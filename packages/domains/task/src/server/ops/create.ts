@@ -4,6 +4,7 @@ import { getDefaultStatus, isKnownStatus } from '@slayzone/projects-contracts'
 import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,
+  chatOwnsSpawnFlags,
   parseAgentStartupMode
 } from '@slayzone/terminal-contracts'
 import { taskEvents } from '../events.js'
@@ -83,6 +84,13 @@ export async function createTaskOp(
   }
   const allModes = await getEnabledModeDefaults(db)
   for (const row of allModes) {
+    // Claude chat's pills own its spawn flags: only a template's own flags
+    // (user extras) are copied, never the mode's defaults.
+    if (chatOwnsSpawnFlags(row.id)) {
+      const templateFlags = template?.provider_config?.[row.id]?.flags
+      providerConfig[row.id] = templateFlags !== undefined ? { flags: templateFlags } : {}
+      continue
+    }
     providerConfig[row.id] = {
       flags:
         legacyOverrides[row.id] ??

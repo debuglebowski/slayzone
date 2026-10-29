@@ -82,6 +82,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         return parseControlResponse(obj)
       case 'control_request':
         return parseControlRequest(obj)
+      case 'control_cancel_request':
+        return parseControlCancelRequest(obj)
       default:
         return { kind: 'unknown', reason: 'unknown-type', raw: obj }
     }
@@ -298,6 +300,11 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
       }
     }
     if (obj.status === 'compacting') return { kind: 'compact-status', phase: 'started' }
+    // A mode switch made mid-session (plan approval, "switch to accept edits",
+    // set_permission_mode) is only reported here until the next turn's init.
+    if (typeof obj.permissionMode === 'string') {
+      return { kind: 'permission-mode-changed', mode: obj.permissionMode }
+    }
     return null
   }
   if (subtype === 'local_command_output') {
@@ -527,35 +534,76 @@ function parseResult(obj: Record<string, unknown>): ResultEvent {
 }
 
 /**
- * Inbound `{type:"control_request", request_id, request:{subtype:'can_use_tool', ...}}`.
- * Surfaces under `--permission-prompt-tool stdio` whenever the CLI needs the
- * host to decide a tool's fate (notably AskUserQuestion, and any tool the
- * active permission mode hasn't already auto-approved).
+ * Inbound `{type:"control_request", request_id, request:{subtype, ...}}`.
  *
- * Schema (observed in claude-agent-sdk-python `_internal/query.py`):
- *   - tool_name: which tool wants to run
- *   - input: the args Claude proposed
- *   - tool_use_id: the originating block id (correlates w/ the tool item in our timeline)
- *   - permission_suggestions?: SDK-suggested permission rule additions
+ * `can_use_tool` surfaces under `--permission-prompt-tool stdio` whenever the
+ * CLI needs the host to decide a tool's fate (AskUserQuestion, ExitPlanMode,
+ * and any tool the active permission mode hasn't already auto-approved). The
+ * display fields drive the approval card (shapes: CLI spike report, item 1).
  *
- * Other subtypes (`hook_callback`, `mcp_message`) currently emit
- * shape-mismatch — wire them when we host hooks or SDK MCP servers.
+ * Every other subtype (`hook_callback`, `mcp_message`, future ones) becomes a
+ * transport-internal `host-control-request` the driver answers with an error:
+ * the CLI blocks on an unanswered request (30 s for a hook, then the prompt is
+ * refused). A request without an id can't be answered at all.
  */
 function parseControlRequest(obj: Record<string, unknown>): AgentEvent {
   const requestId = typeof obj.request_id === 'string' ? obj.request_id : ''
   const request = (obj.request ?? {}) as Record<string, unknown>
   const subtype = request.subtype
-  if (subtype !== 'can_use_tool' || !requestId) {
+  if (!requestId || typeof subtype !== 'string') {
     return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
   }
+  if (subtype !== 'can_use_tool') {
+    return { kind: 'host-control-request', requestId, subtype }
+  }
+  const mcp = request.mcp_server as { name?: unknown; source?: unknown } | null | undefined
   return {
     kind: 'permission-request',
     requestId,
     toolName: typeof request.tool_name === 'string' ? request.tool_name : '',
     toolUseId: typeof request.tool_use_id === 'string' ? request.tool_use_id : '',
     input: request.input ?? null,
-    permissionSuggestions: request.permission_suggestions
+    permissionSuggestions: request.permission_suggestions,
+    ...optionalString('displayName', request.display_name),
+    ...optionalString('title', request.title),
+    ...optionalString('description', request.description),
+    ...optionalString('decisionReason', request.decision_reason),
+    ...optionalString('decisionReasonType', request.decision_reason_type),
+    ...optionalString('blockedPath', request.blocked_path),
+    ...optionalString('agentId', request.agent_id),
+    ...(mcp && typeof mcp.name === 'string'
+      ? {
+          mcpServer: {
+            name: mcp.name,
+            ...(typeof mcp.source === 'string' ? { source: mcp.source } : {})
+          }
+        }
+      : {}),
+    ...optionalTrue('suppressAlwaysAllow', request.suppress_always_allow_rule),
+    ...optionalTrue('defaultToNo', request.default_to_no),
+    ...optionalTrue('requiresUserInteraction', request.requires_user_interaction),
+    ...optionalTrue('serverPolicyAskOnly', request.server_policy_ask_only)
   }
+}
+
+/** Absent or non-string wire fields stay absent (no `undefined` keys persisted). */
+function optionalString<K extends string>(key: K, v: unknown): { [P in K]?: string } {
+  return (typeof v === 'string' ? { [key]: v } : {}) as { [P in K]?: string }
+}
+
+function optionalTrue<K extends string>(key: K, v: unknown): { [P in K]?: true } {
+  return (v === true ? { [key]: true } : {}) as { [P in K]?: true }
+}
+
+/**
+ * `{type:"control_cancel_request", request_id}` — the CLI withdrew one of its
+ * own pending requests (sent for a pending `can_use_tool` on interrupt).
+ */
+function parseControlCancelRequest(obj: Record<string, unknown>): AgentEvent {
+  if (typeof obj.request_id !== 'string' || !obj.request_id) {
+    return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
+  }
+  return { kind: 'permission-cancelled', requestId: obj.request_id }
 }
 
 /**

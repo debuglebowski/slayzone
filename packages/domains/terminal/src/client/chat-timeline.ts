@@ -10,6 +10,12 @@ import type {
 } from '@slayzone/terminal-contracts'
 import { cliCommandListFromTurnInit, sameCliCommandList } from '@slayzone/terminal-contracts'
 import {
+  applyPromptEvent,
+  expirePendingPrompts,
+  expirePrompt,
+  type ChatPrompt
+} from './chat-prompts'
+import {
   extractBgShellSpawn,
   extractShellIdFromSpawnResult,
   extractBashOutputCall,
@@ -322,6 +328,8 @@ export interface ChatTimelineState {
   /** True between a compaction start and its outcome (or the turn's end). */
   compacting: boolean
   usage: SessionUsage
+  /** The agent's questions to the user, in arrival order (see `chat-prompts.ts`). */
+  prompts: ChatPrompt[]
 }
 
 export function initialState(): ChatTimelineState {
@@ -350,7 +358,8 @@ export function initialState(): ChatTimelineState {
     notStarted: true,
     cliCommands: null,
     compacting: false,
-    usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 }
+    usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
+    prompts: []
   }
 }
 
@@ -360,6 +369,11 @@ export type Action =
   | { type: 'user-send-failed' }
   | { type: 'process-exit'; sessionId: string; code: number | null; signal: string | null }
   | { type: 'turn-interrupted' }
+  /**
+   * Renderer-only: the server refused an answer because the request is no
+   * longer pending (answered elsewhere, or its process is gone). Shown expired.
+   */
+  | { type: 'prompt-refused'; requestId: string }
   | { type: 'reset' }
 
 export function reducer(state: ChatTimelineState, action: Action): ChatTimelineState {
@@ -369,15 +383,20 @@ export function reducer(state: ChatTimelineState, action: Action): ChatTimelineS
   // subscription. We post-process AgentEvents here so the timeline pass stays
   // focused on rendering and bg-shell logic stays in one place.
   if (action.type === 'event') {
-    return applyBgShellEvent(applyContextUsage(next, action.event), action.event)
+    return applyPromptEvent(
+      applyBgShellEvent(applyContextUsage(next, action.event), action.event),
+      action.event
+    )
   }
   if (action.type === 'process-exit') {
     // Live `chat:exit` IPC path. Mirrors the agent-event path so bg shells
     // flip to 'unknown' immediately on subprocess exit even when the
     // persisted `process-exit` event hasn't replayed yet (e.g. live session).
-    if (next.sessionEnded) return invalidateActiveShells(next)
+    if (next.sessionEnded) return expirePendingPrompts(invalidateActiveShells(next))
     return next
   }
+  if (action.type === 'turn-interrupted') return expirePendingPrompts(next)
+  if (action.type === 'prompt-refused') return expirePrompt(next, action.requestId)
   if (action.type === 'reset') {
     // initialState already cleared bg-shells; nothing more to do.
     return next
@@ -479,6 +498,9 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
     }
     case 'event':
       return applyEvent(state, action.event)
+    case 'prompt-refused':
+      // Prompt-only (post-pass in `reducer`).
+      return state
   }
 }
 
@@ -954,7 +976,10 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         ...state,
         timeline: nextTimeline,
         lastResult: item,
-        resultCount: state.resultCount + 1,
+        // Capped: after Stop (or a prompt's "No") the persisted `interrupted`
+        // already closed the turn, and the CLI still sends the aborted turn's
+        // result — counting it would mark the NEXT turn finished at its start.
+        resultCount: Math.min(state.resultCount + 1, state.userMessagesSent),
         // Defensive: a result terminates the turn. `stream-message-stop` should
         // already have cleared these, but if the SDK closes a turn without one
         // (rate-limit, error path, network drop after partial stream) the typing
@@ -1178,11 +1203,18 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // transport leaked a control_response — defensive no-op.
       return state
     case 'permission-request':
-      // Side-channel: inbound control_request from the CLI (e.g.
-      // AskUserQuestion under `--permission-prompt-tool stdio`). Renderer
-      // subscribes via a separate effect and resolves with
-      // `respondPermission`. No timeline item materialized — the originating
-      // tool_use already has its own card via the assistant stream.
+    case 'permission-resolved':
+    case 'permission-cancelled':
+      // Prompt state lives in `prompts` (post-pass `applyPromptEvent`). No
+      // timeline item: the originating tool_use already has its own card, and
+      // the prompt dock answers it.
+      return state
+    case 'permission-mode-changed':
+      // Mid-session switch (plan approval, a prompt's mode row). Same field
+      // turn-init feeds; the mode pill follows it.
+      return { ...state, permissionMode: event.mode }
+    case 'host-control-request':
+      // Transport-internal (answered by the driver, never emitted).
       return state
     case 'session-spawn':
       // Bg-shell scoping bookkeeping (handled by applyBgShellEvent post-pass).

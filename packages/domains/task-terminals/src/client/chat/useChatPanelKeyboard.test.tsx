@@ -47,3 +47,50 @@ describe('useChatPanelKeyboard Shift+Tab', () => {
     expect(handleModeChange).toHaveBeenCalledWith(expected)
   })
 })
+
+describe('useChatPanelKeyboard with a pending prompt', () => {
+  function setup(promptHandler: (e: KeyboardEvent) => boolean) {
+    const root = document.createElement('div')
+    const composer = document.createElement('textarea')
+    root.appendChild(composer)
+    document.body.appendChild(root)
+    composer.focus()
+    const handleStop = vi.fn()
+    const handleModeChange = vi.fn(() => Promise.resolve())
+    renderHook(() =>
+      useChatPanelKeyboard({
+        panelRef: { current: root },
+        scrollRef: Object.assign(() => {}, { current: null }) as never,
+        search: { requestOpen: () => {} },
+        inFlight: true,
+        chatMode: 'auto-accept',
+        handleModeChange,
+        autoCapability: { optedIn: false } as never,
+        autocomplete: { show: false },
+        handleStop,
+        mode: 'claude-chat',
+        promptKeysRef: { current: promptHandler }
+      })
+    )
+    return { handleStop, handleModeChange }
+  }
+
+  it('the prompt gets the key first: Esc answers the prompt instead of stopping the turn', () => {
+    const seen: string[] = []
+    const { handleStop } = setup((e) => {
+      seen.push(e.key)
+      return e.key === 'Escape'
+    })
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    window.dispatchEvent(esc)
+    expect(seen).toEqual(['Escape'])
+    expect(esc.defaultPrevented).toBe(true)
+    expect(handleStop).not.toHaveBeenCalled()
+  })
+
+  it('keys the prompt leaves alone keep their panel meaning', () => {
+    const { handleStop } = setup(() => false)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+    expect(handleStop).toHaveBeenCalled()
+  })
+})

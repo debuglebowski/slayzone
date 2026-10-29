@@ -26,6 +26,8 @@ const toolResultArgs = z.object({
 })
 const permissionArgs = z.object({
   requestId: z.string(),
+  /** Prompt row the user picked (display only; persisted on permission-resolved). */
+  optionId: z.string().optional(),
   decision: z.discriminatedUnion('behavior', [
     z.object({
       behavior: z.literal('allow'),

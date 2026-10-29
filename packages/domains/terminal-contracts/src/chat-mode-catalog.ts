@@ -12,7 +12,7 @@
  */
 
 /** Claude permission modes, dropdown order. */
-const CLAUDE_MODES: string[] = ['plan', 'auto-accept', 'auto', 'bypass']
+const CLAUDE_MODES: string[] = ['plan', 'ask', 'auto-accept', 'auto', 'bypass']
 
 /** Codex runtime modes, dropdown order (safest → most permissive). */
 const CODEX_MODES: string[] = ['approval-required', 'auto-accept-edits', 'full-access']

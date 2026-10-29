@@ -97,6 +97,34 @@ export class FakeRun {
         reply: e.reply
       }))
   }
+  /** Replies to `hostRequest` steps (or `timeout`), in order. */
+  hostReplies(): Array<{ requestId: string; subtype: string; reply: unknown }> {
+    return this.entries
+      .filter((e) => e.kind === 'host-reply')
+      .map((e) => ({
+        requestId: e.requestId as string,
+        subtype: e.subtype as string,
+        reply: e.reply
+      }))
+  }
+  /** Request ids the fake withdrew (`control_cancel_request`). */
+  cancels(): string[] {
+    return this.entries.filter((e) => e.kind === 'cancel').map((e) => e.requestId as string)
+  }
+  /** Answers that arrived for a request no longer pending (cancelled, or answered twice). */
+  lateAnswers(): string[] {
+    return this.entries.filter((e) => e.kind === 'late-answer').map((e) => e.requestId as string)
+  }
+  /** Replayed requests answered with a different behavior than the recording. */
+  replayMismatches(): Array<{ requestId: string; recorded: string; got: string }> {
+    return this.entries
+      .filter((e) => e.kind === 'replay-mismatch')
+      .map((e) => ({
+        requestId: e.requestId as string,
+        recorded: e.recorded as string,
+        got: e.got as string
+      }))
+  }
   stdoutLines(): string[] {
     return this.entries.filter((e) => e.kind === 'stdout').map((e) => e.line as string)
   }

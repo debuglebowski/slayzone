@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from 'react'
 import { nextAgentMode, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
 import { chatModesForMode } from '@slayzone/terminal-contracts'
 import type { CallbackRef } from './useFollowBottom'
+import type { PromptKeyHandler } from './prompts/prompt-keys'
 
 export interface UseChatPanelKeyboardOpts {
   panelRef: RefObject<HTMLDivElement | null>
@@ -14,6 +15,12 @@ export interface UseChatPanelKeyboardOpts {
   autocomplete: { show: boolean }
   handleStop: () => void | Promise<void>
   mode: string
+  /**
+   * The prompt dock's key handler while a prompt waits (`prompts/prompt-keys.ts`).
+   * It sees every key first; a key it consumes means nothing else here (Esc
+   * answers the prompt instead of stopping the turn).
+   */
+  promptKeysRef?: RefObject<PromptKeyHandler | null>
 }
 
 /**
@@ -24,6 +31,8 @@ export interface UseChatPanelKeyboardOpts {
  *   - Shift+Tab → cycle agent permission mode (terminal-mode parity; skipped
  *     while in flight or while autocomplete owns Tab)
  *   - Esc → stop the in-flight turn (defers to autocomplete's own Esc)
+ *   - a pending prompt's keys (1/2/3, ↑/↓, Enter, Esc, Tab) go to the prompt
+ *     dock first
  *
  * Focus scoping matters: multiple chat tabs stay mounted (display:none) and a
  * window-level listener would otherwise fire in every panel at once. The
@@ -41,7 +50,8 @@ export function useChatPanelKeyboard({
   autoCapability,
   autocomplete,
   handleStop,
-  mode
+  mode,
+  promptKeysRef
 }: UseChatPanelKeyboardOpts): void {
   useEffect(() => {
     const isFocusedHere = (): boolean => {
@@ -70,6 +80,12 @@ export function useChatPanelKeyboard({
     }
     const handler = (e: KeyboardEvent): void => {
       if (!isFocusedHere()) return
+      // A key a field already handled (the prompt's feedback Enter / Esc) is
+      // not the prompt's.
+      if (!e.defaultPrevented && !autocomplete.show && promptKeysRef?.current?.(e)) {
+        e.preventDefault()
+        return
+      }
       const mod = e.metaKey || e.ctrlKey
       if (mod && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
@@ -121,6 +137,7 @@ export function useChatPanelKeyboard({
     autoCapability.optedIn,
     autocomplete.show,
     handleStop,
-    mode
+    mode,
+    promptKeysRef
   ])
 }

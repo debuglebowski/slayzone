@@ -23,7 +23,7 @@ import {
   parseColumnsConfig,
   WORKFLOW_CATEGORIES
 } from '@slayzone/projects-contracts'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { chatOwnsSpawnFlags, DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
@@ -1168,8 +1168,9 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
         }
       }
 
-      // Seed default flags when switching terminal mode
-      if (data.terminalMode !== undefined) {
+      // Seed default flags when switching terminal mode (not for Claude chat,
+      // whose pills own its spawn flags)
+      if (data.terminalMode !== undefined && !chatOwnsSpawnFlags(data.terminalMode)) {
         const defaultFlags = await getModeDefaultFlags(db, data.terminalMode)
         if (defaultFlags !== undefined) {
           merged[data.terminalMode] = { ...merged[data.terminalMode], flags: defaultFlags }

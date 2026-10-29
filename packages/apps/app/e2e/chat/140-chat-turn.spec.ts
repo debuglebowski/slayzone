@@ -80,16 +80,12 @@ test.describe('Chat turn', () => {
       t.panel.getByRole('button', { name: 'Agent mode: Auto-accept edits' })
     ).toBeVisible()
 
-    // Task create seeds the claude-chat mode's default flags into provider_config
-    // (`--allow-dangerously-skip-permissions`), and explicit flags win over
-    // chatMode in buildHydrateOpts — so no `--permission-mode` (nor `--model`) is
-    // passed. That flag only ALLOWS bypass: the real CLI then starts in `default`
-    // mode and asks before every edit and command, which chat cannot answer (#1).
-    knownBug({
-      fixedBy: 'not in the plan yet (Phase 2 "Ask before edits" usable end to end is closest)',
-      what: 'new chat task spawns without --permission-mode (CLI in default mode) while the pill shows Auto-accept edits'
-    })
+    // Bug N2 (fixed): task create seeded `--allow-dangerously-skip-permissions`
+    // into provider_config and those flags beat the chat mode, so no
+    // `--permission-mode` was passed — the CLI started in `default` while the
+    // pill said Auto-accept. The pills now own mode/model/effort flags.
     expect(run.flag('--permission-mode')).toBe('acceptEdits')
+    expect(run.argv).not.toContain('--allow-dangerously-skip-permissions')
   })
 
   test('a send that spawns the agent reaches it (lazy spawn, manual startup)', async ({ chat }) => {

@@ -31,6 +31,8 @@ type TRPCClient = ReturnType<typeof useTRPCClient>
 interface ModeRefs {
   pendingModeRef: RefObject<AgentMode | null>
   loopRunningRef: RefObject<boolean>
+  /** The running loop's promise — what a joining click settles with. */
+  loopPromiseRef: RefObject<Promise<void> | null>
   confirmedModeRef: RefObject<AgentMode>
 }
 
@@ -67,7 +69,7 @@ async function runModeChange(
   trpcClient: TRPCClient,
   { tabId, taskId, mode, cwd }: { tabId: string; taskId: string; mode: string; cwd: string },
   next: AgentMode,
-  { pendingModeRef, loopRunningRef, confirmedModeRef }: ModeRefs,
+  { pendingModeRef, loopRunningRef, loopPromiseRef, confirmedModeRef }: ModeRefs,
   setChatModeState: (v: AgentMode) => void
 ): Promise<void> {
   // Optimistic flip happens on every click, regardless of in-flight IPCs.
@@ -75,10 +77,12 @@ async function runModeChange(
   pendingModeRef.current = next
   setChatModeState(next)
 
-  // Loop already running? Just update the target ref and return; the active
-  // loop will fire a new IPC for the latest target on its next iteration.
+  // Loop already running? Just update the target ref and join it: the active
+  // loop fires a new IPC for the latest target on its next iteration, and this
+  // click settles when that target is applied — or rejects when it fails (a
+  // caller branching on success must not run before the mode really flipped).
   // Keeps backend serialized one-IPC-at-a-time per tab.
-  if (loopRunningRef.current) return
+  if (loopRunningRef.current) return loopPromiseRef.current ?? undefined
   loopRunningRef.current = true
 
   const prev = confirmedModeRef.current
@@ -110,6 +114,7 @@ async function runModeChange(
     }
   } finally {
     loopRunningRef.current = false
+    loopPromiseRef.current = null
     pendingModeRef.current = null
   }
   if (lastError !== null) {
@@ -120,9 +125,7 @@ async function runModeChange(
     toast(
       `Mode change failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`
     )
-    // Re-throw so callers awaiting the mode change can branch on success
-    // (e.g. ExitPlanMode "Approve & exit" sends "Approved" only if the mode
-    // actually flipped).
+    // Re-throw so callers awaiting the mode change can branch on success.
     throw lastError
   }
 }
@@ -168,6 +171,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
   // Synchronous gate. Without a ref two near-simultaneous clicks both see no
   // active loop and start parallel ones, racing the backend respawn path.
   const loopRunningRef = useRef(false)
+  const loopPromiseRef = useRef<Promise<void> | null>(null)
   // Last server-confirmed mode. Used to revert on IPC error regardless of how
   // many supersede iterations the loop went through.
   const confirmedModeRef = useRef<AgentMode>('auto-accept')
@@ -237,13 +241,18 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
         toast('Auto mode requires Max/Team/Enterprise + opt-in via `claude` CLI')
         return
       }
-      await runModeChange(
+      const run = runModeChange(
         trpcClient,
         { tabId, taskId, mode, cwd },
         next,
-        { pendingModeRef, loopRunningRef, confirmedModeRef },
+        { pendingModeRef, loopRunningRef, loopPromiseRef, confirmedModeRef },
         setChatModeState
       )
+      // The click that starts the loop publishes it for clicks that join. The
+      // loop clears it in its `finally`, which runs after an await — so always
+      // after this assignment.
+      if (!loopPromiseRef.current) loopPromiseRef.current = run
+      await run
     },
     [chatMode, autoCapability.optedIn, tabId, taskId, mode, cwd, trpcClient]
   )

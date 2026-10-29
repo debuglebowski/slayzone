@@ -351,6 +351,7 @@ run_harness packages/shared/db-migrations/src/tag-color-dedup-migration.test.ts
 run_harness packages/shared/db-migrations/src/v169-ownership-migration.test.ts
 run_harness packages/shared/db-migrations/src/v171-agent-startup-migration.test.ts
 run_harness packages/shared/db-migrations/src/v172-chat-cli-snapshots-migration.test.ts
+run_harness packages/shared/db-migrations/src/v173-claude-chat-mode-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -745,11 +746,13 @@ run_harness packages/domains/task-terminals/src/client/chat/autocomplete/autocom
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/cli-custom-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/ranking.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
+run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
@@ -762,6 +765,7 @@ run_harness packages/domains/terminal/src/server/adapters/encode-submit.test.ts
 run_harness packages/domains/terminal/src/server/adapters/gemini-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/qwen-adapter.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
+run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.
 run_harness packages/domains/terminal/src/server/agents/claude-stream-drift.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-hook-output.test.ts
@@ -775,6 +779,7 @@ run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
 run_harness packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-effort.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
@@ -902,6 +907,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
+  packages/domains/task-terminals/src/client/chat/prompts/PromptDock.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \

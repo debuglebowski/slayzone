@@ -64,7 +64,8 @@ import type {
   AgentInfo,
   FileMatch,
   ChatSessionStateEntry,
-  QueuedChatMessage
+  QueuedChatMessage,
+  PermissionDecision
 } from '@slayzone/terminal-contracts'
 
 export interface ChatSessionInfo {
@@ -867,16 +868,7 @@ export interface _LegacyElectronAPI {
      */
     respondPermission: (
       tabId: string,
-      args: {
-        requestId: string
-        decision:
-          | {
-              behavior: 'allow'
-              updatedInput?: Record<string, unknown>
-              updatedPermissions?: unknown[]
-            }
-          | { behavior: 'deny'; message: string; interrupt?: boolean }
-      }
+      args: { requestId: string; decision: PermissionDecision; optionId?: string }
     ) => Promise<boolean>
     /**
      * Stop the current turn but keep the session. Implemented as kill + respawn

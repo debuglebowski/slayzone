@@ -10,7 +10,8 @@ import {
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
+import type { ChatPrompt } from './chat-prompts'
 import {
   initialState,
   reducer,
@@ -35,15 +36,13 @@ export interface UseChatSessionResult {
    */
   permissionMode: string | null
   /**
-   * Live `can_use_tool` permission requests from the CLI, keyed by
-   * `tool_use_id` (one per pending tool). Populated when the adapter is run
-   * with `--permission-prompt-tool stdio` and Claude calls a tool the active
-   * permission mode hasn't already auto-approved (notably AskUserQuestion).
-   * Renderers correlate by `tool_use_id` from the on-screen tool card and
-   * resolve via `respondPermission`. Cleared automatically when the
-   * matching `tool-result` arrives (or on session exit).
+   * The agent's questions to the user (permission requests, AskUserQuestion,
+   * plan approval) with their state, derived from the event log — a reload
+   * rebuilds them. See `chat-prompts.ts`.
    */
-  permissionRequests: Map<string, { requestId: string; toolName: string; input: unknown }>
+  prompts: ChatPrompt[]
+  /** Request ids whose answer is on its way to the server (buttons disabled). */
+  submittingPrompts: ReadonlySet<string>
   sendMessage: (text: string) => Promise<void>
   /**
    * Resolve a pending `tool_use_id` (e.g. AskUserQuestion) with a `tool_result`
@@ -57,19 +56,17 @@ export interface UseChatSessionResult {
     isError?: boolean
   }) => Promise<boolean>
   /**
-   * Reply to an inbound permission_request. `decision.behavior:'allow'` carries
-   * `updatedInput` (e.g. AskUserQuestion answers) — the CLI runs the tool
-   * with that mutated input. `behavior:'deny'` blocks the tool.
+   * Answer a pending prompt. `decision.behavior:'allow'` may carry
+   * `updatedInput` (AskUserQuestion answers) and `updatedPermissions` (a
+   * "don't ask again" / mode-switch row); `deny` blocks the tool (`interrupt`
+   * also stops the turn). `optionId` names the row picked. Resolves false when
+   * the request is no longer pending (shown expired), or when an answer for it
+   * is already on its way.
    */
   respondPermission: (args: {
     requestId: string
-    decision:
-      | {
-          behavior: 'allow'
-          updatedInput?: Record<string, unknown>
-          updatedPermissions?: unknown[]
-        }
-      | { behavior: 'deny'; message: string; interrupt?: boolean }
+    decision: PermissionDecision
+    optionId?: string
   }) => Promise<boolean>
   interrupt: () => Promise<void>
   /**
@@ -110,7 +107,6 @@ interface HydrateChatCtx {
   liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number }>>
   applyLive: (event: AgentEvent, seq: number) => void
   dispatch: Dispatch<ChatTimelineAction>
-  clearPermissionRequests: () => void
   onHydrated: () => void
 }
 
@@ -138,7 +134,6 @@ async function hydrateAndReplay({
   liveQueueRef,
   applyLive,
   dispatch,
-  clearPermissionRequests,
   onHydrated
 }: HydrateChatCtx): Promise<void> {
   try {
@@ -158,16 +153,9 @@ async function hydrateAndReplay({
       afterSeq: -1
     })
     if (gen !== genRef.current) return
-    if (loadedOnceRef.current) {
-      dispatch({ type: 'reset' })
-      clearPermissionRequests()
-    }
-    // Route replay through applyLive (not raw dispatch) so side-channel
-    // state — notably `permissionRequests` for unresolved AskUserQuestion
-    // prompts — repopulates on tab reattach. Without this, hydrating a tab
-    // with a pending perm-request leaves the Map empty; Submit can't find
-    // the prompt → falls back to `sendMessage`, but the CLI is still
-    // blocked waiting on `control_response` and never responds.
+    if (loadedOnceRef.current) dispatch({ type: 'reset' })
+    // Replay through applyLive so the seq dedup applies. Prompt state is part
+    // of the reducer, so a pending prompt comes back from the replay.
     for (const { seq, event } of buffered) applyLive(event as AgentEvent, seq)
   } catch {
     /* ignore replay failures */
@@ -202,9 +190,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const trpcClient = useTRPCClient()
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
   const lastSeqRef = useRef<number>(-1)
-  const [permissionRequests, setPermissionRequests] = useState<
-    Map<string, { requestId: string; toolName: string; input: unknown }>
-  >(() => new Map())
+  // Answers on their way to the server: the ref is the synchronous double-click
+  // guard, the state drives the disabled buttons.
+  const submittingRef = useRef<Set<string>>(new Set())
+  const [submittingPrompts, setSubmittingPrompts] = useState<ReadonlySet<string>>(() => new Set())
 
   // Per-(re)hydration mutable state shared between the always-on subscriptions
   // and the hydrate effect. `genRef` is the staleness token (replaces the old
@@ -217,35 +206,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const loadedOnceRef = useRef(false)
   const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number }>>([])
 
-  // Stable: only reads refs + stable setters. Applies one event to the reducer
-  // and maintains the permission-request side-channel.
+  // Stable: only reads refs + stable setters. Applies one event to the reducer.
   const applyLive = useCallback((event: AgentEvent, seq: number): void => {
     if (seq <= lastSeqRef.current) return
     lastSeqRef.current = seq
     dispatch({ type: 'event', event })
-
-    // Side-channel: track inbound permission requests so renderers can
-    // resolve them (e.g. AskUserQuestion answers). Drop them when the
-    // originating tool resolves (its tool_result lands) — keyed by
-    // tool_use_id so reload-after-answer doesn't resurface a stale prompt.
-    if (event.kind === 'permission-request') {
-      setPermissionRequests((prev) => {
-        const next = new Map(prev)
-        next.set(event.toolUseId, {
-          requestId: event.requestId,
-          toolName: event.toolName,
-          input: event.input
-        })
-        return next
-      })
-    } else if (event.kind === 'tool-result') {
-      setPermissionRequests((prev) => {
-        if (!prev.has(event.toolUseId)) return prev
-        const next = new Map(prev)
-        next.delete(event.toolUseId)
-        return next
-      })
-    }
   }, [])
 
   // Subscribe (always-on; mounted on first render, BEFORE the hydrate effect
@@ -343,7 +308,6 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       liveQueueRef,
       applyLive,
       dispatch,
-      clearPermissionRequests: () => setPermissionRequests(new Map()),
       onHydrated: () => setLoadedInputs(inputs)
     })
 
@@ -406,28 +370,31 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
   const respondPermission = async (args: {
     requestId: string
-    decision:
-      | {
-          behavior: 'allow'
-          updatedInput?: Record<string, unknown>
-          updatedPermissions?: unknown[]
-        }
-      | { behavior: 'deny'; message: string; interrupt?: boolean }
+    decision: PermissionDecision
+    optionId?: string
   }): Promise<boolean> => {
-    // Optimistic local clear so the renderer un-mounts the prompt UI as soon
-    // as the user clicks. The CLI's tool_result will follow shortly and
-    // confirm; the buffer-replay path also drops it via the tool-result
-    // listener above.
-    setPermissionRequests((prev) => {
-      let next: Map<string, { requestId: string; toolName: string; input: unknown }> | null = null
-      for (const [toolUseId, req] of prev) {
-        if (req.requestId !== args.requestId) continue
-        if (next === null) next = new Map(prev)
-        next.delete(toolUseId)
+    const { requestId } = args
+    if (submittingRef.current.has(requestId)) return false
+    submittingRef.current.add(requestId)
+    setSubmittingPrompts(new Set(submittingRef.current))
+    const settle = (): void => {
+      submittingRef.current.delete(requestId)
+      setSubmittingPrompts(new Set(submittingRef.current))
+    }
+    // The prompt flips to answered when the server's `permission-resolved`
+    // event lands — no optimistic state to undo. A refusal means the request
+    // is no longer pending server-side.
+    return trpcClient.chat.respondPermission.mutate({ tabId: opts.tabId, args }).then(
+      (ok) => {
+        settle()
+        if (!ok) dispatch({ type: 'prompt-refused', requestId })
+        return ok
+      },
+      (err: unknown) => {
+        settle()
+        throw err
       }
-      return next ?? prev
-    })
-    return trpcClient.chat.respondPermission.mutate({ tabId: opts.tabId, args })
+    )
   }
 
   const interrupt = async (): Promise<void> => {
@@ -460,7 +427,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     inFlight: isInFlight(state),
     hydrating,
     permissionMode: state.permissionMode,
-    permissionRequests,
+    prompts: state.prompts,
+    submittingPrompts,
     sendMessage,
     sendToolResult,
     respondPermission,

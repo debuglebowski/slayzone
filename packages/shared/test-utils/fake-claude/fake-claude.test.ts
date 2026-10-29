@@ -459,3 +459,176 @@ describe('fake-claude — transcript replay', () => {
     ])
   })
 })
+
+describe('fake-claude — prompt protocol (as CLI 2.1.312)', () => {
+  const answer = (p: Proc, requestId: unknown, response: Record<string, unknown>) =>
+    p.send({
+      type: 'control_response',
+      response: { subtype: 'success', request_id: requestId, response }
+    })
+  const isStatus = (mode: string) => (e: Record<string, unknown>) =>
+    e.type === 'system' && e.subtype === 'status' && e.permissionMode === mode
+
+  it('step.request carries the display fields; a setMode update switches the mode', async () => {
+    fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.request(
+                {
+                  tool_name: 'Edit',
+                  input: { file_path: 'f1.txt', old_string: 'a', new_string: 'b' },
+                  tool_use_id: 'tu1',
+                  description: 'f1.txt',
+                  permission_suggestions: [
+                    { type: 'setMode', mode: 'acceptEdits', destination: 'session' }
+                  ]
+                },
+                { allow: reply('{{permissionMode}}') }
+              )
+            ]
+          ]
+        }
+      ]
+    })
+    const p = start(['--session-id', 's', '--permission-mode', 'default'])
+    p.send(user('edit'))
+    const req = await p.waitFor((e) => e.type === 'control_request')
+    expect(req).toMatchObject({ request: { tool_name: 'Edit', description: 'f1.txt' } })
+    answer(p, req.request_id, {
+      behavior: 'allow',
+      updatedInput: {},
+      updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]
+    })
+    await p.waitFor(isStatus('acceptEdits'))
+    expect(await p.waitFor(isResult)).toMatchObject({ result: 'acceptEdits' })
+  })
+
+  it('approving ExitPlanMode without a mode leaves plan for default', async () => {
+    fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.request(
+                { tool_name: 'ExitPlanMode', input: { plan: 'p' }, tool_use_id: 'tu1' },
+                { allow: reply('{{permissionMode}}') }
+              )
+            ]
+          ]
+        }
+      ]
+    })
+    const p = start(['--session-id', 's', '--permission-mode', 'plan'])
+    p.send(user('plan'))
+    const req = await p.waitFor((e) => e.type === 'control_request')
+    answer(p, req.request_id, { behavior: 'allow', updatedInput: { plan: 'p' } })
+    await p.waitFor(isStatus('default'))
+    expect(await p.waitFor(isResult)).toMatchObject({ result: 'default' })
+  })
+
+  it('deny + interrupt aborts the turn like the real CLI', async () => {
+    fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.emit(ev.toolUse({ id: 'tu1', name: 'Bash', input: {} })),
+              step.request(
+                { tool_name: 'Bash', input: {}, tool_use_id: 'tu1' },
+                { deny: reply('carried on') }
+              )
+            ]
+          ]
+        }
+      ]
+    })
+    const p = start()
+    p.send(user('x'))
+    const req = await p.waitFor((e) => e.type === 'control_request')
+    answer(p, req.request_id, { behavior: 'deny', message: 'no', interrupt: true })
+    expect(await p.waitFor(isResult)).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true
+    })
+    expect(p.lines.some((e) => isResult(e) && e.result === 'carried on')).toBe(false)
+  })
+
+  it('an interrupt withdraws a pending request (control_cancel_request); a late answer is logged, ignored', async () => {
+    const epoch = fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.request(
+                { tool_name: 'Bash', input: {}, tool_use_id: 'tu1' },
+                { allow: reply('ran') }
+              )
+            ]
+          ],
+          defaultTurn: echoTurn()
+        }
+      ]
+    })
+    const p = start()
+    p.send(user('x'))
+    const req = await p.waitFor((e) => e.type === 'control_request')
+    p.send({ type: 'control_request', request_id: 'int1', request: { subtype: 'interrupt' } })
+    expect(await p.waitFor((e) => e.type === 'control_cancel_request')).toEqual({
+      type: 'control_cancel_request',
+      request_id: req.request_id
+    })
+    await p.waitFor(isResult)
+    answer(p, req.request_id, { behavior: 'allow', updatedInput: {} })
+    p.send(user('after'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: after')
+    const run = await epoch.waitForRun(0)
+    expect(run.decisions()).toEqual([])
+    expect(run.lateAnswers()).toEqual([req.request_id])
+  })
+
+  it('hostRequest: emits a control_request the app must answer and records the reply', async () => {
+    const epoch = fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.hostRequest({ subtype: 'hook_callback', callback_id: 'ups', input: {} }),
+              ...reply('done')
+            ]
+          ]
+        }
+      ]
+    })
+    const p = start()
+    p.send(user('x'))
+    const req = await p.waitFor(
+      (e) =>
+        e.type === 'control_request' &&
+        (e.request as { subtype?: string }).subtype === 'hook_callback'
+    )
+    p.send({
+      type: 'control_response',
+      response: { subtype: 'error', request_id: req.request_id, error: 'nope' }
+    })
+    await p.waitFor(isResult)
+    expect((await epoch.waitForRun(0)).hostReplies()).toMatchObject([
+      { subtype: 'hook_callback', reply: { subtype: 'error', error: 'nope' } }
+    ])
+  })
+
+  it('replay records an answer that differs from the recorded one', async () => {
+    const epoch = fake.setScenario({
+      processes: [{ turns: [[step.replay(transcriptPath('ask-user-question'))]] }]
+    })
+    const p = start()
+    p.send(user('ask'))
+    const req = await p.waitFor((e) => e.type === 'control_request')
+    answer(p, req.request_id, { behavior: 'deny', message: 'declined' })
+    await p.waitFor(isResult)
+    expect((await epoch.waitForRun(0)).replayMismatches()).toEqual([
+      { requestId: req.request_id, recorded: 'allow', got: 'deny' }
+    ])
+  })
+})

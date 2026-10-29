@@ -618,12 +618,11 @@ function commitEvent(session: Session, event: AgentEvent): void {
   //   error   — result came back with isError
   //   dead    — process exited
   if (event.kind === 'permission-request') {
-    // Turn parks on user input (AskUserQuestion etc.) — flip to idle so tab
-    // indicators, kanban cards, and automations see the same "waiting on user"
-    // state PTY adapters signal via completion stamp / approval modal.
-    // Auto-denied prompts (ExitPlanMode) are intercepted upstream and never
-    // reach commit. `awaitingUserInput` gates the queue drainer so a queued
-    // user-message doesn't interleave with the SDK's pending tool_result.
+    // Turn parks on user input (a permission card, AskUserQuestion, plan
+    // approval) — flip to idle so tab indicators, kanban cards, and automations
+    // see the same "waiting on user" state PTY adapters signal via completion
+    // stamp / approval modal. `awaitingUserInput` gates the queue drainer so a
+    // queued user-message doesn't interleave with the SDK's pending tool_result.
     session.awaitingUserInput = true
     transitionState(session, 'idle')
   } else {
@@ -631,6 +630,8 @@ function commitEvent(session: Session, event: AgentEvent): void {
     // control_response and resumed forward progress. stderr / rate-limit /
     // control-response / unknown can fire mid-park and must NOT release the
     // gate, or a `chat:queue:push` would race the SDK's pending tool_result.
+    // `permission-resolved` = the host just answered; `permission-cancelled` =
+    // the CLI withdrew the prompt.
     if (
       event.kind === 'assistant-text' ||
       event.kind === 'assistant-thinking' ||
@@ -640,9 +641,20 @@ function commitEvent(session: Session, event: AgentEvent): void {
       event.kind === 'user-message' ||
       event.kind === 'result' ||
       event.kind === 'interrupted' ||
-      event.kind === 'process-exit'
+      event.kind === 'process-exit' ||
+      event.kind === 'permission-resolved' ||
+      event.kind === 'permission-cancelled'
     ) {
       session.awaitingUserInput = false
+    }
+    // An answer resumes the parked turn: back to running, so the tab stops
+    // reading "needs you" while the approved tool runs. The TUI's plain "No"
+    // (deny + interrupt) ends the turn instead — its `result` settles the state.
+    if (
+      event.kind === 'permission-resolved' &&
+      !(event.decision.behavior === 'deny' && event.decision.interrupt)
+    ) {
+      transitionState(session, 'running')
     }
     // `turn-init` is session metadata (id/model/cwd/tools), NOT a turn-open
     // signal. Claude's SDK emits it mid-first-turn so it *looks* turn-aligned,
@@ -1419,7 +1431,7 @@ export function updateSessionChatFastMode(tabId: string, fastMode: boolean): voi
  */
 export function respondToPermissionRequest(
   tabId: string,
-  args: { requestId: string; decision: PermissionDecision }
+  args: { requestId: string; decision: PermissionDecision; optionId?: string }
 ): boolean {
   const session = sessions.get(tabId)
   if (!session || session.ended || !session.child || !session.driver) return false

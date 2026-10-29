@@ -22,7 +22,6 @@ import {
   BackgroundJobsBanner,
   PulseGrid,
   deriveLoadingLabel,
-  isAwaitingUserQuestion,
   type TimelineItem,
   type ChatTimelineState
 } from '@slayzone/terminal/client'
@@ -44,6 +43,8 @@ export interface ChatTimelineProps {
   hydrating: boolean
   isEmpty: boolean
   inFlight: boolean
+  /** The agent is waiting on the user (a prompt) — no "working" indicator then. */
+  awaitingUser: boolean
   appearance: AppearanceSettings
   hiddenCount: number
   PAGE_SIZE: number
@@ -79,6 +80,7 @@ export function ChatTimeline({
   hydrating,
   isEmpty,
   inFlight,
+  awaitingUser,
   appearance,
   hiddenCount,
   PAGE_SIZE,
@@ -166,7 +168,7 @@ export function ChatTimeline({
                         </div>
                       )
                     })}
-                    {inFlight && !isAwaitingUserQuestion(state) && (
+                    {inFlight && !awaitingUser && (
                       <TypingIndicator label={deriveLoadingLabel(state)} />
                     )}
                   </div>

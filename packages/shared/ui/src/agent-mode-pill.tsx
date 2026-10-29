@@ -1,4 +1,4 @@
-import { ChevronDown, ShieldCheck, Eye, AlertTriangle, Zap } from 'lucide-react'
+import { ChevronDown, ShieldCheck, ShieldQuestion, Eye, AlertTriangle, Zap } from 'lucide-react'
 import { cn } from './utils'
 import {
   DropdownMenu,
@@ -45,9 +45,15 @@ const AMBER = {
   text: 'text-amber-700 dark:text-amber-300'
 }
 
+const NEUTRAL = {
+  chip: 'bg-muted text-foreground ring-border',
+  chipHover: 'hover:bg-accent',
+  text: 'text-foreground'
+}
+
 /**
  * Mode metadata keyed by mode id. Covers both the Claude permission modes
- * (plan/auto-accept/auto/bypass) and the Codex runtime modes
+ * (plan/ask/auto-accept/auto/bypass) and the Codex runtime modes
  * (approval-required/auto-accept-edits/full-access).
  */
 const MODE_META: Record<string, ModeMeta> = {
@@ -58,6 +64,13 @@ const MODE_META: Record<string, ModeMeta> = {
     description: 'Read-only — investigation phase. No edits, no shell.',
     icon: Eye,
     ...SKY
+  },
+  ask: {
+    label: 'Ask before edits',
+    short: 'Ask',
+    description: 'Claude asks before each edit and command; you answer in the chat.',
+    icon: ShieldQuestion,
+    ...NEUTRAL
   },
   'auto-accept': {
     label: 'Auto-accept edits',
@@ -114,7 +127,7 @@ const FALLBACK_META: ModeMeta = {
   ...EMERALD
 }
 
-const CLAUDE_MODE_ORDER: AgentMode[] = ['plan', 'auto-accept', 'auto', 'bypass']
+const CLAUDE_MODE_ORDER: AgentMode[] = ['plan', 'ask', 'auto-accept', 'auto', 'bypass']
 
 /**
  * Cycle to the next mode, wrapping around. `order` overrides the default

@@ -4,7 +4,6 @@
 // mode, and the serialized one-IPC-at-a-time setMode loop with revert on failure.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
-import { expectKnownBug } from '@slayzone/test-utils/known-bug'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -198,8 +197,14 @@ describe('useChatMode drift sync', () => {
 
   it('ignores an unmapped permission mode', async () => {
     const { result, rerender } = await setup()
-    rerender({ ...base, livePermissionMode: 'default' })
+    rerender({ ...base, livePermissionMode: 'dontAsk' })
     expect(result.current.chatMode).toBe('auto-accept')
+  })
+
+  it('the CLI default mode is "Ask before edits" (e.g. after "manually approve edits")', async () => {
+    const { result, rerender } = await setup()
+    rerender({ ...base, livePermissionMode: 'default' })
+    expect(result.current.chatMode).toBe('ask')
   })
 
   it('does not re-apply an unchanged live mode over a later user change', async () => {
@@ -292,8 +297,13 @@ describe('useChatMode handleModeChange', () => {
     act(() => {
       loop = result.current.handleModeChange('plan')
     })
-    await act(() => result.current.handleModeChange('bypass'))
-    await act(() => result.current.handleModeChange('auto'))
+    // Clicks during the IPC join the running loop (they settle with it).
+    act(() => {
+      void result.current.handleModeChange('bypass')
+    })
+    act(() => {
+      void result.current.handleModeChange('auto')
+    })
     expect(m.setMode).toHaveBeenCalledTimes(1)
     expect(result.current.chatMode).toBe('auto')
 
@@ -313,7 +323,9 @@ describe('useChatMode handleModeChange', () => {
     act(() => {
       void result.current.handleModeChange('plan')
     })
-    await act(() => result.current.handleModeChange('bypass'))
+    act(() => {
+      void result.current.handleModeChange('bypass')
+    })
     await act(async () => first.resolve({ chatMode: 'auto-accept' }))
     expect(result.current.chatMode).toBe('bypass')
     expect(m.setMode).toHaveBeenCalledTimes(2)
@@ -340,7 +352,9 @@ describe('useChatMode handleModeChange', () => {
     act(() => {
       loop = result.current.handleModeChange('plan')
     })
-    await act(() => result.current.handleModeChange('bypass'))
+    act(() => {
+      void result.current.handleModeChange('bypass').catch(() => {})
+    })
     await act(async () => {
       first.resolve({ chatMode: 'plan' })
       await loop.catch(() => {})
@@ -358,9 +372,8 @@ describe('useChatMode handleModeChange', () => {
     expect(result.current.chatMode).toBe('bypass')
   })
 
-  // A caller that awaits the change to branch on success (ExitPlanMode's "Approve &
-  // exit plan" sends "Approved" only if the mode flipped) relies on the promise
-  // settling with its own target's outcome.
+  // A caller that awaits the change to branch on success relies on the promise
+  // settling with its own target's outcome (chat bug N4).
   it('keeps a click that joined an in-flight IPC pending until its target is applied', async () => {
     m.setMode.mockReturnValueOnce(pending())
     const { result } = await setup()
@@ -373,13 +386,7 @@ describe('useChatMode handleModeChange', () => {
     })
     await flush()
     expect(m.setMode).toHaveBeenCalledTimes(1)
-    await expectKnownBug(
-      {
-        fixedBy: 'not in plan',
-        what: 'handleModeChange joining an in-flight setMode loop resolves before its target is sent'
-      },
-      () => expect(joinedSettled).toBe(false)
-    )
+    expect(joinedSettled).toBe(false)
   })
 
   it('rejects a click that joined an in-flight IPC when its target fails', async () => {
@@ -400,12 +407,6 @@ describe('useChatMode handleModeChange', () => {
     })
     expect(m.setMode).toHaveBeenCalledTimes(2)
     expect(m.toast).toHaveBeenCalledWith('Mode change failed: respawn failed')
-    await expectKnownBug(
-      {
-        fixedBy: 'not in plan',
-        what: 'handleModeChange joining an in-flight setMode loop never sees its target fail'
-      },
-      () => expect(joinedRejected).toBe(true)
-    )
+    expect(joinedRejected).toBe(true)
   })
 })

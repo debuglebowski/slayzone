@@ -41,21 +41,44 @@ export type Step =
   /**
    * Ask the app for a decision: emits `control_request{subtype:'can_use_tool'}`
    * and blocks until the matching `control_response` arrives, then runs the
-   * branch for its `behavior` (an error reply runs `deny`).
+   * branch for its `behavior` (an error reply runs `deny`). Like CLI 2.1.312:
+   * an allow carrying a session `setMode` update (or allowing ExitPlanMode in
+   * plan mode) switches `{{permissionMode}}` and emits `system/status`; a deny
+   * with `interrupt: true` aborts the turn (`onInterrupt` / the recorded
+   * reaction); an interrupt while waiting withdraws the request with
+   * `control_cancel_request`.
    */
-  | {
-      request: {
-        tool_name: string
-        input: Record<string, unknown>
-        tool_use_id: string
-        permission_suggestions?: unknown[]
-      }
-      then?: { allow?: Step[]; deny?: Step[] }
-    }
+  | { request: CanUseToolRequest; then?: { allow?: Step[]; deny?: Step[] } }
+  /**
+   * Send a control_request the app does not implement (`hook_callback`,
+   * `mcp_message`, …) and wait for its reply (`timeoutMs`, default 30 s — the
+   * real CLI's hook timeout). The reply is logged (`FakeRun.hostReplies`).
+   */
+  | { hostRequest: { subtype: string } & Record<string, unknown>; timeoutMs?: number }
   /** Exit now with `exit` as the code, or kill itself with `signal`. */
   | { exit: number | null; signal?: NodeJS.Signals }
   /** Re-emit one turn of a recorded transcript (see transcript.ts). */
   | { replay: { transcript: string; process?: number; turn?: number; speed?: number } }
+
+/** A `can_use_tool` request body (CLI 2.1.312 field names). */
+export interface CanUseToolRequest {
+  tool_name: string
+  input: Record<string, unknown>
+  tool_use_id: string
+  permission_suggestions?: unknown[]
+  display_name?: string
+  title?: string
+  description?: string
+  decision_reason?: string
+  decision_reason_type?: string
+  blocked_path?: string
+  agent_id?: string
+  mcp_server?: { name: string; source?: string }
+  suppress_always_allow_rule?: boolean
+  default_to_no?: boolean
+  requires_user_interaction?: boolean
+  server_policy_ask_only?: boolean
+}
 
 export type ControlReply = 'success' | 'error' | 'ignore'
 
@@ -72,9 +95,7 @@ export interface ProcessScript {
   /** Unset → exit 143 at once. Set → keep running these steps, then exit 143. */
   onSigterm?: Step[]
   /** How to answer the app's control requests. Default: `success` for all. */
-  controlResponses?: Partial<
-    Record<'interrupt' | 'set_model' | 'set_permission_mode', ControlReply>
-  >
+  controlResponses?: Partial<Record<string, ControlReply>>
   /** Exit code once stdin closes. Default 0. */
   exitCodeOnStdinEnd?: number
 }
@@ -252,7 +273,14 @@ export const step = {
     opts: { process?: number; turn?: number; speed?: number } = {}
   ): Step => ({
     replay: { transcript, ...opts }
-  })
+  }),
+  request: (request: CanUseToolRequest, then?: { allow?: Step[]; deny?: Step[] }): Step =>
+    then ? { request, then } : { request },
+  hostRequest: (
+    request: { subtype: string } & Record<string, unknown>,
+    timeoutMs?: number
+  ): Step =>
+    timeoutMs === undefined ? { hostRequest: request } : { hostRequest: request, timeoutMs }
 }
 
 /** One complete turn that answers with `text`: init → text → result. */

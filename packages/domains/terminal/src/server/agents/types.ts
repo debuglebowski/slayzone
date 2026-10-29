@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
 
 export interface AgentSpawnOpts {
   /** Session ID — either a fresh UUID (new session) or existing conversationId for --resume. */
@@ -89,13 +89,12 @@ export interface AgentAdapter {
 
 /**
  * Decision payload for an inbound permission request, surfaced from the
- * renderer via `chat:respondPermission`. The shape mirrors Claude Code's
+ * renderer via `chat:respondPermission` (defined in the event contract, which
+ * persists it on `permission-resolved`). The shape mirrors Claude Code's
  * `control_response` for `can_use_tool`; provider drivers translate it to
  * their own approval vocabulary.
  */
-export type PermissionDecision =
-  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
-  | { behavior: 'deny'; message: string; interrupt?: boolean }
+export type { PermissionDecision }
 
 /**
  * IO seam handed to a `ChatSessionDriver` once its OS subprocess is alive.
@@ -161,8 +160,16 @@ export interface ChatSessionDriver {
    * acknowledges, rejects on timeout / unsupported / session exit.
    */
   applyControl?(request: Record<string, unknown>, timeoutMs: number): Promise<unknown>
-  /** Reply to an inbound permission request. Return false when unsupported. */
-  respondPermission?(args: { requestId: string; decision: PermissionDecision }): boolean
+  /**
+   * Reply to an inbound permission request. Return false when unsupported, or
+   * when the request is not (or no longer) pending. `optionId` names the prompt
+   * row the user picked (display only).
+   */
+  respondPermission?(args: {
+    requestId: string
+    decision: PermissionDecision
+    optionId?: string
+  }): boolean
   /** Extract a session/conversation id from an event for resume persistence. */
   extractSessionId(event: AgentEvent): string | null
   /** Teardown — reject pending promises, clear timers. Called on process exit. */

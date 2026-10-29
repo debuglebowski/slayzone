@@ -1,21 +1,22 @@
 /**
  * ClaudeSessionDriver — stateful per-spawn wrapper around the stateless
- * `claudeCodeAdapter`. It preserves the exact behavior the transport manager
- * used to implement inline (control_request/response correlation, ExitPlanMode
- * auto-deny) so the Claude chat path is byte-for-byte unchanged after the
- * driver-seam refactor; the only structural difference is that the protocol
- * logic now lives behind the shared `ChatSessionDriver` interface.
+ * `claudeCodeAdapter`. Owns the Claude half of the chat control protocol:
+ * correlating the host's own control_requests with their responses, and the
+ * CLI's inbound requests (prompts) with the host's answers.
+ *
+ * Prompts: every `can_use_tool` (ExitPlanMode and AskUserQuestion included)
+ * reaches the timeline as `permission-request` and stays pending here until
+ * the host answers it (`permission-resolved`, persisted) or the CLI withdraws
+ * it (`permission-cancelled`). Only a pending request can be answered, so a
+ * stale card (reload after the process was replaced) or a second click can't
+ * write a reply the CLI would ignore — or worse, misattribute.
  *
  * @module agents/claude-session-driver
  */
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { isDeepStrictEqual } from 'node:util'
+import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
-import type {
-  AgentBackend,
-  ChatDriverContext,
-  ChatSessionDriver,
-  PermissionDecision
-} from './types'
+import type { AgentBackend, ChatDriverContext, ChatSessionDriver } from './types'
 
 interface PendingControl {
   resolve: (data: unknown) => void
@@ -23,11 +24,81 @@ interface PendingControl {
   timer: NodeJS.Timeout
 }
 
+/** A `can_use_tool` request the CLI is blocked on. */
+interface PendingPrompt {
+  toolName: string
+  input: unknown
+  suggestions: unknown[]
+}
+
+/** Fields a user's answer may add to an AskUserQuestion input (answers + preview notes). */
+const QUESTION_ANSWER_KEYS = ['answers', 'annotations'] as const
+
+/**
+ * Session-scoped mode switches a prompt row may apply besides the request's
+ * own suggestions: "switch to auto mode" (Bash, plan approval) and "auto-accept
+ * edits" (plan approval without auto mode).
+ */
+const ALLOWED_SESSION_MODES = new Set(['auto', 'acceptEdits'])
+
+function isAllowedPermissionUpdate(entry: unknown, suggestions: unknown[]): boolean {
+  if (suggestions.some((s) => isDeepStrictEqual(s, entry))) return true
+  const e = entry as { type?: unknown; mode?: unknown; destination?: unknown } | null
+  return (
+    e?.type === 'setMode' &&
+    e.destination === 'session' &&
+    typeof e.mode === 'string' &&
+    ALLOWED_SESSION_MODES.has(e.mode) &&
+    Object.keys(e).length === 3
+  )
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+
+/**
+ * The control_response body for a decision, built from what the CLI asked:
+ * the input is the one the user saw (plus a question's answers), and every
+ * permission update must be one the CLI suggested or an allowed mode switch.
+ * Returns null for a decision this request can't carry.
+ */
+function buildWireDecision(
+  prompt: PendingPrompt,
+  decision: PermissionDecision
+): PermissionDecision | null {
+  if (decision.behavior === 'deny') {
+    return {
+      behavior: 'deny',
+      message: decision.message,
+      ...(decision.interrupt ? { interrupt: true } : {})
+    }
+  }
+  const updatedInput = { ...asRecord(prompt.input) }
+  if (prompt.toolName === 'AskUserQuestion') {
+    const extra = asRecord(decision.updatedInput)
+    for (const key of QUESTION_ANSWER_KEYS) {
+      if (extra[key] !== undefined) updatedInput[key] = extra[key]
+    }
+  }
+  const updates = decision.updatedPermissions ?? []
+  if (!updates.every((u) => isAllowedPermissionUpdate(u, prompt.suggestions))) return null
+  return {
+    behavior: 'allow',
+    updatedInput,
+    ...(updates.length > 0 ? { updatedPermissions: updates } : {})
+  }
+}
+
 class ClaudeSessionDriver implements ChatSessionDriver {
   private ctx: ChatDriverContext | null = null
   /** In-flight `control_request` promises, keyed by request_id. */
   private readonly pendingControl = new Map<string, PendingControl>()
   private controlReqCounter = 0
+  /** Inbound `can_use_tool` requests awaiting the host's answer, keyed by request_id. */
+  private readonly pendingPrompts = new Map<string, PendingPrompt>()
+  /** Last permission mode the CLI reported (turn-init or status). */
+  private permissionMode: string | null = null
 
   start(ctx: ChatDriverContext): void {
     this.ctx = ctx
@@ -50,18 +121,35 @@ class ClaudeSessionDriver implements ChatSessionDriver {
       return
     }
 
-    // Plan-mode `ExitPlanMode` arrives via stdio permission-prompt (we pass
-    // `--permission-prompt-tool stdio`). The SDK only emits the
-    // `result.permissionDenials` the renderer footer keys off AFTER receiving
-    // a control_response, so auto-deny here; the renderer footer ("Approve &
-    // exit plan") handles the user's actual decision.
-    if (ev.kind === 'permission-request' && ev.toolName === 'ExitPlanMode') {
-      const denyLine = claudeCodeAdapter.serializeControlResponse?.({
-        requestId: ev.requestId,
-        response: { behavior: 'deny', message: 'Plan mode requires explicit approval' }
-      })
-      if (denyLine != null) this.ctx?.write(denyLine)
+    // A request we don't implement must still be answered: the CLI blocks on
+    // it (a hook callback stalls 30 s, then refuses the prompt). An error reply
+    // makes it skip the hook / server and carry on.
+    if (ev.kind === 'host-control-request') {
+      this.writeSafely(
+        claudeCodeAdapter.serializeControlResponse?.({
+          requestId: ev.requestId,
+          isError: true,
+          error: `SlayZone does not handle control request "${ev.subtype}"`
+        })
+      )
       return
+    }
+
+    if (ev.kind === 'permission-request') {
+      this.pendingPrompts.set(ev.requestId, {
+        toolName: ev.toolName,
+        input: ev.input,
+        suggestions: Array.isArray(ev.permissionSuggestions) ? ev.permissionSuggestions : []
+      })
+    } else if (ev.kind === 'permission-cancelled') {
+      // The CLI also withdraws requests that were never prompts (its own hook
+      // callbacks); only a withdrawn prompt means something to the timeline.
+      if (!this.pendingPrompts.delete(ev.requestId)) return
+    } else if (ev.kind === 'turn-init') {
+      if (ev.permissionMode) this.permissionMode = ev.permissionMode
+    } else if (ev.kind === 'permission-mode-changed') {
+      if (ev.mode === this.permissionMode) return
+      this.permissionMode = ev.mode
     }
 
     if (ev.kind === 'unknown' && ev.reason === 'unknown-type') {
@@ -118,19 +206,30 @@ class ClaudeSessionDriver implements ChatSessionDriver {
     })
   }
 
-  respondPermission(args: { requestId: string; decision: PermissionDecision }): boolean {
-    if (!this.ctx || !claudeCodeAdapter.serializeControlResponse) return false
+  respondPermission(args: {
+    requestId: string
+    decision: PermissionDecision
+    optionId?: string
+  }): boolean {
+    const prompt = this.pendingPrompts.get(args.requestId)
+    if (!this.ctx || !prompt || !claudeCodeAdapter.serializeControlResponse) return false
+    const decision = buildWireDecision(prompt, args.decision)
+    if (!decision) return false
     const line = claudeCodeAdapter.serializeControlResponse({
       requestId: args.requestId,
-      response: args.decision as unknown as Record<string, unknown>
+      response: decision as unknown as Record<string, unknown>
     })
-    if (line == null) return false
-    try {
-      this.ctx.write(line)
-      return true
-    } catch {
-      return false
-    }
+    if (line == null || !this.writeSafely(line)) return false
+    this.pendingPrompts.delete(args.requestId)
+    this.ctx.emit({
+      kind: 'permission-resolved',
+      requestId: args.requestId,
+      decision,
+      ...(args.optionId ? { optionId: args.optionId } : {})
+    })
+    // The TUI's plain "No": the CLI aborts the turn. Same boundary as Stop.
+    if (decision.behavior === 'deny' && decision.interrupt) this.ctx.emit({ kind: 'interrupted' })
+    return true
   }
 
   extractSessionId(event: AgentEvent): string | null {
@@ -142,6 +241,18 @@ class ClaudeSessionDriver implements ChatSessionDriver {
       clearTimeout(pending.timer)
       pending.reject(new Error('session ended before control_response'))
       this.pendingControl.delete(id)
+    }
+    this.pendingPrompts.clear()
+  }
+
+  /** Write one line; false when there's no context or the child's stdin is gone. */
+  private writeSafely(line: string | null | undefined): boolean {
+    if (!this.ctx || line == null) return false
+    try {
+      this.ctx.write(line)
+      return true
+    } catch {
+      return false
     }
   }
 }

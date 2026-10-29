@@ -43,14 +43,18 @@ import { listAgents } from '../agents-registry'
 import { listProjectFiles } from '../files-scan'
 import type { UsageMap } from '../autocomplete-usage-store'
 import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal-contracts'
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
 import {
   rawPermissionModeToChatMode,
   chatModeToFlags as chatModeToFlagsShared,
   chatModeToCliPermissionMode,
   type ChatMode as ChatModeShared
 } from '@slayzone/terminal-contracts'
-import { chatModelToFlags } from '@slayzone/terminal-contracts'
+import {
+  chatModelToFlags,
+  chatOwnsSpawnFlags,
+  stripChatOwnedFlags
+} from '@slayzone/terminal-contracts'
 import { defaultModelForMode, isValidModelForMode } from '@slayzone/terminal-contracts'
 import { defaultChatModeForMode, isValidChatModeForMode } from '@slayzone/terminal-contracts'
 import { chatEffortToFlags, isChatEffort, type ChatEffort } from '@slayzone/terminal-contracts'
@@ -145,6 +149,11 @@ async function resolveSafeChatMode(stored: string): Promise<string> {
  * created after this migration runs get `auto-accept` by default via
  * `buildHydrateOpts`.
  *
+ * Claude chat is skipped: this runs on every start, so it tagged every NEW
+ * Claude task 'bypass' at the next restart — and Claude's 'bypass' now really
+ * bypasses. A missing chatMode resolves to the default (`auto-accept`);
+ * migration v173 moved the tags it had written to that default.
+ *
  * Two categories of pre-existing tasks are covered:
  *   1. Existing provider_config entry but no `chatMode` field — patched.
  *   2. NULL provider_config (or missing entry for the task's terminal_mode) —
@@ -180,7 +189,7 @@ export async function backfillChatModes(
     for (const mode of Object.keys(cfg)) {
       const entry = cfg[mode]
       if (!entry || entry.chatMode != null) continue
-      if (!supportsChatMode(mode)) continue
+      if (!supportsChatMode(mode) || chatOwnsSpawnFlags(mode)) continue
       cfg[mode] = { ...entry, chatMode: DEFAULT_CHAT_MODE_LEGACY }
       dirty = true
     }
@@ -188,6 +197,7 @@ export async function backfillChatModes(
     if (
       row.terminal_mode &&
       supportsChatMode(row.terminal_mode) &&
+      !chatOwnsSpawnFlags(row.terminal_mode) &&
       cfg[row.terminal_mode]?.chatMode == null
     ) {
       cfg[row.terminal_mode] = {
@@ -274,7 +284,7 @@ async function buildHydrateOpts(
   }
 ): Promise<Parameters<typeof hydrateSession>[0]> {
   const providerCfg = await data.readProviderConfig(opts.taskId, opts.mode)
-  // Flag-resolution priority for chat:
+  // Flag-resolution priority for chat (non-Claude chat modes; Claude below):
   //   1. per-call override (`providerFlagsOverride`)
   //   2. per-task explicit flags (`providerCfg.flags`)
   //   3. chatMode (override > DB-cached > default)
@@ -282,7 +292,19 @@ async function buildHydrateOpts(
   // its own permission UX through chatMode. Terminal still uses default_flags.
   let providerFlags: string[]
   let resolvedChatMode: string | null = null
-  if (chatModeOverride) {
+  // Claude chat: the pills own permission mode, model and effort, so they
+  // always decide the spawn; a task's own flags (or the main tab's per-call
+  // override) are EXTRAS appended after them, minus the flags the pills set.
+  // (Explicit flags used to win outright — the seeded
+  // `--allow-dangerously-skip-permissions` then started every new task in the
+  // CLI's `default` mode while the pill said Auto-accept.)
+  const pillsOwnFlags = chatOwnsSpawnFlags(opts.mode)
+  if (pillsOwnFlags) {
+    resolvedChatMode = await resolveSafeChatMode(
+      chatModeOverride ?? providerCfg.chatMode ?? defaultChatModeForMode(opts.mode)
+    )
+    providerFlags = chatModeToFlags(resolvedChatMode)
+  } else if (chatModeOverride) {
     // Explicit chatMode change (chat:setMode): override wins over both per-call
     // flag overrides and providerCfg.flags — the user explicitly asked for a
     // mode, and chatMode-derived flags must take effect for the spawn.
@@ -330,10 +352,20 @@ async function buildHydrateOpts(
   // Append --model/--effort flags only for flag-driven providers (claude-chat).
   // codex-chat carries model/effort over the JSON-RPC `turn/start` params, not
   // CLI flags — its backend ignores `providerFlags` entirely.
-  const usedExplicitFlags = !chatModeOverride && (opts.providerFlagsOverride || providerCfg.flags)
-  if (!usedExplicitFlags && opts.mode !== 'codex-chat') {
-    providerFlags = [...providerFlags, ...chatModelToFlags(resolvedChatModel)]
-    providerFlags = [...providerFlags, ...chatEffortToFlags(resolvedChatEffort)]
+  if (pillsOwnFlags) {
+    const extraFlags = opts.providerFlagsOverride ?? providerCfg.flags ?? ''
+    providerFlags = [
+      ...providerFlags,
+      ...chatModelToFlags(resolvedChatModel),
+      ...chatEffortToFlags(resolvedChatEffort),
+      ...stripChatOwnedFlags(parseShellArgs(extraFlags))
+    ]
+  } else {
+    const usedExplicitFlags = !chatModeOverride && (opts.providerFlagsOverride || providerCfg.flags)
+    if (!usedExplicitFlags && opts.mode !== 'codex-chat') {
+      providerFlags = [...providerFlags, ...chatModelToFlags(resolvedChatModel)]
+      providerFlags = [...providerFlags, ...chatEffortToFlags(resolvedChatEffort)]
+    }
   }
 
   const initialBuffer = fresh ? [] : await data.loadChatEvents(opts.tabId)
@@ -480,9 +512,16 @@ export function createChatOps(opts: ChatHandlerOpts) {
             }
           }
         }
-        if (event.kind === 'turn-init') {
-          const mapped = rawPermissionModeToChatMode(event.permissionMode)
+        // A mid-session switch (plan approval, a prompt's "switch to accept
+        // edits" / "auto mode" row) arrives as `permission-mode-changed`; it
+        // also refreshes the live session so `getInfo` (the pill's hydration
+        // source) doesn't lag until the next turn-init.
+        if (event.kind === 'turn-init' || event.kind === 'permission-mode-changed') {
+          const mapped = rawPermissionModeToChatMode(
+            event.kind === 'turn-init' ? event.permissionMode : event.mode
+          )
           if (mapped) {
+            if (event.kind === 'permission-mode-changed') updateSessionChatMode(tabId, mapped)
             const info = getSessionInfo(tabId)
             if (info) {
               try {
@@ -573,18 +612,12 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // CLI unblocks the tool. AskUserQuestion uses `behavior:'allow'` with
     // `updatedInput.answers` populated; other tools the renderer decides
     // independently.
+    // False when the request is not pending any more (answered elsewhere,
+    // withdrawn by the CLI, or its process was replaced) — the card shows it
+    // as expired.
     respondPermission: (
       tabId: string,
-      args: {
-        requestId: string
-        decision:
-          | {
-              behavior: 'allow'
-              updatedInput?: Record<string, unknown>
-              updatedPermissions?: unknown[]
-            }
-          | { behavior: 'deny'; message: string; interrupt?: boolean }
-      }
+      args: { requestId: string; decision: PermissionDecision; optionId?: string }
     ): boolean => respondToPermissionRequest(tabId, args),
 
     // Interrupt = stop the current turn but keep the session. Fast path: live
@@ -1056,16 +1089,7 @@ export function registerChatHandlers(
     (
       _,
       tabId: string,
-      args: {
-        requestId: string
-        decision:
-          | {
-              behavior: 'allow'
-              updatedInput?: Record<string, unknown>
-              updatedPermissions?: unknown[]
-            }
-          | { behavior: 'deny'; message: string; interrupt?: boolean }
-      }
+      args: { requestId: string; decision: PermissionDecision; optionId?: string }
     ) => ops.respondPermission(tabId, args)
   )
   ipcMain.handle('chat:interrupt', (_, o: ChatCreateOpts) => ops.interrupt(o))

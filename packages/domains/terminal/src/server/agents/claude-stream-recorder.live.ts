@@ -32,8 +32,11 @@ type Decision = { behavior: 'allow'; updatedInput: Json } | { behavior: 'deny'; 
 
 interface Turn {
   say: string
-  /** Answer a `can_use_tool` request. Default: allow with the proposed input. */
-  decide?: (toolName: string, input: Json) => Decision
+  /**
+   * Answer a `can_use_tool` request. Default: allow with the proposed input.
+   * `null` leaves it unanswered (e.g. for an interrupt to withdraw it).
+   */
+  decide?: (toolName: string, input: Json) => Decision | null
   /** Control requests sent (and answered) before the user message. */
   before?: Json[]
   /** Send ONE interrupt when this first matches a stdout event. */
@@ -63,7 +66,28 @@ function answerQuestion(label: string) {
   }
 }
 
-/** ExitPlanMode answered the way chat does today (claude-session-driver.ts). */
+/**
+ * Answer AskUserQuestion like the prompt dock does when the options carry
+ * previews: the pick, plus the picked option's preview and the user's notes as
+ * `annotations` (the TUI's shape).
+ */
+function answerQuestionWithPreview(label: string, notes: string) {
+  return (toolName: string, input: Json): Decision => {
+    if (toolName !== 'AskUserQuestion') return { behavior: 'allow', updatedInput: input }
+    type Q = { question: string; options?: Array<{ label: string; preview?: string }> }
+    const questions = (input.questions as Q[] | undefined) ?? []
+    const answers = Object.fromEntries(questions.map((q) => [q.question, label]))
+    const annotations = Object.fromEntries(
+      questions.map((q) => {
+        const preview = q.options?.find((o) => o.label === label)?.preview
+        return [q.question, { ...(preview ? { preview } : {}), notes }]
+      })
+    )
+    return { behavior: 'allow', updatedInput: { ...input, answers, annotations } }
+  }
+}
+
+/** ExitPlanMode answered the way older builds' driver did (before plan approval cards). */
 const denyPlanLikeTheDriver = (toolName: string, input: Json): Decision =>
   toolName === 'ExitPlanMode'
     ? { behavior: 'deny', message: 'Plan mode requires explicit approval' }
@@ -121,7 +145,7 @@ const RECIPES: Record<string, Recipe> = {
     ]
   },
   'exit-plan-deny': {
-    note: 'Plan mode: ExitPlanMode denied the way the driver does today; then the UI flow: set_permission_mode acceptEdits + the approval marker message.',
+    note: 'Plan mode: ExitPlanMode denied the way the driver used to; then the old UI flow: set_permission_mode acceptEdits + the approval marker message.',
     processes: [
       {
         permissionMode: 'plan',
@@ -135,8 +159,40 @@ const RECIPES: Record<string, Recipe> = {
       }
     ]
   },
+  'permission-cancel-interrupt': {
+    note: 'Default mode: a Bash request left unanswered, then an interrupt — the CLI withdraws it (control_cancel_request). Then a normal turn.',
+    processes: [
+      {
+        permissionMode: 'default',
+        turns: [
+          {
+            say: 'Use the Bash tool to run exactly: touch cancel-me.txt',
+            decide: () => null,
+            interruptWhen: (e) =>
+              e.type === 'control_request' &&
+              (e.request as Json | undefined)?.subtype === 'can_use_tool'
+          },
+          { say: 'Reply with only: AFTER' }
+        ]
+      }
+    ]
+  },
+  'ask-user-question-preview': {
+    note: 'AskUserQuestion whose options carry previews, answered with the pick plus annotations (preview + notes), as the prompt dock does.',
+    processes: [
+      {
+        permissionMode: 'acceptEdits',
+        turns: [
+          {
+            say: 'Use the AskUserQuestion tool to ask me which page layout I prefer, with exactly two options: Stacked and Side by side. Give each option a preview: a three-line ASCII sketch of that layout. After I answer, reply with only the layout I picked.',
+            decide: answerQuestionWithPreview('Stacked', 'keep the header slim')
+          }
+        ]
+      }
+    ]
+  },
   'exit-plan-allow': {
-    note: 'Plan mode: ExitPlanMode allowed (the CLI leaves plan mode itself) — what plan item 2.3 will do.',
+    note: 'Plan mode: ExitPlanMode allowed (the CLI leaves plan mode itself) — what plan approval does.',
     processes: [{ permissionMode: 'plan', turns: [{ say: PLAN_PROMPT }] }]
   },
   compact: {
@@ -399,19 +455,20 @@ async function runProcess(
     }
     let interrupted = false
     const onEvent = (event: Json): void => {
-      if (event.type === 'control_request') {
-        const req = event.request as Json
-        if (req.subtype !== 'can_use_tool') return
+      const req = event.type === 'control_request' ? (event.request as Json) : null
+      if (req?.subtype === 'can_use_tool') {
         const toolName = req.tool_name as string
         const input = (req.input as Json | undefined) ?? {}
-        const decision = turn.decide?.(toolName, input) ?? {
-          behavior: 'allow',
-          updatedInput: input
+        const decision =
+          turn.decide === undefined
+            ? { behavior: 'allow', updatedInput: input }
+            : turn.decide(toolName, input)
+        if (decision !== null) {
+          write({
+            type: 'control_response',
+            response: { subtype: 'success', request_id: event.request_id, response: decision }
+          })
         }
-        write({
-          type: 'control_response',
-          response: { subtype: 'success', request_id: event.request_id, response: decision }
-        })
       }
       if (turn.interruptWhen && !interrupted && turn.interruptWhen(event)) {
         interrupted = true

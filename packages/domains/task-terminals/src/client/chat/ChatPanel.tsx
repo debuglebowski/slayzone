@@ -1,6 +1,11 @@
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
-import { selectUsageSummary, useChatSession } from '@slayzone/terminal/client'
+import {
+  hasPendingPrompt,
+  isAwaitingUserQuestion,
+  selectUsageSummary,
+  useChatSession
+} from '@slayzone/terminal/client'
 import { chatCapabilitiesForMode } from '@slayzone/terminal-contracts'
 import type { AgentState } from '@slayzone/terminal-contracts'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
@@ -19,6 +24,7 @@ import { useChatPanelKeyboard } from './useChatPanelKeyboard'
 import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
+import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 
 export interface ChatPanelHandle {
   focus: () => void
@@ -71,7 +77,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inFlight,
       hydrating,
       permissionMode,
-      permissionRequests,
+      prompts,
+      submittingPrompts,
       sendMessage,
       sendToolResult,
       respondPermission,
@@ -121,6 +128,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       tabId,
       cwd
     })
+    const promptCards = chatCapabilitiesForMode(mode).promptCards
+    // The prompt dock's key handler, consulted first by the panel's keys.
+    const promptKeysRef = useRef<PromptKeyHandler | null>(null)
     const [collapseSignal, setCollapseSignal] = useState(0)
     const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useFollowBottom()
     const panelRef = useRef<HTMLDivElement>(null)
@@ -211,7 +221,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       autoCapability,
       autocomplete: composer.autocomplete,
       handleStop: composer.handleStop,
-      mode
+      mode,
+      promptKeysRef
     })
 
     // Adapt the `(path, { position })` signature used by host wiring to the flat
@@ -223,9 +234,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [onOpenFile])
 
-    // Destructured so the memo depends on the stable callback, not the
-    // composer object (a method call on `composer` would make it the dep).
-    const { clearQueue: clearComposerQueue } = composer
     const chatView = useMemo(
       () => ({
         collapseSignal,
@@ -238,12 +246,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           void sendMessage(text)
         },
         sendToolResult,
-        permissionRequests,
+        promptCards,
+        prompts,
+        submittingPrompts,
         respondPermission,
-        abortAgent: async () => {
-          void clearComposerQueue()
-          await abortAndPop()
-        },
+        autoModeAvailable: autoCapability.optedIn,
+        cwd,
         timeline,
         childIndex: state.childIndex,
         onOpenUrl,
@@ -259,10 +267,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         handleModeChange,
         sendMessage,
         sendToolResult,
-        permissionRequests,
+        promptCards,
+        prompts,
+        submittingPrompts,
         respondPermission,
-        abortAndPop,
-        clearComposerQueue,
+        autoCapability.optedIn,
+        cwd,
         timeline,
         state.childIndex,
         onOpenUrl,
@@ -349,6 +359,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             hydrating={hydrating}
             isEmpty={isEmpty}
             inFlight={inFlight}
+            awaitingUser={promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)}
             appearance={appearance}
             hiddenCount={display.hiddenCount}
             PAGE_SIZE={display.PAGE_SIZE}
@@ -368,6 +379,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             handleReset={handleReset}
             resetting={resetting}
           />
+
+          <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
 
           <ChatComposer
             appearance={appearance}

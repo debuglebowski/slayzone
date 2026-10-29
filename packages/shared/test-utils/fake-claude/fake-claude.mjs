@@ -158,6 +158,10 @@ function onStdinLine(line) {
     if (waiter) {
       pendingRequests.delete(id)
       waiter.resolve(msg.response)
+    } else {
+      // Like the real CLI: an answer to a withdrawn (or already answered)
+      // request is ignored — recorded so a test can tell.
+      log('late-answer', { requestId: id })
     }
     return
   }
@@ -306,6 +310,11 @@ async function writeLine(event) {
 async function emit(raw) {
   const event = substitute(raw)
   trackTools(event)
+  // A status frame reporting a mode (scripted, replayed or from a prompt
+  // answer) is the CLI's mode from now on.
+  if (event?.type === 'system' && event.subtype === 'status') {
+    if (typeof event.permissionMode === 'string') ctx.permissionMode = event.permissionMode
+  }
   await writeLine(event)
 }
 
@@ -339,28 +348,96 @@ function sleep(ms, signal) {
   })
 }
 
+/**
+ * Send one control_request to the app and wait for its control_response.
+ * Interrupted (signal) or timed out → withdrawn with `control_cancel_request`,
+ * as CLI 2.1.312 does; a timeout resolves null.
+ */
+function askHost(requestId, request, signal, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let timer = null
+    const withdraw = () => {
+      pendingRequests.delete(requestId)
+      if (timer) clearTimeout(timer)
+      log('cancel', { requestId })
+      void writeLine({ type: 'control_cancel_request', request_id: requestId })
+    }
+    pendingRequests.set(requestId, {
+      resolve: (reply) => {
+        if (timer) clearTimeout(timer)
+        resolve(reply)
+      }
+    })
+    signal?.addEventListener('abort', () => {
+      if (!pendingRequests.has(requestId)) return
+      withdraw()
+      reject(new Aborted())
+    })
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        withdraw()
+        resolve(null)
+      }, timeoutMs)
+    }
+    void writeLine({ type: 'control_request', request_id: requestId, request })
+  })
+}
+
+/** Log the app's answer to a `can_use_tool`; a deny + interrupt aborts the turn. */
+function recordDecision(requestId, toolName, reply) {
+  const behavior = reply.subtype === 'error' ? 'error' : reply.response?.behavior
+  log('decision', { requestId, toolName, behavior, reply })
+  if (behavior === 'deny' && reply.response?.interrupt === true) throw new Aborted()
+  return behavior
+}
+
+/**
+ * The mode an allow switches to, as the real CLI does: a session `setMode`
+ * update, or leaving plan mode when ExitPlanMode is approved without one.
+ */
+async function applyModeChange(toolName, reply) {
+  const updates = Array.isArray(reply.response?.updatedPermissions)
+    ? reply.response.updatedPermissions
+    : []
+  const setMode = updates.find((u) => u?.type === 'setMode' && typeof u.mode === 'string')
+  const next = setMode
+    ? setMode.mode
+    : toolName === 'ExitPlanMode' && ctx.permissionMode === 'plan'
+      ? 'default'
+      : null
+  if (!next || next === ctx.permissionMode) return
+  await emit({
+    type: 'system',
+    subtype: 'status',
+    status: null,
+    permissionMode: next,
+    session_id: '{{sessionId}}'
+  })
+}
+
 let requestSeq = 0
 async function request(step, signal) {
   requestSeq += 1
   const requestId = `fake_req_${ctx.spawn}_${requestSeq}`
   const req = substitute(step.request)
-  const response = new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve })
-    signal?.addEventListener('abort', () => {
-      pendingRequests.delete(requestId)
-      reject(new Aborted())
-    })
-  })
-  await writeLine({
-    type: 'control_request',
-    request_id: requestId,
-    request: { subtype: 'can_use_tool', display_name: req.tool_name, ...req }
-  })
-  const reply = await response
-  const behavior = reply.subtype === 'error' ? 'error' : reply.response?.behavior
-  log('decision', { requestId, toolName: req.tool_name, behavior, reply })
+  const reply = await askHost(
+    requestId,
+    { subtype: 'can_use_tool', display_name: req.tool_name, ...req },
+    signal
+  )
+  const behavior = recordDecision(requestId, req.tool_name, reply)
+  if (behavior === 'allow') await applyModeChange(req.tool_name, reply)
   const branch = behavior === 'allow' ? step.then?.allow : step.then?.deny
   if (branch) await runSteps(branch, signal)
+}
+
+let hostSeq = 0
+async function hostRequest(step, signal) {
+  hostSeq += 1
+  const requestId = `fake_host_${ctx.spawn}_${hostSeq}`
+  const req = substitute(step.hostRequest)
+  const reply = await askHost(requestId, req, signal, step.timeoutMs ?? 30000)
+  log('host-reply', { requestId, subtype: req.subtype, reply: reply ?? 'timeout' })
 }
 
 async function runSteps(steps, signal) {
@@ -383,6 +460,7 @@ async function runSteps(steps, signal) {
     } else if ('sleep' in step) await sleep(step.sleep, signal)
     else if ('hang' in step) await sleep(2 ** 31 - 1, signal)
     else if ('request' in step) await request(step, signal)
+    else if ('hostRequest' in step) await hostRequest(step, signal)
     else if ('exit' in step) {
       if (step.signal) {
         log('exit', { signal: step.signal })
@@ -505,18 +583,15 @@ async function replay(spec, signal) {
       if (speed > 0 && prevT !== null) await sleep(Math.max(0, (rec.t - prevT) / speed), signal)
       prevT = rec.t
       if (event.type === 'control_request' && event.request?.subtype === 'can_use_tool') {
-        const reply = new Promise((resolve, reject) => {
-          pendingRequests.set(event.request_id, { resolve })
-          signal?.addEventListener('abort', () => reject(new Aborted()))
-        })
-        await emit(event)
-        const response = await reply
-        log('decision', {
-          requestId: event.request_id,
-          toolName: event.request.tool_name,
-          behavior: response.subtype === 'error' ? 'error' : response.response?.behavior,
-          reply: response
-        })
+        // The recorded output that follows assumes the recorded answer; a
+        // different answer is recorded so a test can't silently rely on it.
+        const recorded = recordedDecision(records, event.request_id)
+        const sub = substitute(event)
+        const response = await askHost(sub.request_id, sub.request, signal)
+        const behavior = recordDecision(sub.request_id, sub.request.tool_name, response)
+        if (recorded && behavior !== recorded) {
+          log('replay-mismatch', { requestId: sub.request_id, recorded, got: behavior })
+        }
         continue
       }
       await emit(event)
@@ -525,6 +600,18 @@ async function replay(spec, signal) {
       log('stderr', { text: rec.text })
     }
   }
+}
+
+/** The behavior the recorder answered a recorded request with. */
+function recordedDecision(records, requestId) {
+  for (const rec of records) {
+    if (rec.kind !== 'stdin') continue
+    const msg = JSON.parse(rec.line)
+    if (msg.type === 'control_response' && msg.response?.request_id === requestId) {
+      return msg.response.subtype === 'error' ? 'error' : msg.response.response?.behavior
+    }
+  }
+  return null
 }
 
 // --- main ---------------------------------------------------------------------

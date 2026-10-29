@@ -1,5 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task } from '@slayzone/task-contracts'
+import { chatOwnsSpawnFlags } from '@slayzone/terminal-contracts'
 import { taskEvents } from '../events.js'
 import { colorOne, getEnabledModeDefaults, maybeAutoCreateWorktree, parseTask } from './shared.js'
 import { insertTaskRow } from './insert.js'
@@ -43,7 +44,8 @@ export async function createImportedTaskOp(
   // Provider config from terminal_modes defaults
   const providerConfig: ProviderConfig = {}
   for (const row of await getEnabledModeDefaults(db)) {
-    providerConfig[row.id] = { flags: row.default_flags ?? '' }
+    // Claude chat's pills own its spawn flags — no default flags seeded.
+    providerConfig[row.id] = chatOwnsSpawnFlags(row.id) ? {} : { flags: row.default_flags ?? '' }
   }
 
   const initialTask = await insertTaskRow(db, {

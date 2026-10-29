@@ -37,6 +37,14 @@ import {
   extractRawText,
   type ToolProps
 } from './tool-cards/card-shell'
+import { questionsOf } from './prompts/QuestionPrompt'
+import {
+  answersOf,
+  PlanStatus,
+  PromptStatusLine,
+  QuestionStatus,
+  usePromptFor
+} from './prompts/PromptStatus'
 import { HighlightedText } from './HighlightedText'
 import { CompactionRow } from './CompactionRow'
 import { CommandOutputBlock } from './CommandOutputBlock'
@@ -626,24 +634,18 @@ export function ToolCallTodoWrite({ invocation, timestamp }: ToolProps) {
   )
 }
 
-type AskQuestion = {
-  question: string
-  header: string
-  multiSelect: boolean
-  options: Array<{ label: string; description: string; preview?: string }>
-}
-
+/**
+ * AskUserQuestion in the timeline: the questions and what became of them
+ * (answered, declined, handed back, expired). Answering happens in the prompt
+ * dock above the composer; this card only reads the prompt's state, which the
+ * event log carries — so a reload shows the same answer and nothing can be
+ * answered twice.
+ */
 export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
-  const input = invocation.input as { questions?: AskQuestion[] } | null
-  const questions = input?.questions ?? []
-  const {
-    sendMessage,
-    permissionRequests,
-    respondPermission,
-    abortAgent,
-    timeline,
-    collapseSignal
-  } = useChatView()
+  const questions = questionsOf(invocation.input)
+  const { timeline, collapseSignal } = useChatView()
+  const prompt = usePromptFor(invocation.id)
+  const answers = answersOf(prompt, invocation)
   // Latest AskUserQuestion in the timeline stays expanded; older ones auto-collapse
   // when a newer ask appears. User can still toggle manually.
   const isLatestAsk = useMemo(() => {
@@ -669,143 +671,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
     if (latestAskChanged) setCollapsed(!isLatestAsk)
     if (collapseSignalChanged) setCollapsed(true)
   }
-  // Permission-prompt path: when the CLI was spawned with
-  // `--permission-prompt-tool stdio`, the SDK emits a control_request that
-  // we surface here. Resolving it with `behavior:'allow' + updatedInput.answers`
-  // lets the tool run and Claude continue from a real tool_result.
-  // Fallback: plain user-message (legacy path; loses tool_use linkage but
-  // still conveys the answer).
-  const pendingPrompt = permissionRequests?.get(invocation.id) ?? null
-  const canRespond = Boolean((pendingPrompt && respondPermission) || sendMessage)
-  const [answered, setAnswered] = useState(false)
-  const [submittedText, setSubmittedText] = useState<string | null>(null)
-  const [selections, setSelections] = useState<Map<number, Set<string>>>(() => new Map())
-  const [otherActive, setOtherActive] = useState<Set<number>>(() => new Set())
-  const [otherText, setOtherText] = useState<Map<number, string>>(() => new Map())
-
-  // SDK closes AskUserQuestion automatically in non-interactive print mode
-  // (synthetic tool_result + entry in `result.permissionDenials` because no
-  // `--permission-prompt-tool` is wired) — so by the time renderer mounts,
-  // both `invocation.status === 'done'` and `invocation.denied === true`
-  // are already set. Treating either as "locked" hides the buttons before
-  // the user can answer. Lock ONLY on explicit user submit; the user-msg
-  // path (handleSubmit) is what actually carries the answer to Claude.
-  const locked = answered
-
-  const pickOption = (qi: number, label: string, multi: boolean): void => {
-    if (locked) return
-    setOtherActive((prev) => {
-      if (!prev.has(qi)) return prev
-      const next = new Set(prev)
-      next.delete(qi)
-      return next
-    })
-    setSelections((prev) => {
-      const next = new Map(prev)
-      const cur = new Set(next.get(qi) ?? [])
-      if (multi) {
-        if (cur.has(label)) cur.delete(label)
-        else cur.add(label)
-      } else {
-        cur.clear()
-        cur.add(label)
-      }
-      next.set(qi, cur)
-      return next
-    })
-  }
-
-  const pickOther = (qi: number): void => {
-    if (locked) return
-    setOtherActive((prev) => new Set(prev).add(qi))
-    setSelections((prev) => {
-      const next = new Map(prev)
-      next.set(qi, new Set())
-      return next
-    })
-  }
-
-  const setOther = (qi: number, value: string): void => {
-    setOtherText((prev) => {
-      const next = new Map(prev)
-      next.set(qi, value)
-      return next
-    })
-  }
-
-  const canSubmit =
-    questions.length > 0 &&
-    questions.every((_q, qi) => {
-      if (otherActive.has(qi)) return (otherText.get(qi) ?? '').trim().length > 0
-      return (selections.get(qi)?.size ?? 0) > 0
-    })
-
-  const handleSubmit = (): void => {
-    if (!canSubmit || !canRespond || locked) return
-    const answersByQuestion: Record<string, string> = {}
-    const lines: string[] = []
-    questions.forEach((q, qi) => {
-      const ans = otherActive.has(qi)
-        ? (otherText.get(qi) ?? '').trim()
-        : Array.from(selections.get(qi) ?? []).join(', ')
-      answersByQuestion[q.question] = ans
-      const prefix = q.header || q.question || `Q${qi + 1}`
-      lines.push(`${prefix}: ${ans}`)
-    })
-    const text = lines.join('\n')
-    setSubmittedText(text)
-    setAnswered(true)
-
-    // Primary: resolve the inbound `can_use_tool` permission request with
-    // `behavior:'allow'` + answers in `updatedInput`. The CLI then runs the
-    // tool with the merged input → emits a real tool_result → Claude reads
-    // the answers and continues. Single turn, no orphan tool_use, no
-    // synthetic "user declined" text.
-    // Fallback: when no pending prompt is wired (adapter without stdio
-    // permission routing or sub-agent context), send the answer as a plain
-    // user message so Claude can still read it from the next turn.
-    if (pendingPrompt && respondPermission) {
-      void respondPermission({
-        requestId: pendingPrompt.requestId,
-        decision: {
-          behavior: 'allow',
-          // Merge into the tool's original input so the CLI runs it with the
-          // populated `answers`. Spread original input first; our `answers`
-          // overrides any stale field of the same name.
-          updatedInput: {
-            ...((pendingPrompt.input as Record<string, unknown>) ?? {}),
-            answers: answersByQuestion
-          }
-        }
-      })
-      return
-    }
-    if (sendMessage) sendMessage(text)
-  }
-
-  // Cancel = interrupt the agent. Same path as the Stop button: clear
-  // queued messages, abort the in-flight turn (kill+respawn). Skip the
-  // permission-deny/sendMessage paths when abortAgent is wired since the
-  // session dies anyway. Fallback (harness, no abortAgent): preserve old
-  // behavior so the question still resolves cleanly.
-  const canCancel = Boolean(abortAgent) || canRespond
-  const handleCancel = (): void => {
-    if (!canCancel || locked) return
-    setSubmittedText('Cancelled')
-    setAnswered(true)
-    if (abortAgent) {
-      void abortAgent()
-      return
-    }
-    if (pendingPrompt && respondPermission) {
-      void respondPermission({
-        requestId: pendingPrompt.requestId,
-        decision: { behavior: 'deny', message: 'User cancelled the question.' }
-      })
-      return
-    }
-    if (sendMessage) sendMessage('Cancelled')
-  }
+  const firstAnswer = answers ? Object.values(answers)[0] : undefined
 
   return (
     <div className="pl-4 pr-4 py-3">
@@ -813,12 +679,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
         <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-info to-info-emphasis flex items-center justify-center text-info-contrast shadow-sm">
           <HelpCircle className="size-3.5" />
         </div>
-        <div
-          className={cn(
-            'min-w-0 flex-1 rounded-lg border border-info/40 bg-info/5 shadow-sm overflow-hidden transition-opacity',
-            locked && 'opacity-60'
-          )}
-        >
+        <div className="min-w-0 flex-1 rounded-lg border border-info/40 bg-info/5 shadow-sm overflow-hidden">
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}
@@ -829,14 +690,9 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
           >
             <HelpCircle className="size-3 shrink-0" />
             <span className="shrink-0">Question</span>
-            {/* StatusIcon intentionally omitted — SDK auto-marks AskUserQuestion
-                done/denied in non-interactive print mode, which would render a
-                red X next to "Question" while the user is still picking. */}
             {collapsed && (
               <span className="flex-1 min-w-0 truncate normal-case font-normal text-info-foreground/80">
-                {locked && submittedText
-                  ? submittedText.split('\n')[0]
-                  : questions[0]?.question || ''}
+                {firstAnswer ?? questions[0]?.question ?? ''}
               </span>
             )}
             <span className="ml-auto shrink-0">
@@ -848,140 +704,34 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
           )}
           {!collapsed &&
             questions.map((q, qi) => {
-              const sel = selections.get(qi) ?? new Set<string>()
-              const isOther = otherActive.has(qi)
+              const picked = answers?.[q.question]?.split(', ') ?? []
               return (
                 <div key={qi} className={cn('px-3 py-2', qi > 0 && 'border-t border-info/10')}>
-                  <div className="text-sm font-medium text-foreground mb-2">{q.question}</div>
-                  <div className="grid gap-1.5">
-                    {q.options.map((opt) => {
-                      const active = sel.has(opt.label)
-                      return (
-                        <button
-                          key={opt.label}
-                          type="button"
-                          disabled={locked}
-                          onClick={() => pickOption(qi, opt.label, q.multiSelect)}
-                          className={cn(
-                            'text-left rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-                            active
-                              ? 'border-info bg-info/15 text-foreground'
-                              : 'border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40',
-                            locked && 'opacity-60 cursor-not-allowed'
-                          )}
-                        >
-                          <div className="flex items-start gap-2">
-                            <span
-                              className={cn(
-                                'mt-0.5 shrink-0 size-3.5 border flex items-center justify-center',
-                                q.multiSelect ? 'rounded-sm' : 'rounded-full',
-                                active ? 'border-info bg-info text-info-contrast' : 'border-border'
-                              )}
-                              aria-hidden
-                            >
-                              {active && <CheckIcon className="size-2.5" />}
-                            </span>
-                            <div className="min-w-0">
-                              <div className="font-medium">{opt.label}</div>
-                              {opt.description && (
-                                <div className="text-muted-foreground text-[11px] mt-0.5">
-                                  {opt.description}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </button>
-                      )
-                    })}
-                    <button
-                      type="button"
-                      disabled={locked}
-                      onClick={() => pickOther(qi)}
-                      className={cn(
-                        'text-left rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-                        isOther
-                          ? 'border-info bg-info/15 text-foreground'
-                          : 'border-dashed border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40',
-                        locked && 'opacity-60 cursor-not-allowed'
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            'shrink-0 size-3.5 rounded-full border flex items-center justify-center',
-                            isOther ? 'border-info bg-info text-info-contrast' : 'border-border'
-                          )}
-                          aria-hidden
-                        >
-                          {isOther && <CheckIcon className="size-2.5" />}
-                        </span>
-                        <span className="font-medium">Other…</span>
-                      </div>
-                    </button>
-                    {isOther && (
-                      <textarea
-                        autoFocus
-                        disabled={locked}
-                        value={otherText.get(qi) ?? ''}
-                        onChange={(e) => setOther(qi, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                            e.preventDefault()
-                            handleSubmit()
-                          }
-                        }}
-                        placeholder="Type your answer…"
-                        className="w-full rounded-md border border-input bg-input/30 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-info"
-                        rows={2}
-                      />
-                    )}
-                  </div>
+                  <div className="text-sm font-medium text-foreground mb-1.5">{q.question}</div>
+                  <ul className="grid gap-1">
+                    {q.options.map((opt) => (
+                      <li
+                        key={opt.label}
+                        className={cn(
+                          'rounded-md border px-2.5 py-1 text-xs',
+                          picked.includes(opt.label)
+                            ? 'border-info bg-info/15 text-foreground'
+                            : 'border-border/60 bg-background/60'
+                        )}
+                      >
+                        <span className="font-medium">{opt.label}</span>
+                        {opt.description && (
+                          <span className="text-muted-foreground"> — {opt.description}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )
             })}
-          {!collapsed && questions.length > 0 && (
-            <div className="border-t border-info/20 bg-info/10 px-3 py-2 flex items-center gap-2">
-              {locked ? (
-                <span className="flex-1 text-xs text-muted-foreground whitespace-pre-wrap">
-                  {submittedText ?? 'Answered.'}
-                </span>
-              ) : (
-                <>
-                  <span className="flex-1 text-[11px] text-muted-foreground">
-                    {!canRespond
-                      ? 'Cannot submit — chat send unavailable.'
-                      : pendingPrompt
-                        ? 'Submit resolves the tool with your answers.'
-                        : 'Answer is sent as your next chat message.'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCancel}
-                    disabled={!canCancel}
-                    className={cn(
-                      'shrink-0 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
-                      canCancel
-                        ? 'border-border/60 bg-background/60 hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive text-muted-foreground'
-                        : 'border-border/40 bg-muted/30 text-muted-foreground cursor-not-allowed'
-                    )}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    disabled={!canSubmit || !canRespond}
-                    className={cn(
-                      'shrink-0 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
-                      canSubmit && canRespond
-                        ? 'border-info/40 bg-info/20 hover:bg-info/30 text-info-foreground'
-                        : 'border-border/40 bg-muted/30 text-muted-foreground cursor-not-allowed'
-                    )}
-                  >
-                    Submit
-                  </button>
-                </>
-              )}
+          {!collapsed && questions.length > 0 && (prompt || answers) && (
+            <div className="border-t border-info/20 bg-info/10 px-3 py-2">
+              <QuestionStatus prompt={prompt} invocation={invocation} />
             </div>
           )}
         </div>
@@ -991,53 +741,22 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
   )
 }
 
-// Marker text the Approve/Cancel buttons send. Detector below scans for either
-// to mark the plan as resolved — keep sender + detector in sync via these consts.
-// Sentinel-style strings so normal user text ("Approved", "Cancelled") doesn't
-// accidentally trigger plan resolution. Hidden from chat render via
-// `isPlanMarker` below.
+// Marker texts older builds sent as chat messages to approve / cancel a plan.
+// Plan approval now answers ExitPlanMode itself; the markers stay only so old
+// conversations keep them hidden (`isRenderable`) and out of prompt history.
 export const PLAN_APPROVED_MARKER = '__slay_plan_approved__'
 export const PLAN_CANCELLED_MARKER = '__slay_plan_cancelled__'
 export const isPlanMarker = (text: string): boolean =>
   text === PLAN_APPROVED_MARKER || text === PLAN_CANCELLED_MARKER
 
+/**
+ * ExitPlanMode in the timeline: the plan, and how it was answered. Approval
+ * happens in the prompt dock right below ("Ready to code?").
+ */
 export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { plan?: string } | null
   const plan = input?.plan ?? ''
-  const denied = invocation.denied === true
-  const { setChatMode, sendMessage, timeline } = useChatView()
-  // Show approve-footer only on the LAST ExitPlanMode card AND only until the
-  // user clicks Approve. Both signals are derived from `timeline` so the state
-  // survives unmount (virtualized scroll, tab switch). The click sends a
-  // canonical 'Approved' user-text — its presence after this plan idx marks
-  // it pressed. `denied` never flips back, so we can't rely on invocation
-  // status alone.
-  const { isLastPlan, pressed } = useMemo(() => {
-    let lastPlanId: string | null = null
-    let myIdx = -1
-    for (let i = 0; i < timeline.length; i++) {
-      const t = timeline[i]
-      if (t.kind === 'tool' && t.invocation.name === 'ExitPlanMode') {
-        lastPlanId = t.invocation.id
-        if (t.invocation.id === invocation.id) myIdx = i
-      }
-    }
-    let resolved = false
-    if (myIdx >= 0) {
-      for (let i = myIdx + 1; i < timeline.length; i++) {
-        const t = timeline[i]
-        if (
-          t.kind === 'user-text' &&
-          (t.text === PLAN_APPROVED_MARKER || t.text === PLAN_CANCELLED_MARKER)
-        ) {
-          resolved = true
-          break
-        }
-      }
-    }
-    return { isLastPlan: lastPlanId === invocation.id, pressed: resolved }
-  }, [timeline, invocation.id])
-  const showApproveFooter = denied && isLastPlan && !pressed
+  const prompt = usePromptFor(invocation.id)
   return (
     <div className="pl-4 pr-4 py-3">
       <div className="group flex gap-3 items-start">
@@ -1048,42 +767,21 @@ export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
           <div className="flex items-center gap-2 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-warning-foreground">
             <ClipboardList className="size-3" />
             <span>Plan</span>
-            <span className="ml-auto">
-              <StatusIcon status={invocation.status} />
-            </span>
+            {/* No status icon while the plan waits: a pending prompt is not a failure. */}
+            {prompt?.status !== 'pending' && (
+              <span className="ml-auto">
+                <StatusIcon status={invocation.status} />
+              </span>
+            )}
           </div>
           {plan && (
             <div className="px-3 py-2 text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]">
               <GhMarkdown>{plan}</GhMarkdown>
             </div>
           )}
-          {showApproveFooter && (
-            <div className="border-t border-warning/20 bg-warning/10 px-3 py-2 flex items-center gap-2 text-xs text-warning-foreground">
-              <span className="flex-1">Approve plan?</span>
-              <button
-                onClick={() => {
-                  sendMessage?.(PLAN_CANCELLED_MARKER)
-                }}
-                disabled={!sendMessage}
-                className="shrink-0 rounded-md border border-border/60 bg-background/60 hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive px-2 py-1 font-medium text-muted-foreground transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              {setChatMode && (
-                <button
-                  onClick={async () => {
-                    try {
-                      await setChatMode('auto-accept')
-                    } catch {
-                      return
-                    }
-                    sendMessage?.(PLAN_APPROVED_MARKER)
-                  }}
-                  className="shrink-0 rounded-md border border-warning/40 bg-warning/20 hover:bg-warning/30 px-2 py-1 font-medium text-warning-foreground transition-colors"
-                >
-                  Approve & exit plan
-                </button>
-              )}
+          {prompt && (
+            <div className="border-t border-warning/20 bg-warning/10 px-3 py-2">
+              <PlanStatus prompt={prompt} />
             </div>
           )}
         </div>
@@ -1142,11 +840,22 @@ export const toolRenderers: Record<string, React.FC<ToolProps>> = {
   AskUserQuestion: ToolCallAskUserQuestion
 }
 
+/** Tools whose card shows its own prompt status. */
+const OWN_PROMPT_STATUS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
 export function renderTool(invocation: ToolInvocation, timestamp?: number): React.JSX.Element {
   const R =
     toolRenderers[invocation.name] ??
     (parseMcpToolName(invocation.name) ? McpToolCard : ToolCallGeneric)
-  return <R invocation={invocation} timestamp={timestamp} />
+  if (OWN_PROMPT_STATUS.has(invocation.name)) {
+    return <R invocation={invocation} timestamp={timestamp} />
+  }
+  return (
+    <>
+      <R invocation={invocation} timestamp={timestamp} />
+      <PromptStatusLine toolUseId={invocation.id} />
+    </>
+  )
 }
 
 /**

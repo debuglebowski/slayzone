@@ -19,12 +19,21 @@ export interface ChatCapabilities {
   nativeSlashCommands: boolean
   /** The composer recalls the task's earlier prompts (↑/↓, Ctrl+R) and chat sends are recorded for it. */
   promptHistory: boolean
+  /**
+   * Every permission request, question and plan approval is answered from a
+   * prompt card (the prompt dock), with the TUI's options and wording.
+   */
+  promptCards: boolean
 }
 
-const NONE: ChatCapabilities = { nativeSlashCommands: false, promptHistory: false }
+const NONE: ChatCapabilities = {
+  nativeSlashCommands: false,
+  promptHistory: false,
+  promptCards: false
+}
 
 const CAPABILITIES: Record<string, ChatCapabilities> = {
-  'claude-chat': { nativeSlashCommands: true, promptHistory: true },
+  'claude-chat': { nativeSlashCommands: true, promptHistory: true, promptCards: true },
   'codex-chat': NONE
 }
 

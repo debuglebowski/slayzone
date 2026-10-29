@@ -75,7 +75,8 @@ fake.setScenario({
 | `{ stderr: 'text' }` | Write to stderr. |
 | `{ sleep: ms }` | Wait. An interrupt aborts the wait. |
 | `{ hang: true }` | Wait until the turn is interrupted or the process is killed. |
-| `{ request: {tool_name, input, tool_use_id}, then: {allow, deny} }` | Emit `control_request{subtype:'can_use_tool'}` and block until the app answers it. Then run the branch that matches `behavior` (an error reply runs `deny`). |
+| `step.request({tool_name, input, tool_use_id, …}, {allow, deny})` | Emit `control_request{subtype:'can_use_tool'}` (any CLI field: `description`, `permission_suggestions`, `agent_id`, `mcp_server`, `decision_reason`, …) and block until the app answers it. Then run the branch that matches `behavior` (an error reply runs `deny`). |
+| `step.hostRequest({subtype, …}, timeoutMs?)` | Emit a control_request the app does not implement (`hook_callback`, `mcp_message`) and wait for its reply (default 30 s, the CLI's hook timeout; then withdrawn). Read it with `run.hostReplies()`. |
 | `{ exit: code }` / `{ exit: null, signal: 'SIGSEGV' }` | Exit with that code, or kill itself with that signal. |
 | `{ replay: { transcript, process?, turn?, speed? } }` | Re-emit one recorded turn (see below). |
 
@@ -106,6 +107,11 @@ The defaults copy CLI 2.1.312 behaviour as recorded:
   - Then a user text `[Request interrupted by user(for tool use)]`.
   - Then `result{subtype:'error_during_execution', terminal_reason:'aborted_tools'|'aborted_streaming'}`.
   - The process stays alive for the next turn.
+- **Answers to `can_use_tool`** (a `request` step, or a replayed one):
+  - An allow with a session `setMode` update switches `{{permissionMode}}` and emits `system/status {permissionMode}`; so does allowing ExitPlanMode in plan mode (→ `default`). Not during replay: the recording has the CLI's own status lines.
+  - A deny with `interrupt: true` aborts the turn like an interrupt (below).
+  - An interrupt while the request waits withdraws it: `control_cancel_request {request_id}`. A later answer is ignored and logged (`run.lateAnswers()`).
+  - A replayed request answered differently from the recording is logged (`run.replayMismatches()`): the recorded output after it assumes the recorded answer.
 - **stdin closed**: the fake finishes the current turn and exits 0.
 - **SIGTERM**: exit 143. Set `onSigterm` to keep talking first; this is how a replaced process that still emits events is scripted.
 - **`--allow-dangerously-skip-permissions`** leaves the mode at `default`, as on the real CLI. Only `--dangerously-skip-permissions` means bypass.
@@ -128,6 +134,8 @@ run.argv; run.sessionId; run.resumed; run.flag('--model')
 run.userMessages()       // texts the app sent
 run.controlRequests()    // [{subtype:'interrupt'}, {subtype:'set_model', model}]
 run.decisions()          // answers to the fake's can_use_tool requests
+run.hostReplies()        // replies to hostRequest steps (or 'timeout')
+run.cancels(); run.lateAnswers(); run.replayMismatches()
 run.signals(); run.exit(); run.stdoutLines(); run.entries   // raw log
 ```
 
@@ -157,8 +165,10 @@ turns: [[step.replay(transcriptPath('permission-bash'), { turn: 0 })]]
 | `tool-turn` | Read, then Bash, in acceptEdits. Two turns in one process. |
 | `permission-bash` | Default mode: `can_use_tool` for Bash. Turn 1 allowed, turn 2 denied. |
 | `ask-user-question` | AskUserQuestion answered via `updatedInput.answers`, as the chat card does it. |
-| `exit-plan-deny` | ExitPlanMode denied the way the driver does today, then `set_permission_mode` + `__slay_plan_approved__`. |
+| `exit-plan-deny` | ExitPlanMode denied the way older builds' driver did, then `set_permission_mode` + `__slay_plan_approved__` (pre-prompt-card flow; kept for history replays). |
 | `exit-plan-allow` | ExitPlanMode allowed: the CLI leaves plan mode itself. |
+| `permission-cancel-interrupt` | Default mode: a Bash request left unanswered, then an interrupt — the CLI withdraws it (`control_cancel_request`). |
+| `ask-user-question-preview` | AskUserQuestion whose options carry `preview`, answered with `answers` + `annotations` (preview + notes). |
 | `compact` | `/compact`: `system/status compacting`, `compact_boundary`, the summary as a user **string**. |
 | `resume`, `resume-missing` | `--resume` working, and `--resume` of an unknown id (stderr + `error_during_execution`, 0 turns, exit 1). |
 | `interrupt-tool`, `interrupt-text` | Interrupt with and without an open tool. |

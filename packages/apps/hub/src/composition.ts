@@ -615,7 +615,7 @@ export function composeServer(opts: {
     const stats = await backfillChatModes(db)
     if (stats.updated > 0) {
       console.log(
-        `[chat-handlers] backfillChatModes: ${stats.updated}/${stats.scanned} tasks tagged 'bypass'`
+        `[chat-handlers] backfillChatModes: ${stats.updated}/${stats.scanned} tasks tagged 'bypass' (Codex chat only)`
       )
     }
   })

@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { AgentMode } from '@slayzone/ui'
-import type { TimelineItem } from '@slayzone/terminal/client'
+import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
+import type { PermissionDecision } from '@slayzone/terminal-contracts'
 
 export interface ChatViewState {
   /**
@@ -27,22 +28,17 @@ export interface ChatViewState {
   }
   /**
    * Switch the chat's permission mode. Wired by ChatPanel to `useChatMode`'s
-   * handleModeChange. Renderers consume it for inline approval flows — e.g.
-   * the ExitPlanMode tool exposes an "Approve & exit plan" button that calls
-   * `setChatMode('auto-accept')`, which kills + respawns the subprocess with
-   * the new flag.
+   * handleModeChange.
    */
   setChatMode?: (next: AgentMode) => Promise<void>
   /**
-   * Send a user message into the chat session. Used as a fallback by inline
-   * answer flows when the adapter lacks a structured-input channel.
+   * Send a user message into the chat session (plan approval's "approve with
+   * this feedback" sends the feedback this way).
    */
   sendMessage?: (text: string) => void
   /**
    * Resolve a pending `tool_use_id` with a `tool_result` content block.
-   * Preferred path for AskUserQuestion's submit so the SDK's turn machinery
-   * sees a normal completion. Returns false when the adapter lacks a
-   * structured-input channel — caller should fall back to `sendMessage`.
+   * Returns false when the adapter lacks a structured-input channel.
    */
   sendToolResult?: (args: {
     toolUseId: string
@@ -50,35 +46,27 @@ export interface ChatViewState {
     isError?: boolean
   }) => Promise<boolean>
   /**
-   * Live `can_use_tool` permission requests keyed by `tool_use_id`. Set when
-   * the adapter runs with `--permission-prompt-tool stdio` and Claude calls
-   * a tool the active permission mode hasn't already auto-approved (notably
-   * AskUserQuestion). Renderers correlate by `tool_use_id` (matches the
-   * tool card's `invocation.id`) and resolve via `respondPermission`.
+   * The provider answers prompts from prompt cards (`ChatCapabilities.promptCards`).
+   * Off: no dock, no prompt status on cards (Codex keeps today's behavior).
    */
-  permissionRequests?: Map<string, { requestId: string; toolName: string; input: unknown }>
+  promptCards?: boolean
+  /** The agent's questions to the user with their state, oldest first (`chat-prompts.ts`). */
+  prompts?: ChatPrompt[]
+  /** Request ids whose answer is on its way to the server. */
+  submittingPrompts?: ReadonlySet<string>
   /**
-   * Reply to an inbound permission request. `behavior:'allow'` carries
-   * `updatedInput` (e.g. AskUserQuestion answers). `behavior:'deny'` blocks
-   * the tool with a message.
+   * Answer a pending prompt with a wire decision; `optionId` names the row
+   * picked. Resolves false when the request is no longer pending.
    */
   respondPermission?: (args: {
     requestId: string
-    decision:
-      | {
-          behavior: 'allow'
-          updatedInput?: Record<string, unknown>
-          updatedPermissions?: unknown[]
-        }
-      | { behavior: 'deny'; message: string; interrupt?: boolean }
+    decision: PermissionDecision
+    optionId?: string
   }) => Promise<boolean>
-  /**
-   * Interrupt the running agent + clear queued messages. Same path as the
-   * Stop button. Inline cancel flows (e.g. AskUserQuestion's Cancel) call
-   * this so dismissing a question kills the turn instead of just denying
-   * the tool. Undefined in harness contexts → callers fall back.
-   */
-  abortAgent?: () => Promise<void>
+  /** The account has auto mode and opted in (prompt rows offer "switch to auto mode"). */
+  autoModeAvailable?: boolean
+  /** The session's working directory (rows that name it). */
+  cwd?: string
   /**
    * Full flat timeline + parent→children index, exposed so SubAgentRow can
    * render the items emitted while it ran (parentToolUseId === toolUseId).

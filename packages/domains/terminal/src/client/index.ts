@@ -60,4 +60,11 @@ export {
   deriveLoadingLabel,
   selectUsageSummary
 } from './chat-timeline'
+export {
+  type ChatPrompt,
+  type ChatPromptStatus,
+  selectPendingPrompts,
+  selectPromptForTool,
+  hasPendingPrompt
+} from './chat-prompts'
 export * from './utils'

@@ -428,16 +428,144 @@ describe('ClaudeCodeAdapter tests', () => {
     expect(ev.toolUseId).toBe('tu_42')
   })
 
-  test('parseLine: control_request with unknown subtype → unknown shape-mismatch', () => {
+  test('parseLine: can_use_tool keeps the display fields the card needs (Bash, CLI 2.1.312)', () => {
     const ev = claudeCodeAdapter.parseLine(
       JSON.stringify({
         type: 'control_request',
-        request_id: 'r_x',
-        request: { subtype: 'hook_callback', callback_id: 'h1' }
+        request_id: 'cu_bash',
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'Bash',
+          display_name: 'Bash',
+          input: { command: 'python3 -c "print(6*7)"', description: 'Print 6*7' },
+          description: 'Print 6*7',
+          permission_suggestions: [
+            {
+              type: 'addRules',
+              rules: [{ toolName: 'Bash', ruleContent: 'python3 -c "print(6*7)"' }],
+              behavior: 'allow',
+              destination: 'localSettings'
+            }
+          ],
+          decision_reason: 'This command requires approval',
+          decision_reason_type: 'other',
+          blocked_path: '/repo/out.txt',
+          tool_use_id: 'toolu_bash'
+        }
       })
+    )
+    expect(ev).toEqual({
+      kind: 'permission-request',
+      requestId: 'cu_bash',
+      toolName: 'Bash',
+      toolUseId: 'toolu_bash',
+      input: { command: 'python3 -c "print(6*7)"', description: 'Print 6*7' },
+      permissionSuggestions: [
+        {
+          type: 'addRules',
+          rules: [{ toolName: 'Bash', ruleContent: 'python3 -c "print(6*7)"' }],
+          behavior: 'allow',
+          destination: 'localSettings'
+        }
+      ],
+      displayName: 'Bash',
+      description: 'Print 6*7',
+      decisionReason: 'This command requires approval',
+      decisionReasonType: 'other',
+      blockedPath: '/repo/out.txt'
+    })
+  })
+
+  test('parseLine: can_use_tool keeps subagent, MCP and card-shaping flags', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'control_request',
+        request_id: 'cu_mcp',
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'mcp__spike__echo',
+          mcp_server: { name: 'spike', source: 'dynamic' },
+          display_name: 'Echo',
+          title: 'Echo tool',
+          input: { text: 'abc1' },
+          server_policy_ask_only: true,
+          suppress_always_allow_rule: true,
+          default_to_no: true,
+          requires_user_interaction: true,
+          agent_id: 'a20fbe83',
+          tool_use_id: 'toolu_mcp'
+        }
+      })
+    )
+    if (!ev || ev.kind !== 'permission-request') throw new Error('expected permission-request')
+    expect(ev).toMatchObject({
+      toolName: 'mcp__spike__echo',
+      mcpServer: { name: 'spike', source: 'dynamic' },
+      displayName: 'Echo',
+      title: 'Echo tool',
+      serverPolicyAskOnly: true,
+      suppressAlwaysAllow: true,
+      defaultToNo: true,
+      requiresUserInteraction: true,
+      agentId: 'a20fbe83'
+    })
+    // Absent wire fields stay absent (no `undefined` keys persisted).
+    expect(Object.keys(ev)).not.toContain('decisionReason')
+    expect(Object.keys(ev)).not.toContain('blockedPath')
+  })
+
+  test('parseLine: control_request the host must answer but does not handle → host-control-request', () => {
+    for (const subtype of ['hook_callback', 'mcp_message', 'some_future_subtype']) {
+      const ev = claudeCodeAdapter.parseLine(
+        JSON.stringify({
+          type: 'control_request',
+          request_id: `r_${subtype}`,
+          request: { subtype, callback_id: 'h1' }
+        })
+      )
+      expect(ev).toEqual({ kind: 'host-control-request', requestId: `r_${subtype}`, subtype })
+    }
+  })
+
+  test('parseLine: control_request without a request_id → unknown shape-mismatch (cannot be answered)', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({ type: 'control_request', request: { subtype: 'can_use_tool' } })
     )
     if (!ev || ev.kind !== 'unknown') throw new Error('expected unknown')
     expect(ev.reason).toBe('shape-mismatch')
+  })
+
+  test('parseLine: control_cancel_request → permission-cancelled', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'control_cancel_request',
+        request_id: '2bb5b252-9242-4a74-a45f-8de393d35219'
+      })
+    )
+    expect(ev).toEqual({
+      kind: 'permission-cancelled',
+      requestId: '2bb5b252-9242-4a74-a45f-8de393d35219'
+    })
+  })
+
+  test('parseLine: control_cancel_request without a request_id → unknown shape-mismatch', () => {
+    const ev = claudeCodeAdapter.parseLine(JSON.stringify({ type: 'control_cancel_request' }))
+    if (!ev || ev.kind !== 'unknown') throw new Error('expected unknown')
+    expect(ev.reason).toBe('shape-mismatch')
+  })
+
+  test('parseLine: system/status carrying permissionMode → permission-mode-changed', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'status',
+        status: null,
+        permissionMode: 'acceptEdits',
+        uuid: '68d2d067',
+        session_id: 'b68b548e'
+      })
+    )
+    expect(ev).toEqual({ kind: 'permission-mode-changed', mode: 'acceptEdits' })
   })
 
   test('serializeControlResponse: success carries response payload', () => {

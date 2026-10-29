@@ -12,8 +12,10 @@ import {
   isInFlight,
   isAwaitingUserQuestion,
   deriveLoadingLabel,
-  selectUsageSummary
+  selectUsageSummary,
+  type ChatTimelineState
 } from './chat-timeline'
+import { selectPendingPrompts, selectPromptForTool, hasPendingPrompt } from './chat-prompts'
 
 const ev = {
   turnInit: (sessionId = 'sid-1'): AgentEvent => ({
@@ -1962,4 +1964,123 @@ describe('hook output + notices', () => {
       'hook:Stop:cancelled'
     ])
   })
+})
+
+// ---- Prompt model (permission requests, questions, plan approval) ----------
+// Prompt state is derived from the event log only, so a reload (replay of the
+// same events) rebuilds it exactly.
+
+describe('prompt model', () => {
+  const request = (requestId: string, toolUseId: string, toolName = 'Bash'): AgentEvent => ({
+    kind: 'permission-request',
+    requestId,
+    toolName,
+    toolUseId,
+    input: { command: 'npm run build' },
+    permissionSuggestions: [],
+    description: 'Build'
+  })
+  function run(events: AgentEvent[]): ChatTimelineState {
+    let s = initialState()
+    s = reducer(s, { type: 'event', event: { kind: 'session-spawn', spawnId: 'sp1' } })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'go' } })
+    for (const e of events) s = reducer(s, { type: 'event', event: e })
+    return s
+  }
+
+  test('a request is pending until answered; the answer is kept with it', () => {
+    const pending = run([ev.call('t-1'), request('r1', 't-1')])
+    expect(hasPendingPrompt(pending)).toBe(true)
+    expect(selectPendingPrompts(pending).map((p) => p.requestId)).toEqual(['r1'])
+    expect(selectPromptForTool(pending, 't-1')).toMatchObject({
+      requestId: 'r1',
+      toolName: 'Bash',
+      status: 'pending',
+      request: { description: 'Build' }
+    })
+
+    const answered = run([
+      ev.call('t-1'),
+      request('r1', 't-1'),
+      {
+        kind: 'permission-resolved',
+        requestId: 'r1',
+        decision: { behavior: 'allow' },
+        optionId: 'yes'
+      }
+    ])
+    expect(hasPendingPrompt(answered)).toBe(false)
+    expect(selectPromptForTool(answered, 't-1')).toMatchObject({
+      status: 'resolved',
+      decision: { behavior: 'allow' },
+      optionId: 'yes'
+    })
+  })
+
+  test('the CLI withdrawing a request cancels it', () => {
+    const s = run([request('r1', 't-1'), { kind: 'permission-cancelled', requestId: 'r1' }])
+    expect(selectPromptForTool(s, 't-1')?.status).toBe('cancelled')
+    expect(hasPendingPrompt(s)).toBe(false)
+  })
+
+  test('a request dies with its process: exit, respawn, interrupt → expired', () => {
+    for (const end of [
+      { kind: 'process-exit', code: 0, signal: null },
+      { kind: 'session-spawn', spawnId: 'sp2' },
+      { kind: 'interrupted' }
+    ] as AgentEvent[]) {
+      const s = run([request('r1', 't-1'), end])
+      expect(selectPromptForTool(s, 't-1')?.status).toBe('expired')
+    }
+  })
+
+  test('an answered request stays answered when the turn is interrupted (TUI "No")', () => {
+    const s = run([
+      request('r1', 't-1'),
+      {
+        kind: 'permission-resolved',
+        requestId: 'r1',
+        decision: { behavior: 'deny', message: 'no', interrupt: true }
+      },
+      { kind: 'interrupted' }
+    ])
+    expect(selectPromptForTool(s, 't-1')?.status).toBe('resolved')
+  })
+
+  test('older logs (no permission-resolved): the tool result marks the request answered', () => {
+    const s = run([ev.call('t-1'), request('r1', 't-1'), ev.result('t-1')])
+    expect(selectPromptForTool(s, 't-1')?.status).toBe('resolved')
+    // Codex approvals can carry an empty tool id — never matched by id.
+    const codex = run([request('c1', ''), ev.result('')])
+    expect(selectPendingPrompts(codex).map((p) => p.requestId)).toEqual(['c1'])
+  })
+
+  test('replaying the same events twice does not duplicate a request', () => {
+    const s = run([request('r1', 't-1'), request('r1', 't-1')])
+    expect(selectPendingPrompts(s)).toHaveLength(1)
+  })
+
+  test('permission-mode-changed updates the live permission mode', () => {
+    const s = run([{ kind: 'permission-mode-changed', mode: 'acceptEdits' }])
+    expect(s.permissionMode).toBe('acceptEdits')
+  })
+})
+
+// Stop (and a prompt's "No") persists `interrupted`, then the CLI still sends
+// the aborted turn's `result`. That result must not count as the NEXT turn's.
+test('a result after an interrupt does not leave the next turn looking finished', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'one' } })
+  s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+  const aborted = ev.turnResult()
+  if (aborted.kind !== 'result') throw new Error('expected a result event')
+  s = reducer(s, {
+    type: 'event',
+    event: { ...aborted, isError: true, subtype: 'error_during_execution' }
+  })
+  expect(isInFlight(s)).toBe(false)
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'two' } })
+  expect(isInFlight(s)).toBe(true)
 })

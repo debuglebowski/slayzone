@@ -35,6 +35,10 @@ export type AgentEvent =
   | StreamMessageStopEvent
   | ControlResponseEvent
   | PermissionRequestEvent
+  | PermissionCancelledEvent
+  | PermissionResolvedEvent
+  | PermissionModeChangedEvent
+  | HostControlRequestEvent
   | SessionSpawnEvent
   | AgentPlanEvent
 
@@ -406,6 +410,75 @@ export interface PermissionRequestEvent {
   toolUseId: string
   input: unknown
   permissionSuggestions?: unknown
+  // Display fields of Claude's `can_use_tool` (absent when the CLI omits them).
+  /** Tool name for humans (`Echo` for `mcp__spike__echo`). */
+  displayName?: string
+  title?: string
+  /** What the call does (Bash: the command's description; Edit/Write: the file name). */
+  description?: string
+  /** Why the CLI asks (`This command requires approval`). */
+  decisionReason?: string
+  decisionReasonType?: string
+  /** Path outside the allowed directories that triggered the prompt. */
+  blockedPath?: string
+  /** Set when a subagent raised the prompt. */
+  agentId?: string
+  mcpServer?: { name: string; source?: string }
+  /** Omit the "don't ask again" row. */
+  suppressAlwaysAllow?: boolean
+  /** Don't pre-select an approving row. */
+  defaultToNo?: boolean
+  /** The tool exists to ask the user (AskUserQuestion, ExitPlanMode). */
+  requiresUserInteraction?: boolean
+  serverPolicyAskOnly?: boolean
+}
+
+/**
+ * The host's answer to a permission request. Claude: the `can_use_tool`
+ * control_response body. `deny` + `interrupt` stops the turn (the TUI's plain
+ * "No"); `deny` alone hands `message` to the model and the turn continues.
+ */
+export type PermissionDecision =
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
+  | { behavior: 'deny'; message: string; interrupt?: boolean }
+
+/**
+ * The CLI withdrew a pending permission request (`control_cancel_request`),
+ * e.g. because the turn was interrupted. A late answer would be ignored.
+ */
+export interface PermissionCancelledEvent {
+  kind: 'permission-cancelled'
+  requestId: string
+}
+
+/**
+ * The host answered a permission request (written to the CLI). Persisted so
+ * prompt state is derived from the event log and survives a reload.
+ */
+export interface PermissionResolvedEvent {
+  kind: 'permission-resolved'
+  requestId: string
+  decision: PermissionDecision
+  /** Which prompt row the user picked (display only, e.g. `yes-always`). */
+  optionId?: string
+}
+
+/** The CLI reports a new permission mode mid-session (`system/status.permissionMode`). Raw CLI value. */
+export interface PermissionModeChangedEvent {
+  kind: 'permission-mode-changed'
+  mode: string
+}
+
+/**
+ * Inbound control_request the host does not implement (`hook_callback`,
+ * `mcp_message`, …). Transport-internal like `control-response`: the driver
+ * answers it with an error at once (an unanswered request stalls the CLI) and
+ * never emits it.
+ */
+export interface HostControlRequestEvent {
+  kind: 'host-control-request'
+  requestId: string
+  subtype: string
 }
 
 /**

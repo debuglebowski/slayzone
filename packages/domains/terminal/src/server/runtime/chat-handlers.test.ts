@@ -15,7 +15,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type Database from 'better-sqlite3'
-import { createChatOps, registerChatHandlers } from './chat-handlers'
+import { backfillChatModes, createChatOps, registerChatHandlers } from './chat-handlers'
 import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
@@ -465,16 +465,17 @@ test('chat:start reads stored chatModel and adds --model on cold spawn', async (
   expect(args[idx + 1]).toBe('haiku')
 })
 
-test('explicit providerFlagsOverride suppresses --model injection', async () => {
+/** Spawn args of one cold `chat:start` for a seeded task. */
+async function coldStartArgs(
+  providerConfig: Record<string, unknown>,
+  providerFlagsOverride: string | null
+): Promise<string[]> {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
-  const taskId = 'task-model-7'
-  const tabId = 'tab-model-7'
-  const mode = 'claude-chat'
-  // Stored chatModel = sonnet; override should still win.
-  seedTask(db, taskId, JSON.stringify({ [mode]: { chatModel: 'sonnet' } }), tabId)
-
+  const taskId = `task-flags-${Math.random().toString(36).slice(2, 8)}`
+  const tabId = `tab-${taskId}`
+  seedTask(db, taskId, JSON.stringify({ 'claude-chat': providerConfig }), tabId)
   const spawnArgsLog: string[][] = []
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
@@ -486,23 +487,56 @@ test('explicit providerFlagsOverride suppresses --model injection', async () => 
     broadcastExit: () => {},
     broadcastStateChange: () => {}
   })
-
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
     createSlayzoneDbAdapter(db),
     localChatOpts(db)
   )
-
   await ipc.invoke('chat:start', {
     tabId,
     taskId,
-    mode,
+    mode: 'claude-chat',
     cwd: '/tmp',
-    providerFlagsOverride: '--allow-dangerously-skip-permissions'
+    providerFlagsOverride
   })
   expect(spawnArgsLog.length).toBe(1)
-  expect(spawnArgsLog[0].includes('--model')).toBeFalsy()
+  return spawnArgsLog[0]
+}
+
+function flagValue(args: string[], flag: string): string | null {
+  const i = args.indexOf(flag)
+  return i === -1 ? null : (args[i + 1] ?? null)
+}
+
+// N2: task create seeded the mode's default flags (--allow-dangerously-skip-
+// permissions) into provider_config, and explicit flags used to win over the
+// chat mode — the CLI started in `default` while the pill showed Auto-accept.
+test("a task's own flags are extras: the chat mode, model and effort still decide the spawn", async () => {
+  const seeded = await coldStartArgs(
+    { flags: '--allow-dangerously-skip-permissions', chatModel: 'sonnet' },
+    null
+  )
+  expect(flagValue(seeded, '--permission-mode')).toBe('acceptEdits')
+  expect(flagValue(seeded, '--model')).toBe('sonnet')
+  expect(seeded).not.toContain('--allow-dangerously-skip-permissions')
+
+  const override = await coldStartArgs(
+    { chatMode: 'ask', chatModel: 'sonnet', chatEffort: 'high' },
+    '--allow-dangerously-skip-permissions --add-dir ../shared --permission-mode plan --model opus'
+  )
+  expect(flagValue(override, '--permission-mode')).toBe('default')
+  expect(flagValue(override, '--model')).toBe('sonnet')
+  expect(flagValue(override, '--effort')).toBe('high')
+  expect(flagValue(override, '--add-dir')).toBe('../shared')
+  expect(override.filter((a) => a === '--permission-mode')).toHaveLength(1)
+  expect(override.filter((a) => a === '--model')).toHaveLength(1)
+  expect(override).not.toContain('--allow-dangerously-skip-permissions')
+})
+
+test('chat bypass really bypasses (not just allows it)', async () => {
+  const args = await coldStartArgs({ chatMode: 'bypass' }, null)
+  expect(flagValue(args, '--permission-mode')).toBe('bypassPermissions')
 })
 
 test('chat:hydrate does NOT spawn a subprocess', async () => {
@@ -846,4 +880,70 @@ test('onChatEvent receives the task, mode and conversation of the event', async 
     mode: 'claude-chat',
     conversationId: info.sessionId
   })
+})
+
+test('a mode switch the CLI reports mid-session (plan approval) reaches the session and the stored mode', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  seedTask(db, 'task-mode-1', JSON.stringify({ 'claude-chat': { chatMode: 'plan' } }), 'tab-mode-1')
+  const child = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => child,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ops = createChatOps(localChatOpts(db))
+  const opts = { tabId: 'tab-mode-1', taskId: 'task-mode-1', mode: 'claude-chat', cwd: '/tmp' }
+  const info = await ops.start({ ...opts, providerFlagsOverride: null })
+  ;(child as unknown as EventEmitter).emit('spawn')
+  const stdout = child.stdout as PassThrough
+  stdout.write(
+    JSON.stringify({
+      type: 'system',
+      subtype: 'init',
+      session_id: info.sessionId,
+      permissionMode: 'plan'
+    }) + '\n'
+  )
+  // Approving the plan with "Yes, and use auto mode" flips the CLI's mode.
+  stdout.write(
+    JSON.stringify({
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      permissionMode: 'acceptEdits'
+    }) + '\n'
+  )
+  expect(
+    await eventually(async () =>
+      (await ops.getMode('task-mode-1', 'claude-chat')) === 'auto-accept' ? true : null
+    )
+  ).toBe(true)
+  expect((await ops.getInfo('tab-mode-1'))?.chatMode).toBe('auto-accept')
+})
+
+// The boot backfill ran on EVERY start and tagged any entry without a chatMode
+// 'bypass' — so a new Claude task (default Auto-accept) silently became Bypass
+// after the next restart. Claude's default now covers a missing chatMode;
+// Codex keeps today's behavior.
+test('boot backfill leaves Claude chat entries to the default mode; Codex unchanged', async () => {
+  const db = await setupDb()
+  seedTask(db, 'task-bf-claude', JSON.stringify({ 'claude-chat': { chatModel: 'sonnet' } }))
+  seedTask(db, 'task-bf-codex', JSON.stringify({ 'codex-chat': {} }))
+  await backfillChatModes(createSlayzoneDbAdapter(db))
+  const read = (id: string) =>
+    JSON.parse(
+      (
+        db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
+          provider_config: string
+        }
+      ).provider_config
+    )
+  expect(read('task-bf-claude')).toEqual({ 'claude-chat': { chatModel: 'sonnet' } })
+  expect(read('task-bf-codex')).toEqual({ 'codex-chat': { chatMode: 'bypass' } })
+  const ops = createChatOps(localChatOpts(db))
+  expect(await ops.getMode('task-bf-claude', 'claude-chat')).toBe('auto-accept')
 })

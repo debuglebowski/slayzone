@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Pins useChatSession's hydrate → replay lifecycle: the loading flag, replay order,
-// live events queued during a load, the permission-request side-channel, and stale-load
+// live events queued during a load, prompts rebuilt by the replay, and stale-load
 // isolation. A reload (same tab, new folder / flags) must end in the same timeline a
 // fresh open of the tab shows — never the old timeline with the history replayed on top.
 import { useLayoutEffect } from 'react'
@@ -63,8 +63,16 @@ const client = {
       }
     },
     getBufferSince: { query: () => loads[bufferLoad].buffer.promise },
-    send: { mutate: () => Promise.resolve(true) }
+    send: { mutate: () => Promise.resolve(true) },
+    respondPermission: { mutate: (_input: unknown) => respondReply.promise }
   }
+}
+// What the server answers to the next `respondPermission`.
+let respondReply = deferred<boolean>()
+const respondCalls: unknown[] = []
+client.chat.respondPermission.mutate = (input: unknown) => {
+  respondCalls.push(input)
+  return respondReply.promise
 }
 
 const { useChatSession } = await import('./useChatSession')
@@ -159,6 +167,10 @@ const result = (seq: number) => ({
   }
 })
 
+/** Tool ids of the prompts still waiting for the user. */
+const pendingToolIds = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
+  r.current.prompts.filter((p) => p.status === 'pending').map((p) => p.toolUseId)
+
 /** The user messages on screen (the reducer adds its own markers between them). */
 const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
   r.current.timeline.flatMap((it) => (it.kind === 'user-text' ? [it.text] : []))
@@ -167,6 +179,8 @@ afterEach(() => {
   cleanup()
   loads = []
   bufferLoad = -1
+  respondReply = deferred<boolean>()
+  respondCalls.length = 0
 })
 
 describe('useChatSession — must keep working', () => {
@@ -192,7 +206,7 @@ describe('useChatSession — must keep working', () => {
   it('a pending permission request (AskUserQuestion) comes back from the replay', async () => {
     const { result } = setup()
     await finishLoad(0, HISTORY)
-    expect([...result.current.permissionRequests.keys()]).toEqual(['tu-1'])
+    expect(pendingToolIds(result)).toEqual(['tu-1'])
   })
 
   it('a slow load for the old folder neither applies nor ends the new load', async () => {
@@ -224,7 +238,7 @@ describe('useChatSession — bugs', () => {
     rerender({ cwd: '/wt' })
     await finishLoad(1, HISTORY)
     expect(texts(result)).toEqual(['one', 'two'])
-    expect([...result.current.permissionRequests.keys()]).toEqual(['tu-1'])
+    expect(pendingToolIds(result)).toEqual(['tu-1'])
   })
 })
 
@@ -269,7 +283,7 @@ describe('useChatSession — reload edge cases', () => {
     await finishLoad(1, HISTORY)
     expect(r.current.hydrating).toBe(false)
     expect(texts(r)).toEqual(['one', 'two'])
-    expect([...r.current.permissionRequests.keys()]).toEqual(['tu-1'])
+    expect(pendingToolIds(r)).toEqual(['tu-1'])
   })
 })
 
@@ -279,7 +293,7 @@ describe('useChatSession — fix behaviour', () => {
     await finishLoad(0, HISTORY)
     rerender({ cwd: '/wt' })
     await finishLoad(1, HISTORY.slice(0, 2))
-    expect([...result.current.permissionRequests.keys()]).toEqual([])
+    expect(pendingToolIds(result)).toEqual([])
   })
 
   it('loading shows from the first frame drawn for the new folder', async () => {
@@ -300,5 +314,43 @@ describe('useChatSession — fix behaviour', () => {
     await finishLoad(2, HISTORY)
     expect(result.current.hydrating).toBe(false)
     expect(texts(result)).toEqual(['one', 'two'])
+  })
+})
+
+describe('useChatSession — answering prompts', () => {
+  const allow = { requestId: 'req-tu-1', decision: { behavior: 'allow' as const }, optionId: 'yes' }
+
+  it('a second click while the answer is in flight sends nothing more', async () => {
+    const { result } = setup()
+    await finishLoad(0, HISTORY)
+    let first!: Promise<boolean>
+    let second!: Promise<boolean>
+    act(() => {
+      first = result.current.respondPermission(allow)
+      second = result.current.respondPermission(allow)
+    })
+    expect(result.current.submittingPrompts.has('req-tu-1')).toBe(true)
+    await act(async () => {
+      respondReply.resolve(true)
+      await first
+    })
+    expect(await second).toBe(false)
+    expect(respondCalls).toEqual([{ tabId: 'tab-1', args: allow }])
+    expect(result.current.submittingPrompts.size).toBe(0)
+  })
+
+  it('a refused answer (request no longer pending server-side) shows the prompt as expired', async () => {
+    const { result } = setup()
+    await finishLoad(0, HISTORY)
+    let answer!: Promise<boolean>
+    act(() => {
+      answer = result.current.respondPermission(allow)
+    })
+    await act(async () => {
+      respondReply.resolve(false)
+      await answer
+    })
+    expect(await answer).toBe(false)
+    expect(result.current.prompts.map((p) => p.status)).toEqual(['expired'])
   })
 })

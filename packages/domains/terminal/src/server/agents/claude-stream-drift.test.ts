@@ -50,9 +50,10 @@ const KNOWN_IGNORED: Record<string, string> = {
   // (compact-status) + `compact_boundary`, command output through
   // `local_command_output` / `local_command_run`.
   'user/string': 'synthesized context, surfaced through other events',
-  // Every status without a compaction (`requesting` per API call, the bare
-  // `{status:null, permissionMode}` after a mode change) has no chat surface.
-  'system/status': 'non-compaction status',
+  // `requesting` (per API call) and a bare `{status:null}` have no chat
+  // surface. Compaction frames become compact-status, a `permissionMode` frame
+  // permission-mode-changed.
+  'system/status': 'status without compaction or permission mode',
   // Hook runs (the chatui-* fixtures run with hooks installed): the start frame
   // carries nothing to show; a response is dropped only when the hook changed
   // nothing and told the model nothing — the rest parse to `hook-output`

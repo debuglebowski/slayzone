@@ -3991,6 +3991,49 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 173,
+    up: (db) => {
+      // Claude chat runs in the mode its pill shows (chat bug N2). Its pills own
+      // the spawn's permission mode, model and effort; a task's own flags are
+      // extras. Two leftovers of the time they didn't:
+      //  - Task create copied the claude-chat terminal mode's default flags
+      //    (`--allow-dangerously-skip-permissions`) into provider_config, where
+      //    they beat the chat mode (the CLI started in `default`). Flags equal
+      //    to that seed (the built-in default or the mode's current default) are
+      //    removed; any other flags stay.
+      //  - A boot backfill tagged every Claude chat entry 'bypass'. That never
+      //    really bypassed (the flag only ALLOWS bypass) and now would, so the
+      //    tag moves to the new-task default 'auto-accept'.
+      // Codex chat and terminal modes are untouched.
+      const MODE = 'claude-chat'
+      const seeded = new Set(['--allow-dangerously-skip-permissions'])
+      const row = db.prepare('SELECT default_flags FROM terminal_modes WHERE id = ?').get(MODE) as
+        | { default_flags: string | null }
+        | undefined
+      if (row?.default_flags?.trim()) seeded.add(row.default_flags.trim())
+
+      const update = db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+      const tasks = db
+        .prepare(`SELECT id, provider_config FROM tasks WHERE provider_config LIKE '%claude-chat%'`)
+        .all() as { id: string; provider_config: string }[]
+      for (const task of tasks) {
+        let cfg: Record<string, Record<string, unknown>>
+        try {
+          cfg = JSON.parse(task.provider_config)
+        } catch {
+          continue
+        }
+        const entry = cfg?.[MODE]
+        if (!entry || typeof entry !== 'object') continue
+        const next = { ...entry }
+        if (typeof next.flags === 'string' && seeded.has(next.flags.trim())) delete next.flags
+        if (next.chatMode === 'bypass') next.chatMode = 'auto-accept'
+        if (JSON.stringify(next) === JSON.stringify(entry)) continue
+        update.run(JSON.stringify({ ...cfg, [MODE]: next }), task.id)
+      }
+    }
   }
 ]
 

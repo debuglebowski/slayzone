@@ -365,6 +365,28 @@ test('respondToPermissionRequest: writes control_response success on stdin', asy
     providerFlags: []
   })
 
+  // Only a request the CLI actually sent can be answered.
+  expect(
+    mgr.respondToPermissionRequest('tab-perm', {
+      requestId: 'cu_42',
+      decision: { behavior: 'allow' }
+    })
+  ).toBe(false)
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'control_request',
+      request_id: 'cu_42',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'tu_42',
+        input: { questions: [] }
+      }
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  fake._stdinRef.value = ''
+
   const ok = mgr.respondToPermissionRequest('tab-perm', {
     requestId: 'cu_42',
     decision: { behavior: 'allow', updatedInput: { answers: { Q: 'A' } } }
@@ -376,6 +398,7 @@ test('respondToPermissionRequest: writes control_response success on stdin', asy
   expect(parsed.response.subtype).toBe('success')
   expect(parsed.response.request_id).toBe('cu_42')
   expect(parsed.response.response.behavior).toBe('allow')
+  expect(parsed.response.response.updatedInput).toEqual({ questions: [], answers: { Q: 'A' } })
 })
 
 test('respondToPermissionRequest: false for unknown tab', async () => {
@@ -952,7 +975,7 @@ test('createChat: initialBuffer with completed turn → no synthetic interrupted
   expect(events.some((e) => e.kind === 'interrupted')).toBe(false)
 })
 
-test('permission-request ExitPlanMode → auto-deny on stdin, no broadcast', async () => {
+test('permission-request ExitPlanMode → broadcast for the user to decide, no auto-deny', async () => {
   await setup()
   const events: AgentEvent[] = []
   const fake = makeFakeChild()
@@ -985,15 +1008,83 @@ test('permission-request ExitPlanMode → auto-deny on stdin, no broadcast', asy
     }) + '\n'
   )
   await new Promise((r) => setImmediate(r))
-  const written = fake._stdinRef.value.trim()
-  expect(written.length > 0).toBeTruthy()
-  const parsed = JSON.parse(written)
-  expect(parsed.type).toBe('control_response')
-  expect(parsed.response.subtype).toBe('success')
-  expect(parsed.response.request_id).toBe('cu_exit_1')
-  expect(parsed.response.response.behavior).toBe('deny')
-  // permission-request must NOT reach renderer — auto-handled at transport
-  expect(events.some((e) => e.kind === 'permission-request')).toBe(false)
+  expect(fake._stdinRef.value).toBe('')
+  expect(events.some((e) => e.kind === 'permission-request')).toBe(true)
+})
+
+/** Open a turn, park it on a Bash prompt; returns the fake child and state-change log. */
+async function parkOnPrompt(tabId: string) {
+  await setup()
+  const events: AgentEvent[] = []
+  const stateChanges: { next: string; old: string }[] = []
+  const fake = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: (_t, e) => events.push(e),
+    broadcastStateChange: (_s, next, old) => stateChanges.push({ next, old }),
+    broadcastExit: () => {}
+  })
+  await createChat({
+    tabId,
+    taskId: 'task-test',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    conversationId: null,
+    providerFlags: []
+  })
+  mgr.sendUserMessage(tabId, 'build it')
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'control_request',
+      request_id: 'cu_bash_1',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'Bash',
+        tool_use_id: 'tu_bash_1',
+        input: { command: 'npm run build' }
+      }
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getSessionTerminalState(tabId)).toBe('idle')
+  expect(mgr.isSessionAwaitingUserInput(tabId)).toBe(true)
+  return { fake, events, stateChanges }
+}
+
+test('answering a prompt resumes the turn: gate cleared, state back to running', async () => {
+  const { events, stateChanges } = await parkOnPrompt('tab-resolve')
+  expect(
+    mgr.respondToPermissionRequest('tab-resolve', {
+      requestId: 'cu_bash_1',
+      decision: { behavior: 'allow' }
+    })
+  ).toBe(true)
+  await new Promise((r) => setImmediate(r))
+  expect(events.some((e) => e.kind === 'permission-resolved')).toBe(true)
+  expect(mgr.isSessionAwaitingUserInput('tab-resolve')).toBe(false)
+  expect(mgr.getSessionTerminalState('tab-resolve')).toBe('running')
+  expect(stateChanges.at(-1)).toEqual({ old: 'idle', next: 'running' })
+})
+
+test('the TUI "No" (deny + interrupt) clears the gate but does not resume the turn', async () => {
+  await parkOnPrompt('tab-no')
+  mgr.respondToPermissionRequest('tab-no', {
+    requestId: 'cu_bash_1',
+    decision: { behavior: 'deny', message: 'no', interrupt: true }
+  })
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.isSessionAwaitingUserInput('tab-no')).toBe(false)
+  expect(mgr.getSessionTerminalState('tab-no')).toBe('idle')
+})
+
+test('the CLI withdrawing a prompt clears the gate', async () => {
+  const { fake } = await parkOnPrompt('tab-cancel')
+  fake._stdout.write(
+    JSON.stringify({ type: 'control_cancel_request', request_id: 'cu_bash_1' }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.isSessionAwaitingUserInput('tab-cancel')).toBe(false)
 })
 
 test('permission-request AskUserQuestion → broadcast, no auto-deny', async () => {
