@@ -649,3 +649,111 @@ describe('ClaudeCodeAdapter — slash commands, compaction, usage', () => {
     expect(events.some((e) => e.kind === 'unknown')).toBe(false)
   })
 })
+
+describe('ClaudeCodeAdapter — custom commands', () => {
+  const userRecord = (content: string): string =>
+    JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content },
+      session_id: 's',
+      parent_tool_use_id: null,
+      uuid: 'u-1'
+    })
+
+  test('a custom command whose `!shell` line was refused → command-output error', () => {
+    // CLI 2.1.312, spike item 11: `!python3 …` without allowed-tools.
+    const out = claudeCodeAdapter.parseLine(
+      userRecord(
+        '<local-command-stderr>Shell command permission check failed for pattern "!`python3 -c "print(7*6)"`": This command requires approval</local-command-stderr>'
+      )
+    )
+    expect(out).toEqual({
+      kind: 'command-output',
+      id: 'u-1',
+      command: null,
+      text: 'Shell command permission check failed for pattern "!`python3 -c "print(7*6)"`": This command requires approval',
+      isError: true
+    })
+  })
+
+  test('local-command stdout records stay dropped', () => {
+    expect(
+      claudeCodeAdapter.parseLine(
+        userRecord(
+          '<local-command-stdout>Compacted PreCompact [notify.sh] completed successfully: {}</local-command-stdout>'
+        )
+      )
+    ).toBe(null)
+  })
+})
+
+describe('ClaudeCodeAdapter — hook output', () => {
+  test('buildSpawnArgs asks the CLI for every hook event', () => {
+    const { args } = claudeCodeAdapter.buildSpawnArgs({
+      sessionId: 'abc',
+      resume: false,
+      cwd: '/tmp',
+      providerFlags: []
+    })
+    expect(args).toContain('--include-hook-events')
+  })
+
+  test('chatui-hooks.ndjson: only hooks that changed something or told Claude something', () => {
+    const events = parseFixture('chatui-hooks.ndjson')
+    const hooks = events.filter((e) => e.kind === 'hook-output')
+    expect(
+      hooks.map((e) => (e.kind === 'hook-output' ? `${e.hookName}:${e.effect}:${e.audience}` : ''))
+    ).toEqual([
+      'SessionStart:startup:context:agent',
+      'UserPromptSubmit:context:agent',
+      'PreToolUse:Bash:blocked:agent',
+      'PostToolUse:Bash:failed:user',
+      'Stop:cancelled:user'
+    ])
+    expect(events.filter((e) => e.kind === 'notice')).toEqual([
+      {
+        kind: 'notice',
+        id: '08f7314f-01bc-47d5-bd78-696fdf888fd4',
+        level: 'notice',
+        text: 'PostToolUse:Bash says: Formatter ran on 0 files'
+      }
+    ])
+    // Quiet hooks (`{}` like SlayZone's notify.sh, hook_started) never become events.
+    const hookUnknowns = events.filter(
+      (e) =>
+        e.kind === 'unknown' &&
+        /^(hook_|informational)/.test(String((e.raw as { subtype?: unknown }).subtype))
+    )
+    expect(hookUnknowns).toEqual([])
+  })
+
+  test('hook_started / hook_progress → null', () => {
+    for (const subtype of ['hook_started', 'hook_progress']) {
+      const out = claudeCodeAdapter.parseLine(
+        JSON.stringify({
+          type: 'system',
+          subtype,
+          hook_id: 'x',
+          hook_name: 'Stop',
+          hook_event: 'Stop'
+        })
+      )
+      expect(out).toBe(null)
+    }
+  })
+
+  test('system/informational → notice', () => {
+    expect(
+      claudeCodeAdapter.parseLine(
+        JSON.stringify({
+          type: 'system',
+          subtype: 'informational',
+          content: 'PostToolUse:Bash says: hi',
+          level: 'warning',
+          uuid: 'n1',
+          session_id: 's'
+        })
+      )
+    ).toEqual({ kind: 'notice', id: 'n1', level: 'warning', text: 'PostToolUse:Bash says: hi' })
+  })
+})

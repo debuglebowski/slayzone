@@ -80,3 +80,24 @@ describe('useChatSearch coverage', () => {
     expect(result.current.matchCount).toBe(1)
   })
 })
+
+describe('useChatSearch — hook output and notices', () => {
+  it('finds text in hook rows and CLI notices', () => {
+    const items = [
+      {
+        kind: 'hook',
+        hookId: 'h1',
+        hookName: 'PreToolUse:Bash',
+        hookEvent: 'PreToolUse',
+        effect: 'blocked',
+        audience: 'agent',
+        text: 'Blocked by policy',
+        timestamp: 0
+      },
+      { kind: 'notice', id: 'n1', level: 'notice', text: 'policy notice', timestamp: 0 }
+    ] as TimelineItem[]
+    const { result } = renderHook(() => useChatSearch(items))
+    act(() => result.current.setQuery('policy'))
+    expect(result.current.matchCount).toBe(2)
+  })
+})

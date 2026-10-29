@@ -85,7 +85,8 @@ export interface NavigateActions {
  */
 export interface ChatListApi {
   listSkills: (cwd: string) => Promise<SkillInfo[]>
-  listCommands: (cwd: string) => Promise<CommandInfo[]>
+  /** `nested` adds sub-folder commands under their CLI name (`sub/z.md` → `sub:z`). */
+  listCommands: (cwd: string, opts?: { nested?: boolean }) => Promise<CommandInfo[]>
   listAgents: (cwd: string) => Promise<AgentInfo[]>
   listFiles: (cwd: string, query: string, limit?: number) => Promise<FileMatch[]>
 }

@@ -13,6 +13,7 @@ import { useChatQueue } from './useChatQueue'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
 import { createSkillsSource } from './autocomplete/sources/skills'
 import { createCommandsSource } from './autocomplete/sources/commands'
+import { createCliCustomCommandsSource } from './autocomplete/sources/cli-custom-commands'
 import { createAgentsSource } from './autocomplete/sources/agents'
 import { createBuiltinsSource } from './autocomplete/sources/builtins'
 import { createFilesSource } from './autocomplete/sources/files'
@@ -146,7 +147,7 @@ export function useChatComposer({
   const listApi = useMemo<ChatListApi>(
     () => ({
       listSkills: (cwd) => trpcClient.chat.listSkills.query({ cwd }),
-      listCommands: (cwd) => trpcClient.chat.listCommands.query({ cwd }),
+      listCommands: (cwd, opts) => trpcClient.chat.listCommands.query({ cwd, ...opts }),
       listAgents: (cwd) => trpcClient.chat.listAgents.query({ cwd }),
       listFiles: (cwd, query, limit) => trpcClient.chat.listFiles.query({ cwd, query, limit })
     }),
@@ -158,7 +159,11 @@ export function useChatComposer({
   const sources = useMemo(
     () => [
       createFilesSource(listApi),
-      createCommandsSource((text) => sendMessage(text).then(() => true), listApi),
+      // A CLI that runs slash commands expands custom-command templates itself:
+      // send the typed `/name args`. Otherwise expand them here.
+      capabilities.nativeSlashCommands
+        ? createCliCustomCommandsSource(listApi, cliList)
+        : createCommandsSource((text) => sendMessage(text).then(() => true), listApi),
       createAgentsSource(listApi),
       createBuiltinsSource({
         cliCommandNames: new Set(cliCommandItems(cliList).map((c) => c.name)),

@@ -102,3 +102,63 @@ describe('useChatDisplay search scroll', () => {
     expect(scrolled).toEqual(['120'])
   })
 })
+
+describe('useChatDisplay final-only view', () => {
+  const hook = (effect: string, id: string): TimelineItem =>
+    ({
+      kind: 'hook',
+      hookId: id,
+      hookName: 'PreToolUse:Bash',
+      hookEvent: 'PreToolUse',
+      effect,
+      audience: 'agent',
+      text: 'x',
+      timestamp: 0
+    }) as unknown as TimelineItem
+
+  it('keeps hooks that blocked or failed something and CLI notices; hides added context', () => {
+    let shown: TimelineItem[] = []
+    function Final({ items }: { items: TimelineItem[] }) {
+      const d = useChatDisplay({
+        timeline: items,
+        finalOnly: true,
+        showLastMessageTools: false,
+        scrollRef: makeScrollRef()
+      })
+      shown = d.displayedTimeline
+      return null
+    }
+    const user = { kind: 'user-text', text: 'go', timestamp: 0 } as unknown as TimelineItem
+    const notice = {
+      kind: 'notice',
+      id: 'n1',
+      level: 'notice',
+      text: 'hi',
+      timestamp: 0
+    } as unknown as TimelineItem
+    render(
+      <Final
+        items={[
+          user,
+          hook('context', 'h0'),
+          hook('blocked', 'h1'),
+          hook('failed', 'h2'),
+          notice,
+          text('done', 9)
+        ]}
+      />
+    )
+    expect(shown.map((i) => (i.kind === 'hook' ? `hook:${i.effect}` : i.kind))).toEqual([
+      'user-text',
+      'hook:blocked',
+      'hook:failed',
+      'notice',
+      'text'
+    ])
+  })
+
+  it('keys hook and notice rows by their ids', () => {
+    render(<Harness items={[hook('blocked', 'h7')]} scrollRef={makeScrollRef()} />)
+    expect(display.itemKey(hook('blocked', 'h7'), 0)).toBe('hook:h7')
+  })
+})

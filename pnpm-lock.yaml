@@ -2624,6 +2624,9 @@ importers:
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)

@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AgentPlanStep,
   CliCommandList,
+  HookEffect,
   ModelUsage,
   TokenUsage,
   ToolCallEvent,
@@ -92,6 +93,30 @@ export type TimelineItem =
       kind: 'command-output'
       id: string
       command: string | null
+      text: string
+      /** The command failed; `text` is the reason. */
+      isError?: boolean
+      timestamp: number
+      parentToolUseId?: string
+    }
+  | {
+      /** A hook run that blocked, failed, timed out, stopped the agent, or added context. */
+      kind: 'hook'
+      hookId: string
+      hookName: string
+      hookEvent: string
+      effect: HookEffect
+      audience: 'agent' | 'user'
+      text: string
+      exitCode?: number
+      timestamp: number
+      parentToolUseId?: string
+    }
+  | {
+      /** A notice the CLI shows the user (e.g. a hook's `systemMessage`). */
+      kind: 'notice'
+      id: string
+      level: string
       text: string
       timestamp: number
       parentToolUseId?: string
@@ -1087,7 +1112,33 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const item: TimelineItem = {
         kind: 'command-output',
         id: event.id,
-        command: event.command,
+        // A failed custom command doesn't name itself; the `/name …` just sent does.
+        command: event.command ?? (event.isError ? lastSentCommand(state.timeline) : null),
+        text: event.text,
+        ...(event.isError ? { isError: true } : {}),
+        timestamp: ts
+      }
+      return { ...state, timeline: [...state.timeline, item] }
+    }
+    case 'hook-output': {
+      const item: TimelineItem = {
+        kind: 'hook',
+        hookId: event.hookId,
+        hookName: event.hookName,
+        hookEvent: event.hookEvent,
+        effect: event.effect,
+        audience: event.audience,
+        text: event.text,
+        ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+        timestamp: ts
+      }
+      return { ...state, timeline: [...state.timeline, item] }
+    }
+    case 'notice': {
+      const item: TimelineItem = {
+        kind: 'notice',
+        id: event.id,
+        level: event.level,
         text: event.text,
         timestamp: ts
       }
@@ -1176,6 +1227,15 @@ function isCurrentTurnCompactionError(state: ChatTimelineState, text: string): b
     }
   }
   return false
+}
+
+/** Command name of the latest user message when it was a `/name …` command, else null. */
+function lastSentCommand(timeline: TimelineItem[]): string | null {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const it = timeline[i]
+    if (it.kind === 'user-text') return /^\/(\S+)/.exec(it.text.trim())?.[1] ?? null
+  }
+  return null
 }
 
 /**

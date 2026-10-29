@@ -93,7 +93,10 @@ export function useChatDisplay({
       } else if (
         item.kind === 'interrupted' ||
         item.kind === 'compaction' ||
-        item.kind === 'command-output'
+        item.kind === 'command-output' ||
+        item.kind === 'notice' ||
+        // A hook that blocked / failed something explains what happened; context it added doesn't.
+        (item.kind === 'hook' && item.effect !== 'context')
       ) {
         flushPending()
         out.push(item)
@@ -124,6 +127,8 @@ export function useChatDisplay({
     if (item.kind === 'tool') return `tool:${item.invocation.id}`
     if (item.kind === 'session-start') return `session:${item.sessionId}`
     if (item.kind === 'result') return `result:${item.timestamp}:${index}`
+    if (item.kind === 'hook' && item.hookId) return `hook:${item.hookId}`
+    if (item.kind === 'notice' && item.id) return `notice:${item.id}`
     return `${item.kind}:${index}`
   }, [])
 

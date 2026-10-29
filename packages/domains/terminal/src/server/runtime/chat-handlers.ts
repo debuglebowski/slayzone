@@ -983,9 +983,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
       return listSkills(cwd)
     },
 
-    listCommands: async (cwd: string): Promise<CommandInfo[]> => {
+    listCommands: async (cwd: string, opts?: { nested?: boolean }): Promise<CommandInfo[]> => {
       assertHubLocalExecEnabled({ op: 'chat.commands' })
-      return listCommands(cwd)
+      return listCommands(cwd, opts)
     },
 
     listAgents: async (cwd: string): Promise<AgentInfo[]> => {

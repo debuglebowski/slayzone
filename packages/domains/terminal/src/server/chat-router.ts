@@ -130,8 +130,9 @@ export const chatRouter = router({
     .input(z.object({ cwd: z.string() }))
     .query(({ input }) => ops().listSkills(input.cwd)),
   listCommands: publicProcedure
-    .input(z.object({ cwd: z.string() }))
-    .query(({ input }) => ops().listCommands(input.cwd)),
+    // `nested` adds sub-folder commands (`sub/z.md` → `/sub:z`) — Claude chat only.
+    .input(z.object({ cwd: z.string(), nested: z.boolean().optional() }))
+    .query(({ input }) => ops().listCommands(input.cwd, { nested: input.nested })),
   listAgents: publicProcedure
     .input(z.object({ cwd: z.string() }))
     .query(({ input }) => ops().listAgents(input.cwd)),

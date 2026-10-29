@@ -506,6 +506,13 @@ export interface CommandInfo {
   description: string
   source: CommandSource
   path: string
+  /**
+   * Name the Claude CLI runs the file under: its path below `commands/`
+   * without `.md`, folders joined by `:` (`sub/z.md` → `sub:z`).
+   */
+  cliName?: string
+  /** Frontmatter `argument-hint`, e.g. `<fruit> <count>`. */
+  argumentHint?: string
   /** Raw markdown body (frontmatter stripped) — injected as user msg on accept. */
   body: string
 }

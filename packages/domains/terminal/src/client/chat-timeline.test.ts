@@ -1860,3 +1860,106 @@ test('recorded /compact session replays to one divider, cumulative cost and the 
   expect(s.timeline.filter((i) => i.kind === 'command-output')).toHaveLength(1)
   expect(s.compacting).toBe(false)
 })
+
+describe('custom command errors', () => {
+  test('a refused `!shell` line → error command-output named after the sent command', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: '/y check it' },
+      {
+        kind: 'command-output',
+        id: 'u-1',
+        command: null,
+        text: 'Shell command permission check failed',
+        isError: true
+      },
+      ev.turnResult()
+    ])
+    const out = s.timeline.find((i) => i.kind === 'command-output')
+    expect(out).toMatchObject({
+      command: 'y',
+      text: 'Shell command permission check failed',
+      isError: true
+    })
+  })
+
+  test('without a `/command` user message the error keeps a null command', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: 'plain text' },
+      { kind: 'command-output', id: 'u-1', command: null, text: 'boom', isError: true }
+    ])
+    expect(s.timeline.find((i) => i.kind === 'command-output')).toMatchObject({
+      command: null,
+      isError: true
+    })
+  })
+})
+
+describe('hook output + notices', () => {
+  test('hook-output → hook item; notice → notice item', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: 'go' },
+      {
+        kind: 'hook-output',
+        hookId: 'h1',
+        hookName: 'PreToolUse:Bash',
+        hookEvent: 'PreToolUse',
+        effect: 'blocked',
+        audience: 'agent',
+        text: 'Blocked by policy',
+        exitCode: 2
+      },
+      { kind: 'notice', id: 'n1', level: 'notice', text: 'PostToolUse:Bash says: hi' }
+    ])
+    expect(s.timeline.find((i) => i.kind === 'hook')).toMatchObject({
+      hookId: 'h1',
+      hookName: 'PreToolUse:Bash',
+      effect: 'blocked',
+      audience: 'agent',
+      text: 'Blocked by policy',
+      exitCode: 2
+    })
+    expect(s.timeline.find((i) => i.kind === 'notice')).toMatchObject({
+      id: 'n1',
+      level: 'notice',
+      text: 'PostToolUse:Bash says: hi'
+    })
+  })
+
+  test('recorded hook session replays hooks in place, between the tool cards', () => {
+    const raw = readFileSync(
+      fileURLToPath(
+        new URL('../../test/fixtures/claude-stream/chatui-hooks.ndjson', import.meta.url)
+      ),
+      'utf8'
+    )
+    const events = raw
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => claudeCodeAdapter.parseLine(l))
+      .filter((e): e is AgentEvent => e !== null)
+    const s = run(events)
+    const order = s.timeline
+      .filter((i) => i.kind === 'hook' || i.kind === 'notice' || i.kind === 'tool')
+      .map((i) =>
+        i.kind === 'hook'
+          ? `hook:${i.hookName}:${i.effect}`
+          : i.kind === 'notice'
+            ? 'notice'
+            : `tool:${i.invocation.status}`
+      )
+    expect(order).toEqual([
+      'hook:SessionStart:startup:context',
+      'hook:UserPromptSubmit:context',
+      // The CLI lists a hook-blocked call in result.permission_denials.
+      'tool:denied',
+      'hook:PreToolUse:Bash:blocked',
+      'tool:done',
+      'hook:PostToolUse:Bash:failed',
+      'notice',
+      'hook:Stop:cancelled'
+    ])
+  })
+})

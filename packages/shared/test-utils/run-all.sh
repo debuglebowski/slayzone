@@ -742,9 +742,11 @@ run_harness packages/domains/dialogs/src/useDialogStore.test.ts
 run_harness packages/domains/task-browser/src/client/dom-picker.test.ts
 run_harness packages/domains/task-browser/src/client/scale.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/autocomplete.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/autocomplete/cli-custom-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/ranking.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
@@ -762,10 +764,12 @@ run_harness packages/domains/terminal/src/server/adapters/qwen-adapter.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.
 run_harness packages/domains/terminal/src/server/agents/claude-stream-drift.test.ts
+run_harness packages/domains/terminal/src/server/agents/claude-hook-output.test.ts
 run_harness packages/domains/terminal/src/server/files-scan.test.ts
 run_harness packages/domains/terminal/src/server/runtime/session-registry.test.ts
 run_harness packages/domains/terminal/src/server/shell-env.test.ts
 run_harness packages/domains/terminal/src/server/skills.test.ts
+run_harness packages/domains/terminal/src/server/commands.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-event-handler.test.ts
 run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
 run_harness packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
@@ -897,6 +901,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
+  packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \

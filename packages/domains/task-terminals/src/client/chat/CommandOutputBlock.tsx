@@ -1,4 +1,4 @@
-import { SquareTerminal } from 'lucide-react'
+import { SquareTerminal, TriangleAlert } from 'lucide-react'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import type { TimelineItem } from '@slayzone/terminal/client'
 
@@ -17,6 +17,28 @@ export function CommandOutputBlock({
 }: {
   item: Extract<TimelineItem, { kind: 'command-output' }>
 }) {
+  if (item.isError) {
+    return (
+      <div className="pl-4 pr-[10%] py-2">
+        <div className="flex gap-3 items-start">
+          <div className="shrink-0 size-7 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <TriangleAlert className="size-3.5" />
+          </div>
+          <div
+            role="alert"
+            className="min-w-0 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2"
+          >
+            <div className="mb-1 font-mono text-[11px] text-destructive">
+              {item.command ? `/${item.command} failed` : 'Command failed'}
+            </div>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-destructive">
+              {item.text}
+            </pre>
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="pl-4 pr-[10%] py-2">
       <div className="flex gap-3 items-start">

@@ -4,33 +4,61 @@ import * as path from 'node:path'
 import type { CommandInfo, CommandSource } from '@slayzone/terminal-contracts'
 import { parseFrontmatter } from './frontmatter'
 
-async function scanDir(root: string, source: CommandSource): Promise<CommandInfo[]> {
-  let entries: string[]
+/** Sub-folder depth a nested scan follows (`a/b/c/d.md` → `a:b:c:d`). */
+const MAX_NESTED_DEPTH = 4
+
+async function readCommand(
+  cmdPath: string,
+  namespace: string[],
+  file: string,
+  source: CommandSource
+): Promise<CommandInfo | null> {
+  let text: string
   try {
-    entries = await fs.readdir(root)
+    const stat = await fs.stat(cmdPath)
+    if (!stat.isFile()) return null
+    text = await fs.readFile(cmdPath, 'utf-8')
+  } catch {
+    return null
+  }
+  const fm = parseFrontmatter(text)
+  const cliName = [...namespace, file.replace(/\.md$/, '')].join(':')
+  return {
+    name: fm.name ?? cliName,
+    description: fm.description ?? '',
+    source,
+    path: cmdPath,
+    cliName,
+    ...(fm.argumentHint ? { argumentHint: fm.argumentHint } : {}),
+    body: fm.body.trim()
+  }
+}
+
+async function scanDir(
+  root: string,
+  source: CommandSource,
+  nested: boolean,
+  namespace: string[] = []
+): Promise<CommandInfo[]> {
+  let entries: Array<{ name: string; isDirectory(): boolean }>
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true })
   } catch {
     return []
   }
-  const out: CommandInfo[] = []
-  await Promise.all(
-    entries.map(async (file) => {
-      if (!file.endsWith('.md')) return
-      const cmdPath = path.join(root, file)
-      let text: string
-      try {
-        const stat = await fs.stat(cmdPath)
-        if (!stat.isFile()) return
-        text = await fs.readFile(cmdPath, 'utf-8')
-      } catch {
-        return
+  const found = await Promise.all(
+    entries.map(async (entry): Promise<CommandInfo[]> => {
+      const entryPath = path.join(root, entry.name)
+      if (entry.isDirectory()) {
+        if (!nested || namespace.length >= MAX_NESTED_DEPTH) return []
+        return scanDir(entryPath, source, nested, [...namespace, entry.name])
       }
-      const fm = parseFrontmatter(text)
-      const name = fm.name ?? file.replace(/\.md$/, '')
-      const description = fm.description ?? ''
-      out.push({ name, description, source, path: cmdPath, body: fm.body.trim() })
+      if (!entry.name.endsWith('.md')) return []
+      const cmd = await readCommand(entryPath, namespace, entry.name, source)
+      return cmd ? [cmd] : []
     })
   )
-  return out
+  return found.flat()
 }
 
 /**
@@ -39,11 +67,17 @@ async function scanDir(root: string, source: CommandSource): Promise<CommandInfo
  *   - <cwd>/.claude/commands     (project)
  *
  * Precedence: project > user. Sorted by name.
+ * `nested` also lists commands in sub-folders, named the way the Claude CLI
+ * runs them (`sub/z.md` → `sub:z`).
  */
-export async function listCommands(cwd: string): Promise<CommandInfo[]> {
+export async function listCommands(
+  cwd: string,
+  opts: { nested?: boolean } = {}
+): Promise<CommandInfo[]> {
+  const nested = opts.nested === true
   const [user, project] = await Promise.all([
-    scanDir(path.join(os.homedir(), '.claude', 'commands'), 'user'),
-    scanDir(path.join(cwd, '.claude', 'commands'), 'project')
+    scanDir(path.join(os.homedir(), '.claude', 'commands'), 'user', nested),
+    scanDir(path.join(cwd, '.claude', 'commands'), 'project', nested)
   ])
   const byName = new Map<string, CommandInfo>()
   for (const c of user) byName.set(c.name, c)

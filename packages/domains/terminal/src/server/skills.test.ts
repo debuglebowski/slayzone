@@ -75,3 +75,8 @@ test('body is whole text when no frontmatter', () => {
   const fm = parseFrontmatter('no fm here')
   expect(fm.body).toBe('no fm here')
 })
+
+test('parses argument-hint (custom slash commands)', () => {
+  const fm = parseFrontmatter('---\ndescription: d\nargument-hint: <fruit> [count]\n---\nbody')
+  expect(fm.argumentHint).toBe('<fruit> [count]')
+})

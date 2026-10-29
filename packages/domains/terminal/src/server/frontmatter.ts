@@ -1,13 +1,16 @@
 export interface Frontmatter {
   name?: string
   description?: string
+  /** `argument-hint:` — custom slash commands show it next to the name. */
+  argumentHint?: string
   /** Raw markdown body (frontmatter + `---` removed). */
   body: string
 }
 
 /**
  * Parse a minimal YAML subset from a markdown file's frontmatter.
- * Extracts `name:` and `description:` (inline scalar or `|` / `>` block).
+ * Extracts `name:`, `description:` (inline scalar or `|` / `>` block) and
+ * `argument-hint:`.
  * Returns `body` = the markdown content after the closing `---`.
  * Intentionally narrow — no nested keys, no array values.
  */
@@ -54,16 +57,17 @@ export function parseFrontmatter(text: string): Frontmatter {
         collected.push(ln.slice(baseIndent))
         i++
       }
-      if (key === 'description' || key === 'name') {
-        out[key] = collected.join('\n').trim()
-      }
+      setField(out, key, collected.join('\n').trim())
       continue
     }
     const value = rest.replace(/^['"]|['"]$/g, '').trim()
-    if (key === 'description' || key === 'name') {
-      out[key] = value
-    }
+    setField(out, key, value)
     i++
   }
   return out
+}
+
+function setField(out: Frontmatter, key: string, value: string): void {
+  if (key === 'name' || key === 'description') out[key] = value
+  else if (key === 'argument-hint') out.argumentHint = value
 }

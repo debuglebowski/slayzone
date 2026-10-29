@@ -19,6 +19,8 @@ export type AgentEvent =
   | CompactBoundaryEvent
   | CompactStatusEvent
   | CommandOutputEvent
+  | HookOutputEvent
+  | NoticeEvent
   | SubAgentEvent
   | StderrEvent
   | ProcessExitEvent
@@ -261,6 +263,43 @@ export interface CommandOutputEvent {
   id: string
   /** Command name without the slash, when the CLI reports it. */
   command: string | null
+  text: string
+  /** The command failed (e.g. a custom command's refused `!shell` line); `text` is the reason. */
+  isError?: boolean
+}
+
+/**
+ * What a hook's run did, for hooks that matter in chat: it blocked an action,
+ * failed, timed out / was cancelled, stopped the agent, or added context for
+ * the model. Hooks that did none of these are never emitted.
+ */
+export type HookEffect = 'blocked' | 'failed' | 'cancelled' | 'stopped' | 'context'
+
+/**
+ * A hook (from the user's settings, plugins or SlayZone) whose run changed what
+ * happened or told the model something. Claude Code `system/hook_response`.
+ */
+export interface HookOutputEvent {
+  kind: 'hook-output'
+  hookId: string
+  /** e.g. `PreToolUse:Bash`, `SessionStart:startup`, `Stop`. */
+  hookName: string
+  /** e.g. `PreToolUse`. */
+  hookEvent: string
+  effect: HookEffect
+  /** Who `text` reached: the model, or only the user. */
+  audience: 'agent' | 'user'
+  /** The hook's message: block / failure reason, stop reason, or the added context. */
+  text: string
+  exitCode?: number
+}
+
+/** A notice the CLI shows the user, e.g. a hook's `systemMessage` (Claude Code `system/informational`). */
+export interface NoticeEvent {
+  kind: 'notice'
+  id: string
+  /** CLI level, e.g. `notice`, `warning`. */
+  level: string
   text: string
 }
 

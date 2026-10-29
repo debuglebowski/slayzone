@@ -1,5 +1,6 @@
 import type { AgentEvent, ResultEvent, ModelUsage, TokenUsage } from '@slayzone/terminal-contracts'
 import type { AgentAdapter, AgentSpawnOpts, SpawnArgs } from './types'
+import { classifyClaudeHookResponse } from './claude-hook-output'
 
 /**
  * Claude Code stream-json transport.
@@ -29,7 +30,11 @@ export const claudeCodeAdapter: AgentAdapter = {
       // back as a control_response with `behavior:'allow'` + `updatedInput`.
       // Verified mechanism in claude-agent-sdk-python `_internal/client.py`.
       '--permission-prompt-tool',
-      'stdio'
+      'stdio',
+      // Every hook run arrives as system/hook_started + hook_response (without
+      // it only SessionStart's do). The parser keeps the ones that blocked,
+      // failed or told the model something; the rest are dropped unpersisted.
+      '--include-hook-events'
     ]
     if (opts.resume) {
       base.push('--resume', opts.sessionId)
@@ -340,11 +345,24 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
       error: (obj.error as string) ?? ''
     }
   }
-  // Drop noise that has no surface in the chat UI: per-tool hook events, plus
-  // sub-agent progress ticks (the surrounding `task_started` / `task_notification`
-  // already carry the user-visible signal). Returning null here avoids buffering
-  // and persisting events that would otherwise render as "unsupported event".
-  if (subtype === 'hook_started' || subtype === 'hook_response' || subtype === 'task_progress') {
+  // A hook run that blocked, failed or told the model something is shown; the
+  // rest (most runs) is dropped so it is never buffered or persisted.
+  if (subtype === 'hook_response') return classifyClaudeHookResponse(obj)
+  // A hook's `systemMessage` (and other CLI notices for the user).
+  if (subtype === 'informational') {
+    return {
+      kind: 'notice',
+      id: typeof obj.uuid === 'string' ? obj.uuid : '',
+      level: typeof obj.level === 'string' ? obj.level : 'info',
+      text: typeof obj.content === 'string' ? obj.content : ''
+    }
+  }
+  // Drop noise that has no surface in the chat UI: hook start / progress
+  // frames, plus sub-agent progress ticks (the surrounding `task_started` /
+  // `task_notification` already carry the user-visible signal). Returning null
+  // here avoids buffering and persisting events that would otherwise render as
+  // "unsupported event".
+  if (subtype === 'hook_started' || subtype === 'hook_progress' || subtype === 'task_progress') {
     return null
   }
   return { kind: 'unknown', reason: 'unknown-type', raw: obj }
@@ -431,7 +449,21 @@ function parseUser(obj: Record<string, unknown>, parent: string | undefined): Ag
   const toolUseResult = obj.tool_use_result
   // Plain-string user records are CLI-synthesized context (the compaction
   // summary, replayed local-command stdout) — never a chat-visible event.
-  if (message && typeof message.content === 'string') return null
+  // Except stderr of a local command: a custom command whose `!shell` line was
+  // refused reports only that, and runs no turn.
+  if (message && typeof message.content === 'string') {
+    const stderr = /^\s*<local-command-stderr>([\s\S]*)<\/local-command-stderr>\s*$/.exec(
+      message.content
+    )
+    if (!stderr) return null
+    return {
+      kind: 'command-output',
+      id: typeof obj.uuid === 'string' ? obj.uuid : '',
+      command: null,
+      text: stderr[1].trim(),
+      isError: true
+    }
+  }
   if (!message || !Array.isArray(message.content)) {
     return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
   }

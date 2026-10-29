@@ -8,6 +8,8 @@
  * Playwright runs these specs in their own worker (their own app); every other
  * group keeps the shared app without the override.
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import {
   createFakeClaude,
@@ -67,6 +69,11 @@ export interface OpenChatTaskOpts {
   conversationId?: string
   /** Seeds `chat_events` rows (seq = index), as a previous session would have left them. */
   seedEvents?: Array<Record<string, unknown>>
+  /**
+   * Files written into the task's repo before the task opens (repo-relative path →
+   * content), e.g. `.claude/commands/x.md` — the composer lists those once, on mount.
+   */
+  repoFiles?: Record<string, string>
   /**
    * When the agent spawns. The chat group keeps the reset's `manual` startup: any
    * other mode turns on the warm pool, which pre-boots a TUI `claude` through a
@@ -172,6 +179,11 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
         const epoch = fakeClaude.setScenario(opts.scenario)
         projectSeq += 1
         const repo = createIsolatedGitRepo(`chat-${projectSeq}-${Date.now()}`)
+        for (const [rel, content] of Object.entries(opts.repoFiles ?? {})) {
+          const file = path.join(repo, rel)
+          fs.mkdirSync(path.dirname(file), { recursive: true })
+          fs.writeFileSync(file, content)
+        }
         const s = seed(page)
         const project = await s.createProject({
           name: `Chat ${projectSeq}`,

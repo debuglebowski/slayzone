@@ -11,7 +11,7 @@ export interface ChatViewState {
   collapseSignal: number
   /** When true, timeline filters down to user messages + final assistant reply per turn. */
   finalOnly: boolean
-  /** When true, file-edit tool cards (Edit/Write) start expanded. */
+  /** When true, file-edit tool cards (Edit/Write/MultiEdit/NotebookEdit) start expanded. */
   fileEditsOpenByDefault: boolean
   /** When true, the per-turn meta footer (duration, cost, turn count) is shown. */
   showMessageMeta: boolean

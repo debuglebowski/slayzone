@@ -5,6 +5,9 @@ import { isSyntheticChatPrompt } from '@slayzone/terminal-contracts'
 import { ContextMeter } from './ContextMeter'
 import { CompactionRow } from './CompactionRow'
 import { CommandOutputBlock, looksLikeMarkdown } from './CommandOutputBlock'
+import { HookOutputRow } from './HookOutputRow'
+import { NoticeRow } from './NoticeRow'
+import type { TimelineItem } from '@slayzone/terminal/client'
 import { PromptHistorySearch } from './PromptHistorySearch'
 import { formatCost, formatTokens } from './usage-format'
 import { PLAN_APPROVED_MARKER, PLAN_CANCELLED_MARKER } from './renderers'
@@ -128,6 +131,133 @@ describe('CommandOutputBlock', () => {
     )
     const pre = container.querySelector('pre')
     expect(pre?.textContent).toBe(text)
+  })
+
+  it('a failed command (refused `!shell` line) renders as an alert with the reason', () => {
+    const text = 'Shell command permission check failed: This command requires approval'
+    render(
+      <CommandOutputBlock
+        item={{ kind: 'command-output', id: 'c', command: 'y', text, timestamp: 0, isError: true }}
+      />
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('/y failed')
+    expect(alert.textContent).toContain(text)
+  })
+})
+
+describe('HookOutputRow', () => {
+  const hook = (
+    over: Partial<Extract<TimelineItem, { kind: 'hook' }>>
+  ): Extract<TimelineItem, { kind: 'hook' }> => ({
+    kind: 'hook',
+    hookId: 'h1',
+    hookName: 'PreToolUse:Bash',
+    hookEvent: 'PreToolUse',
+    effect: 'blocked',
+    audience: 'agent',
+    text: 'Blocked by policy: never echo the word forbidden',
+    exitCode: 2,
+    timestamp: 0,
+    ...over
+  })
+
+  it('a blocking hook says what it blocked, who was told, and shows its message', () => {
+    render(<HookOutputRow item={hook({})} />)
+    const row = screen.getByTestId('chat-hook-output')
+    expect(row.getAttribute('data-effect')).toBe('blocked')
+    expect(row.textContent).toContain('PreToolUse:Bash hook blocked the tool call')
+    expect(row.textContent).toContain('Sent to Claude')
+    expect(row.textContent).toContain('Blocked by policy: never echo the word forbidden')
+  })
+
+  it('a blocked prompt is only shown to the user', () => {
+    render(
+      <HookOutputRow
+        item={hook({
+          hookName: 'UserPromptSubmit',
+          hookEvent: 'UserPromptSubmit',
+          audience: 'user'
+        })}
+      />
+    )
+    const row = screen.getByTestId('chat-hook-output')
+    expect(row.textContent).toContain('UserPromptSubmit hook blocked your message')
+    expect(row.textContent).toContain('Shown only to you')
+  })
+
+  it('a failing hook shows its exit code and stderr', () => {
+    render(
+      <HookOutputRow
+        item={hook({
+          hookName: 'PostToolUse:Bash',
+          hookEvent: 'PostToolUse',
+          effect: 'failed',
+          audience: 'user',
+          text: 'post hook crashed: lint server unreachable',
+          exitCode: 1
+        })}
+      />
+    )
+    const row = screen.getByTestId('chat-hook-output')
+    expect(row.textContent).toContain('PostToolUse:Bash hook failed (exit 1)')
+    expect(row.textContent).toContain('post hook crashed: lint server unreachable')
+  })
+
+  it('a timed-out hook says so', () => {
+    render(
+      <HookOutputRow
+        item={hook({
+          hookName: 'Stop',
+          hookEvent: 'Stop',
+          effect: 'cancelled',
+          audience: 'user',
+          text: ''
+        })}
+      />
+    )
+    expect(screen.getByTestId('chat-hook-output').textContent).toContain(
+      'Stop hook timed out or was cancelled'
+    )
+  })
+
+  it('context a hook added for Claude starts collapsed and opens on click', () => {
+    render(
+      <HookOutputRow
+        item={hook({
+          hookName: 'SessionStart:startup',
+          hookEvent: 'SessionStart',
+          effect: 'context',
+          text: 'Project rule: prefer printf over echo.\nSecond line'
+        })}
+      />
+    )
+    const row = screen.getByTestId('chat-hook-output')
+    expect(row.textContent).toContain(
+      'SessionStart:startup hook added context for Claude · 2 lines'
+    )
+    expect(row.textContent).not.toContain('Project rule')
+    fireEvent.click(screen.getByRole('button'))
+    expect(row.textContent).toContain('Project rule: prefer printf over echo.')
+  })
+})
+
+describe('NoticeRow', () => {
+  it('shows the CLI notice with its level', () => {
+    render(
+      <NoticeRow
+        item={{
+          kind: 'notice',
+          id: 'n1',
+          level: 'notice',
+          text: 'PostToolUse:Bash says: Formatter ran on 0 files',
+          timestamp: 0
+        }}
+      />
+    )
+    const row = screen.getByTestId('chat-notice')
+    expect(row.getAttribute('data-level')).toBe('notice')
+    expect(row.textContent).toContain('PostToolUse:Bash says: Formatter ran on 0 files')
   })
 })
 

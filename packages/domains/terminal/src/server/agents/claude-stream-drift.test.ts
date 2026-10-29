@@ -31,10 +31,13 @@ const LEGACY_FIXTURES = fileURLToPath(
 /**
  * Shapes the adapter parses to `{kind:'unknown'}` today, each with the plan item
  * that will give it a surface. Persisted, never drawn (chat-timeline drops them).
- * None today: the /compact + local-command work (plan 3.1) gave the last ones —
- * `system/status`, string-content `user` — a parse or a deliberate drop.
  */
-const KNOWN_UNHANDLED: Record<string, string> = {}
+const KNOWN_UNHANDLED: Record<string, string> = {
+  // Estimated thinking-token progress while the model thinks (several per turn
+  // with thinking on; the chatui-* fixtures record it). Plan 3.2 (thinking
+  // display) gives it a surface or a deliberate drop.
+  'system/thinking_tokens': 'thinking progress, plan 3.2'
+}
 
 /** Shapes the adapter deliberately returns `null` for, and why that is safe. */
 const KNOWN_IGNORED: Record<string, string> = {
@@ -50,9 +53,14 @@ const KNOWN_IGNORED: Record<string, string> = {
   // Every status without a compaction (`requesting` per API call, the bare
   // `{status:null, permissionMode}` after a mode change) has no chat surface.
   'system/status': 'non-compaction status',
-  // Per-hook lifecycle noise (the chatui-* fixtures run with hooks installed).
-  'system/hook_started': 'hook lifecycle noise',
-  'system/hook_response': 'hook lifecycle noise',
+  // Hook runs (the chatui-* fixtures run with hooks installed): the start frame
+  // carries nothing to show; a response is dropped only when the hook changed
+  // nothing and told the model nothing — the rest parse to `hook-output`
+  // (claude-hook-output.ts).
+  'system/hook_started': 'hook start frame',
+  'system/hook_response': 'a quiet hook run (no block, failure or context)',
+  // Sub-agent progress ticks: `task_started` / `task_notification` carry the signal.
+  'system/task_progress': 'sub-agent progress tick',
   // Usage/stop_reason update mid-stream; the final `result` carries both.
   'stream_event/message_delta': 'superseded by result'
 }
