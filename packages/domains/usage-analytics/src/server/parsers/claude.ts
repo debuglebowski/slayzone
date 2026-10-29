@@ -25,8 +25,10 @@ interface ClaudeAssistantEntry {
 }
 
 function getClaudeProjectsDirs(): string[] {
-  if (process.env.CLAUDE_CONFIG_DIR) {
-    return process.env.CLAUDE_CONFIG_DIR.split(',').map((d) => join(d.trim(), 'projects'))
+  // Annotated: Expo's ambient types (the mobile app's typecheck) make env values `any`.
+  const configDir: string | undefined = process.env.CLAUDE_CONFIG_DIR
+  if (configDir) {
+    return configDir.split(',').map((d) => join(d.trim(), 'projects'))
   }
   const dirs = [join(homedir(), '.claude', 'projects')]
   const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')

@@ -21,7 +21,7 @@
  */
 
 import { spawn as realSpawn, type ChildProcess } from 'node:child_process'
-import { sanitizeSpawnEnv } from '@slayzone/platform'
+import { childProcessEnv } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 /** Unsubscribe token (mirrors node-pty's `IDisposable`). */
@@ -206,7 +206,7 @@ export function createLocalChatBackend(deps: {
       return childProcessToHandle(
         spawnFn(binary, spec.args, {
           cwd: spec.cwd,
-          env: { ...sanitizeSpawnEnv(process.env), ...spec.env },
+          env: childProcessEnv(spec.env),
           stdio: ['pipe', 'pipe', 'pipe'],
           shell: false
         })

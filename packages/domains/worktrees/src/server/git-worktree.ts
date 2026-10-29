@@ -149,9 +149,9 @@ function setupScriptEnv(
   worktreePath: string,
   repoPath: string,
   sourceBranch?: string | null
-): Record<string, string> {
+): NodeJS.ProcessEnv {
   return {
-    ...(process.env as Record<string, string>),
+    ...process.env,
     WORKTREE_PATH: worktreePath,
     REPO_PATH: repoPath,
     SOURCE_BRANCH: sourceBranch ?? ''

@@ -1,6 +1,6 @@
 import { spawn, execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
-import { buildShellInvocation, killPidTree, sanitizeSpawnEnv } from '@slayzone/platform'
+import { buildShellInvocation, childProcessEnv, killPidTree } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 
@@ -151,7 +151,7 @@ export const localProcessBackend: ProcessBackend = {
     // never inherits SlayZone infra/secret/identity vars (fail closed on
     // unmanifested SLAYZONE_*). PATH-enrichment + the caller's `spec.env` overlay
     // apply on top.
-    const env: Record<string, string | undefined> = sanitizeSpawnEnv(process.env)
+    const env = childProcessEnv()
     const enrichedPath = getEnrichedPath()
     if (enrichedPath) env.PATH = enrichedPath
     if (spec.env) Object.assign(env, spec.env)

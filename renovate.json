@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Weekly dependency updates, only to versions published at least 30 days ago (pnpm-workspace.yaml installs from 25 days, so a hand bump has 5 days of slack), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
+  "description": "Weekly dependency updates, only to versions published at least 30 days ago (the same age pnpm-workspace.yaml installs from: minimumReleaseAge 43200 minutes), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
   "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
   "timezone": "Europe/Stockholm",
   "schedule": ["before 6am on monday"],
@@ -38,6 +38,14 @@
       "description": "Native modules are rebuilt against Electron's ABI: their own PR.",
       "matchPackageNames": ["better-sqlite3", "node-pty", "@electron/rebuild", "node-abi"],
       "groupName": "native modules"
+    },
+    {
+      "description": "Expo SDK (mobile app): an SDK pins the versions of its expo-* modules, React Native and the native libraries it was tested with, so they move together in one PR, approved from the Dependency Dashboard. Each bump is a new native build (expo prebuild --clean). The mobile app's react is here too: React Native's renderer is built for one React minor, so react moves only with the SDK.",
+      "matchFileNames": ["packages/apps/mobile/package.json"],
+      "matchPackageNames": ["expo", "expo-*", "@expo/*", "react-native", "react-native-*", "react"],
+      "groupName": "expo sdk",
+      "groupSlug": "expo-sdk",
+      "dependencyDashboardApproval": true
     },
     {
       "description": "Patched in patches/ (package.json pnpm.patchedDependencies, keyed by exact version): a bump needs the patch re-ported, so approve it from the Dependency Dashboard. electron-builder is here because it pins the patched app-builder-lib. Kept out of the weekly non-major group, which would otherwise need approval as a whole.",

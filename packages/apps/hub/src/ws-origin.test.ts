@@ -11,6 +11,7 @@
  *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/ws-origin.test.ts
  */
+import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { expect, test } from 'vitest'
 import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
 
@@ -168,6 +169,42 @@ test('the public origin is DERIVED from the address a reachable hub must already
     }).join(','),
     'a leftover SLAYZONE_MODE=local does not downgrade the scheme'
   ).toBe('https://hub.example.com')
+})
+
+/**
+ * The Origin React Native's iOS WebSocket (SocketRocket's `-[NSURL SR_origin]`) sends for
+ * a socket URL: `wss` → `https`, `ws` → `http`, the host, and the port unless it is the
+ * scheme's default (443 / 80).
+ */
+function socketRocketOrigin(wsUrl: string): string {
+  const u = new URL(wsUrl)
+  const scheme = u.protocol === 'wss:' ? 'https' : 'http'
+  const defaultPort = scheme === 'https' ? '443' : '80'
+  return `${scheme}://${u.hostname}${u.port && u.port !== defaultPort ? `:${u.port}` : ''}`
+}
+
+test('a native client that sends an Origin (React Native iOS) is accepted at the public address', () => {
+  // Unlike desktop's node client, React Native iOS ALWAYS sends an Origin on the
+  // handshake, derived from the URL it dials. The mobile app dials the public address
+  // the way desktop registers a remote hub (`hubUrlFromAddr(address, 'ws', '/trpc')`),
+  // so that Origin must equal the one the hub derives from the same address — or the
+  // phone can never open /trpc on a reachable hub.
+  for (const [address, origin] of [
+    ['hub.example.com', 'https://hub.example.com'],
+    // An explicit default port is dropped on both sides.
+    ['hub.example.com:443', 'https://hub.example.com'],
+    ['box.local:8765', 'https://box.local:8765'],
+    ['192.168.1.20:8765', 'https://192.168.1.20:8765']
+  ] as const) {
+    const wsUrl = hubUrlFromAddr(address, 'ws', '/trpc')
+    expect(wsUrl.startsWith('wss://'), `${address} is dialled over wss`).toBe(true)
+    expect(socketRocketOrigin(wsUrl), `Origin sent for ${wsUrl}`).toBe(origin)
+    const allowedOrigins = resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: address })
+    expect(
+      wsOriginDecision({ origin, ...INTERNET_FACING, allowedOrigins }),
+      `${origin} on a hub whose public address is ${address}`
+    ).toBe('accept')
+  }
 })
 
 test('a login-off hub trusts local-client origins; turning login on closes them to a reachable hub', () => {

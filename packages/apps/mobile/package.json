@@ -6,23 +6,30 @@
   "scripts": {
     "start": "expo start --dev-client",
     "ios": "expo run:ios",
-    "typecheck": "node scripts/typecheck.mjs"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@slayzone/hub-auth": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
-    "expo": "~57.0.26",
-    "expo-secure-store": "~57.0.4",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0"
+    "expo": "~58.0.21",
+    "expo-secure-store": "~58.0.2",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.1",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.10.1"
   },
   "devDependencies": {
     "@slayzone/api": "workspace:*",
     "@trpc/server": "^11.19.0",
     "@types/react": "^19.3.0"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react"
+      ]
+    }
   }
 }

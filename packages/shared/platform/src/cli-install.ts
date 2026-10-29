@@ -186,7 +186,8 @@ function installWindows(cliSrcPath: string, binDir: string, target: string): Cli
 }
 
 function isBinDirInPath(binDir: string): boolean {
-  const envPath = process.env.PATH ?? ''
+  // Annotated: Expo's ambient types (the mobile app's typecheck) make env values `any`.
+  const envPath: string = process.env.PATH ?? ''
   const sep = process.platform === 'win32' ? ';' : ':'
   return envPath.split(sep).some((p) => {
     try {

@@ -1,10 +1,14 @@
 // Metro for an Expo app inside the pnpm workspace. `getDefaultConfig` already handles the
 // monorepo (watches the workspace root, looks in both node_modules). What it cannot know:
-// React Native's renderer only runs against the EXACT `react` version it was built for,
-// while the rest of the workspace (desktop, web) uses a newer `react` that pnpm hoists to
-// the root. A shared package (`@slayzone/transport`) importing `react` from its own folder
-// would get that root copy — a second React, and every hook throws. So every `react` /
-// `react-native` request is resolved as if it came from this app, whoever asked.
+// the bundle must hold ONE React instance, and it must be of the React minor that React
+// Native's renderer was built for (the renderer embeds its own reconciler; it checks no
+// version, but another minor is unsupported). Today the app and the rest of the workspace
+// (desktop, web) resolve the same `react`, so this is a safety net: once the workspace's
+// `react` moves to a minor this React Native was not built for, pnpm keeps the app's own
+// copy beside it, and a shared package (`@slayzone/transport`) importing `react` from its
+// own folder would get the workspace copy — a second React, and every hook throws. So
+// every `react` / `react-native` request is resolved as if it came from this app, whoever
+// asked.
 const path = require('node:path')
 const { getDefaultConfig } = require('expo/metro-config')
 

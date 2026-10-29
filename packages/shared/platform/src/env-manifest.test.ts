@@ -15,7 +15,14 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/env-manifest.test.ts
  */
 import { describe, expect, test } from 'vitest'
-import { ENV_MANIFEST, NON_PREFIXED_INFRA, sanitizeSpawnEnv, type EnvScope } from './env-manifest'
+import {
+  childProcessEnv,
+  ENV_MANIFEST,
+  type EnvOverlay,
+  NON_PREFIXED_INFRA,
+  sanitizeSpawnEnv,
+  type EnvScope
+} from './env-manifest'
 
 describe('manifest shape', () => {
   test('every manifest value is a valid scope', () => {
@@ -358,5 +365,63 @@ describe('sanitizeSpawnEnv behavior', () => {
   // Does not mutate the input.
   test('does not mutate the input base', () => {
     expect(base.SLAYZONE_HUB_TOKEN).toBe('sekret')
+  })
+})
+
+// childProcessEnv is what a `node:child_process` spawn takes as `env`: the SAME object
+// `{ ...sanitizeSpawnEnv(base), ...overlay }` builds (the pattern it replaced at every
+// such call site), but typed `NodeJS.ProcessEnv` without an assertion. Any drift from
+// that spread — a key kept or lost, a value, the ORDER a child sees its environment in —
+// is a behavior change at every spawn that moved to it.
+describe('childProcessEnv', () => {
+  const base: NodeJS.ProcessEnv = {
+    NODE_ENV: 'production',
+    PATH: '/usr/bin:/bin',
+    SLAYZONE_ROOT: '/home/dev/.slayzone',
+    SLAYZONE_HUB_TOKEN: 'sekret',
+    SLAYZONE_TASK_ID: 'task-A',
+    SLAYZONE_FUTURE_SECRET: 'oops',
+    ELECTRON_RUN_AS_NODE: '1',
+    LANG: 'en_US.UTF-8',
+    SOME_UNSET: undefined
+  }
+  const overlays: Array<EnvOverlay | null | undefined> = [
+    undefined,
+    null,
+    {},
+    // Re-adds a stripped identity var, replaces a kept one in place, appends a new
+    // one, and unsets one (`undefined`, which child_process skips).
+    {
+      SLAYZONE_TASK_ID: 'task-B',
+      PATH: '/enriched:/usr/bin',
+      GIT_INDEX_FILE: '/tmp/i',
+      LANG: undefined
+    }
+  ]
+
+  test('equals { ...sanitizeSpawnEnv(base), ...overlay }: same entries, same order', () => {
+    for (const overlay of overlays) {
+      expect(
+        Object.entries(childProcessEnv(overlay, base)),
+        `overlay ${JSON.stringify(overlay)}`
+      ).toEqual(Object.entries({ ...sanitizeSpawnEnv(base), ...overlay }))
+    }
+  })
+
+  test('carries NODE_ENV through (a runtime may type it as always present)', () => {
+    expect(childProcessEnv(undefined, base).NODE_ENV).toBe('production')
+  })
+
+  test('mutates neither base nor overlay', () => {
+    const overlay = { PATH: '/x' }
+    const env = childProcessEnv(overlay, base)
+    env.EXTRA = '1'
+    expect(base.SLAYZONE_HUB_TOKEN).toBe('sekret')
+    expect(base.PATH).toBe('/usr/bin:/bin')
+    expect(overlay).toEqual({ PATH: '/x' })
+  })
+
+  test('defaults base to process.env', () => {
+    expect(Object.entries(childProcessEnv())).toEqual(Object.entries(sanitizeSpawnEnv(process.env)))
   })
 })

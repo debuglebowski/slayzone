@@ -225,15 +225,52 @@ export const NON_PREFIXED_INFRA = new Set<string>([
 export function sanitizeSpawnEnv(base: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(base)) {
-    if (typeof value !== 'string') continue
-    if (NON_PREFIXED_INFRA.has(key)) continue
-    if (key.startsWith('SLAYZONE_')) {
-      // Fail closed: only an explicit `global` tag survives. infra/secret/
-      // identity AND any unmanifested SLAYZONE_* are dropped.
-      if (ENV_MANIFEST[key] === 'global') out[key] = value
-      continue
-    }
-    out[key] = value
+    if (keptInSpawnEnv(key, value)) out[key] = value
   }
   return out
+}
+
+/** Whether one entry of a parent env survives into a spawned child's base env. */
+function keptInSpawnEnv(key: string, value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  if (NON_PREFIXED_INFRA.has(key)) return false
+  // Fail closed: only an explicit `global` tag survives. infra/secret/identity AND
+  // any unmanifested SLAYZONE_* are dropped.
+  if (key.startsWith('SLAYZONE_')) return ENV_MANIFEST[key] === 'global'
+  return true
+}
+
+/**
+ * Env vars a caller layers onto a child's environment: an identity overlay, PATH
+ * enrichment, a `GIT_INDEX_FILE`. A plain record, deliberately NOT `NodeJS.ProcessEnv`:
+ * that type describes THIS process's `process.env`, and a runtime may augment it in
+ * ways an overlay does not satisfy — Expo's ambient types (which the mobile app's
+ * typecheck applies to the server sources behind `AppRouter`) make `NODE_ENV`
+ * required, because a Metro bundle always inlines it. An `undefined` value unsets the
+ * var in the child, as it does for `child_process`.
+ */
+export type EnvOverlay = Readonly<Record<string, string | undefined>>
+
+/**
+ * The `env` for a `node:child_process` spawn: {@link sanitizeSpawnEnv} of `base` with
+ * `overlay` on top — exactly the object `{ ...sanitizeSpawnEnv(base), ...overlay }`
+ * builds (same entries, same order), typed as the `NodeJS.ProcessEnv` child_process
+ * asks for.
+ *
+ * Built as a copy of `base` minus the stripped entries rather than asserted to that
+ * type, so it IS a `NodeJS.ProcessEnv` under every typing of it — Node's (a string
+ * record) and Expo's (`NODE_ENV` required): `NODE_ENV` is never stripped, so it is
+ * present in the child whenever it was in `base`.
+ *
+ * Pure: never mutates `base` or `overlay`.
+ */
+export function childProcessEnv(
+  overlay?: EnvOverlay | null,
+  base: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const env = { ...base }
+  for (const [key, value] of Object.entries(env)) {
+    if (!keptInSpawnEnv(key, value)) delete env[key]
+  }
+  return Object.assign(env, overlay)
 }

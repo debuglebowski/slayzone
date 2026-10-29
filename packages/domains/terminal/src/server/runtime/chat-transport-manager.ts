@@ -13,7 +13,7 @@ import { getPtyHostBridge } from '../pty-host'
 import { whichBinary as realWhichBinary } from '../shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { sanitizeSpawnEnv } from '@slayzone/platform'
+import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { ConversationOrigin } from '@slayzone/terminal-contracts'
 import type { BufferedEvent } from '../chat-events-store'
@@ -856,7 +856,7 @@ export interface CreateChatOpts {
    */
   projectId?: string | null
   /** Extra env overrides (PATH enrichment already applied by caller or inherited). */
-  env?: NodeJS.ProcessEnv
+  env?: EnvOverlay
   /**
    * Callback when adapter discovers a session_id in the stream. The transport
    * tags it with a provenance `origin` — `slay-spawned-*` when the discovered
@@ -1112,7 +1112,7 @@ async function spawnSubprocess(session: Session): Promise<void> {
       // one thing the hub cannot know for another machine.
       projectId: opts.projectId ?? null,
       cwd: opts.cwd,
-      // `opts.env` is `NodeJS.ProcessEnv` (values may be undefined); the wire
+      // `opts.env` values may be undefined (an `EnvOverlay`); the wire
       // contract is `Record<string, string>`, so drop unset keys rather than
       // shipping `undefined` values a zod record would reject.
       env: Object.fromEntries(
@@ -1142,7 +1142,7 @@ async function spawnSubprocess(session: Session): Promise<void> {
       // Sanitized base (user env survives; SlayZone infra/secret/identity
       // stripped, fail closed on unmanifested SLAYZONE_*) + the per-spawn
       // overlay `opts.env` (the mcpEnv identity for this chat agent) on top.
-      env: { ...sanitizeSpawnEnv(process.env), ...opts.env },
+      env: childProcessEnv(opts.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false
     })

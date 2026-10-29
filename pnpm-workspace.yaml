@@ -34,6 +34,84 @@ minimumReleaseAgeExclude:
   # comment → main crashed at boot. 6.0.0 parses the AST. Drop once 6.0.0 clears the
   # age gate (2026-11-13).
   - electron-vite@6.0.0
+  # Hand bump (2026-10-29): Expo SDK 58 (expo 58.0.21 / react-native 0.88.1), approved by
+  # the user before the age gate. Remove every entry below by 2026-11-27, when all have
+  # cleared.
+  - 2g@1.0.1
+  - '@expo/cli@58.1.17'
+  - '@expo/code-signing-certificates@0.0.7'
+  - '@expo/config-plugins@58.0.11'
+  - '@expo/config-types@58.0.3'
+  - '@expo/config@58.0.9'
+  - '@expo/devcert@1.2.2'
+  - '@expo/devtools@58.0.2'
+  - '@expo/dom-webview@58.0.2'
+  - '@expo/env@2.5.3'
+  - '@expo/fingerprint@0.21.7'
+  - '@expo/image-utils@0.12.6'
+  - '@expo/inline-modules@0.2.8'
+  - '@expo/json-file@11.2.1'
+  - '@expo/local-build-cache-provider@58.0.9'
+  - '@expo/log-box-utils@58.0.2'
+  - '@expo/log-box@58.0.13'
+  - '@expo/metro-config@58.0.19'
+  - '@expo/metro-file-map@58.0.5'
+  - '@expo/metro@58.0.0'
+  - '@expo/modules-macros-linux-arm64@0.27.1'
+  - '@expo/modules-macros-linux-x64@0.27.1'
+  - '@expo/modules-macros-win32-arm64@0.27.1'
+  - '@expo/modules-macros-win32-x64@0.27.1'
+  - '@expo/osascript@2.8.1'
+  - '@expo/package-manager@1.14.2'
+  - '@expo/platforms@58.0.1'
+  - '@expo/plist@0.10.1'
+  - '@expo/prebuild-config@58.0.17'
+  - '@expo/require-utils@58.0.5'
+  - '@expo/router-server@58.0.19'
+  - '@expo/schema-utils@58.0.2'
+  - '@expo/sdk-runtime-versions@1.0.1'
+  - '@expo/ws-tunnel@2.0.1'
+  - '@expo/xcpretty@4.4.6'
+  - '@noxcturnal/noxcturnal-darwin-arm64@0.1.11'
+  - '@noxcturnal/noxcturnal-darwin-x64@0.1.11'
+  - '@noxcturnal/noxcturnal-linux-arm64-gnu@0.1.11'
+  - '@noxcturnal/noxcturnal-linux-arm64-musl@0.1.11'
+  - '@noxcturnal/noxcturnal-linux-x64-gnu@0.1.11'
+  - '@noxcturnal/noxcturnal-linux-x64-musl@0.1.11'
+  - '@noxcturnal/noxcturnal-win32-arm64-msvc@0.1.11'
+  - '@noxcturnal/noxcturnal-win32-x64-msvc@0.1.11'
+  - '@oxc-project/types@0.154.0'
+  - '@react-native/asset-utils@0.88.1'
+  - '@react-native/babel-plugin-codegen@0.88.1'
+  - '@react-native/codegen@0.88.1'
+  - '@react-native/community-cli-plugin@0.88.1'
+  - '@react-native/debugger-frontend@0.88.1'
+  - '@react-native/debugger-shell@0.88.1'
+  - '@react-native/dev-middleware@0.88.1'
+  - '@react-native/gradle-plugin@0.88.1'
+  - '@react-native/js-polyfills@0.88.1'
+  - '@react-native/normalize-colors@0.88.1'
+  - '@react-native/virtualized-lists@0.88.1'
+  - babel-plugin-react-native-web@0.21.4
+  - babel-preset-expo@58.0.22
+  - expo-asset@58.0.19
+  - expo-constants@58.0.14
+  - expo-file-system@58.0.13
+  - expo-font@58.0.11
+  - expo-keep-awake@58.0.3
+  - expo-modules-autolinking@58.0.16
+  - expo-modules-cli@0.4.0
+  - expo-modules-core@58.0.28
+  - expo-modules-jsi@58.0.21
+  - expo-modules-macros@0.27.1
+  - expo-secure-store@58.0.2
+  - expo-server@58.0.6
+  - expo-status-bar@58.0.4
+  - expo@58.0.21
+  - hermes-compiler@260318099.0.5
+  - noxcturnal@0.1.11
+  - react-native@0.88.1
+  - xcode@4.0.0
 
 # Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
 nodeLinker: hoisted

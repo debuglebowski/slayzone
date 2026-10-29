@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sanitizeSpawnEnv } from '@slayzone/platform'
+import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 // Every git here runs against a worktree on the hub's OWN disk, so each spawn is
@@ -21,7 +21,7 @@ interface ExecResult {
   status: number | null
 }
 
-function exec(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<ExecResult> {
+function exec(args: string[], cwd: string, env?: EnvOverlay): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = gitSpawn('git', args, {
       cwd,
@@ -30,7 +30,7 @@ function exec(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<Exe
       // stripped, fail closed) + the caller's overlay (e.g. GIT_INDEX_FILE for
       // the isolated-index snapshot). Keeps the host's hub creds out of any git
       // subprocess env.
-      env: { ...sanitizeSpawnEnv(process.env), ...(env ?? {}) }
+      env: childProcessEnv(env)
     })
     const out: string[] = []
     const err: string[] = []

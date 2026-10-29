@@ -65,7 +65,9 @@ export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from 
 export type { HubKind, HubEntry } from './hub-registry'
 export type { LocalComputerStatus } from './local-computer-status'
 export {
+  childProcessEnv,
   ENV_MANIFEST,
+  type EnvOverlay,
   NON_PREFIXED_INFRA,
   sanitizeSpawnEnv,
   type EnvScope
