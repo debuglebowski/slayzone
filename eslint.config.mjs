@@ -59,9 +59,9 @@ export default defineConfig(
       'react-hooks/preserve-manual-memoization': 'error',
       'react-hooks/static-components': 'error',
       // Owned here, not by biome's useExhaustiveDependencies (off in biome.json): React's own
-      // rule, and the React Compiler honors its suppressions. 'warn' while the backlog is
-      // cleared; lint:eslint's --max-warnings caps it at the current count.
-      'react-hooks/exhaustive-deps': 'warn'
+      // rule, and the React Compiler honors its suppressions (a suppression makes the
+      // Compiler skip that hook — prefer useEffectEvent / useStableCallback).
+      'react-hooks/exhaustive-deps': 'error'
     }
   },
   // Ban raw setInterval in renderer/client code — these timers fire while the
