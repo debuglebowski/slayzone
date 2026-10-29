@@ -42,9 +42,10 @@ type Handler = (req: IncomingMessage, res: ServerResponse) => void
 
 async function serve(
   publicAddress: string | undefined,
-  handler: Handler
+  handler: Handler,
+  telemetry = true
 ): Promise<{ base: string; close: () => Promise<void> }> {
-  const srv = http.createServer(withSecurityHeaders(handler, { publicAddress }))
+  const srv = http.createServer(withSecurityHeaders(handler, { publicAddress, telemetry }))
   await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', () => resolve()))
   const port = (srv.address() as AddressInfo).port
   return {
@@ -111,7 +112,7 @@ test('HSTS only for an https (non-loopback) public address', () => {
 
 test('shell CSP: script only self, no eval, no inline script, no Convex', () => {
   for (const pub of [undefined, 'hub.example.com', '127.0.0.1:4100']) {
-    const csp = webShellCsp(pub)
+    const csp = webShellCsp(pub, true)
     expect(csp, `no unsafe-eval: ${csp}`).not.toContain('unsafe-eval')
     expect(csp, `no wasm-unsafe-eval: ${csp}`).not.toContain('wasm-unsafe-eval')
     expect(directive(csp, 'script-src')?.join(' '), 'script-src').toBe("'self'")
@@ -126,17 +127,40 @@ test('shell CSP: script only self, no eval, no inline script, no Convex', () => 
   }
 })
 
+test('shell CSP, telemetry off: no PostHog origin, nothing else changes', () => {
+  for (const pub of [undefined, 'hub.example.com', '127.0.0.1:4100']) {
+    const on = webShellCsp(pub, true)
+    const off = webShellCsp(pub, false)
+    const connect = directive(off, 'connect-src') ?? []
+    for (const origin of POSTHOG_ORIGINS) {
+      expect(connect, `connect-src without ${origin}`).not.toContain(origin)
+    }
+    expect(off, `no posthog anywhere: ${off}`).not.toContain('posthog')
+    expect(connect, 'connect-src keeps self (+ the public ws)').toEqual(
+      (directive(on, 'connect-src') ?? []).filter((src) => !POSTHOG_ORIGINS.includes(src))
+    )
+    // Every other directive is the telemetry-on policy, unchanged.
+    const others = (csp: string): string[] =>
+      csp
+        .split(';')
+        .map((d) => d.trim())
+        .filter((d) => !d.startsWith('connect-src'))
+    expect(others(off), 'other directives unchanged').toEqual(others(on))
+  }
+})
+
 test('shell CSP: /trpc websocket derived from the public address only', () => {
   expect(
-    directive(webShellCsp(undefined), 'connect-src')?.filter((s) => s.startsWith('ws')).length,
+    directive(webShellCsp(undefined, true), 'connect-src')?.filter((s) => s.startsWith('ws'))
+      .length,
     'no public address: self only'
   ).toBe(0)
   expect(
-    directive(webShellCsp('hub.example.com'), 'connect-src'),
+    directive(webShellCsp('hub.example.com', true), 'connect-src'),
     'https public address → wss'
   ).toContain('wss://hub.example.com')
   expect(
-    directive(webShellCsp('127.0.0.1:4100'), 'connect-src'),
+    directive(webShellCsp('127.0.0.1:4100', true), 'connect-src'),
     'loopback public address → ws'
   ).toContain('ws://127.0.0.1:4100')
 })
@@ -152,7 +176,7 @@ test('shell CSP: the web sign-in chain needs no new source; form-action stays se
     new URL(ENTRA_AUTHORITY).origin
   )
   for (const pub of [undefined, 'hub.example.com', '127.0.0.1:4100']) {
-    const csp = webShellCsp(pub)
+    const csp = webShellCsp(pub, true)
     expect(
       directive(csp, 'form-action')?.join(' '),
       'form-action: self + Entra, nothing else'
@@ -182,9 +206,11 @@ const withShell: Handler = (req, res) => {
 
 const loop = await serve(undefined, withShell)
 const pub = await serve('hub.example.com', withShell)
+const pubTelemetryOff = await serve('hub.example.com', withShell, false)
 afterAll(async () => {
   await loop.close()
   await pub.close()
+  await pubTelemetryOff.close()
   rmSync(webRoot, { recursive: true, force: true })
 })
 
@@ -192,7 +218,7 @@ test('web shell document: shell CSP, revalidated, nosniff, DENY, same-origin', a
   const r = await fetch(`${loop.base}/`)
   expect(r.headers.get('content-type'), 'content-type kept').toBe('text/html; charset=utf-8')
   expect(r.headers.get('cache-control'), 'index not cached long').toBe('no-cache')
-  expect(r.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp(undefined))
+  expect(r.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp(undefined, true))
   expect(r.headers.get('x-content-type-options'), 'nosniff').toBe('nosniff')
   expect(r.headers.get('x-frame-options'), 'xfo').toBe('DENY')
   expect(r.headers.get('referrer-policy'), 'referrer').toBe('same-origin')
@@ -202,14 +228,14 @@ test('web shell document: shell CSP, revalidated, nosniff, DENY, same-origin', a
 test('hashed asset keeps immutable caching and gets the shell CSP', async () => {
   const r = await fetch(`${loop.base}/assets/index-abc123.js`)
   expect(r.headers.get('cache-control'), 'cache').toBe('public, max-age=31536000, immutable')
-  expect(r.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp(undefined))
+  expect(r.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp(undefined, true))
 })
 
 test('a route keeps its own type and caching; security headers win', async () => {
   const r = await fetch(`${loop.base}/shell-explicit`)
   expect(r.headers.get('content-type'), 'content-type kept').toBe('text/plain')
   expect(r.headers.get('cache-control'), 'cache-control kept').toBe('private, max-age=60')
-  expect(r.headers.get('content-security-policy'), 'csp wins').toEqual(webShellCsp(undefined))
+  expect(r.headers.get('content-security-policy'), 'csp wins').toEqual(webShellCsp(undefined, true))
   expect(r.headers.get('x-frame-options'), 'xfo wins').toBe('DENY')
 })
 
@@ -250,7 +276,7 @@ test('a 404 outside the API: shell CSP and no-store', async () => {
   const r = await fetch(`${loop.base}/`, { method: 'POST' })
   expect(r.status, 'status').toBe(404)
   expect(r.headers.get('cache-control'), 'cache-control').toBe('no-store')
-  expect(r.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp(undefined))
+  expect(r.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp(undefined, true))
 })
 
 test('https public address: HSTS on every response', async () => {
@@ -259,5 +285,26 @@ test('https public address: HSTS on every response', async () => {
     expect(r.headers.get('strict-transport-security'), path).toBe('max-age=31536000')
   }
   const doc = await fetch(`${pub.base}/`)
-  expect(doc.headers.get('content-security-policy'), 'csp').toEqual(webShellCsp('hub.example.com'))
+  expect(doc.headers.get('content-security-policy'), 'csp').toEqual(
+    webShellCsp('hub.example.com', true)
+  )
+})
+
+test('telemetry off: every shell response blocks PostHog, the API policy is unchanged', async () => {
+  for (const path of ['/', '/assets/index-abc123.js', '/shell-explicit', '/shell-implicit']) {
+    const r = await fetch(`${pubTelemetryOff.base}${path}`)
+    const csp = r.headers.get('content-security-policy') ?? ''
+    expect(csp, `${path} csp`).toEqual(webShellCsp('hub.example.com', false))
+    for (const origin of POSTHOG_ORIGINS) {
+      expect(directive(csp, 'connect-src'), `${path} blocks ${origin}`).not.toContain(origin)
+    }
+  }
+  const api = await fetch(`${pubTelemetryOff.base}/api/nope`)
+  expect(api.headers.get('content-security-policy'), 'API csp').toEqual(API_CSP)
+})
+
+test('telemetry on: the shell response allows PostHog', async () => {
+  const r = await fetch(`${pub.base}/`)
+  const connect = directive(r.headers.get('content-security-policy') ?? '', 'connect-src')
+  for (const origin of POSTHOG_ORIGINS) expect(connect, origin).toContain(origin)
 })

@@ -32,7 +32,8 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
     enablePassword: true,
     enableSso: false,
     enableProcesses: true,
-    enableIntegrations: true
+    enableIntegrations: true,
+    enableTelemetry: true
   },
   reachable: false,
   computersConnected: () => 2
@@ -263,7 +264,8 @@ test('every switch is reported, to loopback and non-loopback callers alike', asy
     enablePassword: false,
     enableSso: true,
     enableProcesses: false,
-    enableIntegrations: false
+    enableIntegrations: false,
+    enableTelemetry: false
   }
   const srv = await startHealthServer({ authRequired: true, switches })
   try {

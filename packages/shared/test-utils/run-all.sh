@@ -848,6 +848,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/onboarding/src/client/tutorial/TutorialAnimationModal.test.tsx \
   packages/domains/tags/src/client/CreateTagDialog.test.tsx \
   packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
+  packages/domains/telemetry/src/client/telemetry.test.ts \
+  packages/domains/leaderboard/src/convexAuth.test.tsx \
   packages/shared/editor/src/ArtifactPicker.test.tsx \
   packages/shared/editor/src/rich-text-editor.mention.test.tsx \
   packages/shared/editor/src/rich-text-editor.tab-switch.test.tsx \

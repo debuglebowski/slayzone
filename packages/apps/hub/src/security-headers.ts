@@ -27,6 +27,11 @@
  * Desktop hub: same code, no switch. The only difference is HSTS, which needs an
  * https public address, so a loopback hub never sends it.
  *
+ * `SLAYZONE_HUB_ENABLE_TELEMETRY=0` takes the PostHog origins out of the shell's
+ * `connect-src` and changes nothing else: the shell is told not to start PostHog
+ * (`hub.describe` / `/health`), and if it did anyway the browser refuses every request
+ * (fail closed).
+ *
  * @module server/security-headers
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -43,7 +48,8 @@ import { isReservedUrl } from './web-assets.js'
  *
  * Connect only, never script: posthog-js is told not to load remote scripts
  * (`disable_external_dependency_loading`, telemetry.ts), so no third-party code
- * runs in the hub's origin, where the session token lives.
+ * runs in the hub's origin, where the session token lives. Left out entirely on a hub
+ * with telemetry off ({@link webShellCsp}).
  */
 export const POSTHOG_ORIGINS = ['https://eu.i.posthog.com', 'https://eu-assets.i.posthog.com']
 
@@ -74,12 +80,13 @@ export const ENTRA_SIGN_IN_ORIGIN = 'https://login.microsoftonline.com'
  * `connect-src`: `'self'` covers same-origin fetches and, in CSP Level 3, the
  * same-origin `ws:`/`wss:` of `/trpc`. The public address is named as well, derived
  * from config and never from a request header, for browsers that still do not
- * match a websocket on `'self'`.
+ * match a websocket on `'self'`. PostHog only when `telemetry` (the
+ * `SLAYZONE_HUB_ENABLE_TELEMETRY` switch) is on.
  */
-export function webShellCsp(publicAddress: string | undefined): string {
+export function webShellCsp(publicAddress: string | undefined, telemetry: boolean): string {
   const connect = ["'self'"]
   if (publicAddress !== undefined) connect.push(hubUrlFromAddr(publicAddress, 'ws'))
-  connect.push(...POSTHOG_ORIGINS)
+  if (telemetry) connect.push(...POSTHOG_ORIGINS)
   return [
     "default-src 'self'",
     "script-src 'self'",
@@ -114,6 +121,8 @@ export function strictTransportSecurity(publicAddress: string | undefined): stri
 export interface SecurityHeadersOptions {
   /** `SLAYZONE_HUB_PUBLIC_ADDRESS` (`host[:port]`, B8-validated); undefined on a hub nobody else reaches. */
   publicAddress: string | undefined
+  /** `SLAYZONE_HUB_ENABLE_TELEMETRY`. Off: the shell CSP allows no PostHog origin. */
+  telemetry: boolean
 }
 
 interface Profile {
@@ -154,7 +163,7 @@ function buildProfiles(opts: SecurityHeadersOptions): { api: Profile; shell: Pro
       []
     ),
     shell: profile(
-      [...common, ['content-security-policy', webShellCsp(opts.publicAddress)]],
+      [...common, ['content-security-policy', webShellCsp(opts.publicAddress, opts.telemetry)]],
       // `web-assets.ts` sets its own (index `no-cache`, hashed assets immutable);
       // this covers what falls through to express (a 404, a POST to `/`).
       [['cache-control', 'no-store']]

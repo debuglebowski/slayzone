@@ -5,7 +5,8 @@
  *   `<ROOT>/hub.config.json`    — operator-set: listenAddress, publicAddress, hubName,
  *                                 and the per-hub switches (requireLogin, enablePassword,
  *                                 enableSso, ssoTenantId, ssoClientId, enableProcesses,
- *                                 enableIntegrations — booleans; secrets are env only)
+ *                                 enableIntegrations, enableTelemetry — booleans; secrets
+ *                                 are env only)
  *   `<ROOT>/hub.state.json`     — system-generated: computerTransportSecret (the hub-auth
  *                                 secret; auto-generated on first boot, never typed in,
  *                                 by a hub only this machine reaches — a reachable hub
@@ -83,6 +84,8 @@ export interface HubConfig {
   enableProcesses?: boolean
   /** Linear / GitHub connect + sync. Default on. */
   enableIntegrations?: boolean
+  /** Third-party telemetry (PostHog, Convex) in the web UI and connected apps. Default on. */
+  enableTelemetry?: boolean
 }
 
 /** The boolean switch keys of {@link HubConfig}, in file order. */
@@ -91,7 +94,8 @@ export const HUB_CONFIG_SWITCH_KEYS = [
   'enablePassword',
   'enableSso',
   'enableProcesses',
-  'enableIntegrations'
+  'enableIntegrations',
+  'enableTelemetry'
 ] as const satisfies ReadonlyArray<keyof HubConfig>
 
 /** Old `hub.config.json` keys that no longer mean anything — boot refuses them (rule B5). */

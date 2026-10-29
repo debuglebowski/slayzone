@@ -50,6 +50,10 @@ test('default: integrations on', () => {
   expect(defaults.enableIntegrations).toBe(true)
 })
 
+test('default: telemetry on', () => {
+  expect(defaults.enableTelemetry).toBe(true)
+})
+
 test('defaults equal HUB_SWITCH_DEFAULTS', () => {
   expect(JSON.stringify(defaults)).toBe(JSON.stringify(HUB_SWITCH_DEFAULTS))
 })
@@ -75,6 +79,10 @@ test('env name: ENABLE_INTEGRATIONS', () => {
   expect(HUB_SWITCH_ENV.enableIntegrations).toBe('SLAYZONE_HUB_ENABLE_INTEGRATIONS')
 })
 
+test('env name: ENABLE_TELEMETRY', () => {
+  expect(HUB_SWITCH_ENV.enableTelemetry).toBe('SLAYZONE_HUB_ENABLE_TELEMETRY')
+})
+
 // --- 1 / 0 flip each switch ---
 {
   const on = resolveHubSwitches({
@@ -82,7 +90,8 @@ test('env name: ENABLE_INTEGRATIONS', () => {
     SLAYZONE_HUB_ENABLE_PASSWORD: '0',
     SLAYZONE_HUB_ENABLE_SSO: '1',
     SLAYZONE_HUB_ENABLE_PROCESSES: '0',
-    SLAYZONE_HUB_ENABLE_INTEGRATIONS: '0'
+    SLAYZONE_HUB_ENABLE_INTEGRATIONS: '0',
+    SLAYZONE_HUB_ENABLE_TELEMETRY: '0'
   })
 
   test('1 turns requireLogin on', () => {
@@ -103,6 +112,10 @@ test('env name: ENABLE_INTEGRATIONS', () => {
 
   test('0 turns enableIntegrations off', () => {
     expect(on.enableIntegrations).toBe(false)
+  })
+
+  test('0 turns enableTelemetry off', () => {
+    expect(on.enableTelemetry).toBe(false)
   })
 }
 

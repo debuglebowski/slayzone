@@ -36,7 +36,8 @@ function ensurePosthogLoading(): Promise<typeof import('posthog-js').default | n
   return phReady
 }
 
-let currentTier: TelemetryTier = 'anonymous'
+/** The tier last applied ({@link applyTelemetryTier}); null until the first one. */
+let currentTier: TelemetryTier | null = null
 let initialized = false
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let lastActive = 0
@@ -181,7 +182,7 @@ export function stopHeartbeat(): void {
   accumulatedActiveMs = 0
 }
 
-export async function initTelemetry(tier: TelemetryTier): Promise<void> {
+async function initTelemetry(tier: Exclude<TelemetryTier, 'off'>): Promise<void> {
   if (!ENABLED) return
 
   const ready = ensurePosthogLoading()
@@ -190,11 +191,12 @@ export async function initTelemetry(tier: TelemetryTier): Promise<void> {
   const posthog = await ready
   if (!posthog) return
 
+  // Another tier was applied while posthog-js loaded — `off` above all: never start it.
+  if (currentTier !== tier) return
+
   if (initialized) {
     posthog.reset()
   }
-
-  currentTier = tier
 
   const isOptedIn = tier === 'opted_in'
 
@@ -213,6 +215,10 @@ export async function initTelemetry(tier: TelemetryTier): Promise<void> {
     disable_external_dependency_loading: true,
     ...(isOptedIn ? {} : { disable_persistence: true })
   })
+
+  // `off` opted posthog-js out (`turnOff`). Coming back clears that, without the
+  // `$opt_in` event `opt_in_capturing` would send.
+  if (posthog.has_opted_out_capturing()) posthog.clear_opt_in_out_capturing()
 
   posthog.register({ environment: IS_DEV ? 'development' : 'production' })
 
@@ -283,18 +289,50 @@ export function trackShortcut(key: string): void {
   track('keyboard_shortcut_used', { key })
 }
 
-export function setTelemetryTier(tier: TelemetryTier): void {
+/**
+ * Nothing leaves from here on: `track` checks `initialized`, posthog-js stops capturing
+ * (also what it would capture by itself) and the heartbeat + IPC bridge stop. The
+ * heartbeat's closing events are dropped, not sent, because `initialized` goes first.
+ */
+function turnOff(): void {
+  initialized = false
+  ph?.opt_out_capturing()
+  stopHeartbeat()
+  stopIpcTelemetryBridge()
+}
+
+/**
+ * Make `tier` the one in force — the only way the provider changes PostHog. Idempotent.
+ *
+ *   - `off`: PostHog is never loaded, or is stopped now ({@link turnOff}).
+ *   - first tier, or the first one after `off`: PostHog starts, then the heartbeat and
+ *     the IPC bridge.
+ *   - `anonymous` ↔ `opted_in`: as before — back to anonymous forgets the stored id.
+ */
+export async function applyTelemetryTier(tier: TelemetryTier): Promise<void> {
   if (tier === currentTier) return
+  const previous = currentTier
+  currentTier = tier
+
+  if (tier === 'off') {
+    turnOff()
+    return
+  }
 
   if (tier === 'anonymous' && ph) {
     ph.reset()
     localStorage.removeItem('slayzone_telemetry_id')
   }
 
-  void initTelemetry(tier)
+  await initTelemetry(tier)
+  if (currentTier !== tier) return
+  if (previous === null || previous === 'off') {
+    startHeartbeat()
+    startIpcTelemetryBridge()
+  }
 }
 
-export function getTelemetryTier(): TelemetryTier {
+export function getTelemetryTier(): TelemetryTier | null {
   return currentTier
 }
 
@@ -306,8 +344,9 @@ export function shutdownTelemetry(): void {
   }
 }
 
-/** Returns the posthog instance once loaded, for PostHogProvider */
+/** The posthog instance once loaded and running; null while telemetry is off. */
 export async function getPosthogInstance(): Promise<typeof import('posthog-js').default | null> {
+  if (currentTier === null || currentTier === 'off') return null
   const ready = ensurePosthogLoading()
   if (!ready) return null
   return ready

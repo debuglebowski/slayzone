@@ -3,14 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { useContext } from 'react'
 import { createTrpcTest } from '@slayzone/transport/testing'
+import type { TelemetryTier } from '../shared/types'
 
 const telemetry = vi.hoisted(() => ({
-  initTelemetry: vi.fn(async () => {}),
-  setTelemetryTier: vi.fn(),
+  applyTelemetryTier: vi.fn(async () => {}),
   track: vi.fn(),
-  startHeartbeat: vi.fn(),
   stopHeartbeat: vi.fn(),
-  startIpcTelemetryBridge: vi.fn(),
   stopIpcTelemetryBridge: vi.fn(),
   getPosthogInstance: vi.fn(async () => null)
 }))
@@ -25,14 +23,21 @@ async function flush(): Promise<void> {
   })
 }
 
-let setTierFromUi: (tier: 'anonymous' | 'opted_in') => void
+let setTierFromUi: (tier: TelemetryTier) => void
 function Probe() {
   const ctx = useContext(TelemetryContext)
   setTierFromUi = ctx.setTier
-  return <span data-testid="tier">{ctx.tier}</span>
+  return (
+    <>
+      <span data-testid="tier">{ctx.tier}</span>
+      <span data-testid="services">{ctx.thirdPartyServices}</span>
+      <span data-testid="locked">{String(ctx.lockedByHub)}</span>
+    </>
+  )
 }
 
-function setup(stored: string | null) {
+/** `hubTelemetry`: what the hub's `hub.describe` reports for `enableTelemetry` (undefined = an older hub). */
+function setup(stored: string | null, hubTelemetry?: boolean) {
   let value = stored
   const sets: unknown[] = []
   const trpc = createTrpcTest({
@@ -42,7 +47,11 @@ function setup(stored: string | null) {
         sets.push(input)
         return null
       },
-      'app.meta.getVersion': () => '9.9.9'
+      'app.meta.getVersion': () => '9.9.9',
+      'hub.describe': () => ({
+        scopes: null,
+        switches: hubTelemetry === undefined ? {} : { enableTelemetry: hubTelemetry }
+      })
     }
   })
   const Wrapper = trpc.wrapper
@@ -63,6 +72,9 @@ function setup(stored: string | null) {
 }
 
 const tier = () => screen.getByTestId('tier').textContent
+const services = () => screen.getByTestId('services').textContent
+const locked = () => screen.getByTestId('locked').textContent
+const appliedTiers = () => telemetry.applyTelemetryTier.mock.calls.map((c) => (c as unknown[])[0])
 
 beforeEach(() => {
   for (const fn of Object.values(telemetry)) fn.mockClear()
@@ -73,41 +85,128 @@ afterEach(() => {
 })
 
 describe('TelemetryProvider tier hydration', () => {
-  it('adopts the stored tier once and initializes telemetry with it', async () => {
-    const { queryClient, setStored } = setup('opted_in')
+  it('adopts the stored tier once and starts telemetry with it', async () => {
+    const { queryClient, setStored } = setup('opted_in', true)
     expect(tier()).toBe('anonymous')
+    expect(services(), 'nothing third-party before the answers are in').toBe('pending')
+    expect(telemetry.applyTelemetryTier).not.toHaveBeenCalled()
     await flush()
     expect(tier()).toBe('opted_in')
-    expect(telemetry.initTelemetry).toHaveBeenCalledTimes(1)
-    expect(telemetry.initTelemetry).toHaveBeenCalledWith('opted_in')
-    expect(telemetry.startHeartbeat).toHaveBeenCalledTimes(1)
+    expect(services()).toBe('allowed')
+    expect(appliedTiers()).toEqual(['opted_in'])
 
-    // A later change of the stored value is not re-adopted (init runs once).
+    // A later change of the stored value is not re-adopted.
     setStored('anonymous')
     await act(async () => {
       await queryClient.invalidateQueries()
     })
     await flush()
     expect(tier()).toBe('opted_in')
-    expect(telemetry.initTelemetry).toHaveBeenCalledTimes(1)
+    expect(appliedTiers()).toEqual(['opted_in'])
   })
 
-  it('anything but opted_in → anonymous', async () => {
-    setup('weird')
+  it('anything unknown → anonymous', async () => {
+    setup('weird', true)
     await flush()
     expect(tier()).toBe('anonymous')
-    expect(telemetry.initTelemetry).toHaveBeenCalledWith('anonymous')
+    expect(appliedTiers()).toEqual(['anonymous'])
+  })
+
+  it('a hub older than the switch (no enableTelemetry) changes nothing', async () => {
+    setup(null)
+    await flush()
+    expect(tier()).toBe('anonymous')
+    expect(services()).toBe('allowed')
+    expect(locked()).toBe('false')
   })
 
   it('setTier from the UI updates the tier and persists it', async () => {
-    const { sets } = setup(null)
+    const { sets } = setup(null, true)
     await flush()
     act(() => {
       setTierFromUi('opted_in')
     })
     expect(tier()).toBe('opted_in')
-    expect(telemetry.setTelemetryTier).toHaveBeenCalledWith('opted_in')
     await flush()
+    expect(appliedTiers()).toEqual(['anonymous', 'opted_in'])
     expect(sets).toContainEqual({ key: 'telemetry_tier', value: 'opted_in' })
+  })
+})
+
+describe('TelemetryProvider off tier', () => {
+  it('stored off: third-party services blocked, PostHog only ever told off', async () => {
+    setup('off', true)
+    await flush()
+    expect(tier()).toBe('off')
+    expect(services()).toBe('blocked')
+    expect(appliedTiers()).toEqual(['off'])
+  })
+
+  it('off from the UI: blocked at once, persisted, PostHog stopped', async () => {
+    const { sets } = setup('anonymous', true)
+    await flush()
+    expect(services()).toBe('allowed')
+    act(() => {
+      setTierFromUi('off')
+    })
+    expect(services()).toBe('blocked')
+    await flush()
+    expect(appliedTiers()).toEqual(['anonymous', 'off'])
+    expect(sets).toContainEqual({ key: 'telemetry_tier', value: 'off' })
+  })
+
+  it('back on from the UI: allowed again', async () => {
+    setup('off', true)
+    await flush()
+    act(() => {
+      setTierFromUi('anonymous')
+    })
+    await flush()
+    expect(services()).toBe('allowed')
+    expect(appliedTiers()).toEqual(['off', 'anonymous'])
+  })
+})
+
+describe('TelemetryProvider with a hub that turned telemetry off', () => {
+  it('forces off over the stored tier, locked, nothing ever started', async () => {
+    const { sets } = setup('opted_in', false)
+    await flush()
+    expect(tier()).toBe('off')
+    expect(locked()).toBe('true')
+    expect(services()).toBe('blocked')
+    expect(appliedTiers(), 'PostHog never started').toEqual(['off'])
+
+    // The user cannot turn it back on: nothing changes, nothing is stored.
+    act(() => {
+      setTierFromUi('opted_in')
+    })
+    await flush()
+    expect(tier()).toBe('off')
+    expect(appliedTiers()).toEqual(['off'])
+    expect(sets).toEqual([])
+  })
+
+  it('a hub that cannot be asked counts as off (fail closed)', async () => {
+    const trpc = createTrpcTest({
+      procedures: {
+        'settings.get': () => 'anonymous',
+        'settings.set': () => null,
+        'app.meta.getVersion': () => '9.9.9',
+        'hub.describe': () => {
+          throw new Error('hub down')
+        }
+      }
+    })
+    const Wrapper = trpc.wrapper
+    render(
+      <Wrapper>
+        <TelemetryProvider>
+          <Probe />
+        </TelemetryProvider>
+      </Wrapper>
+    )
+    await flush()
+    expect(services()).toBe('blocked')
+    expect(appliedTiers()).toEqual(['off'])
   })
 })

@@ -97,10 +97,12 @@ export async function mountApp(): Promise<void> {
 
   // Provider stack mirrors the Electron renderer (packages/apps/app/src/renderer/
   // src/main.tsx): TrpcProvider OUTERMOST (Pty/Appearance/Telemetry providers call
-  // tRPC hooks), then ConvexAuthBootstrap (Convex + GitHub OAuth — needs the tRPC
-  // context), then PtyProvider (TaskDetailPage's usePty/useLoopMode/useSlayNudge
-  // throw without it), ThemeProvider, AppearanceProvider (useAppearance), and
-  // TelemetryProvider (track() — no-ops with no analytics backend configured).
+  // tRPC hooks), then TelemetryProvider (track() — no-ops with no analytics backend
+  // configured; it also decides whether third-party services may start: tier not
+  // `off`, and the hub's `SLAYZONE_HUB_ENABLE_TELEMETRY`), then ConvexAuthBootstrap
+  // (Convex + GitHub OAuth — needs the tRPC context and that decision), then
+  // PtyProvider (TaskDetailPage's usePty/useLoopMode/useSlayNudge throw without it),
+  // ThemeProvider and AppearanceProvider (useAppearance).
   // settingsRevision is a constant in the fork (no live settings-dialog revision).
   //
   // oauthDelivery="subscription": the fork can't catch the slayzone:// callback in
@@ -109,21 +111,21 @@ export async function mountApp(): Promise<void> {
   // When VITE_CONVEX_URL is unset the bootstrap degrades to LEADERBOARD_AUTH_DISABLED.
   createRoot(el).render(
     <TrpcProvider url={trpcUrl}>
-      <ConvexAuthBootstrap oauthDelivery="subscription">
-        <PtyProvider>
-          <ThemeProvider>
-            <AppearanceProvider settingsRevision={0}>
-              <TelemetryProvider>
+      <TelemetryProvider>
+        <ConvexAuthBootstrap oauthDelivery="subscription">
+          <PtyProvider>
+            <ThemeProvider>
+              <AppearanceProvider settingsRevision={0}>
                 <UndoProvider>
                   <TooltipProvider delayDuration={0}>
                     <HomeView />
                   </TooltipProvider>
                 </UndoProvider>
-              </TelemetryProvider>
-            </AppearanceProvider>
-          </ThemeProvider>
-        </PtyProvider>
-      </ConvexAuthBootstrap>
+              </AppearanceProvider>
+            </ThemeProvider>
+          </PtyProvider>
+        </ConvexAuthBootstrap>
+      </TelemetryProvider>
     </TrpcProvider>
   )
 }

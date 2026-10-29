@@ -49,6 +49,8 @@ export interface OnboardingChecklistState {
 interface UseOnboardingChecklistOptions {
   projectCount: number
   hasCreatedTask: boolean
+  /** Convex runs here (`useLeaderboardAuth().configured`). False: no leaderboard step. */
+  leaderboardAvailable: boolean
   onCheckLeaderboard: () => void
   onJoinCommunity: () => void
   onFollowOnX: () => void
@@ -113,6 +115,7 @@ function areStatesEqual(
 export function useOnboardingChecklist({
   projectCount,
   hasCreatedTask,
+  leaderboardAvailable,
   onCheckLeaderboard,
   onJoinCommunity,
   onFollowOnX
@@ -302,12 +305,17 @@ export function useOnboardingChecklist({
         disabled: !forceComplete && projectCount === 0,
         onClick: () => useDialogStore.getState().openCreateTask()
       },
-      {
-        id: 'check-leaderboard',
-        label: 'Checkout the leaderboard',
-        completed: forceComplete || persistedState.completed.checkLeaderboard,
-        onClick: checkLeaderboard
-      },
+      // The leaderboard needs Convex: no step for it where Convex is off.
+      ...(leaderboardAvailable
+        ? [
+            {
+              id: 'check-leaderboard',
+              label: 'Checkout the leaderboard',
+              completed: forceComplete || persistedState.completed.checkLeaderboard,
+              onClick: checkLeaderboard
+            }
+          ]
+        : []),
       {
         id: 'join-community',
         label: 'Join the community',
@@ -330,6 +338,7 @@ export function useOnboardingChecklist({
     persistedState.completed.followOnX,
     projectCount,
     hasCreatedTask,
+    leaderboardAvailable,
     startTour,
     checkLeaderboard,
     joinCommunity,

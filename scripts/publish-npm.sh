@@ -167,6 +167,7 @@ Switches (`0` or `1`; anything else refuses to start), each also a boolean in
 | `SLAYZONE_HUB_ENABLE_SSO` | `0` | Entra sign-in (needs `SLAYZONE_HUB_SSO_TENANT_ID`, `_CLIENT_ID`, `_CERT_PATH`, `_KEY_PATH` and a public address; `SLAYZONE_HUB_SSO_REQUIRE_MFA`, default `1`) |
 | `SLAYZONE_HUB_ENABLE_PROCESSES` | `1` | hub-local processes |
 | `SLAYZONE_HUB_ENABLE_INTEGRATIONS` | `1` | Linear / GitHub |
+| `SLAYZONE_HUB_ENABLE_TELEMETRY` | `1` | third-party telemetry: `0` = no PostHog and no Convex (leaderboard, feedback) from the web UI or apps connected to this hub; its CSP blocks PostHog |
 
 Today the hub validates and reports every switch (`/health`) and enforces
 `REQUIRE_LOGIN`; enforcing the others follows.
@@ -317,6 +318,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
        -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_LISTEN_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
        -u SLAYZONE_HUB_REQUIRE_LOGIN -u SLAYZONE_HUB_ENABLE_PASSWORD -u SLAYZONE_HUB_ENABLE_SSO
        -u SLAYZONE_HUB_ENABLE_PROCESSES -u SLAYZONE_HUB_ENABLE_INTEGRATIONS
+       -u SLAYZONE_HUB_ENABLE_TELEMETRY
        -u SLAYZONE_HUB_AUTH_SECRET
        -u SLAYZONE_HUB_JOIN_TOKEN
        -u SLAYZONE_COMPUTER_CREDENTIALS_DIR

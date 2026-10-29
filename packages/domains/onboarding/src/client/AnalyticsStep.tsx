@@ -4,10 +4,40 @@ import { BarChart3 } from 'lucide-react'
 import { TRACKED_EVENTS, NOT_TRACKED } from './onboardingConstants'
 
 interface AnalyticsStepProps {
-  onChoose: (tier: 'anonymous' | 'opted_in') => void
+  /** The user's answer; null when a hub decided (`lockedByHub`) and there was no question. */
+  onChoose: (tier: 'anonymous' | 'opted_in' | null) => void
+  /** A connected hub turned telemetry off: say so instead of asking. */
+  lockedByHub?: boolean
 }
 
-export function AnalyticsStep({ onChoose }: AnalyticsStepProps): React.JSX.Element {
+export function AnalyticsStep({
+  onChoose,
+  lockedByHub = false
+}: AnalyticsStepProps): React.JSX.Element {
+  if (lockedByHub) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+      >
+        <div className="text-center mb-6">
+          <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+            <BarChart3 className="h-7 w-7 text-primary" />
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight mb-2">Analytics</h2>
+          <p className="text-muted-foreground">
+            Your hub has turned telemetry off. Nothing is sent to PostHog, and the leaderboard and
+            feedback are unavailable.
+          </p>
+        </div>
+        <Button className="h-11 w-full" onClick={() => onChoose(null)}>
+          Continue
+        </Button>
+      </motion.div>
+    )
+  }
   return (
     <motion.div
       initial={{ opacity: 0 }}

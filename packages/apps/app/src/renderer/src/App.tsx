@@ -99,7 +99,7 @@ import {
 import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
-import { useLeaderboardAuth } from '@/lib/convexAuth'
+import { ConvexScope, useLeaderboardAuth } from '@/lib/convexAuth'
 import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
@@ -418,6 +418,10 @@ function App(): React.JSX.Element {
     return { taskProgress: progress, doneTaskIds: done, attentionTaskIds: attention }
   }, [tasks, projects])
 
+  // Convex/GitHub auth state, injected into the (now packaged) LeaderboardPage.
+  // `configured` is false while Convex is off, which hides every entry point to it.
+  const leaderboardAuth = useLeaderboardAuth()
+
   // Onboarding
   const showAnimatedTour = useDialogStore((s) => s.showAnimatedTour)
   const handleChecklistCheckLeaderboard = useCallback((): void => {
@@ -438,6 +442,7 @@ function App(): React.JSX.Element {
   } = useOnboardingChecklist({
     projectCount: projects.length,
     hasCreatedTask,
+    leaderboardAvailable: leaderboardAuth.configured,
     onCheckLeaderboard: handleChecklistCheckLeaderboard,
     onJoinCommunity: handleChecklistJoinCommunity,
     onFollowOnX: handleChecklistFollowOnX
@@ -631,9 +636,6 @@ function App(): React.JSX.Element {
     const { activeTabIndex: idx } = useTabStore.getState()
     if (idx > 0) closeTab(idx)
   }, [closeTab])
-
-  // Convex/GitHub auth state, injected into the (now packaged) LeaderboardPage.
-  const leaderboardAuth = useLeaderboardAuth()
 
   // Stale-skill dot on Context Manager tab
   const { count: staleSkillCount, refresh: refreshStaleSkillCount } = useStaleSkillCount(
@@ -1423,7 +1425,11 @@ function App(): React.JSX.Element {
               void trpcClient.app.window.setWindowButtonVisibility.mutate({ visible: v })
             }
             convexConfigured={leaderboardAuth.configured}
-            feedbackSlot={<FeedbackDialog />}
+            feedbackSlot={
+              <ConvexScope>
+                <FeedbackDialog />
+              </ConvexScope>
+            }
             keyRecorder={KeyRecorder}
             sessionTaskIds={activeAgentTaskIds}
             idleByProject={idleByProject}

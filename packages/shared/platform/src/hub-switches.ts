@@ -10,6 +10,9 @@
  *   SLAYZONE_HUB_ENABLE_SSO           0   Entra OIDC sign-in
  *   SLAYZONE_HUB_ENABLE_PROCESSES     1   hub-local processes / automation commands
  *   SLAYZONE_HUB_ENABLE_INTEGRATIONS  1   Linear / GitHub connect + sync
+ *   SLAYZONE_HUB_ENABLE_TELEMETRY     1   third-party telemetry: PostHog analytics and the
+ *                                         Convex-backed leaderboard + feedback, in the web
+ *                                         UI and in every app connected to this hub
  *
  * Env wins over `<ROOT>/hub.config.json` (`standalone-config.ts` seeds env from the
  * file before anything reads it), so this module only ever reads env. Anything
@@ -19,6 +22,10 @@
  * This module only parses, validates and reports the switches. Processes,
  * integrations and password off are enforced through `hub-switch-refusal.ts` (password
  * also in hub-auth and the hub's REST gate, T-10); SSO lives in hub-auth (T-09).
+ * Telemetry off: the web shell's CSP drops the PostHog origins (hub
+ * `security-headers.ts`), the hub never starts a Convex sign-in
+ * (`assertHubConvexSignInUrl`), and clients read the switch from `hub.describe` /
+ * `/health` and start neither PostHog nor Convex (`@slayzone/telemetry`).
  *
  * Lean leaf (no imports) so the CLI and computer bundles can use it without the
  * platform barrel.
@@ -32,7 +39,8 @@ export const HUB_SWITCH_ENV = {
   enablePassword: 'SLAYZONE_HUB_ENABLE_PASSWORD',
   enableSso: 'SLAYZONE_HUB_ENABLE_SSO',
   enableProcesses: 'SLAYZONE_HUB_ENABLE_PROCESSES',
-  enableIntegrations: 'SLAYZONE_HUB_ENABLE_INTEGRATIONS'
+  enableIntegrations: 'SLAYZONE_HUB_ENABLE_INTEGRATIONS',
+  enableTelemetry: 'SLAYZONE_HUB_ENABLE_TELEMETRY'
 } as const
 
 export type HubSwitchKey = keyof typeof HUB_SWITCH_ENV
@@ -46,7 +54,8 @@ export const HUB_SWITCH_DEFAULTS: Readonly<HubSwitches> = {
   enablePassword: true,
   enableSso: false,
   enableProcesses: true,
-  enableIntegrations: true
+  enableIntegrations: true,
+  enableTelemetry: true
 }
 
 /**
@@ -107,8 +116,9 @@ export const HUB_TRUSTED_PROXIES_ENV = 'SLAYZONE_HUB_TRUSTED_PROXIES'
 
 /**
  * The Convex deployment this hub starts GitHub sign-in against (`host[:port]`, no
- * scheme — loopback → http, else https). Unset = no Convex sign-in on this hub. The hub
- * never POSTs to a Convex URL a client names (T-99); see `hub-convex.ts`.
+ * scheme — loopback → http, else https). Unset, or `SLAYZONE_HUB_ENABLE_TELEMETRY=0`, = no
+ * Convex sign-in on this hub. The hub never POSTs to a Convex URL a client names (T-99);
+ * see `hub-convex.ts`.
  */
 export const HUB_CONVEX_ADDRESS_ENV = 'SLAYZONE_HUB_CONVEX_ADDRESS'
 

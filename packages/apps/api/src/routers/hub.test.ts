@@ -36,7 +36,8 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
     enablePassword: true,
     enableSso: false,
     enableProcesses: true,
-    enableIntegrations: true
+    enableIntegrations: true,
+    enableTelemetry: true
   })
   expect(d.label).toBeNull()
 })
@@ -53,7 +54,8 @@ test('hub.describe reflects the wired deps (authRequired + every switch); never 
     enablePassword: false,
     enableSso: true,
     enableProcesses: false,
-    enableIntegrations: false
+    enableIntegrations: false,
+    enableTelemetry: false
   }
   setHubDescribeDeps({ getAuthRequired: () => true, getSwitches: () => switches })
   const d = await caller.describe()
@@ -70,7 +72,8 @@ test('hub.describe reflects the wired deps (authRequired + every switch); never 
       enablePassword: true,
       enableSso: false,
       enableProcesses: true,
-      enableIntegrations: true
+      enableIntegrations: true,
+      enableTelemetry: true
     })
   })
 })

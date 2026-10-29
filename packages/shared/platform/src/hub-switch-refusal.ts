@@ -12,6 +12,8 @@
  *                                       credential, no provider call, no sign-in start.
  *   SLAYZONE_HUB_ENABLE_PASSWORD=0      no password sign-in, sign-up, change or reset,
  *                                       no account with a generated password (T-10).
+ *   SLAYZONE_HUB_ENABLE_TELEMETRY=0     no Convex sign-in start (the hub's only Convex
+ *                                       call), even with a Convex address set.
  *
  * ONE SHAPE FOR EVERY REFUSAL. A chokepoint calls `assertHub*Enabled`, which writes one
  * `denied` audit line and throws {@link HubSwitchedOffError}: a stable `code` and one
@@ -40,6 +42,7 @@ export type HubSwitchedOffCode =
   | 'HUB_PASSWORD_DISABLED'
   | 'HUB_CONVEX_NOT_CONFIGURED'
   | 'HUB_CONVEX_MISMATCH'
+  | 'HUB_TELEMETRY_DISABLED'
 
 const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED:
@@ -53,7 +56,10 @@ const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_CONVEX_NOT_CONFIGURED: `GitHub sign-in is off on this hub: no Convex deployment is configured (${HUB_CONVEX_ADDRESS_ENV}).`,
   HUB_CONVEX_MISMATCH:
     'This hub starts GitHub sign-in only against its own Convex deployment ' +
-    `(${HUB_CONVEX_ADDRESS_ENV}); the request named another.`
+    `(${HUB_CONVEX_ADDRESS_ENV}); the request named another.`,
+  HUB_TELEMETRY_DISABLED:
+    'GitHub sign-in (leaderboard, feedback) is off on this hub: third-party telemetry is ' +
+    `switched off (${HUB_SWITCH_ENV.enableTelemetry}=0).`
 }
 
 const VARIABLES: Record<HubSwitchedOffCode, string> = {
@@ -62,7 +68,8 @@ const VARIABLES: Record<HubSwitchedOffCode, string> = {
   NO_COMPUTER_CONNECTED: HUB_SWITCH_ENV.enableProcesses,
   HUB_PASSWORD_DISABLED: HUB_SWITCH_ENV.enablePassword,
   HUB_CONVEX_NOT_CONFIGURED: HUB_CONVEX_ADDRESS_ENV,
-  HUB_CONVEX_MISMATCH: HUB_CONVEX_ADDRESS_ENV
+  HUB_CONVEX_MISMATCH: HUB_CONVEX_ADDRESS_ENV,
+  HUB_TELEMETRY_DISABLED: HUB_SWITCH_ENV.enableTelemetry
 }
 
 /** Work refused because a hub switch is `0`. */
@@ -96,6 +103,11 @@ export function hubProcessesEnabled(env: NodeJS.ProcessEnv = process.env): boole
 /** `SLAYZONE_HUB_ENABLE_INTEGRATIONS` — may this hub talk to integration providers? */
 export function hubIntegrationsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveHubSwitches(env).enableIntegrations
+}
+
+/** `SLAYZONE_HUB_ENABLE_TELEMETRY` — may this hub and its clients use PostHog and Convex? */
+export function hubTelemetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveHubSwitches(env).enableTelemetry
 }
 
 /** `SLAYZONE_HUB_ENABLE_PASSWORD` — may anyone sign in, or get an account, with a password? */
@@ -188,14 +200,17 @@ export function assertHubPasswordEnabled(
  *
  * Returns that origin when `clientUrl` names the same one. Otherwise throws
  * {@link HubSwitchedOffError} after one `integration.connect` audit line, before anything
- * is sent: `HUB_CONVEX_NOT_CONFIGURED` when the hub has none, `HUB_CONVEX_MISMATCH` when
- * the client named another (or nothing usable) — the requested origin goes in the line.
+ * is sent: `HUB_TELEMETRY_DISABLED` when `SLAYZONE_HUB_ENABLE_TELEMETRY=0` (checked
+ * first, so an address left set cannot reach Convex), `HUB_CONVEX_NOT_CONFIGURED` when
+ * the hub has none, `HUB_CONVEX_MISMATCH` when the client named another (or nothing
+ * usable) — the requested origin goes in the line.
  */
 export function assertHubConvexSignInUrl(
   clientUrl: unknown,
   refusal: HubRefusal,
   env: NodeJS.ProcessEnv = process.env
 ): string {
+  if (!hubTelemetryEnabled(env)) refuse('integration.connect', 'HUB_TELEMETRY_DISABLED', refusal)
   const own = hubConvexOrigin(env)
   if (own === null) refuse('integration.connect', 'HUB_CONVEX_NOT_CONFIGURED', refusal)
   const requested = convexOriginOf(clientUrl)

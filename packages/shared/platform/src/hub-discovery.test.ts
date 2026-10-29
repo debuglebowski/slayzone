@@ -193,6 +193,25 @@ describe('hub discovery', () => {
     expect(hubs[0]?.switches, 'absent switches → null, not invented defaults').toBe(null)
   })
 
+  test('a hub older than a switch reports that switch at its default', async () => {
+    const port = await fakeHub(HUB_A)
+    const hubs = await discoverHubs({ range: { start: port, end: port } })
+    expect(HUB_A.switches, 'fixture predates the telemetry switch').not.toHaveProperty(
+      'enableTelemetry'
+    )
+    expect(hubs[0]?.switches?.enableTelemetry, 'absent key → default (on)').toBe(true)
+    expect(hubs[0]?.switches?.enableProcesses, 'present keys still read').toBe(false)
+  })
+
+  test('a hub with telemetry off reports it', async () => {
+    const port = await fakeHub({
+      ...HUB_A,
+      switches: { ...HUB_A.switches, enableTelemetry: false }
+    })
+    const hubs = await discoverHubs({ range: { start: port, end: port } })
+    expect(hubs[0]?.switches?.enableTelemetry).toBe(false)
+  })
+
   test('a malformed switches object reads as unknown', async () => {
     const port = await fakeHub({ ...HUB_A, switches: { requireLogin: 'yes' } })
     const hubs = await discoverHubs({ range: { start: port, end: port } })

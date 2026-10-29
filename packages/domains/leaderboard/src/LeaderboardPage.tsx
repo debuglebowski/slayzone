@@ -6,6 +6,7 @@ import { LeaderboardHeader } from './LeaderboardHeader'
 import { LeaderboardTable } from './LeaderboardTable'
 import { formatTokens } from './LeaderboardPage.utils'
 import { useLeaderboardController } from './useLeaderboardController'
+import { ConvexScope } from './convexAuth'
 
 // Host-injected auth (see ./auth). The Electron renderer passes
 // useLeaderboardAuth() (Convex + GitHub OAuth wired); the chromium-shell fork
@@ -19,16 +20,21 @@ export function LeaderboardPage({ auth }: { auth: LeaderboardAuthState }): React
     }
   }, [])
   // Gate BEFORE LeaderboardPageInner mounts: its controller calls Convex
-  // useQuery/useMutation, which require a ConvexProvider ancestor the fork has
-  // no client for. `configured: false` keeps every Convex hook out of the tree.
+  // useQuery/useMutation, which need the ConvexProvider ConvexScope puts above it —
+  // there is no client while Convex is off. `configured: false` keeps every Convex
+  // hook out of the tree.
   if (!auth.configured) return <LeaderboardAuthGate />
-  return <LeaderboardPageInner auth={auth} />
+  return (
+    <ConvexScope>
+      <LeaderboardPageInner auth={auth} />
+    </ConvexScope>
+  )
 }
 
-// Shown when the host hasn't wired Convex/auth (the chromium-shell fork today).
-// The leaderboard is fundamentally a signed-in, cloud-backed view — without a
-// Convex client there is nothing to rank, so this is the honest terminal state
-// until fork auth lands.
+// Shown while Convex is off: no deployment configured for this build, or telemetry
+// off (the user's tier, or a hub's `SLAYZONE_HUB_ENABLE_TELEMETRY=0`). The
+// leaderboard is fundamentally a signed-in, cloud-backed view — without a Convex
+// client there is nothing to rank, so this is the honest terminal state.
 function LeaderboardAuthGate(): React.JSX.Element {
   return (
     <div className="h-full overflow-hidden flex items-center justify-center p-6">
@@ -36,14 +42,15 @@ function LeaderboardAuthGate(): React.JSX.Element {
         <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
           <Trophy className="size-6 text-muted-foreground" />
         </div>
-        <h1 className="text-lg font-semibold">Leaderboard requires sign-in</h1>
+        <h1 className="text-lg font-semibold">Leaderboard unavailable</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          The leaderboard ranks signed-in users by tokens used and tasks completed. This build has
-          no Convex backend configured, so sign-in is unavailable here.
+          The leaderboard ranks signed-in users by tokens used and tasks completed. It needs
+          SlayZone&apos;s cloud service (Convex), which is off here: this build has none configured,
+          or telemetry is turned off.
         </p>
         <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground/80">
           <Lock className="size-3.5" />
-          Convex / GitHub auth not wired in this environment
+          Convex / GitHub sign-in is off in this environment
         </p>
       </div>
     </div>

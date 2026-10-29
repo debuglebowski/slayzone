@@ -1,4 +1,16 @@
-export type TelemetryTier = 'anonymous' | 'opted_in'
+/**
+ * What this app sends to PostHog, and whether it uses Convex:
+ *   - `off`: nothing to PostHog, and no Convex (leaderboard, feedback). Chosen in
+ *     Settings, or forced by a hub with `SLAYZONE_HUB_ENABLE_TELEMETRY=0`.
+ *   - `anonymous` (the default): app opens + an activity heartbeat, in-memory id.
+ *   - `opted_in`: plus a persisted random id and crash reports.
+ */
+export type TelemetryTier = 'off' | 'anonymous' | 'opted_in'
+
+/** The stored `telemetry_tier` setting as a tier. Anything unknown (or unset) is the default, `anonymous`. */
+export function parseTelemetryTier(stored: unknown): TelemetryTier {
+  return stored === 'off' || stored === 'opted_in' ? stored : 'anonymous'
+}
 
 export type TelemetryEventName =
   // App lifecycle
