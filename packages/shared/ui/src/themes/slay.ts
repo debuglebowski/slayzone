@@ -41,7 +41,29 @@ export const slay: UnifiedThemeDefinition = {
       surface2: '#2c313c',
       surface3: '#343a45',
       modal: '#202329',
-      modalBorder: 'rgba(255, 255, 255, 0.25)'
+      modalBorder: 'rgba(255, 255, 255, 0.25)',
+      // Status + diff tones: exact Tailwind v4 palette values (emerald/amber/orange/
+      // indigo/violet/green/red) — the look these surfaces had before they were tokens.
+      success: 'oklch(69.6% 0.17 162.48)',
+      successForeground: 'oklch(76.5% 0.177 163.223)',
+      successEmphasis: 'oklch(59.6% 0.145 163.225)',
+      successContrast: '#ffffff',
+      warning: 'oklch(76.9% 0.188 70.08)',
+      warningForeground: 'oklch(87.9% 0.169 91.605)',
+      warningEmphasis: 'oklch(64.6% 0.222 41.116)',
+      warningContrast: '#ffffff',
+      info: 'oklch(58.5% 0.233 277.117)',
+      infoForeground: 'oklch(78.5% 0.115 274.713)',
+      infoEmphasis: 'oklch(54.1% 0.281 293.009)',
+      infoContrast: '#ffffff',
+      agent: 'oklch(60.6% 0.25 292.717)',
+      agentForeground: 'oklch(81.1% 0.111 293.571)',
+      agentEmphasis: 'oklch(51.1% 0.262 276.966)',
+      agentContrast: '#ffffff',
+      diffAdded: 'oklch(72.3% 0.219 149.579)',
+      diffAddedForeground: 'oklch(79.2% 0.209 151.711)',
+      diffRemoved: 'oklch(63.7% 0.237 25.331)',
+      diffRemovedForeground: 'oklch(70.4% 0.191 22.216)'
     },
     terminal: {
       background: '#282c34',
@@ -126,7 +148,29 @@ export const slay: UnifiedThemeDefinition = {
       surface2: 'oklch(0.97 0 0)',
       surface3: 'oklch(1 0 0)',
       modal: 'oklch(1 0 0)',
-      modalBorder: 'oklch(0 0 0 / 35%)'
+      modalBorder: 'oklch(0 0 0 / 35%)',
+      // Status + diff tones: exact Tailwind v4 palette values (emerald/amber/orange/
+      // indigo/violet/green/red) — the look these surfaces had before they were tokens.
+      success: 'oklch(69.6% 0.17 162.48)',
+      successForeground: 'oklch(50.8% 0.118 165.612)',
+      successEmphasis: 'oklch(59.6% 0.145 163.225)',
+      successContrast: '#ffffff',
+      warning: 'oklch(76.9% 0.188 70.08)',
+      warningForeground: 'oklch(55.5% 0.163 48.998)',
+      warningEmphasis: 'oklch(64.6% 0.222 41.116)',
+      warningContrast: '#ffffff',
+      info: 'oklch(58.5% 0.233 277.117)',
+      infoForeground: 'oklch(45.7% 0.24 277.023)',
+      infoEmphasis: 'oklch(54.1% 0.281 293.009)',
+      infoContrast: '#ffffff',
+      agent: 'oklch(60.6% 0.25 292.717)',
+      agentForeground: 'oklch(49.1% 0.27 292.581)',
+      agentEmphasis: 'oklch(51.1% 0.262 276.966)',
+      agentContrast: '#ffffff',
+      diffAdded: 'oklch(72.3% 0.219 149.579)',
+      diffAddedForeground: 'oklch(52.7% 0.154 150.069)',
+      diffRemoved: 'oklch(63.7% 0.237 25.331)',
+      diffRemovedForeground: 'oklch(50.5% 0.213 27.518)'
     },
     terminal: {
       background: '#f4f4f5',

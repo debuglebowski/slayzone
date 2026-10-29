@@ -95,7 +95,7 @@ export function ChatSearchBar({
       <button
         onClick={() => onCaseSensitiveChange(!caseSensitive)}
         title="Case sensitive"
-        className={`p-0.5 rounded ${caseSensitive ? 'bg-accent text-amber-600' : 'hover:bg-accent text-muted-foreground'}`}
+        className={`p-0.5 rounded ${caseSensitive ? 'bg-accent text-search-match-active' : 'hover:bg-accent text-muted-foreground'}`}
       >
         <ALargeSmall className="size-4" />
       </button>

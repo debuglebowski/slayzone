@@ -98,7 +98,27 @@ const chromeVarMap: [string, keyof ChromeColors][] = [
   ['--surface-2', 'surface2'],
   ['--surface-3', 'surface3'],
   ['--modal', 'modal'],
-  ['--modal-border', 'modalBorder']
+  ['--modal-border', 'modalBorder'],
+  ['--success', 'success'],
+  ['--success-foreground', 'successForeground'],
+  ['--success-emphasis', 'successEmphasis'],
+  ['--success-contrast', 'successContrast'],
+  ['--warning', 'warning'],
+  ['--warning-foreground', 'warningForeground'],
+  ['--warning-emphasis', 'warningEmphasis'],
+  ['--warning-contrast', 'warningContrast'],
+  ['--info', 'info'],
+  ['--info-foreground', 'infoForeground'],
+  ['--info-emphasis', 'infoEmphasis'],
+  ['--info-contrast', 'infoContrast'],
+  ['--agent', 'agent'],
+  ['--agent-foreground', 'agentForeground'],
+  ['--agent-emphasis', 'agentEmphasis'],
+  ['--agent-contrast', 'agentContrast'],
+  ['--diff-added', 'diffAdded'],
+  ['--diff-added-foreground', 'diffAddedForeground'],
+  ['--diff-removed', 'diffRemoved'],
+  ['--diff-removed-foreground', 'diffRemovedForeground']
 ]
 
 export function applyChromeColors(chrome: ChromeColors): void {

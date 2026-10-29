@@ -105,7 +105,7 @@ export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 't
 
 function AssistantAvatar() {
   return (
-    <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+    <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
       <Sparkles className="size-3.5" />
     </div>
   )
@@ -186,7 +186,7 @@ export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 're
         {item.isError ? (
           <CircleX className="size-3" />
         ) : (
-          <CircleCheck className="size-3 text-emerald-500" />
+          <CircleCheck className="size-3 text-success" />
         )}
         <span>{(item.durationMs / 1000).toFixed(1)}s</span>
         <span>·</span>
@@ -226,7 +226,7 @@ export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 're
 
 export function ApiRetryBanner({ item }: { item: Extract<TimelineItem, { kind: 'api-retry' }> }) {
   return (
-    <div className="mx-4 my-1 px-3 py-1.5 text-xs rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 flex items-center gap-2">
+    <div className="mx-4 my-1 px-3 py-1.5 text-xs rounded-md border border-warning/40 bg-warning/10 text-warning-foreground flex items-center gap-2">
       <Loader2 className="size-3 animate-spin shrink-0" />
       API retry {item.attempt}/{item.maxRetries} in {item.delayMs}ms: {item.error}
     </div>
@@ -243,7 +243,7 @@ export function StderrBlock({ item }: { item: Extract<TimelineItem, { kind: 'std
 
 export function InterruptedBlock(_props: { item: Extract<TimelineItem, { kind: 'interrupted' }> }) {
   return (
-    <div className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+    <div className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-warning-foreground">
       Turn interrupted
     </div>
   )
@@ -269,8 +269,8 @@ export function PlanBlock({ item }: { item: Extract<TimelineItem, { kind: 'plan'
             <span
               className={cn(
                 'inline-block size-2 rounded-full shrink-0',
-                s.status === 'completed' && 'bg-emerald-500',
-                s.status === 'inProgress' && 'bg-amber-500',
+                s.status === 'completed' && 'bg-success',
+                s.status === 'inProgress' && 'bg-warning',
                 s.status === 'pending' && 'bg-muted-foreground/30'
               )}
             />
@@ -345,11 +345,11 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
             )}
           >
             {inFlight ? (
-              <Loader2 className="size-3 shrink-0 animate-spin text-violet-500" />
+              <Loader2 className="size-3 shrink-0 animate-spin text-agent" />
             ) : errored ? (
               <CircleX className="size-3 shrink-0 text-destructive" />
             ) : (
-              <CircleCheck className="size-3 shrink-0 text-emerald-500" />
+              <CircleCheck className="size-3 shrink-0 text-success" />
             )}
             <Bot className="size-3 shrink-0 text-muted-foreground" />
             <span className="font-medium shrink-0">Sub-agent</span>
@@ -536,8 +536,8 @@ function StatusIcon({ status }: { status: ToolInvocation['status'] }) {
   if (status === 'pending')
     return <Loader2 className="size-3 animate-spin text-muted-foreground shrink-0" />
   if (status === 'error') return <CircleX className="size-3 text-destructive shrink-0" />
-  if (status === 'denied') return <CircleX className="size-3 text-amber-500 shrink-0" />
-  return <CircleCheck className="size-3 text-emerald-500 shrink-0" />
+  if (status === 'denied') return <CircleX className="size-3 text-warning shrink-0" />
+  return <CircleCheck className="size-3 text-success shrink-0" />
 }
 
 function shortenPath(p?: string): string {
@@ -571,8 +571,8 @@ export function ToolCallEdit({ invocation, timestamp }: ToolProps) {
         </div>
       ) : input ? (
         <div className="p-3 text-xs font-mono grid gap-1">
-          <div className="text-red-600 dark:text-red-400">- {input.old_string}</div>
-          <div className="text-green-700 dark:text-green-400">+ {input.new_string}</div>
+          <div className="text-diff-removed-foreground">- {input.old_string}</div>
+          <div className="text-diff-added-foreground">+ {input.new_string}</div>
         </div>
       ) : null}
     </ToolShell>
@@ -743,8 +743,8 @@ export function ToolCallTodoWrite({ invocation, timestamp }: ToolProps) {
             <span
               className={cn(
                 'inline-block size-2 rounded-full shrink-0',
-                t.status === 'completed' && 'bg-emerald-500',
-                t.status === 'in_progress' && 'bg-amber-500',
+                t.status === 'completed' && 'bg-success',
+                t.status === 'in_progress' && 'bg-warning',
                 t.status === 'pending' && 'bg-muted-foreground/30'
               )}
             />
@@ -947,12 +947,12 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
   return (
     <div className="pl-4 pr-4 py-3">
       <div className="group flex gap-3 items-start">
-        <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-sm">
+        <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-info to-info-emphasis flex items-center justify-center text-info-contrast shadow-sm">
           <HelpCircle className="size-3.5" />
         </div>
         <div
           className={cn(
-            'min-w-0 flex-1 rounded-lg border border-indigo-500/40 bg-indigo-500/5 shadow-sm overflow-hidden transition-opacity',
+            'min-w-0 flex-1 rounded-lg border border-info/40 bg-info/5 shadow-sm overflow-hidden transition-opacity',
             locked && 'opacity-60'
           )}
         >
@@ -960,8 +960,8 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
             type="button"
             onClick={() => setCollapsed((c) => !c)}
             className={cn(
-              'w-full flex items-center gap-2 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/15 transition-colors',
-              !collapsed && 'border-b border-indigo-500/20'
+              'w-full flex items-center gap-2 bg-info/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-info-foreground hover:bg-info/15 transition-colors',
+              !collapsed && 'border-b border-info/20'
             )}
           >
             <HelpCircle className="size-3 shrink-0" />
@@ -970,7 +970,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                 done/denied in non-interactive print mode, which would render a
                 red X next to "Question" while the user is still picking. */}
             {collapsed && (
-              <span className="flex-1 min-w-0 truncate normal-case font-normal text-indigo-700/80 dark:text-indigo-300/80">
+              <span className="flex-1 min-w-0 truncate normal-case font-normal text-info-foreground/80">
                 {locked && submittedText
                   ? submittedText.split('\n')[0]
                   : questions[0]?.question || ''}
@@ -988,10 +988,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
               const sel = selections.get(qi) ?? new Set<string>()
               const isOther = otherActive.has(qi)
               return (
-                <div
-                  key={qi}
-                  className={cn('px-3 py-2', qi > 0 && 'border-t border-indigo-500/10')}
-                >
+                <div key={qi} className={cn('px-3 py-2', qi > 0 && 'border-t border-info/10')}>
                   <div className="text-sm font-medium text-foreground mb-2">{q.question}</div>
                   <div className="grid gap-1.5">
                     {q.options.map((opt) => {
@@ -1005,8 +1002,8 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                           className={cn(
                             'text-left rounded-md border px-2.5 py-1.5 text-xs transition-colors',
                             active
-                              ? 'border-indigo-500 bg-indigo-500/15 text-foreground'
-                              : 'border-border/60 bg-background/60 hover:bg-indigo-500/5 hover:border-indigo-500/40',
+                              ? 'border-info bg-info/15 text-foreground'
+                              : 'border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40',
                             locked && 'opacity-60 cursor-not-allowed'
                           )}
                         >
@@ -1015,9 +1012,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                               className={cn(
                                 'mt-0.5 shrink-0 size-3.5 border flex items-center justify-center',
                                 q.multiSelect ? 'rounded-sm' : 'rounded-full',
-                                active
-                                  ? 'border-indigo-500 bg-indigo-500 text-white'
-                                  : 'border-border'
+                                active ? 'border-info bg-info text-info-contrast' : 'border-border'
                               )}
                               aria-hidden
                             >
@@ -1042,8 +1037,8 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                       className={cn(
                         'text-left rounded-md border px-2.5 py-1.5 text-xs transition-colors',
                         isOther
-                          ? 'border-indigo-500 bg-indigo-500/15 text-foreground'
-                          : 'border-dashed border-border/60 bg-background/60 hover:bg-indigo-500/5 hover:border-indigo-500/40',
+                          ? 'border-info bg-info/15 text-foreground'
+                          : 'border-dashed border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40',
                         locked && 'opacity-60 cursor-not-allowed'
                       )}
                     >
@@ -1051,7 +1046,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                         <span
                           className={cn(
                             'shrink-0 size-3.5 rounded-full border flex items-center justify-center',
-                            isOther ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-border'
+                            isOther ? 'border-info bg-info text-info-contrast' : 'border-border'
                           )}
                           aria-hidden
                         >
@@ -1073,7 +1068,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                           }
                         }}
                         placeholder="Type your answer…"
-                        className="w-full rounded-md border border-input bg-input/30 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500"
+                        className="w-full rounded-md border border-input bg-input/30 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-info"
                         rows={2}
                       />
                     )}
@@ -1082,7 +1077,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
               )
             })}
           {!collapsed && questions.length > 0 && (
-            <div className="border-t border-indigo-500/20 bg-indigo-500/10 px-3 py-2 flex items-center gap-2">
+            <div className="border-t border-info/20 bg-info/10 px-3 py-2 flex items-center gap-2">
               {locked ? (
                 <span className="flex-1 text-xs text-muted-foreground whitespace-pre-wrap">
                   {submittedText ?? 'Answered.'}
@@ -1116,7 +1111,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
                     className={cn(
                       'shrink-0 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
                       canSubmit && canRespond
-                        ? 'border-indigo-500/40 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-900 dark:text-indigo-100'
+                        ? 'border-info/40 bg-info/20 hover:bg-info/30 text-info-foreground'
                         : 'border-border/40 bg-muted/30 text-muted-foreground cursor-not-allowed'
                     )}
                   >
@@ -1183,11 +1178,11 @@ export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
   return (
     <div className="pl-4 pr-4 py-3">
       <div className="group flex gap-3 items-start">
-        <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-sm">
+        <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-warning to-warning-emphasis flex items-center justify-center text-warning-contrast shadow-sm">
           <ClipboardList className="size-3.5" />
         </div>
-        <div className="min-w-0 flex-1 rounded-lg border border-amber-500/40 bg-amber-500/5 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+        <div className="min-w-0 flex-1 rounded-lg border border-warning/40 bg-warning/5 shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-warning-foreground">
             <ClipboardList className="size-3" />
             <span>Plan</span>
             <span className="ml-auto">
@@ -1200,7 +1195,7 @@ export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
             </div>
           )}
           {showApproveFooter && (
-            <div className="border-t border-amber-500/20 bg-amber-500/10 px-3 py-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
+            <div className="border-t border-warning/20 bg-warning/10 px-3 py-2 flex items-center gap-2 text-xs text-warning-foreground">
               <span className="flex-1">Approve plan?</span>
               <button
                 onClick={() => {
@@ -1221,7 +1216,7 @@ export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
                     }
                     sendMessage?.(PLAN_APPROVED_MARKER)
                   }}
-                  className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/20 hover:bg-amber-500/30 px-2 py-1 font-medium text-amber-900 dark:text-amber-200 transition-colors"
+                  className="shrink-0 rounded-md border border-warning/40 bg-warning/20 hover:bg-warning/30 px-2 py-1 font-medium text-warning-foreground transition-colors"
                 >
                   Approve & exit plan
                 </button>
@@ -1318,7 +1313,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <ApiRetryBanner key={key} item={item} />
     case 'rate-limit':
       return item.status === 'allowed' ? null : (
-        <div key={key} className="mx-4 my-1 text-[11px] text-amber-600">
+        <div key={key} className="mx-4 my-1 text-[11px] text-warning-foreground">
           rate limit: {item.status}
         </div>
       )

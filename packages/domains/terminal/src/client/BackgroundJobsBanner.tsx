@@ -25,15 +25,19 @@ const STATUS_LABELS: Record<BgShellStatus, string> = {
 }
 
 const STATUS_DOT_COLORS: Record<BgShellStatus, string> = {
-  pending: 'bg-blue-500',
-  running: 'bg-yellow-500',
-  completed: 'bg-green-500',
+  pending: 'bg-info',
+  running: 'bg-warning',
+  completed: 'bg-success',
   killed: 'bg-muted-foreground',
-  failed: 'bg-red-500',
-  unknown: 'bg-orange-500'
+  failed: 'bg-destructive',
+  unknown: 'bg-warning-emphasis'
 }
 
 const ACTIVE_STATUSES = new Set<BgShellStatus>(['pending', 'running'])
+
+/** The warning tone at `pct`% opacity, for the banner's glow. */
+const glow = (pct: number): string =>
+  `color-mix(in oklab, var(--color-warning) ${pct}%, transparent)`
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s
@@ -81,19 +85,19 @@ export function BackgroundJobsBanner({
   return (
     <div
       className={`${floating ? 'absolute top-6 right-6 z-10 ' : ''}w-72 rounded-xl border-2 ${
-        headerActive ? 'border-yellow-500/60' : 'border-border'
+        headerActive ? 'border-warning/60' : 'border-border'
       } bg-surface-1 backdrop-blur-md text-xs overflow-hidden transition-all duration-300`}
       style={{
         boxShadow: headerActive
-          ? '0 0 20px 0 rgba(234,179,8,0.35), 0 0 60px 0 rgba(234,179,8,0.12)'
-          : '0 4px 20px 0 rgba(234,179,8,0.06), 0 0 15px 2px rgba(234,179,8,0.06)'
+          ? `0 0 20px 0 ${glow(35)}, 0 0 60px 0 ${glow(12)}`
+          : `0 4px 20px 0 ${glow(6)}, 0 0 15px 2px ${glow(6)}`
       }}
     >
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
         className={`w-full flex items-center justify-between px-3 py-2 border-b ${
-          headerActive ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-border'
+          headerActive ? 'border-warning/20 bg-warning/5' : 'border-border'
         } hover:bg-muted/30 transition-colors`}
         aria-expanded={!collapsed}
       >

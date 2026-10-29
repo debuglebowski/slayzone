@@ -105,7 +105,7 @@ export function ChatTimeline({
     <>
       {/* Header: mode pill + (override notice if explicitly passed by parent) */}
       {overrideNotice && (
-        <div className="px-4 py-2 text-xs bg-amber-500/10 border-b border-amber-500/30 text-amber-800 dark:text-amber-300">
+        <div className="px-4 py-2 text-xs bg-warning/10 border-b border-warning/30 text-warning-foreground">
           {overrideNotice}
         </div>
       )}
@@ -250,7 +250,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center px-6 text-center">
       <div className="h-[30%] shrink-0" />
-      <div className="size-12 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white shadow-lg mb-4">
+      <div className="size-12 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-lg mb-4">
         <Sparkles className="size-5" />
       </div>
       <div className="text-base font-medium">Chat with Claude Code</div>
@@ -275,7 +275,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
 function TypingIndicator({ label }: { label?: string | null }) {
   return (
     <div className="px-4 py-2 flex gap-3 items-center">
-      <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+      <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
         <Sparkles className="size-3.5 animate-pulse" />
       </div>
       <div className="flex gap-1 px-3 py-2 rounded-2xl bg-muted/40">

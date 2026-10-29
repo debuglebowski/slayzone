@@ -26,7 +26,7 @@ export function HighlightedText({ text }: { text: string }) {
     if (at < 0) break
     if (at > cursor) out.push(<React.Fragment key={key++}>{text.slice(cursor, at)}</React.Fragment>)
     out.push(
-      <mark key={key++} className="bg-amber-300/60 text-foreground rounded-sm px-0.5">
+      <mark key={key++} className="bg-search-match text-search-match-foreground rounded-sm px-0.5">
         {text.slice(at, at + needle.length)}
       </mark>
     )

@@ -17,7 +17,8 @@ export function renderContent(
 
   if (!hasSpans && !hasHl) return <span className={ws}>{content}</span>
 
-  const highlightClass = type === 'add' ? 'bg-green-500/40 rounded-sm' : 'bg-red-500/40 rounded-sm'
+  const highlightClass =
+    type === 'add' ? 'bg-diff-added/40 rounded-sm' : 'bg-diff-removed/40 rounded-sm'
 
   // Build sorted unique boundaries
   const b = new Set<number>([0, content.length])
@@ -109,8 +110,8 @@ export const UnifiedLine = memo(function UnifiedLine({
     <div
       className={cn(
         'flex w-full border-l-[3px] border-l-transparent',
-        line.type === 'add' && 'bg-green-500/10 border-l-green-500',
-        line.type === 'delete' && 'bg-red-500/10 border-l-red-500'
+        line.type === 'add' && 'bg-diff-added/10 border-l-diff-added',
+        line.type === 'delete' && 'bg-diff-removed/10 border-l-diff-removed'
       )}
     >
       <span className="w-10 shrink-0 text-right pr-1.5 text-muted-foreground/50 select-none border-r border-border/30 tabular-nums">
@@ -125,8 +126,8 @@ export const UnifiedLine = memo(function UnifiedLine({
       <span
         className={cn(
           wrap ? 'min-w-0 flex-1' : 'shrink-0',
-          line.type === 'add' && 'text-green-700 dark:text-green-400',
-          line.type === 'delete' && 'text-red-700 dark:text-red-400'
+          line.type === 'add' && 'text-diff-added-foreground',
+          line.type === 'delete' && 'text-diff-removed-foreground'
         )}
       >
         {renderContent(line.content, line.type, wrap, spans, line.highlights)}
@@ -162,8 +163,8 @@ export const SbsHalf = memo(function SbsHalf({
     <div
       className={cn(
         'flex w-full border-l-[3px] border-l-transparent',
-        isAdd && 'bg-green-500/10 border-l-green-500',
-        isDel && 'bg-red-500/10 border-l-red-500'
+        isAdd && 'bg-diff-added/10 border-l-diff-added',
+        isDel && 'bg-diff-removed/10 border-l-diff-removed'
       )}
     >
       <span className="w-10 shrink-0 text-right pr-1.5 text-muted-foreground/50 select-none border-r border-border/30 tabular-nums">
@@ -175,8 +176,8 @@ export const SbsHalf = memo(function SbsHalf({
       <span
         className={cn(
           wrap ? 'min-w-0 flex-1' : 'shrink-0',
-          isAdd && 'text-green-700 dark:text-green-400',
-          isDel && 'text-red-700 dark:text-red-400'
+          isAdd && 'text-diff-added-foreground',
+          isDel && 'text-diff-removed-foreground'
         )}
       >
         {renderContent(line.content, line.type, wrap, spans, line.highlights)}

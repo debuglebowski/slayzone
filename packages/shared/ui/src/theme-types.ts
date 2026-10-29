@@ -37,6 +37,37 @@ export interface ChromeColors {
   surface3: string
   modal: string
   modalBorder: string
+  /**
+   * Status tones. Each tone T has four roles:
+   * - `T` — the tone: icons, status dots, solid fills, base for borders/tints (`border-T/40`, `bg-T/10`)
+   * - `TForeground` — tone-coloured text, readable on surfaces and on the tone's own tints
+   * - `TEmphasis` — deeper partner: gradient end stops (`from-T to-T-emphasis`), hover on solid
+   * - `TContrast` — icon/text drawn on a solid `bg-T` or the `T → T-emphasis` gradient
+   */
+  success: string
+  successForeground: string
+  successEmphasis: string
+  successContrast: string
+  /** Attention / caution: retries, interruptions, denied tools, awaiting approval. */
+  warning: string
+  warningForeground: string
+  warningEmphasis: string
+  warningContrast: string
+  /** Informational / input wanted (e.g. a question for the user). */
+  info: string
+  infoForeground: string
+  infoEmphasis: string
+  infoContrast: string
+  /** The AI agent's identity colour (avatars, agent activity), provider-neutral. */
+  agent: string
+  agentForeground: string
+  agentEmphasis: string
+  agentContrast: string
+  /** Diff lines: tone for line tints, gutters and word highlights; foreground for line text. */
+  diffAdded: string
+  diffAddedForeground: string
+  diffRemoved: string
+  diffRemovedForeground: string
 }
 
 /** Structural mirror of xterm.js ITheme — no @xterm/xterm dependency */

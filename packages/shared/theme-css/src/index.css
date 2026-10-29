@@ -127,6 +127,26 @@
   --color-search-match-foreground: var(--search-match-foreground);
   --color-search-match-active: var(--search-match-active);
   --color-search-match-active-foreground: var(--search-match-active-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-emphasis: var(--success-emphasis);
+  --color-success-contrast: var(--success-contrast);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-emphasis: var(--warning-emphasis);
+  --color-warning-contrast: var(--warning-contrast);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-emphasis: var(--info-emphasis);
+  --color-info-contrast: var(--info-contrast);
+  --color-agent: var(--agent);
+  --color-agent-foreground: var(--agent-foreground);
+  --color-agent-emphasis: var(--agent-emphasis);
+  --color-agent-contrast: var(--agent-contrast);
+  --color-diff-added: var(--diff-added);
+  --color-diff-added-foreground: var(--diff-added-foreground);
+  --color-diff-removed: var(--diff-removed);
+  --color-diff-removed-foreground: var(--diff-removed-foreground);
 
   --animate-collapsible-down: collapsible-down 0.15s ease-out;
   --animate-collapsible-up: collapsible-up 0.15s ease-out;
@@ -189,6 +209,27 @@
   --search-match-foreground: oklch(0.18 0.05 85);
   --search-match-active: oklch(0.78 0.19 55);
   --search-match-active-foreground: oklch(0.15 0 0);
+  /* Status + diff tones: the default (slay) theme's values until a theme is applied. */
+  --success: oklch(69.6% 0.17 162.48);
+  --success-foreground: oklch(50.8% 0.118 165.612);
+  --success-emphasis: oklch(59.6% 0.145 163.225);
+  --success-contrast: #ffffff;
+  --warning: oklch(76.9% 0.188 70.08);
+  --warning-foreground: oklch(55.5% 0.163 48.998);
+  --warning-emphasis: oklch(64.6% 0.222 41.116);
+  --warning-contrast: #ffffff;
+  --info: oklch(58.5% 0.233 277.117);
+  --info-foreground: oklch(45.7% 0.24 277.023);
+  --info-emphasis: oklch(54.1% 0.281 293.009);
+  --info-contrast: #ffffff;
+  --agent: oklch(60.6% 0.25 292.717);
+  --agent-foreground: oklch(49.1% 0.27 292.581);
+  --agent-emphasis: oklch(51.1% 0.262 276.966);
+  --agent-contrast: #ffffff;
+  --diff-added: oklch(72.3% 0.219 149.579);
+  --diff-added-foreground: oklch(52.7% 0.154 150.069);
+  --diff-removed: oklch(63.7% 0.237 25.331);
+  --diff-removed-foreground: oklch(50.5% 0.213 27.518);
 }
 
 .dark {
@@ -234,6 +275,26 @@
   --search-match-foreground: oklch(0.96 0 0);
   --search-match-active: oklch(0.68 0.2 55);
   --search-match-active-foreground: oklch(0.15 0 0);
+  --success: oklch(69.6% 0.17 162.48);
+  --success-foreground: oklch(76.5% 0.177 163.223);
+  --success-emphasis: oklch(59.6% 0.145 163.225);
+  --success-contrast: #ffffff;
+  --warning: oklch(76.9% 0.188 70.08);
+  --warning-foreground: oklch(87.9% 0.169 91.605);
+  --warning-emphasis: oklch(64.6% 0.222 41.116);
+  --warning-contrast: #ffffff;
+  --info: oklch(58.5% 0.233 277.117);
+  --info-foreground: oklch(78.5% 0.115 274.713);
+  --info-emphasis: oklch(54.1% 0.281 293.009);
+  --info-contrast: #ffffff;
+  --agent: oklch(60.6% 0.25 292.717);
+  --agent-foreground: oklch(81.1% 0.111 293.571);
+  --agent-emphasis: oklch(51.1% 0.262 276.966);
+  --agent-contrast: #ffffff;
+  --diff-added: oklch(72.3% 0.219 149.579);
+  --diff-added-foreground: oklch(79.2% 0.209 151.711);
+  --diff-removed: oklch(63.7% 0.237 25.331);
+  --diff-removed-foreground: oklch(70.4% 0.191 22.216);
 }
 
 [data-sonner-toaster][dir='ltr'] {
