@@ -371,6 +371,32 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  it('overlays SLAYZONE_HUB_ADDRESS with the hub this connection dials', async () => {
+    // `slay` inside a task terminal must talk to the hub that spawned it, never to
+    // whatever `slay hub use/login` stored on this machine. The computer is the one
+    // side that knows how THIS box reaches that hub (it dials it), so it sets the
+    // address — overriding anything the hub sent, which is the hub's own view.
+    const { ctx } = makeCtx()
+    let out = ''
+    const dialer: ComputerDialer = {
+      notify: (method, params) => {
+        if (method === 'pty.data') out += (params as { data: string }).data
+        return true
+      }
+    }
+    const pty = createPtyHandlers({ ...ctx, dialer, hubAddress: '127.0.0.1:51101' })
+    await pty.handlers['pty.spawn']({
+      sessionId: 'hub-address',
+      command: 'sh',
+      args: ['-c', 'echo ADDR=[$SLAYZONE_HUB_ADDRESS]'],
+      cwd: process.cwd(),
+      env: { SLAYZONE_HUB_ADDRESS: 'hub-view.example:9', SLAYZONE_TASK_ID: 'task-1' }
+    })
+    await waitFor(() => out.includes('ADDR='))
+    expect(out).toContain('ADDR=[127.0.0.1:51101]')
+    pty.disposeAll()
+  })
+
   it('sanitizes the inherited process.env base: strips infra/secret/identity + non-prefixed infra, keeps PATH', async () => {
     // The computer inherits its parent (supervisor) process.env, which carries
     // SlayZone infra/secret/identity vars. NONE of those may leak into a spawned

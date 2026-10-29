@@ -41,11 +41,15 @@ import {
   type ServiceBackend
 } from '@slayzone/platform/service-unit'
 import {
+  getBreakGlassSessionPath,
   getHubConfigPath,
+  isTaskTerminal,
   normalizeHubUrl,
   removeHubConfig,
-  resolveHubTarget,
-  writeHubConfig
+  resolveHubCommandTarget,
+  resolveTaskCommandTarget,
+  writeHubConfig,
+  type ResolvedHubTarget
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import { deviceSignIn, postAuthJson, readSignInMethods, signedInEmail } from '../hub-sign-in'
@@ -651,6 +655,53 @@ function hubUsersCommand(): Command {
   return users
 }
 
+/**
+ * After `hub use` / `hub login`: say what the stored target now covers, when that is
+ * not simply "every command".
+ */
+function noteStoredTargetScope(): void {
+  if (isTaskTerminal()) {
+    console.error(
+      'Note: this is a task terminal. Task commands here (tasks, artifacts, pty, …) keep\n' +
+        'going to the hub that spawned it; hub commands (hub users, hub computers,\n' +
+        'computer mint) use this target. `slay hub current` shows both.'
+    )
+  } else if (process.env.SLAYZONE_HUB_ADDRESS) {
+    console.error('Note: SLAYZONE_HUB_ADDRESS is set and takes precedence over this config.')
+  }
+}
+
+/** Where a resolved target came from, for `slay hub current`. */
+function describeTargetSource(target: ResolvedHubTarget): string {
+  switch (target.source) {
+    case 'flag':
+      return '--hub'
+    case 'break-glass':
+      return `break-glass session, ${getBreakGlassSessionPath()}`
+    case 'env':
+      return isTaskTerminal()
+        ? 'SLAYZONE_HUB_ADDRESS (the hub that spawned this task terminal)'
+        : 'SLAYZONE_HUB_ADDRESS env'
+    case 'file':
+      return `${getHubConfigPath()} (slay hub use / login)`
+  }
+}
+
+/** `GET /health` on a target, as one `Health: …` line. */
+async function probeHealth(target: ResolvedHubTarget): Promise<{ ok: boolean; line: string }> {
+  try {
+    const res = await fetch(`${target.baseUrl}/health`, {
+      headers: target.token ? { Authorization: `Bearer ${target.token}` } : {},
+      signal: AbortSignal.timeout(5000)
+    })
+    return res.ok
+      ? { ok: true, line: `Health: ok (HTTP ${res.status})` }
+      : { ok: false, line: `Health: failed (HTTP ${res.status})` }
+  } catch {
+    return { ok: false, line: `Health: unreachable (could not connect to ${target.baseUrl})` }
+  }
+}
+
 export function hubCommand(): Command {
   const cmd = new Command('hub')
     .description('Run, list and target SlayZone hubs')
@@ -1168,9 +1219,7 @@ export function hubCommand(): Command {
       const configPath = writeHubConfig(url, opts.token ?? null)
       console.log(`Now targeting: ${url}`)
       console.log(`Config written: ${configPath}`)
-      if (process.env.SLAYZONE_HUB_ADDRESS) {
-        console.error('Note: SLAYZONE_HUB_ADDRESS is set and takes precedence over this config.')
-      }
+      noteStoredTargetScope()
     })
 
   // slay hub login <url>
@@ -1233,6 +1282,7 @@ export function hubCommand(): Command {
         const configPath = writeHubConfig(url, token)
         console.log(`Signed in to ${url} as ${who}.`)
         console.log(`Token stored: ${configPath}`)
+        noteStoredTargetScope()
         if (process.env.SLAYZONE_HUB_TOKEN) {
           console.error(
             'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this config.'
@@ -1242,39 +1292,47 @@ export function hubCommand(): Command {
     )
 
   // slay hub current
+  //
+  // Two answers, because there are two kinds of command (hub-config.ts): in a task
+  // terminal, task commands go to the hub that spawned it while hub commands go to
+  // the stored target. Showing one would hide the other — which is how a remote
+  // sign-in once retargeted every agent toolbox on a machine without anyone seeing.
   cmd
     .command('current')
-    .description('Show which hub this CLI targets, and probe it')
+    .description('Show which hub task commands and hub commands target, and probe them')
     .action(async () => {
-      const target = resolveHubTarget()
-      if (!target) {
-        console.log('No hub configured — using the local app.')
-        return
-      }
-      const source = process.env.SLAYZONE_HUB_ADDRESS
-        ? 'SLAYZONE_HUB_ADDRESS env'
-        : getHubConfigPath()
-      console.log(`Hub:    ${target.baseUrl}`)
-      console.log(`Source: ${source}`)
-      console.log(`Token:  ${target.token ? 'set' : 'not set'}`)
-      try {
-        const headers: Record<string, string> = target.token
-          ? { Authorization: `Bearer ${target.token}` }
-          : {}
-        const res = await fetch(`${target.baseUrl}/health`, {
-          headers,
-          signal: AbortSignal.timeout(5000)
-        })
-        if (res.ok) {
-          console.log(`Health: ok (HTTP ${res.status})`)
-        } else {
-          console.error(`Health: failed (HTTP ${res.status})`)
-          process.exit(1)
+      const probes = new Map<string, Promise<{ ok: boolean; line: string }>>()
+      let healthy = true
+      const blocks: Array<[string, ResolvedHubTarget | null, string]> = [
+        [
+          'Task commands (tasks, artifacts, pty, …)',
+          resolveTaskCommandTarget(),
+          'the local app (no hub configured)'
+        ],
+        [
+          'Hub commands (hub users, hub computers, computer mint)',
+          resolveHubCommandTarget(),
+          'none configured: the one hub running on this machine, if exactly one is'
+        ]
+      ]
+      for (const [label, target, none] of blocks) {
+        console.log(`${label}:`)
+        if (!target) {
+          console.log(`  Hub:    ${none}`)
+          continue
         }
-      } catch {
-        console.error(`Health: unreachable (could not connect to ${target.baseUrl})`)
-        process.exit(1)
+        console.log(`  Hub:    ${target.baseUrl}`)
+        console.log(`  Source: ${describeTargetSource(target)}`)
+        console.log(`  Token:  ${target.token ? 'set' : 'not set'}`)
+        // One probe per distinct target: both blocks usually name the same one.
+        const key = `${target.baseUrl}\n${target.token ?? ''}`
+        if (!probes.has(key)) probes.set(key, probeHealth(target))
+        const result = await probes.get(key)!
+        if (result.ok) console.log(`  ${result.line}`)
+        else console.error(`  ${result.line}`)
+        healthy &&= result.ok
       }
+      if (!healthy) process.exit(1)
     })
 
   // slay hub forget
@@ -1284,7 +1342,8 @@ export function hubCommand(): Command {
     .action(() => {
       const removed = removeHubConfig()
       console.log(removed ? `Removed: ${getHubConfigPath()}` : 'No hub target to remove.')
-      if (process.env.SLAYZONE_HUB_ADDRESS) {
+      // In a task terminal the address is the spawning hub's, and expected.
+      if (process.env.SLAYZONE_HUB_ADDRESS && !isTaskTerminal()) {
         console.error('Note: SLAYZONE_HUB_ADDRESS is still set in the environment.')
       }
     })

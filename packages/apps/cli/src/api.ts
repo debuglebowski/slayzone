@@ -1,6 +1,6 @@
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
 import { probeFixedPort } from './local-hub'
-import { resolveHubTarget } from './hub-config'
+import { isTaskTerminal, resolveTaskCommandTarget } from './hub-config'
 
 interface ApiTarget {
   baseUrl: string
@@ -9,7 +9,8 @@ interface ApiTarget {
 }
 
 /**
- * Hub when configured (env or cli-hub-target.json), otherwise the local app.
+ * Hub when configured (`--hub`, env, or — outside a task terminal — the stored
+ * target; see hub-config.ts), otherwise the local app.
  *
  * Both channels are DB-free. An explicitly configured hub is read from env/file;
  * the local app is found by probing its fixed per-channel port — one loopback
@@ -22,8 +23,20 @@ interface ApiTarget {
  * their command to the wrong data.
  */
 async function resolveTarget(): Promise<ApiTarget> {
-  const hub = resolveHubTarget()
+  const hub = resolveTaskCommandTarget()
   if (hub) return { baseUrl: hub.baseUrl, token: hub.token, hub: true }
+  // A task terminal with no address belongs to the app whose root it names, and the
+  // probe below checks exactly that. With no root either, nothing can tell the app
+  // that spawned it from any other: refuse rather than act on a guess. (Every app
+  // that spawns task terminals sets SLAYZONE_ROOT; this is a terminal that lost it.)
+  if (isTaskTerminal() && !process.env.SLAYZONE_ROOT?.trim()) {
+    console.error(
+      'This is a task terminal (SLAYZONE_TASK_ID is set), but it does not say which app\n' +
+        'spawned it: neither SLAYZONE_HUB_ADDRESS nor SLAYZONE_ROOT is set. Refusing to guess.\n' +
+        'Open a new terminal from the app, or name the hub with `slay --hub <name|port>`.'
+    )
+    process.exit(1)
+  }
   const probe = await probeFixedPort()
   if (probe.kind === 'foreign') {
     // Same rule as the configured-hub case above, applied to the probe: a hub

@@ -32,6 +32,7 @@ import {
   computerShutdownParamsSchema,
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
+import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import {
   getComputerConfigFilePath,
   loadComputerConfigFile
@@ -99,6 +100,9 @@ export interface HubRequestHandlerDeps {
   /** Computer loopback agent-hook URL — overlaid into every spawned agent's env
    *  (see HandlerContext.agentHookUrl). Absent → env passthrough (tests). */
   agentHookUrl?: string
+  /** The authority this hub connection dials — overlaid as `SLAYZONE_HUB_ADDRESS`
+   *  into everything spawned for it (see HandlerContext.hubAddress). */
+  hubAddress?: string
   /**
    * Where this computer keeps each project on disk. Read lazily: the map comes
    * from a file and the dispatch table is built synchronously, so the handlers
@@ -154,7 +158,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     dialer: deps.dialer,
     config: deps.config,
     log,
-    ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {})
+    ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {}),
+    ...(deps.hubAddress ? { hubAddress: deps.hubAddress } : {})
   }
 
   const pty = createPtyHandlers(
@@ -361,6 +366,8 @@ export function startComputer(
       (isPrimary ? deps.credentialStore : undefined) ??
       createFileCredentialStore(hubHostFromUrl(hubUrl))
 
+    // How this box reaches the hub — what `slay` in its terminals must dial too.
+    const hubAddress = hubAddrFromUrl(hubUrl)
     let dispatch: HubRequestDispatch
     const dialer = new HubDialer({
       url: hubUrl,
@@ -397,6 +404,8 @@ export function startComputer(
       admission,
       requestLog,
       hubHost: hubHostFromUrl(hubUrl),
+      // Per hub, like the hook relay: a pty THIS hub asked for belongs to it.
+      ...(hubAddress ? { hubAddress } : {}),
       ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
     })
 

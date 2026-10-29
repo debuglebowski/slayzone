@@ -108,6 +108,31 @@ export function hubUrlFromAddr(addr: string, kind: 'ws' | 'http', path = ''): st
 }
 
 /**
+ * The hub authority (`host[:port]`) of a hub URL — the inverse of
+ * {@link hubUrlFromAddr}, for handing a URL-shaped address down an env channel that
+ * carries authority only.
+ *
+ * The answer must re-compose to the SAME endpoint, so a URL whose scheme is not the
+ * one A1 derives from its host (e.g. `ws://hub.lan:8080`, which a reader would dial
+ * as `https://hub.lan:8080`) yields null, as does anything that is not an http(s) or
+ * ws(s) URL, or that carries userinfo. The path is dropped: an authority cannot
+ * express one (same limit as {@link hubUrlFromAddr}). A port equal to the scheme's
+ * default stays implicit, exactly as A1 composes it.
+ */
+export function hubAddrFromUrl(url: string): string | null {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return null
+  }
+  if (!['ws:', 'wss:', 'http:', 'https:'].includes(u.protocol)) return null
+  const kind = u.protocol === 'ws:' || u.protocol === 'wss:' ? 'ws' : 'http'
+  if (u.username !== '' || u.password !== '' || !isBareAuthority(u.host)) return null
+  return new URL(hubUrlFromAddr(u.host, kind)).protocol === u.protocol ? u.host : null
+}
+
+/**
  * True when `addr` is a bare hub AUTHORITY — `host` or `host:port`, with NO
  * scheme (`://`), NO path (`/`), no userinfo and no whitespace.
  *

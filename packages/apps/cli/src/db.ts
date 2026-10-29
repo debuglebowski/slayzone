@@ -22,7 +22,7 @@
 import http from 'node:http'
 import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
 import { findHub } from '@slayzone/platform/hub-discovery'
-import { resolveHubTarget, type HubTarget } from './hub-config'
+import { resolveTaskCommandTarget, type HubTarget } from './hub-config'
 import { probeFixedPort } from './local-hub'
 export { resolveProjectArg } from './db-helpers.mjs'
 
@@ -76,7 +76,7 @@ async function postHubNotify(hub: HubTarget, timeoutMs = 3000): Promise<boolean>
 }
 
 export async function notifyApp(): Promise<void> {
-  const hub = resolveHubTarget()
+  const hub = resolveTaskCommandTarget()
   if (hub) {
     const ok = await postHubNotify(hub)
     if (!ok) {

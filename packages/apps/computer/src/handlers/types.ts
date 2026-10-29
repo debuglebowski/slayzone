@@ -32,6 +32,16 @@ export interface HandlerContext {
    * pre-init) → the env is passed through unchanged.
    */
   agentHookUrl?: string
+  /**
+   * The authority (`host[:port]`) THIS hub connection dials. When set, the pty and
+   * proc handlers OVERLAY `SLAYZONE_HUB_ADDRESS` with it in every process they spawn,
+   * so `slay` there talks to the hub that spawned it — never to a hub that
+   * `slay hub use` / `hub login` stored on this machine. Set here, not by the hub:
+   * only this side knows how this box reaches the hub (loopback for the desktop's
+   * own computer, the public address for a cloud one). Absent (tests, or a dial url
+   * with no authority form) → whatever the hub sent is passed through.
+   */
+  hubAddress?: string
 }
 
 /** A single hub→computer method handler. Params are validated inside. */

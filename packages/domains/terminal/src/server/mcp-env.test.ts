@@ -32,7 +32,9 @@ const HUB_ENV_KEYS = ['SLAYZONE_HUB_ADDRESS', ...RETIRED_HUB_ENV_KEYS] as const
  * No hub dial env AT ALL — the REMOTE invariant.
  *
  * A remote spawn runs on someone else's computer box, so handing it the hub's
- * address is a leak; the computer already owns its own relay. Unchanged.
+ * address is a leak; the computer already owns its own relay. Unchanged. The
+ * computer sets `SLAYZONE_HUB_ADDRESS` itself — how ITS box reaches this hub
+ * (apps/computer handlers/spawn-env.ts, pinned in handlers/pty.test.ts).
  */
 function assertNoHubEnv(env: Env, where: string): void {
   for (const key of HUB_ENV_KEYS) {

@@ -1,5 +1,5 @@
 /**
- * CLI hub plumbing tests — resolveHubTarget precedence, cli-hub-target.json perms,
+ * CLI hub plumbing tests — resolveTaskCommandTarget precedence, cli-hub-target.json perms,
  * Authorization header injection, legacy fallback.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/hub.test.ts
@@ -15,7 +15,7 @@ import {
   getHubConfigPath,
   normalizeHubUrl,
   removeHubConfig,
-  resolveHubTarget,
+  resolveTaskCommandTarget,
   writeHubConfig,
   type HubTarget
 } from '../src/hub-config'
@@ -25,6 +25,8 @@ import { notifyApp } from '../src/db'
 // --- env + fs scaffolding -------------------------------------------------
 
 const ENV_KEYS = [
+  'HOME',
+  'SLAYZONE_TASK_ID',
   'SLAYZONE_HUB_ADDRESS',
   'SLAYZONE_HUB_TOKEN',
   'SLAYZONE_ROOT',
@@ -37,19 +39,25 @@ for (const k of ENV_KEYS) {
   if (process.env[k] !== undefined) savedEnv[k] = process.env[k]
 }
 
-/** Reset all hub-relevant env vars, then apply the given overrides. */
-function setEnv(vars: Partial<Record<EnvKey, string>>): void {
-  for (const k of ENV_KEYS) {
-    if (vars[k] === undefined) delete process.env[k]
-    else process.env[k] = vars[k]
-  }
-}
-
 const tmpDirs: string[] = []
 function freshStateDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-hub-test-'))
   tmpDirs.push(dir)
   return dir
+}
+
+// The stored hub target lives under `$HOME/.slayzone/cli`: point HOME at a temp dir so
+// these tests never read — or write and then delete — the developer's real one.
+const testHome = freshStateDir()
+
+/** Reset all hub-relevant env vars, then apply the given overrides. A plain shell:
+ *  no SLAYZONE_TASK_ID unless a test sets one. */
+function setEnv(vars: Partial<Record<Exclude<EnvKey, 'HOME'>, string>>): void {
+  for (const k of ENV_KEYS) {
+    const v = k === 'HOME' ? testHome : vars[k]
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
 }
 
 interface SeenRequest {
@@ -117,10 +125,10 @@ describe('normalizeHubUrl', () => {
   })
 })
 
-describe('resolveHubTarget precedence', () => {
+describe('resolveTaskCommandTarget precedence', () => {
   test('returns null when no env and no file (legacy)', () => {
     setEnv({ SLAYZONE_ROOT: freshStateDir() })
-    expect(resolveHubTarget()).toBeNull()
+    expect(resolveTaskCommandTarget()).toBeNull()
   })
 
   test('env ADDRESS wins over file; file token does not leak to env target', () => {
@@ -132,7 +140,7 @@ describe('resolveHubTarget precedence', () => {
       SLAYZONE_ROOT: dir,
       SLAYZONE_HUB_ADDRESS: 'env.example.com:9999'
     })
-    const target = resolveHubTarget()
+    const target = resolveTaskCommandTarget()
     expect(target?.baseUrl).toBe('https://env.example.com:9999')
     expect(target?.token).toBeNull()
   })
@@ -143,7 +151,7 @@ describe('resolveHubTarget precedence', () => {
       SLAYZONE_HUB_ADDRESS: 'env.example.com',
       SLAYZONE_HUB_TOKEN: 'env-token'
     })
-    const target = resolveHubTarget()
+    const target = resolveTaskCommandTarget()
     expect(target?.baseUrl).toBe('https://env.example.com')
     expect(target?.token).toBe('env-token')
   })
@@ -155,7 +163,7 @@ describe('resolveHubTarget precedence', () => {
       ['[::1]:51101', 'http://[::1]:51101']
     ] as const) {
       setEnv({ SLAYZONE_ROOT: freshStateDir(), SLAYZONE_HUB_ADDRESS: addr })
-      expect(resolveHubTarget()?.baseUrl).toBe(base)
+      expect(resolveTaskCommandTarget()?.baseUrl).toBe(base)
     }
   })
 
@@ -163,7 +171,7 @@ describe('resolveHubTarget precedence', () => {
     const dir = freshStateDir()
     setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
-    const target = resolveHubTarget()
+    const target = resolveTaskCommandTarget()
     expect(target?.baseUrl).toBe('http://file.example.com:1234')
     expect(target?.token).toBe('file-token')
   })
@@ -173,7 +181,7 @@ describe('resolveHubTarget precedence', () => {
     setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
     setEnv({ SLAYZONE_ROOT: dir, SLAYZONE_HUB_TOKEN: '' })
-    const target = resolveHubTarget()
+    const target = resolveTaskCommandTarget()
     expect(target?.baseUrl).toBe('http://file.example.com:1234')
     expect(target?.token).toBeNull()
   })
@@ -186,7 +194,7 @@ describe('resolveHubTarget precedence', () => {
     fs.writeFileSync(cfgPath, '"just a string"')
     let target: HubTarget | null | undefined
     const { exitCode, stderr } = captureAll(() => {
-      target = resolveHubTarget()
+      target = resolveTaskCommandTarget()
     })
     expect(target).toBeNull()
     expect(exitCode).toBeNull()
@@ -198,7 +206,7 @@ describe('resolveHubTarget precedence', () => {
     setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
     setEnv({ SLAYZONE_ROOT: dir, SLAYZONE_HUB_TOKEN: 'env-token' })
-    const target = resolveHubTarget()
+    const target = resolveTaskCommandTarget()
     expect(target?.baseUrl).toBe('http://file.example.com:1234')
     expect(target?.token).toBe('env-token')
   })
@@ -208,7 +216,7 @@ describe('resolveHubTarget precedence', () => {
     // double-scheme url that normalizeHubUrl rejects → hard exit.
     setEnv({ SLAYZONE_ROOT: freshStateDir(), SLAYZONE_HUB_ADDRESS: 'http://sneaky' })
     const { exitCode, stderr } = captureAll(() => {
-      resolveHubTarget()
+      resolveTaskCommandTarget()
     })
     expect(exitCode).toBe(1)
     expect(stderr.some((s) => s.includes('Invalid SLAYZONE_HUB_ADDRESS'))).toBe(true)
@@ -222,7 +230,7 @@ describe('resolveHubTarget precedence', () => {
     fs.writeFileSync(cfgPath, '{ not json')
     let target: HubTarget | null | undefined
     const { exitCode, stderr } = captureAll(() => {
-      target = resolveHubTarget()
+      target = resolveTaskCommandTarget()
     })
     expect(target).toBeNull()
     expect(exitCode).toBeNull()
@@ -237,7 +245,7 @@ describe('resolveHubTarget precedence', () => {
     fs.writeFileSync(cfgPath, JSON.stringify({ url: 'ftp://nope' }))
     let target: HubTarget | null | undefined
     const { exitCode, stderr } = captureAll(() => {
-      target = resolveHubTarget()
+      target = resolveTaskCommandTarget()
     })
     expect(target).toBeNull()
     expect(exitCode).toBeNull()

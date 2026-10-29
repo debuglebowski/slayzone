@@ -60,6 +60,20 @@ export function getHubTargetPath(): string {
 }
 
 /**
+ * The break-glass session for this channel (`break-glass.json` /
+ * `break-glass.dev.json`).
+ *
+ * Its own file, never the hub target: a break-glass session is short-lived and
+ * usually opened against a hub whose sign-in is down, so storing it as the hub target
+ * replaced whatever `slay hub use` / `hub login` had stored — and ending it deleted
+ * that target outright.
+ */
+export function getBreakGlassPath(): string {
+  const name = process.env.SLAYZONE_DEV === '1' ? 'break-glass.dev.json' : 'break-glass.json'
+  return path.join(getCliStateDir(), name)
+}
+
+/**
  * The npm prefix a `<kind>-runtime` bundle is installed into.
  *
  * Machine-level install cache, not per-hub: `slay hub start --root /a` and

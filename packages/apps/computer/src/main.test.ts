@@ -120,6 +120,37 @@ describe('createHubRequestHandler dispatch table', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  // Each hub connection hands its ptys the address it dials, so `slay` in a task
+  // terminal reaches the hub that spawned it (connectHub derives it from the hub url).
+  it('gives every pty it spawns the address of the hub this dispatch serves', async () => {
+    const root = realpathSync(tmpdir())
+    let out = ''
+    const { handle, dispose } = createHubRequestHandler({
+      shutdown: () => {},
+      dialer: {
+        notify: (method, params) => {
+          if (method === 'pty.data') out += (params as { data: string }).data
+          return true
+        }
+      },
+      config: { ...testConfig, allowedRoots: [root] },
+      hubAddress: 'slay.example.com'
+    })
+    await handle(
+      HubToComputerMethods.ptySpawn,
+      {
+        sessionId: 'hub-address-dispatch',
+        command: 'sh',
+        args: ['-c', 'echo ADDR=[$SLAYZONE_HUB_ADDRESS]'],
+        cwd: root,
+        env: {}
+      },
+      ACTOR
+    )
+    await vi.waitFor(() => expect(out).toContain('ADDR=[slay.example.com]'), { timeout: 8_000 })
+    dispose()
+  })
+
   // The login-shell PATH probe (~1s on a heavy zshrc) runs alongside enrollment.
   // git/gh/proc requests can need it; a pty starts the user's login shell, which
   // builds its own PATH — so terminals restore without waiting for the probe.

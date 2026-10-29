@@ -29,15 +29,15 @@ export interface RemoteMcpEnv {
   computerId: string
   /**
    * The hub's externally-reachable HTTP base URL (e.g. `https://hub:8443`), no
-   * trailing slash. The `slay` CLI inside the remote pty dials THIS to reach the
-   * hub's REST surface (loopback resolves on the computer machine, where no hub
-   * runs). The provider MUST return `null` rather than an empty/invalid base.
+   * trailing slash. The provider MUST return `null` rather than an empty/invalid
+   * base. Not written into the agent env: neither the hook nor `slay` dials it.
    *
-   * NOTE: the AGENT HOOK no longer uses this. The hook posts to the COMPUTER's own
-   * loopback `/api/agent-hook`, and the computer relays to the hub over its
-   * authenticated ws channel (so the agent env is byte-identical local vs
-   * remote and carries no per-agent hub bearer). This field remains only for the
-   * `slay` CLI's hub REST access.
+   * The AGENT HOOK posts to the COMPUTER's own loopback `/api/agent-hook`, and the
+   * computer relays to the hub over its authenticated ws channel (so the agent env
+   * is byte-identical local vs remote and carries no per-agent hub bearer). The
+   * `slay` CLI dials `SLAYZONE_HUB_ADDRESS`, which the COMPUTER also sets — the
+   * authority it dials this hub at (apps/computer handlers/spawn-env.ts) — because
+   * only that side knows how its box reaches the hub.
    */
   hubBaseUrl: string
 }
@@ -127,9 +127,11 @@ export async function resolveRemoteMcpEnv(
  *
  * `remote` (a task's pty routed to a computer) only suppresses the loopback hook
  * URL (the computer supplies it). It injects NO hub URL and NO bearer: the hook
- * posts to computer loopback, and the `slay` CLI reaches the hub via its own
- * `cli-hub-target.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
- * nothing about the local env changes.
+ * posts to computer loopback, and the computer overlays `SLAYZONE_HUB_ADDRESS` with
+ * the authority it dials this hub at, so `slay` reaches the hub that spawned it —
+ * never a hub `slay hub use` / `hub login` stored on that machine (see
+ * apps/cli/hub-config.ts). With no `remote` (the default) nothing about the local
+ * env changes.
  *
  * `SLAYZONE_HUB_ADDRESS` IS injected for a local spawn — this hub's own loopback
  * address. It is infra-scoped, so sanitizeSpawnEnv strips whatever the parent held
@@ -231,8 +233,8 @@ export async function buildMcpEnv(
     // Remote computer: the agent posts to the COMPUTER's own loopback /api/agent-hook
     // (the computer overlays SLAYZONE_AGENT_HOOK_URL at spawn and relays to the hub
     // over its ws channel). So we set NO hub URL, NO bearer, and NO hook URL here
-    // — the identity env is byte-identical to a local spawn. `remote.hubBaseUrl`
-    // is used only by the `slay` CLI's own cli-hub-target.json path, not the hook.
+    // — the identity env is byte-identical to a local spawn. Nor the hub address:
+    // the computer overlays SLAYZONE_HUB_ADDRESS with how ITS box reaches this hub.
     if (hookCapable) setHookIdentity()
     return env
   }

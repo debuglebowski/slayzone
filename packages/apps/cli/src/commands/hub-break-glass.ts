@@ -7,16 +7,25 @@
  * command to run on the hub machine with its CHALLENGE (base64url SHA-256 — a hash, so
  * Azure keeping the Run Command script and output reveals nothing usable), waits for the
  * operator to press Enter, then redeems: `POST /api/auth/break-glass { verifier }`. The
- * session token comes back and is stored exactly as `slay hub login` stores a bearer
- * (0600 `cli-hub-target.json`), so `slay hub users …` / `slay hub computers …` use it.
- * `end` ends the session early and forgets the token.
+ * session token comes back and is stored in a file of its own (0600
+ * `break-glass[.dev].json`), which hub commands — `slay hub users …` / `slay hub
+ * computers …` — use until it expires. It never touches the hub target `slay hub
+ * use` / `hub login` stored: a break-glass session is a detour, and ending it must
+ * leave things where they were. `end` ends the session early and forgets the token.
  *
  * @module cli/commands/hub-break-glass
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { Command } from 'commander'
-import { normalizeHubUrl, removeHubConfig, resolveHubTarget, writeHubConfig } from '../hub-config'
+import {
+  normalizeHubUrl,
+  readBreakGlassSession,
+  removeBreakGlassSession,
+  removeHubConfig,
+  resolveHubCommandTarget,
+  writeBreakGlassSession
+} from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import { fail } from '../service'
 
@@ -103,20 +112,22 @@ export function hubBreakGlassCommand(): Command {
           }
           const outcome = await redeem(url, verifier)
           if (outcome.ok) {
-            const configPath = writeHubConfig(url, outcome.token)
+            const sessionPath = writeBreakGlassSession({
+              url,
+              token: outcome.token,
+              expiresAt: outcome.expiresAt
+            })
             console.log(
               `\nBreak-glass session open as ${outcome.email} until ${outcome.expiresAt}.`
             )
-            console.log(`Token stored: ${configPath} (it replaces the stored hub target).`)
+            console.log(
+              `Session stored: ${sessionPath}. Hub commands use it until it ends; ` +
+                'the stored hub target is unchanged.'
+            )
             console.log('')
             console.log('  slay hub users ls | disable <email> | enable <email>')
             console.log('  slay hub computers ls | revoke <id> | unrevoke <id>')
             console.log('  slay hub break-glass end      (when done)')
-            if (process.env.SLAYZONE_HUB_TOKEN) {
-              console.error(
-                'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this token.'
-              )
-            }
             return
           }
           if (outcome.status === 403) {
@@ -134,22 +145,48 @@ export function hubBreakGlassCommand(): Command {
     .command('end')
     .description('End this CLI’s break-glass session now and forget its token')
     .action(async () => {
-      const target = resolveHubTarget()
+      // The stored session even when it has expired: `end` is also how it is cleared.
+      // Failing that, a session an older CLI stored AS the hub target, before sessions
+      // had a file of their own.
+      const session = readBreakGlassSession()
+      const target = session
+        ? { baseUrl: session.url, token: session.token, source: 'break-glass' as const }
+        : resolveHubCommandTarget()
       if (!target?.token?.startsWith(BREAK_GLASS_TOKEN_PREFIX)) {
         fail(
           'No break-glass session is stored for this CLI. On the hub machine, ' +
             '`slayzone-hub break-glass end` ends any.'
         )
       }
-      await hubRequest({
-        target,
-        path: BREAK_GLASS_PATH,
-        method: 'DELETE',
-        unwrap: 'raw',
-        hints: { 401: 'The session has already ended (expired, or ended on the hub machine).' }
-      })
-      if (!process.env.SLAYZONE_HUB_ADDRESS) removeHubConfig()
-      console.log('Break-glass session ended: the account is disabled and its token forgotten.')
+      let res: Response
+      try {
+        res = await fetch(`${target.baseUrl}${BREAK_GLASS_PATH}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${target.token}` },
+          signal: AbortSignal.timeout(10_000)
+        })
+      } catch {
+        fail(
+          `Could not reach the hub at ${target.baseUrl}. The session stays stored; ` +
+            'it ends on its own when it expires.'
+        )
+      }
+      // 401: the hub no longer knows the token — it expired, or was ended on the hub
+      // machine. Nothing left to end, so forget it here too.
+      const alreadyEnded = res.status === 401
+      if (!res.ok && !alreadyEnded) {
+        const body = (await res.json().catch(() => ({}))) as { error?: unknown }
+        fail(
+          `Break-glass end failed: ${typeof body.error === 'string' ? body.error : `HTTP ${res.status}`}`
+        )
+      }
+      if (target.source === 'break-glass') removeBreakGlassSession()
+      else if (target.source === 'file') removeHubConfig()
+      console.log(
+        alreadyEnded
+          ? 'The break-glass session had already ended (expired, or ended on the hub machine); its token is forgotten.'
+          : 'Break-glass session ended: the account is disabled and its token forgotten.'
+      )
     })
 
   return cmd

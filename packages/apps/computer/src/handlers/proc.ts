@@ -36,7 +36,6 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { buildShellInvocation, killPidTree, PROCESS_TREE_DETACHED } from '@slayzone/platform'
-import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import {
   HubToComputerMethods,
   procGetBufferSinceParamsSchema,
@@ -49,6 +48,7 @@ import {
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '../ring-buffer'
+import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Matches the pty handler's per-session buffer cap (750 KiB). */
@@ -92,28 +92,6 @@ export function createProcHandlers(
 ): ProcHandlers {
   const procs = new Map<string, ProcSession>()
   const tombstones = new ExitTombstones()
-
-  function buildEnv(overrides?: Record<string, string>): Record<string, string> {
-    // Sanitize the inherited computer env through the shared manifest: keep the
-    // user env (PATH/HOME) but strip every SlayZone infra/secret/identity var
-    // (and any unmanifested SLAYZONE_*, fail closed) so a computer-hosted process
-    // never inherits the computer's own creds/wiring. Hub-passed `overrides` layer
-    // on top as the authoritative per-spawn values.
-    const merged: Record<string, string> = overrides
-      ? { ...sanitizeSpawnEnv(process.env), ...overrides }
-      : sanitizeSpawnEnv(process.env)
-    // Same override channel as handlers/pty.ts: force the agent's lifecycle hook
-    // to the computer's OWN loopback relay (which forwards to the hub over the
-    // authed ws channel) and strip any hub bearer the hub baked into `overrides`.
-    // Without this a computer-hosted CHAT agent would post its hooks at a hub URL
-    // that does not resolve from this machine — no spinner, no unread dot — and
-    // could carry a hub token into a subprocess env.
-    if (ctx.agentHookUrl) {
-      merged.SLAYZONE_AGENT_HOOK_URL = ctx.agentHookUrl
-      delete merged.SLAYZONE_HUB_TOKEN
-    }
-    return merged
-  }
 
   /**
    * Kill a spawned process AND everything it started. Signalling only the direct
@@ -166,7 +144,7 @@ export function createProcHandlers(
       : { file: params.command, args: params.args ?? [] }
     const child = spawn(invocation.file, invocation.args, {
       ...(cwd ? { cwd } : {}),
-      env: buildEnv(params.env),
+      env: buildSpawnEnv(ctx, params.env),
       // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
       stdio: ['pipe', 'pipe', 'pipe'],
       // Its own process group, so a kill reaches everything it started (`pnpm dev`

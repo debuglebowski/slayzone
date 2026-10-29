@@ -19,7 +19,7 @@
  */
 import { discoverHubs, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
-import { resolveHubTarget } from './hub-config'
+import { resolveHubCommandTarget } from './hub-config'
 import { fail } from './service'
 
 /** A resolved hub REST base plus the bearer to send, if any. */
@@ -32,11 +32,12 @@ export interface HubRequestTarget {
  * Resolve which hub a hub-side command acts on.
  *
  * Precedence:
- *   1. Whatever `resolveHubTarget()` says — which already covers the root `--hub`
- *      flag, `SLAYZONE_HUB_ADDRESS`/`_TOKEN`, and `cli-hub-target.json` (written by
- *      `slay hub use` / `slay hub login`). Reusing it means `slay --hub staging …`
- *      works with no new surface, and a remote hub is reachable through exactly the
- *      channels that already exist.
+ *   1. Whatever `resolveHubCommandTarget()` says — which already covers the root `--hub`
+ *      flag, a live break-glass session, `SLAYZONE_HUB_ADDRESS`/`_TOKEN`, and the
+ *      stored target (written by `slay hub use` / `slay hub login`; it outranks the
+ *      address a task terminal was spawned with — see hub-config.ts). Reusing it
+ *      means `slay --hub staging …` works with no new surface, and a remote hub is
+ *      reachable through exactly the channels that already exist.
  *   2. Auto-discovery, when exactly ONE hub is running here. Refusing to guess
  *      between several is the point: minting a token on the wrong hub produces a
  *      computer that enrolls somewhere nobody is looking.
@@ -50,7 +51,7 @@ export async function resolveHubRequestTarget(
   what: string,
   discover: () => Promise<DiscoveredHub[]> = () => discoverHubs()
 ): Promise<HubRequestTarget> {
-  const configured = resolveHubTarget()
+  const configured = resolveHubCommandTarget()
   if (configured) return configured
 
   const running = await discover()

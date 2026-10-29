@@ -29,7 +29,7 @@ import path from 'node:path'
 import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
 import { LOOPBACK_HOSTS } from '@slayzone/platform/hub-addr'
 import { findHub } from '@slayzone/platform/hub-discovery'
-import { resolveHubTarget } from './hub-config'
+import { resolveTaskCommandTarget } from './hub-config'
 
 /**
  * The fixed port THIS invocation's channel expects the sidecar on.
@@ -121,7 +121,7 @@ export async function probeFixedPort(port = fixedPortForChannel()): Promise<Fixe
  * prevents.
  */
 export async function isCoLocatedHub(): Promise<boolean> {
-  const configured = resolveHubTarget()
+  const configured = resolveTaskCommandTarget()
   if (!configured) return true
   try {
     // `URL.hostname` KEEPS the brackets on an IPv6 literal (`[::1]`), while

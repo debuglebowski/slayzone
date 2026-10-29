@@ -14,6 +14,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import {
   assertLoopbackBind,
+  hubAddrFromUrl,
   hubUrlFromAddr,
   isBareAuthority,
   isLoopbackAuthority,
@@ -325,4 +326,51 @@ test('unparseable: garbage → false', () => {
 
 test('unparseable: empty → false', () => {
   expect(isLoopbackComputerUrl('')).toBeFalsy()
+})
+
+// --- hubAddrFromUrl: the inverse of hubUrlFromAddr ---
+// A computer hands each pty the authority of the hub it dials, so `slay` there talks
+// to the hub that spawned it. Re-composed by the CLI (A1), it must name the same
+// endpoint the computer dials — or nothing at all.
+describe('hubAddrFromUrl', () => {
+  test.each([
+    ['ws://127.0.0.1:51101/computers', '127.0.0.1:51101'],
+    ['ws://localhost:8443/computers', 'localhost:8443'],
+    ['ws://[::1]:8080/computers', '[::1]:8080'],
+    ['wss://slay.example.com/computers', 'slay.example.com'],
+    ['wss://hub.example.com:8443/computers', 'hub.example.com:8443'],
+    // The scheme's default port is implicit in the authority, as A1 composes it.
+    ['wss://hub.example.com:443/computers', 'hub.example.com'],
+    ['https://hub.example.com', 'hub.example.com'],
+    ['http://127.0.0.1:51101', '127.0.0.1:51101']
+  ])('%s → %s', (url, addr) => {
+    expect(hubAddrFromUrl(url)).toBe(addr)
+  })
+
+  test.each([
+    ['ws://127.0.0.1:51101/computers', 'ws'],
+    ['wss://hub.example.com:8443/computers', 'ws'],
+    ['https://hub.example.com', 'http']
+  ] as const)('round-trips through hubUrlFromAddr (%s)', (url, kind) => {
+    const addr = hubAddrFromUrl(url)!
+    expect(new URL(hubUrlFromAddr(addr, kind)).origin).toBe(new URL(url).origin)
+  })
+
+  // A scheme A1 would not derive from this host: the authority, re-composed, would
+  // name a different endpoint (https:// where the computer dials ws://). No answer
+  // beats a wrong one.
+  test.each([
+    'ws://hub.lan:8080/computers',
+    'wss://127.0.0.1:8443/computers',
+    'http://hub.example.com'
+  ])('%s → null (scheme disagrees with A1)', (url) => {
+    expect(hubAddrFromUrl(url)).toBeNull()
+  })
+
+  test.each(['not a url', '', 'ftp://hub.example.com', 'wss://user:pw@hub.example.com/'])(
+    '%s → null',
+    (url) => {
+      expect(hubAddrFromUrl(url)).toBeNull()
+    }
+  )
 })

@@ -46,7 +46,6 @@ import {
   ComputerTransportErrorCodes
 } from '@slayzone/computer-transport/shared'
 import * as pty from 'node-pty'
-import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
@@ -59,6 +58,7 @@ import {
   type AdmissionTicket,
   type SpawnAdmission
 } from '../spawn-admission'
+import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Matches the terminal domain's per-session buffer cap (750 KiB). */
@@ -185,30 +185,6 @@ export function createPtyHandlers(
     return spawnCwd(entry.path, ctx.config.allowedRoots)
   }
 
-  function buildEnv(overrides?: Record<string, string>): Record<string, string> {
-    // Base channel: the computer inherits its parent (supervisor) process.env, so
-    // sanitize it through the shared manifest — keep the user env (PATH/HOME/
-    // toolchains) but strip every SlayZone infra/secret/identity var (and any
-    // unmanifested SLAYZONE_*, fail closed) so nothing the computer was configured
-    // with leaks into a spawned agent, which would reinterpret it. The hub's
-    // per-spawn `overrides` (the identity overlay) apply AFTER and are the
-    // authoritative source for anything an agent legitimately needs.
-    const merged: Record<string, string> = overrides
-      ? { ...sanitizeSpawnEnv(process.env), ...overrides }
-      : sanitizeSpawnEnv(process.env)
-    // Override channel: force the agent's lifecycle hook to the computer's OWN
-    // loopback relay (which forwards to the hub over the authed ws channel), and
-    // strip any hub bearer the hub baked into `overrides` — no per-agent token in
-    // subprocess env, and the agent env is byte-identical to a local spawn's hook
-    // wiring. Distinct from the base sanitize above: this guards a token the HUB
-    // passed in, which sanitizeSpawnEnv (base-only) never sees.
-    if (ctx.agentHookUrl) {
-      merged.SLAYZONE_AGENT_HOOK_URL = ctx.agentHookUrl
-      delete merged.SLAYZONE_HUB_TOKEN
-    }
-    return merged
-  }
-
   /**
    * Spawn a pty and file it under `id`. Shared by `pty.spawn` and
    * `pty.warmSpawn` so a warm session is byte-for-byte an ordinary session —
@@ -248,7 +224,7 @@ export function createPtyHandlers(
     const proc = pty.spawn(opts.command, opts.args ?? [], {
       name: 'xterm-color',
       cwd,
-      env: buildEnv(opts.env),
+      env: buildSpawnEnv(ctx, opts.env),
       cols: opts.cols ?? 80,
       rows: opts.rows ?? 24
     })

@@ -697,6 +697,9 @@ run_harness packages/apps/app/src/main/db/v127-disk-migration.test.ts
 run_harness packages/apps/app/src/main/raise-fd-limit.test.ts
 run_harness packages/apps/cli/test/artifacts-mv.test.ts
 run_harness packages/apps/cli/test/hub.test.ts
+# A stored hub target (`slay hub use/login`) never retargets a task terminal's task
+# commands; break-glass keeps its session apart from the stored target.
+run_harness packages/apps/cli/test/hub-target-scope.test.ts
 run_harness packages/apps/cli/test/init-skills.test.ts
 run_harness packages/apps/cli/test/panels.test.ts
 run_harness packages/domains/agent-panels/src/agent-status/useIdleTasks.test.ts

@@ -40,7 +40,7 @@ import {
   unitPath,
   type ServiceBackend
 } from '@slayzone/platform/service-unit'
-import { resolveHubTarget } from '../hub-config'
+import { resolveHubCommandTarget } from '../hub-config'
 import { supervisorStatus } from '../service'
 
 /** `<ROOT>/computer.config.json` for a computer rooted at `root`. */
@@ -119,7 +119,8 @@ export function isEnrolled(root: string): boolean {
  * succeeding, and "which hub did you mean" is not a question `ls` should ever ask.
  * The same hazard is documented for `getServerPort()` in `hub.ts`.
  *
- * A configured target (`--hub`, `SLAYZONE_HUB_ADDRESS`, `slay hub use`) wins. Failing
+ * A configured hub-command target (`--hub`, break-glass, `SLAYZONE_HUB_ADDRESS`,
+ * `slay hub use` — see hub-config.ts) wins. Failing
  * that, a SINGLE discovered hub is used; several means no unambiguous answer, so the
  * hub source is simply skipped rather than guessed at.
  */
@@ -127,7 +128,7 @@ async function hubComputers(): Promise<HubComputerRow[] | null> {
   let baseUrl: string
   let token: string | null = null
   try {
-    const configured = resolveHubTarget()
+    const configured = resolveHubCommandTarget()
     if (configured) {
       baseUrl = configured.baseUrl
       token = configured.token
