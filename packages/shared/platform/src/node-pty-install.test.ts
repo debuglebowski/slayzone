@@ -45,10 +45,12 @@ test('an unreadable manifest is unknown, not healthy and not broken', () => {
 })
 
 test('spawn-helper candidates mirror node-pty load order for this platform', () => {
-  expect(spawnHelperCandidates('/r/node_modules/node-pty', 'darwin', 'arm64')).toEqual([
-    '/r/node_modules/node-pty/build/Release/spawn-helper',
-    '/r/node_modules/node-pty/build/Debug/spawn-helper',
-    '/r/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper'
+  // Joined with the HOST's separator: the darwin list is also built on Windows CI.
+  const dir = '/r/node_modules/node-pty'
+  expect(spawnHelperCandidates(dir, 'darwin', 'arm64')).toEqual([
+    path.join(dir, 'build', 'Release', 'spawn-helper'),
+    path.join(dir, 'build', 'Debug', 'spawn-helper'),
+    path.join(dir, 'prebuilds', 'darwin-arm64', 'spawn-helper')
   ])
   expect(
     spawnHelperCandidates('/r/node_modules/node-pty', 'win32', 'x64'),
