@@ -48,6 +48,12 @@ test.describe('Server restart button', () => {
     const after = await status()
     expect(after.health).toBe('ready')
     expect(after.pid).not.toBe(before.pid)
+    // Flaked once (2026-10-29, 99829ba9b, full suite at load ~145 on 10 cores):
+    // came back on a NEW port; didn't reproduce alone or after its shard
+    // neighbours. The supervisor only moves off the sticky port when a spawn dies
+    // before ready, so check its log for "[supervisor] health timeout — killing
+    // child" (boot past the 10s HEALTH_BOOT_TIMEOUT_MS) or an EADDRINUSE exit (the
+    // old child still held the port).
     expect(after.port).toBe(before.port)
     expect(after.totalRespawns).toBe(before.totalRespawns + 1)
 

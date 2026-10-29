@@ -43,6 +43,12 @@ test.describe('Sidecar crash recovery', () => {
     }, before.pid!)
 
     // Respawned: healthy again, new pid, lifetime counter moved.
+    // Flaked once (2026-10-29, 99829ba9b, full suite at load ~145 on 10 cores):
+    // still `null` after 20s; didn't reproduce alone or after its shard
+    // neighbours. If it recurs, check the supervisor log for a respawn that died
+    // before ready — "[supervisor] health timeout — killing child" (10s boot
+    // deadline, HEALTH_BOOT_TIMEOUT_MS) or an exit with EADDRINUSE: that path drops
+    // the sticky port and backs off (1s, 2s…) instead of respawning at once.
     await expect
       .poll(
         async () => {

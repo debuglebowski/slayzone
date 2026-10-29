@@ -1,11 +1,12 @@
 /**
  * Shared harness for the restored-many-tabs boot specs: `core/116-boot-idle-hydration`
- * (hydration order, load-independent) and `perf/boot-budget` (wall-clock budgets,
- * quiet box only). Both seed the same 40-tab session, reload it with the boot
- * probe installed, and read the same census.
+ * (hydration order + a load-tolerant boot budget, in the default suite) and
+ * `perf/boot-budget` (the same budget with the strict quiet-box bar). Both seed
+ * the same 40-tab session, reload it with the boot probe installed, and read the
+ * same census.
  */
 import type { Page } from '@playwright/test'
-import { expect, seed, openTaskById, resetApp, TEST_PROJECT_PATH } from './electron'
+import { test, expect, seed, openTaskById, resetApp, TEST_PROJECT_PATH } from './electron'
 import { getMainSessionId, waitForPtySession } from './terminal'
 
 export const BOOT_TABS = 40
@@ -183,4 +184,110 @@ export function hiddenRunningAnimations(page: Page): Promise<string[]> {
       )
       .map((t) => `${t.tagName.toLowerCase()}.${String(t.className).slice(0, 60)}`)
   )
+}
+
+/** One restored-session boot, as the budget reads it. */
+export interface BootMeasurement {
+  activeReadyAt: number
+  maxLongTask: number
+  idleFraction: number
+  bootBusyMs: number
+  hiddenAnimations: string[]
+  summary: string
+}
+
+/**
+ * Open every tab, reload, and measure the boot: time to the active tab's detail
+ * page, the longest task in the first 5s, main-thread busy once settled, and CSS
+ * animations still running in hidden panes.
+ */
+export async function measureBoot(page: Page, ids: string[]): Promise<BootMeasurement> {
+  await openBootTabs(page, ids)
+
+  // Measures this one boot: removed right after it, so later reloads on the
+  // worker's shared page don't run the census.
+  const probeScript = await page.addInitScript(installBootProbe, {
+    total: BOOT_TABS,
+    detailSelector: BOOT_DETAIL
+  })
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Performance.enable')
+  const taskSeconds = async (): Promise<number> => {
+    const { metrics } = (await cdp.send('Performance.getMetrics')) as {
+      metrics: Array<{ name: string; value: number }>
+    }
+    return metrics.find((m) => m.name === 'TaskDuration')?.value ?? 0
+  }
+
+  const busyBeforeReload = await taskSeconds()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await probeScript.dispose()
+  // Settled = every hidden pane hydrated and every terminal attached.
+  await expect
+    .poll(() => page.locator(BOOT_DETAIL).count(), { timeout: 60_000, intervals: [250] })
+    .toBeGreaterThanOrEqual(BOOT_TABS)
+  await expect
+    .poll(() => attachedTerminals(page, ids), { timeout: 60_000, intervals: [250] })
+    .toBe(BOOT_TABS)
+  // Past the 5s long-task window, plus a margin for post-hydration work.
+  const sinceBoot = await page.evaluate(() => Math.round(performance.now()))
+  await page.waitForTimeout(Math.max(2_000, 7_000 - sinceBoot))
+
+  const IDLE_WINDOW_MS = 3_000
+  const busy0 = await taskSeconds()
+  // Sanity for the metric itself: the boot up to here was real main-thread work.
+  const bootBusyMs = Math.round((busy0 - busyBeforeReload) * 1000)
+  const t0 = Date.now()
+  await page.waitForTimeout(IDLE_WINDOW_MS)
+  const idleBusy = (await taskSeconds()) - busy0
+  const idleFraction = idleBusy / ((Date.now() - t0) / 1000)
+
+  const hiddenAnimations = await hiddenRunningAnimations(page)
+  const { probe, detailMark } = await page.evaluate(() => ({
+    probe: (window as unknown as ProbeWindow).__szBoot!,
+    detailMark: Math.round(
+      performance.getEntriesByName('sz:activeTab:detail', 'mark')[0]?.startTime ?? -1
+    )
+  }))
+  const early = probe.longTasks.filter((t) => t.start < 5_000)
+  const maxLongTask = Math.max(0, ...early.map((t) => t.duration))
+  const summary =
+    `[boot-budget] activeReadyAt=${probe.activeReadyAt}ms (mark ${detailMark}ms) ` +
+    `longTasks<5s n=${early.length} max=${maxLongTask}ms ` +
+    `boot main-thread=${bootBusyMs}ms idle main-thread=${(idleFraction * 100).toFixed(1)}% ` +
+    `over ${IDLE_WINDOW_MS}ms ` +
+    `hiddenAnimations=${hiddenAnimations.length}` +
+    (hiddenAnimations.length ? ` ${JSON.stringify(hiddenAnimations.slice(0, 5))}` : '')
+  test.info().annotations.push({ type: 'boot-budget', description: summary })
+  console.log(summary)
+  return {
+    activeReadyAt: probe.activeReadyAt,
+    maxLongTask,
+    idleFraction,
+    bootBusyMs,
+    hiddenAnimations,
+    summary
+  }
+}
+
+/**
+ * The boot budget. Each bar sits well above a healthy boot and well below what
+ * the regression it guards produced:
+ * - active tab within `activeTabMs` — a reload stuck behind a WebSocket throttle
+ *   added +2.4s;
+ * - no long task over 200ms in the first 5s — all tabs mounting at once ran long
+ *   tasks up to ~2s;
+ * - under 15% main-thread busy once settled, and no CSS animation in a hidden
+ *   pane — hidden-pane loading animations kept the main thread ~85% busy.
+ *
+ * Only the active-tab bar is wall-clock sensitive, so the caller picks it: a
+ * healthy boot measured 0.77-1.07s inside the busy parallel suite, ~0.8s alone.
+ */
+export function expectBootBudget(m: BootMeasurement, activeTabMs: number): void {
+  expect(m.bootBusyMs, m.summary).toBeGreaterThan(0)
+  expect(m.activeReadyAt, m.summary).toBeGreaterThan(0)
+  expect(m.activeReadyAt, m.summary).toBeLessThan(activeTabMs)
+  expect(m.maxLongTask, m.summary).toBeLessThanOrEqual(200)
+  expect(m.idleFraction, m.summary).toBeLessThan(0.15)
+  expect(m.hiddenAnimations, m.summary).toEqual([])
 }

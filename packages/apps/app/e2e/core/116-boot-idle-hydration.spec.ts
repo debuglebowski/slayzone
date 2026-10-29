@@ -13,9 +13,9 @@
  * Every hidden tab must still end up mounted (and its terminal attached) shortly
  * after boot — hydration only defers, it never skips.
  *
- * Load-independent assertions only: this runs inside the 7-way parallel suite.
- * The wall-clock budgets for the same boot (time to active tab, long tasks, idle
- * CPU) live in `perf/boot-budget.spec.ts`.
+ * This runs inside the busy 7-way parallel suite, so its one wall-clock bar is
+ * load-tolerant (active tab within 2s). `perf/boot-budget.spec.ts` runs the same
+ * budget with the strict quiet-box bar (1s).
  */
 import type { CDPSession } from '@playwright/test'
 import { test, expect } from '../fixtures/electron'
@@ -23,8 +23,9 @@ import {
   BOOT_DETAIL as DETAIL,
   BOOT_TABS as TABS,
   attachedTerminals,
-  hiddenRunningAnimations,
+  expectBootBudget,
   installBootProbe,
+  measureBoot,
   openBootTabs,
   seedBootTasks,
   type ProbeWindow
@@ -128,9 +129,6 @@ test.describe('boot idle hydration', () => {
     // slower the box (measured: 5-6 alone, 10 inside the parallel suite) — so the
     // bar sits between that and the regression this guards (all 40 at once).
     expect(probe.mountedAtActiveReady, summary).toBeLessThan(TABS / 2)
-    // A hidden pane runs no CSS animation (the regression this guards kept the
-    // main thread ~85% busy at idle). Load-independent, so it lives here too.
-    expect(await hiddenRunningAnimations(mainWindow), summary).toEqual([])
   })
   test('revealing a hidden tab before its turn shows its detail page at once', async ({
     mainWindow
@@ -173,5 +171,12 @@ test.describe('boot idle hydration', () => {
       `hydrated reveal=${warm.ms}ms`
     test.info().annotations.push({ type: 'reveal', description: summary })
     console.log(summary)
+  })
+
+  test('boot stays within budget (active tab under 2s, long tasks, idle CPU, hidden animations)', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(240_000)
+    expectBootBudget(await measureBoot(mainWindow, taskIds), 2_000)
   })
 })
