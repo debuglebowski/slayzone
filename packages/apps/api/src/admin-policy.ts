@@ -412,6 +412,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.setModel': 'user',
   'chat.start': 'user',
   'chat.supports': 'user',
+  'chat.testSetWatchdogTimings': 'user',
   'computers.claim': 'admin',
   'computers.delete': 'user',
   'computers.list': 'user',

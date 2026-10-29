@@ -673,6 +673,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
 
   // ── chat ──
   'chat.supports': none('a terminal mode id'),
+  'chat.testSetWatchdogTimings': none(TEST),
   'chat.hydrate': chatOpts,
   'chat.start': chatOpts,
   'chat.send': checked(tab('tabId')),

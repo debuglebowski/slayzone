@@ -486,6 +486,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.setModel': 'agent',
   'chat.start': 'never',
   'chat.supports': 'agent',
+  'chat.testSetWatchdogTimings': 'never',
   'computers.claim': 'never',
   'computers.delete': 'never',
   'computers.list': 'read',
