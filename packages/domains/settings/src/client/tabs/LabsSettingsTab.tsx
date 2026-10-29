@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import { Label, Switch } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
@@ -26,7 +26,18 @@ export function LabsSettingsTab() {
   // Labs flags are client-scoped (they gate native menu items built before any hub
   // exists), so they go through the app router to the desktop's client store — NOT
   // `settings.set`, which would write a hub row nothing reads.
-  const setLabFlagMutation = useMutation(trpc.app.meta.setLabFlag.mutationOptions())
+  // Once saved, refresh every reader of the flags (the home Tests panel reads
+  // `isTestsPanelEnabled` live), whenever Settings closes.
+  const queryClient = useQueryClient()
+  const setLabFlagMutation = useMutation(
+    trpc.app.meta.setLabFlag.mutationOptions({
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: trpc.app.meta.isTestsPanelEnabled.queryKey() }),
+          queryClient.invalidateQueries({ queryKey: trpc.app.meta.isLoopModeEnabled.queryKey() })
+        ])
+    })
+  )
 
   // Each new flag result re-seeds its switch (which a local toggle overrides in
   // between) — adjusted while rendering.

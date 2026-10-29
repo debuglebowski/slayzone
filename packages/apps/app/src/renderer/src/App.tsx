@@ -265,7 +265,6 @@ function App(): React.JSX.Element {
   const [settingsRevision, setSettingsRevision] = useState(0)
   const [colorTintsEnabled, setColorTintsEnabled] = useState(true)
   const [showContextManager, setShowContextManager] = useState(true)
-  const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>(
     settingsReopenTab ?? 'appearance'
   )
@@ -698,8 +697,12 @@ function App(): React.JSX.Element {
     trpcClient.settings.get
       .query({ key: 'show_context_manager' })
       .then((v) => setShowContextManager(v !== '0'))
-    trpcClient.app.meta.isTestsPanelEnabled.query().then(setTestsPanelEnabled)
   }, [settingsRevision, trpcClient])
+
+  // A live query, not a read on Settings close: the Labs switch saves the flag
+  // in the background and refreshes this query when the save lands, so closing
+  // Settings right after flipping it can't read the old value.
+  const testsPanelEnabled = useQuery(trpc.app.meta.isTestsPanelEnabled.queryOptions()).data ?? false
 
   // Close context manager when hidden
   useEffect(() => {

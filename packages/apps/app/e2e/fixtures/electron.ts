@@ -1192,35 +1192,35 @@ export async function clickAddProject(page: Page) {
   await button.click()
 }
 
-/** Click the settings button in the sidebar footer */
+/**
+ * Open the global Settings dialog. One trigger at a time, each followed by a
+ * real wait: the dialog mounts lazily and can take a few seconds on a loaded
+ * box. (`isVisible({ timeout })` ignores its timeout and returns at once — the
+ * old retry loop fired 3 shortcuts and 6 clicks in ~100ms and then gave up.)
+ * Every trigger only opens, never toggles, so a slow first one is harmless.
+ */
 export async function clickSettings(page: Page) {
   const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
-  if (await dialog.isVisible({ timeout: 200 }).catch(() => false)) return
+  const opened = (timeout: number) =>
+    dialog
+      .waitFor({ state: 'visible', timeout })
+      .then(() => true)
+      .catch(() => false)
+  if (await dialog.isVisible()) return
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await page.bringToFront().catch(() => {})
+  await page.bringToFront().catch(() => {})
+  await page.keyboard.press('Meta+,').catch(() => {})
+  if (await opened(5_000)) return
 
-    await page.keyboard.press('Meta+,').catch(() => {})
-    if (await dialog.isVisible({ timeout: 500 }).catch(() => false)) return
-
-    const sidebarSettingsButton = page
-      .getByRole('button', { name: 'Settings', exact: true })
-      .first()
-    if (await sidebarSettingsButton.isVisible({ timeout: 300 }).catch(() => false)) {
-      await sidebarSettingsButton.click({ force: true }).catch(() => {})
-      if (await dialog.isVisible({ timeout: 500 }).catch(() => false)) return
-    }
-
-    const footer = sidebar(page).locator('[data-sidebar="footer"]').first()
-    const footerIconButton = footer
-      .locator('button')
-      .filter({ has: page.locator('.lucide-settings') })
-      .first()
-    if (await footerIconButton.isVisible({ timeout: 300 }).catch(() => false)) {
-      await footerIconButton.click({ force: true }).catch(() => {})
-      if (await dialog.isVisible({ timeout: 500 }).catch(() => false)) return
-    }
-  }
+  // Shortcut didn't land (e.g. the window lost keyboard focus): the footer button.
+  // A real click, not `force` — if something covers the button, fail here rather
+  // than click through whatever covers it.
+  await page
+    .getByRole('button', { name: 'Settings', exact: true })
+    .first()
+    .click({ timeout: 5_000 })
+    .catch(() => {})
+  await opened(5_000)
 }
 
 /** Navigate to home tab (div with lucide house/home icon, no title attr) */
