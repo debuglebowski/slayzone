@@ -21,8 +21,11 @@ import type { LocalComputerStatus } from './local-computer-status'
 
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
-  /** Pre-boot config the renderer can't get from the settings DB (multi-hub). */
-  getBootConfig: () => Promise<{ multiHub: boolean }>
+  /** Pre-boot config the renderer can't get from the settings DB (multi-hub), plus
+   *  `convexUrl`: the Convex deployment the host decided at boot for this renderer
+   *  ('' = Convex off). Absent = the host decides none; the renderer uses its own
+   *  build-time `VITE_CONVEX_URL`. */
+  getBootConfig: () => Promise<{ multiHub: boolean; convexUrl?: string }>
   /** Resolved multi-hub registry (local always first + present when multiHub on;
    *  the local hub's `url` is injected from the live sidecar port). */
   getHubRegistry: () => Promise<{ hubs: HubEntry[]; defaultHubId: string }>

@@ -160,13 +160,15 @@ if (isFloatingGlobalAgentPanel) {
   // Wait for tab store + server URL discovery before rendering. Tab store
   // hydrates from SQLite (prevents effect race wiping persisted tabs); the
   // server URL (local: embedded port; remote: configured host) is needed to
-  // construct the WS URL passed to TrpcProvider.
+  // construct the WS URL passed to TrpcProvider. Boot config carries the Convex
+  // deployment main decided (the one its hub was handed too).
   Promise.all([
     electronBootstrap.getServerUrl(),
     electronBootstrap.getWindowId(),
     electronBootstrap.getHubRegistry(),
-    electronBootstrap.getHubTokens()
-  ]).then(async ([server, windowId, registry, hubTokens]) => {
+    electronBootstrap.getHubTokens(),
+    electronBootstrap.getBootConfig()
+  ]).then(async ([server, windowId, registry, hubTokens, bootConfig]) => {
     // Remote mode with a missing/unreachable server → render the recovery
     // screen instead of mounting TrpcProvider against a dead URL (it would
     // WS-reconnect-loop forever behind a blank window). Probe runs main-side.
@@ -252,7 +254,7 @@ if (isFloatingGlobalAgentPanel) {
       // identical to the former single TrpcProvider.
       <FederatedRoot decorateUrl={decorateUrl}>
         <HubScope hubId={registry.defaultHubId}>
-          <ConvexAuthBootstrap>
+          <ConvexAuthBootstrap convexUrl={bootConfig.convexUrl}>
             <PtyProvider>
               <ThemeProvider>
                 <TelemetryProvider>

@@ -143,6 +143,10 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // computers with none spawned" contract test).
   SLAYZONE_E2E_NO_COMPUTER: 'infra',
   SLAYZONE_E2E_INSTALL_HOOKS: 'infra',
+  // PLAYWRIGHT-only: the Convex deployment (host[:port], '' = off) the desktop app's
+  // renderer + hub use instead of the build's (app main convex-deployment.ts). Infra:
+  // a hub started from a task terminal must not inherit a spec's deployment.
+  SLAYZONE_E2E_CONVEX_ADDRESS: 'infra',
   // Redirects the MACHINE-WIDE ~/.slayzone (hooks/, bin/) — the files shared by
   // every SlayZone process on the box, which deliberately do NOT follow
   // SLAYZONE_ROOT. Sandbox redirect for tests, same role as the per-provider

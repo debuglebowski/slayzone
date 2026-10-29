@@ -40,8 +40,11 @@ export function convexOriginOf(url: unknown): string | null {
   }
 }
 
-/** Origin of a bare authority under the scheme rule (loopback → http, else https). */
-function originFromAddress(addr: string): string | null {
+/**
+ * Origin of a bare `host[:port]` under the scheme rule (loopback → http, else https);
+ * null when it is not a bare authority (a full URL is refused, not guessed at).
+ */
+export function convexOriginFromAddress(addr: string): string | null {
   if (!isBareAuthority(addr)) return null
   return convexOriginOf(`${isLoopbackAuthority(addr) ? 'http' : 'https'}://${addr}`)
 }
@@ -53,7 +56,7 @@ function originFromAddress(addr: string): string | null {
  */
 export function hubConvexOrigin(env: NodeJS.ProcessEnv = process.env): string | null {
   const addr = env[HUB_CONVEX_ADDRESS_ENV]?.trim()
-  return addr ? originFromAddress(addr) : null
+  return addr ? convexOriginFromAddress(addr) : null
 }
 
 /**
@@ -69,5 +72,5 @@ export function convexAddressFromUrl(url: string | undefined): string | undefine
   const origin = convexOriginOf(url)
   if (origin === null) return undefined
   const addr = new URL(origin).host
-  return originFromAddress(addr) === origin ? addr : undefined
+  return convexOriginFromAddress(addr) === origin ? addr : undefined
 }

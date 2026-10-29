@@ -465,11 +465,15 @@ import { getClientRoot } from '@slayzone/platform'
 import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
 import { convexAddressFromUrl } from '@slayzone/platform/hub-convex'
 import { migrateClientSettings } from './client-settings-migration'
+import { resolveAppConvexUrl } from './convex-deployment'
 
 // Inlined by electron.vite.config.ts (main `define`) from the SAME `VITE_CONVEX_URL` the
-// renderer is built with, so the hub is handed exactly the deployment the renderer names.
+// renderer is built with.
 declare const __SLAYZONE_CONVEX_URL__: string | undefined
 const BUILD_CONVEX_URL = typeof __SLAYZONE_CONVEX_URL__ === 'string' ? __SLAYZONE_CONVEX_URL__ : ''
+// The one Convex deployment this app's renderer (app:get-boot-config) and its hub
+// (convexAddress below) both use — the build's, or an e2e override (convex-deployment.ts).
+const APP_CONVEX_URL = resolveAppConvexUrl(BUILD_CONVEX_URL, process.env, isPlaywright)
 
 /**
  * One-shot latch for the Linux CLI-symlink warning. Client-scoped by nature —
@@ -2658,9 +2662,9 @@ app
               // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
               // so the Diagnostics "Database" row can name the file.
               dbPath: getDatabasePath(),
-              // T-99: the Convex deployment THIS build's renderer signs in against. The
+              // T-99: the Convex deployment THIS app's renderer signs in against. The
               // hub starts GitHub sign-in only against it, never a URL a client names.
-              convexAddress: convexAddressFromUrl(BUILD_CONVEX_URL),
+              convexAddress: convexAddressFromUrl(APP_CONVEX_URL),
               env: {
                 ...process.env,
                 // The sidecar IS this app's hub, so hand it this app's own
@@ -3523,10 +3527,11 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // aren't backed by the settings DB (multi-hub — see HubsSettingsTab). The
     // in-memory `bootConfig` was read once at boot; re-read from disk so a save
     // made since boot is reflected. `server_mode`/url are already exposed via
-    // `app:get-server-url`; this surfaces `multi_hub` as a plain boolean.
+    // `app:get-server-url`; this surfaces `multi_hub` as a plain boolean, plus the
+    // Convex deployment main decided at boot (the same one its hub was handed).
     ipcMain.handle('app:get-boot-config', () => {
       const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
-      return { multiHub: cfg.multi_hub === true }
+      return { multiHub: cfg.multi_hub === true, convexUrl: APP_CONVEX_URL }
     })
     // Resolved multi-hub registry the renderer's FederationProvider connects to.
     // Single source of truth for "which hubs exist": synthesized purely from the

@@ -39,7 +39,7 @@ const api: ElectronAPI = {
         url: string
       }>,
     getBootConfig: () =>
-      ipcRenderer.invoke('app:get-boot-config') as Promise<{ multiHub: boolean }>,
+      ipcRenderer.invoke('app:get-boot-config') as ReturnType<ElectronAPI['app']['getBootConfig']>,
     getHubRegistry: () =>
       ipcRenderer.invoke('app:get-hub-registry') as Promise<{
         hubs: HubEntry[]
