@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/turbo/schema.json",
+  "noUpdateNotifier": true,
+  "agentGuidance": false,
+  "globalDependencies": ["tsconfig.base.json", "convex/**"],
+  "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "typecheck": {
+      "dependsOn": ["transit"],
+      "outputs": [],
+      "outputLogs": "errors-only"
+    }
+  }
+}

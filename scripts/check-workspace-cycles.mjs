@@ -7,8 +7,8 @@
  *   node scripts/check-workspace-cycles.mjs --root <dir>   check another workspace (tests)
  *
  * The workspace graph is acyclic (baseline `[]`), so `pnpm -r` runs packages in
- * dependency order (no `ignoreWorkspaceCycles`) and per-package ordering/caching tools
- * (Turborepo, `tsc -b` project references) are usable. Keep it that way.
+ * dependency order (no `ignoreWorkspaceCycles`) and `pnpm typecheck` can cache per
+ * package with Turborepo (turbo.json). Keep it that way.
  *
  * The graph is the workspace packages and the `@workspace` dependencies their
  * package.json files declare (all dependency fields) — the same graph pnpm and

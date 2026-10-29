@@ -37,7 +37,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm dev` | Start dev server |
 | `pnpm build` | Build for production |
 | `pnpm build:mac` | Build macOS .app |
-| `pnpm typecheck` | Typecheck all packages |
+| `pnpm typecheck` | Typecheck all packages via Turborepo: per-package cache, re-runs only changed packages + dependents (`--force` = no cache) |
 | `pnpm test:e2e` | Run E2E tests (requires build) |
 | `pnpm test:e2e:perf` | Run perf E2E budgets alone (not in `test:e2e`) |
 | `pnpm lint` | Lint all packages |

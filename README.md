@@ -140,7 +140,7 @@ pnpm dev
 | `pnpm dev`          | Start dev server                                              |
 | `pnpm dev:protocol` | Start dev server with deep-link protocol handler registration |
 | `pnpm build`        | Production build                                              |
-| `pnpm typecheck`    | Typecheck all packages                                        |
+| `pnpm typecheck` | Typecheck all packages via Turborepo: per-package cache, re-runs only changed packages + dependents (`--force` = no cache) |
 | `pnpm test:e2e`     | Run E2E tests (build first)                                   |
 | `pnpm test:e2e:perf`| Run perf E2E budgets alone (quiet box; not in `test:e2e`)     |
 

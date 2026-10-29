@@ -19,7 +19,7 @@
     "build:win:arm64": "pnpm --filter @slayzone/app build:win:arm64",
     "build:win:all": "pnpm --filter @slayzone/app build:win:all",
     "build:linux": "pnpm --filter @slayzone/app build:linux",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "node scripts/turbo.mjs run typecheck",
     "lint": "pnpm lint:versions && pnpm lint:theme && pnpm lint:server-boundary && pnpm lint:trpc-deps && pnpm lint:window-api && pnpm lint:e2e-guardrails && pnpm lint:react-compiler && pnpm lint:workspace-cycles && pnpm lint:tsconfig-hermetic && pnpm lint:format && pnpm lint:biome && pnpm lint:eslint && pnpm test:unit:registered",
     "audit:check": "node scripts/ci/audit-check.mjs",
     "audit:age": "node scripts/ci/release-age-check.mjs",
@@ -72,6 +72,7 @@
     "png-to-ico": "^3.0.2",
     "sharp": "^0.34.5",
     "tsx": "^4.23.15",
+    "turbo": "^2.11.5",
     "typescript": "7.1.0-beta"
   },
   "engines": {
