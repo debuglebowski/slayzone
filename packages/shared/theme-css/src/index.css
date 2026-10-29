@@ -35,12 +35,19 @@
 
 /* Scan every package whose className strings render through a consumer of
    this theme — the UNION across all three shells' surfaces, so no shell
-   silently loses Tailwind classes that only appear inside one domain. */
+   silently loses Tailwind classes that only appear inside one domain. A class
+   used only in an unscanned file is never generated (MediaView's `bg-popover/90`
+   toolbar shipped see-through that way). `pnpm lint:theme`
+   (scripts/check-tailwind-sources.mjs) fails when a shell renders a
+   class-bearing file no line below covers. */
+@source "../../../apps/renderer-app/src";
 @source "../../../domains/agent-panels/src";
 @source "../../../domains/ai-config/src";
 @source "../../../domains/app-shell/src";
+@source "../../../domains/automations/src";
 @source "../../../domains/feedback/src";
 @source "../../../domains/file-editor/src";
+@source "../../../domains/home/src";
 @source "../../../domains/integrations/src";
 @source "../../../domains/leaderboard/src";
 @source "../../../domains/onboarding/src";
@@ -57,17 +64,16 @@
 @source "../../../domains/task-contracts/src";
 @source "../../../domains/task-terminals/src";
 @source "../../../domains/tasks/src";
+@source "../../../domains/telemetry/src";
 @source "../../../domains/terminal/src";
 @source "../../../domains/terminal-contracts/src";
+@source "../../../domains/test-panel/src";
 @source "../../../domains/usage-analytics/src";
 @source "../../../domains/worktrees/src";
 @source "../../../shared/diff-view/src";
 @source "../../../shared/editor/src";
-/* GhMarkdown only (moved here from worktrees/src, which was scanned). The rest of
-   shared/markdown has never been scanned: adding the whole package would newly
-   generate `bg-popover/90` (MediaView's toolbar), a visible change to decide on
-   separately. */
-@source "../../../shared/markdown/src/client/GhMarkdown.tsx";
+@source "../../../shared/icons/src";
+@source "../../../shared/markdown/src";
 @source "../../../shared/ui/src";
 
 @custom-variant dark (&:is(.dark *));
