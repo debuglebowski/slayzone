@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { ensureComputerBuilt } from './fixtures/computer-build'
+import { assertInstallHealthy } from './fixtures/install-health'
 import { parsePgrepOutput, readProcessEnviron, selectTestRunPids } from './fixtures/stale-processes'
 import { pruneStaleRuntimeDirs } from './fixtures/stale-runtime-dirs'
 
@@ -54,6 +55,12 @@ function killStale(pattern: string, label: string): void {
  * is matched by its bin.js script path in argv — not a binary name.
  */
 export default function globalSetup(): void {
+  const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+  // An install that skipped its scripts leaves every pty spawn failing; stop here
+  // with the fix instead of ~70 terminal specs failing for one cause.
+  assertInstallHealthy(path.resolve(appDir, '..', '..', '..'))
+
   killStale('Electron.*out/main/index\\.js', 'Electron')
   // `bin.cjs`, not `bin.js`: the sidecar bundle was renamed and these patterns
   // were not, so for every release since they matched NOTHING and orphaned
@@ -77,7 +84,6 @@ export default function globalSetup(): void {
   // Under Playwright the app loads from out/main, so the sidecar's dev
   // scriptPath (`app.getAppPath()/../hub/dist/bin.cjs`) resolves to
   // out/hub/... — the root build doesn't create that link. Idempotent.
-  const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
   // Every worker/isolated launch leaves `.e2e-runtime/<prefix>-<pid>-<ms>`
   // behind; unpruned they reached 231 GB and filled the disk. Only dirs whose

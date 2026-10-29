@@ -600,6 +600,10 @@ run_harness packages/apps/app/e2e/fixtures/stale-processes.test.ts
 # filled the disk); a concurrent group's live worker dirs must survive.
 run_harness packages/apps/app/e2e/fixtures/stale-runtime-dirs.test.ts
 
+# e2e install-health gate: an install that skipped its scripts (pendingBuilds, or a
+# non-executable node-pty spawn-helper) must stop the run with the fix named.
+run_harness packages/apps/app/e2e/fixtures/install-health.test.ts
+
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
 run_harness packages/domains/task/src/server/events.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/archive.test.ts
