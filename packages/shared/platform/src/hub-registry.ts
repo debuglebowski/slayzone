@@ -10,6 +10,9 @@
  * list of hubs — it may be down), so this contract is shared between the main
  * process (boot-config) and the renderer (via the `app:get-hub-registry` IPC).
  *
+ * Lives in platform: `@slayzone/transport` (below every domain) and the preload
+ * contract (`./electron-bootstrap-contract`) both need it.
+ *
  * Type-only and dependency-free: also the lean `@slayzone/platform/hub-registry`
  * subpath, safe to import from renderer bundles.
  */

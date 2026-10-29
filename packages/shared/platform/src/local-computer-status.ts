@@ -4,6 +4,9 @@
  * cause (it crashes at startup, its join token could not be minted) lives with
  * the supervisor in the main process.
  *
+ * Lives here, not in `@slayzone/computers`: `@slayzone/transport` (below every
+ * domain) and the preload contract (`./electron-bootstrap-contract`) both need it.
+ *
  * Type-only and dependency-free: also the lean
  * `@slayzone/platform/local-computer-status` subpath, safe to import from
  * renderer bundles.

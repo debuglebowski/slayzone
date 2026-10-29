@@ -9,6 +9,9 @@
  * against exactly the same signatures without transport depending on the
  * domain-aggregating `@slayzone/types`.
  *
+ * Lives in platform: it is a two-sided host contract (the preload implements it,
+ * transport consumes it), so it sits in the base package both sides depend on.
+ *
  * Type-only and dependency-free beyond sibling platform types: the lean
  * `@slayzone/platform/electron-bootstrap-contract` subpath, safe to import
  * from renderer bundles.
