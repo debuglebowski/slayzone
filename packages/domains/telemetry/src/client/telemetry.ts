@@ -1,4 +1,5 @@
-import { getTrpcClient, hubAllows, type TrpcVanillaClient } from '@slayzone/transport/client'
+import { hubAllows } from '@slayzone/transport/client'
+import { getTrpcClient, type TelemetryTrpcClient } from './trpc'
 import { safeRandomUUID } from '@slayzone/ui/secure-context'
 import type { TelemetryTier, TelemetryEventName, TelemetryEventProps } from '../shared/types'
 
@@ -238,7 +239,7 @@ export function startIpcTelemetryBridge(): void {
   if (typeof window === 'undefined') return
   // Runs from TelemetryProvider's init effect — i.e. after a tRPC query has
   // already resolved — so the vanilla client is initialized. Guard defensively.
-  let client: TrpcVanillaClient
+  let client: TelemetryTrpcClient
   try {
     client = getTrpcClient()
   } catch {

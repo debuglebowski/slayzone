@@ -1,5 +1,5 @@
 import { createContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import type { TelemetryTier } from '../shared/types'
 import {

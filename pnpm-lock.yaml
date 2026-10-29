@@ -2625,9 +2625,15 @@ importers:
 
   packages/domains/telemetry:
     dependencies:
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
