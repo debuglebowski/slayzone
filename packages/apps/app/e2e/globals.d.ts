@@ -1,4 +1,4 @@
-import type { TrpcVanillaClient } from '@slayzone/transport/client'
+import type { TrpcVanillaClient } from '../src/renderer/src/trpc'
 
 /**
  * Window globals the app exposes to the e2e suite, declared ONCE.

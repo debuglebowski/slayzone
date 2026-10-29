@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn, Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../../trpc'
 
 const PROMO_END = new Date('2026-03-29T07:59:00Z') // March 28 11:59 PM PT
 const PEAK_START = 5 // 5 AM PT

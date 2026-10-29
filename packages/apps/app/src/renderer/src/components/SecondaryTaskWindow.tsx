@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from 'react'
 import { Pin } from 'lucide-react'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task, PanelVisibility } from '@slayzone/task-contracts'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 

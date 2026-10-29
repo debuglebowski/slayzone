@@ -48,7 +48,7 @@ const client = {
   task: { update: { mutate: async () => undefined } }
 }
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('@/trpc', () => ({
   useTRPCClient: () => client,
   getTrpcClient: () => client
 }))

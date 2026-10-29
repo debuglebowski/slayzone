@@ -1,6 +1,6 @@
 import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 import {
   AlertDialog,
   AlertDialogAction,

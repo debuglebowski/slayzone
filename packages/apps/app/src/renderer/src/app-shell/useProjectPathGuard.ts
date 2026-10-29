@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import type { Project } from '@slayzone/projects-contracts'
 
 export interface ProjectPathGuardApi {

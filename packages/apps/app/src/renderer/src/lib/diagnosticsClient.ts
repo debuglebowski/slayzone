@@ -1,4 +1,4 @@
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from '../trpc'
 import type { ClientErrorEventInput } from '@slayzone/types'
 
 type DiagnosticsContext = Record<string, unknown>

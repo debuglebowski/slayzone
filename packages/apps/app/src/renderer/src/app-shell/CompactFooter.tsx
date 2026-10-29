@@ -15,7 +15,7 @@ import {
   PanelLeftClose
 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import {
   DropdownMenu,
   DropdownMenuTrigger,

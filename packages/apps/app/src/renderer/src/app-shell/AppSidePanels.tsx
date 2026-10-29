@@ -1,6 +1,6 @@
 import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import type { Project } from '@slayzone/projects-contracts'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'

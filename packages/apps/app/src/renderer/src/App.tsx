@@ -11,14 +11,12 @@ import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
-  useTRPC,
-  useTRPCClient,
   useSubscription,
   useFederationOrNull,
-  getClientForHub,
   getHubIdForProject,
   useHubOwnershipStore
 } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import {

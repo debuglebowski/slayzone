@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger
 } from '@slayzone/ui'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../../trpc'
 import type { ProviderUsage, UsageWindow } from '@slayzone/terminal-contracts'
 
 type PinnedBars = Record<string, string[]>

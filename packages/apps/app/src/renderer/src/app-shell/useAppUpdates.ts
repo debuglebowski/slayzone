@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type SetStateAction } from 'react'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import { toast } from '@slayzone/ui'
 
 export interface AppUpdatesApi {

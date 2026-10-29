@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import { useEffect, useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import logo from '@/assets/logo-solid.svg'
 
 const FIRST = 'Breath...'

@@ -1,6 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { Button } from '@slayzone/ui'
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from '../trpc'
 import { getDiagnosticsContext } from '@/lib/diagnosticsClient'
 
 interface Props {

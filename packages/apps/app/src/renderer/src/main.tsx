@@ -11,11 +11,10 @@ import {
   FederatedRoot,
   HubScope,
   electronBootstrap,
-  getTrpcClient,
-  initTrpcClient,
   setHubConnectProbe,
   useHubRegistryStore
 } from '@slayzone/transport/client'
+import { getTrpcClient, initTrpcClient } from './trpc'
 import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'

@@ -10,7 +10,7 @@ vi.mock('@slayzone/ui', () => ({
 }))
 
 const recordClientError = vi.fn()
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('@/trpc', () => ({
   getTrpcClient: () => ({
     diagnostics: { recordClientError: { mutate: recordClientError } }
   })

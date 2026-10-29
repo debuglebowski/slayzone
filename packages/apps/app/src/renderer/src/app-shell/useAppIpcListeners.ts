@@ -1,6 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 import { scopeTracker, useStableCallback } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'

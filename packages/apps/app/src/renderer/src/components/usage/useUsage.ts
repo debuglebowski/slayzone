@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../../trpc'
 
 const POLL_INTERVAL = 5 * 60_000
 
