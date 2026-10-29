@@ -936,6 +936,9 @@ importers:
       expo:
         specifier: ~58.0.21
         version: 58.0.21(@babel/core@7.29.7(supports-color@7.2.0))(bufferutil@4.1.0)(react-dom@19.3.1(react@19.3.1))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)(utf-8-validate@6.0.6))(react@19.3.1)(supports-color@7.2.0)(typescript@7.1.0-beta)(utf-8-validate@6.0.6)
+      expo-file-system:
+        specifier: ~58.0.13
+        version: 58.0.13(expo@58.0.21(@babel/core@7.29.7(supports-color@7.2.0))(bufferutil@4.1.0)(react-dom@19.3.1(react@19.3.1))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)(utf-8-validate@6.0.6))(react@19.3.1)(supports-color@7.2.0)(typescript@7.1.0-beta)(utf-8-validate@6.0.6))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)(utf-8-validate@6.0.6))
       expo-secure-store:
         specifier: ~58.0.2
         version: 58.0.2(expo@58.0.21(@babel/core@7.29.7(supports-color@7.2.0))(bufferutil@4.1.0)(react-dom@19.3.1(react@19.3.1))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)(utf-8-validate@6.0.6))(react@19.3.1)(supports-color@7.2.0)(typescript@7.1.0-beta)(utf-8-validate@6.0.6))

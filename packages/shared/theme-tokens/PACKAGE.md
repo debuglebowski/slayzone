@@ -18,11 +18,15 @@ The app's theme presets as plain data, plus the pure logic around them. No DOM, 
 - `getThemeChromeHex(id, variant)` — a variant's chrome as `#rrggbb[aa]` (converted once per palette)
 - `resolveNativeTheme(hubSettings | null, deviceScheme)` → `{ themeId, variant, colors }` — the whole decision for a client without CSS: hub settings + light/dark preference + device scheme → preset, variant, hex chrome (`null` = signed out / not loaded → `slay` in the device scheme)
 
+**First-paint cache** (`src/hub-theme-cache.ts`) — the hub settings a client last read, kept between launches so it paints the user's theme before the hub answers (desktop's counterpart: `@slayzone/settings` `theme-cache.ts`):
+- `createHubThemeCache(storage)` → `{ load(hubId), loadLast(), save(hubId, settings), forget(hubId) }` over the platform's `HubThemeCacheStorage` (one text value: `read()`, `write(text)`); format `{ v: 1, last?: hubId, hubs: { [hubId]: HubThemeSettings } }` (`last` = the hub saved most recently, so `loadLast()` paints before the client knows its session; `forget` clears it for that hub); anything unreadable (corrupt, other version, wrong shape, storage that throws) = nothing kept, never thrown
+- `pickHubThemeSettings(live, cached)` — live once loaded, else cached
+
 ## Consumers
 
 - `@slayzone/ui` re-exports the data names (existing `@slayzone/ui` and `@slayzone/ui/theme-types` imports keep working) and owns the DOM side: `applyChromeColors` / `clearChromeColors` / `getChromeStyleOverrides` paint the ORIGINAL strings as CSS variables.
 - `@slayzone/settings` (desktop `ThemeProvider`, first-paint cache) resolves the choice with the selection functions.
-- `@slayzone/mobile` paints `resolveNativeTheme(...).colors`, from the signed-in user's hub settings (`src/theme.ts`).
+- `@slayzone/mobile` paints `resolveNativeTheme(...).colors`, from the signed-in user's hub settings (`src/theme.ts`), and keeps them per hub with `createHubThemeCache` over a file (`src/theme-cache.ts`).
 
 ## Rules
 
@@ -35,3 +39,6 @@ The presets were TypeScript objects inside the DOM/React UI package, so the mobi
 
 **2026-10-29: Hand-written converter, clamped**
 No colour-library dependency for the three syntaxes the presets use (hex, `rgb[a]()`, `oklch()`). An `oklch()` colour outside sRGB is clamped per channel, not CSS Color 4 gamut-mapped (chroma reduction, e.g. lightningcss): the two differ by a few units per channel, only for the saturated `slay` / `slay-special` light colours (destructive, charts).
+
+**2026-10-29: Mobile first-paint cache keeps the inputs, not the colours**
+A launch painted `slay` until the hub answered. The cache keeps the hub settings (`HubThemeSettings`) per hub and resolves them again at each launch, so `system` follows the device's light/dark of that launch and the colours are always the current build's presets. Format and validation live here (platform-free, unit-tested); the app only supplies the storage.

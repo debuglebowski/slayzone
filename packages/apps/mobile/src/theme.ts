@@ -5,14 +5,16 @@ import {
   type HubThemeSettings,
   LEGACY_THEME_SETTING_KEYS,
   type NativeTheme,
+  pickHubThemeSettings,
   resolveNativeTheme,
   type Theme,
   unifiedThemes
 } from '@slayzone/theme-tokens'
 import { useSubscription } from '@slayzone/transport/client'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createContext, createElement, type ReactNode, useContext, useMemo } from 'react'
+import { createContext, createElement, type ReactNode, useContext, useEffect, useMemo } from 'react'
 import { useColorScheme } from 'react-native'
+import { hubThemeCache } from './theme-cache'
 import { useTRPC } from './trpc'
 
 /**
@@ -27,8 +29,10 @@ import { useTRPC } from './trpc'
  *   settings (`app_theme_id`, `app_theme_split`, `app_theme_id_dark`,
  *   `app_theme_id_light`) and the hub's light/dark preference (`settings.getThemeSource`;
  *   `system` = this device's scheme), kept current when another client changes them.
- *   Signed out, or until those load: `slay` in the device's scheme. A preset without
- *   a light variant uses its dark one.
+ *   Until those load: the ones this app last read from that hub (kept per hub between
+ *   launches, `theme-cache.ts`; forgotten at sign-out). Before the app knows its session:
+ *   the ones kept from the hub signed in last. Signed out, or nothing kept: `slay` in
+ *   the device's scheme. A preset without a light variant uses its dark one.
  */
 
 export type { ChromeColors }
@@ -40,7 +44,7 @@ for (const t of unifiedThemes) {
   getThemeChromeHex(t.id, 'light')
 }
 
-/** The signed-in user's theme settings on the hub; null = none (signed out, or loading). */
+/** The signed-in user's theme settings (live, else kept); null = none (signed out). */
 const HubThemeContext = createContext<HubThemeSettings | null>(null)
 
 function useNativeTheme(): NativeTheme {
@@ -57,6 +61,21 @@ export function useThemeVariant(): Theme {
   return useNativeTheme().variant
 }
 
+/**
+ * Paints its subtree in theme settings the app already holds, without reading a hub:
+ * the first paint, before the app knows its session, uses the ones kept from the hub
+ * signed in last (`hubThemeCache.loadLast()`; null = the defaults).
+ */
+export function KeptThemeProvider({
+  settings,
+  children
+}: {
+  settings: HubThemeSettings | null
+  children: ReactNode
+}) {
+  return createElement(HubThemeContext.Provider, { value: settings }, children)
+}
+
 /** The hub settings holding the choice, in `StoredAppTheme` order (legacy last). */
 const SETTING_KEYS = [
   APP_THEME_SETTING_KEYS.themeId,
@@ -68,9 +87,19 @@ const SETTING_KEYS = [
 
 /**
  * Paints its subtree in the signed-in user's theme. Must sit inside `HubScope` (it
- * reads that hub over tRPC); everything outside it keeps the defaults.
+ * reads that hub over tRPC); everything outside it keeps the defaults. Until the hub's
+ * settings load it paints `cached` (what the app kept from hub `hubId` at the last
+ * launch); once they load it keeps them for the next one.
  */
-export function HubThemeProvider({ children }: { children: ReactNode }) {
+export function HubThemeProvider({
+  hubId,
+  cached,
+  children
+}: {
+  hubId: string
+  cached: HubThemeSettings | null
+  children: ReactNode
+}) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const preference = useQuery(trpc.settings.getThemeSource.queryOptions())
@@ -96,15 +125,15 @@ export function HubThemeProvider({ children }: { children: ReactNode }) {
     })
   )
 
-  // Until every setting has loaded the defaults stay (no half-applied choice); a
-  // preference the hub could not answer is null (= follow the device).
+  // Until every setting has loaded, `cached` (else the defaults) stays: no half-applied
+  // choice. A preference the hub could not answer is null (= follow the device).
   const ready = !preference.isPending && stored.every((q) => q.isSuccess)
   const source = preference.data ?? null
   const [themeId, split, themeIdDark, themeIdLight, legacy, olderLegacy] = stored.map(
     (q) => q.data ?? null
   )
-  // A new context value only when the settings change, not on every refetch.
-  const settings = useMemo<HubThemeSettings | null>(
+  // A new value only when the settings change, not on every refetch.
+  const live = useMemo<HubThemeSettings | null>(
     () =>
       ready
         ? {
@@ -120,5 +149,15 @@ export function HubThemeProvider({ children }: { children: ReactNode }) {
         : null,
     [ready, source, themeId, split, themeIdDark, themeIdLight, legacy, olderLegacy]
   )
-  return createElement(HubThemeContext.Provider, { value: settings }, children)
+
+  // Keep what the hub said for the next launch's first paint, whenever it loads or changes.
+  useEffect(() => {
+    if (live) hubThemeCache.save(hubId, live)
+  }, [hubId, live])
+
+  return createElement(
+    HubThemeContext.Provider,
+    { value: pickHubThemeSettings(live, cached) },
+    children
+  )
 }

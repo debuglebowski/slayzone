@@ -35,3 +35,9 @@ export {
 export { parseColor, formatHex, toHex, withAlpha, toHexColors, type Rgba } from './color'
 export { getThemeChromeHex } from './chrome-hex'
 export { resolveNativeTheme, type HubThemeSettings, type NativeTheme } from './native-theme'
+export {
+  createHubThemeCache,
+  pickHubThemeSettings,
+  type HubThemeCache,
+  type HubThemeCacheStorage
+} from './hub-theme-cache'
