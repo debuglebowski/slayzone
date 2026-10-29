@@ -30,8 +30,9 @@
  * through its package.json dependencies (all dependency fields, transitively).
  *
  * NON_PACKAGE_INPUTS lists the repo-root directories that are not workspace
- * packages but that a typecheck may read. Each one is an input every per-package
- * cache must declare globally (Turborepo `globalDependencies`) — keep it short.
+ * packages but that a typecheck may read. Each one (as `<dir>/**`), and
+ * tsconfig.base.json, must be in turbo.json `globalDependencies` — checked here —
+ * so the per-package cache re-runs typechecks when they change. Keep it short.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -231,6 +232,19 @@ for (const pkg of packages) {
         )
     }
   }
+}
+
+// The per-package cache only re-runs a typecheck when an input it hashes changed, so
+// every allowed input outside the packages must be hashed globally.
+const TURBO_CONFIG = join(root, 'turbo.json')
+if (existsSync(TURBO_CONFIG)) {
+  const globals =
+    parseJsonc(readFileSync(TURBO_CONFIG, 'utf8'), TURBO_CONFIG).globalDependencies ?? []
+  for (const required of ['tsconfig.base.json', ...NON_PACKAGE_INPUTS.map((d) => `${d}/**`)])
+    if (!globals.includes(required))
+      violations.push(
+        `  turbo.json globalDependencies: missing ${JSON.stringify(required)} — a typecheck reads it, so the cache must hash it`
+      )
 }
 
 if (violations.length > 0) {

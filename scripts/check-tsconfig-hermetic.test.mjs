@@ -181,6 +181,21 @@ test('the repo-root tsconfig.base.json and the convex/ directory are allowed', (
   expect(r.status).toBe(0)
 })
 
+test('with a turbo.json, every non-package input must be a Turborepo global dependency', () => {
+  const pkgs = { a: { files: { 'tsconfig.json': tsconfig({ include: ['src'] }) } } }
+  const turbo = (globalDependencies) => JSON.stringify({ globalDependencies, tasks: {} })
+  const ok = check(pkgs, {
+    rootFiles: { 'turbo.json': turbo(['tsconfig.base.json', 'convex/**']) }
+  })
+  expect(ok.status).toBe(0)
+  const bad = check(pkgs, { rootFiles: { 'turbo.json': turbo(['tsconfig.base.json']) } })
+  expect(bad.status).toBe(1)
+  expect(bad.out).toContain('turbo.json globalDependencies: missing "convex/**"')
+  const noBase = check(pkgs, { rootFiles: { 'turbo.json': turbo(['convex/**']) } })
+  expect(noBase.status).toBe(1)
+  expect(noBase.out).toContain('turbo.json globalDependencies: missing "tsconfig.base.json"')
+})
+
 test('reads JSONC (comments, trailing commas, `//` inside strings) and every tsconfig*.json', () => {
   const r = check({
     a: {
