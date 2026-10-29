@@ -41,8 +41,12 @@ export function ProcessesPanel({
   // 'failed' only while there is no list to show: a failed reload of a loaded list
   // (tab re-show) keeps that list on screen.
   const [listLoad, setListLoad] = useState<'loading' | 'failed' | 'loaded'>('loading')
-  // Bumped by Retry: re-runs the list load.
+  // Bumped by Retry and by a dialog save/spawn: re-runs the list load.
   const [listLoadAttempt, setListLoadAttempt] = useState(0)
+  // The reload after a dialog save/spawn, so the list shows that change: 'pending'
+  // until a load lands, 'failed' if it failed. Shown only on a loaded list (that list
+  // misses the change); every later successful load (a re-show's, a new task's) clears it.
+  const [refresh, setRefresh] = useState<'idle' | 'pending' | 'failed'>('idle')
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProcess, setEditingProcess] = useState<ProcessEntry | null>(null)
@@ -71,10 +75,12 @@ export function ProcessesPanel({
         })
         setProcesses(entries)
         setListLoad('loaded')
+        setRefresh('idle')
       })
       .catch(() => {
         if (cancelled) return
         setListLoad((prev) => (prev === 'loaded' ? prev : 'failed'))
+        setRefresh((prev) => (prev === 'pending' ? 'failed' : prev))
       })
     return () => {
       cancelled = true
@@ -146,10 +152,13 @@ export function ProcessesPanel({
     }
   }, [processes, expandedLogs])
 
-  const refreshList = useCallback(async () => {
-    const list = await trpcClient.processes.listForTask.query({ taskId, projectId })
-    setProcesses(list as ProcessEntry[])
-  }, [taskId, projectId, trpcClient])
+  // Re-runs the list load (its stale guard, failure handling and URL derivation),
+  // keeping the current list on screen meanwhile. A load already in flight was asked
+  // before the change: re-running drops its answer.
+  const refreshList = useCallback(() => {
+    setRefresh('pending')
+    setListLoadAttempt((n) => n + 1)
+  }, [])
 
   const toggleLog = useCallback((id: string) => {
     setExpandedLogs((prev) => {
@@ -209,13 +218,9 @@ export function ProcessesPanel({
     setDialogOpen(true)
   }, [])
 
-  const handleDialogSaved = useCallback(() => {
-    void refreshList()
-  }, [refreshList])
-
   const handleDialogSpawned = useCallback(
     (id: string) => {
-      void refreshList()
+      refreshList()
       setExpandedLogs((prev) => new Set(prev).add(id))
     },
     [refreshList]
@@ -253,6 +258,19 @@ export function ProcessesPanel({
           New process
         </button>
       </div>
+
+      {/* A failed reload after a dialog save/spawn: the list below misses that change. */}
+      {refresh === 'failed' && listLoad === 'loaded' && (
+        <div
+          data-testid="processes-refresh-error"
+          className="shrink-0 px-4 py-2 border-b border-border flex items-center gap-2 text-xs text-muted-foreground"
+        >
+          <span className="text-destructive">Couldn't refresh processes.</span>
+          <button type="button" className="underline hover:text-foreground" onClick={refreshList}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* List */}
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -357,7 +375,7 @@ export function ProcessesPanel({
         taskId={taskId}
         projectId={projectId}
         cwd={cwd ?? null}
-        onSaved={handleDialogSaved}
+        onSaved={refreshList}
         onSpawned={handleDialogSpawned}
       />
     </div>
