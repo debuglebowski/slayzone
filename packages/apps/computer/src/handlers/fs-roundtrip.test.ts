@@ -11,10 +11,10 @@
  * picker depends on, so it gets the same treatment: both real implementations,
  * wired to each other through the shared schemas, over real files in a tmpdir.
  *
- * The computer handler lives in `@slayzone/computer` (an app, not a dep of this
- * package), so it is loaded by path and the suite skips if unresolvable.
+ * It lives here, in the computer, because it needs both sides: the computer depends
+ * on `@slayzone/computer-transport` (the hub side), never the reverse.
  *
- * @module computer/server/fs-roundtrip.test
+ * @module computer/handlers/fs-roundtrip.test
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,10 +22,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
-import { TypedEventEmitter } from '../shared/events'
-import { ComputerNotificationMethods, fsChangeParamsSchema } from '../shared/frames'
-import { createRemoteFsAdapters, type RoutingGateway } from './exec-proxies'
-import type { ComputerGatewayEvents } from './hub-gateway'
+import {
+  ComputerNotificationMethods,
+  fsChangeParamsSchema,
+  TypedEventEmitter
+} from '@slayzone/computer-transport/shared'
+import {
+  createRemoteFsAdapters,
+  type ComputerGatewayEvents,
+  type RoutingGateway
+} from '@slayzone/computer-transport/server'
+import { createFsHandlers } from './fs'
 
 const COMPUTER_ID = 'computer-1'
 
@@ -70,15 +77,9 @@ interface LoadedComputer {
   events: TypedEventEmitter<ComputerGatewayEvents>
 }
 
-async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer | null> {
-  let mod: typeof import('../../../../apps/computer/src/handlers/fs')
-  try {
-    mod = await import('../../../../apps/computer/src/handlers/fs')
-  } catch {
-    return null
-  }
+function loadComputerFsHandlers(roots: string[]): LoadedComputer {
   const events = new TypedEventEmitter<ComputerGatewayEvents>()
-  const { handlers } = mod.createFsHandlers({
+  const { handlers } = createFsHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
         if (method === ComputerNotificationMethods.fsChange) {
@@ -102,9 +103,8 @@ async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer |
   return { handlers, events }
 }
 
-async function adaptersFor(roots: string[]) {
-  const computer = await loadComputerFsHandlers(roots)
-  if (!computer) return null
+function adaptersFor(roots: string[]) {
+  const computer = loadComputerFsHandlers(roots)
   return createRemoteFsAdapters({
     gateway: bridge(computer.handlers, computer.events),
     local: refuseLocal,
@@ -114,8 +114,7 @@ async function adaptersFor(roots: string[]) {
 
 describe('fs.* hub⇄computer round trip — browse', () => {
   it('reports the computer jail as the browsable roots', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
     const res = await fs.listRoots(COMPUTER_ID)
     expect(res.roots).toEqual([dir])
     expect(res.platform).toBe(process.platform)
@@ -126,8 +125,7 @@ describe('fs.* hub⇄computer round trip — browse', () => {
     mkdirSync(join(dir, 'plain'), { recursive: true })
     writeFileSync(join(dir, 'note.txt'), 'x')
 
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
 
     const atRoot = await fs.listDir(COMPUTER_ID, dir, { dirsOnly: true })
     expect(atRoot.entries.map((e) => e.name)).toEqual(['plain', 'repo'])
@@ -139,8 +137,7 @@ describe('fs.* hub⇄computer round trip — browse', () => {
   })
 
   it('creates a directory on the computer and confirms it exists there', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
     const target = join(dir, 'made', 'deep')
     expect(await fs.pathExists(COMPUTER_ID, target)).toBe(false)
     expect((await fs.mkdir(COMPUTER_ID, target)).path).toBe(target)
@@ -153,8 +150,7 @@ describe('fs.* hub⇄computer round trip — browse', () => {
   it('propagates a jail violation as an error, not an empty result', async () => {
     const inner = join(dir, 'inner')
     mkdirSync(inner, { recursive: true })
-    const fs = await adaptersFor([inner])
-    if (!fs) return
+    const fs = adaptersFor([inner])
     await expect(fs.listDir(COMPUTER_ID, dir)).rejects.toThrow(/allowedRoots/)
   })
 })
@@ -168,40 +164,35 @@ describe('fs.* hub⇄computer round trip — editor', () => {
   })
 
   it('reads the tree with root-relative paths and gitignore flags intact', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
     const entries = await fs.readDir(COMPUTER_ID, dir, '')
     expect(entries.find((e) => e.name === 'src')?.path).toBe('src')
     expect(entries.find((e) => e.name === 'secret.txt')?.ignored).toBe(true)
   })
 
   it('round-trips a write through the wire and lands it on real disk', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
     await fs.writeFile(COMPUTER_ID, dir, 'src/new.ts', 'const b = 2')
     expect(readFileSync(join(dir, 'src', 'new.ts'), 'utf-8')).toBe('const b = 2')
     expect(await fs.readFile(COMPUTER_ID, dir, 'src/new.ts')).toEqual({ content: 'const b = 2' })
   })
 
   it('carries search results and the truncated flag across the wire', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
     const res = await fs.searchFiles(COMPUTER_ID, dir, 'export')
     expect(res.results.map((r) => r.path)).toEqual(['src/index.ts'])
     expect(res.truncated).toBe(false)
   })
 
   it('reports git status for a non-repo root without inventing one', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
     expect(await fs.gitStatus(COMPUTER_ID, dir)).toEqual({ files: {}, isGitRepo: false })
   })
 })
 
 describe('fs.* hub⇄computer round trip — watch', () => {
   it('delivers a real file change from the computer watcher to the hub listener', async () => {
-    const fs = await adaptersFor([dir])
-    if (!fs) return
+    const fs = adaptersFor([dir])
 
     const seen: string[] = []
     const stop = fs.watch(COMPUTER_ID, dir, (e) => seen.push(`${e.type}:${e.relPath}`))

@@ -12,25 +12,28 @@
  * This test wires the two real implementations to each other through the shared
  * frame schemas, so a param-name or notification-shape divergence fails here.
  *
- * The computer handler lives in `@slayzone/computer` (an app, not a dep of this
- * package), so it is loaded dynamically and skipped if unresolvable — the suite
- * must not go red merely because the computer bundle is absent.
+ * It lives here, in the computer, because it needs both sides: the computer depends
+ * on `@slayzone/computer-transport` (the hub side), never the reverse.
  *
- * @module computer/server/proc-roundtrip.test
+ * @module computer/handlers/proc-roundtrip.test
  */
 
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { TypedEventEmitter } from '../shared/events'
 import {
   ComputerNotificationMethods,
   procDataParamsSchema,
-  procExitParamsSchema
-} from '../shared/frames'
-import { createRoutingProcessBackend, type RoutingGateway } from './exec-proxies'
-import type { ComputerGatewayEvents } from './hub-gateway'
+  procExitParamsSchema,
+  TypedEventEmitter
+} from '@slayzone/computer-transport/shared'
+import {
+  createRoutingProcessBackend,
+  type ComputerGatewayEvents,
+  type RoutingGateway
+} from '@slayzone/computer-transport/server'
+import { createProcHandlers } from './proc'
 
 const COMPUTER_ID = 'computer-1'
 
@@ -78,17 +81,9 @@ interface LoadedComputer {
   events: TypedEventEmitter<ComputerGatewayEvents>
 }
 
-async function loadComputerProcHandlers(): Promise<LoadedComputer | null> {
-  // Resolved by path, not package name: the computer is an app, not a dependency
-  // of this package, so there is no bare specifier to import.
-  let mod: typeof import('../../../../apps/computer/src/handlers/proc')
-  try {
-    mod = await import('../../../../apps/computer/src/handlers/proc')
-  } catch {
-    return null
-  }
+function loadComputerProcHandlers(): LoadedComputer {
   const events = new TypedEventEmitter<ComputerGatewayEvents>()
-  const created = mod.createProcHandlers({
+  const created = createProcHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
         // Validate like the real gateway's demux does before re-emitting.
@@ -119,8 +114,7 @@ async function loadComputerProcHandlers(): Promise<LoadedComputer | null> {
 
 describe('proc.* hub⇄computer round trip', () => {
   it('routes a spawn, streams sequenced stdout back, and reports exit', async () => {
-    const computer = await loadComputerProcHandlers()
-    if (!computer) return // computer app unavailable in this context
+    const computer = loadComputerProcHandlers()
     cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingProcessBackend({
@@ -155,8 +149,7 @@ describe('proc.* hub⇄computer round trip', () => {
   })
 
   it('writes to stdin over the wire (duplex — required for a chat protocol)', async () => {
-    const computer = await loadComputerProcHandlers()
-    if (!computer) return
+    const computer = loadComputerProcHandlers()
     cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingProcessBackend({
@@ -192,8 +185,7 @@ describe('proc.* hub⇄computer round trip', () => {
   })
 
   it('recovers a dropped stdout frame via proc.getBufferSince, preserving order', async () => {
-    const computer = await loadComputerProcHandlers()
-    if (!computer) return
+    const computer = loadComputerProcHandlers()
     cleanup.push(() => computer.disposeAll())
 
     // Swallow ONE mid-stream stdout notification to simulate a lost frame. The

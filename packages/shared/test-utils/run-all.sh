@@ -973,9 +973,12 @@ run_vitest_files "vitest (owner checks)" \
 # `fs.watch({recursive:true})` never delivers there, at any timeout. Run each
 # package's own suite instead. Proven on Linux (ubuntu 24.04) before CI ran it: that
 # run found proc.kill leaking a shell's children (dash forks a lone command).
+# Includes the hub⇄computer round trips (handlers/{proc,fs,chat}-roundtrip.test.ts):
+# the real computer handlers wired to the real hub-side transport, so they live in the
+# computer, which depends on @slayzone/computer-transport (never the reverse).
 run_package_tests packages/apps/computer @slayzone/computer
 
-# Same reason: the hub⇄computer fs round trip loads the real computer handlers.
+# The hub-side transport's own suites, under the same node-environment default config.
 run_package_tests packages/domains/computer-transport @slayzone/computer-transport
 
 # The computers DOMAIN suite (store, join-tokens, migration) was never registered

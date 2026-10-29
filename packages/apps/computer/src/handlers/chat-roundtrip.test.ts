@@ -11,25 +11,29 @@
  * so if this passes, the transport's driver has a working duplex channel to a
  * process on another machine.
  *
- * @module computer/server/chat-roundtrip.test
+ * It lives here, in the computer, because it needs both sides: the computer depends
+ * on `@slayzone/computer-transport` (the hub side), never the reverse.
+ *
+ * @module computer/handlers/chat-roundtrip.test
  */
 
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { TypedEventEmitter } from '../shared/events'
 import {
   ComputerNotificationMethods,
   procDataParamsSchema,
-  procExitParamsSchema
-} from '../shared/frames'
+  procExitParamsSchema,
+  TypedEventEmitter
+} from '@slayzone/computer-transport/shared'
 import {
   createRoutingChatBackend,
   NoComputerAvailableError,
+  type ComputerGatewayEvents,
   type RoutingGateway
-} from './exec-proxies'
-import type { ComputerGatewayEvents } from './hub-gateway'
+} from '@slayzone/computer-transport/server'
+import { createProcHandlers } from './proc'
 
 const COMPUTER_ID = 'computer-1'
 
@@ -45,18 +49,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-async function loadComputer(): Promise<{
+function loadComputer(): {
   gateway: RoutingGateway
   disposeAll: () => void
-} | null> {
-  let mod: typeof import('../../../../apps/computer/src/handlers/proc')
-  try {
-    mod = await import('../../../../apps/computer/src/handlers/proc')
-  } catch {
-    return null
-  }
+} {
   const events = new TypedEventEmitter<ComputerGatewayEvents>()
-  const created = mod.createProcHandlers({
+  const created = createProcHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
         // Validate like the real gateway's demux does before re-emitting.
@@ -101,8 +99,7 @@ async function loadComputer(): Promise<{
 
 describe('routed chat agent', () => {
   it('holds an NDJSON request/response exchange with a process on the computer', async () => {
-    const computer = await loadComputer()
-    if (!computer) return
+    const computer = loadComputer()
     cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingChatBackend({
@@ -175,8 +172,7 @@ describe('routed chat agent', () => {
   })
 
   it('throws NoComputerAvailableError when no computer resolves (no hub-local spawn)', async () => {
-    const computer = await loadComputer()
-    if (!computer) return
+    const computer = loadComputer()
     cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingChatBackend({
