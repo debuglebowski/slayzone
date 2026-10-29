@@ -1,4 +1,4 @@
-import type { TRPCClient } from '@trpc/client'
+import type { TRPCClient, TRPCLink } from '@trpc/client'
 import type { AnyTRPCRouter } from '@trpc/server'
 import type { TRPCOptionsProxy } from '@trpc/tanstack-react-query'
 import type { MountedRouter, RouterMounts } from '@slayzone/trpc-server'
@@ -8,6 +8,7 @@ import {
   getTrpcClient,
   getHubClient,
   listHubClients,
+  initTrpcClient,
   type RuntimeWsClient
 } from './runtime'
 import {
@@ -92,4 +93,26 @@ export function trpcFor<TRouter extends AnyTRPCRouter>(): TrpcView<TRouter> {
  */
 export function typedTrpc<TMounts extends RouterMounts>(): TrpcView<MountedRouter<TMounts>> {
   return trpcFor<MountedRouter<TMounts>>()
+}
+
+/**
+ * Boot helpers of the runtime, typed for an app's router. Separate from the view: only
+ * an app's entry point boots the client (domains never do). `initTrpcClient` is the
+ * runtime's own idempotent boot (first call wins the link stack); typing its links and
+ * client with `TRouter` changes nothing on the wire.
+ *
+ *   // an app's boot (sees api)
+ *   export const { initTrpcClient } = trpcBootFor<AppRouter>()
+ */
+export interface TrpcBoot<TRouter extends AnyTRPCRouter> {
+  initTrpcClient: (
+    url: string,
+    opts?: { links?: TRPCLink<TRouter>[]; token?: string }
+  ) => { client: TRPCClient<TRouter>; wsClient: RuntimeWsClient }
+}
+
+const runtimeBoot = Object.freeze({ initTrpcClient })
+
+export function trpcBootFor<TRouter extends AnyTRPCRouter>(): TrpcBoot<TRouter> {
+  return runtimeBoot as unknown as TrpcBoot<TRouter>
 }

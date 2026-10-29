@@ -26,8 +26,9 @@ export const { useTRPC } = typedTrpc<XMounts & YMounts>()
 // (`AppMetaMounts = { app: { meta: AppMetaRouter } }`, @slayzone/host-capabilities)
 export const { useTRPC } = typedTrpc<XMounts & AppMetaMounts & AppShellMounts>()
 
-// an app (depends on @slayzone/api): the whole router
+// an app (depends on @slayzone/api): the whole router, plus its typed boot
 export const { useTRPC } = trpcFor<AppRouter>()
+export const { initTrpcClient } = trpcBootFor<AppRouter>()
 ```
 
 A view carries `useTRPC`, `useTRPCClient`, `getTrpcClient`, `getHubClient`,
@@ -81,9 +82,9 @@ typed via `src/client/app-router.ts` (`export type { AppRouter } from '@slayzone
 Those two files are the only reason transport depends on `@slayzone/api`
 (transport → api → every domain → transport). When the last domain has migrated:
 
-- apps (`app`, `renderer-app`, `web-shell`, `chromium-shell`) define their own
-  `trpcFor<AppRouter>()` view and add `@slayzone/api` as a (type-only) dependency where
-  they lack it (`renderer-app`, `web-shell` get `AppRouter` through transport today);
+- apps (`app`, `renderer-app`, `web-shell`) define their own `trpcFor<AppRouter>()`
+  view + `trpcBootFor<AppRouter>()` boot and depend on `@slayzone/api` (done;
+  `chromium-shell` calls no procedure, it mounts `renderer-app`);
 - transport-internal users of the whole-app types move to the runtime types:
   `FederationProvider`'s `ResolvedHub.ws` (`RuntimeHubWsClient`; its one reader,
   `tasks`' `useTasksData`, re-types it with its view), `hubCapabilities`

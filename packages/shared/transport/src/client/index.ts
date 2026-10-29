@@ -24,7 +24,14 @@ export {
 } from './trpc'
 // Typed views over the one client runtime — how new code gets a typed client.
 // A domain: `typedTrpc<ItsMounts>()`; an app: `trpcFor<AppRouter>()`. See README.md.
-export { typedTrpc, trpcFor, type TrpcView, type TypedHubWsClient } from './view'
+export {
+  typedTrpc,
+  trpcFor,
+  trpcBootFor,
+  type TrpcView,
+  type TrpcBoot,
+  type TypedHubWsClient
+} from './view'
 export { TrpcProvider, makeQueryClient, type TrpcProviderProps } from './provider'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
