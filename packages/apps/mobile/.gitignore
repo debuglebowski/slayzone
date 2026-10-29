@@ -1,0 +1,4 @@
+# Continuous Native Generation: `expo run:ios` / `expo prebuild` regenerate these from app.json.
+ios/
+android/
+.expo/

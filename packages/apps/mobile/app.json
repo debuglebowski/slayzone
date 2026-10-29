@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "SlayZone",
+    "slug": "slayzone-mobile",
+    "scheme": "slayzone",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios"],
+    "updates": { "enabled": false },
+    "ios": {
+      "bundleIdentifier": "com.slayzone.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "plugins": ["expo-secure-store"]
+  }
+}
