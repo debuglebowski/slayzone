@@ -1,5 +1,42 @@
 [
   {
+    "version": "0.36.2",
+    "date": "2026-10-29",
+    "tagline": "Right where you left it",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Turn off telemetry",
+        "description": "You can now switch off usage analytics and cloud features like the leaderboard in Settings, and people running their own hub can switch them off for everyone on it."
+      },
+      {
+        "category": "fix",
+        "title": "Editors remember where you were",
+        "description": "Switching tabs and coming back no longer loses your cursor, scroll position, undo history or open search."
+      },
+      {
+        "category": "fix",
+        "title": "Chat reload",
+        "description": "Reloading a chat no longer shows every message twice."
+      },
+      {
+        "category": "fix",
+        "title": "Smoother search",
+        "description": "Reopening search no longer remembers your last highlighted result, and results from one project never mix into another."
+      },
+      {
+        "category": "fix",
+        "title": "Renaming isn't interrupted",
+        "description": "Renaming a task in the sidebar no longer gets cut off when a terminal grabs the keyboard."
+      },
+      {
+        "category": "fix",
+        "title": "Up-to-date git details",
+        "description": "Git details for projects and tasks are correct as soon as you open them and update as your files change."
+      }
+    ]
+  },
+  {
     "version": "0.36.1",
     "date": "2026-10-28",
     "tagline": "Tighter, steadier, faster",
