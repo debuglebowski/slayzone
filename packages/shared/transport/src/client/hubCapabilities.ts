@@ -1,38 +1,38 @@
 import { isPathAllowed, type Scope } from '../shared/scopes'
 import type { RuntimeClient } from './runtime'
 
-/**
- * The one procedure this module calls, typed structurally: transport names no router
- * (`hub` is composed in `@slayzone/api`). Only the field read here is declared.
- */
-type HubDescribeClient = {
-  hub: { describe: { query: () => Promise<{ scopes?: readonly Scope[] | null }> } }
+/** The fields of a `hub.describe` answer this module reads. A hub older than one sends none. */
+type HubDescribe = {
+  scopes?: readonly Scope[] | null
+  switches?: { enableTelemetry?: boolean }
 }
 
 /**
- * The scopes each hub connection holds, asked once per client (`hub.describe`).
- * Keyed by the client object: a hub whose token changes gets a new client
- * (`getOrCreateHubClient`), so a stale answer never outlives its credential.
+ * The one procedure this module calls, typed structurally: transport names no router
+ * (`hub` is composed in `@slayzone/api`). Only the fields read here are declared.
  */
-const scopesByClient = new WeakMap<object, Promise<readonly Scope[] | null>>()
+type HubDescribeClient = { hub: { describe: { query: () => Promise<HubDescribe> } } }
 
-function scopesOf(client: RuntimeClient): Promise<readonly Scope[] | null> {
-  let scopes = scopesByClient.get(client)
-  if (!scopes) {
+/**
+ * Each hub connection's `hub.describe` answer, asked once per client. Keyed by the
+ * client object: a hub whose token changes gets a new client (`getOrCreateHubClient`),
+ * so a stale answer never outlives its credential.
+ */
+const describeByClient = new WeakMap<object, Promise<HubDescribe>>()
+
+function describeOf(client: RuntimeClient): Promise<HubDescribe> {
+  let answer = describeByClient.get(client)
+  if (!answer) {
     // Every view's client is the one path-based runtime client, and every hub serves
     // `hub.describe`: reading it through this structural type is sound for any view.
-    scopes = (client as unknown as HubDescribeClient).hub.describe.query().then(
-      // `?? null`: a hub older than the field sends none.
-      (d) => d.scopes ?? null,
-      (err: unknown) => {
-        // Not remembered: the next call asks again, once the hub is back.
-        scopesByClient.delete(client)
-        throw err
-      }
-    )
-    scopesByClient.set(client, scopes)
+    answer = (client as unknown as HubDescribeClient).hub.describe.query().catch((err: unknown) => {
+      // Not remembered: the next call asks again, once the hub is back.
+      describeByClient.delete(client)
+      throw err
+    })
+    describeByClient.set(client, answer)
   }
-  return scopes
+  return answer
 }
 
 /**
@@ -49,6 +49,25 @@ function scopesOf(client: RuntimeClient): Promise<readonly Scope[] | null> {
  * routers the caller's view types.
  */
 export async function hubAllows(client: RuntimeClient, path: string): Promise<boolean> {
-  const scopes = await scopesOf(client).catch(() => null)
+  // `?? null`: a hub older than the field sends none.
+  const scopes = await describeOf(client).then(
+    (d) => d.scopes ?? null,
+    () => null
+  )
   return scopes === null || isPathAllowed(scopes, path)
+}
+
+/**
+ * Does the hub behind `client` permit third-party telemetry (PostHog, Convex) —
+ * `SLAYZONE_HUB_ENABLE_TELEMETRY`, reported in `hub.describe`'s switches?
+ *
+ * True for a hub older than the switch (it cannot turn telemetry off). FAILS CLOSED:
+ * false when the hub cannot be asked, so a client never starts telemetry it could not
+ * confirm. The answer is not remembered then; the next call asks again.
+ */
+export async function hubPermitsTelemetry(client: RuntimeClient): Promise<boolean> {
+  return describeOf(client).then(
+    (d) => d.switches?.enableTelemetry !== false,
+    () => false
+  )
 }

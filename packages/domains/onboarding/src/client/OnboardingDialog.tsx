@@ -29,7 +29,7 @@ export function OnboardingDialog({
   const [step, setStep] = useState(0)
   const [selectedProvider, setSelectedProvider] = useState('claude-code')
   const [closing, setClosing] = useState(false)
-  const { setTier } = useTelemetry()
+  const { setTier, lockedByHub } = useTelemetry()
 
   const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
   const onboardingCompletedQuery = useQuery(
@@ -91,9 +91,12 @@ export function OnboardingDialog({
     [setTier, setSetting, onExternalClose]
   )
 
-  const handleAnalyticsChoice = (tier: 'anonymous' | 'opted_in'): void => {
-    setTier(tier)
-    track('onboarding_completed', { provider: selectedProvider, tier })
+  const handleAnalyticsChoice = (tier: 'anonymous' | 'opted_in' | null): void => {
+    // null: a hub turned telemetry off, so there was no choice (and nothing is sent).
+    if (tier) {
+      setTier(tier)
+      track('onboarding_completed', { provider: selectedProvider, tier })
+    }
     setSetting({ key: 'onboarding_completed', value: 'true' })
     setStep(4)
   }
@@ -175,7 +178,13 @@ export function OnboardingDialog({
                 />
               )}
 
-              {step === 3 && <AnalyticsStep key="analytics" onChoose={handleAnalyticsChoice} />}
+              {step === 3 && (
+                <AnalyticsStep
+                  key="analytics"
+                  lockedByHub={lockedByHub}
+                  onChoose={handleAnalyticsChoice}
+                />
+              )}
 
               {step === 4 && <CliInstallStep onNext={handleNext} />}
 

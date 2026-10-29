@@ -6,13 +6,36 @@ import { track } from './telemetry'
 interface TelemetrySettingsProps {
   tier: TelemetryTier
   onTierChange: (tier: TelemetryTier) => void
+  /** A connected hub turned telemetry off (or could not be asked): say so, change nothing. */
+  lockedByHub?: boolean
 }
 
-export function TelemetrySettings({ tier, onTierChange }: TelemetrySettingsProps) {
+export function TelemetrySettings({
+  tier,
+  onTierChange,
+  lockedByHub = false
+}: TelemetrySettingsProps) {
   const isOptedIn = tier === 'opted_in'
+  const isOff = tier === 'off'
+
+  const change = (newTier: TelemetryTier): void => {
+    // Turning it off sends nothing, not even the switch itself.
+    if (newTier !== 'off') track('telemetry_tier_changed', { tier: newTier })
+    onTierChange(newTier)
+  }
 
   return (
     <div className="space-y-6">
+      {lockedByHub && (
+        <p
+          className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground"
+          data-testid="telemetry-locked-by-hub"
+        >
+          Telemetry is off: a hub this app is connected to has turned it off, or could not be asked.
+          Nothing is sent to PostHog, and the leaderboard and feedback are unavailable.
+        </p>
+      )}
+
       <div className="space-y-3">
         <Label className="text-base font-semibold">Anonymous Analytics</Label>
         <p className="text-sm text-muted-foreground">
@@ -33,14 +56,30 @@ export function TelemetrySettings({ tier, onTierChange }: TelemetrySettingsProps
           <Switch
             id="telemetry-opt-in"
             checked={isOptedIn}
-            onCheckedChange={(checked: boolean) => {
-              const newTier = checked ? 'opted_in' : 'anonymous'
-              track('telemetry_tier_changed', { tier: newTier })
-              onTierChange(newTier)
-            }}
+            disabled={isOff || lockedByHub}
+            onCheckedChange={(checked: boolean) => change(checked ? 'opted_in' : 'anonymous')}
           />
           <label htmlFor="telemetry-opt-in" className="text-sm cursor-pointer">
             Help improve SlayZone
+          </label>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <Label className="text-base font-semibold">Turn Off</Label>
+        <p className="text-sm text-muted-foreground">
+          Send nothing to PostHog and turn off the features that use SlayZone&apos;s cloud service
+          (Convex): the leaderboard and feedback.
+        </p>
+        <div className="flex items-center gap-3">
+          <Switch
+            id="telemetry-off"
+            checked={isOff}
+            disabled={lockedByHub}
+            onCheckedChange={(checked: boolean) => change(checked ? 'off' : 'anonymous')}
+          />
+          <label htmlFor="telemetry-off" className="text-sm cursor-pointer">
+            Turn off telemetry
           </label>
         </div>
       </div>

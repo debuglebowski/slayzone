@@ -38,6 +38,7 @@ const ENV_KEYS = [
   'SLAYZONE_HUB_ENABLE_SSO',
   'SLAYZONE_HUB_ENABLE_PROCESSES',
   'SLAYZONE_HUB_ENABLE_INTEGRATIONS',
+  'SLAYZONE_HUB_ENABLE_TELEMETRY',
   'SLAYZONE_HUB_SSO_TENANT_ID',
   'SLAYZONE_HUB_SSO_CLIENT_ID',
   'SLAYZONE_HUB_SSO_CLIENT_SECRET',
@@ -113,7 +114,8 @@ test('hub.config.json switches seed the env as 0|1', () => {
       ssoTenantId: TENANT,
       ssoClientId: CLIENT,
       enableProcesses: false,
-      enableIntegrations: false
+      enableIntegrations: false,
+      enableTelemetry: false
     })
     applyStandaloneHubConfig()
     expect(process.env.SLAYZONE_HUB_REQUIRE_LOGIN, 'requireLogin true → 1').toBe('1')
@@ -121,6 +123,7 @@ test('hub.config.json switches seed the env as 0|1', () => {
     expect(process.env.SLAYZONE_HUB_ENABLE_SSO, 'enableSso true → 1').toBe('1')
     expect(process.env.SLAYZONE_HUB_ENABLE_PROCESSES, 'enableProcesses false → 0').toBe('0')
     expect(process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS, 'enableIntegrations false → 0').toBe('0')
+    expect(process.env.SLAYZONE_HUB_ENABLE_TELEMETRY, 'enableTelemetry false → 0').toBe('0')
     expect(process.env.SLAYZONE_HUB_SSO_TENANT_ID, 'ssoTenantId').toEqual(TENANT)
     expect(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, 'ssoClientId').toEqual(CLIENT)
   })
@@ -137,6 +140,7 @@ test('an ABSENT switch key leaves the env unset (the default applies, not an inv
     expect(process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS, 'enableIntegrations not seeded').toBe(
       undefined
     )
+    expect(process.env.SLAYZONE_HUB_ENABLE_TELEMETRY, 'enableTelemetry not seeded').toBe(undefined)
   })
 })
 

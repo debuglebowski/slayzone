@@ -192,7 +192,8 @@ function checkHeaders(r: Response, exp: Expected, label: string): void {
 
 async function checkHub(name: string, hub: Hub, publicAddress: string | undefined): Promise<void> {
   const hsts = publicAddress === undefined ? null : 'max-age=31536000'
-  const shell = { csp: webShellCsp(publicAddress), hsts }
+  // The spawned hubs keep the telemetry default (on).
+  const shell = { csp: webShellCsp(publicAddress, true), hsts }
   const api = { csp: API_CSP, cacheControl: 'no-store', hsts }
   const bearer = { authorization: `Bearer ${hub.owner.token}` }
 

@@ -182,14 +182,20 @@ function parseHub(body: string, port: number): DiscoveredHub | null {
   }
 }
 
-/** The `switches` object of a `/health` body, or null when absent/malformed. Every key must be a boolean. */
+/**
+ * The `switches` object of a `/health` body, or null when absent/malformed. A key that
+ * is present must be a boolean. A key that is absent comes from a hub older than that
+ * switch, which cannot turn it off: it reads as its default (`enableTelemetry`).
+ */
 function parseSwitches(raw: unknown): HubSwitches | null {
   if (typeof raw !== 'object' || raw === null) return null
   const o = raw as Record<string, unknown>
   const out: HubSwitches = { ...HUB_SWITCH_DEFAULTS }
   for (const key of Object.keys(HUB_SWITCH_ENV) as Array<keyof HubSwitches>) {
-    if (typeof o[key] !== 'boolean') return null
-    out[key] = o[key]
+    const value = o[key]
+    if (value === undefined) continue
+    if (typeof value !== 'boolean') return null
+    out[key] = value
   }
   return out
 }

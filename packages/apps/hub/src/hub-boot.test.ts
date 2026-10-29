@@ -991,7 +991,8 @@ test('the SAME hub config in hub.config.json boots, env still wins over it', asy
       publicAddress: 'hub.example.com',
       requireLogin: true,
       enableProcesses: false,
-      enableIntegrations: false
+      enableIntegrations: false,
+      enableTelemetry: false
     })
   )
   // The secret is env only; a switch in env beats the file (enableProcesses 1 vs false).
@@ -1007,6 +1008,7 @@ test('the SAME hub config in hub.config.json boots, env still wins over it', asy
     }
     expect(health.authRequired, 'requireLogin came from the file').toBe(true)
     expect(health.switches?.enableIntegrations, 'enableIntegrations came from the file').toBe(false)
+    expect(health.switches?.enableTelemetry, 'enableTelemetry came from the file').toBe(false)
     expect(health.switches?.enableProcesses, 'env wins over the file for enableProcesses').toBe(
       true
     )

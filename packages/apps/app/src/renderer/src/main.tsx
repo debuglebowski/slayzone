@@ -251,13 +251,15 @@ if (isFloatingGlobalAgentPanel) {
       // FederatedRoot (registry) + HubScope (the default hub's client) must
       // be OUTERMOST: ConvexAuthBootstrap (and Pty/Theme/Telemetry providers) now
       // call tRPC hooks, so they need the tRPC context. With one hub this is
-      // identical to the former single TrpcProvider.
+      // identical to the former single TrpcProvider. TelemetryProvider sits above
+      // ConvexAuthBootstrap: Convex starts only when it says third-party services
+      // are allowed (tier not `off`, no hub with telemetry off).
       <FederatedRoot decorateUrl={decorateUrl}>
         <HubScope hubId={registry.defaultHubId}>
-          <ConvexAuthBootstrap convexUrl={bootConfig.convexUrl}>
-            <PtyProvider>
-              <ThemeProvider>
-                <TelemetryProvider>
+          <TelemetryProvider>
+            <ConvexAuthBootstrap convexUrl={bootConfig.convexUrl}>
+              <PtyProvider>
+                <ThemeProvider>
                   <UndoProvider>
                     <MaybeProfiler>
                       <TooltipProvider delayDuration={0}>
@@ -265,10 +267,10 @@ if (isFloatingGlobalAgentPanel) {
                       </TooltipProvider>
                     </MaybeProfiler>
                   </UndoProvider>
-                </TelemetryProvider>
-              </ThemeProvider>
-            </PtyProvider>
-          </ConvexAuthBootstrap>
+                </ThemeProvider>
+              </PtyProvider>
+            </ConvexAuthBootstrap>
+          </TelemetryProvider>
         </HubScope>
       </FederatedRoot>
     )

@@ -536,7 +536,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
   // Every response gets the security headers here, whichever handler writes it.
   const httpServer = createServer(
-    withSecurityHeaders(handleRequest, { publicAddress: boot.publicAddress })
+    withSecurityHeaders(handleRequest, {
+      publicAddress: boot.publicAddress,
+      telemetry: switches.enableTelemetry
+    })
   )
 
   // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.

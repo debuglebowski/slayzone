@@ -265,4 +265,49 @@ describe('assertHubConvexSignInUrl', () => {
       })
     })
   }
+
+  // SLAYZONE_HUB_ENABLE_TELEMETRY=0 wins over a Convex address left set: the hub's one
+  // Convex call (the sign-in start) never happens, even for its own deployment.
+  describe('telemetry off', () => {
+    let before = -1
+    let after = -1
+    let err: unknown
+    beforeAll(() => {
+      before = lines.length
+      err = caught(() =>
+        assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud', refusal, {
+          ...own,
+          SLAYZONE_HUB_ENABLE_TELEMETRY: '0'
+        })
+      )
+      after = lines.length
+    })
+
+    test('telemetry off: HUB_TELEMETRY_DISABLED, naming the switch', () => {
+      expect(err).toBeInstanceOf(HubSwitchedOffError)
+      expect(err).toMatchObject({
+        code: 'HUB_TELEMETRY_DISABLED',
+        variable: 'SLAYZONE_HUB_ENABLE_TELEMETRY'
+      })
+      expect((err as Error).message).toContain('SLAYZONE_HUB_ENABLE_TELEMETRY=0')
+    })
+
+    test('telemetry off: exactly one audit line', () => {
+      expect(after).toBe(before + 1)
+      expect(lines[before]).toMatchObject({
+        event: 'integration.connect',
+        outcome: 'denied',
+        detail: { code: 'HUB_TELEMETRY_DISABLED' }
+      })
+    })
+
+    test('telemetry on (explicit 1): the own deployment still signs in', () => {
+      expect(
+        assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud', refusal, {
+          ...own,
+          SLAYZONE_HUB_ENABLE_TELEMETRY: '1'
+        })
+      ).toBe('https://happy-animal-123.convex.cloud')
+    })
+  })
 })

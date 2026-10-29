@@ -61,7 +61,8 @@ function healthState(overrides: Partial<HealthState>): HealthState {
       enablePassword: true,
       enableSso: false,
       enableProcesses: true,
-      enableIntegrations: true
+      enableIntegrations: true,
+      enableTelemetry: true
     },
     reachable: false,
     computersConnected: () => 0,

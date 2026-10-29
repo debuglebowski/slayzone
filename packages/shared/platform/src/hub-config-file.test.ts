@@ -95,6 +95,7 @@ describe('hub-config-file: loadHubConfigFile', () => {
         ssoClientId: 'client-1',
         enableProcesses: false,
         enableIntegrations: false,
+        enableTelemetry: false,
         // unknown → dropped
         extra: { nested: 1 }
       })
@@ -110,6 +111,7 @@ describe('hub-config-file: loadHubConfigFile', () => {
     expect(cfg.ssoClientId, 'ssoClientId').toBe('client-1')
     expect(cfg.enableProcesses, 'enableProcesses').toBe(false)
     expect(cfg.enableIntegrations, 'enableIntegrations').toBe(false)
+    expect(cfg.enableTelemetry, 'enableTelemetry').toBe(false)
     expect(cfg, 'unknown key dropped').not.toHaveProperty('extra')
     expect(loadHubConfigProblems(p).length, 'a clean file has no boot problems').toBe(0)
     rmSync(dir, { recursive: true, force: true })
@@ -219,14 +221,15 @@ describe('hub-config-file: boot problems (B4, B5)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test('B4: each of the five switch keys is checked', () => {
+  test('B4: each of the six switch keys is checked', () => {
     const dir = tmp()
     for (const key of [
       'requireLogin',
       'enablePassword',
       'enableSso',
       'enableProcesses',
-      'enableIntegrations'
+      'enableIntegrations',
+      'enableTelemetry'
     ]) {
       const p = join(dir, `${key}.json`)
       writeFileSync(p, JSON.stringify({ [key]: 'x' }))

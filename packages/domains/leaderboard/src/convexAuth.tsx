@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
+import { ConvexProvider, ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { useVisibleInterval } from '@slayzone/ui'
 import { hubAllows } from '@slayzone/transport/client'
+import { useTelemetry } from '@slayzone/telemetry/client'
 import { useTRPCClient } from './trpc'
 import { api } from 'convex/_generated/api'
 import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
@@ -31,10 +32,19 @@ import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
 // `useLeaderboardAuth().configured`, never from the build env, so a host-chosen
 // deployment (the Electron app's main process decides it, see
 // app/src/main/convex-deployment.ts) is the one fact every consumer sees.
+//
+// Whether: Convex is third-party telemetry. It starts only once
+// `useTelemetry().thirdPartyServices` is 'allowed' — the user's tier is not `off` and
+// no connected hub has `SLAYZONE_HUB_ENABLE_TELEMETRY=0` — and is closed again the
+// moment that changes. So the Convex session is a SIBLING of the app tree, not its
+// parent: starting or stopping it never remounts the app. The few Convex consumers
+// (leaderboard table, feedback) reach the client through <ConvexScope>.
 
 const ONE_DAY = 24 * 60 * 60 * 1000
 
 const LeaderboardAuthContext = createContext<LeaderboardAuthState>(LEADERBOARD_AUTH_DISABLED)
+/** The running Convex client (null while Convex is off), for {@link ConvexScope}. */
+const ConvexClientContext = createContext<ConvexReactClient | null>(null)
 /** This bundle's own Convex deployment — the default when the host names none. */
 const BUILD_CONVEX_URL = import.meta.env.VITE_CONVEX_URL?.trim() ?? ''
 const OAUTH_REDIRECT_URI = 'slayzone://auth/callback'
@@ -48,8 +58,14 @@ interface ConvexDeployment {
 }
 
 const deployments = new Map<string, ConvexDeployment>()
+/** Mounted users of each deployment ({@link useConvexDeployment}); it closes at none. */
+const deploymentUsers = new Map<ConvexDeployment, number>()
 
-/** One client per deployment URL for the page's life ('' → none): a re-render never reconnects. */
+/**
+ * One client per deployment URL while it is in use ('' → none): a re-render never
+ * reconnects. Creating it opens nothing — `ConvexReactClient` connects on first use,
+ * which is `ConvexAuthProvider` mounting.
+ */
 function convexDeployment(url: string): ConvexDeployment | null {
   if (!url) return null
   let deployment = deployments.get(url)
@@ -61,6 +77,33 @@ function convexDeployment(url: string): ConvexDeployment | null {
     }
     deployments.set(url, deployment)
   }
+  return deployment
+}
+
+/**
+ * The deployment for `url` while this component uses it ('' → none). When no component
+ * uses it any more the client is closed — its socket with it, so nothing reaches Convex
+ * — and forgotten, so the next use starts a fresh one. Closing waits a microtask: a
+ * StrictMode re-run of the effect takes the same deployment straight back.
+ */
+function useConvexDeployment(url: string): ConvexDeployment | null {
+  const deployment = convexDeployment(url)
+  useEffect(() => {
+    if (!deployment) return
+    deploymentUsers.set(deployment, (deploymentUsers.get(deployment) ?? 0) + 1)
+    return () => {
+      const left = (deploymentUsers.get(deployment) ?? 1) - 1
+      if (left > 0) deploymentUsers.set(deployment, left)
+      else deploymentUsers.delete(deployment)
+      queueMicrotask(() => {
+        if (deploymentUsers.has(deployment) || deployments.get(deployment.url) !== deployment)
+          return
+        deployments.delete(deployment.url)
+        // A socket that is already gone leaves nothing to stop.
+        deployment.client.close().catch(() => undefined)
+      })
+    }
+  }, [deployment])
   return deployment
 }
 
@@ -112,15 +155,21 @@ const ON_CALLBACK_PATH = 'app.auth.onCallback'
 /** How the OAuth callback code is delivered to the bridge (see header). */
 export type OAuthDelivery = 'inline' | 'subscription'
 
+/** What a bridge reports up: its auth state, tagged with the deployment it is for. */
+interface ReportedAuth {
+  deployment: ConvexDeployment
+  auth: LeaderboardAuthState
+}
+
 function ConvexAuthBridge({
   deployment,
   oauthDelivery = 'inline',
-  children
+  onAuth
 }: {
   deployment: ConvexDeployment
   oauthDelivery?: OAuthDelivery
-  children: React.ReactNode
-}): React.JSX.Element {
+  onAuth: (reported: ReportedAuth) => void
+}): null {
   const { isLoading, isAuthenticated } = useConvexAuth()
   const actions = useAuthActions()
   const trpcClient = useTRPCClient()
@@ -285,9 +334,19 @@ function ConvexAuthBridge({
 
   useVisibleInterval(sync, ONE_DAY, { enabled: isAuthenticated })
 
-  return <LeaderboardAuthContext.Provider value={value}>{children}</LeaderboardAuthContext.Provider>
+  useEffect(() => {
+    onAuth({ deployment, auth: value })
+  }, [deployment, value, onAuth])
+
+  return null
 }
 
+/**
+ * Convex for this host: the leaderboard auth state for the app tree, and — once
+ * third-party services are allowed (`useTelemetry().thirdPartyServices`) and a deployment
+ * is configured — the Convex session beside it. Must sit inside `TelemetryProvider`;
+ * outside one, Convex never starts (its default is 'blocked').
+ */
 export function ConvexAuthBootstrap({
   convexUrl = BUILD_CONVEX_URL,
   oauthDelivery,
@@ -298,22 +357,45 @@ export function ConvexAuthBootstrap({
   oauthDelivery?: OAuthDelivery
   children: React.ReactNode
 }): React.JSX.Element {
-  const deployment = convexDeployment(convexUrl)
-  if (!deployment) {
-    return (
-      <LeaderboardAuthContext.Provider value={LEADERBOARD_AUTH_DISABLED}>
-        {children}
-      </LeaderboardAuthContext.Provider>
-    )
-  }
+  const allowed = useTelemetry().thirdPartyServices === 'allowed'
+  const deployment = useConvexDeployment(allowed ? convexUrl : '')
+  const [reported, setReported] = useState<ReportedAuth | null>(null)
+  // Disabled until this deployment's bridge has reported — never a stale state of a
+  // closed one.
+  const auth =
+    deployment && reported?.deployment === deployment ? reported.auth : LEADERBOARD_AUTH_DISABLED
 
+  // `children` stays the first child whether or not the session runs, so starting or
+  // stopping Convex never remounts the app.
   return (
-    <ConvexAuthProvider client={deployment.client} storageNamespace={deployment.storageNamespace}>
-      <ConvexAuthBridge deployment={deployment} oauthDelivery={oauthDelivery}>
-        {children}
-      </ConvexAuthBridge>
-    </ConvexAuthProvider>
+    <ConvexClientContext.Provider value={deployment?.client ?? null}>
+      <LeaderboardAuthContext.Provider value={auth}>{children}</LeaderboardAuthContext.Provider>
+      {deployment && (
+        <ConvexAuthProvider
+          client={deployment.client}
+          storageNamespace={deployment.storageNamespace}
+        >
+          <ConvexAuthBridge
+            deployment={deployment}
+            oauthDelivery={oauthDelivery}
+            onAuth={setReported}
+          />
+        </ConvexAuthProvider>
+      )}
+    </ConvexClientContext.Provider>
   )
+}
+
+/**
+ * The Convex client for a Convex consumer (leaderboard table, feedback dialog): their
+ * `useQuery` / `useMutation` / `useAction` need a `ConvexProvider` above them, and the
+ * session runs beside the app tree, not around it. Renders nothing while Convex is off —
+ * the hosts hide those entry points then anyway (`useLeaderboardAuth().configured`).
+ */
+export function ConvexScope({ children }: { children: React.ReactNode }): React.JSX.Element | null {
+  const client = useContext(ConvexClientContext)
+  if (!client) return null
+  return <ConvexProvider client={client}>{children}</ConvexProvider>
 }
 
 export function useLeaderboardAuth(): LeaderboardAuthState {

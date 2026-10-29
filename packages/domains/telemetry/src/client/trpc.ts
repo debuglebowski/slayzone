@@ -9,7 +9,7 @@ import type { TelemetryMounts } from '../server/telemetry-router'
  * typed against only the routers telemetry calls: its own `telemetry`, `settings` and
  * `app.meta`.
  */
-export const { useTRPC, getTrpcClient } = typedTrpc<
+export const { useTRPC, useTRPCClient, getTrpcClient } = typedTrpc<
   TelemetryMounts & SettingsMounts & AppMetaMounts
 >()
 

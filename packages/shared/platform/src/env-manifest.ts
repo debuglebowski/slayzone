@@ -106,6 +106,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_ENABLE_SSO: 'infra',
   SLAYZONE_HUB_ENABLE_PROCESSES: 'infra',
   SLAYZONE_HUB_ENABLE_INTEGRATIONS: 'infra',
+  SLAYZONE_HUB_ENABLE_TELEMETRY: 'infra',
   SLAYZONE_HUB_SSO_TENANT_ID: 'infra',
   SLAYZONE_HUB_SSO_CLIENT_ID: 'infra',
   // Paths to the Entra client certificate and its private key, and the MFA switch.

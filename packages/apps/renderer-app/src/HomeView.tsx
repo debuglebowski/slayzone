@@ -66,7 +66,7 @@ import {
 } from '@slayzone/agent-panels'
 import { AppSidebar } from '@slayzone/sidebar'
 import { FeedbackDialog } from '@slayzone/feedback/client'
-import { useLeaderboardAuth } from '@slayzone/leaderboard'
+import { ConvexScope, useLeaderboardAuth } from '@slayzone/leaderboard'
 import {
   useOnboardingChecklist,
   COMMUNITY_DISCORD_URL,
@@ -499,6 +499,7 @@ export function HomeView(): React.JSX.Element {
   } = useOnboardingChecklist({
     projectCount: projects.length,
     hasCreatedTask: data.tasks.some((t) => !t.is_temporary),
+    leaderboardAvailable: convexConfigured,
     onCheckLeaderboard: () => useTabStore.getState().setActiveView('leaderboard'),
     onJoinCommunity: () =>
       void trpcClient.app.shell.openExternal.mutate({ url: COMMUNITY_DISCORD_URL }),
@@ -703,7 +704,11 @@ export function HomeView(): React.JSX.Element {
         zenMode={zenMode}
         onSetWindowButtonVisibility={NOOP}
         convexConfigured={convexConfigured}
-        feedbackSlot={<FeedbackDialog />}
+        feedbackSlot={
+          <ConvexScope>
+            <FeedbackDialog />
+          </ConvexScope>
+        }
         keyRecorder={KeyRecorder}
         sessionTaskIds={EMPTY_SESSION_IDS}
         onReorderProjects={data.reorderProjects}
