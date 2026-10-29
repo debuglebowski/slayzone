@@ -388,6 +388,9 @@ run_harness scripts/check-workspace-cycles.test.mjs
 # and typechecked sources' relative imports resolve inside the package or a workspace
 # package it depends on (transitively).
 run_harness scripts/check-tsconfig-hermetic.test.mjs
+# `pnpm lint:theme` (Tailwind sources): every class-bearing module a theme-css shell renders
+# sits under an @source path, else its classes are never generated (MediaView bg-popover/90).
+run_harness scripts/check-tailwind-sources.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.
