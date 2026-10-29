@@ -334,6 +334,8 @@ run_harness packages/shared/db-migrations/src/ai-config-raw-skill-migration.test
 run_harness packages/shared/db-migrations/src/ai-config-slug-migration.test.ts
 run_harness packages/shared/db-migrations/src/codex-flags-migration.test.ts
 run_harness packages/shared/db-migrations/src/schema-too-new.test.ts
+# v51 on a v50 DB, with and without the column already present (drift).
+run_harness packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts
 run_harness packages/domains/projects/src/server/status-normalization.test.ts
 run_harness packages/shared/db-migrations/src/tag-color-dedup-migration.test.ts
 # v169 project owner + per-user settings, on an empty and a populated v168 DB.
@@ -762,10 +764,6 @@ run_harness packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
-
-# Known-red suites, skipped visibly with the reason and owner instead of failing every run.
-skip_suite packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts \
-  "fails at HEAD (duplicate column name: execution_context). TODO(T-01): fix the test, then register it with the other migration suites"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the
 # app's vitest config, not the node harness config above. The app
