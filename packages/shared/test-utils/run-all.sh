@@ -255,6 +255,8 @@ run_harness packages/apps/cli/src/commands/hub-lifecycle.test.ts
 # denial, no token without MFA, audit; plus the CLI's password path (no more
 # MISSING_OR_NULL_ORIGIN).
 run_harness packages/apps/hub/src/hub-device-sign-in.test.ts
+# `slay hub login` opens only an approval page on the hub's own host. Pure.
+run_harness packages/apps/cli/src/hub-sign-in.test.ts
 # `slay computer` end-to-end: boots a REAL hub in a temp root, mints a join token over
 # its loopback REST channel, then drives `computer create` through the built CLI and
 # asserts the computer ENROLLS (a computer has no /health to probe — its own

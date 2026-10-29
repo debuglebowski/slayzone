@@ -13,9 +13,10 @@
  *
  * DEVICE SIGN-IN (T-14). On a hub with Entra sign-in (`/health` → `switches.enableSso`)
  * the CLI never handles a password: it asks the hub for a device code (RFC 8628),
- * prints the hub's page and the code, opens a browser when this machine has one, and
- * polls until the person approved on that page after signing in through Entra (with
- * MFA). Works over SSH on a Cloud Device: the page opens on any other device.
+ * prints the hub's page and the code, opens a browser when this machine has one (only
+ * for a page on the hub's own host, as the desktop app does), and polls until the
+ * person approved on that page after signing in through Entra (with MFA). Works over
+ * SSH on a Cloud Device: the page opens on any other device.
  *
  * @module cli/hub-sign-in
  */
@@ -24,6 +25,7 @@ import {
   fetchHubHealth,
   fetchSessionEmail,
   HUB_DEVICE_CLIENT_IDS,
+  isHubOwnPage,
   requestDeviceCode,
   signInMethodsOf,
   signInWithPassword,
@@ -116,6 +118,21 @@ function tryOpenBrowser(url: string): void {
 }
 
 /**
+ * Open the approval page the hub named, only when it is on the hub's own host (the
+ * desktop app's rule): a hub answer naming any other site is printed, never opened.
+ * True when the page was handed to `open`.
+ */
+export function openApprovalPage(
+  baseUrl: string,
+  page: string,
+  open: (url: string) => void = tryOpenBrowser
+): boolean {
+  if (!isHubOwnPage(baseUrl, page)) return false
+  open(page)
+  return true
+}
+
+/**
  * Device sign-in: returns the hub bearer once the person approved in a browser, or
  * exits with what went wrong (denied, expired, disabled account).
  */
@@ -137,7 +154,9 @@ export async function deviceSignIn(
   console.log('To sign in, open this page in a browser (on any device) and approve:')
   console.log(`  ${page}`)
   console.log(`Check that the page shows this code: ${code.userCode}  (valid ${minutes} min)`)
-  if (opts.openBrowser) tryOpenBrowser(page)
+  if (opts.openBrowser && !openApprovalPage(baseUrl, page)) {
+    console.log('Not opening it automatically: the page is not on this hub.')
+  }
   console.log('Waiting for approval…')
 
   // RFC 8628 §3.5 polling — interval, `slow_down`, retries over a network blip (a hub
