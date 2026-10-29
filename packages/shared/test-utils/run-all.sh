@@ -391,6 +391,8 @@ run_harness scripts/check-workspace-cycles.test.mjs
 # and typechecked sources' relative imports resolve inside the package or a workspace
 # package it depends on (transitively).
 run_harness scripts/check-tsconfig-hermetic.test.mjs
+# CI's Turborepo typecheck cache keeps only the current run's entries before it is saved.
+run_harness scripts/ci/turbo-cache-prune.test.mjs
 # `pnpm lint:theme` (Tailwind sources): every class-bearing module a theme-css shell renders
 # sits under an @source path, else its classes are never generated (MediaView bg-popover/90).
 run_harness scripts/check-tailwind-sources.test.mjs

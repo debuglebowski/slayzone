@@ -47,8 +47,31 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Turborepo's typecheck cache (turbo.json): an earlier main run's entries, so only the
+      # packages a commit changed (and their dependents) re-check. Saved from main only,
+      # pruned first to this run's entries (scripts/ci/turbo-cache-prune.mjs), ~1 MB.
+      - name: Restore typecheck cache
+        id: turbo-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: .turbo/cache
+          key: turbo-typecheck-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-typecheck-${{ runner.os }}-
+
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Prune typecheck cache
+        if: github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
+        run: node scripts/ci/turbo-cache-prune.mjs
+
+      - name: Save typecheck cache
+        if: github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: .turbo/cache
+          key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
 
       - name: Build CLI
         run: pnpm --filter @slayzone/cli build
@@ -144,8 +167,31 @@ jobs:
         env:
           CI_SKIP_POSTINSTALL: '1'
 
+      # Turborepo's typecheck cache (turbo.json): an earlier main run's entries, so only the
+      # packages a commit changed (and their dependents) re-check. Saved from main only,
+      # pruned first to this run's entries (scripts/ci/turbo-cache-prune.mjs), ~1 MB.
+      - name: Restore typecheck cache
+        id: turbo-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: .turbo/cache
+          key: turbo-typecheck-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-typecheck-${{ runner.os }}-
+
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Prune typecheck cache
+        if: github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
+        run: node scripts/ci/turbo-cache-prune.mjs
+
+      - name: Save typecheck cache
+        if: github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: .turbo/cache
+          key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
 
       - name: Test platform (shell primitives)
         run: pnpm --filter @slayzone/platform test
