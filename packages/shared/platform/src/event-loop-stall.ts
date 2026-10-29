@@ -67,6 +67,9 @@ export interface EventLoopStall {
 export interface EventLoopStallDetectorOptions {
   /** Report a freeze this long or longer. Default 1000. */
   thresholdMs?: number
+  /** Cap on one `ps` child snapshot; a report waits at most this long past the grace
+   *  window for a snapshot taken during the freeze. Default 2000. */
+  psTimeoutMs?: number
   /** Called once per freeze, after the thread runs again. Must not throw (it is guarded). */
   onStall: (stall: EventLoopStall) => void
 }
@@ -78,8 +81,8 @@ export interface EventLoopStallDetector {
 const TICK_MS = 100
 /** How long to wait after thawing for the watcher's samples to arrive. */
 const REPORT_GRACE_MS = 300
-/** Cap on one `ps` child snapshot. A report waits at most this long past the grace
- *  window for a snapshot taken during the freeze whose output has not landed. */
+/** Default cap on one `ps` child snapshot. A report waits at most this long past the
+ *  grace window for a snapshot taken during the freeze whose output has not landed. */
 const PS_TIMEOUT_MS = 2_000
 const SAMPLE_EVERY_MS = 1_000
 const MAX_SAMPLES_PER_STALL = 5
@@ -235,6 +238,7 @@ export function startEventLoopStallDetector(
   options: EventLoopStallDetectorOptions
 ): EventLoopStallDetector {
   const thresholdMs = options.thresholdMs ?? 1_000
+  const psTimeoutMs = options.psTimeoutMs ?? PS_TIMEOUT_MS
   const heartbeat = new BigInt64Array(new SharedArrayBuffer(8))
   Atomics.store(heartbeat, 0, BigInt(Date.now()))
 
@@ -252,7 +256,7 @@ export function startEventLoopStallDetector(
         maxSamples: MAX_SAMPLES_PER_STALL,
         maxFrames: MAX_FRAMES,
         parentPid: process.pid,
-        psTimeoutMs: PS_TIMEOUT_MS
+        psTimeoutMs
       }
     })
     watcher.on('message', (m: WatcherMessage) => {
@@ -356,7 +360,7 @@ export function startEventLoopStallDetector(
     // Thawed. The watcher's samples are already queued behind this timer; give
     // them one short window to land, then report — later only for a child
     // snapshot taken mid-freeze whose `ps` is still running (bounded by its timeout).
-    scheduleReport(from, now, Date.now() + REPORT_GRACE_MS + PS_TIMEOUT_MS, REPORT_GRACE_MS)
+    scheduleReport(from, now, Date.now() + REPORT_GRACE_MS + psTimeoutMs, REPORT_GRACE_MS)
   }, TICK_MS)
   tick.unref?.()
 

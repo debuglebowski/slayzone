@@ -53,17 +53,21 @@ function oneLongBlockingCallForTest(): void {
 }
 
 /** Run `freeze` under a fresh detector and return what it reported. */
-async function observe(freeze: () => void): Promise<EventLoopStall[]> {
+async function observe(
+  freeze: () => void,
+  { psTimeoutMs, settleMs = 1200 }: { psTimeoutMs?: number; settleMs?: number } = {}
+): Promise<EventLoopStall[]> {
   const stalls: EventLoopStall[] = []
   const detector = startEventLoopStallDetector({
     thresholdMs: 500,
+    psTimeoutMs,
     onStall: (s) => stalls.push(s)
   })
   // Let the watcher thread boot and the heartbeat settle first.
   await sleep(400)
   freeze()
   // Past the report grace window.
-  await sleep(1200)
+  await sleep(settleMs)
   detector.stop()
   return stalls
 }
@@ -199,19 +203,33 @@ describe('one long blocking call, when the child snapshot is slow to return', ()
   // On a loaded box `ps` reads the process table during the freeze but its output
   // lands after the thaw. That snapshot is still evidence from the freeze: it must
   // not be dropped for arriving late. A fake `ps` (first on PATH, inherited by the
-  // watcher thread) snapshots at once and replies 1.5s later — past the thaw.
+  // watcher thread) snapshots at once and replies 1s after the thaw — past the
+  // report grace window. Timed off the thaw itself (a marker written the moment the
+  // freeze returns), not a fixed sleep, and under a generous `ps` cap: a fixed sleep
+  // against the default 2s cap left ~0.4s of slack and failed on a loaded box.
   let stalls: EventLoopStall[] = []
   let s: EventLoopStall | undefined
   beforeAll(async () => {
     if (process.platform === 'win32') return
     const dir = mkdtempSync(join(tmpdir(), 'slow-ps-'))
     const fake = join(dir, 'ps')
-    writeFileSync(fake, '#!/bin/sh\nout=$(/bin/ps "$@")\nsleep 1.5\nprintf \'%s\\n\' "$out"\n')
+    const thawed = join(dir, 'thawed')
+    // Bounded wait (10s): a stuck fake must not outlive the suite.
+    writeFileSync(
+      fake,
+      `#!/bin/sh\nout=$(/bin/ps "$@")\ni=0\nwhile [ ! -e '${thawed}' ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\nsleep 1\nprintf '%s\\n' "$out"\n`
+    )
     chmodSync(fake, 0o755)
     const savedPath = process.env.PATH
     process.env.PATH = `${dir}:${savedPath}`
     try {
-      stalls = await observe(oneLongBlockingCallForTest)
+      stalls = await observe(
+        () => {
+          oneLongBlockingCallForTest()
+          writeFileSync(thawed, '')
+        },
+        { psTimeoutMs: 30_000, settleMs: 5_000 }
+      )
     } finally {
       process.env.PATH = savedPath
     }
