@@ -15,7 +15,7 @@
  * `onDowngrade` (which calls this) before its own dispose for exactly
  * this reason.
  */
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from './trpc'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { WebglAddon } from '@xterm/addon-webgl'
 import type { DowngradeReason } from './webgl-loader'

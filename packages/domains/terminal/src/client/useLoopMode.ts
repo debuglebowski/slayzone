@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import type { LoopConfig, CriteriaType, LoopStatus } from '@slayzone/terminal-contracts'
 import {
   makeLoopController,

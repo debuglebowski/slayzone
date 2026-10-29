@@ -24,9 +24,12 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/ai-config": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
+    "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",

@@ -7,13 +7,8 @@ import {
   type MutableRefObject,
   type ReactNode
 } from 'react'
-import {
-  useSubscription,
-  useTRPC,
-  useTRPCClient,
-  useFederationOrNull,
-  HubScope
-} from '@slayzone/transport/client'
+import { useSubscription, useFederationOrNull, HubScope } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal-contracts'
 import { useStableCallback } from '@slayzone/ui'
 import { disposeTerminal } from './terminal-cache'

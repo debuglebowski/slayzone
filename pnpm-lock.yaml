@@ -2602,15 +2602,24 @@ importers:
 
   packages/domains/terminal:
     dependencies:
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../ai-config
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry

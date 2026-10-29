@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Info, X, Check, Loader2 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 
 interface SlayNudgeBannerProps {

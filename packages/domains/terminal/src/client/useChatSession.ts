@@ -7,7 +7,8 @@ import {
   type Dispatch,
   type RefObject
 } from 'react'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import {

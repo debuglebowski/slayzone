@@ -24,6 +24,9 @@ function makeClient(): { client: unknown; modesList: ReturnType<typeof vi.fn> } 
 let currentClient: unknown
 const mutateAsync = vi.fn()
 
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () =>
     new Proxy({}, { get: () => new Proxy({}, { get: () => ({ mutationOptions: () => ({}) }) }) }),

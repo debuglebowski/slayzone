@@ -16,13 +16,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useMemo } from 'react'
-import {
-  getTrpcClient,
-  listHubClients,
-  useSubscription,
-  useTRPC,
-  useTRPCClient
-} from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { getTrpcClient, listHubClients, useTRPC, useTRPCClient } from './trpc'
 import type { TerminalState } from '@slayzone/terminal-contracts'
 import { listHibernatedSessionIds } from './hibernated-sessions-source'
 

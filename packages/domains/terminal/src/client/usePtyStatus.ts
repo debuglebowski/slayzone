@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { useStablePoll } from '@slayzone/ui'
 import { isAliveTerminalState } from '@slayzone/terminal-contracts'
 

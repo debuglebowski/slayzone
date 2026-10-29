@@ -15,7 +15,7 @@
  * Distinguishing the first class (server buffer contaminated): reload the window
  * — every terminal rebuilds from its server buffer; a leak that survives is there.
  */
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from './trpc'
 import type { Terminal as XTerm } from '@xterm/xterm'
 
 const TAG_ATTR = 'data-slz-session'

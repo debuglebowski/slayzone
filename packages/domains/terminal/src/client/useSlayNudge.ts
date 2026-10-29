@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 
 interface UseSlayNudgeOptions {
   projectId: string | null

@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
-import { electronBootstrap, type useTRPCClient } from '@slayzone/transport/client'
+import { electronBootstrap } from '@slayzone/transport/client'
+import type { useTRPCClient } from './trpc'
 
 interface FileInputOptions {
   container: HTMLElement
