@@ -15,8 +15,10 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   Tooltip: ({ children }: Children) => <>{children}</>,
   TooltipTrigger: ({ children }: Children) => <>{children}</>,
   TooltipContent: () => null,
-  useDepsChanged: (await importOriginal<typeof import('@slayzone/ui')>()).useDepsChanged
+  useDepsChanged: (await importOriginal<typeof import('@slayzone/ui')>()).useDepsChanged,
+  toast: { error: (message: string) => toastErrors.push(message) }
 }))
+let toastErrors: string[] = []
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: Error) => void }
 function deferred<T>(): Deferred<T> {
@@ -30,9 +32,21 @@ function deferred<T>(): Deferred<T> {
 }
 
 let listCalls: Array<{ input: unknown; d: Deferred<ProcessEntry[]> }> = []
-// Every trpc.processes.<proc> exposes the option builders (mutations, subscriptions).
-const options = { mutationOptions: () => ({}), subscriptionOptions: () => ({}) }
-const trpc = { processes: new Proxy({}, { get: () => options }) }
+// Every trpc.processes.<proc> exposes the option builders (mutations, subscriptions);
+// a mutation's options carry its procedure name, so `useMutation` can route on it.
+const trpc = {
+  processes: new Proxy(
+    {},
+    {
+      get: (_target, name) => ({
+        mutationOptions: () => ({ name }),
+        subscriptionOptions: () => ({})
+      })
+    }
+  )
+}
+/** `mutateAsync` per procedure name (kill/stop/restart); unset ones resolve. */
+let mutations: Record<string, (input: unknown) => Promise<unknown>> = {}
 const trpcClient = {
   processes: {
     listForTask: {
@@ -51,7 +65,11 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => trpcClient,
   useSubscription: () => undefined
 }))
-vi.mock('@tanstack/react-query', () => ({ useMutation: () => ({ mutateAsync: vi.fn() }) }))
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: (opts: { name: string }) => ({
+    mutateAsync: (input: unknown) => (mutations[opts.name] ?? (async () => undefined))(input)
+  })
+}))
 // The dialog's two outcomes, as buttons: a save, and a spawn of process "new".
 vi.mock('./ProcessDialog', () => ({
   ProcessDialog: ({
@@ -72,10 +90,27 @@ vi.mock('./ProcessDialog', () => ({
   )
 }))
 vi.mock('./ProcessRow', () => ({
-  ProcessRow: ({ proc, expanded }: { proc: ProcessEntry; expanded: boolean }) => (
-    <div data-testid="proc" data-expanded={String(expanded)}>
-      {proc.label}
-    </div>
+  ProcessRow: ({
+    proc,
+    expanded,
+    onKill,
+    onStop,
+    onRestart
+  }: {
+    proc: ProcessEntry
+    expanded: boolean
+    onKill: () => void
+    onStop: () => void
+    onRestart: () => void
+  }) => (
+    <>
+      <div data-testid="proc" data-expanded={String(expanded)}>
+        {proc.label}
+      </div>
+      <button type="button" onClick={onKill}>{`kill-${proc.id}`}</button>
+      <button type="button" onClick={onStop}>{`stop-${proc.id}`}</button>
+      <button type="button" onClick={onRestart}>{`restart-${proc.id}`}</button>
+    </>
   )
 }))
 
@@ -101,6 +136,8 @@ const proc = (id: string, taskId: string, label: string): ProcessEntry => ({
 
 beforeEach(() => {
   listCalls = []
+  mutations = {}
+  toastErrors = []
 })
 afterEach(cleanup)
 
@@ -521,4 +558,52 @@ describe('ProcessesPanel reload after the dialog saves or spawns', () => {
     expect(refreshErrorShown()).toBe(false)
     expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1)
   })
+})
+
+// Kill / Stop / Restart used to `await` the mutation with no `.catch`: a failure (the
+// computer offline, the process already gone) was an unhandled rejection and the
+// user saw nothing. A failed action now says so and leaves the list as it was.
+describe('ProcessesPanel row actions', () => {
+  const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+
+  let unhandled: unknown[] = []
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason)
+  }
+  beforeEach(() => {
+    unhandled = []
+    process.on('unhandledRejection', onUnhandled)
+  })
+  afterEach(() => {
+    process.off('unhandledRejection', onUnhandled)
+  })
+  // Node reports an unhandled rejection after the microtask queue drains.
+  const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
+
+  async function loaded(list: ProcessEntry[]) {
+    render(<ProcessesPanel taskId="t1" projectId="proj" />)
+    await act(async () => listCalls[0].d.resolve(list))
+  }
+
+  it('a kill removes the process from the list', async () => {
+    await loaded([proc('a', 't1', 'Dev server'), proc('b', 't1', 'Watcher')])
+    click('kill-a')
+    await settle()
+    expect(labels()).toEqual(['Watcher'])
+    expect(toastErrors).toEqual([])
+  })
+
+  for (const action of ['kill', 'stop', 'restart'] as const) {
+    it(`a failed ${action} says so, keeps the list, and rejects nothing unhandled`, async () => {
+      mutations[action] = async () => {
+        throw new Error('computer offline')
+      }
+      await loaded([proc('a', 't1', 'Dev server')])
+      click(`${action}-a`)
+      await settle()
+      expect(unhandled).toEqual([])
+      expect(toastErrors).toEqual([`Couldn't ${action} Dev server: computer offline`])
+      expect(labels()).toEqual(['Dev server'])
+    })
+  }
 })

@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { Plus, Cpu, Info, Loader2 } from 'lucide-react'
-import { Tooltip, TooltipTrigger, TooltipContent, useDepsChanged } from '@slayzone/ui'
+import { Tooltip, TooltipTrigger, TooltipContent, toast, useDepsChanged } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
 import type { ProcessEntry, ProcessStatus } from './ProcessesPanel.types'
 import { extractUrlFromLine } from './ProcessesPanel.utils'
@@ -169,31 +169,46 @@ export function ProcessesPanel({
     })
   }, [])
 
+  // A failed action (computer offline, process already gone) leaves the list as it
+  // was and says so; the status subscription keeps reporting the real state.
+  const reportActionError = useCallback((verb: string, proc: ProcessEntry, err: unknown) => {
+    toast.error(
+      `Couldn't ${verb} ${proc.label}: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }, [])
+
   const handleKill = useCallback(
-    async (id: string) => {
-      await killProcess({ processId: id })
-      setProcesses((prev) => prev.filter((p) => p.id !== id))
-      setExpandedLogs((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    },
-    [killProcess]
+    (proc: ProcessEntry) =>
+      killProcess({ processId: proc.id }).then(
+        () => {
+          setProcesses((prev) => prev.filter((p) => p.id !== proc.id))
+          setExpandedLogs((prev) => {
+            const next = new Set(prev)
+            next.delete(proc.id)
+            return next
+          })
+        },
+        (err: unknown) => reportActionError('kill', proc, err)
+      ),
+    [killProcess, reportActionError]
   )
 
   const handleStop = useCallback(
-    async (id: string) => {
-      await stopProcess({ processId: id })
-    },
-    [stopProcess]
+    (proc: ProcessEntry) =>
+      stopProcess({ processId: proc.id }).then(
+        () => {},
+        (err: unknown) => reportActionError('stop', proc, err)
+      ),
+    [stopProcess, reportActionError]
   )
 
   const handleRestart = useCallback(
-    async (id: string) => {
-      await restartProcess({ processId: id })
-    },
-    [restartProcess]
+    (proc: ProcessEntry) =>
+      restartProcess({ processId: proc.id }).then(
+        () => {},
+        (err: unknown) => reportActionError('restart', proc, err)
+      ),
+    [restartProcess, reportActionError]
   )
 
   const handleInject = useCallback(
@@ -328,9 +343,9 @@ export function ProcessesPanel({
                     expanded={expandedLogs.has(proc.id)}
                     stats={stats[proc.id]}
                     onToggleLog={() => toggleLog(proc.id)}
-                    onRestart={() => void handleRestart(proc.id)}
-                    onStop={() => void handleStop(proc.id)}
-                    onKill={() => void handleKill(proc.id)}
+                    onRestart={() => void handleRestart(proc)}
+                    onStop={() => void handleStop(proc)}
+                    onKill={() => void handleKill(proc)}
                     onEdit={() => openEditDialog(proc)}
                     onInject={() => handleInject(proc)}
                     onOpenUrl={onOpenUrl}
@@ -351,9 +366,9 @@ export function ProcessesPanel({
                     expanded={expandedLogs.has(proc.id)}
                     stats={stats[proc.id]}
                     onToggleLog={() => toggleLog(proc.id)}
-                    onRestart={() => void handleRestart(proc.id)}
-                    onStop={() => void handleStop(proc.id)}
-                    onKill={() => void handleKill(proc.id)}
+                    onRestart={() => void handleRestart(proc)}
+                    onStop={() => void handleStop(proc)}
+                    onKill={() => void handleKill(proc)}
                     onEdit={() => openEditDialog(proc)}
                     onInject={() => handleInject(proc)}
                     onOpenUrl={onOpenUrl}
