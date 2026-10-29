@@ -770,29 +770,43 @@ describe('createRoutingPtyBackend', () => {
     })
   })
 
-  it('runtimeProblems asks the computer whether its node-pty install can start ptys', async () => {
+  it("doctor asks the task's computer about itself: node-pty, the shell, the binaries", async () => {
     const gateway = new FakeGateway()
-    const problem = { check: 'spawn-helper', detail: 'not executable', fix: 'chmod +x h' }
-    gateway.onMethod('pty.runtimeCheck', () => ({ ok: true, problems: [problem] }))
+    const facts = {
+      ok: true,
+      problems: [{ check: 'spawn-helper executable', detail: 'not executable', fix: 'chmod +x h' }],
+      shellExists: true,
+      binaries: [{ binary: 'claude', path: '/opt/bin/claude' }]
+    }
+    gateway.onMethod('pty.doctor', () => facts)
     const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
 
-    await expect(backend.runtimeProblems?.('computer-1')).resolves.toEqual([problem])
-    expect(requireCall(gateway, 'pty.runtimeCheck').computerId).toBe('computer-1')
+    await expect(
+      backend.doctor?.('computer-1', { shell: '/bin/zsh', binaries: ['claude'] })
+    ).resolves.toEqual({
+      problems: facts.problems,
+      shellExists: true,
+      binaries: facts.binaries
+    })
+    const call = requireCall(gateway, 'pty.doctor')
+    expect(call.computerId).toBe('computer-1')
+    expect(call.params).toEqual({ shell: '/bin/zsh', binaries: ['claude'] })
   })
 
-  it('runtimeProblems: old computer → null (can not tell); lost link → rejects', async () => {
+  it('doctor: old computer → null (can not tell); lost link → rejects', async () => {
     const gateway = new FakeGateway()
     const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+    const ask = () => backend.doctor?.('computer-1', { shell: '/bin/zsh', binaries: [] })
 
-    gateway.onMethod('pty.runtimeCheck', () => {
+    gateway.onMethod('pty.doctor', () => {
       throw new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented')
     })
-    await expect(backend.runtimeProblems?.('computer-1')).resolves.toBeNull()
+    await expect(ask()).resolves.toBeNull()
 
-    gateway.onMethod('pty.runtimeCheck', () => {
+    gateway.onMethod('pty.doctor', () => {
       throw new RpcDisposedError('gone')
     })
-    await expect(backend.runtimeProblems?.('computer-1')).rejects.toThrow()
+    await expect(ask()).rejects.toThrow()
   })
 
   it('probeBackgroundJobs: unsupported platform / old computer → null; lost link → rejects', async () => {

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import {
+  findOnPath,
   LOGIN_SHELL_PATH_MARKER,
   loginShellPathProbes,
   mergePathLists,
@@ -116,5 +117,28 @@ describe('loginShellPathProbes', () => {
     const probed = parseLoginShellPathOutput(out)
     // A bare `echo $PATH` in fish prints the list space-separated.
     expect(probed).toContain(':')
+  })
+})
+
+describe('findOnPath', () => {
+  // Doctor's "Binary found": the hub asks it about its own PATH, a computer about
+  // the PATH its ptys get — one lookup, so the two can never answer differently.
+  test.skipIf(isWin)('finds an executable on env.PATH, and nothing that is not there', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-find-on-path-'))
+    try {
+      const tool = path.join(dir, 'slz-tool')
+      fs.writeFileSync(tool, '#!/bin/sh\n')
+      fs.chmodSync(tool, 0o755)
+      const env = { PATH: `${dir}:/usr/bin:/bin` }
+      expect(await findOnPath('slz-tool', env)).toBe(tool)
+      expect(await findOnPath('slz-tool-missing', env)).toBeNull()
+      expect(await findOnPath('slz-tool', { PATH: '/usr/bin:/bin' }), 'not on THIS PATH').toBeNull()
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test.skipIf(isWin)('a name is a name, never shell syntax', async () => {
+    expect(await findOnPath('sh; echo injected', { PATH: '/usr/bin:/bin' })).toBeNull()
   })
 })

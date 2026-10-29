@@ -3,9 +3,8 @@ import type {
   PromptInfo,
   ActivityState,
   ErrorInfo,
-  ValidationResult
+  DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal-contracts'
 
 /**
@@ -78,18 +77,9 @@ export class ClaudeAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('claude')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
-      check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'claude not found in PATH',
-      fix: found ? undefined : 'npm install -g @anthropic-ai/claude-code'
-    })
-    return results
-  }
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    { binary: 'claude', check: 'Binary found', fix: 'npm install -g @anthropic-ai/claude-code' }
+  ]
 
   detectPrompt(data: string): PromptInfo | null {
     const stripped = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')

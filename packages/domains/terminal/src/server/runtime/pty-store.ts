@@ -32,7 +32,7 @@ import type { TaskSessionStore } from './task-session-store'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { getPtyBackend } from './pty-backend'
-import { computerRuntimeResults } from './runtime-doctor'
+import { runDoctor } from './runtime-doctor'
 import { getAdapter, type ExecutionContext } from '../adapters'
 import type {
   TerminalMode,
@@ -42,7 +42,13 @@ import type {
 } from '@slayzone/terminal-contracts'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import { parseShellArgs } from '../adapters/flag-parser'
-import { setShellOverride } from '../shell-env'
+import {
+  getShellOverride,
+  resolveUserShell,
+  setShellOverride,
+  shellExists,
+  whichBinary
+} from '../shell-env'
 
 const execFileAsync = promisify(execFile)
 
@@ -398,8 +404,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     ansi?: readonly string[]
   }) => setTerminalTheme(theme)
 
-  /** Doctor. With `taskId`, also asks the computer that task's agents start on
-   *  whether it can start terminals at all (runtime-doctor.ts). */
+  /** Doctor. With `taskId`, the computer that task's agents start on answers for
+   *  itself — node-pty, shell, binaries (runtime-doctor.ts). */
   const ptyValidate = async (mode: TerminalMode, taskId?: string) => {
     const modeInfo = (await lookups.getTerminalMode(mode)) ?? undefined
     const adapter = getAdapter({
@@ -410,16 +416,19 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
         error: modeInfo?.patternError
       }
     })
-    const [runtime, agent] = await Promise.all([
-      taskId
-        ? lookups
-            .resolveComputerId(taskId)
-            .then((computerId) => computerRuntimeResults(computerId, getPtyBackend()))
-        : Promise.resolve([]),
-      adapter.validate ? adapter.validate() : Promise.resolve([])
-    ])
-    // The runtime first: nothing the agent rows say matters if no terminal can start.
-    return [...runtime, ...agent]
+    const requirements = adapter.doctorRequirements ?? []
+    // A plain shell needs nothing checked (and Doctor is not offered for one).
+    if (requirements.length === 0) return []
+    const override = getShellOverride()
+    return runDoctor({
+      requirements,
+      computerId: taskId ? await lookups.resolveComputerId(taskId) : null,
+      backend: getPtyBackend(),
+      // The shell pty-manager will ask the computer to spawn.
+      shell: resolveUserShell(),
+      missingShellOverride: override && !shellExists(override) ? override : null,
+      hubLocal: { shellExists, which: whichBinary }
+    })
   }
 
   const ptySetShellOverride = (value: string | null) => setShellOverride(value)

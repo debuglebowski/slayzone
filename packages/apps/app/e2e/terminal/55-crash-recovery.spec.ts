@@ -150,9 +150,9 @@ test.describe('Terminal crash overlay', () => {
       timeout: 3_000
     })
 
-    // The task's computer answered for its own node-pty install (pty.runtimeCheck):
-    // an install whose scripts never ran fails every agent start while the hub-side
-    // checks above stay green.
+    // The task's computer answers for itself (pty.doctor): its node-pty install, its
+    // shell, its PATH. An install whose scripts never ran fails every agent start,
+    // and the hub's own disk says nothing about the computer's.
     await expect(mainWindow.getByText('This computer can start terminals.').last()).toBeVisible({
       timeout: 8_000
     })
@@ -297,6 +297,11 @@ test.describe('Doctor from terminal menu', () => {
 
     // claude is installed → check should report binary found path
     await expect(dialog.getByText(/Binary found/i).first()).toBeVisible({ timeout: 3_000 })
+
+    // The menu's Doctor names the task too, so its computer answers for itself.
+    await expect(dialog.getByText('This computer can start terminals.')).toBeVisible({
+      timeout: 3_000
+    })
 
     // Close
     await mainWindow.keyboard.press('Escape')

@@ -197,14 +197,25 @@ export interface PtyBackend {
    */
   probeBackgroundJobs?(sessionId: string, jobs: BackgroundJobQuery[]): Promise<string[] | null>
   /**
-   * Can `computerId` start ptys at all — what is wrong with its node-pty install,
-   * each with a fix (Doctor). Empty: nothing wrong. Resolves `null` when nothing
-   * can tell (a computer that predates the request); rejects when the computer
-   * can't be reached.
+   * Doctor's facts about `computerId`, the machine the agent starts on: what is
+   * wrong with its node-pty install, whether `shell` exists there, and where each
+   * of `binaries` resolves on its PATH. Resolves `null` when nothing can tell (a
+   * computer that predates the request); rejects when it can't be reached.
    *
    * Optional: only the routing backend can answer; agents never run hub-local.
    */
-  runtimeProblems?(computerId: string): Promise<PtyRuntimeProblem[] | null>
+  doctor?(
+    computerId: string,
+    ask: { shell: string; binaries: string[] }
+  ): Promise<ComputerDoctorFacts | null>
+}
+
+/** What a computer reports about itself for Doctor — see {@link PtyBackend.doctor}. */
+export interface ComputerDoctorFacts {
+  /** Why node-pty can't start ptys there; empty when it can. */
+  problems: PtyRuntimeProblem[]
+  shellExists: boolean
+  binaries: { binary: string; path: string | null }[]
 }
 
 /** One reason a computer can't start ptys, shaped as a Doctor row. */

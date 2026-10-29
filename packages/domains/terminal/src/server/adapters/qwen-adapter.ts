@@ -4,9 +4,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Qwen Code CLI (Alibaba).
@@ -80,16 +79,11 @@ export class QwenAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('qwen')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    {
+      binary: 'qwen',
       check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'qwen not found in PATH',
-      fix: found ? undefined : 'Install qwen-code (e.g. npm install -g @qwen-code/qwen-code)'
-    })
-    return results
-  }
+      fix: 'Install qwen-code (e.g. npm install -g @qwen-code/qwen-code)'
+    }
+  ]
 }

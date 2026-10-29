@@ -1,4 +1,6 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from '../config'
 import { createSpawnAdmission } from '../spawn-admission'
@@ -1035,17 +1037,96 @@ describe('a spawn node-pty cannot start', () => {
   })
 })
 
-describe('pty.runtimeCheck (Doctor)', () => {
-  it("reports the install check's problems", async () => {
+describe('pty.doctor', () => {
+  // Doctor's facts about THIS computer: the agent starts here, so its binary must
+  // be on this PATH and the shell the hub asks for must exist here — the hub's own
+  // disk says nothing about either.
+  it('reports the install problems, the shell and each binary on this PATH', async () => {
     const { ctx } = makeCtx()
-    const problem = { check: 'Install scripts', detail: 'pnpm skipped …', fix: 'pnpm rebuild' }
+    const problem = { check: 'Install scripts ran', detail: 'pnpm skipped …', fix: 'pnpm rebuild' }
     const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [problem] })
-    expect(await pty.handlers['pty.runtimeCheck']({})).toEqual({ ok: true, problems: [problem] })
+    const res = await pty.handlers['pty.doctor']({
+      shell: '/bin/sh',
+      binaries: ['sh', 'slz-no-such-binary']
+    })
+    expect(res).toEqual({
+      ok: true,
+      problems: [problem],
+      shellExists: true,
+      binaries: [
+        { binary: 'sh', path: expect.stringMatching(/\/sh$/) },
+        { binary: 'slz-no-such-binary', path: null }
+      ]
+    })
+  })
+
+  it('looks binaries up on the PATH spawns get: the bin override dir wins', async () => {
+    const { ctx } = makeCtx()
+    const binDir = mkdtempSync(join(tmpdir(), 'slz-bin-override-'))
+    try {
+      const fake = join(binDir, 'sh')
+      writeFileSync(fake, '#!/bin/sh\n')
+      chmodSync(fake, 0o755)
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: binDir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      const res = (await pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: ['sh'] })) as {
+        binaries: { binary: string; path: string | null }[]
+      }
+      expect(res.binaries).toEqual([{ binary: 'sh', path: fake }])
+    } finally {
+      rmSync(binDir, { recursive: true, force: true })
+    }
+  })
+
+  it('a shell that is not on this computer is reported missing', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [] })
+    const res = (await pty.handlers['pty.doctor']({
+      shell: '/slz/no/such/shell',
+      binaries: []
+    })) as { shellExists: boolean }
+    expect(res.shellExists).toBe(false)
+  })
+
+  it('looks binaries up only once the login-shell PATH is adopted', async () => {
+    const { ctx } = makeCtx()
+    let adopt!: () => void
+    const pathReady = new Promise<void>((r) => {
+      adopt = r
+    })
+    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [], pathReady })
+    let done = false
+    const res = Promise.resolve(
+      pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: ['sh'] })
+    ).then(() => {
+      done = true
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(done, 'answered before PATH adoption').toBe(false)
+    adopt()
+    await res
+    expect(done).toBe(true)
+  })
+
+  it('refuses a binary name that is not a plain name', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [] })
+    await expect(
+      Promise.resolve().then(() =>
+        pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: ['../bin/sh'] })
+      )
+    ).rejects.toThrow()
   })
 
   it('finds the node-pty this computer loads: this checkout is healthy', async () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
-    expect(await pty.handlers['pty.runtimeCheck']({})).toEqual({ ok: true, problems: [] })
+    const res = (await pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: [] })) as {
+      problems: unknown[]
+    }
+    expect(res.problems).toEqual([])
   })
 })

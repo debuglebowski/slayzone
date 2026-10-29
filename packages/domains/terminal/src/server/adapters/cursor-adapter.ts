@@ -4,9 +4,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Cursor Agent CLI.
@@ -47,18 +46,13 @@ export class CursorAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('cursor-agent')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    {
+      binary: 'cursor-agent',
       check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'cursor-agent not found in PATH',
-      fix: found ? undefined : 'Enable via Cursor settings → Background Agent'
-    })
-    return results
-  }
+      fix: 'Enable via Cursor settings → Background Agent'
+    }
+  ]
 
   detectPrompt(_data: string): PromptInfo | null {
     // TODO: Implement once prompt format is known

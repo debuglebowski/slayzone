@@ -12,7 +12,7 @@ import path from 'node:path'
  * cause. Read three times on 2026-10-29 as a product bug.
  *
  * Shared by everything that needs the verdict: the e2e global setup (refuses to
- * run), the computer (explains a failed spawn) and Doctor (`pty.runtimeCheck`).
+ * run), the computer (explains a failed spawn) and Doctor (`pty.doctor`).
  *
  * @module platform/node-pty-install
  */

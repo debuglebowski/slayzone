@@ -162,11 +162,10 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.hubAddress ? { hubAddress: deps.hubAddress } : {})
   }
 
-  const pty = createPtyHandlers(
-    ctx,
-    deps.getProjectPaths,
-    deps.admission ? { admission: deps.admission } : {}
-  )
+  const pty = createPtyHandlers(ctx, deps.getProjectPaths, {
+    ...(deps.admission ? { admission: deps.admission } : {}),
+    ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
+  })
   const proc = createProcHandlers(ctx, deps.getProjectPaths)
   const fs = createFsHandlers(ctx)
 

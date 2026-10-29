@@ -4,9 +4,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for GitHub Copilot CLI.
@@ -78,20 +77,13 @@ export class CopilotAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('copilot')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    {
+      binary: 'copilot',
       check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'copilot not found in PATH',
-      fix: found
-        ? undefined
-        : 'Install GitHub Copilot CLI from https://docs.github.com/copilot/how-tos/copilot-cli'
-    })
-    return results
-  }
+      fix: 'Install GitHub Copilot CLI from https://docs.github.com/copilot/how-tos/copilot-cli'
+    }
+  ]
 
   detectPrompt(data: string): PromptInfo | null {
     const stripped = CopilotAdapter.stripAnsi(data)

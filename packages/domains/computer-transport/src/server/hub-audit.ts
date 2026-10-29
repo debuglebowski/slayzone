@@ -71,7 +71,7 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.list': null,
   'pty.prioritize': null,
   'pty.backgroundJobs': null,
-  'pty.runtimeCheck': null,
+  'pty.doctor': null,
   'pty.warmAdopt': null,
   'pty.warmList': null,
   'proc.spawn': {

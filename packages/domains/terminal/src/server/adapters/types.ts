@@ -66,6 +66,16 @@ export interface ValidationResult {
   fix?: string
 }
 
+/** One binary an agent needs, as Doctor reports it. */
+export interface DoctorBinaryRequirement {
+  /** A plain command name, looked up on the computer's PATH. */
+  binary: string
+  /** Doctor row label. */
+  check: string
+  /** Shown when it is missing: how to install it. */
+  fix: string
+}
+
 export interface TerminalAdapter {
   readonly mode: TerminalMode
 
@@ -147,10 +157,11 @@ export interface TerminalAdapter {
   detectSessionFromDisk?(spawnedAt: number, cwd: string): Promise<string | null>
 
   /**
-   * Validate that the CLI binary and dependencies are available.
-   * Returns a list of check results with fix instructions for failed checks.
+   * The binaries this agent needs on the PATH of the computer it starts on —
+   * Doctor's "Binary found" rows. Data, not a check: the lookup runs on that
+   * computer (`pty.doctor`), never on the hub (runtime/runtime-doctor.ts).
    */
-  validate?(): Promise<ValidationResult[]>
+  readonly doctorRequirements?: readonly DoctorBinaryRequirement[]
 
   /**
    * Encode a user-submitted prompt into PTY wire bytes.

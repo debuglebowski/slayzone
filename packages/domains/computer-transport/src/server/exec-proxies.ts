@@ -88,7 +88,7 @@ import {
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
   ptyBackgroundJobsResultSchema,
-  ptyRuntimeCheckResultSchema,
+  ptyDoctorResultSchema,
   ptyWarmSpawnResultSchema,
   computerSetAllowedRootsResultSchema
 } from '../shared/frames'
@@ -1030,10 +1030,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
     },
 
-    async runtimeProblems(computerId: string) {
+    async doctor(computerId: string, ask: { shell: string; binaries: string[] }) {
       try {
-        const res = await gateway.request(computerId, HubToComputerMethods.ptyRuntimeCheck, {})
-        return ptyRuntimeCheckResultSchema.parse(res).problems
+        const res = await gateway.request(computerId, HubToComputerMethods.ptyDoctor, ask)
+        const { problems, shellExists, binaries } = ptyDoctorResultSchema.parse(res)
+        return { problems, shellExists, binaries }
       } catch (err) {
         // A computer that predates the request can never answer: "can't tell".
         if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {

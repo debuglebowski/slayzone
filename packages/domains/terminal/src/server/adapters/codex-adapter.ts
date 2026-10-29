@@ -7,9 +7,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for OpenAI Codex.
@@ -117,30 +116,10 @@ export class CodexAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, node, codex] = await Promise.all([
-      validateShellEnv(),
-      whichBinary('node'),
-      whichBinary('codex')
-    ])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push(
-      {
-        check: 'Node.js found',
-        ok: !!node,
-        detail: node ?? 'node not found in PATH',
-        fix: node ? undefined : 'Install Node.js from https://nodejs.org'
-      },
-      {
-        check: 'Codex found',
-        ok: !!codex,
-        detail: codex ?? 'codex not found in PATH',
-        fix: codex ? undefined : 'npm install -g @openai/codex'
-      }
-    )
-    return results
-  }
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    { binary: 'node', check: 'Node.js found', fix: 'Install Node.js from https://nodejs.org' },
+    { binary: 'codex', check: 'Codex found', fix: 'npm install -g @openai/codex' }
+  ]
 
   /**
    * Detect session ID from Codex's local session files.

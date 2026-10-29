@@ -161,6 +161,7 @@ export {
   parseLoginShellPathOutput,
   mergePathLists,
   probeLoginShellPath,
+  findOnPath,
   type LoginShellPathProbe
 } from './login-shell-path'
 // Re-export so main-process code can pull URL helpers from the main barrel.

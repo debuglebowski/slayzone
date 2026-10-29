@@ -4,9 +4,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Google Gemini.
@@ -65,18 +64,9 @@ export class GeminiAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('gemini')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
-      check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'gemini not found in PATH',
-      fix: found ? undefined : 'npm install -g @google/gemini-cli'
-    })
-    return results
-  }
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    { binary: 'gemini', check: 'Binary found', fix: 'npm install -g @google/gemini-cli' }
+  ]
 
   detectPrompt(data: string): PromptInfo | null {
     const stripped = GeminiAdapter.stripAnsi(data)

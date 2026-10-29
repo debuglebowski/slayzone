@@ -4,9 +4,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for OpenCode CLI.
@@ -54,18 +53,13 @@ export class OpencodeAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('opencode')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    {
+      binary: 'opencode',
       check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'opencode not found in PATH',
-      fix: found ? undefined : 'curl -fsSL https://opencode.ai/install | sh'
-    })
-    return results
-  }
+      fix: 'curl -fsSL https://opencode.ai/install | sh'
+    }
+  ]
 
   detectPrompt(_data: string): PromptInfo | null {
     // OpenCode TUI uses keyboard controls (a=Allow, d=Deny) rather than text prompts

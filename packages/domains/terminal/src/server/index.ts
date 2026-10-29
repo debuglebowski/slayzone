@@ -72,6 +72,7 @@ export {
   setPtyBackend,
   localPtyBackend,
   type BackgroundJobQuery,
+  type ComputerDoctorFacts,
   type PtyBackend,
   type PtyExit,
   type PtyHandle,

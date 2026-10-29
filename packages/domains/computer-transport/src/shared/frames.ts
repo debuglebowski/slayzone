@@ -326,8 +326,8 @@ export const HubToComputerMethods = {
   ptyPrioritize: 'pty.prioritize',
   /** Which of claude's background jobs still have a live process under a session. */
   ptyBackgroundJobs: 'pty.backgroundJobs',
-  /** Can this computer start ptys at all? Its node-pty install's problems (Doctor). */
-  ptyRuntimeCheck: 'pty.runtimeCheck',
+  /** Doctor's facts about this computer: node-pty install, the shell, agent binaries. */
+  ptyDoctor: 'pty.doctor',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -542,19 +542,40 @@ export const ptyBackgroundJobsResultSchema = z.object({
 export type PtyBackgroundJobsResult = z.infer<typeof ptyBackgroundJobsResultSchema>
 
 /**
- * Why this computer can't start ptys, if anything (Doctor). An install whose
- * scripts never ran leaves node-pty unable to exec its `spawn-helper`, and every
- * spawn then fails with only "posix_spawnp failed." — see
- * `@slayzone/platform/node-pty-install`. Empty `problems`: the install is usable.
+ * Doctor's facts about THIS computer — the machine an agent starts on, so the only
+ * one whose disk can answer:
+ *  - `problems`: why node-pty can't start ptys here, each with a fix (an install
+ *    whose scripts never ran leaves `spawn-helper` non-executable and every spawn
+ *    fails with only "posix_spawnp failed." — `@slayzone/platform/node-pty-install`).
+ *    Empty: the install is usable.
+ *  - `shellExists`: the shell the hub will ask this computer to spawn is here.
+ *  - `binaries`: where each agent binary resolves on this computer's PATH (the
+ *    login-shell PATH it adopted at boot); `path: null` when it doesn't.
  */
-export const ptyRuntimeCheckParamsSchema = z.object({}).strict()
-export type PtyRuntimeCheckParams = z.infer<typeof ptyRuntimeCheckParamsSchema>
+export const ptyDoctorParamsSchema = z
+  .object({
+    shell: z.string().min(1).max(4096),
+    /** Plain command names only (`claude`, `cursor-agent`), never paths or syntax. */
+    binaries: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(128)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/)
+      )
+      .max(16)
+  })
+  .strict()
+export type PtyDoctorParams = z.infer<typeof ptyDoctorParamsSchema>
 
-export const ptyRuntimeCheckResultSchema = z.object({
+export const ptyDoctorResultSchema = z.object({
   ok: z.literal(true),
-  problems: z.array(z.object({ check: z.string(), detail: z.string(), fix: z.string() }))
+  problems: z.array(z.object({ check: z.string(), detail: z.string(), fix: z.string() })),
+  shellExists: z.boolean(),
+  binaries: z.array(z.object({ binary: z.string(), path: z.string().nullable() }))
 })
-export type PtyRuntimeCheckResult = z.infer<typeof ptyRuntimeCheckResultSchema>
+export type PtyDoctorResult = z.infer<typeof ptyDoctorResultSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),

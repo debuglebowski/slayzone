@@ -4,9 +4,8 @@ import {
   type PromptInfo,
   type ActivityState,
   type ErrorInfo,
-  type ValidationResult
+  type DoctorBinaryRequirement
 } from './types'
-import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Google Antigravity CLI — the successor to Gemini CLI (Gemini CLI
@@ -88,18 +87,13 @@ export class AntigravityAdapter implements TerminalAdapter {
     return null
   }
 
-  async validate(): Promise<ValidationResult[]> {
-    const [shell, found] = await Promise.all([validateShellEnv(), whichBinary('agy')])
-    const results: ValidationResult[] = []
-    if (!shell.ok) results.push(shell)
-    results.push({
+  readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
+    {
+      binary: 'agy',
       check: 'Binary found',
-      ok: !!found,
-      detail: found ?? 'agy not found in PATH',
-      fix: found ? undefined : 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
-    })
-    return results
-  }
+      fix: 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
+    }
+  ]
 
   detectPrompt(data: string): PromptInfo | null {
     const stripped = AntigravityAdapter.stripAnsi(data)

@@ -36,8 +36,8 @@ import {
   type PtySpawnParams,
   type PtyWarmSpawnParams,
   ptyResizeParamsSchema,
-  ptyRuntimeCheckParamsSchema,
-  type PtyRuntimeCheckResult,
+  ptyDoctorParamsSchema,
+  type PtyDoctorResult,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
   ptyWarmKillParamsSchema,
@@ -50,6 +50,7 @@ import {
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
 import * as pty from 'node-pty'
+import { findOnPath, shellExists } from '@slayzone/platform'
 import {
   nodePtyInstallProblems as readNodePtyInstallProblems,
   type NodePtyInstallProblem
@@ -150,6 +151,12 @@ export interface PtyHandlerOptions {
   spawnPty?: typeof pty.spawn
   /** Why the node-pty install can't start processes; defaults to reading it off disk. */
   nodePtyInstallProblems?: () => NodePtyInstallProblem[]
+  /**
+   * Settles once the login-shell PATH is adopted into `process.env` (computer
+   * main). Spawns never wait for it — a pty's login shell builds its own PATH —
+   * but Doctor's binary lookups read `process.env.PATH`, so they do.
+   */
+  pathReady?: Promise<unknown>
 }
 
 /**
@@ -594,10 +601,22 @@ export function createPtyHandlers(
       : { ok: true, supported: true, alive }
   }
 
-  /** Can this computer start ptys at all? (Doctor.) */
-  function runtimeCheck(rawParams: unknown): PtyRuntimeCheckResult {
-    ptyRuntimeCheckParamsSchema.parse(rawParams)
-    return { ok: true, problems: installProblems() }
+  /** Doctor's facts about this computer (see `ptyDoctorResultSchema`). */
+  async function doctor(rawParams: unknown): Promise<PtyDoctorResult> {
+    const params = ptyDoctorParamsSchema.parse(rawParams)
+    await options.pathReady
+    // The env a spawn gets (bin override dir first), so the answer is the binary
+    // an agent started here would run.
+    const env = buildSpawnEnv(ctx)
+    const binaries = await Promise.all(
+      params.binaries.map(async (binary) => ({ binary, path: await findOnPath(binary, env) }))
+    )
+    return {
+      ok: true,
+      problems: installProblems(),
+      shellExists: shellExists(params.shell),
+      binaries
+    }
   }
 
   function dropQueued(reason: string): void {
@@ -827,7 +846,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,
     [HubToComputerMethods.ptyBackgroundJobs]: backgroundJobs,
-    [HubToComputerMethods.ptyRuntimeCheck]: runtimeCheck,
+    [HubToComputerMethods.ptyDoctor]: doctor,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,
