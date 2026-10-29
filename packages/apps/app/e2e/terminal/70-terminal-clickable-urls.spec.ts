@@ -81,6 +81,8 @@ test.describe('Terminal clickable URLs', () => {
   /**
    * Wait for URL to appear in xterm's frontend buffer. `excluding` skips lines
    * holding that text — e.g. the tty's echo of the command that prints `needle`.
+   * Matched per logical line (wrapped rows joined), so a long echo that wraps
+   * can't pass on a continuation row the excluded text isn't on.
    */
   async function waitForUrlInFrontendBuffer(
     mainWindow: import('@playwright/test').Page,
@@ -102,9 +104,12 @@ test.describe('Terminal clickable URLs', () => {
                         buffer: {
                           active: {
                             length: number
-                            getLine(
-                              i: number
-                            ): { translateToString(trimRight?: boolean): string } | undefined
+                            getLine(i: number):
+                              | {
+                                  isWrapped: boolean
+                                  translateToString(trimRight?: boolean): string
+                                }
+                              | undefined
                           }
                         }
                       }
@@ -114,11 +119,16 @@ test.describe('Terminal clickable URLs', () => {
               const provider = links?.[sessionId]
               if (!provider) return false
               const buf = provider._terminal.buffer.active
+              const lines: string[] = []
               for (let i = 0; i < buf.length; i++) {
-                const text = buf.getLine(i)?.translateToString(true) ?? ''
-                if (text.includes(needle) && !(excluding && text.includes(excluding))) return true
+                const row = buf.getLine(i)
+                const text = row?.translateToString(true) ?? ''
+                if (row?.isWrapped && lines.length > 0) lines[lines.length - 1] += text
+                else lines.push(text)
               }
-              return false
+              return lines.some(
+                (text) => text.includes(needle) && !(excluding && text.includes(excluding))
+              )
             },
             { sessionId: sid, needle, excluding }
           )

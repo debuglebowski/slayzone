@@ -1,4 +1,5 @@
 import { test, expect, resetApp, notifyScriptPath } from '../fixtures/electron'
+import { subscribeAgentLifecycle } from '../fixtures/terminal'
 import fs from 'fs'
 import http from 'http'
 
@@ -76,22 +77,7 @@ test.describe('OpenCode agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    // Resolve on `onStarted`: the server registers the subscription asynchronously,
-    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
-    await mainWindow.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          const w = window as HookWindow
-          w.__opencodeHookEvents = []
-          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-            onStarted: () => resolve(),
-            onData: (ev) => {
-              w.__opencodeHookEvents?.push(ev)
-            }
-          })
-          w.__opencodeHookUnsub = () => sub.unsubscribe()
-        })
-    )
+    await subscribeAgentLifecycle(mainWindow, '__opencodeHookEvents', '__opencodeHookUnsub')
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'opencode',
@@ -139,22 +125,7 @@ test.describe('OpenCode agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    // Resolve on `onStarted`: the server registers the subscription asynchronously,
-    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
-    await mainWindow.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          const w = window as HookWindow
-          w.__opencodePermEvents = []
-          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-            onStarted: () => resolve(),
-            onData: (ev) => {
-              w.__opencodePermEvents?.push(ev)
-            }
-          })
-          w.__opencodePermUnsub = () => sub.unsubscribe()
-        })
-    )
+    await subscribeAgentLifecycle(mainWindow, '__opencodePermEvents', '__opencodePermUnsub')
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'opencode',

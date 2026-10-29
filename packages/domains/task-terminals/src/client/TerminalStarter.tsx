@@ -1,4 +1,4 @@
-import { useState, useEffect, forwardRef, useRef, useImperativeHandle, type ReactNode } from 'react'
+import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from 'react'
 import { Play, Moon } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
@@ -21,7 +21,6 @@ import { useTheme } from '@slayzone/ui'
 import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'
 import { getModeLabel } from './get-tab-label'
-import { isEditingElement } from './focus-handoff'
 
 // Sessions whose next TerminalStarter mount should skip the Start gate
 // unconditionally. Explicit restart/reset kill the PTY then remount ~100ms
@@ -86,36 +85,6 @@ export interface TerminalStarterProps extends TerminalProps {
   conversationHydrated?: boolean
 }
 
-// The gate's Start button takes focus so Enter starts the agent — but only when
-// its task is shown, and never from a field the user is typing in. A bare
-// `autoFocus` fires on every mount, including a starter mounting in a
-// background tab, and blurred e.g. the sidebar's inline rename mid-edit.
-function StartGateButton({
-  shown,
-  onClick,
-  children
-}: {
-  shown: boolean
-  onClick: () => void
-  children: ReactNode
-}): ReactNode {
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => {
-    if (!shown || isEditingElement(document.activeElement)) return
-    buttonRef.current?.focus()
-  }, [shown])
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-2 rounded-md border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-surface-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {children}
-    </button>
-  )
-}
-
 // Lazy-spawn wrapper: hold off mounting <Terminal> (and thus PTY creation)
 // until the startup mode or the user says to start. Reattach to an already-alive
 // PTY skips the gate so multi-window / hibernation flows are unchanged. The
@@ -158,6 +127,22 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     // Seconds left in the idle-close countdown (null = not counting down).
     const [countdown, setCountdown] = useState<number | null>(null)
     const innerRef = useRef<TerminalHandle | null>(null)
+    // The Start gate's button stands in for the terminal until it starts: it is
+    // what `focus()` focuses, and its mount is reported as the pane attaching —
+    // so the container's focus handoff (tab activation, claims, typing guard)
+    // decides when it takes focus, exactly as it does for a live terminal.
+    const gateButtonRef = useRef<HTMLButtonElement | null>(null)
+    const gateShown = existsChecked && !started
+    const { onAttached } = terminalProps
+    useEffect(() => {
+      if (!gateShown) return
+      onAttached?.({ sessionId, focus: () => gateButtonRef.current?.focus() })
+      // An idle close swaps the gate in for a live terminal the user may have been
+      // in; unmounting its xterm left focus nowhere, so Reopen inherits it.
+      if (reason === 'hibernated' && shown && document.activeElement === document.body) {
+        gateButtonRef.current?.focus()
+      }
+    }, [gateShown, sessionId, onAttached, reason, shown])
     const { terminalThemeId, contentVariant } = useTheme()
     const themeColors = getThemeTerminalColors(terminalThemeId, contentVariant)
 
@@ -338,7 +323,10 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     useImperativeHandle(
       ref,
       () => ({
-        focus: () => innerRef.current?.focus(),
+        focus: () => {
+          if (innerRef.current) innerRef.current.focus()
+          else gateButtonRef.current?.focus()
+        },
         hasSelection: () => innerRef.current?.hasSelection() ?? false,
         getSelection: () => innerRef.current?.getSelection() ?? '',
         selectAll: () => innerRef.current?.selectAll(),
@@ -422,10 +410,15 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
           </p>
         </div>
         <div className="flex flex-col items-center gap-3">
-          <StartGateButton shown={shown} onClick={handleStart}>
+          <button
+            ref={gateButtonRef}
+            type="button"
+            onClick={handleStart}
+            className="flex items-center gap-2 rounded-md border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-surface-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             {Icon ? <Icon className="size-4" /> : <Play className="size-4" />}
             {isHibernated ? `Reopen ${label}` : `Open ${label}`}
-          </StartGateButton>
+          </button>
           {/* The startup-mode checkbox is a no-op for temp tasks (they always start
               regardless) — hide it so the control never lies. Hibernation's
               checkbox is unrelated. */}

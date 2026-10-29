@@ -6,6 +6,7 @@ import {
   TEST_PROJECT_PATH,
   notifyScriptPath
 } from '../fixtures/electron'
+import { subscribeAgentLifecycle } from '../fixtures/terminal'
 import fs from 'fs'
 import http from 'http'
 
@@ -80,22 +81,7 @@ test.describe('Antigravity agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    // Resolve on `onStarted`: the server registers the subscription asynchronously,
-    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
-    await mainWindow.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          const events: unknown[] = []
-          ;(window as HookWindow).__agEvents = events
-          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-            onStarted: () => resolve(),
-            onData: (ev) => {
-              events.push(ev)
-            }
-          })
-          ;(window as HookWindow).__agUnsub = () => sub.unsubscribe()
-        })
-    )
+    await subscribeAgentLifecycle(mainWindow, '__agEvents', '__agUnsub')
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'antigravity',
@@ -135,22 +121,7 @@ test.describe('Antigravity agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    // Resolve on `onStarted`: the server registers the subscription asynchronously,
-    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
-    await mainWindow.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          const events: unknown[] = []
-          ;(window as HookWindow).__agEvents2 = events
-          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-            onStarted: () => resolve(),
-            onData: (ev) => {
-              events.push(ev)
-            }
-          })
-          ;(window as HookWindow).__agUnsub2 = () => sub.unsubscribe()
-        })
-    )
+    await subscribeAgentLifecycle(mainWindow, '__agEvents2', '__agUnsub2')
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'antigravity',

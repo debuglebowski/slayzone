@@ -6,6 +6,8 @@
  * Lives in the `perf` group because its thresholds are wall-clock: a healthy boot
  * measures ~0.8s to the active tab on a quiet box but ~1.05s inside the 7-way
  * parallel suite, which straddles the 1s bar. Run it alone: `pnpm test:e2e:perf`.
+ * The bars are calibrated on a standard build — not a `SLAYZONE_PROFILE=1` one,
+ * whose profiling React is slower.
  */
 import { test, expect } from '../fixtures/electron'
 import {
@@ -42,7 +44,12 @@ test.describe('boot budget', () => {
     test.setTimeout(240_000)
     await openBootTabs(mainWindow, taskIds)
 
-    await mainWindow.addInitScript(installBootProbe, { total: TABS, detailSelector: DETAIL })
+    // Measures this one boot: removed right after it, so later perf specs that
+    // reload the worker's shared page don't run the census.
+    const probeScript = await mainWindow.addInitScript(installBootProbe, {
+      total: TABS,
+      detailSelector: DETAIL
+    })
     const cdp = await mainWindow.context().newCDPSession(mainWindow)
     await cdp.send('Performance.enable')
     const taskSeconds = async (): Promise<number> => {
@@ -54,6 +61,7 @@ test.describe('boot budget', () => {
 
     const busyBeforeReload = await taskSeconds()
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
+    await probeScript.dispose()
     // Settled = every hidden pane hydrated and every terminal attached.
     await expect
       .poll(() => mainWindow.locator(DETAIL).count(), { timeout: 60_000, intervals: [250] })

@@ -92,9 +92,7 @@ describe('createContainerFocusHandoff', () => {
   it('counts focus as landed only inside its container', () => {
     const container = document.createElement('div')
     const inside = document.createElement('input')
-    // Not a text field: focus in one outside the container vetoes the attach
-    // (covered below).
-    const outside = document.createElement('button')
+    const outside = document.createElement('input')
     container.appendChild(inside)
     document.body.append(container, outside)
     try {
@@ -145,6 +143,57 @@ describe('createContainerFocusHandoff', () => {
     } finally {
       container.remove()
       rename.remove()
+    }
+  })
+
+  it('an explicit claim made while typing still completes (Cmd+T from the description)', () => {
+    const container = document.createElement('div')
+    const pane = document.createElement('textarea')
+    container.appendChild(pane)
+    const description = document.createElement('textarea')
+    document.body.append(container, description)
+    try {
+      const handoff = createContainerFocusHandoff(false)
+      handoff.setContainer(container)
+      // The user asks for a new terminal while focus is still in the editor.
+      description.focus()
+      handoff.claim(true)
+      const focus = vi.fn(() => pane.focus())
+      handoff.paneAttached({ sessionId: 'a', focus })
+      expect(focus).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(pane)
+    } finally {
+      container.remove()
+      description.remove()
+    }
+  })
+
+  it("focus in another terminal or a non-text control doesn't hold the claim off", () => {
+    const container = document.createElement('div')
+    const pane = document.createElement('textarea')
+    container.appendChild(pane)
+    const otherTerminal = document.createElement('div')
+    otherTerminal.className = 'xterm'
+    const otherXterm = document.createElement('textarea')
+    otherTerminal.appendChild(otherXterm)
+    const checkbox = document.createElement('input')
+    checkbox.type = 'checkbox'
+    document.body.append(container, otherTerminal, checkbox)
+    try {
+      for (const elsewhere of [otherXterm, checkbox]) {
+        pane.blur()
+        const handoff = createContainerFocusHandoff(true)
+        handoff.setContainer(container)
+        handoff.activate(() => {})
+        elsewhere.focus()
+        const focus = vi.fn(() => pane.focus())
+        handoff.paneAttached({ sessionId: 'a', focus })
+        expect(focus).toHaveBeenCalledTimes(1)
+      }
+    } finally {
+      container.remove()
+      otherTerminal.remove()
+      checkbox.remove()
     }
   })
 

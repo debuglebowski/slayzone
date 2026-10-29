@@ -1,3 +1,5 @@
+import { isTextEntryElement } from '@slayzone/ui'
+
 export interface PaneFocusApi {
   sessionId: string
   focus: () => void
@@ -16,15 +18,17 @@ export interface FocusHandoff {
    * A pane's xterm attached: complete a matching claim. The attach can fire
    * while the tab view is still inert/invisible (deferred tab swap) where
    * focus() no-ops — the claim then survives for the next activation. An attach
-   * that lands while the user is typing elsewhere drops the claim instead.
+   * that finds the user typing somewhere else since the claim drops it instead.
    */
   paneAttached: (api: PaneFocusApi) => void
 }
 
-/** Focus is in a field the user types into — an async focus must never take it. */
-export function isEditingElement(el: Element | null): boolean {
-  if (!(el instanceof HTMLElement)) return false
-  return el.isContentEditable || el.matches('input, textarea, select')
+/** Where focus is, as the handoff needs to see it. */
+export interface FocusTracker {
+  /** The element holding focus now. */
+  current: () => Element | null
+  /** Focus on `el` is the user typing in a field outside the handoff's panes. */
+  isTypingElsewhere: (el: Element | null) => boolean
 }
 
 /**
@@ -35,29 +39,44 @@ export function isEditingElement(el: Element | null): boolean {
  * the claim in place for the other.
  *
  * The attach side is asynchronous — a slow spawn attaches seconds after the
- * activation — so by then the user may be typing somewhere else (an inline
- * rename in the sidebar or artifacts panel). `typingElsewhere` vetoes it: taking
- * focus there would blur the field mid-edit, and blur commits those editors.
+ * claim — so by then the user may have started typing somewhere else (an inline
+ * rename in the sidebar or artifacts panel), and taking focus would blur the
+ * field mid-edit (blur commits those editors). With a `tracker`, an attach drops
+ * the claim when focus has MOVED into such a field since the claim. A claim made
+ * while already in one (Cmd+T from the description editor) still completes: that
+ * request came after the typing, so it is what the user wants now.
  */
 export function createFocusHandoff(
   focusLanded: () => boolean,
   initialClaim: boolean,
-  typingElsewhere: () => boolean = () => false
+  tracker?: FocusTracker
 ): FocusHandoff {
   let pending: string | boolean = initialClaim
+  // Focus when the outstanding claim was made, to tell "moved on" from "was there".
+  let claimedFrom = tracker?.current() ?? null
+  const markClaim = (): void => {
+    claimedFrom = tracker?.current() ?? null
+  }
   return {
     claim(target) {
       pending = target
+      markClaim()
     },
     activate(focus) {
       focus()
       // A landed activation also clears any outstanding claim: the terminal
       // has focus, so a later attach must not steal it.
-      pending = focusLanded() ? false : true
+      if (focusLanded()) {
+        pending = false
+      } else {
+        pending = true
+        markClaim()
+      }
     },
     paneAttached(api) {
       if (pending !== true && pending !== api.sessionId) return
-      if (typingElsewhere()) {
+      const now = tracker?.current() ?? null
+      if (tracker && now !== claimedFrom && tracker.isTypingElsewhere(now)) {
         // The user moved on since the claim; the next activation claims anew.
         pending = false
         return
@@ -83,7 +102,10 @@ export function createContainerFocusHandoff(initialClaim: boolean): ContainerFoc
   const handoff = createFocusHandoff(
     () => !!container?.contains(document.activeElement),
     initialClaim,
-    () => isEditingElement(document.activeElement) && !container?.contains(document.activeElement)
+    {
+      current: () => document.activeElement,
+      isTypingElsewhere: (el) => isTextEntryElement(el) && !container?.contains(el)
+    }
   )
   return {
     ...handoff,

@@ -364,6 +364,36 @@ export async function readFullBuffer(page: Page, sessionId: string): Promise<str
   }, sessionId)
 }
 
+/**
+ * Subscribe the renderer to agent lifecycle events, collecting each on
+ * `window[eventsKey]`; `window[unsubKey]()` unsubscribes. Resolves once the
+ * server has registered the subscription (`onStarted`) — a hook posted before
+ * that is emitted to nobody — and rejects if the subscription errors instead.
+ */
+export async function subscribeAgentLifecycle(
+  page: Page,
+  eventsKey: string,
+  unsubKey: string
+): Promise<void> {
+  await page.evaluate(
+    ({ eventsKey, unsubKey }) =>
+      new Promise<void>((resolve, reject) => {
+        const w = window as unknown as Record<string, unknown>
+        const events: unknown[] = []
+        w[eventsKey] = events
+        const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+          onStarted: () => resolve(),
+          onError: (err) => reject(new Error(`agentLifecycle subscription failed: ${err.message}`)),
+          onData: (ev) => {
+            events.push(ev)
+          }
+        })
+        w[unsubKey] = () => sub.unsubscribe()
+      }),
+    { eventsKey, unsubKey }
+  )
+}
+
 export async function readBufferSince(
   page: Page,
   sessionId: string,

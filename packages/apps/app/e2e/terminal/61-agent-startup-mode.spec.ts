@@ -127,6 +127,8 @@ test.describe('Agent startup mode', () => {
         .filter({ hasText: /(Open|Reopen) Claude/ })
         .last()
       await expect(gate).toBeVisible({ timeout: 10_000 })
+      // Opening the task hands focus to the gate, so Enter starts the agent.
+      await expect(gate).toBeFocused({ timeout: 5_000 })
       // (The icon contributes its own "Claude" text, so anchor on "Reopen" only.)
       if (c.state === 'auto_stopped') await expect(gate).toHaveText(/Reopen Claude/)
       else await expect(gate).not.toHaveText(/Reopen/)

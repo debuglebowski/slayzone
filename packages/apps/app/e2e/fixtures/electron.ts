@@ -537,11 +537,21 @@ export async function launchIsolatedElectron(opts: {
  * here would convert an infrastructure hiccup into ~70 confusing failures, and
  * specs that legitimately boot computer-less (SLAYZONE_E2E_NO_COMPUTER=1) call this
  * too. The individual spec still fails loudly on its own assertion.
+ *
+ * Also called by specs on their own isolated launches, which project creation
+ * needs to wait for as well.
  */
-/** What `computers.list` returned when the gate last passed (diagnostic). */
-let lastGateSnapshot: { atMs: number; rows: unknown[] } | null = null
-
 export async function waitForUsableComputer(page: Page, timeoutMs = 120_000): Promise<boolean> {
+  return (await pollUsableComputer(page, timeoutMs)) !== null
+}
+
+/** What `computers.list` returned when a gate passed (diagnostic). */
+type GateSnapshot = { atMs: number; rows: unknown[] }
+
+/** The worker app's gate pass — recorded by the worker fixture only, never by a spec's isolated app. */
+let lastGateSnapshot: GateSnapshot | null = null
+
+async function pollUsableComputer(page: Page, timeoutMs: number): Promise<GateSnapshot | null> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -559,18 +569,17 @@ export async function waitForUsableComputer(page: Page, timeoutMs = 120_000): Pr
         // computer's first dial at ~2.4s) while reporting a usable computer. Record
         // exactly what the router returned at pass time so the cause is a
         // measurement rather than a guess.
-        lastGateSnapshot = { atMs: Date.now() - startedAt, rows }
-        return true
+        return { atMs: Date.now() - startedAt, rows }
       }
     } catch {
       // Renderer mid-reload / tRPC not ready yet — keep polling.
     }
-    // Runs ONCE per worker (at launch), so a 1s interval is fine — a tighter one
-    // only adds load. The per-spec post-reset wait is a fixed cheap sleep in
+    // Runs once per app launch, so a 1s interval is fine — a tighter one only
+    // adds load. The per-spec post-reset wait is a fixed cheap sleep in
     // `resetApp`, deliberately not a poll.
     await wait(1_000)
   }
-  return false
+  return null
 }
 
 /**
@@ -793,7 +802,9 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
         // worker artifacts so a suite-wide agent failure is diagnosable from the
         // run output instead of looking like N unrelated spec failures.
         const computerReadyStartedAt = Date.now()
-        const computerReady = await waitForUsableComputer(launched.page)
+        const gate = await pollUsableComputer(launched.page, 120_000)
+        if (gate) lastGateSnapshot = gate
+        const computerReady = gate !== null
         if (!computerReady) {
           console.warn(
             `[e2e] no connected computer after ${Date.now() - computerReadyStartedAt}ms — ` +

@@ -44,7 +44,9 @@ test.describe('boot idle hydration', () => {
     // Open every tab (first one active) and let them all settle before the reload.
     await openBootTabs(mainWindow, taskIds)
 
-    await mainWindow.addInitScript(installBootProbe, {
+    // Measures this one boot: removed right after it, so later reloads on the
+    // worker's shared page don't run the census.
+    const probeScript = await mainWindow.addInitScript(installBootProbe, {
       total: TABS,
       detailSelector: DETAIL
     })
@@ -72,6 +74,7 @@ test.describe('boot idle hydration', () => {
 
     const before = await metrics()
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
+    await probeScript.dispose()
     await mainWindow.waitForTimeout(5_000)
     const at5 = await metrics()
     const diag = (): Promise<string> =>

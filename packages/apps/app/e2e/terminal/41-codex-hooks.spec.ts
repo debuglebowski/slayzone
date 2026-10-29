@@ -7,6 +7,7 @@ import {
   notifyScriptEnv,
   notifyScriptPath
 } from '../fixtures/electron'
+import { subscribeAgentLifecycle } from '../fixtures/terminal'
 import fs from 'fs'
 import { spawnSync } from 'child_process'
 
@@ -88,23 +89,7 @@ test.describe('Codex agent hooks', () => {
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
 
-    // Resolve on `onStarted`: the server registers the subscription asynchronously,
-    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
-    await mainWindow.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          const w = window as CodexHookWindow
-          const events: unknown[] = []
-          w.__codexHookEvents = events
-          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-            onStarted: () => resolve(),
-            onData: (ev) => {
-              events.push(ev)
-            }
-          })
-          w.__codexHookUnsub = () => sub.unsubscribe()
-        })
-    )
+    await subscribeAgentLifecycle(mainWindow, '__codexHookEvents', '__codexHookUnsub')
 
     // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
     const res = spawnSync('bash', [scriptPath], {
@@ -144,23 +129,7 @@ test.describe('Codex agent hooks', () => {
     })) as Record<string, string>
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
 
-    // Resolve on `onStarted`: the server registers the subscription asynchronously,
-    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
-    await mainWindow.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          const w = window as CodexHookWindow
-          const events: unknown[] = []
-          w.__codexStartEvents = events
-          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-            onStarted: () => resolve(),
-            onData: (ev) => {
-              events.push(ev)
-            }
-          })
-          w.__codexStartUnsub = () => sub.unsubscribe()
-        })
-    )
+    await subscribeAgentLifecycle(mainWindow, '__codexStartEvents', '__codexStartUnsub')
 
     const res = spawnSync('bash', [scriptPath], {
       // No taskId in the blob — this case asserts only agentId + normalized type,
