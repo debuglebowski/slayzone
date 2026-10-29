@@ -520,7 +520,8 @@ describe('a computer through the front end', () => {
     // Wait on both sides, or the next test reads a state file not yet written.
     const row = await poll(
       async () => {
-        const enroll = (l: string) => l.includes('connected to hub') && l.includes('"mode":"enroll"')
+        const enroll = (l: string) =>
+          l.includes('connected to hub') && l.includes('"mode":"enroll"')
         if (!computer!.logs.some(enroll)) return null
         const r = (await trpc.computers.list.query()).find(
           (x) => x.name === 'tls-front-end-computer'
