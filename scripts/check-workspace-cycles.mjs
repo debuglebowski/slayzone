@@ -19,40 +19,15 @@
  *   - a baseline entry that is no longer a cycle edge fails too, until the baseline
  *     is updated — so the baseline only ever shrinks.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { WorkspaceError, workspacePackages } from './lib/workspace-packages.mjs'
 
 const rootArg = process.argv.indexOf('--root')
 const root =
   rootArg === -1 ? join(dirname(fileURLToPath(import.meta.url)), '..') : process.argv[rootArg + 1]
 const BASELINE = join(root, 'scripts/workspace-cycles-baseline.json')
-
-/** package.json paths of the workspace packages. Only `dir` and `dir/*` patterns are supported. */
-function packageJsonPaths() {
-  const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')
-  const block = yaml.match(/^packages:\n((?:[ \t]+-[^\n]*\n?)+)/m)
-  if (!block) fail('pnpm-workspace.yaml has no `packages:` list')
-  const patterns = [...block[1].matchAll(/-\s*['"]?([^'"\n]+?)['"]?\s*$/gm)].map((m) => m[1])
-  const paths = []
-  for (const pattern of patterns) {
-    if (/^[^*]+\/\*$/.test(pattern)) {
-      const dir = join(root, pattern.slice(0, -2))
-      if (!existsSync(dir)) fail(`workspace pattern '${pattern}': ${dir} does not exist`)
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const p = join(dir, entry.name, 'package.json')
-        if (entry.isDirectory() && existsSync(p)) paths.push(p)
-      }
-    } else if (!pattern.includes('*')) {
-      const p = join(root, pattern, 'package.json')
-      if (!existsSync(p)) fail(`workspace pattern '${pattern}': ${p} does not exist`)
-      paths.push(p)
-    } else {
-      fail(`workspace pattern '${pattern}' is not supported — teach packageJsonPaths() it`)
-    }
-  }
-  return paths
-}
 
 /** A guard that cannot read the workspace must fail, not pass as "no cycles". */
 function fail(message) {
@@ -62,21 +37,12 @@ function fail(message) {
 
 /** name → names of the workspace packages it declares a dependency on. */
 function dependencyGraph() {
-  const manifests = packageJsonPaths().map((p) => JSON.parse(readFileSync(p, 'utf8')))
-  const names = new Set(manifests.map((m) => m.name))
-  const graph = new Map()
-  for (const m of manifests) {
-    const deps = new Set()
-    for (const field of [
-      'dependencies',
-      'devDependencies',
-      'peerDependencies',
-      'optionalDependencies'
-    ])
-      for (const dep of Object.keys(m[field] ?? {})) if (names.has(dep)) deps.add(dep)
-    graph.set(m.name, [...deps].sort())
+  try {
+    return new Map(workspacePackages(root).map((p) => [p.name, p.deps]))
+  } catch (e) {
+    if (e instanceof WorkspaceError) fail(e.message)
+    throw e
   }
-  return graph
 }
 
 /** Tarjan's strongly connected components: name → component id. */
