@@ -16,7 +16,7 @@ import {
   Lock,
   AlertTriangle
 } from 'lucide-react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { Button, PanelToggle, cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'

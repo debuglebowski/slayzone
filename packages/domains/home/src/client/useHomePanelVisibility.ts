@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 
 type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
 

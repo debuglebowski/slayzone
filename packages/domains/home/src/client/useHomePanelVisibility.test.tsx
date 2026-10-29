@@ -30,7 +30,7 @@ const client = {
     }
   }
 }
-vi.mock('@slayzone/transport/client', () => ({ useTRPCClient: () => client }))
+vi.mock('./trpc', () => ({ useTRPCClient: () => client }))
 
 const { useHomePanelState } = await import('./useHomePanelVisibility')
 
