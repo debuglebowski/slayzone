@@ -197,6 +197,59 @@ describe('createContainerFocusHandoff', () => {
     }
   })
 
+  it('a late tab activation does not take focus from a field being typed in', () => {
+    // Opening a task is a transition: a double-click's first click opens it, the
+    // double-click opens an inline rename, and the swap commits after that.
+    const container = document.createElement('div')
+    const pane = document.createElement('textarea')
+    container.appendChild(pane)
+    const rename = document.createElement('input')
+    document.body.append(container, rename)
+    try {
+      const handoff = createContainerFocusHandoff(false)
+      handoff.setContainer(container)
+      rename.focus()
+      const groupFocus = vi.fn(() => pane.focus())
+      handoff.activate(groupFocus)
+      expect(groupFocus).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(rename)
+
+      // Dropped, not parked: the pane attaching later must not take it either.
+      const focus = vi.fn(() => pane.focus())
+      handoff.paneAttached({ sessionId: 'a', focus })
+      expect(focus).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(rename)
+    } finally {
+      container.remove()
+      rename.remove()
+    }
+  })
+
+  it('a field left focused in a hidden (inert) tab does not hold focus off', () => {
+    // Cmd+2 from the description editor: the old tab turns inert in the same
+    // commit, possibly before its field is blurred.
+    const container = document.createElement('div')
+    const pane = document.createElement('textarea')
+    container.appendChild(pane)
+    const hiddenTab = document.createElement('div')
+    const description = document.createElement('textarea')
+    hiddenTab.appendChild(description)
+    document.body.append(container, hiddenTab)
+    try {
+      const handoff = createContainerFocusHandoff(false)
+      handoff.setContainer(container)
+      description.focus()
+      hiddenTab.setAttribute('inert', '')
+      const groupFocus = vi.fn(() => pane.focus())
+      handoff.activate(groupFocus)
+      expect(groupFocus).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(pane)
+    } finally {
+      container.remove()
+      hiddenTab.remove()
+    }
+  })
+
   it('without a container, focus never counts as landed', () => {
     const handoff = createContainerFocusHandoff(true)
     const focus = vi.fn(() => {})

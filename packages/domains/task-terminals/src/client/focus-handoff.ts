@@ -11,7 +11,11 @@ export interface FocusHandoff {
   /**
    * Tab/cell became active: try focusing now. focus() silently no-ops while
    * the pane is unmounted, lazy-loading, or torn down — so when the focus
-   * doesn't land, the claim is kept for the pane that attaches later.
+   * doesn't land, the claim is kept for the pane that attaches later. An
+   * activation that finds the user typing somewhere else drops the claim
+   * instead: opening a task is a transition, so the swap can commit after a
+   * later edit began (a double-click's first click opens the task, the
+   * double-click starts an inline rename).
    */
   activate: (focus: () => void) => void
   /**
@@ -27,7 +31,10 @@ export interface FocusHandoff {
 export interface FocusTracker {
   /** The element holding focus now. */
   current: () => Element | null
-  /** Focus on `el` is the user typing in a field outside the handoff's panes. */
+  /**
+   * Focus on `el` is the user typing in a field outside the handoff's panes. A
+   * field inside an inert subtree (a hidden tab) is not: nobody can type there.
+   */
   isTypingElsewhere: (el: Element | null) => boolean
 }
 
@@ -45,6 +52,11 @@ export interface FocusTracker {
  * the claim when focus has MOVED into such a field since the claim. A claim made
  * while already in one (Cmd+T from the description editor) still completes: that
  * request came after the typing, so it is what the user wants now.
+ *
+ * Activation is asynchronous too — the tab swap is a React transition and
+ * commits after any discrete input the user gave meanwhile — so it never takes
+ * focus from such a field at all. A field in the tab being hidden by the same
+ * swap is inert by then and doesn't count.
  */
 export function createFocusHandoff(
   focusLanded: () => boolean,
@@ -63,6 +75,10 @@ export function createFocusHandoff(
       markClaim()
     },
     activate(focus) {
+      if (tracker?.isTypingElsewhere(tracker.current())) {
+        pending = false
+        return
+      }
       focus()
       // A landed activation also clears any outstanding claim: the terminal
       // has focus, so a later attach must not steal it.
@@ -104,7 +120,8 @@ export function createContainerFocusHandoff(initialClaim: boolean): ContainerFoc
     initialClaim,
     {
       current: () => document.activeElement,
-      isTypingElsewhere: (el) => isTextEntryElement(el) && !container?.contains(el)
+      isTypingElsewhere: (el) =>
+        isTextEntryElement(el) && !container?.contains(el) && !el?.closest('[inert]')
     }
   )
   return {
