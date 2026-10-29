@@ -47,7 +47,9 @@ const trpcClientMock = {
 }
 
 vi.mock('@slayzone/transport/client', () => ({
-  useTRPCClient: () => trpcClientMock
+  useTRPCClient: () => trpcClientMock,
+  // settings' typed view (`@slayzone/settings` client/trpc.ts) is built from this.
+  typedTrpc: () => ({ useTRPCClient: () => trpcClientMock })
 }))
 
 import { CliInstallDialog } from '@slayzone/settings/client/CliInstallDialog'

@@ -48,6 +48,8 @@ function trpcProxy(): unknown {
 }
 const trpc = trpcProxy()
 
+// The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => trpc,
   useTRPCClient: () => ({}),

@@ -72,6 +72,8 @@ const editRootsSpy = vi.fn(
 /** Which hub's subtree is rendering — set by the test's `<Scope>` wrapper. */
 let renderingHubId = 'local'
 
+// The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   // Live status pushes are wired in the component; these tests drive the list
   // directly, so the subscription is a no-op here.

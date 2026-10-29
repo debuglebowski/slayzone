@@ -60,6 +60,8 @@ let deviceStart = vi.fn(async (_p: { hubId: string; url: string }) => ({
 }))
 let deviceWait = vi.fn(async (_p: { flowId: string }) => ({ ok: true as const }))
 
+// The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: {
     getHubRegistry: () => Promise.resolve({ hubs: registryHubs, defaultHubId: 'local' }),

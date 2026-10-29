@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout, useDepsChanged } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'

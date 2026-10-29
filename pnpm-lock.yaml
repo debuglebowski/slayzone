@@ -1959,15 +1959,27 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.1)
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
+      '@slayzone/notify':
+        specifier: workspace:*
+        version: link:../../shared/notify
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts

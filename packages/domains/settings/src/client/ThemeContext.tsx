@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
 import { ThemeContext, useStableCallback, type ThemeContextValue } from '@slayzone/ui'

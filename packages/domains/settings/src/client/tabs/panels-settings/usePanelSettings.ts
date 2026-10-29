@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../../trpc'
 import { parseTerminalOptionAsMeta, safeRandomUUID, type TerminalOptionAsMeta } from '@slayzone/ui'
 import {
   AGENT_STARTUP_SETTING,

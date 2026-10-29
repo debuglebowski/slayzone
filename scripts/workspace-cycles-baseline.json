@@ -43,6 +43,7 @@
   "@slayzone/projects -> @slayzone/test-panel",
   "@slayzone/projects -> @slayzone/transport",
   "@slayzone/settings -> @slayzone/file-editor",
+  "@slayzone/settings -> @slayzone/projects",
   "@slayzone/settings -> @slayzone/tabs-state",
   "@slayzone/settings -> @slayzone/tags",
   "@slayzone/settings -> @slayzone/telemetry",

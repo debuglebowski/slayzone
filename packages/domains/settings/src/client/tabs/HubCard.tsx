@@ -1,11 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  electronBootstrap,
-  useSubscription,
-  useTRPC,
-  useTRPCClient
-} from '@slayzone/transport/client'
+import { electronBootstrap, useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 // Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.

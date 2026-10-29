@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import { FolderOpen, Trash2, RotateCcw, Download, Loader2, Pencil, Check, X } from 'lucide-react'
 import {
   Button,

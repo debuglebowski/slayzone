@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import { Button, Label } from '@slayzone/ui'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
