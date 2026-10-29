@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
-import { TrpcProvider, electronBootstrap, initTrpcClient } from '@slayzone/transport/client'
+import { TrpcProvider, electronBootstrap } from '@slayzone/transport/client'
+import { initTrpcClient } from './trpc'
 import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
 import { PtyProvider, registerHibernatedSessionIdsSource } from '@slayzone/terminal'
 import { hibernatedSessionIdsSource } from '@slayzone/task-terminals/hibernated-sessions'

@@ -45,12 +45,8 @@ import { TabBar } from '@slayzone/tabs'
 import { HomeContainer, type HomeContainerHandle } from '@slayzone/home/client'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
-import {
-  useTRPCClient,
-  getClientForHub,
-  getHubIdForProject,
-  useHubOwnershipStore
-} from '@slayzone/transport/client'
+import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/client'
+import { useTRPCClient, getClientForHub } from './trpc'
 import { TerminalStatusButton } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { getDefaultStatus } from '@slayzone/projects-contracts'

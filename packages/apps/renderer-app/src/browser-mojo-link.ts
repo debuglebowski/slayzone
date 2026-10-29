@@ -19,7 +19,7 @@
 // onEvent contract by the shim (state-snapshot replay, did-navigate, dom-ready, …).
 import { TRPCClientError, type TRPCLink } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from '@slayzone/transport/client'
+import type { AppRouter } from '@slayzone/api'
 
 const PREFIX = 'app.browser.'
 

@@ -12,6 +12,7 @@
   "dependencies": {
     "@slayzone/agent-panels": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
+    "@slayzone/api": "workspace:*",
     "@slayzone/app-shell": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/editor": "workspace:*",

@@ -16,7 +16,7 @@ import type { useTasksData } from '@slayzone/tasks/client'
 import type { Task } from '@slayzone/task-contracts'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 import { TaskDetailDataLoader } from '@slayzone/task/client/TaskDetailDataLoader'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { getDefaultStatus, getStatusByCategory } from '@slayzone/projects-contracts'
 
 interface TaskDetailViewProps {

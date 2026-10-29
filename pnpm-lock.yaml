@@ -912,6 +912,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config
+      '@slayzone/api':
+        specifier: workspace:*
+        version: link:../api
       '@slayzone/app-shell':
         specifier: workspace:*
         version: link:../../domains/app-shell

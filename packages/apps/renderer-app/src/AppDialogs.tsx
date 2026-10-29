@@ -42,12 +42,8 @@ import {
 } from '@slayzone/ui'
 import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
-import {
-  useTRPCClient,
-  getClientForHub,
-  getHubIdForProject,
-  useHubOwnershipStore
-} from '@slayzone/transport/client'
+import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/client'
+import { useTRPCClient, getClientForHub } from './trpc'
 import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
 import type { useTasksData } from '@slayzone/tasks/client'
