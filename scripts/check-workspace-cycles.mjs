@@ -2,13 +2,13 @@
 /**
  * Ratchet on dependency cycles between workspace packages.
  *
- *   node scripts/check-workspace-cycles.mjs            check (`pnpm lint:workspace-cycles`; not in `pnpm lint`/CI until the cycles are gone)
+ *   node scripts/check-workspace-cycles.mjs            check (`pnpm lint:workspace-cycles`, part of `pnpm lint`/CI)
  *   node scripts/check-workspace-cycles.mjs --update   rewrite the baseline
  *   node scripts/check-workspace-cycles.mjs --root <dir>   check another workspace (tests)
  *
- * Packages depend on each other in loops (transport ↔ every domain, settings ↔ task…),
- * which is why pnpm-workspace.yaml needs `ignoreWorkspaceCycles` and why no tool that
- * orders or caches per package (Turborepo, `tsc -b` project references) can be used.
+ * The workspace graph is acyclic (baseline `[]`), so `pnpm -r` runs packages in
+ * dependency order (no `ignoreWorkspaceCycles`) and per-package ordering/caching tools
+ * (Turborepo, `tsc -b` project references) are usable. Keep it that way.
  *
  * The graph is the workspace packages and the `@workspace` dependencies their
  * package.json files declare (all dependency fields) — the same graph pnpm and

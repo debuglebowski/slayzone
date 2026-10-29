@@ -35,10 +35,6 @@ minimumReleaseAgeExclude:
   # age gate (2026-11-13).
   - electron-vite@6.0.0
 
-# The workspace has dependency cycles (transport/types/task/...): `pnpm -r` runs their
-# tasks in arbitrary order, as pnpm 10 did (pnpm 11+ fails on a cycle by default).
-ignoreWorkspaceCycles: true
-
 # Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
 nodeLinker: hoisted
 publicHoistPattern:

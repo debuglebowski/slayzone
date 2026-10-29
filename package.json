@@ -20,7 +20,7 @@
     "build:win:all": "pnpm --filter @slayzone/app build:win:all",
     "build:linux": "pnpm --filter @slayzone/app build:linux",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm lint:versions && pnpm lint:theme && pnpm lint:server-boundary && pnpm lint:trpc-deps && pnpm lint:window-api && pnpm lint:e2e-guardrails && pnpm lint:react-compiler && pnpm lint:format && pnpm lint:biome && pnpm lint:eslint && pnpm test:unit:registered",
+    "lint": "pnpm lint:versions && pnpm lint:theme && pnpm lint:server-boundary && pnpm lint:trpc-deps && pnpm lint:window-api && pnpm lint:e2e-guardrails && pnpm lint:react-compiler && pnpm lint:workspace-cycles && pnpm lint:format && pnpm lint:biome && pnpm lint:eslint && pnpm test:unit:registered",
     "audit:check": "node scripts/ci/audit-check.mjs",
     "audit:age": "node scripts/ci/release-age-check.mjs",
     "lint:versions": "node scripts/sync-versions.mjs --check",
