@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useEffectEvent, type Dispatch, type SetStateAction } from 'react'
 import {
   useGuardedHotkeys,
   matchesShortcut,
@@ -380,80 +380,83 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     { enableOnFormTags: true, enabled: !isRecording }
   )
 
-  // Home tab panel shortcuts
-  useEffect(() => {
-    const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
-      if (activeTabType() !== 'home') return
-      if (!selectedProjectId) return
-      if (isRecording) return
+  // Home tab panel shortcuts. An Effect Event: a key reads the current project,
+  // panel visibility, panel config and bindings — the listener is added once.
+  const { pendingHomeSearchToggleRef } = homePanel
+  const onHomeKeyDown = useEffectEvent((e: KeyboardEvent): void => {
+    if (activeTabType() !== 'home') return
+    if (!selectedProjectId) return
+    if (isRecording) return
 
-      // These shortcuts work even inside editors (no binding conflict)
-      if (matchesShortcut(e, getKeys('editor-search')) && isHomePanelEnabled('editor', 'home')) {
-        e.preventDefault()
-        if (homePanel.homeEditorRef.current) {
-          if (!homePanel.homePanelVisibility.editor)
-            homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
-          homePanel.homeEditorRef.current.toggleSearch()
-        } else {
-          homePanel.pendingHomeSearchToggleRef.current = true
+    // These shortcuts work even inside editors (no binding conflict)
+    if (matchesShortcut(e, getKeys('editor-search')) && isHomePanelEnabled('editor', 'home')) {
+      e.preventDefault()
+      if (homePanel.homeEditorRef.current) {
+        if (!homePanel.homePanelVisibility.editor)
           homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
-        }
-        return
+        homePanel.homeEditorRef.current.toggleSearch()
+      } else {
+        pendingHomeSearchToggleRef.current = true
+        homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
       }
+      return
+    }
 
-      // Git Diff (panel-git-diff)
-      if (matchesShortcut(e, getKeys('panel-git-diff')) && isHomePanelEnabled('git', 'home')) {
-        e.preventDefault()
-        if (!homePanel.homePanelVisibility.git) {
-          homePanel.setHomeGitDefaultTab('changes')
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: true }))
-        } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'changes') {
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: false }))
-        } else {
-          homePanel.homeGitPanelRef.current?.switchToTab('changes')
-        }
-        return
+    // Git Diff (panel-git-diff)
+    if (matchesShortcut(e, getKeys('panel-git-diff')) && isHomePanelEnabled('git', 'home')) {
+      e.preventDefault()
+      if (!homePanel.homePanelVisibility.git) {
+        homePanel.setHomeGitDefaultTab('changes')
+        homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: true }))
+      } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'changes') {
+        homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: false }))
+      } else {
+        homePanel.homeGitPanelRef.current?.switchToTab('changes')
       }
+      return
+    }
 
-      // Git (panel-git)
-      if (matchesShortcut(e, getKeys('panel-git')) && isHomePanelEnabled('git', 'home')) {
-        e.preventDefault()
-        if (!homePanel.homePanelVisibility.git) {
-          homePanel.setHomeGitDefaultTab('general')
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: true }))
-        } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'general') {
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: false }))
-        } else {
-          homePanel.homeGitPanelRef.current?.switchToTab('general')
-        }
-      } else if (
-        matchesShortcut(e, getKeys('panel-editor')) &&
-        isHomePanelEnabled('editor', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: !prev.editor }))
-      } else if (
-        matchesShortcut(e, getKeys('panel-processes')) &&
-        isHomePanelEnabled('processes', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, processes: !prev.processes }))
-      } else if (
-        matchesShortcut(e, getKeys('panel-tests')) &&
-        testsPanelEnabled &&
-        isHomePanelEnabled('tests', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, tests: !prev.tests }))
-      } else if (
-        matchesShortcut(e, getKeys('panel-automations')) &&
-        isHomePanelEnabled('automations', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, automations: !prev.automations }))
+    // Git (panel-git)
+    if (matchesShortcut(e, getKeys('panel-git')) && isHomePanelEnabled('git', 'home')) {
+      e.preventDefault()
+      if (!homePanel.homePanelVisibility.git) {
+        homePanel.setHomeGitDefaultTab('general')
+        homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: true }))
+      } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'general') {
+        homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: false }))
+      } else {
+        homePanel.homeGitPanelRef.current?.switchToTab('general')
       }
-    })
+    } else if (
+      matchesShortcut(e, getKeys('panel-editor')) &&
+      isHomePanelEnabled('editor', 'home')
+    ) {
+      e.preventDefault()
+      homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: !prev.editor }))
+    } else if (
+      matchesShortcut(e, getKeys('panel-processes')) &&
+      isHomePanelEnabled('processes', 'home')
+    ) {
+      e.preventDefault()
+      homePanel.setHomePanelVisibility((prev) => ({ ...prev, processes: !prev.processes }))
+    } else if (
+      matchesShortcut(e, getKeys('panel-tests')) &&
+      testsPanelEnabled &&
+      isHomePanelEnabled('tests', 'home')
+    ) {
+      e.preventDefault()
+      homePanel.setHomePanelVisibility((prev) => ({ ...prev, tests: !prev.tests }))
+    } else if (
+      matchesShortcut(e, getKeys('panel-automations')) &&
+      isHomePanelEnabled('automations', 'home')
+    ) {
+      e.preventDefault()
+      homePanel.setHomePanelVisibility((prev) => ({ ...prev, automations: !prev.automations }))
+    }
+  })
+  useEffect(() => {
+    const handleKeyDown = withModalGuard((e: KeyboardEvent): void => onHomeKeyDown(e))
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedProjectId, homePanel.homePanelVisibility, getKeys, isRecording, buildHomeFileContext])
+  }, [])
 }

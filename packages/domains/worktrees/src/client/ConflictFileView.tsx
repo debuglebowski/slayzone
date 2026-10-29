@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Sparkles, Check, ArrowLeft, ArrowRight, Info, Layers } from 'lucide-react'
@@ -7,7 +7,7 @@ import { useAppearance } from '@slayzone/ui'
 import { useTheme } from '@slayzone/ui'
 import { getThemeEditorColors } from '@slayzone/ui'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { buildCodeMirrorTheme } from './codemirror-theme'
 import type { ConflictAnalysis } from '../shared/types'
@@ -95,6 +95,9 @@ export function ConflictFileView({
   })
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  // Theme + font size are reconfigured live (below) — a rebuild would drop edits.
+  const [themeComp] = useState(() => new Compartment())
+  const [sizeComp] = useState(() => new Compartment())
 
   const labels = resolveLabels(branchContext)
 
@@ -102,13 +105,16 @@ export function ConflictFileView({
     setVisiblePanels((prev) => ({ ...prev, [id]: !prev[id] }))
   }, [])
 
+  // Styles as of creation; later changes go through the compartments.
+  const readInitialStyles = useEffectEvent(() => [sizeComp.of(sizeTheme), themeComp.of(cmThemeExt)])
+
   // Init CodeMirror editor
   useEffect(() => {
     if (!editorRef.current || !content?.merged) return
 
     const state = EditorState.create({
       doc: content.merged,
-      extensions: [basicSetup, javascript(), sizeTheme, cmThemeExt]
+      extensions: [basicSetup, javascript(), ...readInitialStyles()]
     })
 
     const view = new EditorView({ state, parent: editorRef.current })
@@ -119,6 +125,12 @@ export function ConflictFileView({
       viewRef.current = null
     }
   }, [content?.merged])
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: [sizeComp.reconfigure(sizeTheme), themeComp.reconfigure(cmThemeExt)]
+    })
+  }, [sizeTheme, cmThemeExt, sizeComp, themeComp])
 
   const setEditorContent = useCallback((text: string) => {
     const view = viewRef.current

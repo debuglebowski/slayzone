@@ -7,6 +7,7 @@ import { createTrpcTest } from '@slayzone/transport/testing'
 vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 
 import { SearchPanel } from './SearchPanel'
+import { WorkspaceTargetProvider, type WorkspaceTarget } from './workspace-target'
 
 interface SearchInput {
   rootPath: string
@@ -168,5 +169,26 @@ describe('SearchPanel — out-of-date searches', () => {
     await settle()
     expect(status()).toBeNull()
     expect(screen.queryByText('foo.ts')).toBeNull()
+  })
+
+  it('searches again when the workspace target changes under the same query', async () => {
+    const Wrapper = wrapper
+    const at = (target: WorkspaceTarget) => (
+      <Wrapper>
+        <WorkspaceTargetProvider target={target}>
+          <SearchPanel projectPath="/proj" onOpenFile={vi.fn()} />
+        </WorkspaceTargetProvider>
+      </Wrapper>
+    )
+    const view = render(at({ computerId: 'c1' }))
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'fo' } })
+    await settle(300)
+    expect(search).toHaveBeenCalledTimes(1)
+    expect(search.mock.calls[0][0]).toMatchObject({ computerId: 'c1' })
+
+    view.rerender(at({ computerId: 'c2' }))
+    await settle(300)
+    expect(search).toHaveBeenCalledTimes(2)
+    expect(search.mock.calls[1][0]).toMatchObject({ computerId: 'c2', query: 'fo' })
   })
 })

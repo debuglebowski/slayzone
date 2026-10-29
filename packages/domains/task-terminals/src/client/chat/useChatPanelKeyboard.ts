@@ -112,6 +112,7 @@ export function useChatPanelKeyboard({
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [
+    panelRef,
     scrollRef,
     search,
     inFlight,
@@ -119,6 +120,7 @@ export function useChatPanelKeyboard({
     handleModeChange,
     autoCapability.optedIn,
     autocomplete.show,
-    handleStop
+    handleStop,
+    mode
   ])
 }

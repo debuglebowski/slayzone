@@ -112,7 +112,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
       cancelled = true
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, matchCase, useRegex, projectPath, queryClient, trpc])
+  }, [query, matchCase, useRegex, projectPath, target, queryClient, trpc])
 
   const totalMatches = results.reduce((n, r) => n + r.matches.length, 0)
 
