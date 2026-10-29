@@ -1,4 +1,4 @@
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from './trpc'
 import type { HibernatedSessionIdsSource } from '@slayzone/terminal'
 
 /**

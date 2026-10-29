@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import { toast, useStableCallback } from '@slayzone/ui'
 import {
   DEFAULT_CHAT_COLLABORATION,

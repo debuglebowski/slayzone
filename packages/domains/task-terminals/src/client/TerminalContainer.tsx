@@ -7,7 +7,7 @@ import {
   forwardRef,
   useImperativeHandle
 } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { usePty } from '@slayzone/terminal'
 import { isPromptCaptureMode, type TerminalMode } from '@slayzone/terminal-contracts'
 import {

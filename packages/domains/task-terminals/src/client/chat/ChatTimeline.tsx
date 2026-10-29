@@ -1,7 +1,7 @@
 import { type Dispatch, type Key, type SetStateAction } from 'react'
 import { ArrowDown, Sparkles } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import {
   cn,
   ContextMenu,

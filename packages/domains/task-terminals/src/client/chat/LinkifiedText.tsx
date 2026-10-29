@@ -1,5 +1,5 @@
 import React from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import { findLinksInString } from '@slayzone/terminal-contracts'
 import { formatKeysForDisplay, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 

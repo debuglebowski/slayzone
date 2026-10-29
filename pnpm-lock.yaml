@@ -2446,18 +2446,30 @@ importers:
       '@lobehub/icons':
         specifier: ^5.21.0
         version: 5.21.0(@lobehub/ui@5.10.4)(@types/react@19.3.0)(antd@6.3.7(date-fns@4.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(supports-color@7.2.0)
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../agent-turns
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../diagnostics
       '@slayzone/diff-view':
         specifier: workspace:*
         version: link:../../shared/diff-view
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal

@@ -1,7 +1,7 @@
 import { type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { ArrowUp, Square, X as XIcon, RotateCcw, Filter } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import {
   cn,
   AgentModePill,

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import type { ChatActions, NavigateActions } from './autocomplete/types'
 
 export interface UseChatActionsResult {

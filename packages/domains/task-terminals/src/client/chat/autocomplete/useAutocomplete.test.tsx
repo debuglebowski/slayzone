@@ -3,6 +3,9 @@ import type React from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
+// The domain's typed view (`../../trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('../../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => ({
     chat: {

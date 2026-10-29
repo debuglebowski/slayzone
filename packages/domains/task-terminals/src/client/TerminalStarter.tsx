@@ -1,7 +1,8 @@
 import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from 'react'
 import { Play, Moon } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import {
   Terminal,
   type TerminalHandle,

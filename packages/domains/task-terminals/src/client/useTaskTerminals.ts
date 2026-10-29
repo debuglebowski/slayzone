@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { usePty } from '@slayzone/terminal'

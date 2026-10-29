@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../../trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type { AcceptCtx, AutocompleteSource, FetchCtx, TriggerMatch } from './types'
 import { rankAcrossSources, type MergedEntry, type UsageLookup } from './ranking'

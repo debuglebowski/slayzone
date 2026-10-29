@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import { toast } from '@slayzone/ui'
 import type { ChatTimelineState } from '@slayzone/terminal/client'
 import {

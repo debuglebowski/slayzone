@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
 import { toast, useStableCallback, type AgentEffort } from '@slayzone/ui'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
 import { useChatQueue } from './useChatQueue'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
