@@ -6,13 +6,13 @@ import type { Automation, AutomationRun } from '@slayzone/automations/shared'
 
 // AutomationCard loads per-run action details over tRPC
 // (`queryClient.fetchQuery(trpc.history.getAutomationActionRuns.queryOptions(...))`).
-// Stub the transport proxy + the react-query client so the render stays a
+// Stub the domain's tRPC view + the react-query client so the render stays a
 // pure component test: `queryOptions` carries the input into `queryFn`, and
 // `fetchQuery` just runs it. `getActionRunsMock` is the swappable data source
 // (the old `window.api.history.getAutomationActionRuns` mock).
 const getActionRunsMock = vi.fn()
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPC: () => ({
     history: {
       getAutomationActionRuns: {

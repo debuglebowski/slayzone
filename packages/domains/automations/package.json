@@ -28,7 +28,8 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.48.0",
     "zod": "^4.3.5",
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/terminal": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.3.1"

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Button } from '@slayzone/ui'
 import { Plus, Zap } from 'lucide-react'
 import type {

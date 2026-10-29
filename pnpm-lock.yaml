@@ -1260,6 +1260,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
