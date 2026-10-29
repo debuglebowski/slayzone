@@ -1480,7 +1480,7 @@ export function TreeView({
             <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
               <div className="flex flex-col pr-2 pt-2 pb-3">
                 {projectTasks.length === 0 && groups.length === 0 ? (
-                  <span className="text-xs italic text-muted-foreground/60 px-2 py-1">
+                  <span className="text-xs italic text-muted-foreground/60 pl-7 py-1">
                     No active tasks
                   </span>
                 ) : (
