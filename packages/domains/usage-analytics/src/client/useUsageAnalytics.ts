@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type { AnalyticsSummary, DateRange, ProviderOption } from '../shared/types'
 import { PROVIDER_USAGE_SUPPORT, ALL_PROVIDERS } from '../shared/types'
 

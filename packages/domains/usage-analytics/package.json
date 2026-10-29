@@ -24,7 +24,9 @@
     "@tanstack/react-query": "^5.104.0",
     "lucide-react": "^1.48.0",
     "recharts": "^3.10.1",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "@slayzone/settings-core": "workspace:*",
+    "@slayzone/terminal": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.3.1"

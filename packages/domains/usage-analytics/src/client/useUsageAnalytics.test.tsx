@@ -81,7 +81,7 @@ const trpc = {
     }
   }
 }
-vi.mock('@slayzone/transport/client', () => ({ useTRPC: () => trpc }))
+vi.mock('./trpc', () => ({ useTRPC: () => trpc }))
 
 const { useUsageAnalytics } = await import('./useUsageAnalytics')
 
