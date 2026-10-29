@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   normalizeRemoteUrl,
-  toHealthUrl,
+  toHubOrigin,
   readBootConfig,
   writeBootSettings,
   probeRemoteHealth,
@@ -48,10 +48,11 @@ describe('normalizeRemoteUrl', () => {
   })
 })
 
-describe('toHealthUrl', () => {
-  it('maps the canonical ws URL to its http /health endpoint', () => {
-    expect(toHealthUrl('ws://example.com:4400/trpc')).toBe('http://example.com:4400/health')
-    expect(toHealthUrl('wss://example.com/trpc')).toBe('https://example.com/health')
+describe('toHubOrigin', () => {
+  it('maps the canonical ws URL to its http(s) origin', () => {
+    expect(toHubOrigin('ws://example.com:4400/trpc')).toBe('http://example.com:4400')
+    expect(toHubOrigin('wss://example.com/trpc')).toBe('https://example.com')
+    expect(toHubOrigin('ws://[::1]:4400/trpc')).toBe('http://[::1]:4400')
   })
 })
 

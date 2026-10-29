@@ -91,7 +91,7 @@ import {
   LOCAL_HUB_ID
 } from './boot-config'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
-import { setHubTokenCipher, setHubToken, getAllHubTokens } from './hub-tokens'
+import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -3561,18 +3561,15 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // Per-hub bearer tokens (safeStorage-encrypted, main-only). The renderer
     // fetches them to open authed connections; writes come from the enroll/login
     // flow. Empty when no authed hubs are configured.
+    const hubTokens = () => createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot())
     ipcMain.handle('app:get-hub-tokens', () =>
       getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot())
     )
     ipcMain.handle(
       'app:set-hub-token',
       async (_event, payload: { hubId: string; token: string }) => {
-        await setHubToken(
-          getClientStateRoot(),
-          payload.hubId,
-          payload.token,
-          getLegacyClientStateRoot()
-        )
+        // An empty token clears the hub's entry (`createHubTokenStore`).
+        await hubTokens().set(payload.hubId, payload.token)
         return { ok: true as const }
       }
     )
@@ -3584,12 +3581,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         const result = await hubLogin(payload.url, payload.email, payload.password)
         if (result.ok) {
           try {
-            await setHubToken(
-              getClientStateRoot(),
-              payload.hubId,
-              result.token,
-              getLegacyClientStateRoot()
-            )
+            await hubTokens().set(payload.hubId, result.token)
           } catch (err) {
             return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
           }
@@ -3643,12 +3635,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           signal: flow.abort.signal
         })
         if (!result.ok) return result
-        await setHubToken(
-          getClientStateRoot(),
-          flow.hubId,
-          result.token,
-          getLegacyClientStateRoot()
-        )
+        await hubTokens().set(flow.hubId, result.token)
         return { ok: true as const }
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }

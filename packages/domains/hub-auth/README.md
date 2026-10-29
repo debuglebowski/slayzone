@@ -85,6 +85,35 @@ package. `bearer`, `jwt`, and `organization` still come from
   adapter because the plugin's `/api-key/delete` endpoint is session-bound
   and computer keys are managed server-side.
 
+## Client (`./client`, `./client-node`)
+
+The hub sign-in client every SlayZone client shares — desktop main
+(`apps/app/src/main/boot-config.ts`), the CLI (`apps/cli/src/hub-sign-in.ts`), the web
+shell's pure parts, and a future React Native app. One implementation of the protocol
+the server half above serves.
+
+- `./client` (`src/client/`) is PLATFORM-NEUTRAL: no `node:*`, no Electron, no DOM
+  globals, only sibling imports (`purity.test.ts` enforces it). HTTP is injected as a
+  `HubTransport` (one function per exchange; rejects only when the hub is unreachable,
+  with `HubTransportTimeoutError` on a timeout). `baseUrl` = the hub's http(s) origin,
+  optionally with a path prefix.
+  - `/health`: `fetchHubHealth` (raw read), `probeHubHealth` / `healthProbeOf` (strict,
+    for adding a hub), `signInMethodsOf` (native clients), `hubBrowserSignInOf` +
+    `HUB_BROWSER_SIGN_IN_UNKNOWN` (web shell, fails closed).
+  - `signInWithPassword` → bearer from `set-auth-token` (or body `token`).
+  - Device sign-in (RFC 8628): `requestDeviceCode`, `waitForDeviceToken` (interval,
+    `slow_down` +5s, retries over network errors until expiry, `signal` cancels),
+    `isHubOwnPage`. Client ids `HUB_DEVICE_CLIENT_IDS` must equal the server's
+    `DEVICE_CLIENTS` (pinned by `device.test.ts`).
+  - `fetchSessionEmail`, `signInErrorFrom` / `signInErrorMessage` (browser sign-in
+    errors), `HubTokenStore` (per-hub bearer storage; each platform implements it).
+  - Results are structured: a machine `reason` plus a default `error` text, so each
+    client keeps its own wording.
+  - `createFetchHubTransport(fetch)` for React Native / browsers (`credentials: 'omit'`).
+- `./client-node` (`src/client-node/`): `nodeHubTransport`, plain `http(s).request`.
+  Node clients must not use Node's `fetch`: undici sends `Sec-Fetch-Mode: cors`, and
+  better-auth then refuses the request `403 MISSING_OR_NULL_ORIGIN`.
+
 ## Schema snapshot (better-auth 1.6.23 + plugins, sqlite)
 
 Generated with `compileMigrations()` on a fresh database:
@@ -139,3 +168,5 @@ network, no app. Covers migrations, sign-up/sign-in via in-process
 organization create + member add. `entra.test.ts` drives the Entra flow end to
 end against a local fake issuer (own JWKS, signed tokens, an assertion-checking
 token endpoint). `password.test.ts` covers the password switch, `break-glass.test.ts` the break-glass account.
+`src/client/*.test.ts` drive the sign-in client against a fake transport;
+`src/client-node/index.test.ts` drives `nodeHubTransport` against a real local HTTP server.

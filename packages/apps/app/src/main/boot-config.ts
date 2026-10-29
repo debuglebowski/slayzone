@@ -1,7 +1,15 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import http from 'node:http'
-import https from 'node:https'
 import { join } from 'node:path'
+import {
+  HUB_DEVICE_CLIENT_IDS,
+  isHubOwnPage as isOnHubOrigin,
+  probeHubHealth,
+  requestDeviceCode,
+  signInWithPassword,
+  waitForDeviceToken,
+  type HubDeviceCode
+} from '@slayzone/hub-auth/client'
+import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import { isLoopbackAuthority } from '@slayzone/platform'
 import type { HubEntry } from '@slayzone/types'
 
@@ -109,14 +117,14 @@ export function normalizeRemoteUrl(raw: string): string | null {
   return `${scheme}://${url.host}/trpc`
 }
 
-/** Maps the canonical ws URL to the server's GET /health endpoint. */
-export function toHealthUrl(wsUrl: string): string {
+/**
+ * Maps the canonical ws URL to the hub's http(s) origin (`wss:` → `https:`, `ws:` →
+ * `http:`) — the base the shared sign-in client (`@slayzone/hub-auth/client`) appends
+ * its routes to (`/health`, `/api/auth/*`).
+ */
+export function toHubOrigin(wsUrl: string): string {
   const url = new URL(wsUrl)
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
-  url.pathname = '/health'
-  url.search = ''
-  url.hash = ''
-  return url.toString()
+  return `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}`
 }
 
 /**
@@ -327,19 +335,26 @@ export function resolveDefaultHubId(
   return registry[0]?.id ?? LOCAL_HUB_ID
 }
 
+// The hub's sign-in protocol (health, password, device sign-in) is the shared client in
+// `@slayzone/hub-auth/client`, the same code `slay hub login` runs. It goes over
+// `nodeHubTransport`: plain `http(s).request` from the MAIN process — no Fetch Metadata,
+// so better-auth treats it as the non-browser client it is (Node's `fetch` would be
+// refused `403 MISSING_OR_NULL_ORIGIN`). The wrappers below keep this file's URL rules
+// (normalizeRemoteUrl, the TLS gate) and its result shapes for the IPC handlers.
+
 /**
  * Probes a remote server's GET /health from the MAIN process. Runs here (not
  * a renderer fetch) because the renderer CSP floor only allows loopback WS
  * origins and /health sets no CORS headers — and because pre-TrpcProvider
  * surfaces (RemoteConfigScreen) need it before any client exists.
  */
-export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<HealthProbeResult> {
+export async function probeRemoteHealth(
+  rawUrl: string,
+  timeoutMs = 5000
+): Promise<HealthProbeResult> {
   const normalizedUrl = normalizeRemoteUrl(rawUrl)
   if (!normalizedUrl) {
-    return Promise.resolve({
-      ok: false,
-      error: 'Invalid URL — use http(s):// or ws(s)://host[:port]'
-    })
+    return { ok: false, error: 'Invalid URL — use http(s):// or ws(s)://host[:port]' }
   }
   // Hub scheme rule (hubUrlFromAddr): loopback → ws, any other host → wss. A
   // plaintext non-loopback hub could never connect (the renderer CSP floor is
@@ -347,139 +362,37 @@ export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<Hea
   // through — with the reason, instead of letting it fail silently later.
   const parsed = new URL(normalizedUrl)
   if (parsed.protocol === 'ws:' && !isLoopbackAuthority(parsed.host)) {
-    return Promise.resolve({
+    return {
       ok: false,
       normalizedUrl,
       error: `Non-local hubs need TLS — use wss://${parsed.host} (put the hub behind an HTTPS front end)`
-    })
+    }
   }
-  const healthUrl = toHealthUrl(normalizedUrl)
-  const get = healthUrl.startsWith('https:') ? https.get : http.get
-  return new Promise((resolve) => {
-    const req = get(healthUrl, { timeout: timeoutMs }, (res) => {
-      let body = ''
-      res.setEncoding('utf8')
-      res.on('data', (chunk: string) => {
-        // /health bodies are tiny; cap defensively against a misconfigured URL
-        // pointing at something that streams forever.
-        if (body.length < 4096) body += chunk
-      })
-      res.on('end', () => {
-        if (res.statusCode !== 200) {
-          resolve({ ok: false, normalizedUrl, error: `Server answered HTTP ${res.statusCode}` })
-          return
-        }
-        try {
-          const parsed = JSON.parse(body) as {
-            ok?: boolean
-            authRequired?: boolean
-            switches?: { enableSso?: unknown; enablePassword?: unknown }
-          }
-          // `authRequired` is served to every caller (see hub/src/health.ts), so
-          // it survives an off-box probe — which is the case that matters, since
-          // an off-box hub is the one that gates. Absent on older hubs → left
-          // undefined rather than coerced to false.
-          const authRequired =
-            typeof parsed.authRequired === 'boolean' ? parsed.authRequired : undefined
-          const signIn = parsed.switches
-            ? {
-                sso: parsed.switches.enableSso === true,
-                password: parsed.switches.enablePassword !== false
-              }
-            : undefined
-          if (parsed.ok === true) resolve({ ok: true, normalizedUrl, authRequired, signIn })
-          else resolve({ ok: false, normalizedUrl, error: 'Server is not ready', authRequired })
-        } catch {
-          resolve({ ok: false, normalizedUrl, error: 'Not a SlayZone server (bad /health body)' })
-        }
-      })
-    })
-    req.on('error', (err) =>
-      resolve({ ok: false, normalizedUrl, error: String(err.message ?? err) })
-    )
-    req.on('timeout', () => {
-      req.destroy()
-      resolve({ ok: false, normalizedUrl, error: `Health check timed out after ${timeoutMs}ms` })
-    })
-  })
-}
-
-/** Maps the canonical ws URL to the hub's BetterAuth email sign-in endpoint. */
-function toAuthSignInUrl(wsUrl: string): string {
-  const url = new URL(wsUrl)
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
-  url.pathname = '/api/auth/sign-in/email'
-  url.search = ''
-  url.hash = ''
-  return url.toString()
+  const probe = await probeHubHealth(nodeHubTransport, toHubOrigin(normalizedUrl), timeoutMs)
+  return { ...probe, normalizedUrl }
 }
 
 /**
  * Signs in to a remote hub's BetterAuth (email+password) from the MAIN process
  * and returns a bearer token. Runs here (not a renderer fetch) for the same
- * reasons as `probeRemoteHealth` — CSP + no CORS — and so the main-process cert
- * pin applies to the wss host. The bearer plugin returns the token in the
- * `set-auth-token` response header; we also accept a `token` field in the body.
- * The caller persists it via the safeStorage token store.
+ * reasons as `probeRemoteHealth` — CSP + no CORS. The caller persists it via the
+ * safeStorage token store.
  */
-export function hubLogin(
+export async function hubLogin(
   rawUrl: string,
   email: string,
   password: string,
   timeoutMs = 10000
 ): Promise<HubLoginResult> {
   const normalizedUrl = normalizeRemoteUrl(rawUrl)
-  if (!normalizedUrl) return Promise.resolve({ ok: false, error: 'Invalid hub URL' })
-  const signInUrl = toAuthSignInUrl(normalizedUrl)
-  const payload = JSON.stringify({ email, password })
-  const request = signInUrl.startsWith('https:') ? https.request : http.request
-  return new Promise((resolve) => {
-    const req = request(
-      signInUrl,
-      {
-        method: 'POST',
-        timeout: timeoutMs,
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload)
-        }
-      },
-      (res) => {
-        let body = ''
-        res.setEncoding('utf8')
-        res.on('data', (chunk: string) => {
-          if (body.length < 65536) body += chunk
-        })
-        res.on('end', () => {
-          if ((res.statusCode ?? 0) >= 400) {
-            resolve({ ok: false, error: `Sign-in failed (HTTP ${res.statusCode})` })
-            return
-          }
-          // Bearer plugin: token in the `set-auth-token` header. Fallback: body.
-          const header = res.headers['set-auth-token']
-          const headerToken = Array.isArray(header) ? header[0] : header
-          if (headerToken) {
-            resolve({ ok: true, token: headerToken })
-            return
-          }
-          try {
-            const parsed = JSON.parse(body) as { token?: string }
-            if (parsed.token) resolve({ ok: true, token: parsed.token })
-            else resolve({ ok: false, error: 'Hub returned no token' })
-          } catch {
-            resolve({ ok: false, error: 'Bad sign-in response' })
-          }
-        })
-      }
-    )
-    req.on('error', (err) => resolve({ ok: false, error: String(err.message ?? err) }))
-    req.on('timeout', () => {
-      req.destroy()
-      resolve({ ok: false, error: `Sign-in timed out after ${timeoutMs}ms` })
-    })
-    req.write(payload)
-    req.end()
-  })
+  if (!normalizedUrl) return { ok: false, error: 'Invalid hub URL' }
+  const result = await signInWithPassword(
+    nodeHubTransport,
+    toHubOrigin(normalizedUrl),
+    { email, password },
+    timeoutMs
+  )
+  return result.ok ? { ok: true, token: result.token } : { ok: false, error: result.error }
 }
 
 // ------------------------------------------------------------------ device sign-in
@@ -488,75 +401,12 @@ export function hubLogin(
 // hub for a device code (RFC 8628), opens the hub's `/device` page in the SYSTEM
 // browser — where the person signs in through Entra with MFA and approves — and polls
 // for the bearer. Same flow as `slay hub login`; only remote hubs ever get here (the
-// local hub has login off and no sign-in at all). Plain `http(s).request` like
-// `hubLogin`: no Fetch Metadata, so better-auth treats it as the non-browser client it is.
+// local hub has login off and no sign-in at all).
 
 /** The client id the desktop app identifies as (the hub's approval page names it). */
-export const DESKTOP_DEVICE_CLIENT_ID = 'slayzone-desktop'
+export const DESKTOP_DEVICE_CLIENT_ID = HUB_DEVICE_CLIENT_IDS.desktop
 
-const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
-
-export type HubDeviceCode = {
-  deviceCode: string
-  /** As the person reads it, `ABCD-EFGH`. */
-  userCode: string
-  /** The page to open (with the code filled in). */
-  verificationUri: string
-  expiresInSec: number
-  intervalSec: number
-}
-
-/** Maps the canonical ws URL to a path on the hub's http(s) origin. */
-function toHubHttpUrl(wsUrl: string, pathname: string): string {
-  const url = new URL(wsUrl)
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
-  url.pathname = pathname
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
-function postJsonMain(
-  url: string,
-  body: unknown,
-  timeoutMs: number
-): Promise<{ status: number; json: Record<string, unknown> }> {
-  const payload = JSON.stringify(body)
-  const request = url.startsWith('https:') ? https.request : http.request
-  return new Promise((resolve, reject) => {
-    const req = request(
-      url,
-      {
-        method: 'POST',
-        timeout: timeoutMs,
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload)
-        }
-      },
-      (res) => {
-        let text = ''
-        res.setEncoding('utf8')
-        res.on('data', (chunk: string) => {
-          if (text.length < 65536) text += chunk
-        })
-        res.on('end', () => {
-          let json: Record<string, unknown> = {}
-          try {
-            const parsed = JSON.parse(text) as unknown
-            if (parsed && typeof parsed === 'object') json = parsed as Record<string, unknown>
-          } catch {
-            // Not JSON: the status says what happened.
-          }
-          resolve({ status: res.statusCode ?? 0, json })
-        })
-      }
-    )
-    req.on('error', reject)
-    req.on('timeout', () => req.destroy(new Error(`timed out after ${timeoutMs}ms`)))
-    req.end(payload)
-  })
-}
+export type { HubDeviceCode }
 
 /** Ask a hub for a device code. */
 export async function hubDeviceCode(
@@ -565,35 +415,20 @@ export async function hubDeviceCode(
 ): Promise<({ ok: true } & HubDeviceCode) | { ok: false; error: string }> {
   const normalizedUrl = normalizeRemoteUrl(rawUrl)
   if (!normalizedUrl) return { ok: false, error: 'Invalid hub URL' }
-  let res: { status: number; json: Record<string, unknown> }
-  try {
-    res = await postJsonMain(
-      toHubHttpUrl(normalizedUrl, '/api/auth/device/code'),
-      { client_id: DESKTOP_DEVICE_CLIENT_ID },
-      timeoutMs
-    )
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
-  }
-  const j = res.json
-  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
-  const deviceCode = str(j.device_code)
-  const userCode = str(j.user_code)
-  const page = str(j.verification_uri_complete) || str(j.verification_uri)
-  if (res.status !== 200 || !deviceCode || !userCode || !page) {
-    const why = str(j.error_description)
-    return {
-      ok: false,
-      error: `The hub did not start a sign-in (HTTP ${res.status})${why ? `: ${why}` : ''}`
-    }
-  }
+  const code = await requestDeviceCode(
+    nodeHubTransport,
+    toHubOrigin(normalizedUrl),
+    DESKTOP_DEVICE_CLIENT_ID,
+    timeoutMs
+  )
+  if (!code.ok) return { ok: false, error: code.error }
   return {
     ok: true,
-    deviceCode,
-    userCode: `${userCode.slice(0, 4)}-${userCode.slice(4)}`,
-    verificationUri: page,
-    expiresInSec: typeof j.expires_in === 'number' ? j.expires_in : 600,
-    intervalSec: typeof j.interval === 'number' ? Math.max(5, j.interval) : 5
+    deviceCode: code.deviceCode,
+    userCode: code.userCode,
+    verificationUri: code.verificationUri,
+    expiresInSec: code.expiresInSec,
+    intervalSec: code.intervalSec
   }
 }
 
@@ -603,16 +438,7 @@ export async function hubDeviceCode(
  */
 export function isHubOwnPage(rawUrl: string, page: string): boolean {
   const normalizedUrl = normalizeRemoteUrl(rawUrl)
-  if (!normalizedUrl) return false
-  try {
-    const target = new URL(page)
-    return (
-      (target.protocol === 'https:' || target.protocol === 'http:') &&
-      target.host === new URL(normalizedUrl).host
-    )
-  } catch {
-    return false
-  }
+  return normalizedUrl ? isOnHubOrigin(toHubOrigin(normalizedUrl), page) : false
 }
 
 /**
@@ -627,42 +453,12 @@ export async function waitForHubDeviceToken(
 ): Promise<HubLoginResult> {
   const normalizedUrl = normalizeRemoteUrl(rawUrl)
   if (!normalizedUrl) return { ok: false, error: 'Invalid hub URL' }
-  const tokenUrl = toHubHttpUrl(normalizedUrl, '/api/auth/device/token')
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
-  let intervalMs = code.intervalSec * 1000
-  const deadline = Date.now() + code.expiresInSec * 1000
-  while (Date.now() < deadline + intervalMs) {
-    await sleep(intervalMs)
-    if (opts.signal?.aborted) return { ok: false, error: 'Sign-in cancelled' }
-    let res: { status: number; json: Record<string, unknown> }
-    try {
-      res = await postJsonMain(
-        tokenUrl,
-        {
-          grant_type: DEVICE_GRANT,
-          device_code: code.deviceCode,
-          client_id: DESKTOP_DEVICE_CLIENT_ID
-        },
-        10000
-      )
-    } catch {
-      continue
-    }
-    const { error, access_token: token } = res.json
-    if (res.status === 200 && typeof token === 'string' && token) return { ok: true, token }
-    if (error === 'authorization_pending') continue
-    if (error === 'slow_down') {
-      intervalMs += 5000
-      continue
-    }
-    if (error === 'access_denied') return { ok: false, error: 'Sign-in was denied in the browser' }
-    if (error === 'expired_token') return { ok: false, error: 'The sign-in code expired' }
-    if (res.json.code === 'ACCOUNT_DISABLED') {
-      return { ok: false, error: 'This account is disabled on the hub' }
-    }
-    const why =
-      typeof res.json.error_description === 'string' ? `: ${res.json.error_description}` : ''
-    return { ok: false, error: `Sign-in failed (HTTP ${res.status})${why}` }
-  }
-  return { ok: false, error: 'The sign-in code expired' }
+  const result = await waitForDeviceToken(
+    nodeHubTransport,
+    toHubOrigin(normalizedUrl),
+    DESKTOP_DEVICE_CLIENT_ID,
+    code,
+    { signal: opts.signal, sleep: opts.sleep }
+  )
+  return result.ok ? { ok: true, token: result.token } : { ok: false, error: result.error }
 }

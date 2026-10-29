@@ -475,6 +475,9 @@ importers:
       '@slayzone/hub':
         specifier: workspace:*
         version: link:../hub
+      '@slayzone/hub-auth':
+        specifier: workspace:*
+        version: link:../../domains/hub-auth
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
@@ -726,6 +729,9 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/hub-auth':
+        specifier: workspace:*
+        version: link:../../domains/hub-auth
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -1027,6 +1033,9 @@ importers:
       '@slayzone/api':
         specifier: workspace:*
         version: link:../api
+      '@slayzone/hub-auth':
+        specifier: workspace:*
+        version: link:../../domains/hub-auth
       '@slayzone/renderer-app':
         specifier: workspace:*
         version: link:../renderer-app

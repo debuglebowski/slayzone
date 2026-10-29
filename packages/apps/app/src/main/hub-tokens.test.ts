@@ -7,6 +7,7 @@ import {
   setHubToken,
   getHubToken,
   getAllHubTokens,
+  createHubTokenStore,
   type TokenCipher
 } from './hub-tokens'
 
@@ -189,5 +190,18 @@ describe('client.tokens.json rename', () => {
     writeFileSync(join(dir, NEW), '{nope')
     writeFileSync(join(dir, OLD), JSON.stringify({ 'hub-a': blob('ta') }))
     expect(await getAllHubTokens(dir, hubRoot)).toEqual({ 'hub-a': 'ta' })
+  })
+
+  it('createHubTokenStore: the shared HubTokenStore over the same files', async () => {
+    writeFileSync(join(hubRoot, OLD), JSON.stringify({ 'hub-a': blob('ta') }))
+    const store = createHubTokenStore(dir, hubRoot)
+    expect(await store.get('hub-a')).toBe('ta') // the hub-root old name too
+    await store.set('hub-b', 'tb')
+    expect(await getAllHubTokens(dir, hubRoot)).toEqual({ 'hub-a': 'ta', 'hub-b': 'tb' })
+    await store.delete('hub-a')
+    expect(await store.get('hub-a')).toBeNull()
+    expect(await getAllHubTokens(dir, hubRoot)).toEqual({ 'hub-b': 'tb' })
+    await store.set('hub-b', '')
+    expect(await store.get('hub-b')).toBeNull()
   })
 })

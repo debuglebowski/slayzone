@@ -76,7 +76,9 @@ for d in "${dirs[@]}"; do
   fi
 done
 
-SERVER_IMPORT="from ['\"]@slayzone/hub"
+# `@slayzone/hub` itself or a subpath of it — not `@slayzone/hub-auth` (the shared hub
+# sign-in client, which the app's main process uses).
+SERVER_IMPORT="from ['\"]@slayzone/hub(['\"/])"
 require_dir packages/apps/app/src
 grep_hits -rnE --include="*.ts" --include="*.tsx" \
   "$SERVER_IMPORT" packages/apps/app/src

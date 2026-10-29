@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { HubTokenStore } from '@slayzone/hub-auth/client'
 
 /**
  * Multi-hub federation — per-hub bearer token store (main process).
@@ -103,6 +104,18 @@ export async function setHubToken(
 /** Decrypt a hub's token, or null when absent / undecryptable. */
 export async function getHubToken(dir: string, hubId: string): Promise<string | null> {
   return (await decryptAll(dir, undefined, hubId))[hubId] ?? null
+}
+
+/**
+ * This store as the shared client's `HubTokenStore` (`@slayzone/hub-auth/client`) over
+ * `<dir>` (+ the read-only `legacyDir`). `set` with an empty token clears, as `setHubToken`.
+ */
+export function createHubTokenStore(dir: string, legacyDir?: string): HubTokenStore {
+  return {
+    get: async (hubId) => (await decryptAll(dir, legacyDir, hubId))[hubId] ?? null,
+    set: (hubId, token) => setHubToken(dir, hubId, token, legacyDir),
+    delete: (hubId) => setHubToken(dir, hubId, '', legacyDir)
+  }
 }
 
 /** All hubId → token pairs the renderer needs to open authed connections. */

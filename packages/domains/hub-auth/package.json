@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./server": "./src/server/index.ts"
+    "./server": "./src/server/index.ts",
+    "./client": "./src/client/index.ts",
+    "./client-node": "./src/client-node/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

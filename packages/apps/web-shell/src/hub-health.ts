@@ -8,7 +8,8 @@
 // it never verifies a credential at all — mirroring how desktop/CLI clients
 // already connect to one with no token.
 //
-// HOW (T-13): the switches /health reports. Password sign-in when
+// HOW (T-13): the switches /health reports, read by the shared hub sign-in client
+// (`hubBrowserSignInOf`, @slayzone/hub-auth/client). Password sign-in when
 // `enablePassword` is on; "Sign in with Microsoft" when Entra sign-in is
 // (`enableSso` with `requireLogin`, the hub's `ssoActive`).
 //
@@ -16,33 +17,20 @@
 // sign-in method — a transient health-check hiccup must never silently skip the
 // login screen against a hub that actually enforces auth; the screen says to
 // reload instead.
+import {
+  HUB_BROWSER_SIGN_IN_UNKNOWN,
+  hubBrowserSignInOf,
+  type HubBrowserSignIn
+} from '@slayzone/hub-auth/client'
 
-export interface HubSignIn {
-  /** Must this browser sign in before it connects? */
-  authRequired: boolean
-  /** Sign-in methods the hub offers a browser. */
-  methods: { password: boolean; sso: boolean }
-}
-
-const UNKNOWN: HubSignIn = { authRequired: true, methods: { password: false, sso: false } }
+export type HubSignIn = HubBrowserSignIn
 
 export async function fetchHubSignIn(): Promise<HubSignIn> {
   try {
     const res = await fetch('/health', { credentials: 'same-origin' })
-    if (!res.ok) return UNKNOWN
-    const body = (await res.json()) as {
-      authRequired?: unknown
-      switches?: { requireLogin?: unknown; enablePassword?: unknown; enableSso?: unknown }
-    }
-    const sw = body.switches ?? {}
-    return {
-      authRequired: body.authRequired !== false,
-      methods: {
-        password: sw.enablePassword !== false,
-        sso: sw.enableSso === true && sw.requireLogin === true
-      }
-    }
+    if (!res.ok) return HUB_BROWSER_SIGN_IN_UNKNOWN
+    return hubBrowserSignInOf(await res.json())
   } catch {
-    return UNKNOWN
+    return HUB_BROWSER_SIGN_IN_UNKNOWN
   }
 }

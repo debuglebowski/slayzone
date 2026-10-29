@@ -52,7 +52,7 @@ import {
   type ResolvedHubTarget
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
-import { deviceSignIn, postAuthJson, readSignInMethods, signedInEmail } from '../hub-sign-in'
+import { deviceSignIn, hubSignIn, readSignInMethods, signedInEmail } from '../hub-sign-in'
 import { hubOwnerPasswordCommand } from './hub-owner-password'
 import { hubBreakGlassCommand, hubComputersCommand } from './hub-break-glass'
 import {
@@ -465,55 +465,6 @@ async function readPasswordFromStdin(): Promise<string> {
   return Buffer.concat(chunks)
     .toString('utf8')
     .replace(/\r?\n$/, '')
-}
-
-/**
- * Exchange an email + password for a hub bearer token via better-auth.
- *
- * Mirrors the desktop app's `hubLogin` (main/boot-config.ts): POST
- * `/api/auth/sign-in/email`, take the token from the `set-auth-token` response
- * header the bearer plugin sets, falling back to a `token` field in the body. That
- * route is deliberately gate-exempt (`AUTH_BOOTSTRAP_PREFIX`) — it has to be
- * reachable without a credential, or a hub could never be authenticated at all.
- * Sent with `postAuthJson`, not `fetch`: see `../hub-sign-in` (MISSING_OR_NULL_ORIGIN).
- */
-async function hubSignIn(baseUrl: string, email: string, password: string): Promise<string> {
-  let res: Response
-  try {
-    res = await postAuthJson(`${baseUrl}/api/auth/sign-in/email`, { email, password })
-  } catch {
-    fail(`Could not reach the hub at ${baseUrl}.`)
-  }
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { code?: unknown; error?: unknown }
-    const code = body.code
-    // The hub has no password sign-in at all (T-10) — say so, not "check the password".
-    if (code === 'HUB_PASSWORD_DISABLED') {
-      fail(
-        `Sign-in refused: ${typeof body.error === 'string' ? body.error : 'password sign-in is off on this hub'}`
-      )
-    }
-    // Only reachable with the right password (better-auth checks it first).
-    if (code === 'ACCOUNT_DISABLED') {
-      fail(
-        'Sign-in refused: this account is disabled on the hub. An operator can enable it ' +
-          'with `slay hub users enable <email>`.'
-      )
-    }
-    // better-auth answers 401 for both a wrong password and an unknown email, and
-    // deliberately does not distinguish them. Name the likely fixes instead of
-    // guessing which one it was.
-    fail(
-      `Sign-in failed (HTTP ${res.status}).\n` +
-        `Check the email and password. List the accounts on the hub box with ` +
-        `\`slay hub users ls\`, or create one with \`slay hub users add <email>\`.`
-    )
-  }
-  const header = res.headers.get('set-auth-token')
-  if (header) return header
-  const body = (await res.json().catch(() => ({}))) as { token?: unknown }
-  if (typeof body.token === 'string' && body.token) return body.token
-  fail('The hub accepted the sign-in but returned no token.')
 }
 
 /**

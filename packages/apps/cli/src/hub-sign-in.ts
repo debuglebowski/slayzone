@@ -1,13 +1,15 @@
 /**
- * How `slay hub login` talks to a hub's sign-in routes (better-auth, `/api/auth/*`).
+ * How `slay hub login` signs in to a hub: the shared hub sign-in client
+ * (`@slayzone/hub-auth/client`, the same protocol code the desktop app runs) over
+ * `nodeHubTransport`, plus what only a terminal does — the messages it exits with and
+ * opening a browser.
  *
- * NOT `fetch` FOR THE POSTS. Node's fetch (undici) adds `Sec-Fetch-Mode: cors` to every
- * request. better-auth reads Fetch Metadata as "a browser sent this" and then demands an
- * `Origin` it trusts — so the CLI's password sign-in was refused `403
- * MISSING_OR_NULL_ORIGIN` on every hub, main included. The CLI is not a browser and has
- * no cookie: a plain `http(s).request` carries neither, which is better-auth's non-browser
- * path (the desktop app's `hubLogin` has always signed in this way). The hub still
- * refuses a cookie-carrying request without an Origin.
+ * NOT `fetch`. Node's fetch (undici) adds `Sec-Fetch-Mode: cors` to every request.
+ * better-auth reads Fetch Metadata as "a browser sent this" and then demands an `Origin`
+ * it trusts — so the CLI's password sign-in was refused `403 MISSING_OR_NULL_ORIGIN` on
+ * every hub, main included. The CLI is not a browser and has no cookie: a plain
+ * `http(s).request` (`nodeHubTransport`) carries neither, which is better-auth's
+ * non-browser path. The hub still refuses a cookie-carrying request without an Origin.
  *
  * DEVICE SIGN-IN (T-14). On a hub with Entra sign-in (`/health` → `switches.enableSso`)
  * the CLI never handles a password: it asks the hub for a device code (RFC 8628),
@@ -18,76 +20,72 @@
  * @module cli/hub-sign-in
  */
 import { spawn } from 'node:child_process'
-import http from 'node:http'
-import https from 'node:https'
+import {
+  fetchHubHealth,
+  fetchSessionEmail,
+  HUB_DEVICE_CLIENT_IDS,
+  requestDeviceCode,
+  signInMethodsOf,
+  signInWithPassword,
+  waitForDeviceToken,
+  type HubSignInMethods
+} from '@slayzone/hub-auth/client'
+import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import { fail } from './service'
 
-/** The client id this CLI identifies as (the hub's approval page names it). */
-export const CLI_DEVICE_CLIENT_ID = 'slayzone-cli'
+export type { HubSignInMethods }
 
-const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
+/** The client id this CLI identifies as (the hub's approval page names it). */
+export const CLI_DEVICE_CLIENT_ID = HUB_DEVICE_CLIENT_IDS.cli
 
 /**
- * POST JSON to a hub with a plain HTTP client (no Fetch Metadata, no cookie) and answer
- * a standard `Response`. Rejects only when the hub cannot be reached.
+ * How the hub lets people sign in, from its `/health` switches. Any answer counts: a hub
+ * too old to report switches (or a `/health` that is not JSON) is treated as
+ * password-only, and the sign-in itself then says what is wrong.
  */
-export function postAuthJson(url: string, body: unknown, timeoutMs = 10_000): Promise<Response> {
-  const payload = JSON.stringify(body)
-  const request = url.startsWith('https:') ? https.request : http.request
-  return new Promise((resolve, reject) => {
-    const req = request(
-      url,
-      {
-        method: 'POST',
-        timeout: timeoutMs,
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload)
-        }
-      },
-      (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (chunk: Buffer) => chunks.push(chunk))
-        res.on('end', () => {
-          const headers = new Headers()
-          for (const [name, value] of Object.entries(res.headers)) {
-            for (const v of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
-              headers.append(name, v)
-            }
-          }
-          resolve(new Response(Buffer.concat(chunks), { status: res.statusCode ?? 500, headers }))
-        })
-        res.on('error', reject)
-      }
-    )
-    req.on('error', reject)
-    req.on('timeout', () => req.destroy(new Error(`timed out after ${timeoutMs}ms`)))
-    req.end(payload)
-  })
-}
-
-/** How a hub lets people sign in, from its `/health` switches. */
-export interface HubSignInMethods {
-  /** Entra sign-in on: the CLI uses device sign-in. */
-  sso: boolean
-  /** Email + password sign-in on. A hub too old to say is treated as password-only. */
-  password: boolean
-}
-
 export async function readSignInMethods(baseUrl: string): Promise<HubSignInMethods> {
-  let res: Response
-  try {
-    res = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(10_000) })
-  } catch {
+  const health = await fetchHubHealth(nodeHubTransport, baseUrl, 10_000)
+  if (!health.reachable) fail(`Could not reach the hub at ${baseUrl}.`)
+  return signInMethodsOf(health.json) ?? { sso: false, password: true }
+}
+
+/**
+ * Exchange an email + password for a hub bearer token via better-auth.
+ *
+ * Same exchange as the desktop app's `hubLogin` (both run `signInWithPassword`): POST
+ * `/api/auth/sign-in/email`, the token from the `set-auth-token` response header the
+ * bearer plugin sets, falling back to a `token` field in the body. That route is
+ * deliberately gate-exempt (`AUTH_BOOTSTRAP_PREFIX`) — it has to be reachable without a
+ * credential, or a hub could never be authenticated at all.
+ */
+export async function hubSignIn(baseUrl: string, email: string, password: string): Promise<string> {
+  const result = await signInWithPassword(nodeHubTransport, baseUrl, { email, password })
+  if (result.ok) return result.token
+  if (result.reason === 'unreachable' || result.reason === 'timeout') {
     fail(`Could not reach the hub at ${baseUrl}.`)
   }
-  const health = (await res.json().catch(() => ({}))) as {
-    switches?: { enableSso?: unknown; enablePassword?: unknown }
+  if (result.reason === 'refused') {
+    // The hub has no password sign-in at all (T-10) — say so, not "check the password".
+    if (result.code === 'HUB_PASSWORD_DISABLED') {
+      fail(`Sign-in refused: ${result.hubError ?? 'password sign-in is off on this hub'}`)
+    }
+    // Only reachable with the right password (better-auth checks it first).
+    if (result.code === 'ACCOUNT_DISABLED') {
+      fail(
+        'Sign-in refused: this account is disabled on the hub. An operator can enable it ' +
+          'with `slay hub users enable <email>`.'
+      )
+    }
+    // better-auth answers 401 for both a wrong password and an unknown email, and
+    // deliberately does not distinguish them. Name the likely fixes instead of
+    // guessing which one it was.
+    fail(
+      `Sign-in failed (HTTP ${result.status}).\n` +
+        `Check the email and password. List the accounts on the hub box with ` +
+        `\`slay hub users ls\`, or create one with \`slay hub users add <email>\`.`
+    )
   }
-  return {
-    sso: health.switches?.enableSso === true,
-    password: health.switches?.enablePassword !== false
-  }
+  fail('The hub accepted the sign-in but returned no token.')
 }
 
 /**
@@ -117,17 +115,6 @@ function tryOpenBrowser(url: string): void {
   }
 }
 
-interface DeviceCode {
-  device_code: string
-  user_code: string
-  verification_uri: string
-  verification_uri_complete?: string
-  expires_in: number
-  interval?: number
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
 /**
  * Device sign-in: returns the hub bearer once the person approved in a browser, or
  * exits with what went wrong (denied, expired, disabled account).
@@ -137,85 +124,40 @@ export async function deviceSignIn(
   opts: { openBrowser: boolean; clientId?: string }
 ): Promise<string> {
   const clientId = opts.clientId ?? CLI_DEVICE_CLIENT_ID
-  let res: Response
-  try {
-    res = await postAuthJson(`${baseUrl}/api/auth/device/code`, { client_id: clientId })
-  } catch {
-    fail(`Could not reach the hub at ${baseUrl}.`)
-  }
-  const code = (await res.json().catch(() => ({}))) as Partial<DeviceCode> & {
-    error_description?: unknown
-  }
-  if (!res.ok || !code.device_code || !code.user_code || !code.verification_uri) {
+  const code = await requestDeviceCode(nodeHubTransport, baseUrl, clientId)
+  if (!code.ok) {
+    if (code.reason !== 'refused') fail(`Could not reach the hub at ${baseUrl}.`)
     fail(
-      `The hub did not start a sign-in (HTTP ${res.status})` +
-        (typeof code.error_description === 'string' ? `: ${code.error_description}` : '.')
+      `The hub did not start a sign-in (HTTP ${code.status})` +
+        (code.description !== undefined ? `: ${code.description}` : '.')
     )
   }
-  const page = code.verification_uri_complete ?? code.verification_uri
-  const userCode = `${code.user_code.slice(0, 4)}-${code.user_code.slice(4)}`
-  const minutes = Math.round((code.expires_in ?? 600) / 60)
+  const page = code.verificationUri
+  const minutes = Math.round(code.expiresInSec / 60)
   console.log('To sign in, open this page in a browser (on any device) and approve:')
   console.log(`  ${page}`)
-  console.log(`Check that the page shows this code: ${userCode}  (valid ${minutes} min)`)
+  console.log(`Check that the page shows this code: ${code.userCode}  (valid ${minutes} min)`)
   if (opts.openBrowser) tryOpenBrowser(page)
   console.log('Waiting for approval…')
 
-  // RFC 8628 §3.5: wait `interval` between polls, 5s more after each `slow_down`.
-  let intervalMs = Math.max(5, code.interval ?? 5) * 1000
-  const deadline = Date.now() + (code.expires_in ?? 600) * 1000
-  while (Date.now() < deadline + intervalMs) {
-    await sleep(intervalMs)
-    let poll: Response
-    try {
-      poll = await postAuthJson(`${baseUrl}/api/auth/device/token`, {
-        grant_type: DEVICE_GRANT,
-        device_code: code.device_code,
-        client_id: clientId
-      })
-    } catch {
-      // A blip (hub restart, network) is not the end of a 10-minute window.
-      continue
-    }
-    const body = (await poll.json().catch(() => ({}))) as {
-      access_token?: unknown
-      error?: unknown
-      error_description?: unknown
-      code?: unknown
-    }
-    if (poll.ok && typeof body.access_token === 'string' && body.access_token) {
-      return body.access_token
-    }
-    if (body.error === 'authorization_pending') continue
-    if (body.error === 'slow_down') {
-      intervalMs += 5000
-      continue
-    }
-    if (body.error === 'access_denied') fail('Sign-in was denied in the browser.')
-    if (body.error === 'expired_token') {
-      fail('The code expired before it was approved. Run `slay hub login` again.')
-    }
-    if (body.code === 'ACCOUNT_DISABLED') {
-      fail('Sign-in refused: this account is disabled on the hub. Ask a hub admin to enable it.')
-    }
-    fail(
-      `Sign-in failed (HTTP ${poll.status})` +
-        (typeof body.error_description === 'string' ? `: ${body.error_description}` : '.')
-    )
+  // RFC 8628 §3.5 polling — interval, `slow_down`, retries over a network blip (a hub
+  // restart is not the end of a 10-minute window) — is the shared client's.
+  const result = await waitForDeviceToken(nodeHubTransport, baseUrl, clientId, code)
+  if (result.ok) return result.token
+  if (result.reason === 'denied') fail('Sign-in was denied in the browser.')
+  if (result.reason === 'expired') {
+    fail('The code expired before it was approved. Run `slay hub login` again.')
   }
-  fail('The code expired before it was approved. Run `slay hub login` again.')
+  if (result.reason === 'disabled') {
+    fail('Sign-in refused: this account is disabled on the hub. Ask a hub admin to enable it.')
+  }
+  fail(
+    `Sign-in failed (HTTP ${result.status})` +
+      (result.description !== undefined ? `: ${result.description}` : '.')
+  )
 }
 
 /** The email of the account a bearer belongs to, or null. */
-export async function signedInEmail(baseUrl: string, token: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${baseUrl}/api/auth/get-session`, {
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(10_000)
-    })
-    const body = (await res.json().catch(() => null)) as { user?: { email?: unknown } } | null
-    return typeof body?.user?.email === 'string' ? body.user.email : null
-  } catch {
-    return null
-  }
+export function signedInEmail(baseUrl: string, token: string): Promise<string | null> {
+  return fetchSessionEmail(nodeHubTransport, baseUrl, token)
 }

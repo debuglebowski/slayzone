@@ -63,6 +63,7 @@
     "@slayzone/home": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/hub": "workspace:*",
+    "@slayzone/hub-auth": "workspace:*",
     "@slayzone/icons": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/leaderboard": "workspace:*",
