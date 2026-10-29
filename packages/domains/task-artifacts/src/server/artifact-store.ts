@@ -21,6 +21,8 @@ import {
   artifactsDirOf,
   artifactTaskDir
 } from '@slayzone/task/server/artifact-paths'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './artifact-store-txns'
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker

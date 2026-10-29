@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { TxnSigOf } from '@slayzone/platform'
 import type { ColumnConfig, WorkflowCategory } from '@slayzone/projects-contracts'
 import { getDefaultStatus, resolveColumns } from '@slayzone/projects-contracts'
 
@@ -498,4 +499,11 @@ export const projectsTxns = {
       for (const og of oldGroups) repackGroup(db, og)
       return groupsSnapshot(db)
     })()
+}
+
+// Types `db.namedTxn(...)` for these names. Every file that calls one imports this
+// module (`import type {} from ...`), so any program that checks the call also loads
+// this augmentation — see `TxnRegistry` in @slayzone/platform.
+declare module '@slayzone/platform' {
+  interface TxnRegistry extends TxnSigOf<typeof projectsTxns> {}
 }

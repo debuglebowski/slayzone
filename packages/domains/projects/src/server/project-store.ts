@@ -13,6 +13,8 @@ import {
   prepareProjectCreate,
   validateColumns
 } from '@slayzone/projects-contracts'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './projects-txns'
 
 const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 

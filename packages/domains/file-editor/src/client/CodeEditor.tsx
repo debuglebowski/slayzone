@@ -1,3 +1,6 @@
+// `lezer-toml` ships no types. Referencing the declaration here, not from a tsconfig,
+// brings it into every program that compiles this file, whichever package's it is.
+/// <reference path="../lezer-toml.d.ts" />
 import {
   useEffect,
   useEffectEvent,

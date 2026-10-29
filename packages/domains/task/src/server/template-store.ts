@@ -5,6 +5,8 @@ import type {
   CreateTaskTemplateInput,
   UpdateTaskTemplateInput
 } from '@slayzone/task-contracts'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './templates-txns'
 
 // Electron-free task-template store. Single implementation behind both the IPC
 // handlers (../main/template-handlers.ts) and the tRPC `template` router. Logic

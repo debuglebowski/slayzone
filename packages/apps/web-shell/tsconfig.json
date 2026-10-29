@@ -14,10 +14,5 @@
       "convex/_generated/*": ["../../../convex/_generated/*"]
     }
   },
-  "include": [
-    "src",
-    "../renderer-app/src/vite-env.d.ts",
-    "../../shared/types/src/txn-registry.d.ts",
-    "../../domains/file-editor/src/lezer-toml.d.ts"
-  ]
+  "include": ["src"]
 }

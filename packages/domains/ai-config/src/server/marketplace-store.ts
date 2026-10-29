@@ -10,6 +10,8 @@ import type {
 } from '../shared/types'
 import { fetchGitHubRegistry, parseGitHubUrl } from './github-registry-fetcher'
 import { normalizeSkillForPersistence } from './skill-normalize'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './marketplace-txns'
 
 function rowToRegistry(row: Record<string, unknown>): SkillRegistry {
   return {

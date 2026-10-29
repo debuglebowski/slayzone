@@ -7,6 +7,8 @@ import type {
   TopLevelEntryRef
 } from '@slayzone/projects-contracts'
 import { parseProject } from './project-store'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './projects-txns'
 
 // Discord-style folders (rail) + labeled collapsible sections (tree). The complex
 // read-modify-write ordering lives in worker-safe named txns (projects-txns.ts);

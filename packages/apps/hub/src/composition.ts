@@ -209,6 +209,8 @@ import { createUserAccessRevoker, type UserAccessRevoker } from './user-access.j
 import { getDatabasePathFromEnv } from './db.js'
 import { resolveAuthDbPath } from './auth-db.js'
 import { createPtyEnricher } from '@slayzone/task-terminals/server'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '@slayzone/api/txns'
 
 /**
  * Composition root for the standalone server: populates every transport

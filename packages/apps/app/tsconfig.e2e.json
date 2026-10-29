@@ -8,10 +8,7 @@
   // `page.evaluate` closure is authored against browser globals even though it
   // is serialised and run in the renderer.
   "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
-  // txn-registry.d.ts augments a global interface that the named-transaction
-  // helpers key off; both other app configs include it, and without it every
-  // `namedTxn('x:y')` in reachable code reports an unknown key.
-  "include": ["e2e/**/*", "../../shared/types/src/txn-registry.d.ts"],
+  "include": ["e2e/**/*"],
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node"],

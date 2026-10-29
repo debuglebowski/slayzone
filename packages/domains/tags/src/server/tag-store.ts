@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTagInput, Tag, UpdateTagInput } from '../shared'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './tags-txns'
 
 export async function listAllTags(db: SlayzoneDb): Promise<Tag[]> {
   return (await db.prepare('SELECT * FROM tags ORDER BY sort_order, name').all()) as Tag[]

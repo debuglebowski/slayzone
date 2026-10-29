@@ -20,10 +20,10 @@ import { marketplaceTxns } from '@slayzone/ai-config/db'
  *    it directly (app-only txns are deliberately absent there — their call
  *    sites live in `apps/app` only).
  *
- * Type-level: the central aggregator (`@slayzone/types` txn-registry.d.ts)
- * projects these same impl objects into `TxnRegistry`; `DomainTxnRegistry`
- * below stays a precise key-preserving type so the app registry's completeness
- * `satisfies` still sees every domain key through the re-export.
+ * Type-level: each impl object projects itself into `TxnRegistry` from its own
+ * module (`TxnSigOf`, see @slayzone/platform), so importing these modules is what
+ * types `db.namedTxn` here. `DomainTxnRegistry` below stays a precise key-preserving
+ * type; `txn-registry.typetest.ts` proves the typed names are exactly its keys.
  */
 
 /**

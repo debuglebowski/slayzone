@@ -3,6 +3,8 @@ import type { Task } from '@slayzone/task-contracts'
 import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
 import { cleanupTaskFull, parseTask, parseTasks, type OpDeps } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 export async function archiveTaskOp(
   db: SlayzoneDb,

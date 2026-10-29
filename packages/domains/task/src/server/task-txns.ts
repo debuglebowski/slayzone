@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { TxnSigOf } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/recorder'
 import { recordActivityEvents } from '@slayzone/history/recorder'
 
@@ -122,4 +123,11 @@ export const taskTxns = {
   'task:archive': archive,
   'task:update': update,
   'task:record-events': recordEvents
+}
+
+// Types `db.namedTxn(...)` for these names. Every file that calls one imports this
+// module (`import type {} from ...`), so any program that checks the call also loads
+// this augmentation — see `TxnRegistry` in @slayzone/platform.
+declare module '@slayzone/platform' {
+  interface TxnRegistry extends TxnSigOf<typeof taskTxns> {}
 }

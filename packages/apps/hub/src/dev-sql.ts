@@ -6,6 +6,8 @@ import {
   markSessionUserInput,
   clearSessionUserInputMark
 } from '@slayzone/terminal/server'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '@slayzone/api/txns'
 
 /**
  * `POST /api/dev/sql` — raw SQL against the hub's database, for E2E ONLY.

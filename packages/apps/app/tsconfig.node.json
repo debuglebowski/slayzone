@@ -5,11 +5,7 @@
     "vite/**/*",
     "src/main/**/*",
     "src/preload/**/*",
-    "src/shared/**/*",
-    "../../shared/types/src/txn-registry.d.ts",
-    // Main-process tests import the shared harness by relative path, and a
-    // composite project must list every relatively-imported file.
-    "../../shared/test-utils/ipc-harness.ts"
+    "src/shared/**/*"
   ],
   "compilerOptions": {
     "composite": true,

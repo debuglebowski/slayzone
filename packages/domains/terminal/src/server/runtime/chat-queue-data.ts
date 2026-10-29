@@ -1,6 +1,8 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../chat-queue-store'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../chat-queue-txns'
 
 /**
  * Data seam for the chat-queue runtime (hub/computer split, wave 1). The drain

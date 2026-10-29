@@ -16,6 +16,8 @@ import {
 import { taskEvents } from '@slayzone/task/server'
 import { exec } from 'child_process'
 import { assertAutomationActionsAllowed } from './hub-exec-actions'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './automations-txns'
 
 const MAX_DEPTH = 5
 const ACTION_TIMEOUT_MS = 30_000

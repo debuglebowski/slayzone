@@ -7,5 +7,5 @@
       "convex/_generated/*": ["../../../convex/_generated/*"]
     }
   },
-  "include": ["src/**/*", "../../shared/types/src/txn-registry.d.ts"]
+  "include": ["src/**/*"]
 }

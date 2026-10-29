@@ -3,6 +3,8 @@ import { defaultProviderFromMode, filterConfigurableCliProviders } from '@slayzo
 import type { CliProvider } from '@slayzone/ai-config/shared'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveProjectRef } from '../resolve'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '@slayzone/ai-config/db'
 
 /**
  * The provider set `slay init` writes instruction/skill files for. Mirrors the

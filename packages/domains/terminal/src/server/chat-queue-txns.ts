@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { TxnSigOf } from '@slayzone/platform'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 import { pushChatQueue, popChatQueueHead, requeueAtHead } from './chat-queue-store'
 
@@ -21,4 +22,11 @@ export const chatQueueTxns = {
     requeueAtHead(db, p.msg)
     return null
   }
+}
+
+// Types `db.namedTxn(...)` for these names. Every file that calls one imports this
+// module (`import type {} from ...`), so any program that checks the call also loads
+// this augmentation — see `TxnRegistry` in @slayzone/platform.
+declare module '@slayzone/platform' {
+  interface TxnRegistry extends TxnSigOf<typeof chatQueueTxns> {}
 }

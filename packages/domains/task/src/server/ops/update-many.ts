@@ -4,6 +4,8 @@ import type { RecordActivityEventInput } from '@slayzone/history/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, validateTaskUpdate, type OpDeps } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 export interface UpdateManyTasksInput {
   ids: string[]

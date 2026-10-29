@@ -3,6 +3,8 @@ import type { ProviderConfig, Task } from '@slayzone/task-contracts'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { buildTaskCreatedEvents } from '../history.js'
 import { parseTask } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 export interface TaskRowData {
   id: string

@@ -88,6 +88,8 @@ import { onTaskReachedTerminal } from '@slayzone/terminal/server'
 import { createImportedTaskOp } from '@slayzone/task/server'
 import { getAdapter, getRegisteredProviders, normalizeGithubIssue } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './integration-txns'
 
 /**
  * Ensure the integration tables exist. Schema DDL is the sync

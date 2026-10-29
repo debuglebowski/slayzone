@@ -3,6 +3,8 @@ import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
 import { cleanupTaskFull, parseTasks, type OpDeps } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 export async function archiveManyTasksOp(
   db: SlayzoneDb,

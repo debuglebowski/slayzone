@@ -4,9 +4,5 @@
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM"]
   },
-  "include": [
-    "src/**/*",
-    "../../shared/types/src/txn-registry.d.ts",
-    "../file-editor/src/lezer-toml.d.ts"
-  ]
+  "include": ["src/**/*"]
 }

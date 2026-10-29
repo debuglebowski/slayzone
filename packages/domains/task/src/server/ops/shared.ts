@@ -29,6 +29,8 @@ import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { WorktreeCopyBehavior } from '@slayzone/projects-contracts'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 /**
  * The board's task ordering, defined once and interpolated by every list query

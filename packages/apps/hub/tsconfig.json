@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "../../shared/types/src/txn-registry.d.ts"]
+  "include": ["src"]
 }

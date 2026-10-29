@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { TxnSigOf } from '@slayzone/platform'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -255,4 +256,11 @@ export const artifactTxns = {
       a: p.a,
       b: p.b
     })
+}
+
+// Types `db.namedTxn(...)` for these names. Every file that calls one imports this
+// module (`import type {} from ...`), so any program that checks the call also loads
+// this augmentation — see `TxnRegistry` in @slayzone/platform.
+declare module '@slayzone/platform' {
+  interface TxnRegistry extends TxnSigOf<typeof artifactTxns> {}
 }

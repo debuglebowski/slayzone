@@ -8,6 +8,8 @@ import type {
 } from '../shared'
 import { parseAutomationRow } from '../shared'
 import { assertAutomationActionsAllowed } from './hub-exec-actions'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './automations-txns'
 
 /**
  * Pure, electron-free DB ops for the automations domain. Shared by the

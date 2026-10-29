@@ -2,6 +2,8 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { taskEvents } from '../events.js'
 import { buildTaskDeletedEvents } from '../history.js'
 import { cleanupTaskImmediate, parseTask, type OpDeps } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 export type DeleteTaskResult = boolean | { blocked: true; reason: 'linked_to_provider' }
 

@@ -3,6 +3,8 @@ import type { Task } from '@slayzone/task-contracts'
 import { buildTaskUnarchivedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { parseTask, type OpDeps } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 export async function unarchiveTaskOp(
   db: SlayzoneDb,

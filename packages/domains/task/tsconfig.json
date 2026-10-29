@@ -3,10 +3,5 @@
   "compilerOptions": {
     "jsx": "react-jsx"
   },
-  "include": [
-    "src/**/*",
-    "../../shared/types/src/global.d.ts",
-    "../file-editor/src/lezer-toml.d.ts",
-    "src/vite-env.d.ts"
-  ]
+  "include": ["src/**/*"]
 }

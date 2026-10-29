@@ -19,6 +19,8 @@ import { aiConfigRouter } from './ai-config-router.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from './marketplace-txns.js'
 
 // Router mutations/queries are async (the ops resolve Promises); rejections are
 // checked with this await-guard (ported from the old sync-only harness `expect`).

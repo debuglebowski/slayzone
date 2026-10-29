@@ -3,5 +3,5 @@
   "compilerOptions": {
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*", "../types/src/txn-registry.d.ts"]
+  "include": ["src/**/*"]
 }
