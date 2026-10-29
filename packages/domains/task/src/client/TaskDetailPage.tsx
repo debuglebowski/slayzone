@@ -29,7 +29,7 @@ import {
   MoveVertical,
   Expand
 } from 'lucide-react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
@@ -825,14 +825,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   } | null>(null)
 
   // Loop command (labs feature)
-  const [loopModeAvailable, setLoopModeAvailable] = useState(false)
+  // Live, so turning the lab flag on reaches already-open tasks (the Labs switch
+  // refreshes this query when its save lands).
+  const loopModeAvailable = useQuery(trpc.app.meta.isLoopModeEnabled.queryOptions()).data ?? false
   const [loopDialogOpen, setLoopDialogOpen] = useState(false)
   const loopConfigured =
     task?.loop_config != null &&
     !!(task.loop_config.prompt.trim() && task.loop_config.criteriaPattern.trim())
-  useEffect(() => {
-    trpcClient.app.meta.isLoopModeEnabled.query().then(setLoopModeAvailable)
-  }, [trpcClient])
   const mainSessionId = task ? getMainSessionId(task.id) : ''
   const handleLoopConfigChange = useCallback(
     (cfg: LoopConfig | null) => {
