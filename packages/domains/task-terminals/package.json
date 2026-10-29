@@ -44,6 +44,7 @@
     "react": "^19.3.1"
   },
   "devDependencies": {
+    "@slayzone/test-utils": "workspace:*",
     "@types/react": "^19.3.0"
   }
 }

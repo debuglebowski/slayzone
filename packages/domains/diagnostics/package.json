@@ -20,6 +20,7 @@
     "electron": "^45.0.0"
   },
   "devDependencies": {
+    "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.0"
   },

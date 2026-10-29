@@ -29,6 +29,8 @@
     "react": "^19.3.1"
   },
   "devDependencies": {
+    "@slayzone/db-migrations": "workspace:*",
+    "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.3.0"
   }

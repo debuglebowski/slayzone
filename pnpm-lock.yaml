@@ -1159,6 +1159,12 @@ importers:
         specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
+      '@slayzone/db-migrations':
+        specifier: workspace:*
+        version: link:../../shared/db-migrations
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -1211,6 +1217,9 @@ importers:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -1399,6 +1408,9 @@ importers:
         specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -1560,6 +1572,9 @@ importers:
         specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -2197,6 +2212,9 @@ importers:
         specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -2549,6 +2567,9 @@ importers:
         specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -2744,6 +2765,9 @@ importers:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -3282,6 +3306,10 @@ importers:
       zod:
         specifier: ^4.5.4
         version: 4.6.5
+    devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
 
   packages/shared/shortcuts:
     devDependencies:
@@ -3426,9 +3454,6 @@ importers:
       '@slayzone/processes':
         specifier: workspace:*
         version: link:../../domains/processes
-      '@slayzone/projects':
-        specifier: workspace:*
-        version: link:../../domains/projects
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../../domains/projects-contracts
@@ -3438,9 +3463,6 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
-      '@slayzone/task':
-        specifier: workspace:*
-        version: link:../../domains/task
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
@@ -3453,9 +3475,6 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../../domains/terminal
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../../domains/terminal-contracts

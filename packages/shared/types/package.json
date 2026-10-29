@@ -6,8 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./global": "./src/global.d.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -24,16 +23,13 @@
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
-    "@slayzone/projects": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/tags": "workspace:*",
-    "@slayzone/task": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
     "@slayzone/task-browser": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
-    "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
