@@ -60,3 +60,23 @@ describe('useChatSearch active match', () => {
     expect(result.current.activeIdx).toBe(1)
   })
 })
+
+describe('useChatSearch coverage', () => {
+  it('finds text in command output and failed compactions', () => {
+    const items = [
+      {
+        kind: 'command-output',
+        id: 'c',
+        command: 'context',
+        text: 'Free space 928k',
+        timestamp: 0
+      },
+      { kind: 'compaction', outcome: 'failed', error: 'Not enough messages', timestamp: 0 }
+    ] as TimelineItem[]
+    const { result } = renderHook(() => useChatSearch(items))
+    act(() => result.current.setQuery('free space'))
+    expect(result.current.matchCount).toBe(1)
+    act(() => result.current.setQuery('enough'))
+    expect(result.current.matchCount).toBe(1)
+  })
+})

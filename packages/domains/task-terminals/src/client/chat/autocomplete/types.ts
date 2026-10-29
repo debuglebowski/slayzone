@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react'
-import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal-contracts'
+import type {
+  SkillInfo,
+  CommandInfo,
+  AgentInfo,
+  FileMatch,
+  ChatCapabilities
+} from '@slayzone/terminal-contracts'
 
 export interface TriggerMatch {
   /** The query string the user has typed after the trigger char(s). */
@@ -124,6 +130,19 @@ export interface AutocompleteSource<Item = unknown> {
    */
   getName?: (item: Item) => string
   getDescription?: (item: Item) => string
+  /**
+   * The source completes a `/command` token at the start of the draft. With the
+   * `native-commands` Enter policy, Enter on such a match follows `resolveEnter`
+   * (exact name → that entry, unknown → pass the draft through).
+   */
+  commandTrigger?: boolean
+  /** Hide items whose name an item of one of these sources (by id) already has. */
+  shadowedBy?: string[]
+  /**
+   * Text to SEND when Enter picks this item under the `native-commands` policy
+   * (e.g. `/compact` for a CLI command). Null or absent → `accept()` instead.
+   */
+  submitText?: (item: Item, ctx: AcceptCtx) => string | null
 }
 
 export type AnyItem = SkillInfo | CommandInfo | AgentInfo | BuiltinCommand | FileMatch
@@ -131,5 +150,14 @@ export type AnyItem = SkillInfo | CommandInfo | AgentInfo | BuiltinCommand | Fil
 export interface BuiltinCommand {
   name: string
   description: string
+  /**
+   * When the chat CLI advertises a command of the same name: `app-wins` keeps
+   * this builtin (it owns app state or opens app UI — the CLI's version would
+   * bypass or desync it); `cli-wins` hides it so the CLI's native command runs
+   * (this builtin is only a fallback for CLIs that lack it).
+   */
+  cliCollision: 'app-wins' | 'cli-wins'
+  /** Offered only when this returns true for the mode's capabilities (default: always). */
+  available?: (caps: ChatCapabilities) => boolean
   run: (ctx: AcceptCtx) => void | Promise<void>
 }

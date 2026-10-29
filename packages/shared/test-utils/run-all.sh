@@ -60,6 +60,7 @@ run_harness packages/domains/task/src/server/ops/list-task-sessions.test.ts
 run_harness packages/domains/task/src/server/ops/session-switch-delete.test.ts
 # agent-prompts capture + the deleted-session filter on listPromptsForTask.
 run_harness packages/domains/agent-turns/src/server/prompt-capture.test.ts
+run_harness packages/domains/agent-turns/src/server/chat-prompt-recorder.test.ts
 run_harness packages/domains/task-terminals/src/server/task-terminals-router.test.ts
 # Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
@@ -341,6 +342,7 @@ run_harness packages/shared/db-migrations/src/tag-color-dedup-migration.test.ts
 # v169 project owner + per-user settings, on an empty and a populated v168 DB.
 run_harness packages/shared/db-migrations/src/v169-ownership-migration.test.ts
 run_harness packages/shared/db-migrations/src/v171-agent-startup-migration.test.ts
+run_harness packages/shared/db-migrations/src/v172-chat-cli-snapshots-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -725,6 +727,7 @@ run_harness packages/domains/task-browser/src/client/dom-picker.test.ts
 run_harness packages/domains/task-browser/src/client/scale.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/autocomplete.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/ranking.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
@@ -750,6 +753,7 @@ run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
 run_harness packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-effort.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
@@ -868,6 +872,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
+  packages/domains/task-terminals/src/client/chat/chat-ui-components.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \

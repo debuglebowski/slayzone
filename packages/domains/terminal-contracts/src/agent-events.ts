@@ -17,6 +17,8 @@ export type AgentEvent =
   | RateLimitEvent
   | ApiRetryEvent
   | CompactBoundaryEvent
+  | CompactStatusEvent
+  | CommandOutputEvent
   | SubAgentEvent
   | StderrEvent
   | ProcessExitEvent
@@ -112,6 +114,18 @@ export interface TurnInitEvent {
   cwd: string
   tools: string[]
   permissionMode?: string
+  /**
+   * Slash commands the CLI runs from raw `/name args` user text (built-ins,
+   * skills, custom + plugin commands). Undefined when the provider doesn't
+   * advertise a list (Codex, older Claude CLIs).
+   */
+  slashCommands?: string[]
+  /** Subset of `slashCommands` whose UX is bound to a terminal — hide from chat menus. */
+  terminalSlashCommands?: string[]
+  /** Subset of `slashCommands` that are skills. */
+  skills?: string[]
+  /** CLI version that emitted this init (e.g. `2.1.312`). */
+  cliVersion?: string
 }
 
 export interface AssistantTextEvent {
@@ -120,6 +134,8 @@ export interface AssistantTextEvent {
   text: string
   /** Set when this text was emitted by a sub-agent spawned by a Task tool call. */
   parentToolUseId?: string
+  /** Token usage of the API call that produced this message (see `TokenUsage`). */
+  usage?: TokenUsage
 }
 
 export interface AssistantThinkingEvent {
@@ -128,6 +144,7 @@ export interface AssistantThinkingEvent {
   text: string
   hasSignature: boolean
   parentToolUseId?: string
+  usage?: TokenUsage
 }
 
 export interface ToolCallEvent {
@@ -136,6 +153,7 @@ export interface ToolCallEvent {
   name: string
   input: unknown
   parentToolUseId?: string
+  usage?: TokenUsage
 }
 
 export interface ToolResultEvent {
@@ -154,11 +172,17 @@ export interface ResultEvent {
   durationMs: number
   durationApiMs: number
   numTurns: number
+  /**
+   * Claude: cost of the whole CLI session so far (cumulative across turns, and
+   * restored on `--resume`), NOT this turn's cost. Codex reports no cost (0).
+   */
   totalCostUsd: number
   stopReason: string | null
   terminalReason: string | null
   text: string | null
+  /** Per-model accounting for the whole session (cumulative). Empty when the provider reports none. */
   modelUsage: Record<string, ModelUsage>
+  /** This turn's main-loop usage summed over its API calls — not the context size. */
   usage: TokenUsage
   permissionDenials: unknown[]
 }
@@ -169,8 +193,16 @@ export interface ModelUsage {
   cacheReadInputTokens: number
   cacheCreationInputTokens: number
   costUsd: number
+  /** Context window of this model in tokens, when the provider reports it. */
+  contextWindow?: number
+  maxOutputTokens?: number
 }
 
+/**
+ * Token counts of one API call (assistant events) or a sum of calls (`result.usage`).
+ * For one call, input + cache read + cache creation = the prompt size, i.e. how
+ * much of the context window the conversation occupied at that call.
+ */
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
@@ -194,8 +226,42 @@ export interface ApiRetryEvent {
   error: string
 }
 
+/** The CLI finished compacting the conversation (manual `/compact` or automatic). */
 export interface CompactBoundaryEvent {
   kind: 'compact-boundary'
+  trigger?: 'manual' | 'auto'
+  /** Context tokens just before compaction. */
+  preTokens?: number
+  /**
+   * CLI-reported tokens kept after compaction. Excludes the system prompt and
+   * tools, so it is NOT the context size the next call will use.
+   */
+  postTokens?: number
+  durationMs?: number
+}
+
+/**
+ * Compaction progress from the CLI's `system/status` frames: `started` when it
+ * begins summarizing, then `succeeded` or `failed` (with the CLI's reason).
+ */
+export interface CompactStatusEvent {
+  kind: 'compact-status'
+  phase: 'started' | 'succeeded' | 'failed'
+  error?: string
+}
+
+/**
+ * Output of a slash command the CLI ran locally (`/context`, `/usage`, a failed
+ * `/compact`, …) — no model call. Rendered as a command-output block, not as
+ * an assistant reply.
+ */
+export interface CommandOutputEvent {
+  kind: 'command-output'
+  /** Stable id of the CLI message (its uuid). */
+  id: string
+  /** Command name without the slash, when the CLI reports it. */
+  command: string | null
+  text: string
 }
 
 export interface SubAgentEvent {

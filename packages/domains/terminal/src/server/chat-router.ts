@@ -127,6 +127,10 @@ export const chatRouter = router({
     .input(z.object({ source: z.string(), name: z.string() }))
     .mutation(({ input }) => ops().bumpAutocompleteUsage(input.source, input.name)),
   getAutocompleteUsage: publicProcedure.query(() => ops().getAutocompleteUsage()),
+  /** Last slash-command list the mode's CLI advertised in the task's project (null = none yet). */
+  getCliSnapshot: publicProcedure
+    .input(z.object({ taskId: z.string(), mode: z.string() }))
+    .query(({ input }) => ops().getCliSnapshot(input.taskId, input.mode)),
 
   // Queue (mirrors the `chat:queue:*` IPC channels)
   queue: router({

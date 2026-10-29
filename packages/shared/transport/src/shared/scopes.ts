@@ -451,6 +451,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.getAutoEligibility': 'agent',
   'chat.getAutocompleteUsage': 'agent',
   'chat.getBufferSince': 'agent',
+  'chat.getCliSnapshot': 'agent',
   'chat.getCollaboration': 'agent',
   'chat.getEffort': 'agent',
   'chat.getFastMode': 'agent',

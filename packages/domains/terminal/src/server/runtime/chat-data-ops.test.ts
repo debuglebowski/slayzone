@@ -40,6 +40,16 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       created_at TEXT DEFAULT (datetime('now')),
       PRIMARY KEY (tab_id, seq)
     );
+    CREATE TABLE chat_cli_snapshots (
+      project_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      slash_commands TEXT NOT NULL,
+      terminal_slash_commands TEXT NOT NULL,
+      skills TEXT NOT NULL,
+      cli_version TEXT,
+      observed_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, mode)
+    );
   `)
   const runLog: string[] = []
   const db = {
@@ -209,4 +219,47 @@ test('loadChatEvents drops corrupt event rows instead of throwing', async () => 
   expect(events.length).toBe(1)
   expect(events[0].seq).toBe(0)
   expect(await ops.getNextSeqForTab('tab-1')).toBe(2)
+})
+
+const cliList = (slashCommands: string[]) => ({
+  slashCommands,
+  terminalSlashCommands: ['doctor'],
+  skills: ['simplify'],
+  cliVersion: '2.1.312'
+})
+
+test('CLI command snapshot: saved per project + mode, read back through any task of the project', async () => {
+  const { raw, db } = makeDb()
+  raw
+    .prepare('INSERT INTO tasks (id, project_id) VALUES (?, ?), (?, ?), (?, ?)')
+    .run('t1', 'p1', 't2', 'p1', 't3', 'p2')
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+
+  expect(await ops.getCliSnapshot('t1', 'claude-chat')).toBeNull()
+  await ops.saveCliSnapshot('t1', 'claude-chat', cliList(['compact', 'context']))
+  expect(await ops.getCliSnapshot('t2', 'claude-chat')).toEqual(cliList(['compact', 'context']))
+  // Other project, other mode: nothing.
+  expect(await ops.getCliSnapshot('t3', 'claude-chat')).toBeNull()
+  expect(await ops.getCliSnapshot('t1', 'codex-chat')).toBeNull()
+
+  // A newer list replaces the old one.
+  await ops.saveCliSnapshot('t2', 'claude-chat', cliList(['compact']))
+  expect(await ops.getCliSnapshot('t1', 'claude-chat')).toEqual(cliList(['compact']))
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_cli_snapshots').get()).toEqual({ n: 1 })
+})
+
+test('CLI command snapshot: unknown task saves nothing; corrupt rows read as null', async () => {
+  const { raw, db } = makeDb()
+  raw.prepare('INSERT INTO tasks (id, project_id) VALUES (?, ?)').run('t1', 'p1')
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+
+  await ops.saveCliSnapshot('missing', 'claude-chat', cliList(['compact']))
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_cli_snapshots').get()).toEqual({ n: 0 })
+
+  raw
+    .prepare(
+      `INSERT INTO chat_cli_snapshots VALUES ('p1', 'claude-chat', '{not json', '[]', '[]', NULL, 1)`
+    )
+    .run()
+  expect(await ops.getCliSnapshot('t1', 'claude-chat')).toBeNull()
 })

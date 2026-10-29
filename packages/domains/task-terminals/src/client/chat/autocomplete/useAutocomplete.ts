@@ -3,6 +3,15 @@ import { useTRPCClient } from '../../trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type { AcceptCtx, AutocompleteSource, FetchCtx, TriggerMatch } from './types'
 import { rankAcrossSources, type MergedEntry, type UsageLookup } from './ranking'
+import { resolveEnter } from './resolve-enter'
+
+/**
+ * What Enter does on an open menu. `accept-selected`: accept the highlighted
+ * entry (Codex chat, and every non-command trigger). `native-commands`: the
+ * provider runs its own slash commands, so a `/command` match follows
+ * `resolveEnter` and sends through `submit`.
+ */
+export type EnterPolicy = 'accept-selected' | 'native-commands'
 
 export interface UseAutocompleteOptions {
   sources: AutocompleteSource[]
@@ -11,6 +20,11 @@ export interface UseAutocompleteOptions {
   cursorPos: number
   acceptCtx: Omit<AcceptCtx, 'draft' | 'setDraft' | 'tokenStart' | 'tokenEnd'>
   fetchCtx: FetchCtx
+  enterPolicy?: EnterPolicy
+  /** Send `text` through the composer's normal send path (required by `native-commands`). */
+  submit?: (text: string) => void
+  /** Hide the menu (e.g. while ↑/↓ browses prompt history). */
+  suppressed?: boolean
 }
 
 type UsageMap = Record<string, Record<string, number>>
@@ -66,9 +80,21 @@ export interface UseAutocompleteResult {
  * First source whose `detect()` returns non-null wins (priority = registration order).
  */
 export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteResult {
-  const { sources, draft, setDraft, cursorPos, acceptCtx, fetchCtx } = opts
+  const {
+    sources,
+    draft,
+    setDraft,
+    cursorPos,
+    acceptCtx,
+    fetchCtx,
+    enterPolicy = 'accept-selected',
+    submit,
+    suppressed = false
+  } = opts
   const trpcClient = useTRPCClient()
   const [selectedIndex, setSelectedIndex] = useState(0)
+  /** True once ↑/↓ moved the selection for the current match (Enter then takes it). */
+  const [navigated, setNavigated] = useState(false)
   const [itemsBySource, setItemsBySource] = useState<Record<string, unknown[]>>({})
   const [dismissed, setDismissed] = useState<{ source: string; match: TriggerMatch } | null>(null)
   const [usage, setUsage] = useState<UsageMap>({})
@@ -127,6 +153,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   // a high-priority source's results shadowing later sources at the same trigger position.
   // Sources with a different token range OR no matches at all are skipped.
   const active = useMemo<ActiveMatch | null>(() => {
+    if (suppressed) return null
     let leadMatch: TriggerMatch | null = null
     let leadSourceId: string | null = null
     const groups: { source: AutocompleteSource; items: unknown[] }[] = []
@@ -149,8 +176,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
       ) {
         continue
       }
-      const items = itemsBySource[src.id] ?? []
-      groups.push({ source: src, items })
+      groups.push({ source: src, items: unshadowed(src, sources, itemsBySource) })
     }
     if (!leadMatch || !leadSourceId || groups.length === 0) return null
 
@@ -167,7 +193,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
     }
     if (entries.length === 0) return null
     return { match: leadMatch, entries, leadSourceId }
-  }, [sources, draft, cursorPos, itemsBySource, dismissed, usage])
+  }, [sources, draft, cursorPos, itemsBySource, dismissed, usage, suppressed])
 
   const show = active !== null
 
@@ -187,6 +213,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   ) {
     setSelectionMatchKey(matchKey)
     setSelectedIndex(0)
+    setNavigated(false)
   }
 
   // Clear dismissal on any draft/cursor change — Esc closes current state; next keystroke reopens.
@@ -218,22 +245,63 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
     if (active) setDismissed({ source: active.leadSourceId, match: active.match })
   }, [active])
 
+  /**
+   * Enter under `native-commands`: a source with `submitText` SENDS (through the
+   * composer) instead of editing the draft; the rest accept as usual.
+   */
+  const submitEntry = useCallback(
+    (index: number) => {
+      if (!active) return
+      const entry = active.entries[index]
+      if (!entry) return
+      const text = entry.source.submitText?.(entry.item, {
+        ...acceptCtx,
+        draft,
+        setDraft,
+        tokenStart: active.match.tokenStart,
+        tokenEnd: active.match.tokenEnd
+      })
+      if (text == null || !submit) {
+        accept(index)
+        return
+      }
+      const name = entry.source.getName?.(entry.item)
+      if (name) pickedRef.current.set(name, { sourceId: entry.source.id, name })
+      submit(text)
+    },
+    [active, acceptCtx, draft, setDraft, submit, accept]
+  )
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
       if (!active) return false
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setSelectedIndex((i) => Math.min(i + 1, active.entries.length - 1))
+        setNavigated(true)
         return true
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
         setSelectedIndex((i) => Math.max(i - 1, 0))
+        setNavigated(true)
         return true
       }
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
-        accept(selectedIndex)
+        const lead = sources.find((src) => src.id === active.leadSourceId)
+        if (enterPolicy !== 'native-commands' || !lead?.commandTrigger || !submit) {
+          accept(selectedIndex)
+          return true
+        }
+        const resolution = resolveEnter({
+          query: active.match.query,
+          names: active.entries.map((en) => en.source.getName?.(en.item) ?? null),
+          selectedIndex,
+          navigated
+        })
+        if (resolution.kind === 'entry') submitEntry(resolution.index)
+        else submit(draft)
         return true
       }
       if (e.key === 'Tab') {
@@ -248,7 +316,18 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
       }
       return false
     },
-    [active, selectedIndex, accept, close]
+    [
+      active,
+      selectedIndex,
+      accept,
+      close,
+      sources,
+      enterPolicy,
+      submit,
+      navigated,
+      submitEntry,
+      draft
+    ]
   )
 
   const transformSubmit = useCallback(
@@ -267,8 +346,9 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   const bumpUsageFromMessage = useCallback(
     async (text: string) => {
       // Match `/<token>` only at start-of-string or after whitespace; tokens are
-      // [a-zA-Z0-9_-]+, mirroring how skills/commands/agents/builtins name themselves.
-      const tokenRe = /(?:^|\s)\/([a-zA-Z0-9_-]+)/g
+      // [a-zA-Z0-9_:-]+, mirroring how skills/commands/agents/builtins name themselves
+      // (`:` for plugin-namespaced CLI commands, e.g. `plugin:command`).
+      const tokenRe = /(?:^|\s)\/([a-zA-Z0-9_:-]+)/g
       const tokens = new Set<string>()
       for (const m of text.matchAll(tokenRe)) tokens.add(m[1])
       if (tokens.size === 0) return
@@ -325,6 +405,26 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
     transformSubmit,
     bumpUsageFromMessage
   }
+}
+
+/**
+ * A source's fetched items minus names that one of its `shadowedBy` sources
+ * already lists (that source's richer entry wins; no duplicate rows).
+ */
+function unshadowed(
+  src: AutocompleteSource,
+  sources: AutocompleteSource[],
+  itemsBySource: Record<string, unknown[]>
+): unknown[] {
+  const items = itemsBySource[src.id] ?? []
+  const getName = src.getName
+  if (!src.shadowedBy?.length || !getName) return items
+  const taken = new Set<string>()
+  for (const other of sources) {
+    if (!src.shadowedBy.includes(other.id) || !other.getName) continue
+    for (const it of itemsBySource[other.id] ?? []) taken.add(other.getName(it))
+  }
+  return taken.size === 0 ? items : items.filter((it) => !taken.has(getName(it)))
 }
 
 /** Helper: splice-replace text in draft from [tokenStart, tokenEnd) with `replacement`. */

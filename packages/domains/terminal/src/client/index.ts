@@ -53,8 +53,11 @@ export {
   type ChatTimelineState,
   type BgShell,
   type BgShellStatus,
+  type SessionUsage,
+  type UsageSummary,
   isInFlight,
   isAwaitingUserQuestion,
-  deriveLoadingLabel
+  deriveLoadingLabel,
+  selectUsageSummary
 } from './chat-timeline'
 export * from './utils'

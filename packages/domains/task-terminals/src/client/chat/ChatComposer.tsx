@@ -22,8 +22,11 @@ import {
   modeSupportsFastMode
 } from '@slayzone/terminal-contracts'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { UsageSummary } from '@slayzone/terminal/client'
 import { type ArtifactRef, type UseImagePasteDropReturn } from '@slayzone/editor/hooks'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
+import { ContextMeter } from './ContextMeter'
+import { PromptHistorySearch } from './PromptHistorySearch'
 import type { useAutocomplete } from './autocomplete/useAutocomplete'
 import type { useChatMode } from './useChatMode'
 import type { useChatModel } from './useChatModel'
@@ -57,6 +60,15 @@ export interface ChatComposerProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   handleSend: () => void | Promise<void>
   handleStop: () => void | Promise<void>
+  /** Ctrl+R prompt-history search state (see useChatComposer). */
+  historySearch: {
+    open: boolean
+    entries: string[]
+    pick: (text: string) => void
+    close: () => void
+  }
+  /** Context size + session cost the provider reported; null → meter hidden. */
+  usage: UsageSummary | null
 
   // Session lifecycle
   displaySessionEnded: boolean
@@ -108,6 +120,8 @@ export function ChatComposer({
   onKeyDown,
   handleSend,
   handleStop,
+  historySearch,
+  usage,
   displaySessionEnded,
   handleRestart,
   restarting,
@@ -199,6 +213,13 @@ export function ChatComposer({
             void imagePasteDrop.handleFiles(files)
           }}
         >
+          {historySearch.open && (
+            <PromptHistorySearch
+              entries={historySearch.entries}
+              onPick={historySearch.pick}
+              onClose={historySearch.close}
+            />
+          )}
           {autocomplete.show && autocomplete.active && (
             <AutocompleteMenu
               active={autocomplete.active}
@@ -344,6 +365,7 @@ export function ChatComposer({
             </>
           )}
           <div className="flex-1" />
+          <ContextMeter summary={usage} />
           <Popover>
             <PopoverTrigger asChild>
               <button

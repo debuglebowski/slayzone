@@ -3965,6 +3965,32 @@ export const migrations: Migration[] = [
         DELETE FROM user_settings WHERE key IN ('terminal_auto_start', 'terminal_prewarm_enabled');
       `)
     }
+  },
+  {
+    version: 172,
+    up: (db) => {
+      // The last slash-command list a chat CLI advertised (Claude Code's
+      // `system/init`), so the chat composer's `/` menu lists the CLI's own
+      // commands before a session's first turn — the CLI only reports them once
+      // a turn starts. Keyed by project + chat mode: the list includes the
+      // project's own skills and commands. One row per pair, overwritten on
+      // change. Owned through the project (CASCADE), like tasks.
+      //
+      // The three lists are JSON string arrays: all commands, the terminal-only
+      // subset (hidden in chat), and the skills subset.
+      db.exec(`
+        CREATE TABLE chat_cli_snapshots (
+          project_id              TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          mode                    TEXT NOT NULL,
+          slash_commands          TEXT NOT NULL,
+          terminal_slash_commands TEXT NOT NULL,
+          skills                  TEXT NOT NULL,
+          cli_version             TEXT,
+          observed_at             INTEGER NOT NULL,
+          PRIMARY KEY (project_id, mode)
+        );
+      `)
+    }
   }
 ]
 

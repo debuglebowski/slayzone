@@ -43,6 +43,12 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
         case 'stderr':
           hay = item.text
           break
+        case 'command-output':
+          hay = item.text
+          break
+        case 'compaction':
+          hay = item.error ?? ''
+          break
         case 'tool': {
           const inv = item.invocation
           hay = `${inv.name} ${typeof inv.input === 'string' ? inv.input : JSON.stringify(inv.input)}`

@@ -14,6 +14,7 @@ export function filterAgents(items: AgentInfo[], filter: string): AgentInfo[] {
 export function createAgentsSource(listApi?: ChatListApi): AutocompleteSource<AgentInfo> {
   return {
     id: 'agents',
+    commandTrigger: true,
     detect(draft, cursorPos) {
       if (!draft.startsWith('/')) return null
       const rest = draft.slice(1, cursorPos)

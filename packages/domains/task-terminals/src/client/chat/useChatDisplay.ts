@@ -90,7 +90,11 @@ export function useChatDisplay({
       } else if (item.kind === 'result') {
         flushPending()
         out.push(item)
-      } else if (item.kind === 'interrupted') {
+      } else if (
+        item.kind === 'interrupted' ||
+        item.kind === 'compaction' ||
+        item.kind === 'command-output'
+      ) {
         flushPending()
         out.push(item)
       }

@@ -39,6 +39,8 @@ function LinkText({ text }: { text: string }) {
   return <LinkifiedText text={text} onOpenUrl={onOpenUrl} onOpenFile={onOpenFile} />
 }
 import { HighlightedText } from './HighlightedText'
+import { CompactionRow } from './CompactionRow'
+import { CommandOutputBlock } from './CommandOutputBlock'
 
 // Card indent for tool/sub-agent rows: aligns with assistant card position
 // (assistant uses pl-4 + size-7 avatar + gap-3 = 56px = pl-14).
@@ -190,7 +192,7 @@ export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 're
         )}
         <span>{(item.durationMs / 1000).toFixed(1)}s</span>
         <span>·</span>
-        <span>${item.totalCostUsd.toFixed(4)}</span>
+        <span>${item.turnCostUsd.toFixed(4)}</span>
         <span>·</span>
         <span>
           {item.numTurns} turn{item.numTurns === 1 ? '' : 's'}
@@ -1325,6 +1327,10 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <InterruptedBlock key={key} item={item} />
     case 'plan':
       return <PlanBlock key={key} item={item} />
+    case 'compaction':
+      return <CompactionRow key={key} item={item} />
+    case 'command-output':
+      return <CommandOutputBlock key={key} item={item} />
     case 'unknown':
       return <UnknownBlock key={key} item={item} />
   }

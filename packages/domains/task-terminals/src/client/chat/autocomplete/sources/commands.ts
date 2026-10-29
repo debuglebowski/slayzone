@@ -40,6 +40,7 @@ export function createCommandsSource(
 ): AutocompleteSource<CommandInfo> {
   return {
     id: 'commands',
+    commandTrigger: true,
     detect(draft, cursorPos) {
       if (!draft.startsWith('/')) return null
       const rest = draft.slice(1, cursorPos)
@@ -58,6 +59,14 @@ export function createCommandsSource(
     transformSubmit: transformCommandSubmit,
     getName: (c) => c.name,
     getDescription: (c) => c.description,
+    // Enter sends `/name args` through the composer, whose transformSubmit
+    // expands the template. A template that needs arguments none were typed for
+    // falls back to accept(), which parks `/name ` for them.
+    submitText: (cmd, ctx) => {
+      const rest = ctx.draft.slice(ctx.tokenEnd)
+      if (/\$ARGUMENTS/.test(cmd.body) && rest.trim().length === 0) return null
+      return `/${cmd.name}${rest}`
+    },
     async accept(cmd, ctx) {
       const rawAfter = ctx.draft.slice(ctx.tokenEnd).trimStart()
       const needsArgs = /\$ARGUMENTS/.test(cmd.body)

@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
-import { useChatSession } from '@slayzone/terminal/client'
+import { selectUsageSummary, useChatSession } from '@slayzone/terminal/client'
+import { chatCapabilitiesForMode } from '@slayzone/terminal-contracts'
 import type { AgentState } from '@slayzone/terminal-contracts'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
 import { ChatViewContext } from './ChatViewContext'
@@ -15,6 +16,7 @@ import { useChatComposer } from './useChatComposer'
 import { useChatDisplay } from './useChatDisplay'
 import { useChatLifecycle } from './useChatLifecycle'
 import { useChatPanelKeyboard } from './useChatPanelKeyboard'
+import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
 
@@ -125,6 +127,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const { chatApi, navigate } = useChatActions()
 
+    const cliCommands = useCliCommandSnapshot({
+      taskId,
+      mode,
+      live: state.cliCommands,
+      enabled: chatCapabilitiesForMode(mode).nativeSlashCommands
+    })
+
     const { uploadFiles: uploadImageFiles, getFilePath: getArtifactFilePath } = useArtifactUpload(
       taskId,
       { folderName: 'Uploads' }
@@ -145,7 +154,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       navigate,
       getArtifactFilePath,
       scrollToBottom,
-      handleEffortChange
+      handleEffortChange,
+      handleModelChange,
+      cliCommands
     })
 
     const imagePasteDrop = useImagePasteDrop<ArtifactRef>({
@@ -376,6 +387,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             onKeyDown={composer.onKeyDown}
             handleSend={composer.handleSend}
             handleStop={composer.handleStop}
+            historySearch={composer.historySearch}
+            usage={selectUsageSummary(state)}
             displaySessionEnded={displaySessionEnded}
             handleRestart={handleRestart}
             restarting={restarting}

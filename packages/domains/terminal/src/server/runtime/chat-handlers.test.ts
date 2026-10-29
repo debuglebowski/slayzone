@@ -15,7 +15,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type Database from 'better-sqlite3'
-import { registerChatHandlers } from './chat-handlers'
+import { createChatOps, registerChatHandlers } from './chat-handlers'
 import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
@@ -752,4 +752,98 @@ test('chat:setMode pre-spawn persists DB without spawning', async () => {
   }
   const cfg = JSON.parse(cfgRow.provider_config) as Record<string, { chatMode?: string }>
   expect(cfg[mode]?.chatMode).toBe('plan')
+})
+
+/** Poll until `read()` returns a non-null value (persistEvent side effects are fire-and-forget). */
+async function eventually<T>(read: () => Promise<T | null>, timeoutMs = 2000): Promise<T | null> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const v = await read()
+    if (v !== null || Date.now() > deadline) return v
+    await new Promise((r) => setTimeout(r, 10))
+  }
+}
+
+test('a turn-init slash command list is stored for the project and served before the next spawn', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  seedTask(db, 'task-cli-1', null, 'tab-cli-1')
+  // Second task of the same project, no session of its own yet.
+  db.prepare(
+    "INSERT INTO tasks (id, project_id, title, provider_config) VALUES ('task-cli-2', 'proj-1', 'T2', '{}')"
+  ).run()
+
+  const child = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => child,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ops = createChatOps(localChatOpts(db))
+  const opts = { tabId: 'tab-cli-1', taskId: 'task-cli-1', mode: 'claude-chat', cwd: '/tmp' }
+  expect(await ops.getCliSnapshot('task-cli-2', 'claude-chat')).toBeNull()
+
+  const info = await ops.start({ ...opts, providerFlagsOverride: null })
+  ;(child as unknown as EventEmitter).emit('spawn')
+  ;(child.stdout as PassThrough).write(
+    JSON.stringify({
+      type: 'system',
+      subtype: 'init',
+      session_id: info.sessionId,
+      model: 'opus',
+      cwd: '/tmp',
+      tools: [],
+      slash_commands: ['compact', 'context', 'doctor'],
+      terminal_slash_commands: ['doctor'],
+      skills: [],
+      claude_code_version: '2.1.312'
+    }) + '\n'
+  )
+
+  expect(await eventually(() => ops.getCliSnapshot('task-cli-2', 'claude-chat'))).toEqual({
+    slashCommands: ['compact', 'context', 'doctor'],
+    terminalSlashCommands: ['doctor'],
+    skills: [],
+    cliVersion: '2.1.312'
+  })
+})
+
+test('onChatEvent receives the task, mode and conversation of the event', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  seedTask(db, 'task-ctx-1', null, 'tab-ctx-1')
+  const child = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => child,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const seen: Array<{ kind: string; ctx: unknown }> = []
+  const ops = createChatOps({
+    ...localChatOpts(db),
+    onChatEvent: (_tabId, event, ctx) => {
+      seen.push({ kind: event.kind, ctx })
+    }
+  })
+  const info = await ops.start({
+    tabId: 'tab-ctx-1',
+    taskId: 'task-ctx-1',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
+  ;(child as unknown as EventEmitter).emit('spawn')
+  await ops.send('tab-ctx-1', 'hello there')
+  const sent = seen.find((s) => s.kind === 'user-message')
+  expect(sent?.ctx).toEqual({
+    taskId: 'task-ctx-1',
+    mode: 'claude-chat',
+    conversationId: info.sessionId
+  })
 })

@@ -59,11 +59,24 @@ import {
   type ChatCollaborationMode
 } from '@slayzone/terminal-contracts'
 import { modeSupportsFastMode } from '@slayzone/terminal-contracts'
+import {
+  cliCommandListFromTurnInit,
+  sameCliCommandList,
+  type CliCommandList
+} from '@slayzone/terminal-contracts'
+
+/** Who a persisted chat event belongs to (null when the tab has no live session). */
+export interface ChatEventContext {
+  taskId: string
+  mode: string
+  /** CLI conversation id of the session. */
+  conversationId: string | null
+}
 
 export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the
-   * agent-turns domain to detect turn boundaries (user-message + result). */
-  onChatEvent?: (tabId: string, event: AgentEvent) => void
+   * agent-turns domain (turn boundaries; chat prompts → `agent_prompts`). */
+  onChatEvent?: (tabId: string, event: AgentEvent, ctx: ChatEventContext | null) => void
   /** Data seam (hub/computer split). The composition root passes the local-DB
    * impl (`createDbChatDataOps(db, taskStore)`), which runs the same SQL the
    * handlers always ran. */
@@ -398,6 +411,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
   // The local-DB impl (same SQL as before the hub/computer split) is built by
   // the composition root, which owns the task-side `taskStore` it needs.
   const data = opts.dataOps
+  // Last CLI command list stored per task + mode — `turn-init` repeats it every
+  // turn, so only a changed list is written.
+  const storedCliLists = new Map<string, CliCommandList>()
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
   configureTransport({
@@ -446,6 +462,23 @@ export function createChatOps(opts: ChatHandlerOpts) {
         // Subprocess is the source of truth for permission mode. Cache it back
         // into provider_config whenever turn-init carries a recognized mode so
         // cold-start spawn flags match the last observed live value.
+        // Remember the CLI's slash commands for the project, so the composer's
+        // `/` menu can list them before the next session's first turn.
+        if (event.kind === 'turn-init') {
+          const list = cliCommandListFromTurnInit(event)
+          const info = getSessionInfo(tabId)
+          if (list && info) {
+            const key = `${info.taskId}\u0000${info.mode}`
+            if (!sameCliCommandList(storedCliLists.get(key) ?? null, list)) {
+              try {
+                await data.saveCliSnapshot(info.taskId, info.mode, list)
+                storedCliLists.set(key, list)
+              } catch (err) {
+                console.error('[chat-handlers] saveCliSnapshot failed:', err)
+              }
+            }
+          }
+        }
         if (event.kind === 'turn-init') {
           const mapped = rawPermissionModeToChatMode(event.permissionMode)
           if (mapped) {
@@ -462,7 +495,12 @@ export function createChatOps(opts: ChatHandlerOpts) {
       })()
       if (opts.onChatEvent) {
         try {
-          opts.onChatEvent(tabId, event)
+          const info = getSessionInfo(tabId)
+          opts.onChatEvent(
+            tabId,
+            event,
+            info ? { taskId: info.taskId, mode: info.mode, conversationId: info.sessionId } : null
+          )
         } catch (err) {
           console.error('[chat-handlers] onChatEvent failed:', err)
         }
@@ -959,6 +997,16 @@ export function createChatOps(opts: ChatHandlerOpts) {
       } catch (err) {
         console.error('[chat-handlers] getAutocompleteUsage failed:', err)
         return {}
+      }
+    },
+
+    /** Last slash-command list the mode's CLI advertised in this task's project, or null. */
+    getCliSnapshot: async (taskId: string, mode: string): Promise<CliCommandList | null> => {
+      try {
+        return await data.getCliSnapshot(taskId, mode)
+      } catch (err) {
+        console.error('[chat-handlers] getCliSnapshot failed:', err)
+        return null
       }
     }
   }

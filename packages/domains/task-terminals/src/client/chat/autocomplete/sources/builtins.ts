@@ -1,11 +1,29 @@
+import type { ChatCapabilities } from '@slayzone/terminal-contracts'
 import type { AutocompleteSource, BuiltinCommand } from '../types'
-import { filterBuiltins, builtinCommands } from '../builtins-registry'
+import { rankBuiltins, builtinCommands } from '../builtins-registry'
 import { spliceReplace } from '../useAutocomplete'
 import { renderBuiltinItem } from './render-builtin'
 
-export function createBuiltinsSource(): AutocompleteSource<BuiltinCommand> {
+export interface BuiltinsSourceOpts {
+  /** Commands the chat CLI runs itself (its list minus terminal-only ones); empty when unknown. */
+  cliCommandNames: ReadonlySet<string>
+  capabilities: ChatCapabilities
+}
+
+/** Builtins offered for this chat: available for the mode, and not shadowed by a CLI-native command. */
+export function availableBuiltins(opts: BuiltinsSourceOpts): BuiltinCommand[] {
+  return builtinCommands.filter(
+    (b) =>
+      (b.available?.(opts.capabilities) ?? true) &&
+      !(b.cliCollision === 'cli-wins' && opts.cliCommandNames.has(b.name))
+  )
+}
+
+export function createBuiltinsSource(opts: BuiltinsSourceOpts): AutocompleteSource<BuiltinCommand> {
+  const items = availableBuiltins(opts)
   return {
     id: 'builtins',
+    commandTrigger: true,
     detect(draft, cursorPos) {
       if (!draft.startsWith('/')) return null
       const rest = draft.slice(1, cursorPos)
@@ -13,9 +31,9 @@ export function createBuiltinsSource(): AutocompleteSource<BuiltinCommand> {
       return { query: rest, tokenStart: 0, tokenEnd: cursorPos }
     },
     async fetch() {
-      return builtinCommands
+      return items
     },
-    filter: (_items, query) => filterBuiltins(query),
+    filter: (all, query) => rankBuiltins(all, query),
     getKey: (b) => `builtin:${b.name}`,
     render: renderBuiltinItem,
     getName: (b) => b.name,

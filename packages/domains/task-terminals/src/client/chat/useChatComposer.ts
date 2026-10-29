@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
-import { toast, useStableCallback, type AgentEffort } from '@slayzone/ui'
+import { toast, useStableCallback, type AgentEffort, type AgentModel } from '@slayzone/ui'
+import {
+  chatCapabilitiesForMode,
+  isValidModelForMode,
+  modelLabelForMode,
+  modelsForMode,
+  type CliCommandList
+} from '@slayzone/terminal-contracts'
 import { useTRPCClient } from '../trpc'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
 import { useChatQueue } from './useChatQueue'
@@ -9,6 +16,9 @@ import { createCommandsSource } from './autocomplete/sources/commands'
 import { createAgentsSource } from './autocomplete/sources/agents'
 import { createBuiltinsSource } from './autocomplete/sources/builtins'
 import { createFilesSource } from './autocomplete/sources/files'
+import { cliCommandItems, createCliCommandsSource } from './autocomplete/sources/cli-commands'
+import { usePromptHistory } from './usePromptHistory'
+import { HISTORY_IDLE, historyStep, isBrowsingHistory, type HistoryNav } from './prompt-history'
 import type {
   AutocompleteSource,
   ChatActions,
@@ -32,6 +42,9 @@ export interface UseChatComposerOpts {
   getArtifactFilePath: (id: string) => Promise<string | null>
   scrollToBottom: () => void
   handleEffortChange: (next: AgentEffort) => Promise<void>
+  handleModelChange: (next: AgentModel) => Promise<void>
+  /** The chat CLI's slash commands (live or last known); null when unknown / not offered. */
+  cliCommands: CliCommandList | null
 }
 
 /**
@@ -64,11 +77,28 @@ export function useChatComposer({
   navigate,
   getArtifactFilePath,
   scrollToBottom,
-  handleEffortChange
+  handleEffortChange,
+  handleModelChange,
+  cliCommands
 }: UseChatComposerOpts) {
   const trpcClient = useTRPCClient()
+  const capabilities = chatCapabilitiesForMode(mode)
   const [draft, setDraft] = useState('')
   const [cursorPos, setCursorPos] = useState(0)
+  // Prompt history (↑/↓ recall, Ctrl+R search) — modes with `promptHistory` only.
+  const { entries: historyEntries, record: recordHistory } = usePromptHistory({
+    taskId,
+    enabled: capabilities.promptHistory
+  })
+  const [historyNav, setHistoryNav] = useState<HistoryNav>(HISTORY_IDLE)
+  const [historySearchOpen, setHistorySearchOpen] = useState(false)
+  const browsingHistory = isBrowsingHistory(historyNav, draft, historyEntries)
+  // Forward-declared like bumpUsageRef: the autocomplete sends a picked command
+  // through `handleSend`, which is defined after (and reads) the autocomplete.
+  const submitRef = useRef<(text: string) => void>(() => {
+    // Placeholder until the insertion effect below wires `handleSend`.
+  })
+  const submitFromMenu = useStableCallback((text: string) => submitRef.current(text))
   // Forward-declared ref — wired to autocomplete.bumpUsageFromMessage further
   // down once the autocomplete hook has run. The drain callback closes over
   // this ref, so the assignment lands before the first onDrained fires.
@@ -123,15 +153,21 @@ export function useChatComposer({
     [trpcClient]
   )
 
+  // The CLI's own commands — only where the provider runs slash commands itself.
+  const cliList = capabilities.nativeSlashCommands ? cliCommands : null
   const sources = useMemo(
     () => [
       createFilesSource(listApi),
       createCommandsSource((text) => sendMessage(text).then(() => true), listApi),
       createAgentsSource(listApi),
-      createBuiltinsSource(),
-      createSkillsSource(listApi)
+      createBuiltinsSource({
+        cliCommandNames: new Set(cliCommandItems(cliList).map((c) => c.name)),
+        capabilities
+      }),
+      createSkillsSource(listApi),
+      createCliCommandsSource(cliList)
     ],
-    [sendMessage, listApi]
+    [sendMessage, listApi, cliList, capabilities]
   ) as AutocompleteSource[]
 
   const autocomplete = useAutocomplete({
@@ -145,7 +181,11 @@ export function useChatComposer({
       chat: chatApi,
       navigate,
       toast: (msg) => toast(msg)
-    }
+    },
+    enterPolicy: capabilities.nativeSlashCommands ? 'native-commands' : 'accept-selected',
+    submit: submitFromMenu,
+    // A recalled `/command` prompt must not reopen the menu and steal ↑/↓.
+    suppressed: browsingHistory
   })
 
   // Autosize textarea. Height follows scrollHeight up to 240px; no artificial min —
@@ -169,90 +209,120 @@ export function useChatComposer({
     wasDraftEmptyRef.current = empty
   }, [draft, scrollToBottom])
 
-  const handleSend = useCallback(async () => {
-    const text = draft.trim()
-    if (sessionEnded) return
-    if (!text && attachments.length === 0) return
+  // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
+  const handleSend = useCallback(
+    async (textOverride?: string) => {
+      const text = (textOverride ?? draft).trim()
+      if (sessionEnded) return
+      if (!text && attachments.length === 0) return
+      setHistoryNav(HISTORY_IDLE)
+      if (text) recordHistory(text)
 
-    // Builtin `/effort <level>` — write enum to provider_config; setEffort
-    // handler kill+respawns. Mirrors the AgentEffortPill path; both UIs go
-    // through the same canonical field, no flag-string mutation.
-    const effortMatch = /^\/effort\s+(\S+)\s*$/.exec(text)
-    if (effortMatch) {
-      const raw = effortMatch[1].toLowerCase()
-      const valid = ['low', 'medium', 'high', 'xhigh', 'max'] as const
-      if (!(valid as readonly string[]).includes(raw)) {
-        toast(`Invalid effort level "${raw}". Use: ${valid.join(', ')}`)
+      // Builtin `/effort <level>` — write enum to provider_config; setEffort
+      // handler kill+respawns. Mirrors the AgentEffortPill path; both UIs go
+      // through the same canonical field, no flag-string mutation.
+      const effortMatch = /^\/effort\s+(\S+)\s*$/.exec(text)
+      if (effortMatch) {
+        const raw = effortMatch[1].toLowerCase()
+        const valid = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+        if (!(valid as readonly string[]).includes(raw)) {
+          toast(`Invalid effort level "${raw}". Use: ${valid.join(', ')}`)
+          return
+        }
+        setDraft('')
+        await handleEffortChange(raw as (typeof valid)[number])
+        toast(`Effort set to ${raw}`)
         return
       }
-      setDraft('')
-      await handleEffortChange(raw as (typeof valid)[number])
-      toast(`Effort set to ${raw}`)
-      return
-    }
 
-    // Allow sources (e.g. commands) to transform `/cmdname args` into expanded template.
-    const transform = autocomplete.transformSubmit(text)
-    let toSend = transform?.send ?? text
-
-    // Materialize image attachments to abs filesystem paths and prepend to message.
-    if (attachments.length > 0) {
-      const resolved = await Promise.all(
-        attachments.map(async (a) => {
-          const p = await getArtifactFilePath(a.id)
-          return { ref: a, path: p }
-        })
-      )
-      const missing = resolved.filter((r) => r.path === null)
-      if (missing.length > 0) {
-        toast(
-          `${missing.length} image${missing.length === 1 ? '' : 's'} no longer available — skipping`
-        )
+      // Builtin `/model <id>` — where the CLI runs slash commands itself, its own
+      // /model would switch only the running process (the pill and the next
+      // respawn's --model would not follow). Route through the model pill's path.
+      const modelMatch = capabilities.nativeSlashCommands ? /^\/model\s+(\S+)\s*$/.exec(text) : null
+      if (modelMatch) {
+        const id = modelMatch[1]
+        if (!isValidModelForMode(mode, id)) {
+          toast(
+            `Unknown model "${id}". Use: ${modelsForMode(mode)
+              .map((m) => m.id)
+              .join(', ')}`
+          )
+          return
+        }
+        setDraft('')
+        await handleModelChange(id)
+        toast(`Model set to ${modelLabelForMode(mode, id)}`)
+        return
       }
-      const imageRefs = resolved
-        .filter((r): r is { ref: ArtifactRef; path: string } => r.path !== null)
-        .map((r) => `![${r.ref.title}](${r.path})`)
-        .join('\n')
-      toSend = imageRefs + (toSend ? `\n\n${toSend}` : '')
-    }
 
-    // Capture raw input + attachments BEFORE clearing — used by Stop/Esc to
-    // restore them if the turn is popped. Skip when queueing: lastSentRef must
-    // remain aligned with the in-flight turn, not the queued one.
-    const snapshot = { text, attachments: [...attachments] }
-    setDraft('')
-    setAttachments([])
-    void scrollToBottom()
-    if (!toSend) return
-    // Queue when a turn is in flight OR a queue already exists (preserve FIFO
-    // even after reload — the renderer's `inFlight` mirror could be `false`
-    // while persisted queue items still need to flush in order). Backend
-    // drainer pops on session→idle.
-    if (inFlight || queuedMessages.length > 0) {
-      await pushQueue(toSend, text)
-      return
-    }
-    lastSentRef.current = snapshot
-    await sendMessage(toSend)
-    // Bump usage from the ORIGINAL `text` — slash tokens may not survive template
-    // expansion. Only fires after sendMessage resolves (closest signal we have to
-    // a successful send; sendMessage doesn't throw on failure). Read fn via ref
-    // so we don't add `autocomplete` to deps — its returned object is a fresh
-    // ref each render and would over-fire dependent effects.
-    void bumpUsageRef.current(text)
-  }, [
-    draft,
-    attachments,
-    getArtifactFilePath,
-    inFlight,
-    queuedMessages.length,
-    pushQueue,
-    sessionEnded,
-    sendMessage,
-    autocomplete,
-    scrollToBottom,
-    handleEffortChange
-  ])
+      // Allow sources (e.g. commands) to transform `/cmdname args` into expanded template.
+      const transform = autocomplete.transformSubmit(text)
+      let toSend = transform?.send ?? text
+
+      // Materialize image attachments to abs filesystem paths and prepend to message.
+      if (attachments.length > 0) {
+        const resolved = await Promise.all(
+          attachments.map(async (a) => {
+            const p = await getArtifactFilePath(a.id)
+            return { ref: a, path: p }
+          })
+        )
+        const missing = resolved.filter((r) => r.path === null)
+        if (missing.length > 0) {
+          toast(
+            `${missing.length} image${missing.length === 1 ? '' : 's'} no longer available — skipping`
+          )
+        }
+        const imageRefs = resolved
+          .filter((r): r is { ref: ArtifactRef; path: string } => r.path !== null)
+          .map((r) => `![${r.ref.title}](${r.path})`)
+          .join('\n')
+        toSend = imageRefs + (toSend ? `\n\n${toSend}` : '')
+      }
+
+      // Capture raw input + attachments BEFORE clearing — used by Stop/Esc to
+      // restore them if the turn is popped. Skip when queueing: lastSentRef must
+      // remain aligned with the in-flight turn, not the queued one.
+      const snapshot = { text, attachments: [...attachments] }
+      setDraft('')
+      setAttachments([])
+      void scrollToBottom()
+      if (!toSend) return
+      // Queue when a turn is in flight OR a queue already exists (preserve FIFO
+      // even after reload — the renderer's `inFlight` mirror could be `false`
+      // while persisted queue items still need to flush in order). Backend
+      // drainer pops on session→idle.
+      if (inFlight || queuedMessages.length > 0) {
+        await pushQueue(toSend, text)
+        return
+      }
+      lastSentRef.current = snapshot
+      await sendMessage(toSend)
+      // Bump usage from the ORIGINAL `text` — slash tokens may not survive template
+      // expansion. Only fires after sendMessage resolves (closest signal we have to
+      // a successful send; sendMessage doesn't throw on failure). Read fn via ref
+      // so we don't add `autocomplete` to deps — its returned object is a fresh
+      // ref each render and would over-fire dependent effects.
+      void bumpUsageRef.current(text)
+    },
+    [
+      draft,
+      attachments,
+      getArtifactFilePath,
+      inFlight,
+      queuedMessages.length,
+      pushQueue,
+      sessionEnded,
+      sendMessage,
+      autocomplete,
+      scrollToBottom,
+      handleEffortChange,
+      handleModelChange,
+      capabilities.nativeSlashCommands,
+      mode,
+      recordHistory
+    ]
+  )
 
   // Wire the forward-declared bumpUsageRef now that autocomplete is in scope.
   // `autocomplete` is a fresh object every render (useAutocomplete returns
@@ -263,6 +333,9 @@ export function useChatComposer({
   const bumpUsageFromMessage = autocomplete.bumpUsageFromMessage
   useInsertionEffect(() => {
     bumpUsageRef.current = bumpUsageFromMessage
+    submitRef.current = (text) => {
+      void handleSend(text)
+    }
   })
 
   // Stop button + Esc shared path. Clears the queue (intentional: queued msgs
@@ -291,14 +364,65 @@ export function useChatComposer({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Ctrl+R (physical Ctrl, also on macOS) searches the prompt history.
+      // Windows/Linux: the app's reload-browser shortcut (mod+r) takes Ctrl+R first.
+      if (
+        capabilities.promptHistory &&
+        e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === 'r'
+      ) {
+        e.preventDefault()
+        setHistorySearchOpen(true)
+        return
+      }
       if (autocomplete.handleKeyDown(e)) return
+      if (
+        capabilities.promptHistory &&
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey
+      ) {
+        const el = e.currentTarget
+        const step = historyStep({
+          nav: historyNav,
+          key: e.key === 'ArrowUp' ? 'up' : 'down',
+          draft,
+          caretAtStart: el.selectionStart === 0 && el.selectionEnd === 0,
+          entries: historyEntries
+        })
+        if (step) {
+          e.preventDefault()
+          setHistoryNav(step.nav)
+          setDraft(step.draft)
+          setCursorPos(step.draft.length)
+          return
+        }
+      }
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
         void handleSend()
       }
     },
-    [handleSend, autocomplete]
+    [handleSend, autocomplete, capabilities.promptHistory, historyNav, draft, historyEntries]
   )
+
+  // Ctrl+R search → the picked prompt goes into the composer for editing (not sent).
+  const pickHistoryPrompt = useCallback((text: string) => {
+    setHistorySearchOpen(false)
+    setHistoryNav(HISTORY_IDLE)
+    setDraft(text)
+    setCursorPos(text.length)
+    textareaRef.current?.focus()
+  }, [])
+  const closeHistorySearch = useCallback(() => {
+    setHistorySearchOpen(false)
+    textareaRef.current?.focus()
+  }, [])
 
   return {
     draft,
@@ -313,6 +437,12 @@ export function useChatComposer({
     handleSend,
     handleStop,
     onKeyDown,
-    textareaRef
+    textareaRef,
+    historySearch: {
+      open: historySearchOpen,
+      entries: historyEntries,
+      pick: pickHistoryPrompt,
+      close: closeHistorySearch
+    }
   }
 }

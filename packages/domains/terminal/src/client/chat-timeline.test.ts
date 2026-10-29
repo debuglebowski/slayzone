@@ -1,14 +1,18 @@
 /**
  * Tests for chat-timeline reducer (correlation + pairing + in-flight).
  */
-import { expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { claudeCodeAdapter } from '../server/agents/claude-code-adapter'
 import {
   initialState,
   reducer,
   isInFlight,
   isAwaitingUserQuestion,
-  deriveLoadingLabel
+  deriveLoadingLabel,
+  selectUsageSummary
 } from './chat-timeline'
 
 const ev = {
@@ -1616,4 +1620,243 @@ test('spawn-token: replay determinism across spawn-token boundary', () => {
   for (const e of events) s = reducer(s, { type: 'event', event: e })
   expect(s.bgShells.has('shell-a')).toBe(false)
   expect(s.currentSpawnId).toBe('sp-new')
+})
+
+// ---- Slash commands, compaction, context + cost (chat plan 3.1 / 3.4) ----
+
+const usage = (input: number, cacheWrite: number, cacheRead: number, output = 1) => ({
+  inputTokens: input,
+  outputTokens: output,
+  cacheReadInputTokens: cacheRead,
+  cacheCreationInputTokens: cacheWrite
+})
+
+const costResult = (
+  totalCostUsd: number,
+  modelUsage: Extract<AgentEvent, { kind: 'result' }>['modelUsage']
+): AgentEvent => ({
+  ...(ev.turnResult() as Extract<AgentEvent, { kind: 'result' }>),
+  totalCostUsd,
+  modelUsage
+})
+
+const haiku = (costUsd: number, contextWindow = 1_000_000) => ({
+  'claude-haiku-5-5': {
+    inputTokens: 10,
+    outputTokens: 10,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    costUsd,
+    contextWindow
+  }
+})
+
+const run = (events: AgentEvent[], from = initialState()) =>
+  events.reduce((s, event) => reducer(s, { type: 'event', event }), from)
+
+describe('compaction', () => {
+  test('started → compacting + loading label; succeeded → cleared', () => {
+    let s = run([ev.turnInit(), { kind: 'user-message', text: '/compact' }])
+    s = run([{ kind: 'compact-status', phase: 'started' }], s)
+    expect(s.compacting).toBe(true)
+    expect(deriveLoadingLabel(s)).toBe('Compacting conversation…')
+    s = run([{ kind: 'compact-status', phase: 'succeeded' }], s)
+    expect(s.compacting).toBe(false)
+  })
+
+  test('boundary → divider item with trigger + pre tokens; context size becomes unknown', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: 'hi' },
+      { kind: 'assistant-text', messageId: 'm1', text: 'ok', usage: usage(10, 20, 30) },
+      { kind: 'user-message', text: '/compact' },
+      { kind: 'compact-status', phase: 'started' },
+      { kind: 'compact-boundary', trigger: 'manual', preTokens: 49079, postTokens: 6408 }
+    ])
+    const items = s.timeline.filter((i) => i.kind === 'compaction')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ outcome: 'compacted', trigger: 'manual', preTokens: 49079 })
+    expect(s.compacting).toBe(false)
+    expect(s.usage.contextTokens).toBeNull()
+  })
+
+  test('failed → error item; the identical CLI command output is not shown twice', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: '/compact' },
+      { kind: 'compact-status', phase: 'started' },
+      { kind: 'compact-status', phase: 'failed', error: 'Not enough messages to compact.' },
+      {
+        kind: 'command-output',
+        id: 'c1',
+        command: 'compact',
+        text: 'Not enough messages to compact.'
+      }
+    ])
+    const items = s.timeline.filter((i) => i.kind === 'compaction')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ outcome: 'failed', error: 'Not enough messages to compact.' })
+    expect(s.timeline.some((i) => i.kind === 'command-output')).toBe(false)
+    expect(s.compacting).toBe(false)
+  })
+
+  test('interrupt and process exit clear an open compaction', () => {
+    const open = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: '/compact' },
+      { kind: 'compact-status', phase: 'started' }
+    ])
+    expect(run([{ kind: 'interrupted' }], open).compacting).toBe(false)
+    expect(run([{ kind: 'process-exit', code: 1, signal: null }], open).compacting).toBe(false)
+  })
+})
+
+describe('command output', () => {
+  test('local command output → command-output item, part of the turn copy text', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: '/context' },
+      { kind: 'command-output', id: 'c1', command: 'context', text: '## Context Usage' },
+      ev.turnResult()
+    ])
+    const out = s.timeline.find((i) => i.kind === 'command-output')
+    expect(out).toMatchObject({ command: 'context', text: '## Context Usage' })
+    expect(s.lastResult?.copyText).toBe('## Context Usage')
+  })
+})
+
+describe('context + session cost', () => {
+  test('context size = prompt tokens of the latest main-thread call', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: 'hi' },
+      { kind: 'assistant-text', messageId: 'm1', text: 'ok', usage: usage(8036, 40990, 0, 4) }
+    ])
+    expect(s.usage.contextTokens).toBe(8036 + 40990)
+  })
+
+  test('sub-agent calls do not move the main context size', () => {
+    const s = run([
+      ev.turnInit(),
+      { kind: 'user-message', text: 'hi' },
+      { kind: 'assistant-text', messageId: 'm1', text: 'ok', usage: usage(1, 2, 3) },
+      {
+        kind: 'tool-call',
+        id: 't2',
+        name: 'Read',
+        input: {},
+        parentToolUseId: 'task-1',
+        usage: usage(500, 500, 500)
+      }
+    ])
+    expect(s.usage.contextTokens).toBe(6)
+  })
+
+  test('cumulative totals become per-turn costs; session cost is their sum', () => {
+    let s = run([
+      ev.turnInit('sid-1'),
+      { kind: 'user-message', text: 'a' },
+      costResult(0.009, haiku(0.009))
+    ])
+    s = run([{ kind: 'user-message', text: 'b' }, costResult(0.011, haiku(0.011))], s)
+    const results = s.timeline.filter((i) => i.kind === 'result')
+    expect(results.map((r) => (r.kind === 'result' ? r.turnCostUsd : -1))).toEqual([
+      0.009,
+      0.011 - 0.009
+    ])
+    expect(s.usage.sessionCostUsd).toBeCloseTo(0.011)
+    // A respawned CLI that did not restore its cost counter starts again near 0.
+    s = run([{ kind: 'user-message', text: 'c' }, costResult(0.003, haiku(0.003))], s)
+    expect(s.usage.sessionCostUsd).toBeCloseTo(0.014)
+  })
+
+  test('context window comes from the session model; falls back to the busiest model', () => {
+    const s = run([
+      { ...ev.turnInit(), model: 'claude-haiku-5-5' } as AgentEvent,
+      { kind: 'user-message', text: 'a' },
+      costResult(0.01, haiku(0.01, 200_000))
+    ])
+    expect(s.usage.contextWindow).toBe(200_000)
+    const other = run([
+      { ...ev.turnInit(), model: 'haiku' } as AgentEvent,
+      { kind: 'user-message', text: 'a' },
+      costResult(0.01, {
+        small: { ...haiku(0)['claude-haiku-5-5'], inputTokens: 1, contextWindow: 100 },
+        big: { ...haiku(0)['claude-haiku-5-5'], inputTokens: 9999, contextWindow: 1_000_000 }
+      })
+    ])
+    expect(other.usage.contextWindow).toBe(1_000_000)
+  })
+
+  test('provider without per-model accounting (Codex shape) → no usage summary, footer cost unchanged', () => {
+    const s = run([ev.turnInit(), { kind: 'user-message', text: 'a' }, costResult(0, {})])
+    expect(selectUsageSummary(s)).toBeNull()
+    const result = s.timeline.find((i) => i.kind === 'result')
+    expect(result?.kind === 'result' && result.turnCostUsd).toBe(0)
+  })
+
+  test('selectUsageSummary exposes only what was reported', () => {
+    const s = run([
+      { ...ev.turnInit(), model: 'claude-haiku-5-5' } as AgentEvent,
+      { kind: 'user-message', text: 'a' },
+      { kind: 'assistant-text', messageId: 'm1', text: 'ok', usage: usage(100, 0, 0) },
+      costResult(0.5, haiku(0.5))
+    ])
+    expect(selectUsageSummary(s)).toEqual({
+      contextTokens: 100,
+      contextWindow: 1_000_000,
+      sessionCostUsd: 0.5
+    })
+  })
+})
+
+describe('CLI command list', () => {
+  const init = (sessionId: string, slashCommands?: string[]): AgentEvent => ({
+    ...(ev.turnInit(sessionId) as Extract<AgentEvent, { kind: 'turn-init' }>),
+    slashCommands,
+    terminalSlashCommands: slashCommands ? ['doctor'] : undefined,
+    skills: slashCommands ? ['simplify'] : undefined,
+    cliVersion: slashCommands ? '2.1.312' : undefined
+  })
+
+  test('turn-init list is kept; an identical list keeps the same reference', () => {
+    const a = run([init('s1', ['compact', 'context'])])
+    expect(a.cliCommands).toEqual({
+      slashCommands: ['compact', 'context'],
+      terminalSlashCommands: ['doctor'],
+      skills: ['simplify'],
+      cliVersion: '2.1.312'
+    })
+    const b = run([init('s1', ['compact', 'context'])], a)
+    expect(b.cliCommands).toBe(a.cliCommands)
+    const c = run([init('s1', ['compact'])], b)
+    expect(c.cliCommands?.slashCommands).toEqual(['compact'])
+  })
+
+  test('an init without a list (Codex) keeps whatever was known (null on a fresh state)', () => {
+    expect(run([init('s1')]).cliCommands).toBeNull()
+    const known = run([init('s1', ['compact'])])
+    expect(run([init('s1')], known).cliCommands).toBe(known.cliCommands)
+  })
+})
+
+test('recorded /compact session replays to one divider, cumulative cost and the post-compact context', () => {
+  const raw = readFileSync(
+    fileURLToPath(
+      new URL('../../test/fixtures/claude-stream/chatui-compact-session.ndjson', import.meta.url)
+    ),
+    'utf8'
+  )
+  const events = raw
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => claudeCodeAdapter.parseLine(l))
+    .filter((e): e is AgentEvent => e !== null)
+  const s = run(events)
+  expect(s.timeline.filter((i) => i.kind === 'compaction')).toHaveLength(1)
+  expect(s.usage.sessionCostUsd).toBeCloseTo(0.014659365)
+  expect(s.usage.contextWindow).toBe(1_000_000)
+  expect(s.usage.contextTokens).toBe(8036 + 2569 + 39334)
+  expect(s.timeline.filter((i) => i.kind === 'command-output')).toHaveLength(1)
+  expect(s.compacting).toBe(false)
 })

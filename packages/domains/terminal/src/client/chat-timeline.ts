@@ -1,9 +1,13 @@
 import type {
   AgentEvent,
   AgentPlanStep,
+  CliCommandList,
+  ModelUsage,
+  TokenUsage,
   ToolCallEvent,
   ToolResultEvent
 } from '@slayzone/terminal-contracts'
+import { cliCommandListFromTurnInit, sameCliCommandList } from '@slayzone/terminal-contracts'
 import {
   extractBgShellSpawn,
   extractShellIdFromSpawnResult,
@@ -61,8 +65,34 @@ export type TimelineItem =
       totalCostUsd: number
       numTurns: number
       text: string | null
+      /**
+       * This turn's cost. `totalCostUsd` is the CLI's running session total, so
+       * a provider that reports per-model accounting gets the delta to the
+       * previous result; otherwise it equals `totalCostUsd` (Codex: 0).
+       */
+      turnCostUsd: number
       /** Concatenated assistant-text from this turn, for the footer Copy button. */
       copyText: string | null
+      timestamp: number
+      parentToolUseId?: string
+    }
+  | {
+      /** The CLI compacted the conversation (divider), or a compaction failed. */
+      kind: 'compaction'
+      outcome: 'compacted' | 'failed'
+      trigger?: 'manual' | 'auto'
+      /** Context tokens before compaction. */
+      preTokens?: number
+      error?: string
+      timestamp: number
+      parentToolUseId?: string
+    }
+  | {
+      /** Output of a slash command the CLI ran locally (`/context`, `/usage`, …). */
+      kind: 'command-output'
+      id: string
+      command: string | null
+      text: string
       timestamp: number
       parentToolUseId?: string
     }
@@ -137,6 +167,22 @@ export interface OpenBlock {
   messageId?: string
   /** Accumulating partial_json for tool_use blocks. Parsed on stream-block-stop. */
   partialJson?: string
+}
+
+/** Context size + cost of the session, derived from what the provider reports. */
+export interface SessionUsage {
+  /**
+   * Prompt size (input + cache read + cache creation) of the latest
+   * main-thread API call. Null when none was reported yet or right after a
+   * compaction (the next call reports the new size).
+   */
+  contextTokens: number | null
+  /** Context window of the session's model; null when not reported. */
+  contextWindow: number | null
+  /** Sum of per-turn costs; null until a result reports per-model accounting. */
+  sessionCostUsd: number | null
+  /** The latest result's cumulative `totalCostUsd` — base for the next turn's delta. */
+  lastTotalCostUsd: number
 }
 
 export type BgShellStatus = 'pending' | 'running' | 'completed' | 'killed' | 'failed' | 'unknown'
@@ -242,6 +288,15 @@ export interface ChatTimelineState {
    * "Session ended, click to restart" — there's nothing to restart yet.
    */
   notStarted: boolean
+  /**
+   * Latest CLI-advertised slash command list (Claude only); null when never
+   * reported. Same reference while the content is unchanged, so consumers can
+   * memoize on it.
+   */
+  cliCommands: CliCommandList | null
+  /** True between a compaction start and its outcome (or the turn's end). */
+  compacting: boolean
+  usage: SessionUsage
 }
 
 export function initialState(): ChatTimelineState {
@@ -267,7 +322,10 @@ export function initialState(): ChatTimelineState {
     bgShellOrder: [],
     bgShellPollIndex: new Map(),
     currentSpawnId: null,
-    notStarted: true
+    notStarted: true,
+    cliCommands: null,
+    compacting: false,
+    usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 }
   }
 }
 
@@ -286,7 +344,7 @@ export function reducer(state: ChatTimelineState, action: Action): ChatTimelineS
   // subscription. We post-process AgentEvents here so the timeline pass stays
   // focused on rendering and bg-shell logic stays in one place.
   if (action.type === 'event') {
-    return applyBgShellEvent(next, action.event)
+    return applyBgShellEvent(applyContextUsage(next, action.event), action.event)
   }
   if (action.type === 'process-exit') {
     // Live `chat:exit` IPC path. Mirrors the agent-event path so bg shells
@@ -333,7 +391,8 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
       return {
         ...state,
         timeline: [...state.timeline, item],
-        resultCount: state.resultCount + 1
+        resultCount: state.resultCount + 1,
+        compacting: false
       }
     }
     case 'user-sent': {
@@ -389,7 +448,8 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
         ...healed,
         sessionEnded: true,
         exitCode: action.code,
-        exitSignal: action.signal
+        exitSignal: action.signal,
+        compacting: false
       }
     }
     case 'event':
@@ -446,7 +506,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         // Defensive: clear any straggling stream state so the typing indicator
         // can't read "Writing…" off a half-open block once the turn is gone.
         openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
-        currentStreamMessageId: null
+        currentStreamMessageId: null,
+        compacting: false
       }
     }
     case 'user-message-popped': {
@@ -492,7 +553,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           sessionStarted: true,
           sessionId: event.sessionId,
           model: event.model,
-          permissionMode: event.permissionMode ?? null
+          permissionMode: event.permissionMode ?? null,
+          cliCommands: nextCliCommands(null, event)
         }
       }
       if (state.sessionStarted) {
@@ -500,7 +562,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           ...state,
           sessionId: event.sessionId,
           model: event.model,
-          permissionMode: event.permissionMode ?? state.permissionMode
+          permissionMode: event.permissionMode ?? state.permissionMode,
+          cliCommands: nextCliCommands(state.cliCommands, event)
         }
       }
       const item: TimelineItem = {
@@ -524,7 +587,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         sessionEnded: false,
         exitCode: null,
         exitSignal: null,
-        permissionMode: event.permissionMode ?? state.permissionMode
+        permissionMode: event.permissionMode ?? state.permissionMode,
+        cliCommands: nextCliCommands(state.cliCommands, event)
       }
     }
     case 'assistant-text': {
@@ -828,14 +892,17 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const it = state.timeline[i]
         if (it.kind === 'user-text') break
         if (it.kind === 'text' && it.role === 'assistant') texts.unshift(it.text)
+        if (it.kind === 'command-output') texts.unshift(it.text)
       }
       const copyText = texts.length > 0 ? texts.join('\n\n') : null
+      const { usage, turnCostUsd } = applyResultCost(state.usage, state.model, event)
       const item: TimelineItem = {
         kind: 'result',
         subtype: event.subtype,
         isError: event.isError,
         durationMs: event.durationMs,
         totalCostUsd: event.totalCostUsd,
+        turnCostUsd,
         numTurns: event.numTurns,
         text: event.text,
         copyText,
@@ -868,7 +935,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         // (rate-limit, error path, network drop after partial stream) the typing
         // indicator would otherwise read "Writing…" off a stranded open block.
         openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
-        currentStreamMessageId: null
+        currentStreamMessageId: null,
+        compacting: false,
+        usage
       }
     }
     case 'api-retry':
@@ -977,8 +1046,53 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
       return { ...state, timeline: [...state.timeline, item] }
     }
-    case 'compact-boundary':
-      return state
+    case 'compact-status': {
+      if (event.phase === 'started')
+        return state.compacting ? state : { ...state, compacting: true }
+      if (event.phase === 'succeeded') {
+        // The divider lands with the `compact-boundary` that follows.
+        return state.compacting ? { ...state, compacting: false } : state
+      }
+      const item: TimelineItem = {
+        kind: 'compaction',
+        outcome: 'failed',
+        error: event.error,
+        timestamp: ts
+      }
+      return { ...state, timeline: [...state.timeline, item], compacting: false }
+    }
+    case 'compact-boundary': {
+      const item: TimelineItem = {
+        kind: 'compaction',
+        outcome: 'compacted',
+        trigger: event.trigger,
+        preTokens: event.preTokens,
+        timestamp: ts
+      }
+      return {
+        ...state,
+        timeline: [...state.timeline, item],
+        compacting: false,
+        // The CLI's post-compaction count excludes the system prompt + tools;
+        // the next call's usage reports the real new size.
+        usage: { ...state.usage, contextTokens: null }
+      }
+    }
+    case 'command-output': {
+      // A failed `/compact` reports its reason twice: on the status frame
+      // (already shown as the failed compaction row) and as command output.
+      if (event.command === 'compact' && isCurrentTurnCompactionError(state, event.text)) {
+        return state
+      }
+      const item: TimelineItem = {
+        kind: 'command-output',
+        id: event.id,
+        command: event.command,
+        text: event.text,
+        timestamp: ts
+      }
+      return { ...state, timeline: [...state.timeline, item] }
+    }
     case 'stderr':
       return {
         ...state,
@@ -993,7 +1107,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         ...healed,
         sessionEnded: true,
         exitCode: event.code,
-        exitSignal: event.signal
+        exitSignal: event.signal,
+        compacting: false
       }
     }
     case 'error':
@@ -1041,6 +1156,109 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
   }
 }
 
+/** Next `cliCommands` for a turn-init: unchanged content keeps the old reference; no list keeps what was known. */
+function nextCliCommands(
+  prev: CliCommandList | null,
+  event: Extract<AgentEvent, { kind: 'turn-init' }>
+): CliCommandList | null {
+  const next = cliCommandListFromTurnInit(event)
+  if (!next || sameCliCommandList(prev, next)) return prev
+  return next
+}
+
+/** True when the current turn (after the last user-text) holds a failed compaction with this error. */
+function isCurrentTurnCompactionError(state: ChatTimelineState, text: string): boolean {
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    if (it.kind === 'user-text') return false
+    if (it.kind === 'compaction' && it.outcome === 'failed') {
+      return (it.error ?? '').trim() === text.trim()
+    }
+  }
+  return false
+}
+
+/**
+ * Fold one `result` into the session usage. `totalCostUsd` is cumulative for the
+ * CLI session, so this turn's cost is the delta to the previous result; a total
+ * that went DOWN means a respawned CLI restarted its counter (it then counts
+ * from 0). Only providers that report per-model accounting (`modelUsage`) carry
+ * meaningful cost + context-window data — the rest (Codex) leave usage untouched.
+ */
+function applyResultCost(
+  usage: SessionUsage,
+  model: string | null,
+  event: Extract<AgentEvent, { kind: 'result' }>
+): { usage: SessionUsage; turnCostUsd: number } {
+  const models = event.modelUsage ?? {}
+  if (Object.keys(models).length === 0) return { usage, turnCostUsd: event.totalCostUsd }
+  const total = event.totalCostUsd
+  const turnCostUsd = total >= usage.lastTotalCostUsd ? total - usage.lastTotalCostUsd : total
+  return {
+    turnCostUsd,
+    usage: {
+      ...usage,
+      sessionCostUsd: (usage.sessionCostUsd ?? 0) + turnCostUsd,
+      lastTotalCostUsd: total,
+      contextWindow: resolveContextWindow(models, model) ?? usage.contextWindow
+    }
+  }
+}
+
+/** The session model's context window; else the window of the model that did the most work. */
+function resolveContextWindow(
+  models: Record<string, ModelUsage>,
+  model: string | null
+): number | null {
+  const exact = model ? models[model]?.contextWindow : undefined
+  if (exact && exact > 0) return exact
+  let best: { work: number; window: number } | null = null
+  for (const m of Object.values(models)) {
+    if (!m.contextWindow || m.contextWindow <= 0) continue
+    const work =
+      m.inputTokens + m.cacheReadInputTokens + m.cacheCreationInputTokens + m.outputTokens
+    if (!best || work > best.work) best = { work, window: m.contextWindow }
+  }
+  return best ? best.window : null
+}
+
+/** Prompt size of one API call. */
+function promptTokens(u: TokenUsage): number {
+  return u.inputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens
+}
+
+/**
+ * Post-pass: the latest main-thread API call's prompt size is the context the
+ * conversation occupies. Sub-agent calls (`parentToolUseId`) run in their own
+ * context and are ignored.
+ */
+function applyContextUsage(state: ChatTimelineState, event: AgentEvent): ChatTimelineState {
+  if (
+    event.kind !== 'assistant-text' &&
+    event.kind !== 'assistant-thinking' &&
+    event.kind !== 'tool-call'
+  ) {
+    return state
+  }
+  if (!event.usage || event.parentToolUseId) return state
+  const contextTokens = promptTokens(event.usage)
+  if (state.usage.contextTokens === contextTokens) return state
+  return { ...state, usage: { ...state.usage, contextTokens } }
+}
+
+/** What the composer's context meter can show. Null when the provider reported nothing. */
+export interface UsageSummary {
+  contextTokens: number | null
+  contextWindow: number | null
+  sessionCostUsd: number | null
+}
+
+export function selectUsageSummary(state: ChatTimelineState): UsageSummary | null {
+  const { contextTokens, contextWindow, sessionCostUsd } = state.usage
+  if (contextTokens === null && contextWindow === null && sessionCostUsd === null) return null
+  return { contextTokens, contextWindow, sessionCostUsd }
+}
+
 /** Derive whether we're waiting for a response. True if user sent more messages than we've seen results for. */
 export function isInFlight(state: ChatTimelineState): boolean {
   return state.userMessagesSent > state.resultCount
@@ -1082,7 +1300,8 @@ function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineSta
     timeline: [...failed.timeline, item],
     resultCount: state.userMessagesSent,
     openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
-    currentStreamMessageId: null
+    currentStreamMessageId: null,
+    compacting: false
   }
 }
 
@@ -1151,6 +1370,7 @@ function failInFlightSubAgents(state: ChatTimelineState, statusLabel: string): C
  *     indicator never blanks while inFlight.
  */
 export function deriveLoadingLabel(state: ChatTimelineState): string | null {
+  if (state.compacting) return 'Compacting conversation…'
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
     if (item.kind === 'user-text') break

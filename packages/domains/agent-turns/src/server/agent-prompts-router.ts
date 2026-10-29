@@ -7,10 +7,11 @@ import { router, publicProcedure } from '@slayzone/trpc-server'
 export const agentPromptsRouter = router({
   /**
    * All prompts the user sent to a task's agent of `agentId` (the main agent's
-   * current mode), oldest first. Returns [] when never used.
+   * current mode) — or, without `agentId`, to every agent of the task (terminal
+   * + chat; the chat composer's prompt history). Oldest first; [] when never used.
    */
   list: publicProcedure
-    .input(z.object({ taskId: z.string(), agentId: z.string() }))
+    .input(z.object({ taskId: z.string(), agentId: z.string().optional() }))
     .query(({ ctx, input }) => listPromptsForTask(ctx.db, input.taskId, input.agentId)),
 
   /**

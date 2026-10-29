@@ -19,6 +19,8 @@ import {
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { ChatEffort } from '@slayzone/terminal-contracts'
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
+import type { CliCommandList } from '@slayzone/terminal-contracts'
+import { getChatCliSnapshot, saveChatCliSnapshot } from '../chat-cli-snapshot-store'
 
 export interface ProviderConfigEntry {
   conversationId?: string | null
@@ -99,6 +101,10 @@ export interface ChatDataOps {
   getTaskProjectId(taskId: string): Promise<string | null>
   bumpAutocompleteUsage(source: string, name: string): Promise<void>
   getAutocompleteUsage(): Promise<UsageMap>
+  /** Store the slash commands a chat CLI advertised, for the task's project + mode. */
+  saveCliSnapshot(taskId: string, mode: string, list: CliCommandList): Promise<void>
+  /** Last stored slash-command list for the task's project + mode, or null. */
+  getCliSnapshot(taskId: string, mode: string): Promise<CliCommandList | null>
 }
 
 /**
@@ -309,6 +315,10 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
 
     bumpAutocompleteUsage: (source, name) => bumpAutocompleteUsage(db, source, name),
 
-    getAutocompleteUsage: () => getAutocompleteUsage(db)
+    getAutocompleteUsage: () => getAutocompleteUsage(db),
+
+    saveCliSnapshot: (taskId, mode, list) => saveChatCliSnapshot(db, taskId, mode, list),
+
+    getCliSnapshot: (taskId, mode) => getChatCliSnapshot(db, taskId, mode)
   }
 }

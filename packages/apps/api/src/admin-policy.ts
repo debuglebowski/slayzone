@@ -377,6 +377,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.getAutoEligibility': 'user',
   'chat.getAutocompleteUsage': 'user',
   'chat.getBufferSince': 'user',
+  'chat.getCliSnapshot': 'user',
   'chat.getCollaboration': 'user',
   'chat.getEffort': 'user',
   'chat.getFastMode': 'user',

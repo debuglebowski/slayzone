@@ -108,3 +108,152 @@ describe('useAutocomplete dismissal', () => {
     expect(result.current.active?.match.query).toBe('a')
   })
 })
+
+// ---- Native slash commands (Claude chat): Enter policy, shadowing, suppression ----
+
+interface Cmd {
+  name: string
+  description: string
+}
+const slashDetect: AutocompleteSource['detect'] = (draft, cursorPos) => {
+  if (!draft.startsWith('/')) return null
+  const rest = draft.slice(1, cursorPos)
+  if (/\s/.test(rest)) return null
+  return { query: rest, tokenStart: 0, tokenEnd: cursorPos }
+}
+function cmdSource(
+  id: string,
+  items: Cmd[],
+  extra: Partial<AutocompleteSource<Cmd>> = {}
+): AutocompleteSource<Cmd> {
+  return {
+    id,
+    commandTrigger: true,
+    detect: slashDetect,
+    fetch: () => Promise.resolve(items),
+    filter: (all) => all,
+    getKey: (c) => `${id}:${c.name}`,
+    render: (c) => c.name,
+    getName: (c) => c.name,
+    getDescription: (c) => c.description,
+    accept: vi.fn(),
+    ...extra
+  }
+}
+
+const enter = () =>
+  ({
+    key: 'Enter',
+    shiftKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    preventDefault: () => {}
+  }) as unknown as React.KeyboardEvent<HTMLTextAreaElement>
+
+async function setupNative(
+  srcs: AutocompleteSource[],
+  draft: string,
+  opts: Partial<UseAutocompleteOptions> = {}
+) {
+  const submit = vi.fn()
+  const hook = renderHook(
+    (props: { draft: string; cursorPos: number; suppressed?: boolean }) =>
+      useAutocomplete({
+        sources: srcs,
+        setDraft: () => {},
+        acceptCtx,
+        fetchCtx,
+        enterPolicy: 'native-commands',
+        submit,
+        ...opts,
+        ...props
+      }),
+    { initialProps: { draft, cursorPos: draft.length, suppressed: false } }
+  )
+  await waitFor(() => expect(hook.result.current.show).toBe(true))
+  return { ...hook, submit }
+}
+
+const CLI: Cmd[] = [
+  { name: 'compact', description: 'Summarize the conversation to free up context' },
+  { name: 'context', description: 'Show what fills the context window' }
+]
+const cliSrc = () =>
+  cmdSource('cli-commands', CLI, {
+    shadowedBy: ['builtins'],
+    submitText: (c) => `/${c.name}`
+  })
+
+describe('useAutocomplete — native slash commands', () => {
+  it('Enter on an exactly typed command sends that command, not the highlighted fuzzy pick', async () => {
+    const other = cmdSource('skills', [{ name: 'compact-notes', description: '' }])
+    const { result, submit } = await setupNative(
+      [other, cliSrc()] as AutocompleteSource[],
+      '/context'
+    )
+    act(() => {
+      result.current.handleKeyDown(enter())
+    })
+    expect(submit).toHaveBeenCalledWith('/context')
+  })
+
+  it('Enter on an unknown command passes the draft through as typed', async () => {
+    // `free` only matches a description, so the menu shows but no name fits.
+    const { result, submit } = await setupNative([cliSrc()] as AutocompleteSource[], '/free')
+    act(() => {
+      result.current.handleKeyDown(enter())
+    })
+    expect(submit).toHaveBeenCalledWith('/free')
+  })
+
+  it('Enter after arrowing to an entry submits that entry', async () => {
+    const { result, submit } = await setupNative([cliSrc()] as AutocompleteSource[], '/co')
+    act(() => {
+      result.current.handleKeyDown(key('ArrowDown'))
+    })
+    const second = (result.current.active!.entries[1].item as Cmd).name
+    act(() => {
+      result.current.handleKeyDown(enter())
+    })
+    expect(submit).toHaveBeenCalledWith(`/${second}`)
+  })
+
+  it('an entry without submitText (builtin) is accepted on Enter', async () => {
+    const builtin = cmdSource('builtins', [{ name: 'clear', description: 'Clear the chat' }])
+    const { result, submit } = await setupNative([builtin] as AutocompleteSource[], '/clear')
+    act(() => {
+      result.current.handleKeyDown(enter())
+    })
+    expect(builtin.accept).toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('shadowedBy hides a name another source already lists', async () => {
+    const builtin = cmdSource('builtins', [{ name: 'compact', description: 'app version' }])
+    const { result } = await setupNative([builtin, cliSrc()] as AutocompleteSource[], '/')
+    const listed = result.current.active!.entries.map(
+      (e) => `${e.source.id}:${(e.item as Cmd).name}`
+    )
+    expect(listed).toContain('builtins:compact')
+    expect(listed).not.toContain('cli-commands:compact')
+    expect(listed).toContain('cli-commands:context')
+  })
+
+  it('suppressed hides the menu', async () => {
+    const { result, rerender } = await setupNative([cliSrc()] as AutocompleteSource[], '/co')
+    rerender({ draft: '/co', cursorPos: 3, suppressed: true })
+    expect(result.current.show).toBe(false)
+  })
+
+  it('accept-selected policy (Codex) keeps accepting the highlighted entry', async () => {
+    const src = cliSrc()
+    const { result, submit } = await setupNative([src] as AutocompleteSource[], '/free', {
+      enterPolicy: 'accept-selected'
+    })
+    act(() => {
+      result.current.handleKeyDown(enter())
+    })
+    expect(src.accept).toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+  })
+})

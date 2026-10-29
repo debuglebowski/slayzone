@@ -8,7 +8,11 @@ import { expandCommandBody } from './sources/commands'
 import { filterBuiltins } from './builtins-registry'
 import { spliceReplace } from './useAutocomplete'
 import { rankAcrossSources } from './ranking'
-import type { AutocompleteSource } from './types'
+import type { AcceptCtx, AutocompleteSource, BuiltinCommand } from './types'
+import { resolveEnter } from './resolve-enter'
+import { createCliCommandsSource, type CliCommandItem } from './sources/cli-commands'
+import { createBuiltinsSource } from './sources/builtins'
+import { chatCapabilitiesForMode, type CliCommandList } from '@slayzone/terminal-contracts'
 
 describe('skills source — detect', () => {
   const skills = createSkillsSource()
@@ -167,5 +171,139 @@ describe('rankAcrossSources — no shadowing across sources at same trigger', ()
     const names = result.map((e) => (e.item as Named).name)
     expect(names.includes('commit')).toBe(true)
     expect(names.includes('commit-and-done')).toBe(true)
+  })
+})
+
+describe('resolveEnter (native slash commands)', () => {
+  const names = ['compact', 'context', 'commit']
+
+  test('keyboard navigation wins', () => {
+    expect(resolveEnter({ query: 'compact', names, selectedIndex: 2, navigated: true })).toEqual({
+      kind: 'entry',
+      index: 2
+    })
+  })
+
+  test('an exactly typed name picks that entry, whatever is highlighted', () => {
+    expect(resolveEnter({ query: 'context', names, selectedIndex: 0, navigated: false })).toEqual({
+      kind: 'entry',
+      index: 1
+    })
+    expect(
+      resolveEnter({
+        query: 'Compact',
+        names: ['commit', 'compact'],
+        selectedIndex: 0,
+        navigated: false
+      })
+    ).toEqual({ kind: 'entry', index: 1 })
+  })
+
+  test('a prefix of the top entry completes to it; an empty query takes the highlight', () => {
+    expect(resolveEnter({ query: 'comp', names, selectedIndex: 0, navigated: false })).toEqual({
+      kind: 'entry',
+      index: 0
+    })
+    expect(resolveEnter({ query: '', names, selectedIndex: 0, navigated: false })).toEqual({
+      kind: 'entry',
+      index: 0
+    })
+  })
+
+  test('anything else passes through as typed (the CLI answers unknown commands)', () => {
+    expect(resolveEnter({ query: 'cpt', names, selectedIndex: 0, navigated: false })).toEqual({
+      kind: 'passthrough'
+    })
+    expect(resolveEnter({ query: 'zzz', names: [], selectedIndex: 0, navigated: false })).toEqual({
+      kind: 'passthrough'
+    })
+  })
+})
+
+const cliList = (overrides: Partial<CliCommandList> = {}): CliCommandList => ({
+  slashCommands: ['compact', 'context', 'doctor', 'simplify', '__remote-workflow', 'init'],
+  terminalSlashCommands: ['doctor'],
+  skills: ['simplify'],
+  cliVersion: '2.1.312',
+  ...overrides
+})
+
+const ctxFor = (draft: string, tokenEnd = draft.length): AcceptCtx =>
+  ({
+    draft,
+    setDraft: () => {},
+    tokenStart: 0,
+    tokenEnd,
+    session: { tabId: 't', taskId: 'k', mode: 'claude-chat', cwd: '/r' },
+    chat: {} as AcceptCtx['chat'],
+    navigate: {} as AcceptCtx['navigate'],
+    toast: () => {}
+  }) as AcceptCtx
+
+describe('CLI commands source', () => {
+  test('lists the CLI commands usable in chat (no terminal-bound or internal ones)', async () => {
+    const src = createCliCommandsSource(cliList())
+    const items = await src.fetch({ cwd: '/r' })
+    expect(items.map((i) => i.name)).toEqual(['compact', 'context', 'simplify', 'init'])
+    const byName = new Map(items.map((i) => [i.name, i]))
+    expect(byName.get('compact')?.description).toMatch(/context/i)
+    expect(byName.get('simplify')?.kind).toBe('skill')
+  })
+
+  test('no list → no items', async () => {
+    expect(await createCliCommandsSource(null).fetch({ cwd: '/r' })).toEqual([])
+  })
+
+  test('Enter sends `/name` plus anything after the token; Tab parks `/name ` for args', () => {
+    const src = createCliCommandsSource(cliList())
+    const item: CliCommandItem = { name: 'compact', kind: 'command', description: '' }
+    expect(src.submitText?.(item, ctxFor('/comp keep the API notes', 5))).toBe(
+      '/compact keep the API notes'
+    )
+    let draft = ''
+    void src.accept(item, { ...ctxFor('/comp'), setDraft: (v) => (draft = v) })
+    expect(draft).toBe('/compact ')
+  })
+
+  test('is a command trigger shadowed by the richer local sources', () => {
+    const src = createCliCommandsSource(cliList())
+    expect(src.commandTrigger).toBe(true)
+    expect(src.shadowedBy).toEqual(['builtins', 'skills', 'commands'])
+  })
+})
+
+describe('builtins vs the CLI command list', () => {
+  const names = async (cli: string[], mode: string): Promise<string[]> => {
+    const src = createBuiltinsSource({
+      cliCommandNames: new Set(cli),
+      capabilities: chatCapabilitiesForMode(mode)
+    })
+    return (await src.fetch({ cwd: '/r' })).map((b: BuiltinCommand) => b.name)
+  }
+
+  test('CLI-wins builtins step aside when the CLI runs the command itself', async () => {
+    const withCli = await names(['init', 'compact'], 'claude-chat')
+    expect(withCli).not.toContain('init')
+    expect(withCli).toContain('review')
+    expect(await names([], 'claude-chat')).toContain('init')
+  })
+
+  test('app-wins builtins stay even when the CLI has the same name', async () => {
+    const list = await names(['clear', 'effort', 'model', 'config', 'mcp'], 'claude-chat')
+    for (const n of ['clear', 'effort', 'model', 'config', 'mcp']) expect(list).toContain(n)
+  })
+
+  test('/model is offered only where the provider runs its own slash commands', async () => {
+    expect(await names([], 'claude-chat')).toContain('model')
+    expect(await names([], 'codex-chat')).not.toContain('model')
+  })
+
+  test('filter ranks within the fetched items (hidden builtins stay hidden)', async () => {
+    const src = createBuiltinsSource({
+      cliCommandNames: new Set(['init']),
+      capabilities: chatCapabilitiesForMode('claude-chat')
+    })
+    const items = await src.fetch({ cwd: '/r' })
+    expect(src.filter(items, 'init').map((b) => b.name)).not.toContain('init')
   })
 })

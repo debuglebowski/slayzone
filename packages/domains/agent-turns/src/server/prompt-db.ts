@@ -23,8 +23,10 @@ export async function insertPrompt(db: SlayzoneDb, p: InsertPrompt): Promise<voi
 }
 
 /**
- * All prompts sent to one task's agent of the given mode, oldest first
- * (chronological — reads like a transcript). `rowid` tiebreaks same-ms inserts.
+ * All prompts sent to one task's agent of the given mode — or, with no
+ * `agentId`, to every agent of the task (terminal + chat; prompt history) —
+ * oldest first (chronological — reads like a transcript). `rowid` tiebreaks
+ * same-ms inserts.
  *
  * Prompts belonging to a session the user DELETED from the sessions sidebar are
  * excluded (`session_deletions`, migration v157): deleting a session removes it
@@ -37,13 +39,13 @@ export async function insertPrompt(db: SlayzoneDb, p: InsertPrompt): Promise<voi
 export async function listPromptsForTask(
   db: SlayzoneDb,
   taskId: string,
-  agentId: string
+  agentId?: string
 ): Promise<AgentPrompt[]> {
   return (await db
     .prepare(
       `SELECT p.id, p.task_id, p.agent_id, p.cli_session_id, p.text, p.created_at
        FROM agent_prompts p
-       WHERE p.task_id = ? AND p.agent_id = ?
+       WHERE p.task_id = ? AND (? IS NULL OR p.agent_id = ?)
          AND NOT EXISTS (
            SELECT 1 FROM session_deletions d
             WHERE d.task_id = p.task_id
@@ -52,7 +54,7 @@ export async function listPromptsForTask(
          )
        ORDER BY p.created_at ASC, p.rowid ASC`
     )
-    .all(taskId, agentId)) as AgentPrompt[]
+    .all(taskId, agentId ?? null, agentId ?? null)) as AgentPrompt[]
 }
 
 /** Delete the oldest rows beyond MAX_PROMPTS_PER_AGENT for one (task, agent). */

@@ -803,6 +803,9 @@ importers:
 
   packages/apps/hub:
     dependencies:
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../../domains/agent-turns
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config

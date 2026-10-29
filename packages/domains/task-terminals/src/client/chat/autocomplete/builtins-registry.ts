@@ -1,19 +1,24 @@
+import { modelsForMode } from '@slayzone/terminal-contracts'
 import type { BuiltinCommand, AcceptCtx } from './types'
 import { rankByName } from './ranking'
 import { resetChat } from './chat-actions'
 
 /**
- * Built-in slash commands feasible over stream-json chat transport.
- * Each `run()` receives an `AcceptCtx` with chat session handles, navigation hooks, and toast.
- * Handlers prefer side-effects over text insertion — actions happen via IPC or UI events.
+ * The app's own slash commands. Each `run()` receives an `AcceptCtx` with chat
+ * session handles, navigation hooks, and toast. Handlers prefer side-effects over
+ * text insertion — actions happen via IPC or UI events.
  *
- * Skipped from Claude Code: `/vim`, `/ide`, `/add-dir` (REPL-only), MCP prompts (no enum),
- * plugin cmds (no enum), `/compact`, `/model` (tracked in todo — multi-step UI).
+ * Everything else — `/compact`, `/context`, `/usage`, skills, plugin and MCP
+ * commands — comes from the chat CLI's own list (`sources/cli-commands.ts`) and
+ * runs in the CLI. A builtin exists only where the app must act itself: it owns
+ * app state (`/clear`, `/effort`, `/model`) or opens app UI (settings, files,
+ * links). `cliCollision` says which wins when the CLI has the same name.
  */
 export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'clear',
     description: 'Clear the chat — kill session and start fresh',
+    cliCollision: 'app-wins',
     async run(ctx) {
       await resetChat(ctx.chat, ctx.session, {
         interruptFirst: true,
@@ -28,6 +33,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'help',
     description: 'Show available slash commands',
+    cliCollision: 'cli-wins',
     run(ctx) {
       ctx.toast(
         'Slash commands: type / for skills, commands, agents, and built-ins. Type @ for files.'
@@ -37,6 +43,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'bug',
     description: 'Open Claude Code issue tracker',
+    cliCollision: 'app-wins',
     run(ctx) {
       ctx.navigate.openExternal('https://github.com/anthropics/claude-code/issues/new')
     }
@@ -44,6 +51,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'release-notes',
     description: 'Open Claude Code releases page',
+    cliCollision: 'app-wins',
     run(ctx) {
       ctx.navigate.openExternal('https://github.com/anthropics/claude-code/releases')
     }
@@ -51,6 +59,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'config',
     description: 'Open settings',
+    cliCollision: 'app-wins',
     run(ctx) {
       ctx.navigate.openSettings('appearance')
     }
@@ -58,6 +67,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'memory',
     description: 'Open project CLAUDE.md',
+    cliCollision: 'app-wins',
     run(ctx) {
       const sep = ctx.session.cwd.endsWith('/') ? '' : '/'
       ctx.navigate.openFile(`${ctx.session.cwd}${sep}CLAUDE.md`)
@@ -66,6 +76,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'permissions',
     description: 'Open permissions settings',
+    cliCollision: 'app-wins',
     run(ctx) {
       ctx.navigate.openSettings('permissions')
     }
@@ -73,6 +84,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'hooks',
     description: 'Open hooks settings',
+    cliCollision: 'app-wins',
     run(ctx) {
       ctx.navigate.openSettings('hooks')
     }
@@ -80,6 +92,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'mcp',
     description: 'Open MCP servers settings',
+    cliCollision: 'app-wins',
     run(ctx) {
       ctx.navigate.openSettings('mcp')
     }
@@ -87,6 +100,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'init',
     description: 'Ask Claude to create CLAUDE.md for this project',
+    cliCollision: 'cli-wins',
     async run(ctx) {
       await ctx.chat.send(
         ctx.session.tabId,
@@ -97,6 +111,7 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'review',
     description: 'Review the current diff or a PR',
+    cliCollision: 'cli-wins',
     async run(ctx) {
       await ctx.chat.send(
         ctx.session.tabId,
@@ -107,13 +122,30 @@ export const builtinCommands: BuiltinCommand[] = [
   {
     name: 'status',
     description: 'Show current chat session info',
+    cliCollision: 'cli-wins',
     run(ctx) {
       ctx.toast(`Session: ${ctx.session.mode} — cwd ${ctx.session.cwd}`)
     }
   },
   {
+    name: 'model',
+    description: 'Switch model — usage: /model <name>',
+    cliCollision: 'app-wins',
+    // The CLI's own /model would switch the running process only: the model pill
+    // and the next respawn's --model would not follow. Only needed where the
+    // CLI runs slash commands itself.
+    available: (caps) => caps.nativeSlashCommands,
+    run(ctx) {
+      // Park draft so user types the model, then handleSend intercepts on Enter.
+      ctx.setDraft('/model ')
+      const ids = modelsForMode(ctx.session.mode).map((m) => m.id)
+      ctx.toast(`model: type one of ${ids.join(', ')} then Enter`)
+    }
+  },
+  {
     name: 'effort',
     description: 'Set reasoning effort — usage: /effort <low|medium|high|xhigh|max>',
+    cliCollision: 'app-wins',
     run(ctx) {
       // Park draft so user types the level, then handleSend intercepts on Enter.
       ctx.setDraft('/effort ')
@@ -122,11 +154,15 @@ export const builtinCommands: BuiltinCommand[] = [
   }
 ]
 
-export function filterBuiltins(filter: string): BuiltinCommand[] {
-  return rankByName(builtinCommands, filter, {
+export function rankBuiltins(items: BuiltinCommand[], filter: string): BuiltinCommand[] {
+  return rankByName(items, filter, {
     getName: (b) => b.name,
     getDescription: (b) => b.description
   })
+}
+
+export function filterBuiltins(filter: string): BuiltinCommand[] {
+  return rankBuiltins(builtinCommands, filter)
 }
 
 export type AcceptCtxRef = AcceptCtx

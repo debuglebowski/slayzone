@@ -87,6 +87,7 @@ describe('ResultFooter collapse', () => {
     isError: false,
     durationMs: 1500,
     totalCostUsd: 0.0123,
+    turnCostUsd: 0.0123,
     numTurns: 2,
     text: 'final reply text',
     timestamp: 0

@@ -263,11 +263,45 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
       model: (obj.model as string) ?? '',
       cwd: (obj.cwd as string) ?? '',
       tools: Array.isArray(obj.tools) ? (obj.tools as string[]) : [],
-      permissionMode: (obj.permissionMode as string) ?? undefined
+      permissionMode: (obj.permissionMode as string) ?? undefined,
+      slashCommands: toStringList(obj.slash_commands),
+      terminalSlashCommands: toStringList(obj.terminal_slash_commands),
+      skills: toStringList(obj.skills),
+      cliVersion: typeof obj.claude_code_version === 'string' ? obj.claude_code_version : undefined
     }
   }
   if (subtype === 'compact_boundary') {
-    return { kind: 'compact-boundary' }
+    const meta = (obj.compact_metadata ?? {}) as Record<string, unknown>
+    return {
+      kind: 'compact-boundary',
+      trigger: meta.trigger === 'manual' || meta.trigger === 'auto' ? meta.trigger : undefined,
+      preTokens: toOptionalNum(meta.pre_tokens),
+      postTokens: toOptionalNum(meta.post_tokens),
+      durationMs: toOptionalNum(meta.duration_ms)
+    }
+  }
+  if (subtype === 'status') {
+    // `compacting` opens a compaction; the frame that carries `compact_result`
+    // closes it. Every other status (`requesting` per API call, a bare `null`)
+    // has no chat surface — drop it rather than persist it as `unknown`.
+    if (obj.compact_result === 'success') return { kind: 'compact-status', phase: 'succeeded' }
+    if (obj.compact_result === 'failed') {
+      return {
+        kind: 'compact-status',
+        phase: 'failed',
+        ...(typeof obj.compact_error === 'string' ? { error: obj.compact_error } : {})
+      }
+    }
+    if (obj.status === 'compacting') return { kind: 'compact-status', phase: 'started' }
+    return null
+  }
+  if (subtype === 'local_command_output') {
+    return {
+      kind: 'command-output',
+      id: typeof obj.uuid === 'string' ? obj.uuid : '',
+      command: null,
+      text: typeof obj.content === 'string' ? obj.content : ''
+    }
   }
   if (subtype === 'task_started' || subtype === 'task_updated' || subtype === 'task_notification') {
     const usageRaw = (obj.usage ?? null) as Record<string, unknown> | null
@@ -329,10 +363,31 @@ interface RawContentBlock {
 }
 
 function parseAssistant(obj: Record<string, unknown>, parent: string | undefined): AgentEvent {
-  const message = obj.message as { id?: string; content?: RawContentBlock[] } | undefined
+  const message = obj.message as
+    | { id?: string; model?: string; content?: RawContentBlock[]; usage?: unknown }
+    | undefined
   if (!message) return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
   const messageId = message.id ?? ''
   const blocks = Array.isArray(message.content) ? message.content : []
+
+  // A slash command the CLI ran locally (`/context`, `/usage`, a failed
+  // `/compact`, …) comes back as a synthetic assistant message tagged with
+  // `local_command_run`. It is command output, not a model reply, and its
+  // all-zero usage must not read as the conversation's context size.
+  const localRun = obj.local_command_run as { command?: unknown } | undefined
+  if (localRun && typeof localRun === 'object') {
+    const text = blocks
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text ?? '')
+      .join('\n')
+    return {
+      kind: 'command-output',
+      id: typeof obj.uuid === 'string' ? obj.uuid : messageId,
+      command: typeof localRun.command === 'string' ? localRun.command : null,
+      text
+    }
+  }
+  const usage = message.model === '<synthetic>' ? undefined : parseCallUsage(message.usage)
 
   // Spike B confirmed: assistant events are block-scoped (one content block per event).
   // If we ever see multiple blocks, take the first — reducer can handle it, but warn.
@@ -344,7 +399,8 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
       kind: 'assistant-text',
       messageId,
       text: block.text ?? '',
-      parentToolUseId: parent
+      parentToolUseId: parent,
+      ...(usage ? { usage } : {})
     }
   }
   if (block.type === 'thinking') {
@@ -353,7 +409,8 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
       messageId,
       text: block.thinking ?? '',
       hasSignature: Boolean(block.signature),
-      parentToolUseId: parent
+      parentToolUseId: parent,
+      ...(usage ? { usage } : {})
     }
   }
   if (block.type === 'tool_use') {
@@ -362,15 +419,19 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
       id: block.id ?? '',
       name: block.name ?? '',
       input: block.input,
-      parentToolUseId: parent
+      parentToolUseId: parent,
+      ...(usage ? { usage } : {})
     }
   }
   return { kind: 'unknown', reason: 'unknown-type', raw: obj }
 }
 
 function parseUser(obj: Record<string, unknown>, parent: string | undefined): AgentEvent | null {
-  const message = obj.message as { content?: RawContentBlock[] } | undefined
+  const message = obj.message as { content?: RawContentBlock[] | string } | undefined
   const toolUseResult = obj.tool_use_result
+  // Plain-string user records are CLI-synthesized context (the compaction
+  // summary, replayed local-command stdout) — never a chat-visible event.
+  if (message && typeof message.content === 'string') return null
   if (!message || !Array.isArray(message.content)) {
     return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
   }
@@ -405,7 +466,9 @@ function parseResult(obj: Record<string, unknown>): ResultEvent {
       outputTokens: toNum(u.outputTokens),
       cacheReadInputTokens: toNum(u.cacheReadInputTokens),
       cacheCreationInputTokens: toNum(u.cacheCreationInputTokens),
-      costUsd: toNum(u.costUSD)
+      costUsd: toNum(u.costUSD),
+      ...(typeof u.contextWindow === 'number' ? { contextWindow: u.contextWindow } : {}),
+      ...(typeof u.maxOutputTokens === 'number' ? { maxOutputTokens: u.maxOutputTokens } : {})
     }
   }
   const tokenUsage: TokenUsage = {
@@ -507,4 +570,24 @@ function parseRateLimit(obj: Record<string, unknown>): AgentEvent {
 
 function toNum(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+function toOptionalNum(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
+function toStringList(v: unknown): string[] | undefined {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
+}
+
+/** One API call's `message.usage` (snake_case) → `TokenUsage`; undefined when absent. */
+function parseCallUsage(raw: unknown): TokenUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const u = raw as Record<string, unknown>
+  return {
+    inputTokens: toNum(u.input_tokens),
+    outputTokens: toNum(u.output_tokens),
+    cacheReadInputTokens: toNum(u.cache_read_input_tokens),
+    cacheCreationInputTokens: toNum(u.cache_creation_input_tokens)
+  }
 }

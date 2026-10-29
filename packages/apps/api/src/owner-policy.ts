@@ -703,6 +703,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.listFiles': checked(path('cwd')),
   'chat.bumpAutocompleteUsage': none(`${HUB_CONFIG}: slash-command usage counts`),
   'chat.getAutocompleteUsage': none(`${HUB_CONFIG}: slash-command usage counts`),
+  'chat.getCliSnapshot': checked(task('taskId')),
   'chat.queue.list': checked(tab('tabId')),
   'chat.queue.push': checked(tab('tabId')),
   'chat.queue.remove': checked(ref('chatQueueItem')('id')),

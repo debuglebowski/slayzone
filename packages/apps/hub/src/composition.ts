@@ -117,6 +117,7 @@ import {
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
+import { createChatPromptRecorder } from '@slayzone/agent-turns/server'
 import {
   AutomationEngine,
   setAutomationsEvents,
@@ -769,7 +770,10 @@ export function composeServer(opts: {
       dataOps: {
         ...createDbChatDataOps(db, taskSessionStore),
         resolveComputerId: (taskId) => resolveComputerForTask(taskId)
-      }
+      },
+      // Chat CLIs fire no UserPromptSubmit hook, so chat sends are recorded into
+      // `agent_prompts` here — one prompt history per task across chat + TUI.
+      onChatEvent: createChatPromptRecorder(db)
     }),
     queueOps: createChatQueueOps(db),
     events: chatEvents,

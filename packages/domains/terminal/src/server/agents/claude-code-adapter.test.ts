@@ -522,3 +522,130 @@ describe('ClaudeCodeAdapter tests', () => {
     expect(message.content[0].is_error).toBe(true)
   })
 })
+
+// Recorded against Claude Code 2.1.312 (haiku): `chatui-local-commands` = /compact on an
+// empty session (fails), /context, /cost, /usage; `chatui-compact-session` = two turns,
+// a successful /compact, a recall turn and /context.
+describe('ClaudeCodeAdapter — slash commands, compaction, usage', () => {
+  test('turn-init carries the CLI command list, terminal-only subset, skills and version', () => {
+    const init = parseFixture('chatui-local-commands.ndjson').find((e) => e.kind === 'turn-init')
+    if (!init || init.kind !== 'turn-init') throw new Error('no turn-init')
+    expect(init.slashCommands).toContain('compact')
+    expect(init.slashCommands).toContain('context')
+    expect(init.terminalSlashCommands).toEqual(['doctor', 'color', 'focus', 'reload-plugins'])
+    expect(init.skills).toContain('simplify')
+    expect(init.cliVersion).toBe('2.1.312')
+  })
+
+  test('turn-init without a command list (older CLI / other envelope) leaves the fields undefined', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'init',
+        session_id: 's',
+        model: 'm',
+        cwd: '/',
+        tools: []
+      })
+    )
+    if (!ev || ev.kind !== 'turn-init') throw new Error('expected turn-init')
+    expect(ev.slashCommands).toBeUndefined()
+    expect(ev.terminalSlashCommands).toBeUndefined()
+    expect(ev.skills).toBeUndefined()
+  })
+
+  test('status compacting → compact-status started; failed result → compact-status failed + error', () => {
+    const statuses = parseFixture('chatui-local-commands.ndjson').filter(
+      (e) => e.kind === 'compact-status'
+    )
+    expect(statuses).toEqual([
+      { kind: 'compact-status', phase: 'started' },
+      { kind: 'compact-status', phase: 'failed', error: 'Not enough messages to compact.' }
+    ])
+  })
+
+  test('successful compaction → started, succeeded, boundary with metadata', () => {
+    const events = parseFixture('chatui-compact-session.ndjson')
+    expect(events.filter((e) => e.kind === 'compact-status')).toEqual([
+      { kind: 'compact-status', phase: 'started' },
+      { kind: 'compact-status', phase: 'succeeded' }
+    ])
+    expect(events.find((e) => e.kind === 'compact-boundary')).toEqual({
+      kind: 'compact-boundary',
+      trigger: 'manual',
+      preTokens: 49079,
+      postTokens: 6408,
+      durationMs: 3476
+    })
+  })
+
+  test('status requesting / plain null status → dropped (no persisted noise)', () => {
+    for (const status of ['requesting', null]) {
+      const ev = claudeCodeAdapter.parseLine(
+        JSON.stringify({ type: 'system', subtype: 'status', status, session_id: 's', uuid: 'u' })
+      )
+      expect(ev).toBeNull()
+    }
+  })
+
+  test('local slash command output (assistant with local_command_run) → command-output', () => {
+    const outputs = parseFixture('chatui-local-commands.ndjson').filter(
+      (e) => e.kind === 'command-output'
+    )
+    expect(outputs.map((o) => (o.kind === 'command-output' ? o.command : null))).toEqual([
+      'compact',
+      'context',
+      'usage',
+      'usage'
+    ])
+    const ctx = outputs[1]
+    if (ctx.kind !== 'command-output') throw new Error('expected command-output')
+    expect(ctx.text.startsWith('## Context Usage')).toBe(true)
+    expect(ctx.id).toBe('90ba88ba-25ae-4d28-8e57-be002f66fd95')
+    // Synthetic local-command messages never surface as assistant text.
+    expect(
+      parseFixture('chatui-local-commands.ndjson').some((e) => e.kind === 'assistant-text')
+    ).toBe(false)
+  })
+
+  test('system/local_command_output → command-output', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'local_command_output',
+        content: 'Voice mode on',
+        uuid: 'u-1',
+        session_id: 's'
+      })
+    )
+    expect(ev).toEqual({ kind: 'command-output', id: 'u-1', command: null, text: 'Voice mode on' })
+  })
+
+  test('main-thread assistant events carry the API call usage', () => {
+    const text = parseFixture('chatui-compact-session.ndjson').find(
+      (e) => e.kind === 'assistant-text'
+    )
+    if (!text || text.kind !== 'assistant-text') throw new Error('no assistant-text')
+    expect(text.usage).toEqual({
+      inputTokens: 8036,
+      outputTokens: 4,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 40990
+    })
+  })
+
+  test('result modelUsage keeps contextWindow + maxOutputTokens; cost is cumulative', () => {
+    const results = parseFixture('chatui-compact-session.ndjson').filter((e) => e.kind === 'result')
+    const first = results[0]
+    if (first.kind !== 'result') throw new Error('expected result')
+    expect(first.modelUsage['claude-haiku-5-5'].contextWindow).toBe(1000000)
+    expect(first.modelUsage['claude-haiku-5-5'].maxOutputTokens).toBe(128000)
+    const totals = results.map((r) => (r.kind === 'result' ? r.totalCostUsd : 0))
+    for (let i = 1; i < totals.length; i++) expect(totals[i]).toBeGreaterThanOrEqual(totals[i - 1])
+  })
+
+  test('string-content user records (compaction summary / replays) → dropped', () => {
+    const events = parseFixture('chatui-compact-session.ndjson')
+    expect(events.some((e) => e.kind === 'unknown')).toBe(false)
+  })
+})

@@ -3,14 +3,15 @@ import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from '../trpc'
 
 /**
- * User prompts sent to a task's main agent (mode `agentId`), oldest first.
- * Refetches when `agentPrompts.onChanged` fires for THIS task. `enabled` gates
- * both the query and the subscription so closed sidebars cost nothing.
+ * User prompts sent to a task's main agent (mode `agentId`) — or, with
+ * `agentId` undefined, to every agent of the task (terminal + chat) — oldest
+ * first. Refetches when `agentPrompts.onChanged` fires for THIS task. `enabled`
+ * gates both the query and the subscription so closed sidebars cost nothing.
  *
  * Return row shape is inferred from the `agentPrompts.list` tRPC procedure
  * (`AgentPrompt` from @slayzone/agent-turns) — no explicit type import needed.
  */
-export function useAgentPrompts(taskId: string, agentId: string, enabled: boolean) {
+export function useAgentPrompts(taskId: string, agentId: string | undefined, enabled: boolean) {
   const trpc = useTRPC()
 
   const query = useQuery(trpc.agentPrompts.list.queryOptions({ taskId, agentId }, { enabled }))

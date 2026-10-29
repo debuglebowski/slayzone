@@ -215,7 +215,8 @@ export {
   // the Electron host could run it, and a standalone hub silently never did.
   backfillChatModes,
   type ChatOps,
-  type ChatMode
+  type ChatMode,
+  type ChatEventContext
 } from './runtime/chat-handlers'
 // The chat data seam. Exported so a composition root can override ONE method
 // (e.g. computer resolution) over the db-backed defaults instead of reimplementing
