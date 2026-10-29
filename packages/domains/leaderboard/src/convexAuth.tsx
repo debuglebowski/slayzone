@@ -24,16 +24,45 @@ import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
 //     the PKCE verifier + `pending`); the code arrives later over the sub.
 // Either way the code is finished with `actions.signIn('github', { code })`,
 // which reads the stashed verifier from localStorage to complete PKCE.
+//
+// Which deployment: the host hands it to <ConvexAuthBootstrap convexUrl>; omitted,
+// it is this bundle's build-time `VITE_CONVEX_URL`. '' = Convex off for this host
+// (no leaderboard / feedback entry points): read it from
+// `useLeaderboardAuth().configured`, never from the build env, so a host-chosen
+// deployment (the Electron app's main process decides it, see
+// app/src/main/convex-deployment.ts) is the one fact every consumer sees.
 
 const ONE_DAY = 24 * 60 * 60 * 1000
 
 const LeaderboardAuthContext = createContext<LeaderboardAuthState>(LEADERBOARD_AUTH_DISABLED)
-const convexUrl = import.meta.env.VITE_CONVEX_URL?.trim() ?? ''
-const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null
-export const isConvexConfigured = !!convexClient
+/** This bundle's own Convex deployment — the default when the host names none. */
+const BUILD_CONVEX_URL = import.meta.env.VITE_CONVEX_URL?.trim() ?? ''
 const OAUTH_REDIRECT_URI = 'slayzone://auth/callback'
 const VERIFIER_STORAGE_KEY = '__convexAuthOAuthVerifier'
-const AUTH_STORAGE_NAMESPACE = convexUrl.replace(/\/+$/, '')
+
+interface ConvexDeployment {
+  url: string
+  client: ConvexReactClient
+  /** Key namespace of this deployment's auth state in localStorage. */
+  storageNamespace: string
+}
+
+const deployments = new Map<string, ConvexDeployment>()
+
+/** One client per deployment URL for the page's life ('' → none): a re-render never reconnects. */
+function convexDeployment(url: string): ConvexDeployment | null {
+  if (!url) return null
+  let deployment = deployments.get(url)
+  if (!deployment) {
+    deployment = {
+      url,
+      client: new ConvexReactClient(url),
+      storageNamespace: url.replace(/\/+$/, '')
+    }
+    deployments.set(url, deployment)
+  }
+  return deployment
+}
 
 function namespacedVerifierKey(namespace: string): string {
   const escapedNamespace = namespace.replace(/[^a-zA-Z0-9]/g, '')
@@ -84,9 +113,11 @@ const ON_CALLBACK_PATH = 'app.auth.onCallback'
 export type OAuthDelivery = 'inline' | 'subscription'
 
 function ConvexAuthBridge({
+  deployment,
   oauthDelivery = 'inline',
   children
 }: {
+  deployment: ConvexDeployment
   oauthDelivery?: OAuthDelivery
   children: React.ReactNode
 }): React.JSX.Element {
@@ -118,13 +149,13 @@ function ConvexAuthBridge({
         // PKCE verifier is single-use — drop it once the exchange has been
         // attempted so a stale verifier can't widen a replay window.
         try {
-          window.localStorage.removeItem(namespacedVerifierKey(AUTH_STORAGE_NAMESPACE))
+          window.localStorage.removeItem(namespacedVerifierKey(deployment.storageNamespace))
         } catch {
           /* ignore */
         }
       }
     },
-    [actions]
+    [actions, deployment]
   )
 
   // Fork only: the sidecar relays the OAuth callback over this subscription
@@ -167,12 +198,12 @@ function ConvexAuthBridge({
       signInWithGitHub: async () => {
         try {
           setLastError(null)
-          if (convexUrl) {
+          if (deployment.url) {
             // Arm the callback subscription before opening the browser so a fast
             // (fork) callback isn't dropped; the onCallback handler disarms it.
             flowPendingRef.current = true
             const signInResult = (await trpcClient.app.auth.githubSystemSignIn.mutate({
-              convexUrl,
+              convexUrl: deployment.url,
               redirectTo: OAUTH_REDIRECT_URI
             })) as GithubSystemSignInResult
 
@@ -180,7 +211,7 @@ function ConvexAuthBridge({
               // Stash the PKCE verifier so actions.signIn('github', { code })
               // can complete the exchange once the code arrives.
               window.localStorage.setItem(
-                namespacedVerifierKey(AUTH_STORAGE_NAMESPACE),
+                namespacedVerifierKey(deployment.storageNamespace),
                 signInResult.verifier
               )
               if (signInResult.code) {
@@ -230,7 +261,7 @@ function ConvexAuthBridge({
         }
       }
     }),
-    [actions, completeOAuthCode, isAuthenticated, isLoading, lastError, trpcClient]
+    [actions, completeOAuthCode, deployment, isAuthenticated, isLoading, lastError, trpcClient]
   )
 
   // Background leaderboard stats sync once a day
@@ -258,13 +289,17 @@ function ConvexAuthBridge({
 }
 
 export function ConvexAuthBootstrap({
+  convexUrl = BUILD_CONVEX_URL,
   oauthDelivery,
   children
 }: {
+  /** The Convex deployment for this host ('' = Convex off). Default: the bundle's `VITE_CONVEX_URL`. */
+  convexUrl?: string
   oauthDelivery?: OAuthDelivery
   children: React.ReactNode
 }): React.JSX.Element {
-  if (!convexClient) {
+  const deployment = convexDeployment(convexUrl)
+  if (!deployment) {
     return (
       <LeaderboardAuthContext.Provider value={LEADERBOARD_AUTH_DISABLED}>
         {children}
@@ -273,8 +308,10 @@ export function ConvexAuthBootstrap({
   }
 
   return (
-    <ConvexAuthProvider client={convexClient} storageNamespace={AUTH_STORAGE_NAMESPACE}>
-      <ConvexAuthBridge oauthDelivery={oauthDelivery}>{children}</ConvexAuthBridge>
+    <ConvexAuthProvider client={deployment.client} storageNamespace={deployment.storageNamespace}>
+      <ConvexAuthBridge deployment={deployment} oauthDelivery={oauthDelivery}>
+        {children}
+      </ConvexAuthBridge>
     </ConvexAuthProvider>
   )
 }

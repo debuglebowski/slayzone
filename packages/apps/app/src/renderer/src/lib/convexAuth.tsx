@@ -4,4 +4,4 @@
 // `@/lib/convexAuth` import sites (App.tsx, main.tsx). The Electron renderer
 // mounts <ConvexAuthBootstrap> with no oauthDelivery prop → the 'inline'
 // (main-process mutation-return) path, identical to before the extraction.
-export { ConvexAuthBootstrap, useLeaderboardAuth, isConvexConfigured } from '@slayzone/leaderboard'
+export { ConvexAuthBootstrap, useLeaderboardAuth } from '@slayzone/leaderboard'

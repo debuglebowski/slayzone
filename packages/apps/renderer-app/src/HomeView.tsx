@@ -66,7 +66,7 @@ import {
 } from '@slayzone/agent-panels'
 import { AppSidebar } from '@slayzone/sidebar'
 import { FeedbackDialog } from '@slayzone/feedback/client'
-import { isConvexConfigured } from '@slayzone/leaderboard'
+import { useLeaderboardAuth } from '@slayzone/leaderboard'
 import {
   useOnboardingChecklist,
   COMMUNITY_DISCORD_URL,
@@ -102,6 +102,8 @@ testWindow.__slayzone_dialogStore ??= useDialogStore
 export function HomeView(): React.JSX.Element {
   const rawData = useTasksData()
   const trpcClient = useTRPCClient()
+  // Convex backend configured for this host — gates the leaderboard + feedback entry points.
+  const convexConfigured = useLeaderboardAuth().configured
 
   // Wrap task mutations with undo (toast + undo/redo) and merge them over the
   // raw board data, so EVERY consumer — sidebar context-menu edits, the board,
@@ -700,7 +702,7 @@ export function HomeView(): React.JSX.Element {
         onboardingChecklist={onboardingChecklist}
         zenMode={zenMode}
         onSetWindowButtonVisibility={NOOP}
-        convexConfigured={isConvexConfigured}
+        convexConfigured={convexConfigured}
         feedbackSlot={<FeedbackDialog />}
         keyRecorder={KeyRecorder}
         sessionTaskIds={EMPTY_SESSION_IDS}

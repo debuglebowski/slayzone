@@ -99,7 +99,7 @@ import {
 import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
-import { isConvexConfigured, useLeaderboardAuth } from '@/lib/convexAuth'
+import { useLeaderboardAuth } from '@/lib/convexAuth'
 import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
@@ -1419,7 +1419,7 @@ function App(): React.JSX.Element {
             onSetWindowButtonVisibility={(v) =>
               void trpcClient.app.window.setWindowButtonVisibility.mutate({ visible: v })
             }
-            convexConfigured={isConvexConfigured}
+            convexConfigured={leaderboardAuth.configured}
             feedbackSlot={<FeedbackDialog />}
             keyRecorder={KeyRecorder}
             sessionTaskIds={activeAgentTaskIds}
