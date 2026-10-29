@@ -27,6 +27,9 @@ export default defineConfig(
       '**/.e2e-runtime/**',
       '**/.e2e-userdata/**',
       '.claude/worktrees/**',
+      // Gitignored local scratch (`logs/` in .gitignore): flat config does not honor
+      // .gitignore, so a saved bundle or script there would fail `pnpm lint`.
+      '**/logs/**',
       'convex/_generated/**',
       // Local-only chromium fork tree (gitignored, ~70GB) — flat config does
       // not honor .gitignore, and linting it OOMs + reports thousands of
