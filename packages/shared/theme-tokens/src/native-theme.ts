@@ -20,6 +20,11 @@ export interface HubThemeSettings {
 export interface NativeTheme {
   /** The preset painted (after split, legacy ids; an unknown id paints `slay`). */
   themeId: string
+  /**
+   * The variant painted: the chosen one, except `dark` for a preset without a light
+   * variant (its dark colours are painted), so what follows it (status bar text)
+   * matches the colours.
+   */
   variant: Theme
   /** That preset variant's chrome as hex (its dark one if it has no light). */
   colors: ChromeColors
@@ -52,6 +57,7 @@ export function resolveNativeTheme(
     resolveAppThemeSelection(hub?.stored ?? NOTHING_STORED),
     variant
   )
-  const themeId = getUnifiedTheme(chosen).id
-  return { themeId, variant, colors: getThemeChromeHex(themeId, variant) }
+  const theme = getUnifiedTheme(chosen)
+  const painted: Theme = variant === 'light' && !theme.light ? 'dark' : variant
+  return { themeId: theme.id, variant: painted, colors: getThemeChromeHex(theme.id, painted) }
 }

@@ -68,12 +68,14 @@ describe('resolveNativeTheme', () => {
       )
     })
 
-    it('a preset without a light variant paints its dark colours in light', () => {
+    it('a preset without a light variant paints its dark colours in light, as dark', () => {
       const darkOnly = unifiedThemes.filter((t) => !t.light).map((t) => t.id)
       expect(darkOnly).toContain('nord')
       for (const id of darkOnly) {
         const t = resolveNativeTheme(hub({ themeId: id }), 'light')
-        expect(t).toMatchObject({ themeId: id, variant: 'light' })
+        // `variant` is what is painted: what follows it (the status bar's light text)
+        // must match these dark colours, not the device's light scheme.
+        expect(t).toMatchObject({ themeId: id, variant: 'dark' })
         expect(t.colors).toBe(getThemeChromeHex(id, 'dark'))
       }
     })

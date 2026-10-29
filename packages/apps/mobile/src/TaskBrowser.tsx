@@ -54,20 +54,28 @@ export function TaskBrowser({ hubLabel, onSignOut }: { hubLabel: string; onSignO
     </View>
   )
 
+  // The header (with Sign out) stays while the board loads or fails: a session whose hub
+  // is gone must still be able to sign out.
   if (board.isPending) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={theme.foreground} />
+      <View style={styles.screen}>
+        {header}
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.foreground} />
+        </View>
       </View>
     )
   }
   if (board.isError) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.error}>{board.error.message}</Text>
-        <Pressable onPress={() => void board.refetch()}>
-          <Text style={styles.link}>Retry</Text>
-        </Pressable>
+      <View style={styles.screen}>
+        {header}
+        <View style={styles.center}>
+          <Text style={styles.error}>{board.error.message}</Text>
+          <Pressable onPress={() => void board.refetch()}>
+            <Text style={styles.link}>Retry</Text>
+          </Pressable>
+        </View>
       </View>
     )
   }
