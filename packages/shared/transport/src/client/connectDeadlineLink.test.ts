@@ -15,12 +15,29 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
-import { createTRPCClient, createWSClient, wsLink, type TRPCLink } from '@trpc/client'
+import {
+  createTRPCClient,
+  createWSClient,
+  wsLink,
+  type TRPCClient,
+  type TRPCLink
+} from '@trpc/client'
+import { initTRPC } from '@trpc/server'
 import { observable, behaviorSubject } from '@trpc/server/observable'
 import superjson from 'superjson'
 import { connectDeadlineLink, type ConnectionStateSource } from './connectDeadlineLink'
-import { createTrpcWsClient } from './trpc'
-import type { AppRouter } from './app-router'
+import { createTrpcWsClient } from './runtime'
+
+// The two procedures these tests call, at the app's paths. Only the type is used:
+// the wire is path-based and the links here terminate before any server.
+const t = initTRPC.create({ transformer: superjson })
+const testRouter = t.router({
+  hub: t.router({ describe: t.procedure.query(() => ({})) }),
+  agentLifecycle: t.router({
+    onEvent: t.procedure.subscription(() => observable<unknown>(() => () => undefined))
+  })
+})
+type TestRouter = typeof testRouter
 
 /** A port nothing listens on — bound, read, then released. */
 async function deadPort(): Promise<number> {
@@ -34,7 +51,7 @@ async function deadPort(): Promise<number> {
 }
 
 /** Terminating link that accepts an operation and never answers it. */
-function silentLink(onTeardown?: () => void): TRPCLink<AppRouter> {
+function silentLink(onTeardown?: () => void): TRPCLink<TestRouter> {
   return () => () =>
     observable(() => {
       return () => onTeardown?.()
@@ -42,7 +59,7 @@ function silentLink(onTeardown?: () => void): TRPCLink<AppRouter> {
 }
 
 /** Terminating link that answers after `ms` — a slow procedure, not a dead hub. */
-function slowLink(ms: number): TRPCLink<AppRouter> {
+function slowLink(ms: number): TRPCLink<TestRouter> {
   return () =>
     ({ op }) =>
       observable((observer) => {
@@ -71,7 +88,7 @@ describe('a hub whose socket never opens', () => {
     const port = await deadPort()
     const wsClient = createWSClient({ url: `ws://127.0.0.1:${port}/trpc` })
     closers.push(() => void wsClient.close())
-    const client = createTRPCClient<AppRouter>({
+    const client = createTRPCClient<TestRouter>({
       links: [wsLink({ client: wsClient, transformer: superjson })]
     })
 
@@ -86,11 +103,12 @@ describe('a hub whose socket never opens', () => {
 
   it('rejects the query once the connect deadline passes', async () => {
     const port = await deadPort()
-    const { client, wsClient } = createTrpcWsClient({
+    const { client: runtimeClient, wsClient } = createTrpcWsClient({
       url: `ws://127.0.0.1:${port}/trpc`,
       connectDeadlineMs: 300
     })
     closers.push(() => void wsClient.close())
+    const client = runtimeClient as unknown as TRPCClient<TestRouter>
 
     await expect(client.hub.describe.query()).rejects.toThrow(/unreachable/i)
   })
@@ -100,7 +118,7 @@ describe('connectDeadlineLink', () => {
   it('errors an operation that is still waiting on a connection', async () => {
     let toreDown = false
     const connectionState = connectionStateOf('connecting')
-    const client = createTRPCClient<AppRouter>({
+    const client = createTRPCClient<TestRouter>({
       links: [
         connectDeadlineLink({ connectionState, deadlineMs: 100 }),
         silentLink(() => (toreDown = true))
@@ -115,7 +133,7 @@ describe('connectDeadlineLink', () => {
 
   it('leaves a slow procedure alone once the hub is connected', async () => {
     const connectionState = connectionStateOf('pending')
-    const client = createTRPCClient<AppRouter>({
+    const client = createTRPCClient<TestRouter>({
       links: [connectDeadlineLink({ connectionState, deadlineMs: 50 }), slowLink(250)]
     })
 
@@ -124,7 +142,7 @@ describe('connectDeadlineLink', () => {
 
   it('starts the deadline when a connected hub drops mid-operation', async () => {
     const connectionState = connectionStateOf('pending')
-    const client = createTRPCClient<AppRouter>({
+    const client = createTRPCClient<TestRouter>({
       links: [connectDeadlineLink({ connectionState, deadlineMs: 100 }), silentLink()]
     })
 
@@ -135,7 +153,7 @@ describe('connectDeadlineLink', () => {
 
   it('never deadlines a subscription — it owns its own reconnect semantics', async () => {
     const connectionState = connectionStateOf('connecting')
-    const client = createTRPCClient<AppRouter>({
+    const client = createTRPCClient<TestRouter>({
       links: [connectDeadlineLink({ connectionState, deadlineMs: 50 }), slowLink(200)]
     })
 

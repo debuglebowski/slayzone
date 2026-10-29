@@ -18,8 +18,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer } from 'ws'
-import { createTrpcWsClient } from './trpc'
+import type { TRPCClient } from '@trpc/client'
+import { initTRPC } from '@trpc/server'
+import { createTrpcWsClient, type RuntimeClient } from './runtime'
 import { setHubConnectProbe } from './connectPacing'
+
+// The one procedure these tests call, at the app's path. Only the type is used: the
+// wire is path-based and no server ever answers here.
+const t = initTRPC.create()
+const testRouter = t.router({
+  settings: t.router({
+    get: t.procedure.input((v) => v as { key: string }).query(() => null)
+  })
+})
+const asTestClient = (client: RuntimeClient) => client as unknown as TRPCClient<typeof testRouter>
 
 async function deadPort(): Promise<number> {
   return await new Promise<number>((resolve) => {
@@ -51,13 +63,11 @@ afterEach(() => {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Fire `n` queries spaced `gapMs` apart; each one, today, opens its own socket. */
-async function fireQueries(
-  client: ReturnType<typeof createTrpcWsClient>['client'],
-  n: number,
-  gapMs: number
-): Promise<void> {
+async function fireQueries(client: RuntimeClient, n: number, gapMs: number): Promise<void> {
   for (let i = 0; i < n; i++) {
-    void client.settings.get.query({ key: `k${i}` }).catch(() => null)
+    void asTestClient(client)
+      .settings.get.query({ key: `k${i}` })
+      .catch(() => null)
     await sleep(gapMs)
   }
 }
@@ -103,7 +113,9 @@ describe('connect pacing for an unreachable hub', () => {
     serverUp = true
 
     const t0 = Date.now()
-    void client.settings.get.query({ key: 'x' }).catch(() => null)
+    void asTestClient(client)
+      .settings.get.query({ key: 'x' })
+      .catch(() => null)
     await new Promise<void>((resolve) => {
       const sub = wsClient.connectionState.subscribe({
         next: (s) => {
