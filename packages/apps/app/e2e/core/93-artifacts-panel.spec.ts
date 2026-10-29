@@ -619,6 +619,28 @@ test.describe('Artifacts panel', () => {
     await expect(zoom).toHaveCount(0)
   })
 
+  test('SVG preview fit/full controls sit on an opaque popover surface', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    await s.createArtifact({
+      taskId,
+      title: 'toolbar-surface.svg',
+      content: '<svg viewBox="0 0 10 10"/>'
+    })
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'toolbar-surface.svg').click()
+    const fit = artifactsPanel(mainWindow).getByRole('button', { name: 'Fit to view' })
+    await expect(fit).toBeVisible({ timeout: 5_000 })
+    // `bg-popover/90` on the button's wrapper. It was never generated (its file was not a
+    // Tailwind @source), so the controls floated see-through over the image.
+    const background = await fit.evaluate(
+      (button) => getComputedStyle(button.parentElement as HTMLElement).backgroundColor
+    )
+    expect(background).not.toBe('rgba(0, 0, 0, 0)')
+    expect(background).not.toBe('transparent')
+  })
+
   test('caret survives save round-trip in code editor', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     // Use a code-mode extension (.ts) so CodeMirror renders directly (no ProseMirror preview).
