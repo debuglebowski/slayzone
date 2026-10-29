@@ -4034,6 +4034,16 @@ export const migrations: Migration[] = [
         update.run(JSON.stringify({ ...cfg, [MODE]: next }), task.id)
       }
     }
+  },
+  {
+    version: 174,
+    up: (db) => {
+      // A queued chat message's content blocks (JSON array: `{type:'text',text}`
+      // today; images and documents with plan item 3.5), so a queued message
+      // travels exactly like a sent one. NULL for rows from before: their
+      // content is their `send` text.
+      db.exec(`ALTER TABLE chat_queue ADD COLUMN content TEXT;`)
+    }
   }
 ]
 

@@ -1,15 +1,17 @@
 /**
  * Claude Code chat: reopening an old conversation (`--resume`) — success, and each
- * kind of resume failure the transport's "holding pen" reacts to (audit #2).
+ * kind of resume failure the transport's resume guard reacts to (audit #2): only
+ * the CLI's "can't resume" signals are withheld, a fresh start re-sends the message,
+ * and every other error is shown.
  *
  * The real CLI (2.1.312, transcript `resume-missing`) fails an unknown --resume at
  * startup: stderr "No conversation found with session ID: …", then
  * `result{error_during_execution, num_turns:0}`, exit 1. Here the first spawn
  * fails right AFTER it got the user's message — a slow-starting CLI — so the test
- * isolates what the holding pen does with that message.
+ * isolates what happens to that message.
  */
 import { resetApp } from '../fixtures/electron'
-import { echoTurn, ev, expect, knownBug, reply, step, test, type Step } from '../fixtures/chat'
+import { echoTurn, ev, expect, reply, step, test, type Step } from '../fixtures/chat'
 
 const CONVERSATION = '0b6c1a52-5f6e-4d55-9c7e-2a9a3f1e6d01'
 
@@ -113,25 +115,22 @@ test.describe('Chat resume', () => {
         scenario: resumeScenario(kind.failure)
       })
       await t.send('hello again')
-      // Preconditions: the resumed spawn got the message and failed; the holding
-      // pen detected it and started fresh (no --resume).
+      // The resumed spawn got the message and failed; the transport started fresh
+      // (no --resume) and re-sent the message — the new conversation never had it.
       expect((await t.run(0, (r) => r.exit() !== undefined)).userMessages()).toEqual([
         'hello again'
       ])
       const fresh = await t.run(1)
       expect(fresh.resumed).toBe(false)
-
-      // The pen drops every staged event — including the user's message — and
-      // the fresh process is never sent it (the comment in respawnFresh says it is).
-      knownBug({
-        audit: '#2',
-        fixedBy: '1.4',
-        what: 'after a failed resume the fresh start never receives the user’s message'
-      })
       await expect
         .poll(() => t.epoch.run(1)?.userMessages(), { timeout: 4_000 })
         .toEqual(['hello again'])
       await expect(t.panel.getByText('echo: hello again')).toBeVisible()
+      // The history stays, and the user is told the conversation started over.
+      await expect(t.panel.getByText('an earlier answer')).toBeVisible()
+      await expect(
+        t.panel.locator('[data-testid="chat-notice"][data-code="resume-failed-fresh-start"]')
+      ).toBeVisible()
     })
   }
 
@@ -161,13 +160,8 @@ test.describe('Chat resume', () => {
     // Precondition: the CLI reported the error and exited.
     await t.run(0, (r) => r.exit()?.code === 1)
 
-    // Not a resume failure, never a healthy event: the pen stages it forever —
-    // not saved, not shown.
-    knownBug({
-      audit: '#2',
-      fixedBy: '1.4',
-      what: 'a resumed session’s first-turn error is never shown'
-    })
+    // Not a resume failure: shown at once (the old holding pen staged it forever),
+    // and readable in the timeline, not only inside the result footer.
     await expect(t.panel.getByText(authError)).toBeVisible({ timeout: 4_000 })
   })
 })

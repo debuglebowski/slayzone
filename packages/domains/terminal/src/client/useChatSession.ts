@@ -9,8 +9,9 @@ import {
 } from 'react'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
-import { useStableCallback } from '@slayzone/ui'
-import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
+import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
+import type { AgentEvent, PermissionDecision, UserContentBlock } from '@slayzone/terminal-contracts'
+import { userMessageText } from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from './chat-prompts'
 import {
   initialState,
@@ -43,7 +44,14 @@ export interface UseChatSessionResult {
   prompts: ChatPrompt[]
   /** Request ids whose answer is on its way to the server (buttons disabled). */
   submittingPrompts: ReadonlySet<string>
-  sendMessage: (text: string) => Promise<void>
+  /**
+   * Send a user message (text, or content blocks). It shows at once with its
+   * delivery state; it never silently disappears — a failure stays on screen
+   * with Retry.
+   */
+  sendMessage: (input: string | UserContentBlock[]) => Promise<void>
+  /** Send a failed message again (same id, so it is never delivered twice). */
+  retryMessage: (id: string) => Promise<void>
   /**
    * Resolve a pending `tool_use_id` (e.g. AskUserQuestion) with a `tool_result`
    * content block instead of a plain user message. Returns true when the
@@ -104,8 +112,10 @@ interface HydrateChatCtx {
   hydratedRef: RefObject<boolean>
   /** True once any load of this hook finished — the next one is a reload. */
   loadedOnceRef: RefObject<boolean>
-  liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number }>>
-  applyLive: (event: AgentEvent, seq: number) => void
+  liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number; live?: number }>>
+  applyLive: (event: AgentEvent, seq: number, live?: number) => void
+  /** Adopt a replay's live snapshot (blocks still streaming) at its live counter. */
+  applySnapshot: (events: AgentEvent[], afterSeq: number, liveSeq: number) => void
   dispatch: Dispatch<ChatTimelineAction>
   onHydrated: () => void
 }
@@ -133,6 +143,7 @@ async function hydrateAndReplay({
   loadedOnceRef,
   liveQueueRef,
   applyLive,
+  applySnapshot,
   dispatch,
   onHydrated
 }: HydrateChatCtx): Promise<void> {
@@ -148,7 +159,8 @@ async function hydrateAndReplay({
   }
   if (gen !== genRef.current) return
   try {
-    const buffered = await trpcClient.chat.getBufferSince.query({
+    // Saved history + what is streaming right now, in one snapshot.
+    const replay = await trpcClient.chat.getReplay.query({
       tabId: target.tabId,
       afterSeq: -1
     })
@@ -156,7 +168,9 @@ async function hydrateAndReplay({
     if (loadedOnceRef.current) dispatch({ type: 'reset' })
     // Replay through applyLive so the seq dedup applies. Prompt state is part
     // of the reducer, so a pending prompt comes back from the replay.
-    for (const { seq, event } of buffered) applyLive(event as AgentEvent, seq)
+    for (const { seq, event } of replay.events) applyLive(event as AgentEvent, seq)
+    // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
+    applySnapshot(replay.live.events as AgentEvent[], replay.live.afterSeq, replay.live.liveSeq)
   } catch {
     /* ignore replay failures */
   } finally {
@@ -165,7 +179,7 @@ async function hydrateAndReplay({
       // so anything already covered by the replay buffer is skipped.
       hydratedRef.current = true
       loadedOnceRef.current = true
-      for (const { event, seq } of liveQueueRef.current) applyLive(event, seq)
+      for (const { event, seq, live } of liveQueueRef.current) applyLive(event, seq, live)
       liveQueueRef.current = []
       onHydrated()
     }
@@ -190,6 +204,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const trpcClient = useTRPCClient()
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
   const lastSeqRef = useRef<number>(-1)
+  // Newest live event applied (live events carry their own counter; see applyLive).
+  const lastLiveRef = useRef<number>(0)
   // Answers on their way to the server: the ref is the synchronous double-click
   // guard, the state drives the disabled buttons.
   const submittingRef = useRef<Set<string>>(new Set())
@@ -204,10 +220,21 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const genRef = useRef(0)
   const hydratedRef = useRef(false)
   const loadedOnceRef = useRef(false)
-  const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number }>>([])
+  const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number; live?: number }>>([])
 
   // Stable: only reads refs + stable setters. Applies one event to the reducer.
-  const applyLive = useCallback((event: AgentEvent, seq: number): void => {
+  //
+  // A LIVE event (`live` set: a streaming fragment, a `sending` state — never
+  // saved) belongs right after saved event `seq`: it applies only if that is
+  // still the newest saved event here and it is newer than the last live one.
+  // Otherwise it is stale (the saved event it led to is already applied).
+  const applyLive = useCallback((event: AgentEvent, seq: number, live?: number): void => {
+    if (live !== undefined) {
+      if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
+      lastLiveRef.current = live
+      dispatch({ type: 'event', event })
+      return
+    }
     if (seq <= lastSeqRef.current) return
     lastSeqRef.current = seq
     dispatch({ type: 'event', event })
@@ -225,14 +252,33 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // Stable handler (reads refs + the latest tabId) — refs must not be touched
   // from a closure built during render.
   const handleEvent = useStableCallback(
-    ({ tabId, event, seq }: { tabId: string; event: unknown; seq: number }) => {
+    ({
+      tabId,
+      event,
+      seq,
+      live
+    }: {
+      tabId: string
+      event: unknown
+      seq: number
+      live?: number
+    }) => {
       if (tabId !== opts.tabId) return
       if (!hydratedRef.current) {
-        liveQueueRef.current.push({ event: event as AgentEvent, seq })
+        liveQueueRef.current.push({ event: event as AgentEvent, seq, live })
         return
       }
-      applyLive(event as AgentEvent, seq)
+      applyLive(event as AgentEvent, seq, live)
     }
+  )
+  // Stable: refs + dispatch only.
+  const applySnapshot = useCallback(
+    (events: AgentEvent[], afterSeq: number, liveSeq: number): void => {
+      if (afterSeq !== lastSeqRef.current) return
+      lastLiveRef.current = Math.max(lastLiveRef.current, liveSeq)
+      for (const event of events) dispatch({ type: 'event', event })
+    },
+    []
   )
   useSubscription(
     trpc.chat.onEvent.subscriptionOptions(undefined, {
@@ -283,6 +329,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     hydratedRef.current = false
     liveQueueRef.current = []
     lastSeqRef.current = -1
+    lastLiveRef.current = 0
     const inputs = {
       tabId: opts.tabId,
       taskId: opts.taskId,
@@ -307,6 +354,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       loadedOnceRef,
       liveQueueRef,
       applyLive,
+      applySnapshot,
       dispatch,
       onHydrated: () => setLoadedInputs(inputs)
     })
@@ -323,6 +371,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     opts.cwd,
     opts.providerFlagsOverride,
     applyLive,
+    applySnapshot,
     trpcClient
   ])
 
@@ -343,22 +392,52 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // Stable ref so consumers (autocomplete `sources` useMemo, ChatPanel chatApi)
   // don't reinitialize on every parent render. dispatch is stable from useReducer.
   const sendMessage = useCallback(
-    async (text: string): Promise<void> => {
+    async (input: string | UserContentBlock[]): Promise<void> => {
+      const content: UserContentBlock[] =
+        typeof input === 'string' ? [{ type: 'text', text: input }] : input
+      // The client mints the id: the optimistic bubble, the server's
+      // `user-message`, its delivery states and the CLI's message `uuid` all
+      // carry it — and re-sending it can never deliver it twice.
+      const id = safeRandomUUID()
       // Optimistic: paint the user-text immediately so the UI doesn't lag the
       // roundtrip. Main still emits the canonical `user-message` event and the
-      // reducer confirms-in-place (FIFO) when it arrives — single source of truth
-      // for replay. `user-sent` is renderer-only; never persisted.
-      dispatch({ type: 'user-sent', text })
+      // reducer confirms it in place by id — single source of truth for replay.
+      // `user-sent` is renderer-only; never persisted.
+      dispatch({ type: 'user-sent', id, text: userMessageText(content) })
       try {
-        const ok = await trpcClient.chat.send.mutate({ tabId: opts.tabId, text })
-        if (!ok) dispatch({ type: 'user-send-failed' })
+        await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
       } catch (err) {
-        dispatch({ type: 'user-send-failed' })
+        dispatch({
+          type: 'user-send-failed',
+          id,
+          error: err instanceof Error ? err.message : String(err)
+        })
         throw err
       }
     },
     [opts.tabId, trpcClient]
   )
+
+  // Read the failed message's text from the reducer; `state` is read via a
+  // stable callback so this stays stable for renderers.
+  const retryMessage = useStableCallback(async (id: string): Promise<void> => {
+    const item = state.timeline.find((it) => it.kind === 'user-text' && it.id === id)
+    if (!item || item.kind !== 'user-text') return
+    dispatch({ type: 'user-retry', id })
+    try {
+      // Same id: the server retries it (or takes it, if it never got it).
+      await trpcClient.chat.send.mutate({
+        tabId: opts.tabId,
+        message: { id, content: [{ type: 'text', text: item.text }] }
+      })
+    } catch (err) {
+      dispatch({
+        type: 'user-send-failed',
+        id,
+        error: err instanceof Error ? err.message : String(err)
+      })
+    }
+  })
 
   const sendToolResult = async (args: {
     toolUseId: string
@@ -418,6 +497,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
   const reset = (): void => {
     dispatch({ type: 'reset' })
+    lastLiveRef.current = 0
     lastSeqRef.current = -1
   }
 
@@ -430,6 +510,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     prompts: state.prompts,
     submittingPrompts,
     sendMessage,
+    retryMessage,
     sendToolResult,
     respondPermission,
     interrupt,

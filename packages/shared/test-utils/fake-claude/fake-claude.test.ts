@@ -27,7 +27,8 @@ const CHAT_ARGV = [
   'stream-json',
   '--verbose',
   '--permission-prompt-tool',
-  'stdio'
+  'stdio',
+  '--replay-user-messages'
 ]
 
 interface Proc {
@@ -229,6 +230,72 @@ describe('fake-claude — turns', () => {
     const p = start()
     p.child.stdin.end()
     expect((await p.exited).code).toBe(0)
+  })
+})
+
+describe('fake-claude — delivery acks (2.1.312, --replay-user-messages)', () => {
+  const tagged = (uuid: string, text: string) => ({
+    type: 'user',
+    uuid,
+    message: { role: 'user', content: text }
+  })
+  const acks = (lines: Array<Record<string, unknown>>) =>
+    lines.flatMap((e) =>
+      e.type === 'command_lifecycle'
+        ? [`${String(e.command_uuid)}:${String(e.state)}`]
+        : e.type === 'user' && e.isReplay
+          ? [`${String(e.uuid)}:replay`]
+          : e.type === 'result'
+            ? ['result']
+            : []
+    )
+
+  it('a message with a uuid: queued, started + replay, result, completed', async () => {
+    fake.setScenario({ processes: [{ turns: [reply('ok')] }] })
+    const p = start()
+    p.send(tagged('m-1', 'hello'))
+    await p.waitFor((e) => e.type === 'command_lifecycle' && e.state === 'completed')
+    expect(acks(p.lines)).toEqual([
+      'm-1:queued',
+      'm-1:started',
+      'm-1:replay',
+      'result',
+      'm-1:completed'
+    ])
+  })
+
+  it('a message sent mid-turn is acked queued at once, then runs after', async () => {
+    fake.setScenario({
+      processes: [{ turns: [[step.sleep(300), ...reply('one')], reply('two')] }]
+    })
+    const p = start()
+    p.send(tagged('a', 'first'))
+    await p.waitFor((e) => e.type === 'command_lifecycle' && e.state === 'started')
+    p.send(tagged('b', 'second'))
+    await p.waitFor(
+      (e) => e.type === 'command_lifecycle' && e.command_uuid === 'b' && e.state === 'completed'
+    )
+    expect(acks(p.lines)).toEqual([
+      'a:queued',
+      'a:started',
+      'a:replay',
+      'b:queued',
+      'result',
+      'a:completed',
+      'b:started',
+      'b:replay',
+      'result',
+      'b:completed'
+    ])
+  })
+
+  it('lifecycle: none plays a CLI that acks nothing', async () => {
+    fake.setScenario({ processes: [{ lifecycle: 'none', turns: [reply('ok')] }] })
+    const p = start()
+    p.send(tagged('m-1', 'hello'))
+    await p.waitFor(isResult)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(acks(p.lines)).toEqual(['result'])
   })
 })
 

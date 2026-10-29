@@ -20,7 +20,8 @@ const REQUIRED_FLAGS = [
   ['--input-format', 'stream-json'],
   ['--output-format', 'stream-json'],
   ['--verbose'],
-  ['--permission-prompt-tool', 'stdio']
+  ['--permission-prompt-tool', 'stdio'],
+  ['--replay-user-messages']
 ]
 
 const EXIT_ARGV_DRIFT = 2
@@ -108,8 +109,17 @@ const ctx = {
 
 // --- stdin --------------------------------------------------------------------
 
+/** Pending user messages: `{ text, uuid?, content }`. */
 const userQueue = []
 let userWaiter = null
+/**
+ * Delivery acks for a message that carried a `uuid`, as 2.1.312 sends them with
+ * `--replay-user-messages` (spike transcripts 05/14): `command_lifecycle queued`
+ * on receipt (even mid-turn), `started` + the replayed message when its turn
+ * begins, `completed` after the turn's result (`cancelled` when interrupted).
+ * `lifecycle: 'none'` plays a CLI that sends none of it.
+ */
+const acksDelivery = () => script.lifecycle !== 'none' && argv.includes('--replay-user-messages')
 let stdinEnded = false
 const pendingRequests = new Map()
 let turnAbort = null
@@ -174,12 +184,25 @@ function onStdinLine(line) {
         : Array.isArray(content)
           ? content.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('')
           : ''
+    const uuid = typeof msg.uuid === 'string' ? msg.uuid : undefined
+    const entry = { text, uuid, content }
+    if (uuid && acksDelivery()) void lifecycle(uuid, 'queued')
     if (userWaiter) {
       const w = userWaiter
       userWaiter = null
-      w(text)
-    } else userQueue.push(text)
+      w(entry)
+    } else userQueue.push(entry)
   }
+}
+
+function lifecycle(uuid, state) {
+  return writeLine({
+    type: 'command_lifecycle',
+    command_uuid: uuid,
+    state,
+    uuid: `lc-${uuid}-${state}`,
+    session_id: ctx.sessionId
+  })
 }
 
 function nextUserMessage() {
@@ -627,9 +650,22 @@ function exit(code) {
 async function main() {
   await runSteps(script.onStart, null)
   for (;;) {
-    const text = await nextUserMessage()
-    if (text === null) break
+    const message = await nextUserMessage()
+    if (message === null) break
+    const { text, uuid, content } = message
     ctx.userText = text
+    const acks = Boolean(uuid) && acksDelivery()
+    if (acks) {
+      await lifecycle(uuid, 'started')
+      await writeLine({
+        type: 'user',
+        isReplay: true,
+        uuid,
+        message: { role: 'user', content },
+        parent_tool_use_id: null,
+        session_id: ctx.sessionId
+      })
+    }
     const steps = script.turns?.[ctx.turn] ?? script.defaultTurn
     ctx.turn += 1
     if (!steps) {
@@ -645,19 +681,23 @@ async function main() {
         modelUsage: {},
         permission_denials: []
       })
+      if (acks) await lifecycle(uuid, 'completed')
       continue
     }
     turnAbort = new AbortController()
     turnRunning = true
+    let interrupted = false
     try {
       await runSteps(steps, turnAbort.signal)
     } catch (err) {
       if (!(err instanceof Aborted)) throw err
+      interrupted = true
       await runSteps(script.onInterrupt ?? defaultInterruptSteps(), null)
     } finally {
       turnRunning = false
       openToolUses.clear()
     }
+    if (acks) await lifecycle(uuid, interrupted ? 'cancelled' : 'completed')
   }
   exit(script.exitCodeOnStdinEnd ?? 0)
 }

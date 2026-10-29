@@ -36,6 +36,10 @@ export interface ChatViewState {
    * this feedback" sends the feedback this way).
    */
   sendMessage?: (text: string) => void
+  /** Send a failed user message again (same id). */
+  retryMessage?: (id: string) => void
+  /** Start the agent again (the start-failure card's Retry). */
+  restartAgent?: () => void
   /**
    * Resolve a pending `tool_use_id` with a `tool_result` content block.
    * Returns false when the adapter lacks a structured-input channel.

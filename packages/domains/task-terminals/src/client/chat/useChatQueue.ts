@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
-import { useStableCallback } from '@slayzone/ui'
+import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 
 /**
@@ -65,7 +65,15 @@ export function useChatQueue(
   // unstable, and a consumer effect keyed on `clear` looped infinitely.)
   const push = useCallback(
     async (send: string, original: string) => {
-      await trpcClient.chat.queue.push.mutate({ tabId, send, original })
+      // The id it gets here is the id it is sent with: the outbox tracks the
+      // drained message under it. Content travels as blocks, like a direct send.
+      await trpcClient.chat.queue.push.mutate({
+        tabId,
+        send,
+        original,
+        id: safeRandomUUID(),
+        content: [{ type: 'text', text: send }]
+      })
       // No optimistic update — onQueueChanged fires post-insert and triggers refetch.
     },
     [trpcClient, tabId]

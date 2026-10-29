@@ -41,6 +41,10 @@ export type AgentEvent =
   | HostControlRequestEvent
   | SessionSpawnEvent
   | AgentPlanEvent
+  | UserMessageDeliveryEvent
+  | HeartbeatEvent
+  | CommandLifecycleEvent
+  | UserReplayEvent
 
 /**
  * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
@@ -107,10 +111,94 @@ export interface StreamMessageStopEvent {
   parentToolUseId?: string
 }
 
+/**
+ * One block of a user message. Text today; images and documents (plan item 3.5)
+ * join this union without changing how a message travels.
+ */
+export type UserContentBlock = { type: 'text'; text: string }
+
+/** A user message as the outbox carries it: a client-minted id + its content. */
+export interface OutgoingUserMessage {
+  /** Minted by the client; sent to the CLI as the stdin message `uuid`. */
+  id: string
+  content: UserContentBlock[]
+}
+
+/** The message's plain text — what replay, search, copy and pop compare. */
+export function userMessageText(content: UserContentBlock[]): string {
+  return content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n\n')
+}
+
 /** Synthetic event emitted by the main process when the user sends a message. Buffered so it survives replay. */
 export interface UserMessageEvent {
   kind: 'user-message'
+  /** Plain text of the message (rows written before `content` existed carry only this). */
   text: string
+  /** The outbox id (= CLI `uuid`); absent on rows from before the outbox. */
+  id?: string
+  content?: UserContentBlock[]
+}
+
+/**
+ * Where a user message is on its way to the agent:
+ *   - `sending` — written to the agent, not yet confirmed (live only, never saved);
+ *   - `delivered` — the agent confirmed it has the message;
+ *   - `answered` — the agent finished the turn for it;
+ *   - `failed` — it did not reach the agent (`error` says why); can be retried;
+ *   - `cancelled` — withdrawn before it was answered (Stop on an unanswered turn).
+ * A message with no delivery event yet is queued (accepted, waiting for the agent).
+ */
+export type UserMessageDeliveryState = 'sending' | 'delivered' | 'answered' | 'failed' | 'cancelled'
+
+export interface UserMessageDeliveryEvent {
+  kind: 'user-message-delivery'
+  id: string
+  state: UserMessageDeliveryState
+  error?: string
+}
+
+/**
+ * Why the chat TRANSPORT itself shows a notice (a `NoticeEvent` with a `code`;
+ * the CLI's own notices have none).
+ */
+export type NoticeCode =
+  /** The stored conversation could not be resumed; a fresh one was started. */
+  | 'resume-failed-fresh-start'
+  /** The agent stopped responding and was stopped by the watchdog. */
+  | 'watchdog-killed'
+  /** The agent's CLI version has not been tested with chat. */
+  | 'cli-version-untested'
+
+/**
+ * TRANSPORT-INTERNAL (never saved or broadcast): the agent is alive and working
+ * without visible output (thinking-token counts, an API request starting).
+ * Counts as progress for the watchdog.
+ */
+export interface HeartbeatEvent {
+  kind: 'heartbeat'
+  source: string
+}
+
+/**
+ * TRANSPORT-INTERNAL: the CLI's own delivery state for a user message that
+ * carried a `uuid` (Claude `command_lifecycle`). Feeds the outbox.
+ */
+export interface CommandLifecycleEvent {
+  kind: 'command-lifecycle'
+  commandUuid: string
+  state: 'queued' | 'started' | 'completed' | 'cancelled'
+}
+
+/**
+ * TRANSPORT-INTERNAL: the CLI echoed a user message back (`--replay-user-messages`)
+ * — proof it received the message with that `uuid`.
+ */
+export interface UserReplayEvent {
+  kind: 'user-replay'
+  uuid: string
 }
 
 export interface TurnInitEvent {
@@ -298,13 +386,20 @@ export interface HookOutputEvent {
   exitCode?: number
 }
 
-/** A notice the CLI shows the user, e.g. a hook's `systemMessage` (Claude Code `system/informational`). */
+/**
+ * A notice for the user: one the CLI shows (e.g. a hook's `systemMessage`,
+ * Claude Code `system/informational`), or one the chat transport adds about
+ * what it did (`code` set: a failed resume, a watchdog stop, an untested CLI).
+ */
 export interface NoticeEvent {
   kind: 'notice'
   id: string
   /** CLI level, e.g. `notice`, `warning`. */
   level: string
   text: string
+  /** Set on the transport's own notices. */
+  code?: NoticeCode
+  detail?: Record<string, unknown>
 }
 
 export interface SubAgentEvent {

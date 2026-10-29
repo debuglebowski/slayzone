@@ -1182,6 +1182,8 @@ describe('createRoutingProcessBackend', () => {
     handle.kill('SIGKILL')
     expect(requireCall(gateway, 'proc.kill').params).toEqual({
       sessionId: 'proc-1',
+      // The attempt it is meant for, so it can never hit a replacement.
+      spawnId: (requireCall(gateway, 'proc.spawn').params as { spawnId: string }).spawnId,
       signal: 'SIGKILL'
     })
 

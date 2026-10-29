@@ -112,6 +112,11 @@ The defaults copy CLI 2.1.312 behaviour as recorded:
   - A deny with `interrupt: true` aborts the turn like an interrupt (below).
   - An interrupt while the request waits withdraws it: `control_cancel_request {request_id}`. A later answer is ignored and logged (`run.lateAnswers()`).
   - A replayed request answered differently from the recording is logged (`run.replayMismatches()`): the recorded output after it assumes the recorded answer.
+- **Delivery acks** (a user message that carries a `uuid`; chat always sends one, with `--replay-user-messages`):
+  - `command_lifecycle queued` as soon as it arrives, also mid-turn.
+  - `started` and the replayed message (`{type:'user', isReplay:true, uuid}`) when its turn begins.
+  - `completed` after the turn's result, or `cancelled` when the turn is interrupted.
+  - `lifecycle: 'none'` on a process plays a CLI that sends none of these (the app then infers delivery from the turn).
 - **stdin closed**: the fake finishes the current turn and exits 0.
 - **SIGTERM**: exit 143. Set `onSigterm` to keep talking first; this is how a replaced process that still emits events is scripted.
 - **`--allow-dangerously-skip-permissions`** leaves the mode at `default`, as on the real CLI. Only `--dangerously-skip-permissions` means bypass.
@@ -120,7 +125,7 @@ The defaults copy CLI 2.1.312 behaviour as recorded:
 
 | Exit | Meaning | Where it is reported |
 |---|---|---|
-| 2 | The argv is missing one of the flags chat always passes (`-p`, stream-json in/out, `--verbose`, `--permission-prompt-tool stdio`). | `epoch.argvDrift()` |
+| 2 | The argv is missing one of the flags chat always passes (`-p`, stream-json in/out, `--verbose`, `--permission-prompt-tool stdio`, `--replay-user-messages`). | `epoch.argvDrift()` |
 | 3 | A spawn past the scripted processes. Usually an unexpected respawn. | `epoch.unscripted()` |
 | 3 | A spawn before any scenario was set. | `fake.orphans()` |
 

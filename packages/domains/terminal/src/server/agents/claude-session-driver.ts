@@ -13,8 +13,13 @@
  *
  * @module agents/claude-session-driver
  */
+import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
+import type {
+  AgentEvent,
+  OutgoingUserMessage,
+  PermissionDecision
+} from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
 import type { AgentBackend, ChatDriverContext, ChatSessionDriver } from './types'
 
@@ -91,6 +96,8 @@ function buildWireDecision(
 }
 
 class ClaudeSessionDriver implements ChatSessionDriver {
+  /** Claude reports delivery itself: `command_lifecycle` + the replay of the message `uuid`. */
+  readonly confirmsDelivery = true
   private ctx: ChatDriverContext | null = null
   /** In-flight `control_request` promises, keyed by request_id. */
   private readonly pendingControl = new Map<string, PendingControl>()
@@ -161,8 +168,21 @@ class ClaudeSessionDriver implements ChatSessionDriver {
   }
 
   sendUserMessage(text: string): void {
-    if (!this.ctx) return
-    this.ctx.write(claudeCodeAdapter.serializeUserMessage(text, this.ctx.sessionId))
+    void this.sendUserTurn({ id: randomUUID(), content: [{ type: 'text', text }] })
+  }
+
+  sendUserTurn(message: OutgoingUserMessage): Promise<void> {
+    // Never a silent no-op: a message written before the driver has its IO
+    // context is a lost message (it used to return quietly — P0 N1).
+    if (!this.ctx) return Promise.reject(new Error('the agent driver has not started'))
+    const line = claudeCodeAdapter.serializeUserTurn
+      ? claudeCodeAdapter.serializeUserTurn(message)
+      : claudeCodeAdapter.serializeUserMessage(
+          message.content.map((b) => b.text).join('\n\n'),
+          this.ctx.sessionId
+        )
+    // The id doubles as the write's idempotency key: a retried write lands once.
+    return this.sendLine(line, { writeId: message.id })
   }
 
   sendToolResult(args: { toolUseId: string; content: string; isError?: boolean }): boolean {
@@ -189,21 +209,33 @@ class ClaudeSessionDriver implements ChatSessionDriver {
     if (line == null) {
       return Promise.reject(new Error('adapter refused to serialize control_request'))
     }
-    const ctx = this.ctx
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingControl.delete(requestId)
         reject(new Error(`control_request timeout after ${timeoutMs}ms`))
       }, timeoutMs)
       this.pendingControl.set(requestId, { resolve, reject, timer })
-      try {
-        ctx.write(line)
-      } catch (err) {
+      const fail = (err: unknown): void => {
+        // Not delivered: fail now rather than waiting out the timeout.
+        if (!this.pendingControl.has(requestId)) return
         clearTimeout(timer)
         this.pendingControl.delete(requestId)
         reject(err instanceof Error ? err : new Error(String(err)))
       }
+      try {
+        this.sendLine(line).catch(fail)
+      } catch (err) {
+        fail(err)
+      }
     })
+  }
+
+  /** A confirmed write when the transport offers one. */
+  private sendLine(line: string, opts?: { writeId?: string }): Promise<void> {
+    if (!this.ctx) return Promise.reject(new Error('the agent driver has not started'))
+    if (this.ctx.send) return this.ctx.send(line, opts)
+    this.ctx.write(line)
+    return Promise.resolve()
   }
 
   respondPermission(args: {
@@ -258,11 +290,18 @@ class ClaudeSessionDriver implements ChatSessionDriver {
 }
 
 /**
+ * The only Claude Code version chat was verified end to end with (CLI spikes,
+ * P0 transcripts). Lower it once an older release is verified.
+ */
+export const MIN_TESTED_CLAUDE_CLI_VERSION = '2.1.312'
+
+/**
  * `AgentBackend` for the `claude-chat` mode. `buildSpawnArgs` delegates to the
  * stateless adapter; `createDriver` mints one `ClaudeSessionDriver` per spawn.
  */
 export const claudeChatBackend: AgentBackend = {
   binaryName: claudeCodeAdapter.binaryName,
+  minTestedCliVersion: MIN_TESTED_CLAUDE_CLI_VERSION,
   buildSpawnArgs: (opts) => claudeCodeAdapter.buildSpawnArgs(opts),
   createDriver: () => new ClaudeSessionDriver()
 }

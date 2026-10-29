@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 
 interface Row {
   id: string
@@ -10,16 +10,29 @@ interface Row {
   original: string
   position: number
   created_at: string
+  content: string | null
+}
+
+function parseContent(raw: string | null): UserContentBlock[] | undefined {
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as UserContentBlock[]) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function rowToMessage(row: Row): QueuedChatMessage {
+  const content = parseContent(row.content)
   return {
     id: row.id,
     tabId: row.tab_id,
     send: row.send,
     original: row.original,
     position: row.position,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    ...(content ? { content } : {})
   }
 }
 
@@ -34,17 +47,19 @@ export function pushChatQueue(
   db: Database,
   tabId: string,
   send: string,
-  original: string
+  original: string,
+  opts: { id?: string; content?: UserContentBlock[] } = {}
 ): QueuedChatMessage {
-  const id = randomUUID()
+  // The client may mint the id (it becomes the message's outbox id when sent).
+  const id = opts.id ?? randomUUID()
   const insert = db.transaction(() => {
     const max = db
       .prepare('SELECT MAX(position) AS max_pos FROM chat_queue WHERE tab_id = ?')
       .get(tabId) as { max_pos: number | null } | undefined
     const nextPos = (max?.max_pos ?? -1) + 1
     db.prepare(
-      'INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, tabId, send, original, nextPos)
+      'INSERT INTO chat_queue (id, tab_id, send, original, position, content) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(id, tabId, send, original, nextPos, opts.content ? JSON.stringify(opts.content) : null)
     return nextPos
   })
   insert()
@@ -89,8 +104,14 @@ export function requeueAtHead(db: Database, msg: QueuedChatMessage): void {
   const tx = db.transaction(() => {
     db.prepare('UPDATE chat_queue SET position = position + 1 WHERE tab_id = ?').run(msg.tabId)
     db.prepare(
-      'INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES (?, ?, ?, ?, 0)'
-    ).run(msg.id, msg.tabId, msg.send, msg.original)
+      'INSERT INTO chat_queue (id, tab_id, send, original, position, content) VALUES (?, ?, ?, ?, 0, ?)'
+    ).run(
+      msg.id,
+      msg.tabId,
+      msg.send,
+      msg.original,
+      msg.content ? JSON.stringify(msg.content) : null
+    )
   })
   tx()
 }

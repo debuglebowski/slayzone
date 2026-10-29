@@ -29,7 +29,15 @@ function makeFakeChild(): ChildProcess {
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
-  const stdin = { write: () => true }
+  // Like a real pipe: the callback reports the chunk reached the process.
+  const stdin = {
+    write: (_s: string, cb?: (err?: Error | null) => void) => {
+      cb?.()
+      return true
+    }
+  }
+  // Like a real child: `spawn` fires once the OS started it (a later tick).
+  setImmediate(() => emitter.emit('spawn'))
   return Object.assign(emitter, {
     stdout,
     stderr,
@@ -192,11 +200,14 @@ test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversa
   >
   expect(cfg[mode]?.chatConversationId).toBe(null)
 
-  // Persisted events for this tab are wiped.
-  const evCountAfter = db
-    .prepare('SELECT COUNT(*) AS c FROM chat_events WHERE tab_id = ?')
-    .get(tabId) as { c: number }
-  expect(evCountAfter.c).toBe(0)
+  // The old conversation's persisted events are wiped; only the fresh
+  // process's own rows (its session-spawn) exist now.
+  const rowsAfter = db
+    .prepare('SELECT event FROM chat_events WHERE tab_id = ?')
+    .all(tabId) as Array<{ event: string }>
+  expect(rowsAfter.map((r) => (JSON.parse(r.event) as { kind: string }).kind)).toEqual([
+    'session-spawn'
+  ])
 })
 
 test('chat:reset still wipes events + clears conv id when no live session exists', async () => {
@@ -622,9 +633,13 @@ test('chat:send triggers lazy spawn on a hydrated session', async () => {
   // Capture the kernel-spawn signal that promotes 'starting' → 'idle'. Fired
   // synchronously by ensureSpawned after wiring handlers; we re-emit here so
   // the spawned-flag check is meaningful (the fake spawn never auto-fires).
-  const sent = (await ipc.invoke('chat:send', tabId, 'hello')) as boolean
-  expect(spawnCount.n).toBe(1)
-  expect(sent).toBe(true)
+  const sent = (await ipc.invoke('chat:send', tabId, {
+    id: 'msg-lazy-2',
+    content: [{ type: 'text', text: 'hello' }]
+  })) as { id: string; state: string }
+  // Accepted at once; the outbox starts the agent and writes it when ready.
+  expect(sent).toEqual({ id: 'msg-lazy-2', state: 'queued' })
+  expect(await eventually(async () => (spawnCount.n === 1 ? true : null))).toBe(true)
 })
 
 test('chat:hydrate twice is idempotent — only one skeleton, zero spawns', async () => {
@@ -873,7 +888,7 @@ test('onChatEvent receives the task, mode and conversation of the event', async 
     providerFlagsOverride: null
   })
   ;(child as unknown as EventEmitter).emit('spawn')
-  await ops.send('tab-ctx-1', 'hello there')
+  ops.send('tab-ctx-1', { id: 'msg-ctx-1', content: [{ type: 'text', text: 'hello there' }] })
   const sent = seen.find((s) => s.kind === 'user-message')
   expect(sent?.ctx).toEqual({
     taskId: 'task-ctx-1',

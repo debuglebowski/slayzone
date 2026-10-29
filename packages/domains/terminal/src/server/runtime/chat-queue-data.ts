@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../chat-queue-store'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../chat-queue-txns'
 
@@ -16,7 +16,12 @@ export interface ChatQueueData {
   /** All queued messages for a tab, position ASC. */
   list(tabId: string): Promise<QueuedChatMessage[]>
   /** Append at tail (atomic MAX(position)+1 insert) and return the stored row. */
-  push(tabId: string, send: string, original: string): Promise<QueuedChatMessage>
+  push(
+    tabId: string,
+    send: string,
+    original: string,
+    opts?: { id?: string; content?: UserContentBlock[] }
+  ): Promise<QueuedChatMessage>
   /** Atomic pop of the queue head (select+delete in one txn); null when empty. */
   pop(tabId: string): Promise<QueuedChatMessage | null>
   /** Re-insert a popped message at head (send failed; next drain retries). */
@@ -34,7 +39,8 @@ export function createDbChatQueueData(db: SlayzoneDb): ChatQueueData {
   return {
     list: (tabId) => listChatQueue(db, tabId),
 
-    push: (tabId, send, original) => db.namedTxn('chat-queue:push', { tabId, send, original }),
+    push: (tabId, send, original, opts) =>
+      db.namedTxn('chat-queue:push', { tabId, send, original, ...opts }),
 
     pop: (tabId) => db.namedTxn('chat-queue:pop', { tabId }),
 

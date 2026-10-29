@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
+import { randomUUID } from 'node:crypto'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getChatDeps } from './chat-router-deps'
 
@@ -45,8 +46,27 @@ const permissionArgs = z.object({
 const watchdogTimings = z.object({
   startingBoundMs: z.number().int().positive(),
   runningStallMs: z.number().int().positive(),
-  killGraceMs: z.number().int().positive()
+  killGraceMs: z.number().int().positive(),
+  spawnReplyBoundMs: z.number().int().positive().optional()
 })
+
+/** One block of a user message (text today; attachments join in plan item 3.5). */
+const userContentBlock = z.object({ type: z.literal('text'), text: z.string() })
+/**
+ * A user message: the client mints the id (the outbox and the CLI's `uuid` key
+ * on it), so a retry of the same id is the same message. Legacy `{text}` (no
+ * id) is still accepted and gets a server id.
+ */
+const sendInput = z.union([
+  z.object({
+    tabId: z.string(),
+    message: z.object({
+      id: z.string().min(1).max(200),
+      content: z.array(userContentBlock).min(1)
+    })
+  }),
+  z.object({ tabId: z.string(), text: z.string() })
+])
 
 export const chatRouter = router({
   // Test-only (PLAYWRIGHT): shorten the chat watchdog for one spec; `null` restores
@@ -63,10 +83,19 @@ export const chatRouter = router({
     .input(z.object({ mode: z.string() }))
     .query(({ input }) => ops().supports(input.mode)),
   hydrate: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().hydrate(input)),
-  start: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().start(input)),
+  start: publicProcedure
+    .input(chatCreateOpts.extend({ reason: z.enum(['user', 'restore']).optional() }))
+    .mutation(({ input }) => ops().start(input)),
   send: publicProcedure
-    .input(z.object({ tabId: z.string(), text: z.string() }))
-    .mutation(({ input }) => ops().send(input.tabId, input.text)),
+    .input(sendInput)
+    .mutation(({ input }) =>
+      ops().send(
+        input.tabId,
+        'message' in input
+          ? input.message
+          : { id: randomUUID(), content: [{ type: 'text', text: input.text }] }
+      )
+    ),
   sendToolResult: publicProcedure
     .input(z.object({ tabId: z.string(), args: toolResultArgs }))
     .mutation(({ input }) => ops().sendToolResult(input.tabId, input.args)),
@@ -87,6 +116,10 @@ export const chatRouter = router({
   getBufferSince: publicProcedure
     .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
     .query(({ input }) => ops().getBufferSince(input.tabId, input.afterSeq)),
+  // Saved events + what is streaming right now, in one snapshot (reload mid-reply).
+  getReplay: publicProcedure
+    .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
+    .query(({ input }) => ops().getReplay(input.tabId, input.afterSeq)),
   getInfo: publicProcedure
     .input(z.object({ tabId: z.string() }))
     .query(({ input }) => ops().getInfo(input.tabId)),
@@ -156,8 +189,22 @@ export const chatRouter = router({
       .input(z.object({ tabId: z.string() }))
       .query(({ input }) => queueOps().list(input.tabId)),
     push: publicProcedure
-      .input(z.object({ tabId: z.string(), send: z.string(), original: z.string() }))
-      .mutation(({ input }) => queueOps().push(input.tabId, input.send, input.original)),
+      .input(
+        z.object({
+          tabId: z.string(),
+          send: z.string(),
+          original: z.string(),
+          // Client-minted: the queued message's id becomes its outbox id when sent.
+          id: z.string().min(1).max(200).optional(),
+          content: z.array(userContentBlock).min(1).optional()
+        })
+      )
+      .mutation(({ input }) =>
+        queueOps().push(input.tabId, input.send, input.original, {
+          ...(input.id ? { id: input.id } : {}),
+          ...(input.content ? { content: input.content } : {})
+        })
+      ),
     remove: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input }) => queueOps().remove(input.id)),
@@ -177,11 +224,13 @@ export const chatRouter = router({
   onEvent: publicProcedure
     .input(z.object({ tabIds: z.array(z.string()).optional() }).optional())
     .subscription(({ input }) =>
-      observable<{ tabId: string; event: unknown; seq: number }>((emit) => {
+      // `live` is set on live-only events (streaming fragments, `sending`): they
+      // follow saved event `seq` and are never in `getBufferSince`.
+      observable<{ tabId: string; event: unknown; seq: number; live?: number }>((emit) => {
         const filter = input?.tabIds
-        const handler = (tabId: string, event: unknown, seq: number): void => {
+        const handler = (tabId: string, event: unknown, seq: number, live?: number): void => {
           if (filter && !filter.includes(tabId)) return
-          emit.next({ tabId, event, seq })
+          emit.next(live === undefined ? { tabId, event, seq } : { tabId, event, seq, live })
         }
         const ev = getChatDeps().events
         ev.on('event', handler)

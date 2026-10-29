@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
-import { expectKnownBug } from '@slayzone/test-utils/known-bug'
 import type { ChatActions, NavigateActions } from './autocomplete/types'
 
 const mocks = vi.hoisted(() => {
@@ -273,14 +272,7 @@ describe('useChatComposer send', () => {
     type('hi')
     await send()
     expect(sendMessage).toHaveBeenCalledTimes(1)
-    // The empty image block still contributes its '\n\n' separator.
-    await expectKnownBug(
-      {
-        fixedBy: 'not in the plan yet',
-        what: 'text sent with only unavailable attachments gets two leading newlines'
-      },
-      () => expect(sendMessage).toHaveBeenCalledWith('hi')
-    )
+    expect(sendMessage).toHaveBeenCalledWith('hi')
   })
 
   it('sends nothing when every attachment is gone and there is no text', async () => {

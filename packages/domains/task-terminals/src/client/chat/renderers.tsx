@@ -59,6 +59,8 @@ import {
   WriteCard,
   parseMcpToolName
 } from './tool-cards'
+import { UserMessageStatus } from './UserMessageStatus'
+import { AgentProblemCard } from './AgentProblemCard'
 
 // --- Helpers ---
 
@@ -876,7 +878,16 @@ export function isRenderable(item: TimelineItem): boolean {
 export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JSX.Element | null {
   switch (item.kind) {
     case 'user-text':
-      return <UserMessage key={key} item={item} />
+      return (
+        <div key={key}>
+          <UserMessage item={item} />
+          <UserMessageStatus item={item} />
+        </div>
+      )
+    case 'turn-error':
+      return <StderrBlock key={key} item={{ ...item, kind: 'stderr' }} />
+    case 'agent-problem':
+      return <AgentProblemCard key={key} item={item} />
     case 'text':
       return <AssistantText key={key} item={item} />
     case 'thinking':

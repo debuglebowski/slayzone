@@ -685,6 +685,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.remove': checked(tab('tabId')),
   'chat.reset': chatOpts,
   'chat.getBufferSince': checked(tab('tabId')),
+  'chat.getReplay': checked(tab('tabId')),
   'chat.getInfo': checked(tab('tabId')),
   'chat.inspectPermissions': checked(task('taskId')),
   'chat.getMode': checked(task('taskId')),

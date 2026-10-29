@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 import { pushChatQueue, popChatQueueHead, requeueAtHead } from './chat-queue-store'
 
 /**
@@ -15,8 +15,10 @@ import { pushChatQueue, popChatQueueHead, requeueAtHead } from './chat-queue-sto
  * the worker bundle (unlike the node-pty-laden `/main` barrel).
  */
 export const chatQueueTxns = {
-  'chat-queue:push': (db: Database, p: { tabId: string; send: string; original: string }) =>
-    pushChatQueue(db, p.tabId, p.send, p.original),
+  'chat-queue:push': (
+    db: Database,
+    p: { tabId: string; send: string; original: string; id?: string; content?: UserContentBlock[] }
+  ) => pushChatQueue(db, p.tabId, p.send, p.original, { id: p.id, content: p.content }),
   'chat-queue:pop': (db: Database, p: { tabId: string }) => popChatQueueHead(db, p.tabId),
   'chat-queue:requeue': (db: Database, p: { msg: QueuedChatMessage }) => {
     requeueAtHead(db, p.msg)

@@ -25,8 +25,10 @@ function makeFakeChild(): FakeChild {
   const stderr = new PassThrough()
   const stdinRef = { value: '' }
   const stdin = {
-    write: (s: string) => {
+    // Like a real pipe: the callback reports the chunk was handed to the process.
+    write: (s: string, cb?: (err?: Error | null) => void) => {
       stdinRef.value += s
+      cb?.()
       return true
     }
   }
@@ -65,13 +67,26 @@ async function createChat(
   opts: Parameters<typeof mgr.hydrateSession>[0],
   { autoSpawn = true }: { autoSpawn?: boolean } = {}
 ) {
-  mgr.hydrateSession(opts)
-  const info = await mgr.ensureSpawned(opts.tabId)
-  if (autoSpawn) {
-    const child = mgr.__getSessionChildForTests(opts.tabId)
-    if (child) (child as unknown as EventEmitter).emit('spawn')
+  await mgr.hydrateSession(opts)
+  // `ensureSpawned` resolves once the process is READY (spawned + driver
+  // started), so the `spawn` event has to fire while it is pending.
+  const spawning = mgr.ensureSpawned(opts.tabId)
+  spawning.catch(() => undefined)
+  for (let i = 0; i < 50 && !mgr.__getSessionChildForTests(opts.tabId); i++) {
+    // A failed spawn rejects `spawning` before any child exists.
+    const failed = await Promise.race([
+      spawning.then(
+        () => false,
+        () => true
+      ),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 1))
+    ])
+    if (failed) break
   }
-  return info
+  if (!autoSpawn) return mgr.getSessionInfo(opts.tabId)!
+  const child = mgr.__getSessionChildForTests(opts.tabId)
+  if (child) (child as unknown as EventEmitter).emit('spawn')
+  return spawning
 }
 
 test('createChat: unknown mode → throws ChatTransportError', async () => {
@@ -491,7 +506,7 @@ test('invalid --resume: onInvalidResume fires + auto-retry with fresh session', 
   expect(lastArgs[1].includes('--session-id')).toBe(true)
 })
 
-test('invalid --resume: failed spawn events never broadcast or persist', async () => {
+test('invalid --resume: only the failure signals are withheld; the fresh start is announced', async () => {
   await setup()
   const broadcastEvents: Array<{ tabId: string; kind: string }> = []
   const persistedEvents: Array<{ tabId: string; kind: string }> = []
@@ -542,20 +557,21 @@ test('invalid --resume: failed spawn events never broadcast or persist', async (
   ;(first as unknown as EventEmitter).emit('exit', 1, null)
   await new Promise((r) => setTimeout(r, 150))
 
-  // Failed spawn's noise events MUST NOT have reached renderer or chat_events.
+  // The failure's own signals (the "No conversation found" stderr, its error
+  // result, its exit) never reach the renderer or chat_events…
   expect(broadcastEvents.some((e) => e.kind === 'stderr')).toBe(false)
   expect(broadcastEvents.some((e) => e.kind === 'process-exit')).toBe(false)
   expect(broadcastEvents.some((e) => e.kind === 'result')).toBe(false)
-  expect(broadcastEvents.some((e) => e.kind === 'session-spawn')).toBe(false)
   expect(persistedEvents.some((e) => e.kind === 'stderr')).toBe(false)
   expect(persistedEvents.some((e) => e.kind === 'process-exit')).toBe(false)
   expect(persistedEvents.some((e) => e.kind === 'result')).toBe(false)
-  expect(persistedEvents.some((e) => e.kind === 'session-spawn')).toBe(false)
+  // …but the user is told the conversation could not be resumed.
+  expect(persistedEvents.some((e) => e.kind === 'notice')).toBe(true)
   // Auto-retry must have run.
   expect(spawnCount).toBe(2)
 })
 
-test('valid --resume: first healthy event flushes staged events in order', async () => {
+test('valid --resume: events are shown as they arrive, in order — no holding pen', async () => {
   await setup()
   const broadcastEvents: Array<{ kind: string; seq: number }> = []
   const fake = makeFakeChild()
@@ -575,18 +591,13 @@ test('valid --resume: first healthy event flushes staged events in order', async
       conversationId: 'good-uuid',
       providerFlags: []
     },
-    { autoSpawn: false } // fires `spawn` explicitly to test staged-flush order
+    { autoSpawn: false }
   )
 
-  // Synthetic spawn event → would normally broadcast immediately, but we're in
-  // the tentative window so it stages.
   ;(fake as unknown as EventEmitter).emit('spawn')
-  // No broadcasts yet — staged.
-  expect(broadcastEvents.some((e) => e.kind === 'session-spawn')).toBe(false)
+  // Shown at once, even though the resume is not confirmed yet.
+  expect(broadcastEvents.map((e) => e.kind)).toEqual(['session-spawn'])
 
-  // Healthy turn-init … wait, turn-init alone isn't healthy in commitEvent
-  // semantics (only assistant-text / tool-call / non-error result count).
-  // Send turn-init (stages) then assistant-text (flushes).
   fake._stdout.write(
     JSON.stringify({
       type: 'system',
@@ -598,8 +609,7 @@ test('valid --resume: first healthy event flushes staged events in order', async
     }) + '\n'
   )
   await new Promise((r) => setTimeout(r, 30))
-  // Still staged — turn-init isn't healthy.
-  expect(broadcastEvents.some((e) => e.kind === 'turn-init')).toBe(false)
+  expect(broadcastEvents.map((e) => e.kind)).toEqual(['session-spawn', 'turn-init'])
 
   fake._stdout.write(
     JSON.stringify({
@@ -608,20 +618,11 @@ test('valid --resume: first healthy event flushes staged events in order', async
     }) + '\n'
   )
   await new Promise((r) => setTimeout(r, 30))
-
-  // Flush order: session-spawn → turn-init → assistant-text. Seqs monotonic from 0.
-  const kinds = broadcastEvents.map((e) => e.kind)
-  const ssIdx = kinds.indexOf('session-spawn')
-  const tiIdx = kinds.indexOf('turn-init')
-  const atIdx = kinds.indexOf('assistant-text')
-  expect(ssIdx >= 0).toBeTruthy()
-  expect(tiIdx >= 0).toBeTruthy()
-  expect(atIdx >= 0).toBeTruthy()
-  expect(ssIdx < tiIdx).toBeTruthy()
-  expect(tiIdx < atIdx).toBeTruthy()
-  expect(broadcastEvents[ssIdx].seq).toBe(0)
-  expect(broadcastEvents[tiIdx].seq).toBe(1)
-  expect(broadcastEvents[atIdx].seq).toBe(2)
+  expect(broadcastEvents).toEqual([
+    { kind: 'session-spawn', seq: 0 },
+    { kind: 'turn-init', seq: 1 },
+    { kind: 'assistant-text', seq: 2 }
+  ])
 })
 
 test('exit event: fires process-exit + chat:exit broadcast', async () => {

@@ -4,7 +4,7 @@
  * against the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
-import { ev, expect, knownBug, step, test } from '../fixtures/chat'
+import { ev, expect, step, test } from '../fixtures/chat'
 
 /** Short enough to see the watchdog act; production keeps 20 s / 300 s / 2 s. */
 const FAST_WATCHDOG = { startingBoundMs: 20_000, runningStallMs: 1_500, killGraceMs: 500 }
@@ -88,13 +88,8 @@ test.describe('Chat failures', () => {
       .toBe(true)
     await expect(t.panel.getByText('npm test').first()).toBeVisible()
 
-    // The watchdog judges "stuck" by silence, and a running tool is silent: it
-    // kills the turn after the stall bound although Bash may run 10 minutes.
-    knownBug({
-      audit: '#4',
-      fixedBy: '1.6',
-      what: 'the watchdog kills a healthy long-running tool'
-    })
+    // A running tool is silent; while it is open the watchdog's bound is the
+    // tool's own timeout (here 10 minutes), not the 1.5 s stall window.
     await expect(t.panel.getByText('The suite passed.')).toBeVisible({ timeout: 10_000 })
     expect(t.epoch.run(0)?.signals()).toEqual([])
   })

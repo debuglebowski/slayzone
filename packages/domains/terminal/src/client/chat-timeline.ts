@@ -30,6 +30,15 @@ import {
  * sub-agent's tool_use_id. Items with this set live in the flat `timeline` array
  * but are rendered nested inside their parent SubAgentRow, not at the chat root.
  */
+/** Where a user message is on its way to the agent (see `UserMessageDeliveryEvent`). */
+export type UserDeliveryState =
+  | 'queued'
+  | 'sending'
+  | 'delivered'
+  | 'answered'
+  | 'failed'
+  | 'cancelled'
+
 export type TimelineItem =
   | {
       kind: 'user-text'
@@ -37,6 +46,23 @@ export type TimelineItem =
       timestamp: number
       parentToolUseId?: string
       optimistic?: boolean
+      /** Outbox id (absent on messages from before the outbox). */
+      id?: string
+      /** Delivery state; absent on messages from before the outbox. */
+      delivery?: UserDeliveryState
+      /** Why it failed (`delivery: 'failed'`). */
+      deliveryError?: string
+    }
+  /** A turn that failed without a reply: the CLI's own error text (auth, API, …). */
+  | { kind: 'turn-error'; text: string; timestamp: number; parentToolUseId?: string }
+  /** The agent could not be started (not installed, refused, …) — with a fix. */
+  | {
+      kind: 'agent-problem'
+      code: string
+      message: string
+      binary?: string
+      timestamp: number
+      parentToolUseId?: string
     }
   | {
       kind: 'text'
@@ -119,11 +145,15 @@ export type TimelineItem =
       parentToolUseId?: string
     }
   | {
-      /** A notice the CLI shows the user (e.g. a hook's `systemMessage`). */
+      /**
+       * A notice for the user: the CLI's (e.g. a hook's `systemMessage`), or the
+       * transport's own (`code`: resume fallback, watchdog stop, untested CLI).
+       */
       kind: 'notice'
       id: string
       level: string
       text: string
+      code?: string
       timestamp: number
       parentToolUseId?: string
     }
@@ -330,6 +360,11 @@ export interface ChatTimelineState {
   usage: SessionUsage
   /** The agent's questions to the user, in arrival order (see `chat-prompts.ts`). */
   prompts: ChatPrompt[]
+  /**
+   * The previous conversation could not be resumed; the next new session starts
+   * BELOW the existing history (a divider), instead of replacing it.
+   */
+  freshStartPending: boolean
 }
 
 export function initialState(): ChatTimelineState {
@@ -359,14 +394,17 @@ export function initialState(): ChatTimelineState {
     cliCommands: null,
     compacting: false,
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
-    prompts: []
+    prompts: [],
+    freshStartPending: false
   }
 }
 
 export type Action =
   | { type: 'event'; event: AgentEvent }
-  | { type: 'user-sent'; text: string }
-  | { type: 'user-send-failed' }
+  | { type: 'user-sent'; text: string; id?: string }
+  | { type: 'user-send-failed'; id?: string; error?: string }
+  /** Send a failed message again (same id). */
+  | { type: 'user-retry'; id: string }
   | { type: 'process-exit'; sessionId: string; code: number | null; signal: string | null }
   | { type: 'turn-interrupted' }
   /**
@@ -451,7 +489,8 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
         kind: 'user-text',
         text: action.text,
         timestamp: Date.now(),
-        optimistic: true
+        optimistic: true,
+        ...(action.id ? { id: action.id, delivery: 'queued' as const } : {})
       }
       return {
         ...healed,
@@ -460,9 +499,13 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
       }
     }
     case 'user-send-failed': {
-      // Revert the oldest unconfirmed optimistic user-text. CLI ordering
-      // guarantees FIFO: the first user-sent that has no matching user-message
-      // back is the one that failed.
+      if (action.id) {
+        // The server never took it: the bubble stays, failed, with Retry.
+        return setDelivery(state, action.id, 'failed', action.error)
+      }
+      // Legacy (no id): revert the oldest unconfirmed optimistic user-text. CLI
+      // ordering guarantees FIFO: the first user-sent that has no matching
+      // user-message back is the one that failed.
       for (let i = 0; i < state.timeline.length; i++) {
         const it = state.timeline[i]
         if (it.kind === 'user-text' && it.optimistic) {
@@ -477,6 +520,8 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
       }
       return state
     }
+    case 'user-retry':
+      return setDelivery(state, action.id, 'queued')
     case 'process-exit': {
       // Drop stale exits: if no session has emitted turn-init yet (sessionId=null)
       // OR the exit's sessionId belongs to a prior, already-replaced session, the
@@ -504,17 +549,103 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
   }
 }
 
+/** Start failures the chat shows as a card with a fix (`ChatSpawnFailureCode`). */
+function agentProblemCode(detail: unknown): string | null {
+  const code = (detail as { code?: unknown } | null | undefined)?.code
+  return code === 'cli-not-installed' || code === 'spawn-refused' || code === 'spawn-failed'
+    ? code
+    : null
+}
+
+function findUserItem(state: ChatTimelineState, id: string): number {
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    if (it.kind === 'user-text' && it.id === id) return i
+  }
+  return -1
+}
+
+/**
+ * Move a user message to `delivery`. A failed message is not a turn (no longer
+ * in flight); leaving `failed` (retry, or a replayed later state) makes it one
+ * again — so replay and live views count the same.
+ */
+function setDelivery(
+  state: ChatTimelineState,
+  id: string,
+  delivery: UserDeliveryState,
+  error?: string
+): ChatTimelineState {
+  const at = findUserItem(state, id)
+  if (at < 0) return state
+  const it = state.timeline[at] as Extract<TimelineItem, { kind: 'user-text' }>
+  if (it.delivery === delivery && it.deliveryError === error) return state
+  const wasFailed = it.delivery === 'failed'
+  const isFailed = delivery === 'failed'
+  const next = state.timeline.slice()
+  next[at] = {
+    ...it,
+    delivery,
+    deliveryError: isFailed ? error : undefined,
+    ...(isFailed ? { optimistic: false } : {})
+  }
+  const delta =
+    isFailed && !wasFailed ? -1 : wasFailed && !isFailed && delivery !== 'cancelled' ? 1 : 0
+  return {
+    ...state,
+    timeline: next,
+    userMessagesSent: Math.max(0, state.userMessagesSent + delta)
+  }
+}
+
+/** Delivery states (outbox). */
+function applyTransportEvent(
+  state: ChatTimelineState,
+  event: AgentEvent,
+  _ts: number
+): ChatTimelineState {
+  if (event.kind === 'user-message-delivery') {
+    return setDelivery(state, event.id, event.state, event.error)
+  }
+  return state
+}
+
 function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineState {
   const ts = Date.now()
   switch (event.kind) {
     case 'user-message': {
+      if (event.id) {
+        // Confirm the optimistic bubble with the same id in place.
+        const at = findUserItem(state, event.id)
+        if (at >= 0) {
+          const it = state.timeline[at] as Extract<TimelineItem, { kind: 'user-text' }>
+          const next = state.timeline.slice()
+          // A bubble the client had failed (its request errored) but the server
+          // did take is back in flight.
+          const revived = it.delivery === 'failed'
+          next[at] = {
+            ...it,
+            text: event.text,
+            timestamp: ts,
+            optimistic: false,
+            delivery: revived || !it.delivery ? 'queued' : it.delivery,
+            deliveryError: undefined
+          }
+          return {
+            ...state,
+            timeline: next,
+            userMessagesSent: state.userMessagesSent + (revived ? 1 : 0)
+          }
+        }
+      }
       // Confirm the oldest optimistic user-text in place (FIFO — CLI processes
       // sends in order, so the first unconfirmed optimistic item is this one).
+      // Only id-less (legacy) bubbles: an id'd bubble is confirmed by its id.
       // Replay path (cold reattach, no prior `user-sent` dispatch) finds none
       // and falls through to append.
       for (let i = 0; i < state.timeline.length; i++) {
         const it = state.timeline[i]
-        if (it.kind === 'user-text' && it.optimistic) {
+        if (it.kind === 'user-text' && it.optimistic && !it.id && !event.id) {
           const next = state.timeline.slice()
           next[i] = { ...it, text: event.text, timestamp: ts, optimistic: false }
           return { ...state, timeline: next }
@@ -529,7 +660,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const item: TimelineItem = {
         kind: 'user-text',
         text: event.text,
-        timestamp: ts
+        timestamp: ts,
+        ...(event.id ? { id: event.id, delivery: 'queued' as const } : {})
       }
       return {
         ...healed,
@@ -585,6 +717,30 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const isRestart =
         state.sessionStarted &&
         (state.sessionEnded || (state.sessionId !== null && state.sessionId !== event.sessionId))
+      if (isRestart && state.freshStartPending) {
+        // A failed resume started a new conversation: keep everything above (the
+        // user's history and the message being re-sent), mark where it begins.
+        const item: TimelineItem = {
+          kind: 'session-start',
+          sessionId: event.sessionId,
+          model: event.model,
+          cwd: event.cwd,
+          tools: event.tools,
+          timestamp: ts
+        }
+        return {
+          ...state,
+          timeline: [...state.timeline, item],
+          freshStartPending: false,
+          sessionId: event.sessionId,
+          model: event.model,
+          sessionEnded: false,
+          exitCode: null,
+          exitSignal: null,
+          permissionMode: event.permissionMode ?? state.permissionMode,
+          cliCommands: nextCliCommands(state.cliCommands, event)
+        }
+      }
       if (isRestart) {
         const item: TimelineItem = {
           kind: 'session-start',
@@ -955,9 +1111,15 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         copyText,
         timestamp: ts
       }
+      // A turn that failed without any reply: its error text (an expired login,
+      // an API error) must be readable, not tucked inside the result footer.
+      const turnError: TimelineItem[] =
+        event.isError && event.text && texts.length === 0
+          ? [{ kind: 'turn-error', text: event.text, timestamp: ts }]
+          : []
       // Mark any tools the SDK denied this turn — `result.permissionDenials`
       // is the authoritative source (e.g. `ExitPlanMode` in plan mode).
-      let nextTimeline = [...state.timeline, item]
+      let nextTimeline = [...state.timeline, ...turnError, item]
       const denials = Array.isArray(event.permissionDenials) ? event.permissionDenials : []
       for (const denial of denials) {
         const id = (denial as { tool_use_id?: string } | null)?.tool_use_id
@@ -1165,9 +1327,16 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         id: event.id,
         level: event.level,
         text: event.text,
+        ...(event.code ? { code: event.code } : {}),
         timestamp: ts
       }
-      return { ...state, timeline: [...state.timeline, item] }
+      return {
+        ...state,
+        timeline: [...state.timeline, item],
+        // A failed resume: the next new session starts below the history.
+        freshStartPending:
+          event.code === 'resume-failed-fresh-start' ? true : state.freshStartPending
+      }
     }
     case 'stderr':
       return {
@@ -1187,11 +1356,29 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         compacting: false
       }
     }
-    case 'error':
+    case 'error': {
+      const code = agentProblemCode(event.detail)
+      if (code) {
+        const binary = (event.detail as { binary?: unknown }).binary
+        return {
+          ...state,
+          timeline: [
+            ...state.timeline,
+            {
+              kind: 'agent-problem',
+              code,
+              message: event.message,
+              ...(typeof binary === 'string' ? { binary } : {}),
+              timestamp: ts
+            }
+          ]
+        }
+      }
       return {
         ...state,
         timeline: [...state.timeline, { kind: 'stderr', text: event.message, timestamp: ts }]
       }
+    }
     case 'unknown':
       // Silently drop — already logged main-side as `[chat-parser] unknown event type=X`.
       // UI noise w/ no signal; wire the event in the adapter when we learn what it is.
@@ -1216,6 +1403,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'host-control-request':
       // Transport-internal (answered by the driver, never emitted).
       return state
+    case 'heartbeat':
+    case 'command-lifecycle':
+    case 'user-replay':
+      // Transport-internal; never broadcast. Defensive no-op.
+      return state
+    case 'user-message-delivery':
+      return applyTransportEvent(state, event, ts)
     case 'session-spawn':
       // Bg-shell scoping bookkeeping (handled by applyBgShellEvent post-pass).
       // No timeline item — this is process-lifecycle metadata, not chat content.

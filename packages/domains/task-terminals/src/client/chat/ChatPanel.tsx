@@ -80,6 +80,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       prompts,
       submittingPrompts,
       sendMessage,
+      retryMessage,
       sendToolResult,
       respondPermission,
       abortAndPop,
@@ -245,6 +246,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         sendMessage: (text: string) => {
           void sendMessage(text)
         },
+        retryMessage: (id: string) => {
+          void retryMessage(id)
+        },
+        restartAgent: () => {
+          void handleRestart()
+        },
         sendToolResult,
         promptCards,
         prompts,
@@ -266,6 +273,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         search.caseSensitive,
         handleModeChange,
         sendMessage,
+        retryMessage,
+        handleRestart,
         sendToolResult,
         promptCards,
         prompts,

@@ -194,13 +194,21 @@ export function useChatLifecycle({
     if (startDecision === null || (startDecision === 'shown' && !shown)) return
     if (startFiredRef.current) return
     startFiredRef.current = true
-    void chatApi.start({
-      tabId,
-      taskId,
-      mode,
-      cwd,
-      providerFlagsOverride: providerFlagsOverride ?? null
-    })
+    // 'now' = reopening the workspace (a restore: the computer starts these a few
+    // at a time); 'shown' = the user is looking at it.
+    chatApi
+      .start({
+        tabId,
+        taskId,
+        mode,
+        cwd,
+        providerFlagsOverride: providerFlagsOverride ?? null,
+        reason: startDecision === 'now' ? 'restore' : 'user'
+      })
+      .catch((err: unknown) => {
+        // Also shown in the chat itself (the start failure card); never silent.
+        toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
+      })
   }, [startDecision, shown, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleRestart = useCallback(async () => {

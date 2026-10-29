@@ -263,3 +263,56 @@ test('CLI command snapshot: unknown task saves nothing; corrupt rows read as nul
     .run()
   expect(await ops.getCliSnapshot('t1', 'claude-chat')).toBeNull()
 })
+
+test('persistChatEvent inserts only: a second write at the same seq is a clash, not an overwrite', async () => {
+  const { raw, db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  const first = { kind: 'stderr', text: 'first' } as never
+  const second = { kind: 'stderr', text: 'second' } as never
+  expect(await ops.persistChatEvent('tab-1', 0, first)).toBe('inserted')
+  expect(await ops.persistChatEvent('tab-1', 0, second)).toBe('clash')
+  const row = raw
+    .prepare('SELECT event FROM chat_events WHERE tab_id = ? AND seq = 0')
+    .get('tab-1') as {
+    event: string
+  }
+  expect(JSON.parse(row.event)).toEqual({ kind: 'stderr', text: 'first' })
+})
+
+test('concurrent provider_config writes of different keys all land (no read-modify-write loss)', async () => {
+  const { raw, db } = makeDb()
+  raw
+    .prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)')
+    .run('t9', JSON.stringify({ 'claude-chat': { chatConversationId: 'sid' }, other: { k: 1 } }))
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  await Promise.all([
+    ops.writeChatMode('t9', 'claude-chat', 'plan'),
+    ops.writeChatModel('t9', 'claude-chat', 'sonnet'),
+    ops.writeChatEffort('t9', 'claude-chat', 'high'),
+    ops.writeChatFastMode('t9', 'claude-chat', true),
+    ops.clearChatConversationId('t9', 'claude-chat')
+  ])
+  const row = raw.prepare('SELECT provider_config AS v FROM tasks WHERE id = ?').get('t9') as {
+    v: string
+  }
+  expect(JSON.parse(row.v)).toEqual({
+    'claude-chat': {
+      chatConversationId: null,
+      chatMode: 'plan',
+      chatModel: 'sonnet',
+      chatEffort: 'high',
+      chatFastMode: true
+    },
+    other: { k: 1 }
+  })
+})
+
+test('a mode entry that is not an object is replaced by one holding the new key', async () => {
+  const { raw, db } = makeDb()
+  raw
+    .prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)')
+    .run('t10', JSON.stringify({ 'claude-chat': null }))
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  await ops.writeChatModel('t10', 'claude-chat', 'opus')
+  expect((await ops.readProviderConfig('t10', 'claude-chat')).chatModel).toBe('opus')
+})

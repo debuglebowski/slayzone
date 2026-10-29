@@ -1,3 +1,5 @@
+import type { UserContentBlock } from './agent-events'
+
 export type TerminalMode = string
 // `hibernated` is a CLIENT-SYNTHESIZED status (PtyContext): the PTY is actually
 // dead, but the idle-close feature killed it and the UI shows it as sleeping
@@ -541,10 +543,13 @@ export interface FileMatch {
  * raw composer input retained so usage bumps see the user's `/cmd` token.
  */
 export interface QueuedChatMessage {
+  /** Also the message's outbox id once it is sent (the CLI's message `uuid`). */
   id: string
   tabId: string
   send: string
   original: string
   position: number
   createdAt: string
+  /** Content blocks; absent on rows queued before they existed (content = `send`). */
+  content?: UserContentBlock[]
 }

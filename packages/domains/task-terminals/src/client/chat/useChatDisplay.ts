@@ -94,7 +94,10 @@ export function useChatDisplay({
         item.kind === 'interrupted' ||
         item.kind === 'compaction' ||
         item.kind === 'command-output' ||
+        // Failures and notices stay visible in every view.
         item.kind === 'notice' ||
+        item.kind === 'agent-problem' ||
+        item.kind === 'turn-error' ||
         // A hook that blocked / failed something explains what happened; context it added doesn't.
         (item.kind === 'hook' && item.effect !== 'context')
       ) {

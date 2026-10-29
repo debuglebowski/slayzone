@@ -707,13 +707,88 @@ describe('ClaudeCodeAdapter — slash commands, compaction, usage', () => {
     })
   })
 
-  test('status requesting / plain null status → dropped (no persisted noise)', () => {
-    for (const status of ['requesting', null]) {
-      const ev = claudeCodeAdapter.parseLine(
-        JSON.stringify({ type: 'system', subtype: 'status', status, session_id: 's', uuid: 'u' })
+  test('plain null status → dropped (no persisted noise)', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'status',
+        status: null,
+        session_id: 's',
+        uuid: 'u'
+      })
+    )
+    expect(ev).toBeNull()
+  })
+
+  test('status requesting / thinking_tokens → transport-internal heartbeat (proof of life)', () => {
+    expect(
+      claudeCodeAdapter.parseLine(
+        JSON.stringify({ type: 'system', subtype: 'status', status: 'requesting', uuid: 'u' })
       )
-      expect(ev).toBeNull()
+    ).toEqual({ kind: 'heartbeat', source: 'status:requesting' })
+    expect(
+      claudeCodeAdapter.parseLine(
+        JSON.stringify({ type: 'system', subtype: 'thinking_tokens', estimated_tokens: 50 })
+      )
+    ).toEqual({ kind: 'heartbeat', source: 'thinking_tokens' })
+  })
+
+  test('command_lifecycle → command-lifecycle (the CLI confirming a message uuid)', () => {
+    for (const state of ['queued', 'started', 'completed', 'cancelled'] as const) {
+      expect(
+        claudeCodeAdapter.parseLine(
+          JSON.stringify({ type: 'command_lifecycle', command_uuid: 'm-1', state, uuid: 'x' })
+        )
+      ).toEqual({ kind: 'command-lifecycle', commandUuid: 'm-1', state })
     }
+    expect(
+      claudeCodeAdapter.parseLine(JSON.stringify({ type: 'command_lifecycle', state: 'weird' }))
+    ).toMatchObject({ kind: 'unknown', reason: 'shape-mismatch' })
+  })
+
+  test('a replayed user message → user-replay with its uuid; never a timeline event', () => {
+    expect(
+      claudeCodeAdapter.parseLine(
+        JSON.stringify({
+          type: 'user',
+          isReplay: true,
+          uuid: 'm-1',
+          message: { role: 'user', content: 'hello' }
+        })
+      )
+    ).toEqual({ kind: 'user-replay', uuid: 'm-1' })
+  })
+
+  test('serializeUserTurn: the message id is the CLI uuid; one text block travels as a string', () => {
+    expect(
+      JSON.parse(
+        claudeCodeAdapter.serializeUserTurn!({ id: 'm-1', content: [{ type: 'text', text: 'hi' }] })
+      )
+    ).toEqual({ type: 'user', uuid: 'm-1', message: { role: 'user', content: 'hi' } })
+    expect(
+      JSON.parse(
+        claudeCodeAdapter.serializeUserTurn!({
+          id: 'm-2',
+          content: [
+            { type: 'text', text: 'a' },
+            { type: 'text', text: 'b' }
+          ]
+        })
+      ).message.content
+    ).toEqual([
+      { type: 'text', text: 'a' },
+      { type: 'text', text: 'b' }
+    ])
+  })
+
+  test('spawn args ask the CLI to echo user messages (delivery confirmation)', () => {
+    const { args } = claudeCodeAdapter.buildSpawnArgs({
+      sessionId: 's',
+      resume: false,
+      cwd: '/tmp',
+      providerFlags: []
+    })
+    expect(args).toContain('--replay-user-messages')
   })
 
   test('local slash command output (assistant with local_command_run) → command-output', () => {

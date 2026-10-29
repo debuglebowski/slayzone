@@ -3,7 +3,7 @@
  * Harness + scenario API: fixtures/chat.ts, packages/shared/test-utils/fake-claude/README.md.
  */
 import { resetApp } from '../fixtures/electron'
-import { echoTurn, ev, expect, knownBug, reply, step, test } from '../fixtures/chat'
+import { echoTurn, ev, expect, reply, step, test } from '../fixtures/chat'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -97,24 +97,17 @@ test.describe('Chat turn', () => {
     expect(t.epoch.runs()).toHaveLength(0)
 
     await t.send('first message')
-    // Preconditions: the send spawned the fake, the chat shows the message as sent,
-    // and the process is reachable (a direct send after the spawn arrives).
-    const run = await t.run(0)
-    await expect(t.panel.getByText('first message')).toBeVisible()
-    await expect(t.stopButton).toBeVisible()
+    // The send spawned the fake, and the message that did it reached the agent:
+    // the outbox writes only once the process is READY (the routed start is
+    // confirmed by the computer and the driver has its IO) — it used to be
+    // written a tick too early and dropped without an error.
+    const run = await t.run(0, (r) => r.userMessages().includes('first message'))
+    await expect(t.panel.getByText('first reply')).toBeVisible()
     await t.page.evaluate(
       (tabId) => window.getTrpcVanillaClient().chat.send.mutate({ tabId, text: 'probe' }),
       t.tabId
     )
     await t.run(0, (r) => r.userMessages().includes('probe'))
-
-    // `chat.send` awaits ensureSpawned, but the routed handle fires onSpawn — which
-    // starts the protocol driver — a setImmediate later, so sendUserMessage runs
-    // against a driver with no IO context and drops the line without an error.
-    knownBug({
-      fixedBy: '1.5 / 1.8',
-      what: 'the message that lazily spawns the agent is dropped (driver not started yet), shown as sent'
-    })
     expect(run.userMessages()).toEqual(['first message', 'probe'])
   })
 
@@ -145,9 +138,8 @@ test.describe('Chat turn', () => {
       .poll(async () => (await t.events()).filter((e) => e.event.kind === 'assistant-text').length)
       .toBe(1)
 
-    // The computer decodes each stdout chunk on its own (`d.toString()` in
-    // handlers/proc.ts), so a multi-byte character cut across chunks turns into U+FFFD.
-    knownBug({ fixedBy: '1.7', what: 'é / emoji split across stdout chunks become U+FFFD' })
+    // Decoded per stream, not per chunk (computer handlers/proc.ts): a multi-byte
+    // character cut across chunks arrives whole.
     const persisted = (await t.events()).find((e) => e.event.kind === 'assistant-text')
     expect(persisted?.event.text).toBe(text)
     await expect(t.panel.getByText(text)).toBeVisible({ timeout: 3_000 })

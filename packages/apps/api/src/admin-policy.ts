@@ -384,6 +384,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.getInfo': 'user',
   'chat.getMode': 'user',
   'chat.getModel': 'user',
+  'chat.getReplay': 'user',
   'chat.hydrate': 'user',
   'chat.inspectPermissions': 'user',
   'chat.interrupt': 'user',

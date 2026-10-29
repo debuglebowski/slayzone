@@ -5,7 +5,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { ChatTimelineState } from '@slayzone/terminal/client'
-import { expectKnownBug } from '@slayzone/test-utils/known-bug'
 import type { ChatActions } from './autocomplete/types'
 
 interface Deferred<T> {
@@ -73,7 +72,7 @@ const makeChatApi = () => ({
   reset: vi.fn<ChatActions['reset']>(() => Promise.resolve()),
   hydrate: vi.fn<ChatActions['hydrate']>(() => Promise.resolve()),
   start: vi.fn<ChatActions['start']>(() => Promise.resolve()),
-  send: vi.fn<ChatActions['send']>(() => Promise.resolve(true)),
+  send: vi.fn<ChatActions['send']>(() => Promise.resolve({ id: 'm', state: 'queued' })),
   interrupt: vi.fn<ChatActions['interrupt']>(() => Promise.resolve())
 })
 
@@ -203,7 +202,8 @@ describe('useChatLifecycle startup (non-main tab)', () => {
     const { chatApi } = setup({ agentState: 'running' })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
-    expect(chatApi.start).toHaveBeenCalledWith(TARGET)
+    // A restore: the computer starts these a few at a time (background lane).
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'restore' })
   })
 
   it('leaves a stopped agent for the user to start (the default state)', async () => {
@@ -230,7 +230,11 @@ describe('useChatLifecycle startup (non-main tab)', () => {
   it('passes the provider flags override through', async () => {
     const { chatApi } = setup({ agentState: 'running', providerFlagsOverride: '--verbose' })
     await flush()
-    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, providerFlagsOverride: '--verbose' })
+    expect(chatApi.start).toHaveBeenCalledWith({
+      ...TARGET,
+      providerFlagsOverride: '--verbose',
+      reason: 'restore'
+    })
   })
 })
 
@@ -298,14 +302,9 @@ describe('useChatLifecycle startup decision', () => {
       setup({ agentState: 'running', chatApi })
       await flush()
     })
-    expect(start.calls).toEqual([TARGET])
-    await expectKnownBug(
-      {
-        fixedBy: '1.9',
-        what: 'auto-start `void chatApi.start()` leaks its rejection: no toast, lands in window.unhandledrejection'
-      },
-      () => expect(leaked).toEqual([])
-    )
+    expect(start.calls).toEqual([{ ...TARGET, reason: 'restore' }])
+    expect(leaked).toEqual([])
+    expect(m.toast).toHaveBeenCalledWith("Couldn't start the agent: spawn failed")
   })
 })
 
@@ -356,7 +355,8 @@ describe('useChatLifecycle startup (main tab)', () => {
     expect(chatApi.start).not.toHaveBeenCalled()
     update({ shown: true })
     expect(chatApi.start).toHaveBeenCalledTimes(1)
-    expect(chatApi.start).toHaveBeenCalledWith(TARGET)
+    // Started because the user is looking at it.
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'user' })
   })
 
   it('instant: starts only once across show / hide', async () => {

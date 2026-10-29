@@ -1,4 +1,10 @@
-import type { AgentEvent, ResultEvent, ModelUsage, TokenUsage } from '@slayzone/terminal-contracts'
+import type {
+  AgentEvent,
+  OutgoingUserMessage,
+  ResultEvent,
+  ModelUsage,
+  TokenUsage
+} from '@slayzone/terminal-contracts'
 import type { AgentAdapter, AgentSpawnOpts, SpawnArgs } from './types'
 import { classifyClaudeHookResponse } from './claude-hook-output'
 
@@ -34,7 +40,11 @@ export const claudeCodeAdapter: AgentAdapter = {
       // Every hook run arrives as system/hook_started + hook_response (without
       // it only SessionStart's do). The parser keeps the ones that blocked,
       // failed or told the model something; the rest are dropped unpersisted.
-      '--include-hook-events'
+      '--include-hook-events',
+      // Echo each user message back with its `uuid`: with `command_lifecycle`,
+      // the CLI's own confirmation that it has the message (the outbox's
+      // `delivered`). Also what rewind/fork (plan 3.3) keys on.
+      '--replay-user-messages'
     ]
     if (opts.resume) {
       base.push('--resume', opts.sessionId)
@@ -84,6 +94,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         return parseControlRequest(obj)
       case 'control_cancel_request':
         return parseControlCancelRequest(obj)
+      case 'command_lifecycle':
+        return parseCommandLifecycle(obj)
       default:
         return { kind: 'unknown', reason: 'unknown-type', raw: obj }
     }
@@ -93,6 +105,20 @@ export const claudeCodeAdapter: AgentAdapter = {
     return JSON.stringify({
       type: 'user',
       message: { role: 'user', content: text }
+    })
+  },
+
+  serializeUserTurn(message: OutgoingUserMessage): string {
+    // One text block travels as a plain string, exactly like `serializeUserMessage`;
+    // anything richer (3.5 attachments) as the block array the CLI accepts.
+    const only = message.content.length === 1 ? message.content[0] : null
+    return JSON.stringify({
+      type: 'user',
+      uuid: message.id,
+      message: {
+        role: 'user',
+        content: only && only.type === 'text' ? only.text : message.content
+      }
     })
   },
 
@@ -289,8 +315,9 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
   }
   if (subtype === 'status') {
     // `compacting` opens a compaction; the frame that carries `compact_result`
-    // closes it. Every other status (`requesting` per API call, a bare `null`)
-    // has no chat surface — drop it rather than persist it as `unknown`.
+    // closes it. `requesting` (per API call) is a transport heartbeat; any other
+    // status (a bare `null`) has no surface — drop it rather than persist it as
+    // `unknown`.
     if (obj.compact_result === 'success') return { kind: 'compact-status', phase: 'succeeded' }
     if (obj.compact_result === 'failed') {
       return {
@@ -305,7 +332,13 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
     if (typeof obj.permissionMode === 'string') {
       return { kind: 'permission-mode-changed', mode: obj.permissionMode }
     }
+    // An API request just started: the agent is working, silently.
+    if (obj.status === 'requesting') return { kind: 'heartbeat', source: 'status:requesting' }
     return null
+  }
+  if (subtype === 'thinking_tokens') {
+    // Thinking progress (estimated tokens): no chat surface, but proof of life.
+    return { kind: 'heartbeat', source: 'thinking_tokens' }
   }
   if (subtype === 'local_command_output') {
     return {
@@ -452,6 +485,11 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
 }
 
 function parseUser(obj: Record<string, unknown>, parent: string | undefined): AgentEvent | null {
+  // `--replay-user-messages` echo of a message we sent: its `uuid` is ours —
+  // the CLI's confirmation it received it. Never a timeline event.
+  if (obj.isReplay === true) {
+    return typeof obj.uuid === 'string' ? { kind: 'user-replay', uuid: obj.uuid } : null
+  }
   const message = obj.message as { content?: RawContentBlock[] | string } | undefined
   const toolUseResult = obj.tool_use_result
   // Plain-string user records are CLI-synthesized context (the compaction
@@ -635,6 +673,22 @@ function parseControlResponse(obj: Record<string, unknown>): AgentEvent | null {
     data,
     error
   }
+}
+
+/**
+ * `{type:"command_lifecycle", command_uuid, state}` — the CLI's delivery state for
+ * a user message that carried a `uuid`: queued (received) → started → completed,
+ * or cancelled.
+ */
+function parseCommandLifecycle(obj: Record<string, unknown>): AgentEvent {
+  const state = obj.state
+  if (
+    typeof obj.command_uuid !== 'string' ||
+    (state !== 'queued' && state !== 'started' && state !== 'completed' && state !== 'cancelled')
+  ) {
+    return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
+  }
+  return { kind: 'command-lifecycle', commandUuid: obj.command_uuid, state }
 }
 
 function parseRateLimit(obj: Record<string, unknown>): AgentEvent {

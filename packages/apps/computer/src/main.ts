@@ -166,7 +166,12 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.admission ? { admission: deps.admission } : {}),
     ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
   })
-  const proc = createProcHandlers(ctx, deps.getProjectPaths)
+  // Chat agents (proc.spawn with an admission lane) share the pty agents' start queue.
+  const proc = createProcHandlers(
+    ctx,
+    deps.getProjectPaths,
+    deps.admission ? { admission: deps.admission } : {}
+  )
   const fs = createFsHandlers(ctx)
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {

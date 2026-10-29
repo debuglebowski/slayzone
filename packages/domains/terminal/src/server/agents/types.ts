@@ -1,4 +1,9 @@
-import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
+import type {
+  AgentEvent,
+  OutgoingUserMessage,
+  PermissionDecision
+} from '@slayzone/terminal-contracts'
+import type { ChatWriteOptions } from '../runtime/chat-proc-handle'
 
 export interface AgentSpawnOpts {
   /** Session ID — either a fresh UUID (new session) or existing conversationId for --resume. */
@@ -38,6 +43,13 @@ export interface AgentAdapter {
   parseLine(line: string): AgentEvent | null
 
   serializeUserMessage(text: string, sessionId: string): string
+
+  /**
+   * ONE NDJSON line for an outbox message: its content blocks, and its id as the
+   * CLI's message `uuid` (Claude reports delivery against it). Absent: the
+   * transport falls back to `serializeUserMessage` with the plain text.
+   */
+  serializeUserTurn?(message: OutgoingUserMessage): string
 
   /**
    * Produce ONE NDJSON line (no trailing newline) carrying a `tool_result`
@@ -106,6 +118,12 @@ export type { PermissionDecision }
 export interface ChatDriverContext {
   /** Write one protocol line to child stdin. The transport appends the newline. */
   write(line: string): void
+  /**
+   * Write one line and learn whether it arrived: resolves once it reached the
+   * process, rejects (`ChatWriteError`) when it did not. The transport always
+   * supplies it; optional only so a driver test can hand-roll a context.
+   */
+  send?(line: string, opts?: ChatWriteOptions): Promise<void>
   /** Route one normalized event through the transport (buffer + persist + broadcast + state). */
   emit(event: AgentEvent): void
   /** Working directory the subprocess was spawned in. */
@@ -146,8 +164,20 @@ export interface ChatSessionDriver {
   start(ctx: ChatDriverContext): void | Promise<void>
   /** Handle one stdout line. Emits zero or more events via `ctx.emit`. Must never throw. */
   handleLine(line: string): void
-  /** Dispatch a user message to the provider. */
+  /** Dispatch a user message to the provider (plain text). */
   sendUserMessage(text: string): void
+  /**
+   * Dispatch an outbox message (id + content blocks). Resolves once it was
+   * written, rejects when it could not be; throws/rejects — never silently
+   * drops — before `start`. Absent: the transport uses `sendUserMessage`.
+   */
+  sendUserTurn?(message: OutgoingUserMessage): Promise<void>
+  /**
+   * The provider confirms each message itself (Claude: `command_lifecycle` /
+   * replay for the message `uuid`), so a written message is only `sending`
+   * until it does. Absent/false: a confirmed write counts as delivered.
+   */
+  readonly confirmsDelivery?: boolean
   /**
    * Resolve a pending tool call with a structured result. Return false when
    * the provider has no structured-input channel — the transport falls back
@@ -183,6 +213,11 @@ export interface ChatSessionDriver {
  */
 export interface AgentBackend {
   readonly binaryName: string
+  /**
+   * Oldest CLI version chat is tested with. An older one still runs; the chat
+   * shows an "untested version" notice. One constant per provider, easy to lower.
+   */
+  readonly minTestedCliVersion?: string
   buildSpawnArgs(opts: AgentSpawnOpts): SpawnArgs
   createDriver(): ChatSessionDriver
 }

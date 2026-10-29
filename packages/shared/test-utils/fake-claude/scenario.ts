@@ -98,6 +98,13 @@ export interface ProcessScript {
   controlResponses?: Partial<Record<string, ControlReply>>
   /** Exit code once stdin closes. Default 0. */
   exitCodeOnStdinEnd?: number
+  /**
+   * Delivery acks for user messages that carry a `uuid` (with
+   * `--replay-user-messages`): `native` (default) plays 2.1.312 —
+   * `command_lifecycle` queued/started/completed + the replayed message;
+   * `none` plays a CLI that sends neither (the app infers delivery).
+   */
+  lifecycle?: 'native' | 'none'
 }
 
 export interface Scenario {

@@ -46,6 +46,12 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
         case 'command-output':
           hay = item.text
           break
+        case 'agent-problem':
+          hay = item.message
+          break
+        case 'turn-error':
+          hay = item.text
+          break
         case 'compaction':
           hay = item.error ?? ''
           break

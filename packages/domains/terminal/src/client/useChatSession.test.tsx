@@ -8,6 +8,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 
 type Buffered = Array<{ seq: number; event: unknown }>
+/** `chat.getReplay`: saved events + the blocks streaming right now (live-only). */
+interface Replay {
+  events: Buffered
+  live: { afterSeq: number; liveSeq: number; events: unknown[] }
+}
+/** A replay with nothing streaming. */
+const saved = (events: Buffered): Replay => ({
+  events,
+  live: { afterSeq: events.length ? events[events.length - 1].seq : -1, liveSeq: 0, events: [] }
+})
 interface Deferred<T> {
   promise: Promise<T>
   resolve: (v: T) => void
@@ -26,8 +36,10 @@ let loads: Array<{
   mode: string
   providerFlagsOverride: string | null
   hydrate: Deferred<void>
-  buffer: Deferred<Buffered>
+  buffer: Deferred<Buffered | Replay>
 }> = []
+const sent: Array<{ tabId: string; message: { id: string; content: unknown } }> = []
+let sendFails: Error | null = null
 // The load whose hydrate the test just resolved — its buffer fetch follows.
 let bufferLoad = -1
 const subs: Record<string, ((data: unknown) => void) | null> = { event: null, exit: null }
@@ -56,14 +68,22 @@ const client = {
           mode: target.mode,
           providerFlagsOverride: target.providerFlagsOverride,
           hydrate: deferred<void>(),
-          buffer: deferred<Buffered>()
+          buffer: deferred<Buffered | Replay>()
         }
         loads.push(load)
         return load.hydrate.promise
       }
     },
-    getBufferSince: { query: () => loads[bufferLoad].buffer.promise },
-    send: { mutate: () => Promise.resolve(true) },
+    getReplay: {
+      query: () => loads[bufferLoad].buffer.promise.then((b) => (Array.isArray(b) ? saved(b) : b))
+    },
+    send: {
+      mutate: (input: { tabId: string; message: { id: string; content: unknown } }) => {
+        sent.push(input)
+        if (sendFails) return Promise.reject(sendFails)
+        return Promise.resolve({ id: input.message.id, state: 'queued' })
+      }
+    },
     respondPermission: { mutate: (_input: unknown) => respondReply.promise }
   }
 }
@@ -91,8 +111,8 @@ const HISTORY: Buffered = [
   { seq: 2, event: permReq('tu-1') }
 ]
 
-/** Finish load `i`: hydrate resolves, then the buffer fetch returns `buffered`. */
-async function finishLoad(i: number, buffered: Buffered): Promise<void> {
+/** Finish load `i`: hydrate resolves, then the replay fetch returns `buffered`. */
+async function finishLoad(i: number, buffered: Buffered | Replay): Promise<void> {
   await act(async () => {
     bufferLoad = i
     loads[i].hydrate.resolve()
@@ -106,6 +126,9 @@ async function finishLoad(i: number, buffered: Buffered): Promise<void> {
 
 const live = (seq: number, event: unknown): void =>
   act(() => subs.event!({ tabId: 'tab-1', event, seq }))
+/** A live-only event (streaming fragment / `sending`), following saved event `seq`. */
+const liveOnly = (seq: number, liveN: number, event: unknown): void =>
+  act(() => subs.event!({ tabId: 'tab-1', event, seq, live: liveN }))
 
 interface Props {
   cwd: string
@@ -181,6 +204,8 @@ afterEach(() => {
   bufferLoad = -1
   respondReply = deferred<boolean>()
   respondCalls.length = 0
+  sent.length = 0
+  sendFails = null
 })
 
 describe('useChatSession — must keep working', () => {
@@ -226,7 +251,8 @@ describe('useChatSession — must keep working', () => {
     expect(texts(result)).toEqual(['hi'])
     await finishLoad(0, [])
     expect(texts(result)).toEqual(['hi']) // still on screen before the echo lands
-    live(0, userMsg('hi'))
+    // The server echoes the message with the id the client minted.
+    live(0, { kind: 'user-message', id: sent[0].message.id, text: 'hi' })
     expect(texts(result)).toEqual(['hi'])
   })
 })
@@ -244,34 +270,68 @@ describe('useChatSession — bugs', () => {
 
 describe('useChatSession — reload edge cases', () => {
   it('a reload mid-reply keeps the reply streaming, once, and the turn still ends', async () => {
-    // The agent is streaming "Hel…" when the flags change; "lo" lands during the reload.
-    const midReply: Buffered = [
-      { seq: 0, event: userMsg('one') },
-      { seq: 1, event: { kind: 'stream-message-start', messageId: 'm0' } },
-      { seq: 2, event: { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' } },
-      {
-        seq: 3,
-        event: { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'Hel' }
+    // Fragments are live-only (never saved): the replay's live snapshot redraws them.
+    const midReply = (text: string, liveSeq: number): Replay => ({
+      events: [{ seq: 0, event: userMsg('one') }],
+      live: {
+        afterSeq: 0,
+        liveSeq,
+        events: [
+          { kind: 'stream-message-start', messageId: 'm0' },
+          { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' },
+          { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text }
+        ]
       }
-    ]
+    })
     const { result: r, rerender } = setup()
-    await finishLoad(0, midReply)
+    await finishLoad(0, midReply('Hel', 3))
     expect(replies(r)).toEqual(['Hel'])
     expect(r.current.inFlight).toBe(true)
 
     rerender({ cwd: '/repo', flags: '--verbose' })
     expect(loads[1].providerFlagsOverride).toBe('--verbose')
-    live(4, { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'lo' })
-    await finishLoad(1, midReply)
+    // "lo" streams during the reload; the snapshot was taken before it.
+    liveOnly(0, 4, { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'lo' })
+    await finishLoad(1, midReply('Hel', 3))
     expect(texts(r)).toEqual(['one'])
     expect(replies(r)).toEqual(['Hello'])
     expect(r.current.inFlight).toBe(true)
 
-    live(5, { kind: 'stream-block-stop', blockIndex: 0 })
-    live(6, { kind: 'stream-message-stop' })
-    live(7, result(7).event)
+    liveOnly(0, 5, { kind: 'stream-block-stop', blockIndex: 0 })
+    liveOnly(0, 6, { kind: 'stream-message-stop' })
+    // The block's one saved event, then the turn's end.
+    live(1, { kind: 'assistant-text', messageId: 'm0', text: 'Hello' })
+    live(2, result(2).event)
     expect(replies(r)).toEqual(['Hello'])
     expect(r.current.inFlight).toBe(false)
+  })
+
+  it('a snapshot taken after a queued fragment does not apply that fragment twice', async () => {
+    const { result: r } = setup()
+    liveOnly(0, 4, { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'lo' })
+    await finishLoad(0, {
+      events: [{ seq: 0, event: userMsg('one') }],
+      live: {
+        afterSeq: 0,
+        liveSeq: 4,
+        events: [
+          { kind: 'stream-message-start', messageId: 'm0' },
+          { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' },
+          { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'Hello' }
+        ]
+      }
+    })
+    expect(replies(r)).toEqual(['Hello'])
+  })
+
+  it('a live fragment that belongs before an already-applied saved event is dropped', async () => {
+    const { result: r } = setup()
+    await finishLoad(0, [{ seq: 0, event: userMsg('one') }])
+    live(1, { kind: 'assistant-text', messageId: 'm0', text: 'done' })
+    liveOnly(0, 1, { kind: 'stream-message-start', messageId: 'm-stale' })
+    liveOnly(0, 2, { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' })
+    liveOnly(0, 3, { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'ghost' })
+    expect(replies(r)).toEqual(['done'])
   })
 
   it('switching chat agent (Claude → Codex) on the same tab reloads once, no duplicates', async () => {
@@ -352,5 +412,41 @@ describe('useChatSession — answering prompts', () => {
     })
     expect(await answer).toBe(false)
     expect(result.current.prompts.map((p) => p.status)).toEqual(['expired'])
+  })
+})
+
+describe('useChatSession — outbox', () => {
+  it('a send carries a client id + content blocks and is confirmed by that id', async () => {
+    const { result } = setup()
+    await finishLoad(0, [])
+    await act(() => result.current.sendMessage('hi'))
+    expect(sent).toHaveLength(1)
+    const { id, content } = sent[0].message
+    expect(content).toEqual([{ type: 'text', text: 'hi' }])
+    live(0, { kind: 'user-message', id, text: 'hi', content })
+    liveOnly(0, 1, { kind: 'user-message-delivery', id, state: 'sending' })
+    live(1, { kind: 'user-message-delivery', id, state: 'delivered' })
+    const items = result.current.timeline.filter((it) => it.kind === 'user-text')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ id, delivery: 'delivered', optimistic: false })
+  })
+
+  it('a send the hub never got stays on screen as failed; Retry sends the same id again', async () => {
+    const { result } = setup()
+    await finishLoad(0, [])
+    sendFails = new Error('hub unreachable')
+    await act(async () => {
+      await result.current.sendMessage('hi').catch(() => undefined)
+    })
+    const item = result.current.timeline.find((it) => it.kind === 'user-text')
+    expect(item).toMatchObject({ text: 'hi', delivery: 'failed', deliveryError: 'hub unreachable' })
+    expect(result.current.inFlight).toBe(false)
+    sendFails = null
+    const id = sent[0].message.id
+    await act(() => result.current.retryMessage(id))
+    expect(sent.map((s) => s.message.id)).toEqual([id, id])
+    expect(result.current.timeline.find((it) => it.kind === 'user-text')).toMatchObject({
+      delivery: 'queued'
+    })
   })
 })

@@ -102,8 +102,7 @@ export const builtinCommands: BuiltinCommand[] = [
     description: 'Ask Claude to create CLAUDE.md for this project',
     cliCollision: 'cli-wins',
     async run(ctx) {
-      await ctx.chat.send(
-        ctx.session.tabId,
+      await ctx.submit(
         'Initialize a CLAUDE.md file for this codebase. Include the stack, architecture, commands, and any conventions you can infer from the code.'
       )
     }
@@ -113,8 +112,7 @@ export const builtinCommands: BuiltinCommand[] = [
     description: 'Review the current diff or a PR',
     cliCollision: 'cli-wins',
     async run(ctx) {
-      await ctx.chat.send(
-        ctx.session.tabId,
+      await ctx.submit(
         'Review the pending changes. Look for bugs, regressions, security issues, and anything that would not pass a thorough code review.'
       )
     }

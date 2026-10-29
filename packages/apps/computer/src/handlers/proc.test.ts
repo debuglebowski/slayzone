@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ComputerConfig } from '../config'
+import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
+import { createSpawnAdmission } from '../spawn-admission'
 import { createProcHandlers, ProcMethods, ProcNotifications } from './proc'
 import type { ComputerDialer } from './types'
 
@@ -161,23 +163,228 @@ describe('createProcHandlers — proc.spawn streaming', () => {
     proc.disposeAll()
   })
 
-  it('reports a single errored exit (null code + error) for a missing binary — no double-fire', async () => {
+  it('refuses a missing binary up front, saying which — no process, no exit', async () => {
     const { notifies, ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)
     const id = 'p-enoent'
-    // ENOENT emits both 'error' and 'close'; settle() must dedupe to one exit.
+    const err = await Promise.resolve()
+      .then(() =>
+        proc.handlers[ProcMethods.procSpawn]({
+          sessionId: id,
+          command: 'definitely-not-a-real-binary-xyz'
+        })
+      )
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+    expect((err as RpcError).message).toContain('definitely-not-a-real-binary-xyz')
+    expect((err as RpcError).data).toMatchObject({
+      reason: 'binary-not-found',
+      binary: 'definitely-not-a-real-binary-xyz'
+    })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(exitFor(notifies, id)).toBeUndefined()
+    proc.disposeAll()
+  })
+
+  it('a shell spawn is not pre-resolved (the shell reports its own 127)', async () => {
+    const { notifies, ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    const id = 'p-shell-missing'
     await proc.handlers[ProcMethods.procSpawn]({
       sessionId: id,
-      command: 'definitely-not-a-real-binary-xyz'
+      command: 'definitely-not-a-real-binary-xyz',
+      shell: true
     })
     await waitFor(() => exitFor(notifies, id) !== undefined)
-    await new Promise((r) => setTimeout(r, 100))
-    const exits = notifies.filter(
-      (n) => n.method === ProcNotifications.procExit && n.params.sessionId === id
+    expect(exitFor(notifies, id)?.exitCode).not.toBe(0)
+    proc.disposeAll()
+  })
+
+  // A multi-byte character split across two stdout reads must not become U+FFFD:
+  // each chunk used to be decoded on its own (`d.toString()`).
+  it('keeps a UTF-8 character split across two output chunks intact', async () => {
+    const { notifies, ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    const id = 'p-utf8'
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      command: 'sh',
+      args: [
+        '-c',
+        "printf 'h\\303'; sleep 0.2; printf '\\251llo'; printf '\\360\\237'; sleep 0.2; printf '\\230\\200'; " +
+          "printf 'w\\303' 1>&2; sleep 0.2; printf '\\266rd' 1>&2"
+      ]
+    })
+    await waitFor(() => exitFor(notifies, id) !== undefined)
+    const chunks = notifies
+      .filter((n) => n.method === ProcNotifications.procData && n.params.sessionId === id)
+      .map((n) => n.params.data as string)
+    expect(chunks.some((c) => c.includes('\uFFFD'))).toBe(false)
+    expect(chunks.some((c) => c === '')).toBe(false)
+    expect(dataFor(notifies, id, 'stdout')).toBe('héllo😀')
+    expect(dataFor(notifies, id, 'stderr')).toBe('wörd')
+    proc.disposeAll()
+  })
+
+  it('tags every frame with the spawn attempt that produced it', async () => {
+    const { notifies, ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    const id = 'p-tagged'
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      spawnId: 'attempt-7',
+      command: 'sh',
+      args: ['-c', 'printf out; printf err 1>&2']
+    })
+    await waitFor(() => exitFor(notifies, id) !== undefined)
+    const frames = notifies.filter((n) => n.params.sessionId === id)
+    expect(frames.length).toBeGreaterThan(1)
+    for (const f of frames) expect(f.params.spawnId).toBe('attempt-7')
+    proc.disposeAll()
+  })
+})
+
+describe('createProcHandlers — proc.write confirms delivery', () => {
+  async function catProc(spawnId = 'attempt-1') {
+    const made = makeCtx(roots)
+    const proc = createProcHandlers(made.ctx)
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: 'w',
+      spawnId,
+      command: 'cat'
+    })
+    return { ...made, proc }
+  }
+
+  const reject = (p: () => unknown): Promise<unknown> =>
+    Promise.resolve()
+      .then(p)
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+
+  it('acks a write only once it reached the process', async () => {
+    const { notifies, proc } = await catProc()
+    const res = await proc.handlers[ProcMethods.procWrite]({
+      sessionId: 'w',
+      spawnId: 'attempt-1',
+      data: 'hello\n'
+    })
+    expect(res).toEqual({ ok: true, delivered: true })
+    await waitFor(() => dataFor(notifies, 'w', 'stdout') === 'hello\n')
+    proc.disposeAll()
+  })
+
+  it('refuses a write to a session it does not know', async () => {
+    const { ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    const err = await reject(() =>
+      proc.handlers[ProcMethods.procWrite]({ sessionId: 'ghost', data: 'x' })
     )
-    expect(exits.length).toBe(1)
-    expect(exits[0].params.exitCode).toBeNull()
-    expect(typeof exits[0].params.error).toBe('string')
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+    expect((err as RpcError).data).toMatchObject({ reason: 'unknown-session' })
+    proc.disposeAll()
+  })
+
+  it('refuses a write meant for a replaced process', async () => {
+    const { notifies, proc } = await catProc('attempt-2')
+    const err = await reject(() =>
+      proc.handlers[ProcMethods.procWrite]({ sessionId: 'w', spawnId: 'attempt-1', data: 'x\n' })
+    )
+    expect((err as RpcError).data).toMatchObject({ reason: 'stale-spawn' })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(dataFor(notifies, 'w', 'stdout')).toBe('')
+    proc.disposeAll()
+  })
+
+  it('writes a retried write (same writeId) once', async () => {
+    const { notifies, proc } = await catProc()
+    const write = { sessionId: 'w', spawnId: 'attempt-1', writeId: 'msg-1', data: 'once\n' }
+    expect(await proc.handlers[ProcMethods.procWrite](write)).toEqual({ ok: true, delivered: true })
+    expect(await proc.handlers[ProcMethods.procWrite](write)).toEqual({
+      ok: true,
+      delivered: true,
+      duplicate: true
+    })
+    await waitFor(() => dataFor(notifies, 'w', 'stdout') === 'once\n')
+    await new Promise((r) => setTimeout(r, 100))
+    expect(dataFor(notifies, 'w', 'stdout')).toBe('once\n')
+    proc.disposeAll()
+  })
+
+  it('a write to a process that closed its stdin fails instead of crashing', async () => {
+    const { ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: 'closed',
+      command: 'sh',
+      args: ['-c', 'exec 0<&-; sleep 2']
+    })
+    await new Promise((r) => setTimeout(r, 150))
+    const big = 'x'.repeat(256 * 1024)
+    const err = await reject(() =>
+      proc.handlers[ProcMethods.procWrite]({ sessionId: 'closed', data: big })
+    )
+    expect(err).toBeTruthy()
+    // A second write after the pipe broke is refused too, never thrown at the process.
+    const again = await reject(() =>
+      proc.handlers[ProcMethods.procWrite]({ sessionId: 'closed', data: 'y' })
+    )
+    expect(again).toBeTruthy()
+    proc.disposeAll()
+  })
+
+  it('a kill meant for a replaced process leaves the new one running', async () => {
+    const { notifies, proc } = await catProc('attempt-2')
+    await proc.handlers[ProcMethods.procKill]({ sessionId: 'w', spawnId: 'attempt-1' })
+    await new Promise((r) => setTimeout(r, 150))
+    expect(exitFor(notifies, 'w')).toBeUndefined()
+    await proc.handlers[ProcMethods.procWrite]({
+      sessionId: 'w',
+      spawnId: 'attempt-2',
+      data: 'ok\n'
+    })
+    await waitFor(() => dataFor(notifies, 'w', 'stdout') === 'ok\n')
+    proc.disposeAll()
+  })
+})
+
+describe('createProcHandlers — agent-start admission', () => {
+  it('a spawn with an admission lane waits for a free start slot', async () => {
+    const { notifies, ctx } = makeCtx(roots)
+    const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 10_000 })
+    const proc = createProcHandlers(ctx, undefined, { admission })
+    const first = proc.handlers[ProcMethods.procSpawn]({
+      sessionId: 'a1',
+      command: 'sh',
+      args: ['-c', 'sleep 0.3; printf up; sleep 5'],
+      admission: 'background'
+    })
+    let secondDone = false
+    const second = Promise.resolve(
+      proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'a2',
+        command: 'sh',
+        args: ['-c', 'printf two; sleep 5'],
+        admission: 'background'
+      })
+    ).then((r) => {
+      secondDone = true
+      return r
+    })
+    await first
+    await new Promise((r) => setTimeout(r, 150))
+    // The first start still holds the only slot (no output yet).
+    expect(secondDone).toBe(false)
+    await waitFor(() => dataFor(notifies, 'a1', 'stdout') === 'up')
+    await second
+    await waitFor(() => dataFor(notifies, 'a2', 'stdout') === 'two')
     proc.disposeAll()
   })
 })

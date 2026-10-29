@@ -2084,3 +2084,215 @@ test('a result after an interrupt does not leave the next turn looking finished'
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'two' } })
   expect(isInFlight(s)).toBe(true)
 })
+
+describe('outbox: delivery states on the user message', () => {
+  const sent = (id: string, text = id): AgentEvent => ({
+    kind: 'user-message',
+    id,
+    text,
+    content: [{ type: 'text', text }]
+  })
+  const delivery = (
+    id: string,
+    state: 'sending' | 'delivered' | 'answered' | 'failed' | 'cancelled',
+    error?: string
+  ): AgentEvent => ({ kind: 'user-message-delivery', id, state, ...(error ? { error } : {}) })
+  const userItems = (s: ReturnType<typeof initialState>) =>
+    s.timeline.filter((i) => i.kind === 'user-text') as Array<
+      Extract<ReturnType<typeof initialState>['timeline'][number], { kind: 'user-text' }>
+    >
+
+  test('the optimistic bubble is confirmed by id, then follows the delivery states', () => {
+    let s = reducer(initialState(), { type: 'user-sent', id: 'm1', text: 'hi' })
+    expect(userItems(s)[0]).toMatchObject({ id: 'm1', delivery: 'queued', optimistic: true })
+    s = run([sent('m1', 'hi')], s)
+    expect(userItems(s)).toHaveLength(1)
+    expect(userItems(s)[0]).toMatchObject({ id: 'm1', optimistic: false, delivery: 'queued' })
+    s = run([delivery('m1', 'sending'), delivery('m1', 'delivered')], s)
+    expect(userItems(s)[0].delivery).toBe('delivered')
+    s = run([delivery('m1', 'answered')], s)
+    expect(userItems(s)[0].delivery).toBe('answered')
+  })
+
+  test('confirmation matches by id, not by position', () => {
+    let s = reducer(initialState(), { type: 'user-sent', id: 'a', text: 'first' })
+    s = reducer(s, { type: 'user-sent', id: 'b', text: 'second' })
+    s = run([sent('b', 'second')], s)
+    expect(userItems(s).map((i) => [i.id, i.optimistic])).toEqual([
+      ['a', true],
+      ['b', false]
+    ])
+  })
+
+  test('a failed message keeps its bubble with the reason, and is not in flight', () => {
+    let s = run([sent('m1', 'hi')])
+    expect(isInFlight(s)).toBe(true)
+    s = run([delivery('m1', 'failed', 'Claude Code is not installed')], s)
+    expect(userItems(s)[0]).toMatchObject({
+      text: 'hi',
+      delivery: 'failed',
+      deliveryError: 'Claude Code is not installed'
+    })
+    expect(isInFlight(s)).toBe(false)
+  })
+
+  test('a send the server never received fails the bubble (kept), not removed', () => {
+    let s = reducer(initialState(), { type: 'user-sent', id: 'm1', text: 'hi' })
+    s = reducer(s, { type: 'user-send-failed', id: 'm1', error: 'hub unreachable' })
+    expect(userItems(s)[0]).toMatchObject({
+      id: 'm1',
+      delivery: 'failed',
+      deliveryError: 'hub unreachable'
+    })
+    expect(isInFlight(s)).toBe(false)
+  })
+
+  test('retry puts a failed message back in flight; replay of failed → delivered balances too', () => {
+    let s = run([sent('m1', 'hi'), delivery('m1', 'failed', 'x')])
+    s = reducer(s, { type: 'user-retry', id: 'm1' })
+    expect(userItems(s)[0].delivery).toBe('queued')
+    expect(isInFlight(s)).toBe(true)
+    // What a reload replays for the same story:
+    const replayed = run([
+      sent('m1', 'hi'),
+      delivery('m1', 'failed', 'x'),
+      delivery('m1', 'delivered')
+    ])
+    expect(isInFlight(replayed)).toBe(true)
+    expect(userItems(replayed)[0].delivery).toBe('delivered')
+  })
+
+  test('legacy user-message without id still confirms FIFO', () => {
+    let s = reducer(initialState(), { type: 'user-sent', text: 'old style' })
+    s = run([{ kind: 'user-message', text: 'old style' }], s)
+    expect(userItems(s)).toHaveLength(1)
+    expect(userItems(s)[0].optimistic).toBe(false)
+  })
+})
+
+describe('transport notices', () => {
+  test('a notice is shown as its own line', () => {
+    const s = run([
+      {
+        kind: 'notice',
+        id: 'n-w',
+        level: 'warning',
+        code: 'watchdog-killed',
+        text: 'Claude Code stopped responding and was stopped.'
+      }
+    ])
+    expect(s.timeline.at(-1)).toMatchObject({
+      kind: 'notice',
+      code: 'watchdog-killed',
+      text: 'Claude Code stopped responding and was stopped.'
+    })
+  })
+
+  test('after a failed resume the fresh session keeps the history above a divider', () => {
+    let s = run([
+      ev.turnInit('old-sid'),
+      { kind: 'user-message', id: 'u0', text: 'earlier' },
+      ev.text('a0', 'earlier answer'),
+      {
+        kind: 'result',
+        subtype: 'success',
+        isError: false,
+        durationMs: 0,
+        durationApiMs: 0,
+        numTurns: 1,
+        totalCostUsd: 0,
+        stopReason: null,
+        terminalReason: null,
+        text: null,
+        modelUsage: {},
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0
+        },
+        permissionDenials: []
+      }
+    ])
+    s = run(
+      [
+        { kind: 'user-message', id: 'u1', text: 'hello again' },
+        {
+          kind: 'notice',
+          id: 'n-r',
+          level: 'warning',
+          code: 'resume-failed-fresh-start',
+          text: 'could not resume'
+        },
+        ev.turnInit('new-sid')
+      ],
+      s
+    )
+    const kinds = s.timeline.map((i) => i.kind)
+    expect(kinds).toContain('text')
+    expect(s.timeline.some((i) => i.kind === 'user-text' && i.text === 'hello again')).toBe(true)
+    expect(kinds.filter((k) => k === 'session-start')).toHaveLength(2)
+    expect(s.sessionId).toBe('new-sid')
+  })
+
+  test('an agent start failure is a problem card with its code', () => {
+    const s = run([
+      {
+        kind: 'error',
+        message: 'claude was not found on this computer’s PATH',
+        detail: { code: 'cli-not-installed', binary: 'claude' }
+      }
+    ])
+    expect(s.timeline.at(-1)).toMatchObject({
+      kind: 'agent-problem',
+      code: 'cli-not-installed',
+      binary: 'claude'
+    })
+  })
+})
+
+describe('turn errors are visible', () => {
+  const errorResult = (text: string | null): AgentEvent => ({
+    kind: 'result',
+    subtype: 'success',
+    isError: true,
+    durationMs: 0,
+    durationApiMs: 0,
+    numTurns: 1,
+    totalCostUsd: 0,
+    stopReason: null,
+    terminalReason: null,
+    text,
+    modelUsage: {},
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0
+    },
+    permissionDenials: []
+  })
+
+  test('an error result with no reply shows its text as a turn error', () => {
+    const s = run([
+      { kind: 'user-message', text: 'hi' },
+      errorResult('Invalid API key · Please run /login')
+    ])
+    expect(
+      s.timeline.some(
+        (i) => i.kind === 'turn-error' && i.text === 'Invalid API key · Please run /login'
+      )
+    ).toBe(true)
+  })
+
+  test('an error result after a reply (or without text) adds nothing', () => {
+    const s = run([
+      { kind: 'user-message', text: 'hi' },
+      ev.text('m', 'partial answer'),
+      errorResult('partial answer'),
+      { kind: 'user-message', text: 'again' },
+      errorResult(null)
+    ])
+    expect(s.timeline.some((i) => i.kind === 'turn-error')).toBe(false)
+  })
+})

@@ -77,7 +77,8 @@ export interface ChatDataOps {
    * changed (drives the `tasks:changed` renderer notify at the call site).
    */
   bumpLastInteraction(taskId: string, now: number): Promise<boolean>
-  persistChatEvent(tabId: string, seq: number, event: AgentEvent): Promise<void>
+  /** Insert-only; `'clash'` when a row already exists at that seq (never overwritten). */
+  persistChatEvent(tabId: string, seq: number, event: AgentEvent): Promise<'inserted' | 'clash'>
   loadChatEvents(tabId: string): Promise<BufferedEvent[]>
   getNextSeqForTab(tabId: string): Promise<number>
   clearChatEventsForTab(tabId: string): Promise<void>
@@ -113,7 +114,42 @@ export interface ChatDataOps {
  * corrupt-JSON tolerance) is preserved verbatim. The conversation-ledger
  * append goes through the injected task-owned `taskStore`.
  */
+/**
+ * Set `provider_config[mode][key] = value` in ONE statement, so two writers of
+ * different keys can never lose each other's write. Corrupt JSON (or a mode
+ * entry that is not an object) is replaced by a fresh object, as before.
+ */
+const PATCH_PROVIDER_CONFIG_SQL = `UPDATE tasks SET provider_config = (
+  SELECT json_set(
+    json_set(cfg, ?, CASE WHEN json_type(cfg, ?) = 'object' THEN json(json_extract(cfg, ?)) ELSE json('{}') END),
+    ?, json(?))
+  FROM (SELECT CASE WHEN json_valid(provider_config) THEN provider_config ELSE '{}' END AS cfg)
+) WHERE id = ?`
+
 export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore): ChatDataOps {
+  const readEntry = async (taskId: string, mode: string): Promise<ProviderConfigEntry> => {
+    const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
+      | { provider_config: string | null }
+      | undefined
+    if (!row?.provider_config) return {}
+    try {
+      const parsed = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry> | null
+      return parsed?.[mode] ?? {}
+    } catch {
+      return {}
+    }
+  }
+  const patchProviderConfig = async (
+    taskId: string,
+    mode: string,
+    key: keyof ProviderConfigEntry,
+    value: unknown
+  ): Promise<void> => {
+    const modePath = `$.${JSON.stringify(mode)}`
+    await db
+      .prepare(PATCH_PROVIDER_CONFIG_SQL)
+      .run(modePath, modePath, modePath, `${modePath}.${key}`, JSON.stringify(value), taskId)
+  }
   return {
     readProviderConfig: async (taskId, mode) => {
       const row = (await db
@@ -128,107 +164,37 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       }
     },
 
+    // Each write skips when the value is already stored (turn-init re-syncs the
+    // mode every turn), then patches ONE key in place — never a read-modify-write
+    // of the whole JSON, which lost a concurrent write of another key.
     writeChatMode: async (taskId, mode, chatMode) => {
-      const row = (await db
-        .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-        .get(taskId)) as { provider_config: string | null } | undefined
-      let cfg: Record<string, ProviderConfigEntry> = {}
-      if (row?.provider_config) {
-        try {
-          cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-        } catch {
-          cfg = {}
-        }
-      }
-      const existing = cfg[mode] ?? {}
-      // Idempotent: skip the write when nothing changed. Persisted chat events
-      // tick this on every turn-init (live sync); no-op writes would burn I/O for
-      // the common case where mode hasn't moved.
+      const existing = await readEntry(taskId, mode)
       if (existing.chatMode === chatMode) return
-      cfg[mode] = { ...existing, chatMode }
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), taskId)
+      await patchProviderConfig(taskId, mode, 'chatMode', chatMode)
     },
 
     writeChatModel: async (taskId, mode, chatModel) => {
-      const row = (await db
-        .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-        .get(taskId)) as { provider_config: string | null } | undefined
-      let cfg: Record<string, ProviderConfigEntry> = {}
-      if (row?.provider_config) {
-        try {
-          cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-        } catch {
-          cfg = {}
-        }
-      }
-      const existing = cfg[mode] ?? {}
+      const existing = await readEntry(taskId, mode)
       if (existing.chatModel === chatModel) return
-      cfg[mode] = { ...existing, chatModel }
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), taskId)
+      await patchProviderConfig(taskId, mode, 'chatModel', chatModel)
     },
 
     writeChatEffort: async (taskId, mode, chatEffort) => {
-      const row = (await db
-        .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-        .get(taskId)) as { provider_config: string | null } | undefined
-      let cfg: Record<string, ProviderConfigEntry> = {}
-      if (row?.provider_config) {
-        try {
-          cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-        } catch {
-          cfg = {}
-        }
-      }
-      const existing = cfg[mode] ?? {}
+      const existing = await readEntry(taskId, mode)
       if ((existing.chatEffort ?? null) === chatEffort) return
-      cfg[mode] = { ...existing, chatEffort }
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), taskId)
+      await patchProviderConfig(taskId, mode, 'chatEffort', chatEffort)
     },
 
     writeChatCollaboration: async (taskId, mode, chatCollaboration) => {
-      const row = (await db
-        .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-        .get(taskId)) as { provider_config: string | null } | undefined
-      let cfg: Record<string, ProviderConfigEntry> = {}
-      if (row?.provider_config) {
-        try {
-          cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-        } catch {
-          cfg = {}
-        }
-      }
-      const existing = cfg[mode] ?? {}
+      const existing = await readEntry(taskId, mode)
       if ((existing.chatCollaboration ?? null) === chatCollaboration) return
-      cfg[mode] = { ...existing, chatCollaboration }
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), taskId)
+      await patchProviderConfig(taskId, mode, 'chatCollaboration', chatCollaboration)
     },
 
     writeChatFastMode: async (taskId, mode, chatFastMode) => {
-      const row = (await db
-        .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-        .get(taskId)) as { provider_config: string | null } | undefined
-      let cfg: Record<string, ProviderConfigEntry> = {}
-      if (row?.provider_config) {
-        try {
-          cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-        } catch {
-          cfg = {}
-        }
-      }
-      const existing = cfg[mode] ?? {}
+      const existing = await readEntry(taskId, mode)
       if ((existing.chatFastMode ?? false) === chatFastMode) return
-      cfg[mode] = { ...existing, chatFastMode }
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), taskId)
+      await patchProviderConfig(taskId, mode, 'chatFastMode', chatFastMode)
     },
 
     clearChatConversationId: async (taskId, mode) => {
@@ -244,10 +210,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       }
       const existing = cfg[mode]
       if (!existing?.chatConversationId) return
-      cfg[mode] = { ...existing, chatConversationId: null }
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), taskId)
+      await patchProviderConfig(taskId, mode, 'chatConversationId', null)
     },
 
     getModeDefaultFlags: async (mode) => {

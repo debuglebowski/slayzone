@@ -19,7 +19,15 @@
  * driver. stderr is diagnostic and streamed unsequenced.
  *
  * stdin is PIPED and writable via `proc.write`, which is what makes this channel
- * usable by a bidirectional agent protocol at all.
+ * usable by a bidirectional agent protocol at all. A write is CONFIRMED: the reply
+ * comes only once the bytes reached the child's stdin, and a write that cannot be
+ * delivered (unknown session, replaced attempt, closed pipe) is refused with a
+ * `ProcRefusalReasons` code — never acked. A retried write (same `writeId`) is
+ * written once.
+ *
+ * Output is decoded with one `StringDecoder` per stream: a multi-byte character
+ * split across two reads stays intact (per-chunk `toString()` turned it into
+ * U+FFFD, which corrupted the agent's NDJSON text).
  *
  * Same lifecycle rules as `handlers/pty.ts`: a repeat of the same spawn attempt
  * (`spawnId`) returns the running process, and exits are remembered as tombstones
@@ -35,19 +43,32 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { buildShellInvocation, killPidTree, PROCESS_TREE_DETACHED } from '@slayzone/platform'
 import {
+  ComputerTransportErrorCodes,
   HubToComputerMethods,
   procGetBufferSinceParamsSchema,
   type ProcListResult,
   procKillParamsSchema,
+  ProcRefusalReasons,
+  type ProcSpawnParams,
   procSpawnParamsSchema,
+  type ProcWriteResult,
   procWriteParamsSchema,
-  ComputerNotificationMethods
+  ComputerNotificationMethods,
+  RpcError
 } from '@slayzone/computer-transport/shared'
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '../ring-buffer'
+import {
+  createSpawnAdmission,
+  type AdmissionSlot,
+  type AdmissionTicket,
+  type SpawnAdmission
+} from '../spawn-admission'
+import { resolveCommand } from './resolve-command'
 import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -68,12 +89,30 @@ export const ProcNotifications = {
   procExit: ComputerNotificationMethods.procExit
 } as const
 
+/** How many recent `writeId`s a session remembers for retry dedupe. */
+const WRITE_ID_MEMORY = 256
+
 interface ProcSession {
   child: ChildProcess
   /** stdout only — the replayable stream. */
   buffer: RingBuffer
   /** The hub's idempotency key for the spawn attempt that started this process. */
   spawnId?: string
+  /** Set once stdin errored (EPIPE …): later writes are refused, not attempted. */
+  stdinBroken: string | null
+  /** Recent `writeId`s, oldest first (bounded by {@link WRITE_ID_MEMORY}). */
+  writeIds: string[]
+  /** Agent-start slot held until first output or exit (admitted spawns only). */
+  slot: AdmissionSlot | null
+}
+
+/** An admitted spawn waiting for its start slot. */
+interface QueuedProcSpawn {
+  spawnId?: string
+  ticket: AdmissionTicket
+  promise: Promise<{ pid: number | null }>
+  resolve: (value: { pid: number | null } | Promise<{ pid: number | null }>) => void
+  reject: (err: unknown) => void
 }
 
 export interface ProcHandlers {
@@ -82,16 +121,31 @@ export interface ProcHandlers {
   disposeAll(): void
 }
 
+export interface ProcHandlerOptions {
+  /** The computer-wide agent-start queue (see spawn-admission.ts); tests get a private one. */
+  admission?: SpawnAdmission
+}
+
+function refuse(reason: string, message: string, data: Record<string, unknown> = {}): RpcError {
+  return new RpcError(ComputerTransportErrorCodes.refusedByComputer, message, {
+    reason,
+    ...data
+  })
+}
+
 /**
  * `getProjectPaths` lets a cwd-less spawn resolve its own directory — the hub no
  * longer knows where a project lives on this machine. See `pty.ts`.
  */
 export function createProcHandlers(
   ctx: HandlerContext,
-  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null
+  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null,
+  options: ProcHandlerOptions = {}
 ): ProcHandlers {
   const procs = new Map<string, ProcSession>()
   const tombstones = new ExitTombstones()
+  const admission = options.admission ?? createSpawnAdmission()
+  const queued = new Map<string, QueuedProcSpawn>()
 
   /**
    * Kill a spawned process AND everything it started. Signalling only the direct
@@ -105,8 +159,57 @@ export function createProcHandlers(
     // Never got a pid (spawn failed): nothing to signal; `error` reports it.
   }
 
-  function procSpawn(rawParams: unknown): { pid: number | null } {
+  function releaseSlot(session: ProcSession): void {
+    const slot = session.slot
+    session.slot = null
+    slot?.release()
+  }
+
+  function procSpawn(rawParams: unknown): { pid: number | null } | Promise<{ pid: number | null }> {
     const params = procSpawnParamsSchema.parse(rawParams)
+    if (!params.admission) return startProc(params, null)
+    // An agent start: wait for a slot in the computer-wide queue (restoring many
+    // chat tabs must not start every agent at once). The reply waits with it.
+    const prior = queued.get(params.sessionId)
+    if (prior && params.spawnId !== undefined && prior.spawnId === params.spawnId) {
+      return prior.promise
+    }
+    let resolve!: QueuedProcSpawn['resolve']
+    let reject!: QueuedProcSpawn['reject']
+    const promise = new Promise<{ pid: number | null }>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    const item: QueuedProcSpawn = {
+      ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {}),
+      ticket: undefined as unknown as AdmissionTicket,
+      promise,
+      resolve,
+      reject
+    }
+    if (prior) {
+      // Superseded while waiting: it did not fail, it was replaced — same reply.
+      admission.cancel(prior.ticket)
+      prior.resolve(promise)
+    }
+    queued.set(params.sessionId, item)
+    item.ticket = admission.enqueue(params.admission, (slot) => {
+      if (queued.get(params.sessionId) !== item) {
+        slot.release()
+        return
+      }
+      queued.delete(params.sessionId)
+      try {
+        item.resolve(startProc(params, slot))
+      } catch (err) {
+        slot.release()
+        item.reject(err)
+      }
+    })
+    return promise
+  }
+
+  function startProc(params: ProcSpawnParams, slot: AdmissionSlot | null): { pid: number | null } {
     if (params.spawnId !== undefined) {
       const live = procs.get(params.sessionId)
       // The hub re-sent an attempt whose reply it lost: this process IS it.
@@ -139,12 +242,22 @@ export function createProcHandlers(
     // spawn does not, so its resolved binary + argv reach execve untouched and a
     // missing binary still reports ENOENT via `error` (null exitCode + message)
     // rather than being flattened to a shell's exit 127.
+    const env = buildSpawnEnv(ctx, params.env)
+    // A literal command is looked up first, so a missing one is refused with its
+    // name (the hub shows "Claude Code isn't installed") instead of a bare exit.
+    if (!params.shell && resolveCommand(params.command, env, cwd) === null) {
+      throw refuse(
+        ProcRefusalReasons.binaryNotFound,
+        `${params.command} was not found on this computer's PATH`,
+        { binary: params.command }
+      )
+    }
     const invocation = params.shell
       ? buildShellInvocation(params.command)
       : { file: params.command, args: params.args ?? [] }
     const child = spawn(invocation.file, invocation.args, {
       ...(cwd ? { cwd } : {}),
-      env: buildSpawnEnv(ctx, params.env),
+      env,
       // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
       stdio: ['pipe', 'pipe', 'pipe'],
       // Its own process group, so a kill reaches everything it started (`pnpm dev`
@@ -155,9 +268,19 @@ export function createProcHandlers(
     const session: ProcSession = {
       child,
       buffer,
-      ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {})
+      ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {}),
+      stdinBroken: null,
+      writeIds: [],
+      slot
     }
     procs.set(params.sessionId, session)
+    const tag = params.spawnId !== undefined ? { spawnId: params.spawnId } : {}
+    // Without a listener a broken pipe (the child closed stdin, or died) is an
+    // unhandled 'error' event — it would take the whole computer down.
+    child.stdin?.on('error', (err) => {
+      session.stdinBroken = err.message
+      ctx.log('proc stdin error', { sessionId: params.sessionId, error: err.message })
+    })
 
     // Emit proc.exit at most once, and only for the CURRENTLY-tracked process
     // for this sessionId. This dedupes the error+close double-fire on a failed
@@ -168,10 +291,12 @@ export function createProcHandlers(
       signal: string | null
       error?: string
     }): void => {
+      releaseSlot(session)
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
       const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
         sessionId: params.sessionId,
+        ...tag,
         ...payload
       })
       tombstones.add(params.sessionId, {
@@ -184,30 +309,45 @@ export function createProcHandlers(
       })
     }
 
-    child.stdout?.on('data', (d: Buffer) => {
-      if (procs.get(params.sessionId) !== session) return
-      const data = d.toString()
-      // Buffer + stream the SAME bytes under the same seq: the hub's demux keeps
+    const stdoutDecoder = new StringDecoder('utf8')
+    const stderrDecoder = new StringDecoder('utf8')
+    const emitStdout = (data: string): void => {
+      // A chunk that ended mid-character decodes to '' until the rest arrives.
+      if (!data || procs.get(params.sessionId) !== session) return
+      // Buffer + stream the SAME text under the same seq: the hub's demux keeps
       // whichever copy of a seq arrives first (live or backfilled) and emits it
       // once, so any per-seq divergence would make output depend on timing.
       const seq = buffer.append(data)
       ctx.dialer.notify(ProcNotifications.procData, {
         sessionId: params.sessionId,
+        ...tag,
         seq,
         stream: 'stdout',
         data
       })
-    })
-    child.stderr?.on('data', (d: Buffer) => {
-      if (procs.get(params.sessionId) !== session) return
+    }
+    const emitStderr = (data: string): void => {
+      if (!data || procs.get(params.sessionId) !== session) return
       // Unsequenced: stderr is diagnostic, never protocol, and is not replayable.
       ctx.dialer.notify(ProcNotifications.procData, {
         sessionId: params.sessionId,
+        ...tag,
         stream: 'stderr',
-        data: d.toString()
+        data
       })
+    }
+    child.stdout?.on('data', (d: Buffer) => {
+      // First output: the agent got past its expensive start — free the slot.
+      releaseSlot(session)
+      emitStdout(stdoutDecoder.write(d))
+    })
+    child.stderr?.on('data', (d: Buffer) => {
+      releaseSlot(session)
+      emitStderr(stderrDecoder.write(d))
     })
     child.on('close', (code, signal) => {
+      emitStdout(stdoutDecoder.end())
+      emitStderr(stderrDecoder.end())
       settle({
         exitCode: typeof code === 'number' ? code : null,
         signal: signal != null ? String(signal) : null
@@ -233,24 +373,72 @@ export function createProcHandlers(
       ctx.log('proc kill on unknown session', { sessionId: params.sessionId })
       return { ok: true }
     }
+    if (params.spawnId !== undefined && session.spawnId !== params.spawnId) {
+      // Meant for a process this session no longer runs: that one is already gone.
+      ctx.log('proc kill for a replaced attempt', { sessionId: params.sessionId })
+      return { ok: true }
+    }
     killTree(session.child, (params.signal as NodeJS.Signals | undefined) ?? 'SIGTERM')
     return { ok: true }
   }
 
-  function procWrite(rawParams: unknown): { ok: true } {
+  function procWrite(rawParams: unknown): Promise<ProcWriteResult> {
     const params = procWriteParamsSchema.parse(rawParams)
     const session = procs.get(params.sessionId)
     if (!session) {
       ctx.log('proc write on unknown session', { sessionId: params.sessionId })
-      return { ok: true }
+      return Promise.reject(
+        refuse(ProcRefusalReasons.unknownSession, `proc.write: no process ${params.sessionId}`)
+      )
     }
-    try {
-      session.child.stdin?.write(params.data)
-    } catch (err) {
-      // A dead pipe surfaces via `close`/`error` → proc.exit; nothing to add here.
-      ctx.log('proc write failed', { sessionId: params.sessionId, error: String(err) })
+    if (params.spawnId !== undefined && session.spawnId !== params.spawnId) {
+      return Promise.reject(
+        refuse(
+          ProcRefusalReasons.staleSpawn,
+          `proc.write: ${params.sessionId} now runs a different process`
+        )
+      )
     }
-    return { ok: true }
+    if (params.writeId !== undefined && session.writeIds.includes(params.writeId)) {
+      return Promise.resolve({ ok: true, delivered: true, duplicate: true })
+    }
+    const stdin = session.child.stdin
+    if (!stdin || session.stdinBroken !== null || stdin.destroyed || stdin.writableEnded) {
+      return Promise.reject(
+        refuse(
+          ProcRefusalReasons.stdinClosed,
+          `proc.write: ${params.sessionId} stdin is closed${
+            session.stdinBroken ? ` (${session.stdinBroken})` : ''
+          }`
+        )
+      )
+    }
+    if (params.writeId !== undefined) {
+      session.writeIds.push(params.writeId)
+      if (session.writeIds.length > WRITE_ID_MEMORY) session.writeIds.shift()
+    }
+    return new Promise((resolve, reject) => {
+      const fail = (err: unknown): void => {
+        // Not delivered: forget the id so a retry is attempted, not deduped.
+        if (params.writeId !== undefined) {
+          session.writeIds = session.writeIds.filter((id) => id !== params.writeId)
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        session.stdinBroken ??= message
+        ctx.log('proc write failed', { sessionId: params.sessionId, error: message })
+        reject(
+          refuse(ProcRefusalReasons.stdinClosed, `proc.write: ${params.sessionId}: ${message}`)
+        )
+      }
+      try {
+        // The callback fires once the chunk is handed to the OS pipe (or failed).
+        stdin.write(params.data, (err) =>
+          err ? fail(err) : resolve({ ok: true, delivered: true })
+        )
+      } catch (err) {
+        fail(err)
+      }
+    })
   }
 
   function procGetBufferSince(rawParams: unknown): {
@@ -284,7 +472,13 @@ export function createProcHandlers(
   }
 
   function disposeAll(): void {
+    for (const item of queued.values()) {
+      admission.cancel(item.ticket)
+      item.reject(new Error('computer shutting down'))
+    }
+    queued.clear()
     for (const [sessionId, session] of procs) {
+      releaseSlot(session)
       killTree(session.child)
       ctx.log('proc disposed on shutdown', { sessionId })
     }

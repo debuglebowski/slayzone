@@ -2,16 +2,15 @@ import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
-  sendUserMessage,
+  dispatchUserMessage,
   ensureSpawned,
-  getSessionInfo,
   getSessionTerminalState,
-  isSessionAwaitingUserInput,
+  isReadyForQueuedMessage,
   registerChatQueueDrainer
 } from './chat-transport-manager'
 import { createDbChatQueueData, type ChatQueueData } from './chat-queue-data'
 import { getPtyHostBridge } from '../pty-host'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 
 /**
  * Chat-queue event emitter — the source for the tRPC `chat.onQueueChanged` /
@@ -45,26 +44,47 @@ function broadcast(channel: 'chat:queue-changed' | 'chat:queue-drained', ...args
   }
 }
 
+/** Tell every client a tab's queue changed (also after a server-side clear). */
+export function notifyChatQueueChanged(tabId: string): void {
+  broadcast('chat:queue-changed', tabId)
+}
+
+/** One drain at a time per tab: concurrent triggers queue up behind it. */
+const draining = new Map<string, Promise<void>>()
+
 /**
- * Drain head of queue if the session is currently idle. Called by the
- * transport on state→idle transitions and on push (covers the "queue
- * persisted across restart, session boots into idle, no fresh transition
- * fires" case). Gated on `terminalState === 'idle'` so drains during a
- * live turn don't interleave with the in-flight assistant response.
+ * Drain head of queue if the session is ready for it. Called by the transport
+ * on state→idle transitions and on push (covers the "queue persisted across
+ * restart, session boots into idle, no fresh transition fires" case).
  *
- * Extra gate: `isSessionAwaitingUserInput` blocks drain during an inbound
- * permission-request (AskUserQuestion etc.) — that idle flip is "waiting on
- * user", not "free to send next turn"; a user_message here would race the
- * SDK's pending tool_result.
+ * Ready = idle, not parked on a permission prompt (that idle flip is "waiting
+ * on user", not "free to send next turn"; a user_message there would race the
+ * SDK's pending tool_result), and no earlier message still on its way.
  *
- * Pop is atomic via a transaction; if `sendUserMessage` fails we
- * re-insert at head so the next drain retries.
+ * ATOMIC: one drain per tab at a time, and the gate is checked again AFTER the
+ * pop — the old drain checked "idle", awaited the pop, then sent, so two drains
+ * could each pop a message and both go out at once. A pop that lost the race is
+ * put back at the head.
  */
-export async function drainChatQueue(
+export function drainChatQueue(
   db: SlayzoneDb,
   tabId: string,
   data: ChatQueueData = createDbChatQueueData(db)
 ): Promise<void> {
+  const previous = draining.get(tabId) ?? Promise.resolve()
+  const run = previous
+    .then(() => drainOnce(tabId, data))
+    .catch((err) => {
+      console.error('[chat-queue] drain failed:', err)
+    })
+  draining.set(tabId, run)
+  void run.then(() => {
+    if (draining.get(tabId) === run) draining.delete(tabId)
+  })
+  return run
+}
+
+async function drainOnce(tabId: string, data: ChatQueueData): Promise<void> {
   const state = getSessionTerminalState(tabId)
   // Pre-spawn lazy trigger: a queued message arrived before the user ever
   // sent one (so the subprocess was never started). Fire ensureSpawned —
@@ -79,22 +99,31 @@ export async function drainChatQueue(
     })
     return
   }
-  if (state !== 'idle') return
-  if (isSessionAwaitingUserInput(tabId)) return
-  const info = getSessionInfo(tabId)
-  if (!info || info.ended) return
+  if (!isReadyForQueuedMessage(tabId)) return
 
   const head = await data.pop(tabId)
   if (!head) return
-
-  const sent = sendUserMessage(tabId, head.send)
-  if (!sent) {
-    // Session died between gate-check and stdin write. Put it back so the
-    // next idle transition (e.g. fresh respawn) can retry.
+  // Re-check: a direct send (or a turn the agent started itself) may have
+  // claimed the tab while the pop was in flight.
+  if (!isReadyForQueuedMessage(tabId)) {
     try {
       await data.requeue(head)
     } catch (err) {
       console.error('[chat-queue] requeue failed:', err)
+    }
+    return
+  }
+  const content: UserContentBlock[] = head.content ?? [{ type: 'text', text: head.send }]
+  try {
+    // The row id becomes the message id: the outbox tracks it from here on.
+    dispatchUserMessage(tabId, { id: head.id, content })
+  } catch (err) {
+    // The tab went away between check and dispatch: put it back for the next run.
+    console.error('[chat-queue] dispatch failed, requeueing:', err)
+    try {
+      await data.requeue(head)
+    } catch (err2) {
+      console.error('[chat-queue] requeue failed:', err2)
     }
     return
   }
@@ -124,8 +153,13 @@ export function createChatQueueOps(
   return {
     list: (tabId: string): Promise<QueuedChatMessage[]> => data.list(tabId),
 
-    push: async (tabId: string, send: string, original: string): Promise<QueuedChatMessage> => {
-      const msg = await data.push(tabId, send, original)
+    push: async (
+      tabId: string,
+      send: string,
+      original: string,
+      opts?: { id?: string; content?: UserContentBlock[] }
+    ): Promise<QueuedChatMessage> => {
+      const msg = await data.push(tabId, send, original, opts)
       broadcast('chat:queue-changed', tabId)
       // Belt-and-suspenders drain: if the session is already idle when push
       // lands (renderer's inFlight mirror lags the transport), no fresh

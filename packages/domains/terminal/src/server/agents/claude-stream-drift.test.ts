@@ -31,13 +31,10 @@ const LEGACY_FIXTURES = fileURLToPath(
 /**
  * Shapes the adapter parses to `{kind:'unknown'}` today, each with the plan item
  * that will give it a surface. Persisted, never drawn (chat-timeline drops them).
+ * None today: `system/thinking_tokens` and `system/status` `requesting` parse to
+ * the transport-internal `heartbeat` (proof of life for the watchdog).
  */
-const KNOWN_UNHANDLED: Record<string, string> = {
-  // Estimated thinking-token progress while the model thinks (several per turn
-  // with thinking on; the chatui-* fixtures record it). Plan 3.2 (thinking
-  // display) gives it a surface or a deliberate drop.
-  'system/thinking_tokens': 'thinking progress, plan 3.2'
-}
+const KNOWN_UNHANDLED: Record<string, string> = {}
 
 /** Shapes the adapter deliberately returns `null` for, and why that is safe. */
 const KNOWN_IGNORED: Record<string, string> = {
@@ -50,10 +47,6 @@ const KNOWN_IGNORED: Record<string, string> = {
   // (compact-status) + `compact_boundary`, command output through
   // `local_command_output` / `local_command_run`.
   'user/string': 'synthesized context, surfaced through other events',
-  // `requesting` (per API call) and a bare `{status:null}` have no chat
-  // surface. Compaction frames become compact-status, a `permissionMode` frame
-  // permission-mode-changed.
-  'system/status': 'status without compaction or permission mode',
   // Hook runs (the chatui-* fixtures run with hooks installed): the start frame
   // carries nothing to show; a response is dropped only when the hook changed
   // nothing and told the model nothing — the rest parse to `hook-output`

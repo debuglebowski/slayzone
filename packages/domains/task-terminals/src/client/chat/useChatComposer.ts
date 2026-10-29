@@ -154,6 +154,18 @@ export function useChatComposer({
     [trpcClient]
   )
 
+  // Send a prompt the way the composer does: behind a running turn it waits in
+  // the queue (FIFO, survives reload), otherwise it goes now. Commands that send
+  // a prompt (custom commands, /init, /review) use this — they used to skip the
+  // queue and could land in the middle of a turn.
+  const submitPrompt = useStableCallback(async (toSend: string, original: string) => {
+    if (inFlight || queuedMessages.length > 0) {
+      await pushQueue(toSend, original)
+      return
+    }
+    await sendMessage(toSend)
+  })
+
   // The CLI's own commands — only where the provider runs slash commands itself.
   const cliList = capabilities.nativeSlashCommands ? cliCommands : null
   const sources = useMemo(
@@ -163,7 +175,7 @@ export function useChatComposer({
       // send the typed `/name args`. Otherwise expand them here.
       capabilities.nativeSlashCommands
         ? createCliCustomCommandsSource(listApi, cliList)
-        : createCommandsSource((text) => sendMessage(text).then(() => true), listApi),
+        : createCommandsSource((text) => submitPrompt(text, text).then(() => true), listApi),
       createAgentsSource(listApi),
       createBuiltinsSource({
         cliCommandNames: new Set(cliCommandItems(cliList).map((c) => c.name)),
@@ -172,7 +184,7 @@ export function useChatComposer({
       createSkillsSource(listApi),
       createCliCommandsSource(cliList)
     ],
-    [sendMessage, listApi, cliList, capabilities]
+    [submitPrompt, listApi, cliList, capabilities]
   ) as AutocompleteSource[]
 
   const autocomplete = useAutocomplete({
@@ -185,7 +197,8 @@ export function useChatComposer({
       session: { tabId, taskId, mode, cwd, providerFlagsOverride: providerFlagsOverride ?? null },
       chat: chatApi,
       navigate,
-      toast: (msg) => toast(msg)
+      toast: (msg) => toast(msg),
+      submit: (text) => submitPrompt(text, text)
     },
     enterPolicy: capabilities.nativeSlashCommands ? 'native-commands' : 'accept-selected',
     submit: submitFromMenu,
@@ -282,7 +295,9 @@ export function useChatComposer({
           .filter((r): r is { ref: ArtifactRef; path: string } => r.path !== null)
           .map((r) => `![${r.ref.title}](${r.path})`)
           .join('\n')
-        toSend = imageRefs + (toSend ? `\n\n${toSend}` : '')
+        // Join only what is there: no attachment left means just the text (it
+        // used to start with a blank line).
+        toSend = [imageRefs, toSend].filter(Boolean).join('\n\n')
       }
 
       // Capture raw input + attachments BEFORE clearing — used by Stop/Esc to

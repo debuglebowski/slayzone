@@ -52,7 +52,12 @@ import type {
   BackgroundJobQuery,
   ChatBackend,
   ChatProcHandle,
+  ChatSpawnError,
+  ChatSpawnFailureCode,
   ChatSpawnSpec,
+  ChatWriteError,
+  ChatWriteFailureCode,
+  ChatWriteOptions,
   PtyBackend,
   PtyHandle,
   PtySpawnConfirmation,
@@ -81,7 +86,9 @@ import {
   HubToComputerMethods,
   procGetBufferSinceResultSchema,
   procListResultSchema,
+  ProcRefusalReasons,
   procSpawnResultSchema,
+  procWriteResultSchema,
   ptyGetBufferSinceResultSchema,
   ptyListResultSchema,
   ptySpawnResultSchema,
@@ -92,7 +99,7 @@ import {
   ptyWarmSpawnResultSchema,
   computerSetAllowedRootsResultSchema
 } from '../shared/frames'
-import { RpcDisposedError, RpcError } from '../shared/rpc'
+import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { HubComputerGateway } from './hub-gateway'
 
@@ -168,6 +175,32 @@ class BufferingEmitter<T> {
       // single exit event intact for a late onExit — see finalize* below).
       if (this.buffer && this.buffer.length === 0) this.buffer = null
     }
+    return { dispose: () => this.listeners.delete(listener) }
+  }
+}
+
+/**
+ * A one-shot signal every subscriber sees, however late it subscribes — for
+ * "the process started" / "the start failed", which several parties await at
+ * different times (unlike {@link BufferingEmitter}, which replays to the FIRST only).
+ */
+class Latch<T> {
+  private readonly listeners = new Set<(value: T) => void>()
+  private fired: { value: T } | null = null
+
+  fire(value: T): void {
+    if (this.fired) return
+    this.fired = { value }
+    for (const listener of [...this.listeners]) listener(value)
+    this.listeners.clear()
+  }
+
+  on(listener: (value: T) => void): ExecDisposable {
+    if (this.fired) {
+      listener(this.fired.value)
+      return { dispose: () => undefined }
+    }
+    this.listeners.add(listener)
     return { dispose: () => this.listeners.delete(listener) }
   }
 }
@@ -1272,6 +1305,46 @@ interface ProcEntry extends DetachableEntry {
   detached: boolean
   dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
   exitEmitter: BufferingEmitter<{ code: number | null; signal: string | null }>
+  /** The computer confirmed the process runs (its `proc.spawn` reply carried a pid). */
+  spawned: Latch<{ pid: number }>
+  /** Set by `finalize` before the exit is emitted: why it ended, in the computer's words. */
+  outcome?: ProcOutcome
+}
+
+/** How a routed process ended, beyond its code — for a caller that must say why. */
+interface ProcOutcome {
+  /** `spawn-failed`, `superseded`, a detach outcome (`reattach-timeout`, …). */
+  reason?: string
+  /** The computer's own message (its refusal, or the OS error it reported). */
+  detail?: string
+  /** A refused `proc.spawn`: its JSON-RPC code + `data` (e.g. `binary-not-found`). */
+  refusal?: { code: number; data?: unknown }
+}
+
+/** A routed process with the extras the chat channel needs beyond `ProcHandle`. */
+interface RoutedProc extends ProcHandle {
+  readonly entry: ProcEntry
+  onSpawned(cb: (e: { pid: number }) => void): ExecDisposable
+  write(data: string, opts?: ChatWriteOptions): Promise<void>
+}
+
+/** Same shape `chatWriteError` (terminal chat-proc-handle) builds; duck-typed across the seam. */
+function writeError(code: ChatWriteFailureCode, message: string): ChatWriteError {
+  return Object.assign(new Error(message), { name: 'ChatWriteError', code }) as ChatWriteError
+}
+
+/** Same shape `chatSpawnError` builds. */
+function spawnError(code: ChatSpawnFailureCode, message: string, binary?: string): ChatSpawnError {
+  return Object.assign(new Error(message), {
+    name: 'ChatSpawnError',
+    code,
+    ...(binary ? { binary } : {})
+  }) as ChatSpawnError
+}
+
+/** A request that may have run: link loss, disposal, or no reply in time. */
+function outcomeUnknown(err: unknown): boolean {
+  return isConnectionLoss(err) || err instanceof RpcTimeoutError
 }
 
 /**
@@ -1289,14 +1362,36 @@ interface ProcEntry extends DetachableEntry {
  * `proc.spawn` frame.
  */
 export function createRoutingProcessBackend(options: RoutingProcessBackendOptions): ProcessBackend {
+  return createRoutingProcessChannel(options).backend
+}
+
+/** Computers already reported for unconfirmed write replies — once each per hub run. */
+const unconfirmedWrites = new Set<string>()
+
+/**
+ * One gateway subscription + one detach participant for every process it routes —
+ * the routed CHAT backend shares a single channel across all its agents (it used to
+ * build a backend, i.e. a listener pair and a participant, per spawn).
+ */
+function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
+  backend: ProcessBackend
+  spawnRouted(spec: ProcSpawnSpec, params?: Record<string, unknown>): RoutedProc
+} {
   const { gateway, resolveComputerId } = options
   const sessions = new Map<string, ProcEntry>()
 
-  function finalize(entry: ProcEntry, code: number | null, signal: string | null): void {
+  function finalize(
+    entry: ProcEntry,
+    code: number | null,
+    signal: string | null,
+    outcome?: ProcOutcome
+  ): void {
     if (entry.disposed) return
     entry.disposed = true
     entry.pendingSpawn = undefined
-    sessions.delete(entry.key)
+    // A replaced entry is no longer the map's; never delete its successor.
+    if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
+    if (outcome) entry.outcome = outcome
     entry.exitEmitter.emit({ code, signal })
   }
 
@@ -1357,9 +1452,13 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     if (!entry.disposed) drain(entry)
   }
 
+  /** A frame from another spawn attempt under the same session id (a replaced process). */
+  const foreign = (entry: ProcEntry, spawnId: string | undefined): boolean =>
+    spawnId !== undefined && entry.spawnId !== undefined && spawnId !== entry.spawnId
+
   gateway.events.on('proc.data', (payload) => {
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
-    if (!entry || entry.disposed) return
+    if (!entry || entry.disposed || foreign(entry, payload.spawnId)) return
     const stream = payload.stream ?? 'stdout'
     // stderr (and any legacy unsequenced frame) bypasses the ordering machinery.
     if (stream === 'stderr' || typeof payload.seq !== 'number') {
@@ -1372,7 +1471,18 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
   })
   gateway.events.on('proc.exit', (payload) => {
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
-    if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
+    if (!entry || foreign(entry, payload.spawnId)) return
+    finalize(
+      entry,
+      payload.exitCode,
+      payload.signal ?? null,
+      payload.error || payload.reason
+        ? {
+            ...(payload.reason ? { reason: payload.reason } : {}),
+            ...(payload.error ? { detail: payload.error } : {})
+          }
+        : undefined
+    )
   })
   const detach = joinDetachController<ProcEntry>({
     gateway,
@@ -1384,7 +1494,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
       const parsed = procListResultSchema.safeParse(raw)
       return parsed.success ? toSessionList(parsed.data) : null
     },
-    finalize: (entry, reason) => finalize(entry, null, reason),
+    finalize: (entry, reason) => finalize(entry, null, reason, { reason }),
     resume: (entry, listed) => {
       entry.detached = false
       entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
@@ -1402,78 +1512,136 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     }
   })
 
-  return {
-    spawn(spec: ProcSpawnSpec): ProcHandle {
-      const computerId = resolveComputerId(spec)
-      if (computerId == null) throw new NoComputerAvailableError(`process ${spec.id}`)
+  function spawnRouted(spec: ProcSpawnSpec, overrideParams?: Record<string, unknown>): RoutedProc {
+    const computerId = resolveComputerId(spec)
+    if (computerId == null) throw new NoComputerAvailableError(`process ${spec.id}`)
 
-      const key = sessionKey(computerId, spec.id)
-      const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
-      const exitEmitter = new BufferingEmitter<{ code: number | null; signal: string | null }>()
-      const entry: ProcEntry = {
-        key,
-        computerId,
-        sessionId: spec.id,
-        lastSeq: -1,
-        pending: new Map(),
-        backfilledAt: null,
-        disposed: false,
-        detached: false,
-        dataEmitter,
-        exitEmitter
-      }
-      sessions.set(key, entry)
+    const key = sessionKey(computerId, spec.id)
+    const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
+    const exitEmitter = new BufferingEmitter<{ code: number | null; signal: string | null }>()
+    const spawned = new Latch<{ pid: number }>()
+    const entry: ProcEntry = {
+      key,
+      computerId,
+      sessionId: spec.id,
+      lastSeq: -1,
+      pending: new Map(),
+      backfilledAt: null,
+      disposed: false,
+      detached: false,
+      dataEmitter,
+      exitEmitter,
+      spawned
+    }
+    // A previous attempt still tracked under this id was given up on by its
+    // owner (it is being replaced): end it, so it cannot claim the new one's frames.
+    const previous = sessions.get(key)
+    if (previous && previous !== entry) {
+      finalize(previous, null, null, { reason: 'superseded' })
+    }
+    sessions.set(key, entry)
 
-      let pid: number | undefined
-      const handle = {
-        get pid(): number | undefined {
-          return pid
-        },
-        onData: (cb: (chunk: string, stream: 'stdout' | 'stderr') => void): ExecDisposable =>
-          dataEmitter.on((v) => cb(v.chunk, v.stream)),
-        onExit: (cb: (e: { code: number | null; signal: string | null }) => void): ExecDisposable =>
-          exitEmitter.on(cb),
-        /**
-         * Write to the routed child's stdin. Beyond the `ProcessBackend` seam
-         * (background processes never needed stdin), but the routed CHAT backend
-         * built on this channel does — so the capability lives on the handle
-         * rather than forcing callers to reach for the gateway directly.
-         */
-        write: (data: string): void => {
-          void gateway
-            .request(computerId, HubToComputerMethods.procWrite, { sessionId: spec.id, data })
-            .catch(noop)
-        },
-        kill: (signal?: string): void => {
-          if (entry.detached) {
-            // Same rule as the pty handle: undeliverable now, and must not be
-            // resumed or re-spawned later — stop tracking, the reconnect sweep
-            // ends the computer's copy as an orphan.
-            entry.disposed = true
-            entry.pendingSpawn = undefined
-            sessions.delete(entry.key)
-            return
-          }
-          void gateway
-            .request(computerId, HubToComputerMethods.procKill, {
-              sessionId: spec.id,
-              ...(signal ? { signal } : {})
-            })
-            .catch(noop)
+    let pid: number | undefined
+    const handle: RoutedProc = {
+      entry,
+      get pid(): number | undefined {
+        return pid
+      },
+      onData: (cb: (chunk: string, stream: 'stdout' | 'stderr') => void): ExecDisposable =>
+        dataEmitter.on((v) => cb(v.chunk, v.stream)),
+      onExit: (cb: (e: { code: number | null; signal: string | null }) => void): ExecDisposable =>
+        exitEmitter.on(cb),
+      onSpawned: (cb) => spawned.on(cb),
+      /**
+       * Write to the routed child's stdin. Beyond the `ProcessBackend` seam
+       * (background processes never needed stdin), but the routed CHAT backend
+       * built on this channel does — so the capability lives on the handle
+       * rather than forcing callers to reach for the gateway directly.
+       *
+       * CONFIRMED: resolves when the computer reports the bytes reached the
+       * process; rejects `link-down` (unreachable now, safe to retry with the
+       * same `writeId`) or `not-delivered` (gone, replaced, stdin closed).
+       */
+      write: (data: string, opts?: ChatWriteOptions): Promise<void> => {
+        if (entry.disposed) {
+          return Promise.reject(writeError('not-delivered', `process ${spec.id} has ended`))
         }
+        if (entry.detached) {
+          return Promise.reject(
+            writeError('link-down', `computer ${computerId} is unreachable; ${spec.id} not written`)
+          )
+        }
+        return gateway
+          .request(computerId, HubToComputerMethods.procWrite, {
+            sessionId: spec.id,
+            ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+            ...(opts?.writeId ? { writeId: opts.writeId } : {}),
+            data
+          })
+          .then(
+            (res) => {
+              const parsed = procWriteResultSchema.safeParse(res)
+              if (
+                !(parsed.success && parsed.data.delivered) &&
+                !unconfirmedWrites.has(computerId)
+              ) {
+                // A computer older than confirmed writes acks everything — even a
+                // write it dropped. Say so once; the chat still works, unconfirmed.
+                unconfirmedWrites.add(computerId)
+                try {
+                  recordDiagnosticEvent({
+                    level: 'warn',
+                    source: 'main',
+                    event: 'chat.write_unconfirmed',
+                    message: `computer ${computerId} does not confirm writes (older release); chat delivery is unconfirmed there`,
+                    payload: { computerId }
+                  })
+                } catch {
+                  // Diagnostics are best-effort; the write itself succeeded.
+                }
+              }
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : String(err)
+              throw outcomeUnknown(err)
+                ? writeError('link-down', message)
+                : writeError('not-delivered', message)
+            }
+          )
+      },
+      kill: (signal?: string): void => {
+        if (entry.detached) {
+          // Same rule as the pty handle: undeliverable now, and must not be
+          // resumed or re-spawned later — stop tracking, the reconnect sweep
+          // ends the computer's copy as an orphan.
+          entry.disposed = true
+          entry.pendingSpawn = undefined
+          if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
+          return
+        }
+        void gateway
+          .request(computerId, HubToComputerMethods.procKill, {
+            sessionId: spec.id,
+            // Only THIS attempt: a late kill must never reach a replacement.
+            ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+            ...(signal ? { signal } : {})
+          })
+          .catch(noop)
       }
+    }
 
-      // Default: `ProcSpawnSpec.command` is a shell command STRING (e.g.
-      // `pnpm dev`), so ask the computer to run it through a shell. `shell: true` —
-      // NOT a hub-side `buildShellInvocation` — because that helper resolves the
-      // HUB's `$SHELL`, a path that need not exist on the computer's machine (the
-      // same hub-local assumption that makes `whichBinary` wrong for a routed
-      // spawn). The computer wraps with ITS own shell. Overridable via
-      // `buildSpawnParams` (the chat backend needs literal argv).
-      const spawnId = randomUUID()
-      entry.spawnId = spawnId
-      const params = {
-        ...(options.buildSpawnParams?.(spec) ?? {
+    // Default: `ProcSpawnSpec.command` is a shell command STRING (e.g.
+    // `pnpm dev`), so ask the computer to run it through a shell. `shell: true` —
+    // NOT a hub-side `buildShellInvocation` — because that helper resolves the
+    // HUB's `$SHELL`, a path that need not exist on the computer's machine (the
+    // same hub-local assumption that makes `whichBinary` wrong for a routed
+    // spawn). The computer wraps with ITS own shell. Overridable via
+    // `buildSpawnParams` (the chat backend needs literal argv).
+    const spawnId = randomUUID()
+    entry.spawnId = spawnId
+    const params = {
+      ...(overrideParams ??
+        options.buildSpawnParams?.(spec) ?? {
           sessionId: spec.id,
           command: spec.command,
           shell: true,
@@ -1483,55 +1651,67 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
           env: spec.env
         }),
-        // After the override: the idempotency key is the transport's, not the
-        // caller's — see `spawnIdField` in frames.ts.
-        spawnId
-      }
-      const setSpawnedPid = (next: number | null): void => {
-        entry.pendingSpawn = undefined
-        // `pid` is nullable on the wire (immediate spawn failure); the handle
-        // exposes `number | undefined`, so map null → undefined.
-        pid = next ?? undefined
-      }
-      // No request timeout, and a lost reply is UNKNOWN rather than failed — the
-      // same rules and reasons as the pty spawn above.
-      const attempt = (): void => {
-        void gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0).then(
-          (res) => {
-            const parsed = procSpawnResultSchema.safeParse(res)
-            if (parsed.success) setSpawnedPid(parsed.data.pid)
-            else entry.pendingSpawn = undefined
-          },
-          (err: unknown) => {
-            if (entry.disposed) return
-            if (isConnectionLoss(err)) {
-              entry.pendingSpawn = {
-                resend: attempt,
-                confirm: (listedPid) => setSpawnedPid(listedPid)
-              }
-              if (!entry.detached) detach(entry)
-              return
+      // After the override: the idempotency key is the transport's, not the
+      // caller's — see `spawnIdField` in frames.ts.
+      spawnId
+    }
+    const setSpawnedPid = (next: number | null): void => {
+      entry.pendingSpawn = undefined
+      // `pid` is nullable on the wire (immediate spawn failure); the handle
+      // exposes `number | undefined`, so map null → undefined.
+      pid = next ?? undefined
+      // A pid-less reply is NOT a start: the computer's exit (with its error) follows.
+      if (next != null && !entry.disposed) spawned.fire({ pid: next })
+    }
+    // No request timeout, and a lost reply is UNKNOWN rather than failed — the
+    // same rules and reasons as the pty spawn above.
+    const attempt = (): void => {
+      void gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0).then(
+        (res) => {
+          const parsed = procSpawnResultSchema.safeParse(res)
+          if (parsed.success) setSpawnedPid(parsed.data.pid)
+          else entry.pendingSpawn = undefined
+        },
+        (err: unknown) => {
+          if (entry.disposed) return
+          if (isConnectionLoss(err)) {
+            entry.pendingSpawn = {
+              resend: attempt,
+              confirm: (listedPid) => setSpawnedPid(listedPid)
             }
-            finalize(entry, null, 'spawn-failed')
+            if (!entry.detached) detach(entry)
+            return
           }
-        )
-      }
-      attempt()
+          finalize(entry, null, 'spawn-failed', {
+            reason: 'spawn-failed',
+            detail: errorMessage(err),
+            ...(err instanceof RpcError ? { refusal: { code: err.code, data: err.data } } : {})
+          })
+        }
+      )
+    }
+    attempt()
 
-      return handle
-    },
-    // Crash-reap (process-manager.ts's reapStaleIfNeeded) is a local-backend-only
-    // feature: it depends on inspecting/killing a bare OS pid, and a routed
-    // session only ever exposes the computer's own sessionId/key, not one the hub
-    // can act on independently. `getCommandLine` -> null is the same "can't
-    // verify, so don't touch it" signal `localProcessBackend` returns on win32.
-    getCommandLine(): Promise<string | null> {
-      return Promise.resolve(null)
-    },
-    killByPid(): void {
-      // Nothing to kill: same reasoning as `getCommandLine` above — the pid a
-      // routed session reports belongs to the computer's machine, so the hub has
-      // no process of its own to signal.
+    return handle
+  }
+
+  return {
+    spawnRouted,
+    backend: {
+      spawn: (spec: ProcSpawnSpec): ProcHandle => spawnRouted(spec),
+      // Crash-reap (process-manager.ts's reapStaleIfNeeded) is a local-backend-only
+      // feature: it depends on inspecting/killing a bare OS pid, and a routed
+      // session only ever exposes the computer's own sessionId/key, not one the hub
+      // can act on independently. `getCommandLine` -> null is the same "can't
+      // verify, so don't touch it" signal `localProcessBackend` returns on win32.
+      getCommandLine(): Promise<string | null> {
+        return Promise.resolve(null)
+      },
+      killByPid(): void {
+        // Nothing to kill: same reasoning as `getCommandLine` above — the pid a
+        // routed session reports belongs to the computer's machine, so the hub has
+        // no process of its own to signal.
+      }
     }
   }
 }
@@ -1564,6 +1744,30 @@ export interface RoutingChatBackendOptions {
  */
 export function createRoutingChatBackend(options: RoutingChatBackendOptions): ChatBackend {
   const { gateway, resolveComputerId, gate } = options
+  // ONE channel for every agent: one gateway listener pair and one detach
+  // participant, however many agents run (a channel per spawn leaked both).
+  const channel = createRoutingProcessChannel({
+    gateway,
+    resolveComputerId: (procSpec) => procSpec.computerId ?? null
+  })
+
+  /** Why the start failed, from the computer's refusal or the exit it reported. */
+  function toSpawnError(spec: ChatSpawnSpec, outcome: ProcOutcome | undefined): ChatSpawnError {
+    const detail = outcome?.detail ?? 'the process ended before it started'
+    const data = outcome?.refusal?.data as { reason?: unknown; binary?: unknown } | undefined
+    if (data?.reason === ProcRefusalReasons.binaryNotFound) {
+      return spawnError(
+        'cli-not-installed',
+        detail,
+        typeof data.binary === 'string' ? data.binary : spec.binaryName
+      )
+    }
+    if (/\bENOENT\b/.test(detail)) return spawnError('cli-not-installed', detail, spec.binaryName)
+    if (outcome?.refusal?.code === ComputerTransportErrorCodes.refusedByComputer) {
+      return spawnError('spawn-refused', detail)
+    }
+    return spawnError('spawn-failed', detail)
+  }
 
   return {
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
@@ -1571,91 +1775,53 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
       if (computerId == null) throw new NoComputerAvailableError(`chat agent ${spec.binaryName}`)
       if (gate) await gate(computerId, { kind: 'task', id: spec.taskId })
 
-      const backend = createRoutingProcessBackend({
-        gateway,
-        resolveComputerId: () => computerId,
-        // An agent spawn is a resolved binary + argv, NOT a shell string: `sh
-        // <script>` must stay two argv entries. The default sender would set
-        // `shell: true` and drop `args`, so the computer would hand the binary to a
-        // shell and the agent would never receive its arguments.
-        buildSpawnParams: (procSpec) => ({
-          sessionId: procSpec.id,
+      const procHandle = channel.spawnRouted(
+        {
+          id: spec.sessionId,
+          taskId: spec.taskId,
+          projectId: spec.projectId ?? null,
+          computerId,
+          // The binary NAME, resolved against the COMPUTER's PATH — never a
+          // hub-resolved absolute path, which would not exist there.
+          command: spec.binaryName,
+          cwd: spec.cwd,
+          env: spec.env
+        } as never,
+        {
+          sessionId: spec.sessionId,
+          // An agent spawn is a binary + argv, NOT a shell string: `shell` stays
+          // unset so `sh <script>` remains two argv entries and the computer looks
+          // the binary up (refusing with its name when it is missing).
           command: spec.binaryName,
           args: spec.args,
           // Same rule as pty/proc: absent rather than empty, so the computer
           // resolves the project's checkout instead of taking '' as a path.
           ...(spec.cwd ? { cwd: spec.cwd } : {}),
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
-          env: spec.env
-        })
-      })
-
-      const spawnCbs: Array<() => void> = []
-      const errorCbs: Array<(err: Error) => void> = []
-      // Latched: `spawn()` is async, so the readiness signal can fire before the
-      // caller has had a chance to subscribe. A late `onSpawn` must still see it,
-      // or the session sits in `starting` until the watchdog reaps it.
-      let didSpawn = false
-
-      const procHandle = backend.spawn({
-        id: spec.sessionId,
-        taskId: spec.taskId,
-        projectId: null,
-        computerId,
-        // The binary NAME, resolved against the COMPUTER's PATH — never a
-        // hub-resolved absolute path, which would not exist there. `shell` is
-        // deliberately unset: argv must reach execve unsplit.
-        command: spec.binaryName,
-        args: spec.args,
-        cwd: spec.cwd,
-        env: spec.env
-      } as never)
-
-      // A routed spawn has no kernel `'spawn'` event. The remote `proc.spawn`
-      // reply is the equivalent readiness signal — it means the computer has a pid
-      // — so surface it as `onSpawn`, which is what promotes the session out of
-      // `starting` and starts the protocol driver. Deferred a tick so a caller
-      // that subscribes right after `spawn()` resolves still sees it.
-      setImmediate(() => {
-        didSpawn = true
-        for (const cb of [...spawnCbs]) {
-          try {
-            cb()
-          } catch (err) {
-            console.error('[routing-chat] onSpawn listener threw:', err)
-          }
+          env: spec.env,
+          // Agent starts queue on the computer (a restore must not start them all at once).
+          admission: spec.admission ?? 'foreground'
         }
+      )
+
+      // `onSpawn` = the computer's `proc.spawn` reply carried a pid: only then is
+      // there a process to talk to. (It used to fire a tick after the request was
+      // SENT, so a message written right away met a driver that was not started.)
+      let started = false
+      procHandle.onSpawned(() => {
+        started = true
+      })
+      const failed = new Latch<Error>()
+      procHandle.onExit(() => {
+        // Ended without ever starting: the start failed — say why.
+        if (!started) failed.fire(toSpawnError(spec, procHandle.entry.outcome))
       })
 
       return {
         get pid(): number {
           return procHandle.pid ?? 0
         },
-        onSpawn: (cb) => {
-          // Already fired → replay to this late subscriber instead of dropping it.
-          if (didSpawn) {
-            setImmediate(() => {
-              try {
-                cb()
-              } catch (err) {
-                console.error('[routing-chat] onSpawn listener threw:', err)
-              }
-            })
-            return {
-              dispose: () => {
-                // The replay is already queued and `cb` was never added to
-                // `spawnCbs`, so there is no subscription left to tear down.
-              }
-            }
-          }
-          spawnCbs.push(cb)
-          return {
-            dispose: () => {
-              const i = spawnCbs.indexOf(cb)
-              if (i >= 0) spawnCbs.splice(i, 1)
-            }
-          }
-        },
+        onSpawn: (cb) => procHandle.onSpawned(() => cb()),
         onStdout: (cb) =>
           procHandle.onData((chunk, stream) => {
             if (stream !== 'stderr') cb(chunk)
@@ -1665,16 +1831,8 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
             if (stream === 'stderr') cb(chunk)
           }),
         onExit: (cb) => procHandle.onExit((e) => cb({ code: e.code, signal: e.signal })),
-        onError: (cb) => {
-          errorCbs.push(cb)
-          return {
-            dispose: () => {
-              const i = errorCbs.indexOf(cb)
-              if (i >= 0) errorCbs.splice(i, 1)
-            }
-          }
-        },
-        write: (data) => (procHandle as unknown as { write?: (d: string) => void }).write?.(data),
+        onError: (cb) => failed.on(cb),
+        write: (data, opts) => procHandle.write(data, opts),
         kill: (signal) => procHandle.kill(signal)
       }
     }

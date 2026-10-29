@@ -21,12 +21,80 @@
  */
 
 import { spawn as realSpawn, type ChildProcess } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { childProcessEnv } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 /** Unsubscribe token (mirrors node-pty's `IDisposable`). */
 export interface ChatDisposable {
   dispose(): void
+}
+
+/**
+ * Why an agent process could not be started at all:
+ *   - `cli-not-installed` — the binary is not on the PATH of the machine that runs it;
+ *   - `spawn-refused` — that machine refused the start (path jail, policy, no computer);
+ *   - `spawn-failed` — anything else that kept the process from running.
+ */
+export type ChatSpawnFailureCode = 'cli-not-installed' | 'spawn-refused' | 'spawn-failed'
+
+/** A start failure with a code the chat can show a fix for. */
+export interface ChatSpawnError extends Error {
+  readonly code: ChatSpawnFailureCode
+  /** The binary that is missing (`cli-not-installed`). */
+  readonly binary?: string
+}
+
+export function chatSpawnError(
+  code: ChatSpawnFailureCode,
+  message: string,
+  binary?: string
+): ChatSpawnError {
+  return Object.assign(new Error(message), {
+    name: 'ChatSpawnError',
+    code,
+    ...(binary ? { binary } : {})
+  }) as ChatSpawnError
+}
+
+export function isChatSpawnError(err: unknown): err is ChatSpawnError {
+  return (
+    err instanceof Error &&
+    err.name === 'ChatSpawnError' &&
+    typeof (err as { code?: unknown }).code === 'string'
+  )
+}
+
+/**
+ * Why a write did not reach the process:
+ *   - `link-down` — the machine running it is unreachable right now; the process
+ *     may still be alive, so the same write may be retried (same `writeId`);
+ *   - `not-delivered` — the process is gone, replaced, or its stdin is closed.
+ */
+export type ChatWriteFailureCode = 'link-down' | 'not-delivered'
+
+export interface ChatWriteError extends Error {
+  readonly code: ChatWriteFailureCode
+}
+
+export function chatWriteError(code: ChatWriteFailureCode, message: string): ChatWriteError {
+  return Object.assign(new Error(message), { name: 'ChatWriteError', code }) as ChatWriteError
+}
+
+export function isChatWriteError(err: unknown): err is ChatWriteError {
+  return (
+    err instanceof Error &&
+    err.name === 'ChatWriteError' &&
+    typeof (err as { code?: unknown }).code === 'string'
+  )
+}
+
+export interface ChatWriteOptions {
+  /**
+   * Idempotency key: retrying a write whose outcome is unknown (its confirmation
+   * was lost with the link) never delivers it twice.
+   */
+  writeId?: string
 }
 
 /**
@@ -51,10 +119,17 @@ export interface ChatProcHandle {
   onStderr(cb: (chunk: string) => void): ChatDisposable
   /** Fires once with the process's terminal status. */
   onExit(cb: (e: { code: number | null; signal: string | null }) => void): ChatDisposable
-  /** Fires when the process could not be started at all. */
+  /**
+   * Fires when the process could not be started at all — a {@link ChatSpawnError}
+   * when the cause is known. `onExit` may or may not follow; `onSpawn` never does.
+   */
   onError(cb: (err: Error) => void): ChatDisposable
-  /** Write raw bytes to stdin. The caller appends any newline it needs. */
-  write(data: string): void
+  /**
+   * Write raw text to stdin; the caller appends any newline it needs. Resolves once
+   * the bytes reached the process, rejects with a {@link ChatWriteError} when they
+   * did not — never silently drops.
+   */
+  write(data: string, opts?: ChatWriteOptions): Promise<void>
   kill(signal?: string): void
 }
 
@@ -83,6 +158,11 @@ export interface ChatSpawnSpec {
   projectId?: string | null
   /** Identity/MCP env overlay for this spawn. */
   env: Record<string, string>
+  /**
+   * Agent-start admission lane on the computer (`foreground` = a user action,
+   * `background` = a restore). Absent: foreground.
+   */
+  admission?: 'foreground' | 'background'
 }
 
 export interface ChatBackend {
@@ -118,6 +198,16 @@ export function createLineSplitter(onLine: (line: string) => void): (chunk: stri
  * stream being absent, which the fake children in the transport tests rely on.
  */
 export function childProcessToHandle(child: ChildProcess): ChatProcHandle {
+  // Without a listener a broken pipe is an unhandled 'error' event that ends the
+  // hub. Remembered so later writes are refused instead of attempted.
+  let stdinBroken: string | null = null
+  child.stdin?.on?.('error', (err: Error) => {
+    stdinBroken = err.message
+  })
+  let exited = false
+  child.on('exit', () => {
+    exited = true
+  })
   const attach = (
     stream: { on(ev: 'data', cb: (c: Buffer | string) => void): unknown; off?: unknown } | null,
     cb: (chunk: string) => void
@@ -128,7 +218,13 @@ export function childProcessToHandle(child: ChildProcess): ChatProcHandle {
           // Nothing was ever attached — this stdio stream is absent on the child.
         }
       }
-    const listener = (c: Buffer | string): void => cb(typeof c === 'string' ? c : c.toString())
+    // One decoder per subscription: a character split across two reads is held
+    // until its last byte arrives, never emitted as U+FFFD.
+    const decoder = new StringDecoder('utf8')
+    const listener = (c: Buffer | string): void => {
+      const text = typeof c === 'string' ? c : decoder.write(c)
+      if (text) cb(text)
+    }
     stream.on('data', listener)
     return {
       dispose: () => {
@@ -155,15 +251,40 @@ export function childProcessToHandle(child: ChildProcess): ChatProcHandle {
       return { dispose: () => void child.off?.('exit', listener) }
     },
     onError: (cb) => {
-      child.on('error', cb)
-      return { dispose: () => void child.off?.('error', cb) }
+      // ENOENT/EACCES on exec: the binary is not there (or not runnable).
+      const listener = (err: NodeJS.ErrnoException): void =>
+        cb(
+          err.code === 'ENOENT'
+            ? chatSpawnError('cli-not-installed', err.message, err.path)
+            : err.syscall?.startsWith('spawn')
+              ? chatSpawnError('spawn-failed', err.message)
+              : err
+        )
+      child.on('error', listener)
+      return { dispose: () => void child.off?.('error', listener) }
     },
     write: (data) => {
-      try {
-        child.stdin?.write(data)
-      } catch {
-        /* best-effort; a dead pipe surfaces via process exit */
+      const stdin = child.stdin
+      if (!stdin || exited || stdinBroken !== null || stdin.destroyed || stdin.writableEnded) {
+        return Promise.reject(
+          chatWriteError(
+            'not-delivered',
+            `stdin is closed${stdinBroken ? ` (${stdinBroken})` : exited ? ' (process exited)' : ''}`
+          )
+        )
       }
+      return new Promise<void>((resolve, reject) => {
+        const fail = (err: unknown): void => {
+          const message = err instanceof Error ? err.message : String(err)
+          stdinBroken ??= message
+          reject(chatWriteError('not-delivered', message))
+        }
+        try {
+          stdin.write(data, (err) => (err ? fail(err) : resolve()))
+        } catch (err) {
+          fail(err)
+        }
+      })
     },
     kill: (signal) => {
       try {
@@ -199,8 +320,10 @@ export function createLocalChatBackend(deps: {
       })
       const binary = await deps.whichBinary(spec.binaryName)
       if (!binary) {
-        throw new Error(
-          `Binary "${spec.binaryName}" not found on PATH. Install it or fix your shell's PATH.`
+        throw chatSpawnError(
+          'cli-not-installed',
+          `Binary "${spec.binaryName}" not found on PATH. Install it or fix your shell's PATH.`,
+          spec.binaryName
         )
       }
       return childProcessToHandle(

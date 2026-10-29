@@ -5,7 +5,9 @@ import { getPtyHostBridge } from '../pty-host'
 import {
   hydrateSession,
   ensureSpawned,
-  sendUserMessage,
+  dispatchUserMessage,
+  respawn,
+  getReplay,
   sendToolResult,
   sendControlRequest,
   respondToPermissionRequest,
@@ -30,7 +32,11 @@ import {
   type TransportShutdownResult
 } from './chat-transport-manager'
 import type { ChatDataOps, ProviderConfigEntry } from './chat-data-ops'
-import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
+import {
+  registerChatQueueHandlers,
+  createChatQueueOps,
+  notifyChatQueueChanged
+} from './chat-queue-handlers'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../adapters/flag-parser'
 import { getEnrichedPath } from '../shell-env'
@@ -43,7 +49,11 @@ import { listAgents } from '../agents-registry'
 import { listProjectFiles } from '../files-scan'
 import type { UsageMap } from '../autocomplete-usage-store'
 import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal-contracts'
-import type { AgentEvent, PermissionDecision } from '@slayzone/terminal-contracts'
+import type {
+  AgentEvent,
+  OutgoingUserMessage,
+  PermissionDecision
+} from '@slayzone/terminal-contracts'
 import {
   rawPermissionModeToChatMode,
   chatModeToFlags as chatModeToFlagsShared,
@@ -95,6 +105,9 @@ interface ChatCreateOpts {
   cwd: string
   providerFlagsOverride?: string | null
 }
+
+/** What started an agent: a user action (default) or a workspace restore. */
+export type ChatStartReason = 'user' | 'restore'
 
 /**
  * Permission/operating mode for chat sessions. Live mode flips ride a
@@ -368,9 +381,6 @@ async function buildHydrateOpts(
     }
   }
 
-  const initialBuffer = fresh ? [] : await data.loadChatEvents(opts.tabId)
-  const initialNextSeq = fresh ? 0 : await data.getNextSeqForTab(opts.tabId)
-
   // Which machine will run this agent. Resolved BEFORE the env is built: a
   // computer-routed spawn needs a remote-shaped env (no hub loopback hook URL).
   const computerId = await data.resolveComputerId(opts.taskId)
@@ -399,8 +409,6 @@ async function buildHydrateOpts(
     providerFlags,
     computerId,
     env: subprocessEnv,
-    initialBuffer,
-    initialNextSeq,
     chatMode: resolvedChatMode,
     chatModel: resolvedChatModel,
     chatEffort: resolvedChatEffort,
@@ -459,17 +467,17 @@ export function createChatOps(opts: ChatHandlerOpts) {
       if (newState === 'not-spawned' || oldState === 'not-spawned') return
       notifyGlobalStateListeners(sessionId, newState, oldState)
     },
-    // Async because the DB lift makes persistChatEvent / the last_interaction_at
-    // UPDATE / writeChatMode Promises. The transport invokes this without
-    // awaiting (fire-and-forget, wrapped in its own try/catch), matching the
-    // prior void semantics — the returned Promise simply floats.
+    // The tabs' saved history: the transport loads it (after any previous
+    // instance of the tab finished writing) and writes it insert-only, in order.
+    eventStore: {
+      load: (tabId) => data.loadChatEvents(tabId),
+      insert: (tabId, seq, event) => data.persistChatEvent(tabId, seq, event)
+    },
+    // Side effects of a SAVED event (the row itself is the event store's). The
+    // transport invokes this without awaiting; the returned Promise floats.
     persistEvent: (tabId, seq, event) => {
+      void seq
       void (async () => {
-        try {
-          await data.persistChatEvent(tabId, seq, event)
-        } catch (err) {
-          console.error('[chat-handlers] persistChatEvent failed:', err)
-        }
         // Tree-view "Last interaction" sort marker — only fire on user-message
         // (clear "I interacted" signal). Agent-side bumps come via agent_turns.
         if (event.kind === 'user-message') {
@@ -574,28 +582,38 @@ export function createChatOps(opts: ChatHandlerOpts) {
     },
 
     /**
+     * One snapshot for (re)drawing a tab: its saved events after `afterSeq`, and
+     * the blocks still streaming right now (live-only, never saved).
+     */
+    getReplay: (tabId: string, afterSeq: number) => getReplay(tabId, afterSeq),
+
+    /**
      * Eager spawn entrypoint. Used by the renderer's "Restart" button after a
      * session ended — user wants a live subprocess immediately, not on the next
      * keystroke. Hydrates if needed, then `ensureSpawned`. Idempotent for live
      * sessions.
      */
-    start: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+    start: async (o: ChatCreateOpts & { reason?: ChatStartReason }): Promise<ChatSessionInfo> => {
+      // A restore starts in the computer's background lane: reopening a workspace
+      // must not start every agent at once.
+      const built = await buildHydrateOpts(data, o, { fresh: false })
+      await hydrateSession({
+        ...built,
+        admission: o.reason === 'restore' ? 'background' : 'foreground'
+      })
       return ensureSpawned(o.tabId)
     },
 
-    send: async (tabId: string, text: string): Promise<boolean> => {
-      // Lazy trigger: a `chat:send` is the canonical "spawn this subprocess now"
-      // signal. ensureSpawned is idempotent + dedupes concurrent callers, so
-      // simultaneous send + queue drain on the same tab share one spawn.
-      try {
-        await ensureSpawned(tabId)
-      } catch (err) {
-        console.error('[chat-handlers] ensureSpawned failed during chat:send:', err)
-        return false
-      }
-      return sendUserMessage(tabId, text)
-    },
+    /**
+     * Send a user message. Recorded at once (it shows, and survives a reload),
+     * then delivered by the tab's outbox — which starts the agent if needed and
+     * tracks the message until the agent confirmed and answered it, or says why
+     * it failed. Idempotent by `message.id`: sending a failed id again retries it.
+     * Returns the message's delivery state (`failed` included — never a silent
+     * `false`).
+     */
+    send: (tabId: string, message: OutgoingUserMessage): { id: string; state: string } =>
+      dispatchUserMessage(tabId, message),
 
     // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
     // tool_use_id with a tool_result content block so the SDK's turn machinery
@@ -651,13 +669,12 @@ export function createChatOps(opts: ChatHandlerOpts) {
         }
       }
 
-      // Fallback: kill + respawn. Eager-spawn here mirrors the warm-subprocess
-      // semantics of the control_request fast path — after interrupt the user
-      // typically continues the turn immediately, so a ready process avoids the
-      // double-latency of "interrupt → next send waits on spawn".
-      removeSession(o.tabId)
-      hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
-      return ensureSpawned(o.tabId)
+      // Fallback: replace the process (stop, wait for exit, start). Eager-spawn
+      // here mirrors the warm-subprocess semantics of the control_request fast
+      // path — after interrupt the user typically continues the turn
+      // immediately, so a ready process avoids the double-latency of
+      // "interrupt → next send waits on spawn".
+      return respawn(o.tabId, await buildHydrateOpts(data, o, { fresh: false }))
     },
 
     // Stop-button / Esc path. Same kill+respawn as `interrupt`, but if no
@@ -671,17 +688,17 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // Stop button discards queued follow-ups alongside the in-flight turn —
       // matches pre-backend behavior where handleStop did `setQueuedMessages([])`.
       try {
-        await data.clearChatQueue(o.tabId)
+        if ((await data.clearChatQueue(o.tabId)) > 0) notifyChatQueueChanged(o.tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
-      removeSession(o.tabId)
       // Eager respawn after Stop matches Claude CLI parity — user just hit the
       // big red button on a turn, the implicit expectation is "ready to keep
       // chatting"; making them wait for spawn on next send is worse UX than the
-      // lazy mode the rest of the app uses for first-ever messages.
-      hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
-      await ensureSpawned(o.tabId)
+      // lazy mode the rest of the app uses for first-ever messages. The old
+      // process is stopped and its exit awaited first; nothing it still says
+      // reaches the history.
+      await respawn(o.tabId, await buildHydrateOpts(data, o, { fresh: false }))
       return { popped: result.popped, text: result.text }
     },
 
@@ -690,7 +707,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
     },
 
     remove: async (tabId: string): Promise<void> => {
-      removeSession(tabId)
+      // Awaited: its last events must be written BEFORE the rows are cleared, or
+      // a late insert would resurrect them.
+      await removeSession(tabId)
       // Tab is gone — drop persisted history + queue. (FK ON DELETE CASCADE
       // also clears them when the terminal_tabs row itself is deleted, but
       // chat:remove can be invoked before the tab row is gone, so be explicit.)
@@ -716,7 +735,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * "Session ended" in the renderer.
      */
     reset: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      removeSession(o.tabId)
+      // Awaited for the same reason as `remove`.
+      await removeSession(o.tabId)
       try {
         await data.clearChatEventsForTab(o.tabId)
       } catch (err) {
@@ -822,9 +842,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // spawn first, persist DB after spawn succeeds. chatModeOverride bypasses
       // DB read so the new child uses `safe` flags even though provider_config
       // still has the old value.
-      removeSession(o.tabId)
-      hydrateSession(await buildHydrateOpts(data, o, { fresh: false, chatModeOverride: safe }))
-      const created = await ensureSpawned(o.tabId)
+      const created = await respawn(
+        o.tabId,
+        await buildHydrateOpts(data, o, { fresh: false, chatModeOverride: safe })
+      )
       await data.writeChatMode(o.taskId, o.mode, safe)
       // Returned ChatSessionInfo carries `chatMode: safe` via Session.chatMode,
       // so renderer trusts the server's resolved value (e.g. auto → auto-accept
@@ -883,11 +904,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
       // Fallback: kill + respawn. chatModelOverride bypasses DB so the new
       // child uses the requested model before we persist.
-      removeSession(o.tabId)
-      hydrateSession(
+      const created = await respawn(
+        o.tabId,
         await buildHydrateOpts(data, o, { fresh: false, chatModelOverride: o.chatModel })
       )
-      const created = await ensureSpawned(o.tabId)
       await data.writeChatModel(o.taskId, o.mode, o.chatModel)
       return created
     },
@@ -917,11 +937,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // Same kill+respawn pattern as setMode/setModel — effort flag only
       // takes effect on a fresh process. chatEffortOverride bypasses DB so the
       // new child uses the requested level before we persist.
-      removeSession(o.tabId)
-      hydrateSession(
+      const created = await respawn(
+        o.tabId,
         await buildHydrateOpts(data, o, { fresh: false, chatEffortOverride: o.chatEffort })
       )
-      const created = await ensureSpawned(o.tabId)
       await data.writeChatEffort(o.taskId, o.mode, o.chatEffort)
       return created
     },
@@ -960,14 +979,13 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // Live session: kill+respawn (same pattern as setEffort). Codex
       // applies `collaborationMode` per `turn/start`, but a respawn keeps the
       // thread cleanly re-initialized on the new mode.
-      removeSession(o.tabId)
-      hydrateSession(
+      const created = await respawn(
+        o.tabId,
         await buildHydrateOpts(data, o, {
           fresh: false,
           chatCollaborationOverride: o.chatCollaboration
         })
       )
-      const created = await ensureSpawned(o.tabId)
       await data.writeChatCollaboration(o.taskId, o.mode, o.chatCollaboration)
       return created
     },
@@ -997,14 +1015,13 @@ export function createChatOps(opts: ChatHandlerOpts) {
         if (refreshed) return refreshed
       }
       // Live session: kill+respawn (same pattern as setEffort).
-      removeSession(o.tabId)
-      hydrateSession(
+      const created = await respawn(
+        o.tabId,
         await buildHydrateOpts(data, o, {
           fresh: false,
           chatFastModeOverride: o.chatFastMode
         })
       )
-      const created = await ensureSpawned(o.tabId)
       await data.writeChatFastMode(o.taskId, o.mode, o.chatFastMode)
       return created
     },
@@ -1078,7 +1095,9 @@ export function registerChatHandlers(
   ipcMain.handle('chat:supports', (_, mode: string): boolean => ops.supports(mode))
   ipcMain.handle('chat:hydrate', (_, o: ChatCreateOpts) => ops.hydrate(o))
   ipcMain.handle('chat:start', (_, o: ChatCreateOpts) => ops.start(o))
-  ipcMain.handle('chat:send', (_, tabId: string, text: string) => ops.send(tabId, text))
+  ipcMain.handle('chat:send', (_, tabId: string, message: OutgoingUserMessage) =>
+    ops.send(tabId, message)
+  )
   ipcMain.handle(
     'chat:sendToolResult',
     (_, tabId: string, args: { toolUseId: string; content: string; isError?: boolean }) =>

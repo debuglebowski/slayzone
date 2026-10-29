@@ -178,7 +178,7 @@ test('chat transport, in-process path: refused before whichBinary/spawn', async 
     broadcastEvent: () => undefined,
     broadcastExit: () => undefined
   })
-  chat.hydrateSession({
+  await chat.hydrateSession({
     tabId: 'chat-local',
     taskId: 'task-c',
     mode: 'claude-chat',
@@ -199,13 +199,16 @@ test('chat transport, routed backend: still spawns', async () => {
     backend: {
       spawn: async () => {
         routed++
-        return childProcessToHandle(fakeChild())
+        const child = fakeChild()
+        // A real child reports `spawn` once started; ensureSpawned waits for it.
+        setImmediate(() => (child as unknown as { emit(e: string): void }).emit('spawn'))
+        return childProcessToHandle(child)
       }
     },
     broadcastEvent: () => undefined,
     broadcastExit: () => undefined
   })
-  chat.hydrateSession({
+  await chat.hydrateSession({
     tabId: 'chat-routed',
     taskId: 'task-r',
     mode: 'claude-chat',

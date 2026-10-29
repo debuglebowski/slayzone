@@ -173,6 +173,7 @@ run_harness packages/domains/terminal/src/server/runtime/runtime-doctor.test.ts
 run_harness packages/domains/terminal/src/server/runtime/idle-sweep.test.ts
 # Hub-local pty/chat spawn refused with processes switched off; routed spawns unaffected.
 run_harness packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-proc-handle.test.ts
 # node-pty optional in the published hub (T-30): loaded on the first local spawn, never at
 # import; missing → a clear refusal at that spawn.
 run_harness packages/domains/terminal/src/server/runtime/node-pty-optional.test.ts
@@ -582,6 +583,14 @@ run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-chaos.test.ts
+run_harness packages/domains/terminal/src/server/chat-events-store.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
+run_harness packages/domains/terminal/src/server/runtime/cli-version.test.ts
 
 # Terminal — warm-process pool (per-project gate + adopt-match). Strict+electron:
 # pty-manager pulls in `electron`; a fake spawnShell is injected so no real shells spawn.
@@ -960,6 +969,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/agent-hooks/notify-script-gemini.test.ts \
   packages/apps/app/src/main/agent-hooks/opencode-plugin-behavior.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
+  packages/domains/computer-transport/src/server/exec-proxies-chat.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/apps/api/src/scopes.test.ts \
   packages/apps/api/src/settings-admin.test.ts \

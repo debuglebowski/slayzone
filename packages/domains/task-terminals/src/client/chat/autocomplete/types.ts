@@ -52,15 +52,21 @@ export interface ChatActions {
     cwd: string
     providerFlagsOverride?: string | null
   }) => Promise<unknown>
-  /** Eager spawn (Restart button). Hydrate + ensureSpawned. */
+  /**
+   * Eager spawn (Restart button, auto-start). Hydrate + ensureSpawned; resolves
+   * once the agent is ready, rejects when it could not start. `reason: 'restore'`
+   * starts it in the computer's background lane (reopening a workspace).
+   */
   start: (opts: {
     tabId: string
     taskId: string
     mode: string
     cwd: string
     providerFlagsOverride?: string | null
+    reason?: 'user' | 'restore'
   }) => Promise<unknown>
-  send: (tabId: string, text: string) => Promise<boolean>
+  /** Raw send (no queue, no optimistic bubble). Prefer `AcceptCtx.submit`. */
+  send: (tabId: string, text: string) => Promise<{ id: string; state: string }>
   interrupt: (opts: {
     tabId: string
     taskId: string
@@ -100,6 +106,11 @@ export interface AcceptCtx {
   chat: ChatActions
   navigate: NavigateActions
   toast: (msg: string) => void
+  /**
+   * Send text as the user would: queued behind a running turn, shown at once,
+   * tracked to delivery. What a command that sends a prompt should use.
+   */
+  submit: (text: string) => Promise<void>
 }
 
 export interface SubmitTransform {

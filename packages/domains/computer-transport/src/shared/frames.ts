@@ -271,7 +271,9 @@ export const procDataParamsSchema = z.object({
   /** Monotonic per-session sequence number for `stdout`. Absent on stderr. */
   seq: z.number().int().nonnegative().optional(),
   data: z.string(),
-  stream: z.enum(['stdout', 'stderr']).optional()
+  stream: z.enum(['stdout', 'stderr']).optional(),
+  /** The spawn attempt that produced this output; the hub drops a replaced attempt's. */
+  spawnId: z.string().min(1).optional()
 })
 export type ProcDataParams = z.infer<typeof procDataParamsSchema>
 
@@ -280,7 +282,11 @@ export const procExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
-  reason: z.string().min(1).optional()
+  reason: z.string().min(1).optional(),
+  /** The spawn attempt that exited. */
+  spawnId: z.string().min(1).optional(),
+  /** Why the process could not run (e.g. the OS refused to start it). */
+  error: z.string().optional()
 })
 export type ProcExitParams = z.infer<typeof procExitParamsSchema>
 
@@ -1258,7 +1264,9 @@ export const procSpawnParamsSchema = z.object({
    */
   shell: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
-  env: z.record(z.string(), z.string()).optional()
+  env: z.record(z.string(), z.string()).optional(),
+  /** Agent-start admission lane (chat agents), as for `pty.spawn`. Absent: start at once. */
+  admission: ptySpawnAdmissionSchema.optional()
 })
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 
@@ -1272,7 +1280,9 @@ export type ProcSpawnResult = z.infer<typeof procSpawnResultSchema>
 
 export const procKillParamsSchema = z.object({
   sessionId: z.string().min(1),
-  signal: z.string().optional()
+  signal: z.string().optional(),
+  /** Only kill this attempt: a kill meant for a replaced process must not hit its successor. */
+  spawnId: spawnIdField
 })
 export type ProcKillParams = z.infer<typeof procKillParamsSchema>
 
@@ -1280,9 +1290,42 @@ export type ProcKillParams = z.infer<typeof procKillParamsSchema>
  *  channel duplex, and it is what a JSON-RPC/NDJSON chat agent requires. */
 export const procWriteParamsSchema = z.object({
   sessionId: z.string().min(1),
-  data: z.string()
+  data: z.string(),
+  /** Only write to this attempt; a replaced process is refused (`stale-spawn`). */
+  spawnId: spawnIdField,
+  /**
+   * Idempotency key: a write the hub retries (its reply was lost) is written once.
+   * The reply is sent only after the bytes reached the process's stdin, and a
+   * write that cannot be delivered (unknown session, replaced attempt, broken pipe)
+   * is refused rather than acked — so `{ok:true}` means delivered.
+   */
+  writeId: z.string().min(1).max(200).optional()
 })
 export type ProcWriteParams = z.infer<typeof procWriteParamsSchema>
+
+/**
+ * `delivered`: the bytes reached the process (a computer older than confirmed
+ * writes omits it — and acks even writes it dropped). `duplicate`: this
+ * `writeId` was already written; nothing was written again.
+ */
+export const procWriteResultSchema = z.object({
+  ok: z.literal(true),
+  delivered: z.literal(true).optional(),
+  duplicate: z.boolean().optional()
+})
+export type ProcWriteResult = z.infer<typeof procWriteResultSchema>
+
+/** Machine-readable `data.reason` on a `refusedByComputer` `proc.*` refusal. */
+export const ProcRefusalReasons = {
+  /** `proc.spawn`: the command is not on the computer's PATH. `data.binary` names it. */
+  binaryNotFound: 'binary-not-found',
+  /** `proc.write`: no process under this session id. */
+  unknownSession: 'unknown-session',
+  /** `proc.write`: the session now runs a different spawn attempt. */
+  staleSpawn: 'stale-spawn',
+  /** `proc.write`: the process's stdin is closed or broken. */
+  stdinClosed: 'stdin-closed'
+} as const
 
 /** Replay buffered stdout with `seq > since.seq` (gap recovery). Mirrors
  *  `pty.getBufferSince`. */

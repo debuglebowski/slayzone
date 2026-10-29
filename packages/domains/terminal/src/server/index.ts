@@ -91,13 +91,22 @@ export {
 // agent can run on a computer like a terminal agent already can. Injected via
 // `configureTransport({ backend })`; unset = in-process spawn.
 export {
+  chatSpawnError,
+  chatWriteError,
   childProcessToHandle,
   createLineSplitter,
   createLocalChatBackend,
+  isChatSpawnError,
+  isChatWriteError,
   type ChatBackend,
   type ChatDisposable,
   type ChatProcHandle,
-  type ChatSpawnSpec
+  type ChatSpawnError,
+  type ChatSpawnFailureCode,
+  type ChatSpawnSpec,
+  type ChatWriteError,
+  type ChatWriteFailureCode,
+  type ChatWriteOptions
 } from './runtime/chat-proc-handle'
 // Wave-3 remote-MCP-env contracts: the composition root builds a provider of
 // this shape and injects it via `setRemoteMcpEnvProvider`.

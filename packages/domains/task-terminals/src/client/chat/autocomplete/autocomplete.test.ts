@@ -237,7 +237,8 @@ const ctxFor = (draft: string, tokenEnd = draft.length): AcceptCtx =>
     session: { tabId: 't', taskId: 'k', mode: 'claude-chat', cwd: '/r' },
     chat: {} as AcceptCtx['chat'],
     navigate: {} as AcceptCtx['navigate'],
-    toast: () => {}
+    toast: () => {},
+    submit: async () => {}
   }) as AcceptCtx
 
 describe('CLI commands source', () => {

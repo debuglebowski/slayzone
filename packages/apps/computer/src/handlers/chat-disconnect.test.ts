@@ -10,8 +10,8 @@
  *     (`gateway.request(...).catch(noop)` in exec-proxies.ts), and the chat
  *     handle's `onError` subscribers are never called.
  *
- * Bug assertions are wrapped in `expectKnownBug` (test-utils/known-bug.ts): the
- * setup still has to work, and a fix flips the test red.
+ * Both holes are closed: the computer refuses (never acks) an undeliverable
+ * write, and the hub's chat handle rejects a write it could not deliver.
  *
  * @module computer/handlers/chat-disconnect.test
  */
@@ -33,7 +33,6 @@ import {
   type ComputerGatewayEvents,
   type RoutingGateway
 } from '@slayzone/computer-transport/server'
-import { expectKnownBug } from '@slayzone/test-utils/known-bug'
 import { createProcHandlers, ProcMethods } from './proc'
 
 const COMPUTER_ID = 'computer-1'
@@ -182,38 +181,28 @@ describe('chat writes and an unreachable computer (audit #6)', () => {
       Promise.resolve(
         computer.handlers[ProcMethods.procWrite]?.({ sessionId: 'no-such-session', data: 'lost\n' })
       )
-    // Precondition: the handler exists and logs the miss.
-    await write()
-    expect(computer.logs.some((l) => l.msg === 'proc write on unknown session')).toBe(true)
-
-    await expectKnownBug(
-      { audit: '#6', fixedBy: '1.5', what: 'proc.write to an unknown session answers {ok:true}' },
-      () => expect(write()).rejects.toThrow()
+    const err = await write().then(
+      () => null,
+      (e: unknown) => e
     )
+    expect(computer.logs.some((l) => l.msg === 'proc write on unknown session')).toBe(true)
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.refusedByComputer)
   })
 
   it('a write while the computer is disconnected is reported, not silently dropped', async () => {
     const computer = loadComputer()
     cleanup.push(() => computer.disposeAll())
     const { handle, lines } = await spawnAgent(computer)
-    const errors: Error[] = []
-    handle.onError((err) => errors.push(err))
 
     computer.disconnect()
-    let rejected = false
-    const ret: unknown = handle.write('sent while offline\n')
-    if (ret instanceof Promise) ret.catch(() => (rejected = true))
-    // Precondition: the line really did not arrive.
-    await new Promise((r) => setTimeout(r, 300))
-    expect(lines).toEqual([])
-
-    await expectKnownBug(
-      {
-        audit: '#6',
-        fixedBy: '1.5',
-        what: 'a chat write during a disconnect is dropped with no error'
-      },
-      async () => expect(await waitUntil(() => errors.length > 0 || rejected, 1000)).toBe(true)
+    const ret = handle.write('sent while offline\n')
+    const err = await ret.then(
+      () => null,
+      (e: unknown) => e
     )
+    expect(lines).toEqual([])
+    // Rejected as link-down: the line was not written, and the caller may retry it.
+    expect(err).toMatchObject({ code: 'link-down' })
   })
 })
