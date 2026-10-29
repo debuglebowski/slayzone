@@ -384,6 +384,10 @@ run_harness scripts/check-trpc-stable-deps.test.mjs
 # `pnpm lint:workspace-cycles`: a dependency edge inside a package cycle must be in the
 # baseline, and a baseline edge no longer in a cycle must be removed (shrink-only).
 run_harness scripts/check-workspace-cycles.test.mjs
+# `pnpm lint:tsconfig-hermetic`: tsconfig include/files/references/paths/extends entries
+# and typechecked sources' relative imports resolve inside the package or a workspace
+# package it depends on (transitively).
+run_harness scripts/check-tsconfig-hermetic.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.
