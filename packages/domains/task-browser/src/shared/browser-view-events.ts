@@ -1,13 +1,9 @@
 /**
  * Events a WebContentsView (task browser tab or web panel) forwards from the
- * Electron main process back to the renderer, via the transport `app` router.
+ * Electron main process back to the renderer, via the `app.browser` router.
  *
- * Lives here, not in `@slayzone/task-browser`, because transport and
- * `@slayzone/types` need it and task-browser depends on transport.
- *
- * Type-only and dependency-free: also the lean
- * `@slayzone/platform/browser-view-events` subpath, safe to import from
- * renderer bundles.
+ * Type-only and dependency-free: part of the `@slayzone/task-browser/shared`
+ * subpath, safe to import from renderer bundles.
  */
 export type BrowserCreateTaskFromLinkSource = 'modified-link-click' | 'link-context-menu'
 

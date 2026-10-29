@@ -3414,12 +3414,18 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../host-capabilities
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../../domains/processes
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
@@ -3438,6 +3444,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-browser':
+        specifier: workspace:*
+        version: link:../../domains/task-browser
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts

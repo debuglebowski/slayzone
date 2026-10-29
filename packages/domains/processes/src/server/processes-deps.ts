@@ -1,5 +1,5 @@
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { ProcessInfo, ProcessEventMap } from '@slayzone/platform/process-info'
+import type { ProcessInfo, ProcessEventMap } from '../shared'
 
 // Processes deps — the long-running child-process manager. Lifecycle ops plus the
 // live `processEvents` TypedEmitter the 4 streaming subscriptions wrap. Injected by

@@ -14,8 +14,7 @@ import {
   assertHubProcessesEnabled,
   hubProcessesEnabled
 } from '@slayzone/platform/hub-switch-refusal'
-import type { ProcessEventMap, ProcessInfo, ProcessStatus } from '@slayzone/platform/process-info'
-export type { ProcessInfo, ProcessStatus } from '@slayzone/platform/process-info'
+import type { ProcessEventMap, ProcessInfo, ProcessStatus } from '../shared'
 
 /** Structural slice of Electron's BrowserWindow — the legacy dual-emit target.
  *  Kept structural so this module stays electron-free (src/server guard); the

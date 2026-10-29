@@ -7,7 +7,15 @@
 // slice 5). The host conforms to `MenuEventMap`; `@slayzone/api` re-exports the
 // registry for its composition roots.
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { UpdateStatus } from '@slayzone/platform/app-update-status'
+
+/** Auto-updater progress: the `update-status` payload the Electron host's updater
+ *  emits and `menu.onUpdateStatus` streams to the renderer. */
+export type UpdateStatus =
+  | { type: 'checking' }
+  | { type: 'downloading'; percent: number }
+  | { type: 'downloaded'; version: string }
+  | { type: 'not-available' }
+  | { type: 'error'; message: string }
 
 export type MenuEventMap = {
   'go-home': []

@@ -3,10 +3,7 @@
 // them at `app.browser` / `app.webview`.
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import type {
-  BrowserShortcutPayload,
-  BrowserCreateTaskFromLinkIntent
-} from '@slayzone/platform/browser-view-events'
+import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '../shared'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getTaskBrowserHost } from './router-deps'
 

@@ -17,9 +17,8 @@ export {
   shutdownAllProcesses,
   setProjectCwdResolver
 } from './process-manager'
+export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {
-  ProcessStatus,
-  ProcessInfo,
   ProcessShutdownOptions,
   ProcessShutdownResult,
   ProjectCwdResolver

@@ -8,7 +8,7 @@ import {
 } from './process-manager'
 import { setProcessBackend } from './process-backend'
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from './process-backend'
-import type { ProcessStatus } from './process-manager'
+import type { ProcessStatus } from '../shared'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 

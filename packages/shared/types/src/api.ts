@@ -253,12 +253,12 @@ export type { ExecutionContext } from '@slayzone/projects-contracts'
 import type {
   BrowserCreateTaskFromLinkIntent,
   BrowserShortcutPayload
-} from '@slayzone/platform/browser-view-events'
+} from '@slayzone/task-browser/shared'
 export type {
   BrowserCreateTaskFromLinkSource,
   BrowserCreateTaskFromLinkIntent,
   BrowserShortcutPayload
-} from '@slayzone/platform/browser-view-events'
+} from '@slayzone/task-browser/shared'
 
 export type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 
@@ -268,13 +268,13 @@ export type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 import type { LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
 
-import type { ProcessStatus, ProcessStats, ProcessInfo } from '@slayzone/platform/process-info'
+import type { ProcessStatus, ProcessStats, ProcessInfo } from '@slayzone/processes/shared'
 export type {
   ProcessStatus,
   ProcessStats,
   ProcessInfo,
   ProcessEventMap
-} from '@slayzone/platform/process-info'
+} from '@slayzone/processes/shared'
 
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 export type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
@@ -315,8 +315,8 @@ export interface ClientDiagnosticEventInput {
   payload?: unknown
 }
 
-import type { UpdateStatus } from '@slayzone/platform/app-update-status'
-export type { UpdateStatus } from '@slayzone/platform/app-update-status'
+import type { UpdateStatus } from '@slayzone/host-capabilities/server'
+export type { UpdateStatus } from '@slayzone/host-capabilities/server'
 
 export interface PtyCreateOptions {
   sessionId: string

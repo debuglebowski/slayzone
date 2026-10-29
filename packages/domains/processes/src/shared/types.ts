@@ -1,14 +1,10 @@
 /**
  * Contract of the user-defined processes a task/project runs (the Processes
- * panel): the process manager in `@slayzone/processes` produces it, the
- * transport `processes` router serves it, the renderer panel consumes it.
+ * panel): the process manager (`../server`) produces it, the `processes` tRPC
+ * router serves it, the renderer panel consumes it.
  *
- * Lives here, not in `@slayzone/processes`, because transport and
- * `@slayzone/types` need it and depending on the processes package from either
- * would close a workspace dependency cycle.
- *
- * Type-only and dependency-free: also the lean `@slayzone/platform/process-info`
- * subpath, safe to import from renderer bundles.
+ * Type-only and dependency-free: the `@slayzone/processes/shared` subpath, safe
+ * to import from renderer bundles.
  */
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
 
@@ -36,8 +32,8 @@ export interface ProcessInfo {
 }
 
 // Streaming events emitted by the process manager. Shared home (with the other
-// Process* types) so both the main-process emitter and the transport
-// `ProcessesDeps.events` reference one map via TypedEmitter.
+// Process* types) so both the main-process emitter and the `ProcessesDeps.events`
+// seam reference one map via TypedEmitter.
 export type ProcessEventMap = {
   log: [id: string, line: string]
   status: [id: string, status: ProcessStatus]

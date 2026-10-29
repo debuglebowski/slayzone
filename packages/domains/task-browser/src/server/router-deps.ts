@@ -5,10 +5,7 @@
 // registry live on every call (`api/src/domain-router-deps.ts`). This domain never
 // imports `@slayzone/api`.
 import type { EventEmitter } from 'node:events'
-import type {
-  BrowserShortcutPayload,
-  BrowserCreateTaskFromLinkIntent
-} from '@slayzone/platform/browser-view-events'
+import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '../shared'
 
 // Browser view manager — heavy electron coupling, expose as opaque object
 // and call methods directly from procedures. All return types are unknown
