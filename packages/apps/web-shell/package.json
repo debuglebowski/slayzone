@@ -10,6 +10,7 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@slayzone/api": "workspace:*",
     "@slayzone/renderer-app": "workspace:*",
     "@slayzone/theme-css": "workspace:*",
     "@slayzone/transport": "workspace:*",

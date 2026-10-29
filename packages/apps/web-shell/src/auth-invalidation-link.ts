@@ -1,6 +1,6 @@
 import { TRPCClientError, type TRPCLink } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from '@slayzone/transport/client'
+import type { AppRouter } from '@slayzone/api'
 
 /**
  * Web-only link: reacts to an `UNAUTHORIZED` error from any operation by

@@ -1021,6 +1021,9 @@ importers:
 
   packages/apps/web-shell:
     dependencies:
+      '@slayzone/api':
+        specifier: workspace:*
+        version: link:../api
       '@slayzone/renderer-app':
         specifier: workspace:*
         version: link:../renderer-app
