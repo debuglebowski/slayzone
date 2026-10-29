@@ -39,7 +39,8 @@
     "./rate-limit": "./src/rate-limit.ts",
     "./startup-deadline": "./src/startup-deadline.ts",
     "./event-loop-stall": "./src/event-loop-stall.ts",
-    "./parent-watch": "./src/parent-watch.ts"
+    "./parent-watch": "./src/parent-watch.ts",
+    "./node-pty-install": "./src/node-pty-install.ts"
   },
   "scripts": {
     "test": "vitest run",

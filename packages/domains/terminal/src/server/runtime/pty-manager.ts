@@ -101,12 +101,15 @@ export type PtyEventMap = {
   'state-change': [sessionId: string, newState: TerminalState, oldState: TerminalState]
   'title-change': [sessionId: string, title: string]
   /** `exitReason`: lifecycle cause the code cannot carry (`startup-timeout`,
-   *  `computer-restarted`, `spawn-failed`, …) — distinct from the adapter's `errorCode`. */
+   *  `computer-restarted`, `spawn-failed`, …) — distinct from the adapter's `errorCode`.
+   *  `exitDetail`: the owner's own words for it — on `spawn-failed`, the computer's
+   *  refusal ("posix_spawnp failed. … Fix: …"). */
   exit: [
     sessionId: string,
     exitCode: number | null,
     errorCode: string | null,
-    exitReason?: string | null
+    exitReason?: string | null,
+    exitDetail?: string | null
   ]
   // Fired SYNCHRONOUSLY the instant `createPty` decides to replace a live
   // session at this id (respawn/mode-switch/warm-pool adopt) — strictly
@@ -1966,6 +1969,8 @@ export async function createPty(
     let earlyExitWatchdog: NodeJS.Timeout | undefined
     /** Lifecycle cause the backend attached to the exit (`startup-timeout`, a transport outcome). */
     let lastExitReason: string | undefined
+    /** The owner's own words for `lastExitReason` (a spawn refusal's message). */
+    let lastExitDetail: string | undefined
     /** The pty the HUB's own startup deadline killed — its exit is a startup timeout. */
     let hubStartupKilled: pty.IPty | null = null
 
@@ -2052,7 +2057,8 @@ export async function createPty(
         taskId: taskIdFromSessionId(sessionId),
         payload: {
           exitCode,
-          ...(lastExitReason ? { reason: lastExitReason } : {})
+          ...(lastExitReason ? { reason: lastExitReason } : {}),
+          ...(lastExitDetail ? { detail: lastExitDetail } : {})
         }
       })
       // Note: the host-kill timestamp (lastPtyKilledAt) is recorded at the
@@ -2076,7 +2082,8 @@ export async function createPty(
         sessionId,
         exitCode,
         exitSession?.error?.code ?? null,
-        lastExitReason ?? null
+        lastExitReason ?? null,
+        lastExitDetail ?? null
       )
       const exitWin = getWin()
       if (!exitWin.isDestroyed()) {
@@ -2564,6 +2571,7 @@ export async function createPty(
           lastExitReason =
             (exit as PtyExit).reason ??
             (hubStartupKilled === target ? 'startup-timeout' : undefined)
+          lastExitDetail = (exit as PtyExit).detail
           // The owner's deadline fired: record it exactly as the hub's own would,
           // then let the ordinary exit path below decide on a recovery shell.
           if (lastExitReason === 'startup-timeout') recordStartupTimeout('computer')
@@ -2851,6 +2859,7 @@ export async function createPty(
             payload: { reason: 'spawn_refused' }
           })
           lastExitReason = 'spawn-failed'
+          lastExitDetail = err instanceof Error ? err.message : String(err)
           finalizeSessionExit(-1)
         }
       )

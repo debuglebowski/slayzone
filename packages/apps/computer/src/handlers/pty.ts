@@ -36,6 +36,8 @@ import {
   type PtySpawnParams,
   type PtyWarmSpawnParams,
   ptyResizeParamsSchema,
+  ptyRuntimeCheckParamsSchema,
+  type PtyRuntimeCheckResult,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
   ptyWarmKillParamsSchema,
@@ -45,7 +47,13 @@ import {
   ComputerNotificationMethods,
   ComputerTransportErrorCodes
 } from '@slayzone/computer-transport/shared'
+import { createRequire } from 'node:module'
+import * as path from 'node:path'
 import * as pty from 'node-pty'
+import {
+  nodePtyInstallProblems as readNodePtyInstallProblems,
+  type NodePtyInstallProblem
+} from '@slayzone/platform/node-pty-install'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
@@ -138,7 +146,28 @@ export interface PtyHandlerOptions {
    * gets a private one.
    */
   admission?: SpawnAdmission
+  /** node-pty's `spawn`; replaced in tests to model a spawn it refuses. */
+  spawnPty?: typeof pty.spawn
+  /** Why the node-pty install can't start processes; defaults to reading it off disk. */
+  nodePtyInstallProblems?: () => NodePtyInstallProblem[]
 }
+
+/**
+ * The node-pty package this computer loads, resolved as its import is: `require`
+ * in the CJS bundle (relative to the bundle, like the external it keeps); from the
+ * entry script under unbundled ESM (tests), where `import.meta` is off limits —
+ * the bundle compiles this file too and would empty it.
+ */
+function nodePtyDir(): string {
+  const resolve =
+    typeof require === 'function'
+      ? require.resolve
+      : createRequire(process.argv[1] ?? path.join(process.cwd(), 'index.js')).resolve
+  return path.dirname(resolve('node-pty/package.json'))
+}
+
+const installProblemsOnDisk = (): NodePtyInstallProblem[] =>
+  readNodePtyInstallProblems(nodePtyDir())
 
 /**
  * Build the pty handler table. Sessions are tracked in a Map keyed by
@@ -158,6 +187,8 @@ export function createPtyHandlers(
   const sessions = new Map<string, PtySession>()
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
+  const spawnPty = options.spawnPty ?? pty.spawn
+  const installProblems = options.nodePtyInstallProblems ?? installProblemsOnDisk
   /** Spawns waiting for an agent-start slot, keyed like `sessions`. */
   const queued = new Map<string, QueuedSpawn>()
 
@@ -221,13 +252,18 @@ export function createPtyHandlers(
       sessions.delete(id)
     }
 
-    const proc = pty.spawn(opts.command, opts.args ?? [], {
-      name: 'xterm-color',
-      cwd,
-      env: buildSpawnEnv(ctx, opts.env),
-      cols: opts.cols ?? 80,
-      rows: opts.rows ?? 24
-    })
+    let proc: pty.IPty
+    try {
+      proc = spawnPty(opts.command, opts.args ?? [], {
+        name: 'xterm-color',
+        cwd,
+        env: buildSpawnEnv(ctx, opts.env),
+        cols: opts.cols ?? 80,
+        rows: opts.rows ?? 24
+      })
+    } catch (err) {
+      throw explainSpawnFailure(err)
+    }
 
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: PtySession = {
@@ -296,6 +332,25 @@ export function createPtyHandlers(
     })
 
     return session
+  }
+
+  /**
+   * node-pty refused to start a process. Its message names no cause ("posix_spawnp
+   * failed." means it could not exec its own spawn-helper), so append whatever the
+   * install check finds, each with its fix. This text is what the hub shows under
+   * "The computer couldn't start the agent.".
+   */
+  function explainSpawnFailure(err: unknown): Error {
+    const original = err instanceof Error ? err : new Error(String(err))
+    let problems: NodePtyInstallProblem[]
+    try {
+      problems = installProblems()
+    } catch {
+      return original // The check is a diagnosis; it must never mask the refusal.
+    }
+    if (problems.length === 0) return original
+    const why = problems.map((p) => `${p.detail} Fix: ${p.fix}`).join(' ')
+    return new Error(`${original.message} ${why}`, { cause: original })
   }
 
   /** Report a session's exit and remember it. Idempotent per session object. */
@@ -539,6 +594,12 @@ export function createPtyHandlers(
       : { ok: true, supported: true, alive }
   }
 
+  /** Can this computer start ptys at all? (Doctor.) */
+  function runtimeCheck(rawParams: unknown): PtyRuntimeCheckResult {
+    ptyRuntimeCheckParamsSchema.parse(rawParams)
+    return { ok: true, problems: installProblems() }
+  }
+
   function dropQueued(reason: string): void {
     for (const id of [...queued.keys()]) cancelQueued(id, reason)
   }
@@ -766,6 +827,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,
     [HubToComputerMethods.ptyBackgroundJobs]: backgroundJobs,
+    [HubToComputerMethods.ptyRuntimeCheck]: runtimeCheck,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,

@@ -326,6 +326,8 @@ export const HubToComputerMethods = {
   ptyPrioritize: 'pty.prioritize',
   /** Which of claude's background jobs still have a live process under a session. */
   ptyBackgroundJobs: 'pty.backgroundJobs',
+  /** Can this computer start ptys at all? Its node-pty install's problems (Doctor). */
+  ptyRuntimeCheck: 'pty.runtimeCheck',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -538,6 +540,21 @@ export const ptyBackgroundJobsResultSchema = z.object({
   alive: z.array(z.string())
 })
 export type PtyBackgroundJobsResult = z.infer<typeof ptyBackgroundJobsResultSchema>
+
+/**
+ * Why this computer can't start ptys, if anything (Doctor). An install whose
+ * scripts never ran leaves node-pty unable to exec its `spawn-helper`, and every
+ * spawn then fails with only "posix_spawnp failed." — see
+ * `@slayzone/platform/node-pty-install`. Empty `problems`: the install is usable.
+ */
+export const ptyRuntimeCheckParamsSchema = z.object({}).strict()
+export type PtyRuntimeCheckParams = z.infer<typeof ptyRuntimeCheckParamsSchema>
+
+export const ptyRuntimeCheckResultSchema = z.object({
+  ok: z.literal(true),
+  problems: z.array(z.object({ check: z.string(), detail: z.string(), fix: z.string() }))
+})
+export type PtyRuntimeCheckResult = z.infer<typeof ptyRuntimeCheckResultSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),

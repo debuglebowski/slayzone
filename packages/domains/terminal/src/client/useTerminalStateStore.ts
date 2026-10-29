@@ -20,17 +20,13 @@ import { useSubscription } from '@slayzone/transport/client'
 import { getTrpcClient, listHubClients, useTRPC, useTRPCClient } from './trpc'
 import type { TerminalState } from '@slayzone/terminal-contracts'
 import { listHibernatedSessionIds } from './hibernated-sessions-source'
+import { taskIdFromSessionId } from './session-id'
 
 // `background` (main agent done, its background subagents still working) is as
 // alive as `running` — it must count for useActiveTaskIds AND be eligible for the
 // reconcile Pass-2 sweep, or a background session that dropped its exit event
 // would never converge to 'dead'.
 const ALIVE_STATES: ReadonlySet<TerminalState> = new Set(['running', 'background', 'idle'])
-
-function taskIdFromSessionId(sessionId: string): string {
-  const idx = sessionId.indexOf(':')
-  return idx >= 0 ? sessionId.substring(0, idx) : sessionId
-}
 
 interface SessionInfoLite {
   sessionId: string

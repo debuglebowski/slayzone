@@ -10,6 +10,8 @@ export interface TerminalDeadOverlayProps {
   deadExitCode: number | null
   /** Lifecycle cause of the exit (`startup-timeout`, …); null when only the code is known. */
   deadExitReason: string | null
+  /** The owner's own words for that cause (the computer's spawn refusal); null when none. */
+  deadExitDetail: string | null
   /** Raw prop — gates the Retry button's visibility. */
   onRetry?: () => void
   onStartFresh: () => void
@@ -29,6 +31,7 @@ export function TerminalDeadOverlay({
   deadCrashOutput,
   deadExitCode,
   deadExitReason,
+  deadExitDetail,
   onRetry,
   onStartFresh,
   onRetryClick,
@@ -62,6 +65,15 @@ export function TerminalDeadOverlay({
         </pre>
       )}
       <p className="text-sm text-muted-foreground">{describeExit(deadExitCode, deadExitReason)}</p>
+      {deadExitDetail && (
+        // Selectable: it usually ends with the command that fixes it.
+        <p
+          data-testid="terminal-dead-detail"
+          className="text-xs text-muted-foreground font-mono whitespace-pre-wrap break-words text-center max-w-lg select-text"
+        >
+          {deadExitDetail}
+        </p>
+      )}
       <div className="flex gap-2">
         {onRetry && (
           <button

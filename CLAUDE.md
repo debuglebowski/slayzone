@@ -44,6 +44,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm test:e2e:perf` | Run the `perf` group alone (wall-clock budgets — needs a quiet box; not part of `test:e2e`) |
 | `pnpm lint`      | Lint all packages              |
 
+**Installs: never `--ignore-scripts` in the main checkout.** A plain `pnpm install` is safe while the dev app runs. Skipping scripts leaves node-pty's `spawn-helper` at mode 644, so every agent in the dev app fails with "The computer couldn't start the agent." (`posix_spawnp failed.`). If an install did skip them (`node_modules/.modules.yaml` `pendingBuilds` not empty), run `pnpm rebuild --pending` at the repo root.
+
 ## Dev Env Flags
 
 Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.

@@ -167,6 +167,8 @@ run_harness packages/apps/api/src/routers/upload-sources.test.ts
 run_harness packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+# Doctor asks the task's computer whether node-pty can start terminals there.
+run_harness packages/domains/terminal/src/server/runtime/runtime-doctor.test.ts
 # Idle sweep runs windowless: idle-close countdown/hibernate + silence-timer idle flip.
 run_harness packages/domains/terminal/src/server/runtime/idle-sweep.test.ts
 # Hub-local pty/chat spawn refused with processes switched off; routed spawns unaffected.
@@ -609,8 +611,11 @@ run_harness packages/apps/app/e2e/fixtures/stale-processes.test.ts
 # filled the disk); a concurrent group's live worker dirs must survive.
 run_harness packages/apps/app/e2e/fixtures/stale-runtime-dirs.test.ts
 
-# e2e install-health gate: an install that skipped its scripts (pendingBuilds, or a
-# non-executable node-pty spawn-helper) must stop the run with the fix named.
+# node-pty install health (shared by the e2e gate, the computer's spawn errors and
+# Doctor): an install that skipped its scripts (pendingBuilds, or a non-executable
+# spawn-helper) is named with its fix.
+run_harness packages/shared/platform/src/node-pty-install.test.ts
+# e2e install-health gate: such an install must stop the run with the fix named.
 run_harness packages/apps/app/e2e/fixtures/install-health.test.ts
 
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
@@ -894,6 +899,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tasks/src/client/useKanbanSelectionKeyboard.test.tsx \
   packages/domains/tasks/src/client/KanbanListView.test.tsx \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
+  packages/domains/terminal/src/client/TerminalDeadOverlay.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/terminal/src/client/useTerminalModes.test.tsx \

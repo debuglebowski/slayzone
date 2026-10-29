@@ -129,9 +129,15 @@ describe('PtyProvider event streams', () => {
     ctx().subscribeExit('s1', exitCb)
     getBuffer.mockResolvedValue('stack trace')
 
-    await emit('onExit', { sessionId: 's1', exitCode: 1, errorCode: 'E', exitReason: 'r' })
+    await emit('onExit', {
+      sessionId: 's1',
+      exitCode: 1,
+      errorCode: 'E',
+      exitReason: 'r',
+      exitDetail: 'd'
+    })
     expect(getBuffer).toHaveBeenCalledWith({ sessionId: 's1' })
-    expect(exitCb).toHaveBeenCalledWith(1, 'E', 'r')
+    expect(exitCb).toHaveBeenCalledWith(1, 'E', 'r', 'd')
     expect(disposeTerminal).toHaveBeenCalledWith('s1')
     expect(ctx().getLastSeq('s1')).toBe(-1)
 
@@ -146,9 +152,15 @@ describe('PtyProvider event streams', () => {
     const exitCb = vi.fn()
     ctx().subscribe('s1', vi.fn())
     ctx().subscribeExit('s1', exitCb)
-    await emit('onExit', { sessionId: 's1', exitCode: 0, errorCode: null, exitReason: null })
+    await emit('onExit', {
+      sessionId: 's1',
+      exitCode: 0,
+      errorCode: null,
+      exitReason: null,
+      exitDetail: null
+    })
     expect(getBuffer).not.toHaveBeenCalled()
-    expect(exitCb).toHaveBeenCalledWith(0, null, null)
+    expect(exitCb).toHaveBeenCalledWith(0, null, null, null)
   })
 
   it('routes session-detected, dev-server and title events per session', async () => {

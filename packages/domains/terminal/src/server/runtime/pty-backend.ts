@@ -95,6 +95,8 @@ export interface PtyExit {
   exitCode: number
   signal?: number
   reason?: string
+  /** The owner's own words for `reason`: on `spawn-failed`, the computer's refusal. */
+  detail?: string
 }
 
 /**
@@ -194,6 +196,24 @@ export interface PtyBackend {
    * Optional: only the routing backend can answer; agents never run hub-local.
    */
   probeBackgroundJobs?(sessionId: string, jobs: BackgroundJobQuery[]): Promise<string[] | null>
+  /**
+   * Can `computerId` start ptys at all — what is wrong with its node-pty install,
+   * each with a fix (Doctor). Empty: nothing wrong. Resolves `null` when nothing
+   * can tell (a computer that predates the request); rejects when the computer
+   * can't be reached.
+   *
+   * Optional: only the routing backend can answer; agents never run hub-local.
+   */
+  runtimeProblems?(computerId: string): Promise<PtyRuntimeProblem[] | null>
+}
+
+/** One reason a computer can't start ptys, shaped as a Doctor row. */
+export interface PtyRuntimeProblem {
+  /** Unique per problem kind. */
+  check: string
+  detail: string
+  /** A shell command that repairs it. */
+  fix: string
 }
 
 /** One claude background job as the hook route knows it — see `agent-tree.ts`. */

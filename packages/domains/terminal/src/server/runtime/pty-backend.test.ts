@@ -25,7 +25,13 @@ import {
   ptyEvents,
   getState
 } from './pty-manager'
-import { setPtyBackend, type PtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
+import {
+  setPtyBackend,
+  type PtyBackend,
+  type PtyExit,
+  type PtyHandle,
+  type PtySpawnSpec
+} from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 const fakeWin = {
@@ -50,11 +56,11 @@ interface FakeHandle extends PtyHandle {
   resized: Array<[number, number]>
   killed: string[]
   emitData(d: string): void
-  emitExit(code: number, reason?: string): void
+  emitExit(code: number, reason?: string, detail?: string): void
 }
 function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = {}): FakeHandle {
   const dataCbs: Array<(d: string) => void> = []
-  const exitCbs: Array<(e: { exitCode: number; signal?: number; reason?: string }) => void> = []
+  const exitCbs: Array<(e: PtyExit) => void> = []
   return {
     pid: opts.pid === undefined ? 9191 : opts.pid,
     ...(opts.whenSpawned ? { whenSpawned: opts.whenSpawned } : {}),
@@ -82,8 +88,10 @@ function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = 
     emitData(d) {
       for (const cb of dataCbs) cb(d)
     },
-    emitExit(code, reason) {
-      for (const cb of exitCbs) cb({ exitCode: code, ...(reason ? { reason } : {}) })
+    emitExit(code, reason, detail) {
+      for (const cb of exitCbs) {
+        cb({ exitCode: code, ...(reason ? { reason } : {}), ...(detail ? { detail } : {}) })
+      }
     }
   }
 }
@@ -431,6 +439,66 @@ test('remote backend: a REJECTED spawn confirmation finalizes the session', asyn
   expect(exits.length, 'a refused remote spawn must drive an exit').toBeGreaterThanOrEqual(1)
   ptyEvents.off('exit', eh)
   setPtyBackend(null)
+})
+
+// "The computer couldn't start the agent." names no cause; the computer's own
+// refusal does ("posix_spawnp failed. … Fix: chmod +x …"). Both ways a refusal
+// can reach pty-manager must carry those words to the exit event.
+type ExitArgs = [
+  code: number | null,
+  errorCode: string | null,
+  reason?: string | null,
+  detail?: string | null
+]
+
+async function exitOfRemoteSpawn(
+  sid: string,
+  handle: FakeHandle,
+  afterCreate: () => void
+): Promise<ExitArgs | null> {
+  setPtyBackend({ spawn: () => handle })
+  let exit: ExitArgs | null = null
+  const eh = (s: string, ...args: ExitArgs): void => {
+    if (s === sid) exit = args
+  }
+  ptyEvents.on('exit', eh)
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    computerId: 'computer-1'
+  })
+  afterCreate()
+  await new Promise((r) => setTimeout(r, 100))
+  ptyEvents.off('exit', eh)
+  setPtyBackend(null)
+  return exit
+}
+
+test("remote backend: a REJECTED spawn confirmation's message reaches the exit event", async () => {
+  let failSpawn: (e: Error) => void = () => {}
+  const whenSpawned = new Promise<{ pid: number | null }>((_res, rej) => {
+    failSpawn = rej
+  })
+  void whenSpawned.catch(() => {})
+  const refusal =
+    "posix_spawnp failed. /h/spawn-helper is not executable. Fix: chmod +x '/h/spawn-helper'"
+  const exit = await exitOfRemoteSpawn(
+    'refusedWords:refusedWords',
+    makeFakeHandle({ pid: null, whenSpawned }),
+    () => failSpawn(new Error(refusal))
+  )
+  expect(exit).toEqual([-1, null, 'spawn-failed', refusal])
+})
+
+test("remote backend: an exit's detail reaches the exit event", async () => {
+  const handle = makeFakeHandle({ pid: null, whenSpawned: new Promise(() => {}) })
+  const exit = await exitOfRemoteSpawn('exitWords:exitWords', handle, () =>
+    handle.emitExit(1, 'spawn-failed', 'project p is not checked out on this computer')
+  )
+  expect(exit).toEqual([1, null, 'spawn-failed', 'project p is not checked out on this computer'])
 })
 
 test('a session declared dead must not leave a live process behind', async () => {

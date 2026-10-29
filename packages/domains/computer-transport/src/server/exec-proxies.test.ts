@@ -770,6 +770,31 @@ describe('createRoutingPtyBackend', () => {
     })
   })
 
+  it('runtimeProblems asks the computer whether its node-pty install can start ptys', async () => {
+    const gateway = new FakeGateway()
+    const problem = { check: 'spawn-helper', detail: 'not executable', fix: 'chmod +x h' }
+    gateway.onMethod('pty.runtimeCheck', () => ({ ok: true, problems: [problem] }))
+    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+
+    await expect(backend.runtimeProblems?.('computer-1')).resolves.toEqual([problem])
+    expect(requireCall(gateway, 'pty.runtimeCheck').computerId).toBe('computer-1')
+  })
+
+  it('runtimeProblems: old computer → null (can not tell); lost link → rejects', async () => {
+    const gateway = new FakeGateway()
+    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+
+    gateway.onMethod('pty.runtimeCheck', () => {
+      throw new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented')
+    })
+    await expect(backend.runtimeProblems?.('computer-1')).resolves.toBeNull()
+
+    gateway.onMethod('pty.runtimeCheck', () => {
+      throw new RpcDisposedError('gone')
+    })
+    await expect(backend.runtimeProblems?.('computer-1')).rejects.toThrow()
+  })
+
   it('probeBackgroundJobs: unsupported platform / old computer → null; lost link → rejects', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
@@ -974,9 +999,15 @@ describe('createRoutingPtyBackend', () => {
       exit = e
     })
 
-    // The computer answered: this IS a verdict, unlike a lost reply.
+    // The computer answered: this IS a verdict, unlike a lost reply. Its words
+    // ride along — "couldn't start the agent" alone names no cause.
     await expect(handle.whenSpawned).rejects.toThrow(/not checked out/)
-    expect(exit).toEqual({ exitCode: 1, signal: undefined, reason: 'spawn-failed' })
+    expect(exit).toEqual({
+      exitCode: 1,
+      signal: undefined,
+      reason: 'spawn-failed',
+      detail: 'project proj-1 is not checked out on this computer'
+    })
   })
 
   it('a session closed while detached is never re-spawned or resumed', async () => {

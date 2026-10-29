@@ -1043,7 +1043,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.sessionList': listed(rows('sessionId', 'session')),
   'pty.sessionGetState': checked(session('sessionId')),
   'pty.setTheme': none(`${HUB_CONFIG}: the terminal colours answered to OSC queries`),
-  'pty.validate': none('a terminal mode id'),
+  // `taskId` (optional): Doctor also asks that task's computer about its node-pty install.
+  'pty.validate': checked(task('taskId')),
   'pty.setShellOverride': none(`${HUB_CONFIG}: the shell override`),
   'pty.warmSetProjectTabCounts': checked(project('counts{}')),
   'pty.onData': streamed(on('sessionId', 'session')),

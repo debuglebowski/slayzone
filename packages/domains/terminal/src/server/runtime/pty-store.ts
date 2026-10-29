@@ -31,6 +31,8 @@ import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty
 import type { TaskSessionStore } from './task-session-store'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
+import { getPtyBackend } from './pty-backend'
+import { computerRuntimeResults } from './runtime-doctor'
 import { getAdapter, type ExecutionContext } from '../adapters'
 import type {
   TerminalMode,
@@ -396,7 +398,9 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     ansi?: readonly string[]
   }) => setTerminalTheme(theme)
 
-  const ptyValidate = async (mode: TerminalMode) => {
+  /** Doctor. With `taskId`, also asks the computer that task's agents start on
+   *  whether it can start terminals at all (runtime-doctor.ts). */
+  const ptyValidate = async (mode: TerminalMode, taskId?: string) => {
     const modeInfo = (await lookups.getTerminalMode(mode)) ?? undefined
     const adapter = getAdapter({
       mode,
@@ -406,7 +410,16 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
         error: modeInfo?.patternError
       }
     })
-    return adapter.validate ? adapter.validate() : []
+    const [runtime, agent] = await Promise.all([
+      taskId
+        ? lookups
+            .resolveComputerId(taskId)
+            .then((computerId) => computerRuntimeResults(computerId, getPtyBackend()))
+        : Promise.resolve([]),
+      adapter.validate ? adapter.validate() : Promise.resolve([])
+    ])
+    // The runtime first: nothing the agent rows say matters if no terminal can start.
+    return [...runtime, ...agent]
   }
 
   const ptySetShellOverride = (value: string | null) => setShellOverride(value)

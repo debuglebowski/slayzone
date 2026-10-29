@@ -24,7 +24,10 @@ export function useTaskDoctor(task: Task | null): UseTaskDoctorResult {
     setDoctorResults(null)
     setDoctorDialogOpen(true)
     try {
-      const results = await trpcClient.pty.validate.query({ mode: task.terminal_mode })
+      const results = await trpcClient.pty.validate.query({
+        mode: task.terminal_mode,
+        taskId: task.id
+      })
       setDoctorResults(results)
     } catch {
       setDoctorResults([{ check: 'Validation', ok: false, detail: 'Failed to run checks' }])

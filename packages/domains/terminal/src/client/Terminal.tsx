@@ -34,6 +34,7 @@ import type { WebLinkProvider } from './web-link-provider'
 import { unregisterTestTerminalLinks } from './xterm-init'
 import { initTerminalSession, type TerminalInitOptions } from './terminal-session-init'
 import { watchTerminalFocusLoss } from './terminal-focus-watch'
+import { taskIdFromSessionId } from './session-id'
 import { installTerminalFileInput } from './terminal-file-input'
 import { correctAtlas } from './webgl-loader'
 import { isParked, unparkToDom } from './renderer-park'
@@ -170,6 +171,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [deadReason, setDeadReason] = useState<string | null>(null)
   /** Why the session ended, when the exit code can't say (see exit-description.ts). */
   const [deadExitReason, setDeadExitReason] = useState<string | null>(null)
+  const [deadExitDetail, setDeadExitDetail] = useState<string | null>(null)
   const [doctorResults, setDoctorResults] = useState<
     import('@slayzone/terminal-contracts').ValidationResult[] | null
   >(null)
@@ -667,7 +669,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
     })
 
-    const unsubExit = subscribeExit(sessionId, (exitCode, reason, exitReason) => {
+    const unsubExit = subscribeExit(sessionId, (exitCode, reason, exitReason, exitDetail) => {
       // Resume died before any output — stop the overlay so the dead overlay shows.
       if (isResumingRef.current) {
         isResumingRef.current = false
@@ -688,6 +690,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       setDeadExitCode(exitCode)
       setDeadReason(reason ?? null)
       setDeadExitReason(exitReason ?? null)
+      setDeadExitDetail(exitDetail ?? null)
       if (raw) setDeadCrashOutput(raw)
     })
 
@@ -840,6 +843,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         setPtyState('dead')
         setDeadExitCode(-1)
         setDeadExitReason('no-response')
+        setDeadExitDetail(null)
       }
     }
     timer = setTimeout(() => void check(), STARTING_WATCHDOG_INTERVAL_MS)
@@ -1237,6 +1241,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDeadCrashOutput(null)
     setDeadReason(null)
     setDeadExitReason(null)
+    setDeadExitDetail(null)
     setDoctorResults(null)
     onRetry?.()
   }, [onRetry])
@@ -1249,6 +1254,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDeadCrashOutput(null)
     setDeadReason(null)
     setDeadExitReason(null)
+    setDeadExitDetail(null)
     setDoctorResults(null)
     onStartFreshRef.current?.()
   }, [])
@@ -1257,11 +1263,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDoctorLoading(true)
     setDoctorResults(null)
     const results = await trpcClient.pty.validate
-      .query({ mode })
+      .query({ mode, taskId: taskIdFromSessionId(sessionId) })
       .catch(() => [{ check: 'Validation', ok: false, detail: 'Failed to run checks' }])
     setDoctorResults(results)
     setDoctorLoading(false)
-  }, [mode, trpcClient])
+  }, [mode, sessionId, trpcClient])
 
   const showDeadOverlay =
     ptyState === 'dead' && !isInitializing && deadExitCode !== null && mode !== 'terminal'
@@ -1325,6 +1331,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             deadCrashOutput={deadCrashOutput}
             deadExitCode={deadExitCode}
             deadExitReason={deadExitReason}
+            deadExitDetail={deadExitDetail}
             onRetry={onRetry}
             onStartFresh={handleStartFresh}
             onRetryClick={handleRetry}

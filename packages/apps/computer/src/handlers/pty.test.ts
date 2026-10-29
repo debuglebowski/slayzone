@@ -983,3 +983,69 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 })
+
+describe('a spawn node-pty cannot start', () => {
+  // node-pty says only "posix_spawnp failed." — it cannot exec its own
+  // spawn-helper. The usual cause is an install that skipped its scripts and left
+  // the helper non-executable, so the refusal carries what the install check finds.
+  const refuse = (): never => {
+    throw new Error('posix_spawnp failed.')
+  }
+  const helperProblem = {
+    check: 'spawn-helper',
+    detail: '/nm/node-pty/prebuilds/darwin-arm64/spawn-helper is not executable.',
+    fix: "chmod +x '/nm/node-pty/prebuilds/darwin-arm64/spawn-helper'"
+  }
+
+  it('is refused with the install problem and its fix', () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: refuse,
+      nodePtyInstallProblems: () => [helperProblem]
+    })
+    let message = ''
+    try {
+      pty.handlers['pty.spawn']({ sessionId: 's-refused', command: 'cat', cwd: process.cwd() })
+    } catch (err) {
+      message = (err as Error).message
+    }
+    expect(message).toBe(`posix_spawnp failed. ${helperProblem.detail} Fix: ${helperProblem.fix}`)
+  })
+
+  it("keeps node-pty's own message when the install is fine", () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: refuse,
+      nodePtyInstallProblems: () => []
+    })
+    expect(() =>
+      pty.handlers['pty.spawn']({ sessionId: 's-refused', command: 'cat', cwd: process.cwd() })
+    ).toThrow(/^posix_spawnp failed\.$/)
+  })
+
+  it('a warm spawn is explained the same way', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: refuse,
+      nodePtyInstallProblems: () => [helperProblem]
+    })
+    await expect(
+      pty.handlers['pty.warmSpawn']({ warmId: 'w-refused', command: 'cat', cwd: process.cwd() })
+    ).rejects.toThrow(/Fix: chmod \+x/)
+  })
+})
+
+describe('pty.runtimeCheck (Doctor)', () => {
+  it("reports the install check's problems", async () => {
+    const { ctx } = makeCtx()
+    const problem = { check: 'Install scripts', detail: 'pnpm skipped …', fix: 'pnpm rebuild' }
+    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [problem] })
+    expect(await pty.handlers['pty.runtimeCheck']({})).toEqual({ ok: true, problems: [problem] })
+  })
+
+  it('finds the node-pty this computer loads: this checkout is healthy', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    expect(await pty.handlers['pty.runtimeCheck']({})).toEqual({ ok: true, problems: [] })
+  })
+})

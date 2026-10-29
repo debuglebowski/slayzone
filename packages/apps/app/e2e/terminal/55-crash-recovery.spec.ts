@@ -149,6 +149,43 @@ test.describe('Terminal crash overlay', () => {
     await expect(mainWindow.locator('.rounded-lg.border:visible').first()).toBeVisible({
       timeout: 3_000
     })
+
+    // The task's computer answered for its own node-pty install (pty.runtimeCheck):
+    // an install whose scripts never ran fails every agent start while the hub-side
+    // checks above stay green.
+    await expect(mainWindow.getByText('This computer can start terminals.').last()).toBeVisible({
+      timeout: 8_000
+    })
+  })
+
+  test("a refused spawn shows the computer's own words under the reason", async ({
+    mainWindow
+  }) => {
+    await ensureLiveTerminal(mainWindow)
+    const refusal =
+      "posix_spawnp failed. /nm/node-pty/spawn-helper is not executable. Fix: chmod +x '/nm/node-pty/spawn-helper'"
+    await mainWindow.evaluate(
+      ({ sid, detail }) =>
+        window.getTrpcVanillaClient().pty.testEmitExit.mutate({
+          sessionId: sid,
+          exitCode: -1,
+          errorCode: null,
+          exitReason: 'spawn-failed',
+          exitDetail: detail
+        }),
+      { sid: sessionId, detail: refusal }
+    )
+    await expect(mainWindow.getByText("The computer couldn't start the agent.").last()).toBeVisible(
+      {
+        timeout: 10_000
+      }
+    )
+    await expect(mainWindow.getByTestId('terminal-dead-detail').last()).toHaveText(refusal)
+    // The real shell behind the emitted exit is still running: end it.
+    await mainWindow.evaluate(
+      (sid) => window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: sid }),
+      sessionId
+    )
   })
 
   test('Retry clears overlay then it reappears after re-crash', async ({ mainWindow }) => {

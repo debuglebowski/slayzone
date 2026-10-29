@@ -75,6 +75,7 @@ export {
   type PtyBackend,
   type PtyExit,
   type PtyHandle,
+  type PtyRuntimeProblem,
   type PtySpawnAdmission,
   type PtySpawnConfirmation,
   type PtySpawnSpec

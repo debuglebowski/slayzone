@@ -138,8 +138,8 @@ export const ptyRouter = router({
     .input(anyInput)
     .mutation(({ input }) => ops().ptySetTheme(input as never)),
   validate: publicProcedure
-    .input(z.object({ mode: z.string() }))
-    .query(({ input }) => ops().ptyValidate(input.mode as never)),
+    .input(z.object({ mode: z.string(), taskId: z.string().optional() }))
+    .query(({ input }) => ops().ptyValidate(input.mode as never, input.taskId)),
   setShellOverride: publicProcedure
     .input(z.object({ value: z.string().nullable() }))
     .mutation(({ input }) => ops().ptySetShellOverride(input.value)),
@@ -213,13 +213,23 @@ export const ptyRouter = router({
       errorCode: string | null
       /** Lifecycle cause (`startup-timeout`, `computer-restarted`, …); null when none. */
       exitReason: string | null
+      /** The owner's own words for it (a spawn refusal's message); null when none. */
+      exitDetail: string | null
     }>((emit) => {
       const handler = (
         sessionId: string,
         exitCode: number | null,
         errorCode: string | null,
-        exitReason?: string | null
-      ): void => emit.next({ sessionId, exitCode, errorCode, exitReason: exitReason ?? null })
+        exitReason?: string | null,
+        exitDetail?: string | null
+      ): void =>
+        emit.next({
+          sessionId,
+          exitCode,
+          errorCode,
+          exitReason: exitReason ?? null,
+          exitDetail: exitDetail ?? null
+        })
       const ev = getPtyDeps().events
       ev.on('exit', handler)
       return () => ev.off('exit', handler)
@@ -256,20 +266,30 @@ export const ptyRouter = router({
       return { ok: true }
     }),
   // Test-only: emit a `pty:exit` on the shared emitter (e.g. errorCode
-  // SESSION_NOT_FOUND to drive the stale-session "Start fresh" overlay). Specs
-  // run against the stubbed createPty capture, so there is no real process to
-  // exit. PLAYWRIGHT-gated (menu.testEmit pattern).
+  // SESSION_NOT_FOUND to drive the stale-session "Start fresh" overlay, or
+  // exitReason `spawn-failed` + the computer's refusal as exitDetail). Specs run
+  // against the stubbed createPty capture, so there is no real process to exit.
+  // PLAYWRIGHT-gated (menu.testEmit pattern).
   testEmitExit: publicProcedure
     .input(
       z.object({
         sessionId: z.string(),
         exitCode: z.number().nullable(),
-        errorCode: z.string().nullable()
+        errorCode: z.string().nullable(),
+        exitReason: z.string().nullable().optional(),
+        exitDetail: z.string().nullable().optional()
       })
     )
     .mutation(({ input }) => {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
-      getPtyDeps().events.emit('exit', input.sessionId, input.exitCode, input.errorCode)
+      getPtyDeps().events.emit(
+        'exit',
+        input.sessionId,
+        input.exitCode,
+        input.errorCode,
+        input.exitReason ?? null,
+        input.exitDetail ?? null
+      )
       return { ok: true }
     }),
   onDevServerDetected: publicProcedure.subscription(() =>

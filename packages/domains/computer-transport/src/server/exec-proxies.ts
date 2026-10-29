@@ -88,6 +88,7 @@ import {
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
   ptyBackgroundJobsResultSchema,
+  ptyRuntimeCheckResultSchema,
   ptyWarmSpawnResultSchema,
   computerSetAllowedRootsResultSchema
 } from '../shared/frames'
@@ -135,6 +136,8 @@ export interface PtyExitEvent {
   signal?: number | string
   /** Lifecycle cause: the computer's own (`startup-timeout`) or a transport outcome. */
   reason?: string
+  /** The computer's own words for `reason` — its refusal message on `spawn-failed`. */
+  detail?: string
 }
 
 /**
@@ -186,6 +189,9 @@ function isConnectionLoss(err: unknown): boolean {
   if (err instanceof RpcDisposedError) return true
   return err instanceof RpcError && err.code === ComputerTransportErrorCodes.unknownComputer
 }
+
+/** A refusal's own words, carried with the exit so the user sees WHY it failed. */
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 const noop = (): void => {
   // Shared rejection sink for the fire-and-forget gateway calls below (write,
@@ -833,7 +839,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     entry: PtyEntry,
     exitCode: number | null,
     signal: string | null,
-    reason?: string
+    reason?: string,
+    detail?: string
   ): void {
     if (entry.disposed) return
     entry.disposed = true
@@ -843,7 +850,12 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // synthetic -1 ("refused" / "confirmed without a pid").
     entry.pendingSpawn = undefined
     sessions.delete(entry.key)
-    entry.exitEmitter.emit({ exitCode, signal: signal ?? undefined, ...(reason ? { reason } : {}) })
+    entry.exitEmitter.emit({
+      exitCode,
+      signal: signal ?? undefined,
+      ...(reason ? { reason } : {}),
+      ...(detail ? { detail } : {})
+    })
   }
 
   gateway.events.on('pty.data', (payload) => {
@@ -949,13 +961,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       process: processName,
       onData: (listener: (data: string) => void): ExecDisposable => dataEmitter.on(listener),
       onExit: (
-        cb: (e: { exitCode: number; signal?: number; reason?: string }) => void
+        cb: (e: { exitCode: number; signal?: number; reason?: string; detail?: string }) => void
       ): ExecDisposable =>
         exitEmitter.on((event) =>
           cb({
             exitCode: event.exitCode ?? 1,
             signal: typeof event.signal === 'number' ? event.signal : undefined,
-            ...(event.reason ? { reason: event.reason } : {})
+            ...(event.reason ? { reason: event.reason } : {}),
+            ...(event.detail ? { detail: event.detail } : {})
           })
         ),
       write: (data: string): void => {
@@ -1017,6 +1030,19 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
     },
 
+    async runtimeProblems(computerId: string) {
+      try {
+        const res = await gateway.request(computerId, HubToComputerMethods.ptyRuntimeCheck, {})
+        return ptyRuntimeCheckResultSchema.parse(res).problems
+      } catch (err) {
+        // A computer that predates the request can never answer: "can't tell".
+        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
+          return null
+        }
+        throw err
+      }
+    },
+
     async probeBackgroundJobs(sessionId: string, jobs: BackgroundJobQuery[]) {
       let computerId: string | null = null
       for (const entry of sessions.values()) {
@@ -1068,7 +1094,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         drain(entry)
         return handle
       } catch (err) {
-        finalize(entry, null, null, 'adopt-failed')
+        finalize(entry, null, null, 'adopt-failed', errorMessage(err))
         throw err
       }
     },
@@ -1185,7 +1211,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
               // through the buffering emitter, so a not-yet-subscribed caller still
               // gets it) AND propagate, so a caller awaiting confirmation sees the
               // failure rather than a promise that never settles.
-              finalize(entry, null, null, 'spawn-failed')
+              finalize(entry, null, null, 'spawn-failed', errorMessage(err))
               reject(err)
             }
           )
