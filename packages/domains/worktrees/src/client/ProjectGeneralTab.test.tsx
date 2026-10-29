@@ -3,7 +3,9 @@
 // branch, status, remote, ahead/behind) while visible, backing off while nothing
 // changes. "Checking..." shows until the first read lands. A project path change (the
 // git panel's repo picker) reads the new path at once, and a read still in flight for
-// the old path never lands: neither its data nor the end of "Checking...".
+// the old path never lands: neither its data nor the end of "Checking...". A git change
+// under the project path (the shared git store's fs watcher: real store, fake
+// transport) re-reads at once while visible.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 
@@ -22,6 +24,8 @@ function deferred<T>(): Deferred<T> {
 // branch name). Everything else answers at once.
 let branchCalls: Array<{ path: string; d: Deferred<string> }> = []
 const repoChecks: string[] = []
+const CLEAN = { staged: 0, unstaged: 0, untracked: 0 }
+let statusNow = CLEAN
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
@@ -45,13 +49,17 @@ vi.mock('@slayzone/transport/client', () => {
         branchCalls.push({ path: input.path!, d })
         return d.promise
       }),
-      getStatusSummary: q(async () => ({ staged: 0, unstaged: 0, untracked: 0 })),
+      getStatusSummary: q(async () => statusNow),
       getRemoteUrl: q(async () => 'https://example.com/r.git'),
-      getAheadBehindUpstream: q(async () => ({ ahead: 0, behind: 0 }))
+      getAheadBehindUpstream: q(async () => ({ ahead: 0, behind: 0 })),
+      // The fs-watcher broadcasts: the tests deliver them via `notifyDiffChanged`.
+      onDiffChanged: { subscriptionOptions: () => ({}) },
+      onDiffWatchFailed: { subscriptionOptions: () => ({}) }
     },
     settings: { get: q(async () => null), set: { mutationOptions: () => ({}) } }
   }
-  return { useTRPC: () => trpc }
+  const trpcClient = {}
+  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient, useSubscription: () => undefined }
 })
 vi.mock('@tanstack/react-query', () => {
   const mutation = { mutate: () => {}, mutateAsync: async () => undefined }
@@ -73,6 +81,12 @@ vi.mock('./RemoteSection', () => ({
 }))
 
 const { ProjectGeneralTab } = await import('./ProjectGeneralTab')
+const { _setGitDiffStoreTransport, _resetStore, _pathWatcherStats, notifyDiffChanged } =
+  await import('./git-diff-store')
+
+// The main-process watch the shared git store starts/stops per path.
+const watchStarts: string[] = []
+const watchStops: string[] = []
 
 function Tab({ path = '/repo', visible = true }: { path?: string | null; visible?: boolean }) {
   return (
@@ -106,10 +120,24 @@ const shownBranch = (name: string) => screen.queryByText(name) !== null
 beforeEach(() => {
   branchCalls = []
   repoChecks.length = 0
+  statusNow = CLEAN
+  watchStarts.length = 0
+  watchStops.length = 0
   graphState.refresh.mockClear()
+  _setGitDiffStoreTransport({
+    getWorkingDiff: () => new Promise(() => {}),
+    watchStart: async (path) => {
+      watchStarts.push(path)
+    },
+    watchStop: async (path) => {
+      watchStops.push(path)
+    }
+  })
 })
 afterEach(() => {
   cleanup()
+  _resetStore()
+  _setGitDiffStoreTransport(null)
   vi.useRealTimers()
 })
 
@@ -285,5 +313,132 @@ describe('ProjectGeneralTab — git poll', () => {
       expect(callsFor('/repo')).toHaveLength(2)
       expect(shownBranch('other-main')).toBe(true)
     })
+  })
+})
+
+describe('ProjectGeneralTab — git changes (fs watcher)', () => {
+  it('a file edit in the repo re-reads at once (no waiting for the backed-off poll)', async () => {
+    vi.useFakeTimers()
+    render(<Tab />)
+    await flush()
+    await land(0, 'main')
+    // Backed off: the next poll is 40s away.
+    for (const [i, delay] of [5_000, 10_000, 20_000].entries()) {
+      await advance(delay)
+      await land(i + 1, 'main')
+    }
+    expect(branchCalls).toHaveLength(4)
+    expect(screen.queryByText('No changes')).not.toBeNull()
+
+    statusNow = { staged: 0, unstaged: 2, untracked: 0 }
+    // A plain file edit (no ref moved) changes the status counts: it re-reads.
+    await act(async () => notifyDiffChanged('/repo', false))
+    await flush()
+    expect(branchCalls).toHaveLength(5)
+    await land(4, 'main')
+    expect(screen.queryByText('2 modified')).not.toBeNull()
+  })
+
+  it('a ref move (commit, checkout) re-reads at once', async () => {
+    vi.useFakeTimers()
+    render(<Tab />)
+    await flush()
+    await land(0, 'main')
+    await act(async () => notifyDiffChanged('/repo', true))
+    await flush()
+    expect(branchCalls).toHaveLength(2)
+    await land(1, 'dev')
+    expect(shownBranch('dev')).toBe(true)
+  })
+
+  it('changes during a read re-read once, after it settles (it may predate them)', async () => {
+    vi.useFakeTimers()
+    render(<Tab />)
+    await flush()
+    await land(0, 'main')
+    await advance(5_000) // poll tick: a second read, held in flight
+    expect(branchCalls).toHaveLength(2)
+
+    await act(async () => notifyDiffChanged('/repo', false))
+    await act(async () => notifyDiffChanged('/repo', true))
+    await flush()
+    // No overlapping read.
+    expect(branchCalls).toHaveLength(2)
+    await land(1, 'main')
+    expect(branchCalls).toHaveLength(3)
+    await land(2, 'dev')
+    expect(shownBranch('dev')).toBe(true)
+    // One re-read for both changes; the next is the poll's, from the base delay.
+    await advance(4_999)
+    expect(branchCalls).toHaveLength(3)
+    await advance(1)
+    expect(branchCalls).toHaveLength(4)
+  })
+
+  it('while hidden: no watcher held, a change reads nothing; shown again: watched, one read', async () => {
+    vi.useFakeTimers()
+    const view = render(<Tab />)
+    await flush()
+    await land(0, 'main')
+    expect(watchStarts).toEqual(['/repo'])
+    expect(_pathWatcherStats().paths).toBe(1)
+
+    view.rerender(<Tab visible={false} />)
+    await flush()
+    expect(watchStops).toEqual(['/repo'])
+    expect(_pathWatcherStats().paths).toBe(0)
+    await act(async () => notifyDiffChanged('/repo', true))
+    await advance(120_000)
+    expect(branchCalls).toHaveLength(1)
+
+    view.rerender(<Tab />)
+    await flush()
+    expect(watchStarts).toEqual(['/repo', '/repo'])
+    // The poll's resume read only.
+    expect(branchCalls).toHaveLength(2)
+    await land(1, 'main')
+    await act(async () => notifyDiffChanged('/repo', false))
+    await flush()
+    expect(branchCalls).toHaveLength(3)
+  })
+
+  it("a project path change moves the watcher: the new repo's changes re-read it, the old's are ignored", async () => {
+    vi.useFakeTimers()
+    const view = render(<Tab />)
+    await flush()
+    await land(0, 'main')
+    view.rerender(<Tab path="/other" />)
+    await flush()
+    await landAll('/other', 'other-main')
+    expect(watchStarts).toEqual(['/repo', '/other'])
+    expect(watchStops).toEqual(['/repo'])
+    const before = branchCalls.length
+
+    await act(async () => notifyDiffChanged('/repo', true))
+    await flush()
+    expect(branchCalls).toHaveLength(before)
+
+    await act(async () => notifyDiffChanged('/other', true))
+    await flush()
+    expect(branchCalls.slice(before).map((c) => c.path)).toEqual(['/other'])
+    await land(before, 'other-dev')
+    expect(shownBranch('other-dev')).toBe(true)
+    expect(callsFor('/repo')).toHaveLength(1)
+  })
+
+  it('unmount releases the watcher', async () => {
+    render(<Tab />)
+    await flush()
+    expect(_pathWatcherStats().paths).toBe(1)
+    cleanup()
+    expect(_pathWatcherStats().paths).toBe(0)
+    expect(watchStops).toEqual(['/repo'])
+  })
+
+  it('no project path: no watcher', async () => {
+    render(<Tab path={null} />)
+    await flush()
+    expect(watchStarts).toEqual([])
+    expect(_pathWatcherStats().paths).toBe(0)
   })
 })

@@ -17,6 +17,7 @@ import {
 import type { StatusSummary, AheadBehind } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
 import { GitUnavailableFallback } from './general-tab-shared'
+import { useGitPathChanges } from './git-diff-store'
 import {
   useBranchGraph,
   BranchGraphToolbar,
@@ -176,11 +177,15 @@ export function ProjectGeneralTab({
 
   // Restarted per path: a new path is read at once (not on the old path's backed-off
   // timer, nor after its read still in flight), and polls from the base delay.
-  useStablePoll(fetchGitData, {
+  const poll = useStablePoll(fetchGitData, {
     enabled: visible && !!projectPath,
     baseDelayMs: 5000,
     restartKey: projectPath
   })
+  // A git change (fs watcher) re-reads now, instead of after a poll that backs off to
+  // 60s while nothing changes; the poll is the safety net. Every change, not only ref
+  // moves: a file edit changes the status counts. Watched only while visible.
+  useGitPathChanges(projectPath, visible, poll.refetch)
 
   const handleBranchPopoverChange = (open: boolean) => {
     setBranchPopoverOpen(open)
