@@ -1,20 +1,9 @@
-export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
+import type { ProcessInfo } from '@slayzone/processes/shared'
 
-export interface ProcessEntry {
-  id: string
-  taskId: string | null
-  projectId: string | null
-  label: string
-  command: string
-  cwd: string
-  autoRestart: boolean
-  status: ProcessStatus
-  pid: number | null
-  exitCode: number | null
-  logBuffer: string[]
-  startedAt: string
-  restartCount: number
-  spawnedAt: string | null
-  processTitle: string | null
+export type { ProcessStatus } from '@slayzone/processes/shared'
+
+/** A row of the Processes panel: the process manager's `ProcessInfo` plus the
+ *  dev-server URL the panel detects from a running process's log. */
+export interface ProcessEntry extends ProcessInfo {
   serverUrl?: string | null
 }
