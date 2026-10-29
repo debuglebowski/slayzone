@@ -5,7 +5,6 @@ import {
   openTaskTerminal,
   readFullBuffer,
   runCommand,
-  waitForBufferContains,
   waitForPtySession
 } from '../fixtures/terminal'
 
@@ -69,23 +68,38 @@ test.describe('macOS Option as Meta (issue #103)', () => {
   /**
    * What one Option+2 sent, isolated behind a fresh marker line. Retried by the
    * callers' poll: a setting change lands on the renderer asynchronously.
+   *
+   * Returns 'none' when nothing arrived instead of throwing: `expect.poll` does
+   * not retry a callback that throws, so a throw here ended the callers' 15s poll
+   * after 5s (full suite under load, 2026-10-29).
    */
-  async function typedBy(page: Page, side: 'left' | 'right'): Promise<string> {
+  async function typedBy(page: Page, side: 'left' | 'right'): Promise<'meta' | 'char' | 'none'> {
     const sessionId = getMainSessionId(taskId)
     const marker = `OPT${++attempt}_${Date.now()}`
     await runCommand(page, sessionId, marker)
-    await waitForBufferContains(page, sessionId, marker)
-    await pressSwedishOption2(page, side)
+    // Twice: the tty's echo of the line, then `cat`'s copy of it. Pressing after
+    // only the echo lets a slow `cat` print its copy AFTER the key's echo, and the
+    // segment below — read from the last copy on — then never shows the key.
     await expect
-      .poll(async () => {
-        const buf = await readFullBuffer(page, sessionId)
-        const seg = buf.slice(buf.lastIndexOf(marker) + marker.length)
-        return seg.includes('@') || seg.includes(META_ECHO)
+      .poll(async () => (await readFullBuffer(page, sessionId)).split(marker).length - 1, {
+        message: '`cat` printed the marker line'
       })
+      .toBeGreaterThanOrEqual(2)
+    await pressSwedishOption2(page, side)
+    let seg = ''
+    await expect
+      .poll(
+        async () => {
+          const buf = await readFullBuffer(page, sessionId)
+          seg = buf.slice(buf.lastIndexOf(marker) + marker.length)
+          return seg.includes('@') || seg.includes(META_ECHO)
+        },
+        { timeout: 4_000 }
+      )
       .toBe(true)
-    const buf = await readFullBuffer(page, sessionId)
-    const seg = buf.slice(buf.lastIndexOf(marker) + marker.length)
-    return seg.includes(META_ECHO) ? 'meta' : 'char'
+      .catch(() => {})
+    if (seg.includes(META_ECHO)) return 'meta'
+    return seg.includes('@') ? 'char' : 'none'
   }
 
   const poll = { timeout: 15_000, intervals: [250, 500, 1_000] }
@@ -128,8 +142,9 @@ test.describe('macOS Option as Meta (issue #103)', () => {
 
   test('left: only the left Option key is Meta', async ({ mainWindow }) => {
     await setOptionAsMeta(mainWindow, 'left')
+    // Left first: right types '@' before the change lands too, so only left proves it.
+    await expect.poll(() => typedBy(mainWindow, 'left'), poll).toBe('meta')
     await expect.poll(() => typedBy(mainWindow, 'right'), poll).toBe('char')
-    expect(await typedBy(mainWindow, 'left')).toBe('meta')
   })
 
   test('a terminal reattached from the cache follows a change made while detached', async ({
