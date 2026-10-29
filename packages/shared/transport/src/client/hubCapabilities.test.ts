@@ -8,11 +8,11 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { hubAllows } from './hubCapabilities'
-import type { TrpcVanillaClient } from './trpc'
+import type { RuntimeClient } from './runtime'
 
 function fakeClient(describe: () => Promise<{ scopes?: string[] | null }>) {
   const query = vi.fn(describe)
-  return { client: { hub: { describe: { query } } } as unknown as TrpcVanillaClient, query }
+  return { client: { hub: { describe: { query } } } as unknown as RuntimeClient, query }
 }
 
 describe('hubAllows', () => {

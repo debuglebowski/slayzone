@@ -1,6 +1,13 @@
 import { isPathAllowed, type Scope } from '../shared/scopes'
-import type { TrpcVanillaClient } from './trpc'
 import type { RuntimeClient } from './runtime'
+
+/**
+ * The one procedure this module calls, typed structurally: transport names no router
+ * (`hub` is composed in `@slayzone/api`). Only the field read here is declared.
+ */
+type HubDescribeClient = {
+  hub: { describe: { query: () => Promise<{ scopes?: readonly Scope[] | null }> } }
+}
 
 /**
  * The scopes each hub connection holds, asked once per client (`hub.describe`).
@@ -13,8 +20,8 @@ function scopesOf(client: RuntimeClient): Promise<readonly Scope[] | null> {
   let scopes = scopesByClient.get(client)
   if (!scopes) {
     // Every view's client is the one path-based runtime client, and every hub serves
-    // `hub.describe`: reading it through the whole-app type is sound for any view.
-    scopes = (client as TrpcVanillaClient).hub.describe.query().then(
+    // `hub.describe`: reading it through this structural type is sound for any view.
+    scopes = (client as unknown as HubDescribeClient).hub.describe.query().then(
       // `?? null`: a hub older than the field sends none.
       (d) => d.scopes ?? null,
       (err: unknown) => {
