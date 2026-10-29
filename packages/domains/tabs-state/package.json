@@ -13,7 +13,10 @@
   },
   "dependencies": {
     "@slayzone/projects-contracts": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
+    "@slayzone/task-terminals": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "zustand": "^5.0.15"
   }

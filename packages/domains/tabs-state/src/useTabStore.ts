@@ -1,12 +1,8 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
-import {
-  getTrpcClient,
-  getHubClient,
-  hubAllows,
-  type TrpcVanillaClient
-} from '@slayzone/transport/client'
+import { hubAllows } from '@slayzone/transport/client'
+import { getHubClient, getTrpcClient, type TabsStateTrpcClient } from './trpc'
 import type { TaskStatus } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 
@@ -864,10 +860,10 @@ const WARM_PATH = 'pty.warmSetProjectTabCounts'
  */
 export async function pushWarmTabCounts(
   countsByHub: Map<string | undefined, Record<string, number>>,
-  defaultClient: TrpcVanillaClient,
-  hubClientOf: (hubId: string) => TrpcVanillaClient | null
+  defaultClient: TabsStateTrpcClient,
+  hubClientOf: (hubId: string) => TabsStateTrpcClient | null
 ): Promise<void> {
-  const push = async (client: TrpcVanillaClient, counts: Record<string, number>) => {
+  const push = async (client: TabsStateTrpcClient, counts: Record<string, number>) => {
     if (!(await hubAllows(client, WARM_PATH))) return
     await client.pty.warmSetProjectTabCounts.mutate({ counts }).catch(() => {
       // Warm-pool hint only: a hub that is down just misses this snapshot, and the
@@ -899,7 +895,7 @@ useTabStore.subscribe(
       // firing that can land that early is the module-scope hydration push, whose
       // counts are empty (no _taskLookup yet) — safe to drop; the next tab change
       // re-pushes the full snapshot.
-      let defaultClient: TrpcVanillaClient
+      let defaultClient: TabsStateTrpcClient
       try {
         defaultClient = getTrpcClient()
       } catch {

@@ -2121,9 +2121,18 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts
+      '@slayzone/task-terminals':
+        specifier: workspace:*
+        version: link:../task-terminals
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
