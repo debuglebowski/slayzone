@@ -20,7 +20,9 @@ const ws = (url: string, frameUrl: string | undefined) => ({
 describe('shouldStripHubSocketOrigin', () => {
   test('the app document dialing a hub: packaged, dev, task window, floating panel', () => {
     expect(shouldStripHubSocketOrigin(ws(REMOTE, PROD), PROD), 'packaged').toBe(true)
-    expect(shouldStripHubSocketOrigin(ws(`${REMOTE}?windowId=3`, PROD), PROD), 'windowId').toBe(true)
+    expect(shouldStripHubSocketOrigin(ws(`${REMOTE}?windowId=3`, PROD), PROD), 'windowId').toBe(
+      true
+    )
     expect(shouldStripHubSocketOrigin(ws(REMOTE, `${DEV}/`), DEV), 'dev server').toBe(true)
     expect(
       shouldStripHubSocketOrigin(ws(REMOTE, `${PROD}?taskId=t1&windowId=2`), PROD),
@@ -46,9 +48,7 @@ describe('shouldStripHubSocketOrigin', () => {
       undefined // no frame reported (or it was disposed)
     ]) {
       expect(shouldStripHubSocketOrigin(ws(REMOTE, frameUrl), PROD), `${frameUrl}`).toBe(false)
-      expect(shouldStripHubSocketOrigin(ws(REMOTE, frameUrl), DEV), `${frameUrl} (dev)`).toBe(
-        false
-      )
+      expect(shouldStripHubSocketOrigin(ws(REMOTE, frameUrl), DEV), `${frameUrl} (dev)`).toBe(false)
     }
   })
 

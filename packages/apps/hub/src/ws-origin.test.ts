@@ -272,7 +272,8 @@ test('the env override never adds an OPAQUE origin: file:// is not a web origin'
   // refused, put "null" on the allowlist: every website could open /trpc, and
   // better-auth trusted "null" too (`trustedOrigins` is this list).
   const origins = resolveAllowedWebOrigins({
-    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'file://,chrome-extension://abc,ftp://x.example,https://ok.example'
+    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS:
+      'file://,chrome-extension://abc,ftp://x.example,https://ok.example'
   })
   expect(origins.join(','), 'only the http(s) entry survives').toBe('https://ok.example')
   expect(
