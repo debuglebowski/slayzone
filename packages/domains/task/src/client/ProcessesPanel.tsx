@@ -195,18 +195,16 @@ export function ProcessesPanel({
 
   const handleStop = useCallback(
     (proc: ProcessEntry) =>
-      stopProcess({ processId: proc.id }).then(
-        () => {},
-        (err: unknown) => reportActionError('stop', proc, err)
+      stopProcess({ processId: proc.id }).catch((err: unknown) =>
+        reportActionError('stop', proc, err)
       ),
     [stopProcess, reportActionError]
   )
 
   const handleRestart = useCallback(
     (proc: ProcessEntry) =>
-      restartProcess({ processId: proc.id }).then(
-        () => {},
-        (err: unknown) => reportActionError('restart', proc, err)
+      restartProcess({ processId: proc.id }).catch((err: unknown) =>
+        reportActionError('restart', proc, err)
       ),
     [restartProcess, reportActionError]
   )
