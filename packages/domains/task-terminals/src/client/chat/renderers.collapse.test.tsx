@@ -6,8 +6,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
 
 // Diff/markdown viewers are irrelevant to collapse state and heavy to load.
-vi.mock('@slayzone/worktrees/client', () => ({
-  DiffView: () => null,
+vi.mock('@slayzone/diff-view', () => ({
+  DiffView: () => null
+}))
+vi.mock('@slayzone/markdown/client', () => ({
   GhMarkdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
 

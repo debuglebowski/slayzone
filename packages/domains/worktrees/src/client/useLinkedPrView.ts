@@ -4,8 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { useStablePoll } from '@slayzone/ui'
 import type { GhPullRequest, GhPrComment, GhPrTimelineEvent, MergeStrategy } from '../shared/types'
-import { parseUnifiedDiff } from './parse-diff'
-import type { FileDiff } from './parse-diff'
+import { parseUnifiedDiff } from '@slayzone/diff-view'
+import type { FileDiff } from '@slayzone/diff-view'
 import { groupTimelineEvents } from './pr-timeline'
 
 const TIMELINE_PAGE_SIZE = 25

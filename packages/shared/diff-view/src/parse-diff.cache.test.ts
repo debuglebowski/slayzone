@@ -4,7 +4,7 @@
  *
  * MAX_ENTRIES = 64, MAX_BYTES = 8 MiB, estimatePatchBytes = len * 4.
  *
- * Run: pnpm --filter @slayzone/worktrees exec vitest run src/client/parse-diff.cache.test.ts
+ * Run: registered in packages/shared/test-utils/run-all.sh (pnpm test:unit).
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { parseUnifiedDiff, _clearParseDiffCache } from './parse-diff'

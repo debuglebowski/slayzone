@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { GhPullRequest } from '../shared/types'
-import type { FileDiff } from './parse-diff'
+import type { FileDiff } from '@slayzone/diff-view'
 
 export function PrStateIcon({
   state,

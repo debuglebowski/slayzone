@@ -1,4 +1,4 @@
-import type { FileDiff as FileDiffType } from './parse-diff'
+import type { FileDiff as FileDiffType } from '@slayzone/diff-view'
 import type { FileEntry } from './GitDiffPanel.types'
 
 export function deriveStatus(path: string, diffs: FileDiffType[]): 'M' | 'A' | 'D' {

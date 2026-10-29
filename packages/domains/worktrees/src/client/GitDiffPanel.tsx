@@ -30,7 +30,7 @@ import {
   TooltipTrigger
 } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/ui'
-import { DiffView } from './DiffView'
+import { DiffView } from '@slayzone/diff-view'
 import type {
   ConfirmAction,
   FileEntry,

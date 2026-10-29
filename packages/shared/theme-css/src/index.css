@@ -60,7 +60,13 @@
 @source "../../../domains/terminal-contracts/src";
 @source "../../../domains/usage-analytics/src";
 @source "../../../domains/worktrees/src";
+@source "../../../shared/diff-view/src";
 @source "../../../shared/editor/src";
+/* GhMarkdown only (moved here from worktrees/src, which was scanned). The rest of
+   shared/markdown has never been scanned: adding the whole package would newly
+   generate `bg-popover/90` (MediaView's toolbar), a visible change to decide on
+   separately. */
+@source "../../../shared/markdown/src/client/GhMarkdown.tsx";
 @source "../../../shared/ui/src";
 
 @custom-variant dark (&:is(.dark *));

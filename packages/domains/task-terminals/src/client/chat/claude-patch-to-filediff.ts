@@ -1,8 +1,8 @@
-import type { FileDiff, DiffHunk, DiffLine } from '@slayzone/worktrees/client'
+import type { FileDiff, DiffHunk, DiffLine } from '@slayzone/diff-view'
 
 /**
  * Convert Claude Code's Edit tool `structuredPatch` into the FileDiff shape
- * expected by @slayzone/worktrees/client/DiffView.
+ * expected by @slayzone/diff-view's DiffView.
  */
 
 interface ClaudePatchHunk {

@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Button, cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import type { GhPrComment, GhPrCommit, GhPrTimelineEvent } from '../shared/types'
-import { GhMarkdown } from './GhMarkdown'
+import { GhMarkdown } from '@slayzone/markdown/client'
 import { AuthorAvatar } from './pr-avatars'
 import { ReviewInlineBadge, reviewActionLabel } from './pr-badges'
 import { formatRelativeTime } from './pr-utils'

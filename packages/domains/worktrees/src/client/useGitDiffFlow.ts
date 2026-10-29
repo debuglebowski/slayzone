@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
-import type { FileDiff as FileDiffType } from './parse-diff'
+import type { FileDiff as FileDiffType } from '@slayzone/diff-view'
 import type { FileEntry, FlowRow } from './GitDiffPanel.types'
 import { HUGE_FILE_THRESHOLD } from './GitDiffPanel.utils'
 

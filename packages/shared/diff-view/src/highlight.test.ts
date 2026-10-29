@@ -5,7 +5,7 @@
  * responses synchronously and exercise the LRU behavior without spinning up
  * a real Web Worker.
  *
- * Run: pnpm --filter @slayzone/worktrees exec vitest run src/client/highlight.test.ts
+ * Run: registered in packages/shared/test-utils/run-all.sh (pnpm test:unit).
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 

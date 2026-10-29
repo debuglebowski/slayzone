@@ -4,7 +4,4 @@ export { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from './Un
 export { GeneralTabContent } from './GeneralTabContent'
 export { WorktreesTab } from './WorktreesTab'
 export { CommitGraph } from './CommitGraph'
-export { DiffView } from './DiffView'
-export { GhMarkdown } from './GhMarkdown'
 export { useProjectRepos, type UseProjectReposResult } from './useProjectRepos'
-export type { FileDiff, DiffHunk, DiffLine, InlineHighlight } from './parse-diff'

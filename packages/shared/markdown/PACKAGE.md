@@ -1,6 +1,6 @@
 # @slayzone/markdown
 
-Shared markdown helpers consumed by `file-editor`, `worktrees`, and `task` domains.
+Shared markdown helpers consumed by `file-editor`, `worktrees`, `task`, and `task-terminals` domains.
 
 ## Exports
 
@@ -8,6 +8,7 @@ Shared markdown helpers consumed by `file-editor`, `worktrees`, and `task` domai
 - `MediaView` — viewer for raster images and SVG strings, dispatched by `source.kind`. SVG renders inline (browser rasterizes vector natively; sidesteps Chromium's `<foreignObject>` block on `<img>`-loaded SVG that breaks mermaid). Raster goes through a canvas `drawImage` + `setTransform` pipeline. Pan/zoom via pointer/wheel/pinch. Fit + Full buttons.
 - `mermaidCodeOverride` — drop-in `code` component override for `react-markdown`. Renders mermaid for `language-mermaid` fences and auto-detects bare fences whose body matches mermaid keywords.
 - `MERMAID_KEYWORDS` — exported regex used by `mermaidCodeOverride` for auto-detection.
+- `GhMarkdown` — `Markdown` wrapped in GitHub-style `prose` typography (PR bodies, review comments, chat text/plans). Its classes are scanned by `@slayzone/theme-css` file-by-file; the rest of this package is not scanned.
 
 ## Usage
 

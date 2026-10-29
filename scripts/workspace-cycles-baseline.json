@@ -71,7 +71,6 @@
   "@slayzone/task-terminals -> @slayzone/editor",
   "@slayzone/task-terminals -> @slayzone/terminal",
   "@slayzone/task-terminals -> @slayzone/transport",
-  "@slayzone/task-terminals -> @slayzone/worktrees",
   "@slayzone/tasks -> @slayzone/tabs-state",
   "@slayzone/tasks -> @slayzone/tags",
   "@slayzone/tasks -> @slayzone/task",

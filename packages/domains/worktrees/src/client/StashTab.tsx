@@ -5,8 +5,8 @@ import { Archive, FileText } from 'lucide-react'
 import { cn, PulseGrid, useStablePoll } from '@slayzone/ui'
 import type { StashEntry } from '../shared/types'
 import { useGitPanelContext } from './git-panel-context'
-import { parseUnifiedDiff, type FileDiff } from './parse-diff'
-import { DiffView } from './DiffView'
+import { parseUnifiedDiff, type FileDiff } from '@slayzone/diff-view'
+import { DiffView } from '@slayzone/diff-view'
 
 interface StashTabProps {
   visible: boolean

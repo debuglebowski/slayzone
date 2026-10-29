@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FileDiff as FileDiffType } from './parse-diff'
+import type { FileDiff as FileDiffType } from '@slayzone/diff-view'
 import type { FileEntry } from './GitDiffPanel.types'
 
 type SelectedFile = { path: string; source: 'unstaged' | 'staged' } | null

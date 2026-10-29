@@ -23,7 +23,8 @@ import {
   Bot
 } from 'lucide-react'
 import { cn, safeClipboardWriteText, useDepsChanged } from '@slayzone/ui'
-import { DiffView, GhMarkdown } from '@slayzone/worktrees/client'
+import { DiffView } from '@slayzone/diff-view'
+import { GhMarkdown } from '@slayzone/markdown/client'
 import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
 import { LinkifiedText } from './LinkifiedText'

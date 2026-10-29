@@ -31,8 +31,8 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import type { GhPullRequest } from '../shared/types'
-import { DiffView } from './DiffView'
-import { GhMarkdown } from './GhMarkdown'
+import { DiffView } from '@slayzone/diff-view'
+import { GhMarkdown } from '@slayzone/markdown/client'
 import { AuthorAvatar } from './pr-avatars'
 import { PrStateIcon, PrStateBadge, ChecksBadge, ReviewBadge, DiffFileIcon } from './pr-badges'
 import { CommitGroupItem, TimelineItem } from './pr-timeline'

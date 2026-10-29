@@ -5,8 +5,10 @@ import { act, cleanup, render } from '@testing-library/react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 
 // renderers.tsx (isRenderable) pulls these in; irrelevant here and heavy to load.
-vi.mock('@slayzone/worktrees/client', () => ({
-  DiffView: () => null,
+vi.mock('@slayzone/diff-view', () => ({
+  DiffView: () => null
+}))
+vi.mock('@slayzone/markdown/client', () => ({
   GhMarkdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
 

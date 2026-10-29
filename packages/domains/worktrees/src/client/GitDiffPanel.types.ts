@@ -1,5 +1,5 @@
 import type { Task, MergeState } from '@slayzone/task-contracts'
-import type { FileDiff as FileDiffType } from './parse-diff'
+import type { FileDiff as FileDiffType } from '@slayzone/diff-view'
 
 export interface GitDiffPanelProps {
   task: Task | null

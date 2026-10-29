@@ -729,7 +729,7 @@ run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
-run_harness packages/domains/worktrees/src/client/parse-diff.test.ts
+run_harness packages/shared/diff-view/src/parse-diff.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts
 run_harness packages/domains/worktrees/src/server/list-project-repos.test.ts
 run_harness packages/domains/worktrees/src/server/remove-worktree.test.ts
@@ -920,10 +920,9 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/createTaskFormDefaults.test.ts \
   packages/domains/task/src/client/usePanelSizes.test.ts \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
-  packages/domains/worktrees/src/client/GhMarkdown.test.tsx \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
-  packages/domains/worktrees/src/client/highlight.test.ts \
-  packages/domains/worktrees/src/client/parse-diff.cache.test.ts \
+  packages/shared/diff-view/src/highlight.test.ts \
+  packages/shared/diff-view/src/parse-diff.cache.test.ts \
   packages/domains/worktrees/src/shared/worktree-color.test.ts \
   packages/shared/editor/src/milkdown-link-click.test.ts \
   packages/shared/editor/src/milkdown-task-list.test.ts \
