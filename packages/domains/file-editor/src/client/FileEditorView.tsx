@@ -35,7 +35,7 @@ import {
 } from '@slayzone/ui'
 import { usePdfViewerLinks, type LinkOpenTarget } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type {
   EditorOpenFilesState,

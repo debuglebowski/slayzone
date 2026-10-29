@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { track } from '@slayzone/telemetry/client'
 import { safeClipboardWriteText } from '@slayzone/ui'
 import type { DirEntry } from '../shared'

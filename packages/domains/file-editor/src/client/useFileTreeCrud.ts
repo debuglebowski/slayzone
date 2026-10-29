@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { track } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
 import { useWorkspaceTarget } from './workspace-target'

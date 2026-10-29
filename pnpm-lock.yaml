@@ -1493,6 +1493,9 @@ importers:
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
@@ -1502,6 +1505,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts

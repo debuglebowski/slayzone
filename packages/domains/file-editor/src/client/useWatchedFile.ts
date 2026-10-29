@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import { useWorkspaceTarget } from './workspace-target'
 

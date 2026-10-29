@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Code, Columns2, Eye, SlidersHorizontal } from 'lucide-react'
 import { Button, Label, Switch, cn } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'

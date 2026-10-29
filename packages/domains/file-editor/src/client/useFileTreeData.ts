@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useInsertionEffect, useRef, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { STATUS_PRIORITY, compactChildren } from './EditorFileTree.utils'

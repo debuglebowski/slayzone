@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
+import { electronBootstrap } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useWorkspaceTarget } from './workspace-target'
 
 export interface FileDropZoneHandlers {

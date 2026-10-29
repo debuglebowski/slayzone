@@ -8,7 +8,8 @@ import {
   type SetStateAction
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { track } from '@slayzone/telemetry/client'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import type {

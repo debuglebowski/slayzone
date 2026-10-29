@@ -26,7 +26,7 @@ let dirByPath: Record<string, { path: string; parent: string | null; entries: En
 const listDirSpy = vi.fn((_input: { path: string; dirsOnly?: boolean }) => {})
 const mkdirSpy = vi.fn((_input: { path: string; taskId?: string }) => {})
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPC: () => ({
     workspace: {
       listRoots: { queryOptions: (input: unknown) => ({ __op: 'roots', input }) },

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { ChevronRight, CornerLeftUp, Folder, FolderGit2, FolderPlus, HardDrive } from 'lucide-react'
 import {
   Button,
