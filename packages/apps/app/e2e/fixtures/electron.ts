@@ -411,6 +411,10 @@ async function launchElectronWithRetry(args: {
             'slayzone-notify.js'
           ),
           XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
+          // Convex OFF unless a spec names a deployment (65-leaderboard-auth): the
+          // build's VITE_CONVEX_URL depends on which checkout built out/ (an untracked
+          // .env), and would point every worker at a real deployment.
+          SLAYZONE_E2E_CONVEX_ADDRESS: '',
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
           // isolated spec needs (computer-loopback: SLAYZONE_ROOT,
           // SLAYZONE_HUB_ADDRESS, SLAYZONE_HUB_JOIN_TOKEN; computer-less specs:
