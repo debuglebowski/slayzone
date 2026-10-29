@@ -58,7 +58,7 @@ export function AddItemPicker({
       const items = await trpcClient.aiConfig.listItems.query({ scope: 'library', type })
       setLibraryItems(items)
     })()
-  }, [open, step, type])
+  }, [open, step, type, trpcClient])
 
   const compatibleProviders = useMemo(
     () => enabledProviders.filter((provider) => providerSupportsType(provider)),

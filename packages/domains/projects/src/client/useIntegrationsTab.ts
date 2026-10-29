@@ -289,7 +289,7 @@ export function useIntegrationsTab({
       }
     }
     void loadGithubRepositories()
-  }, [githubProjectConnectionId, githubMapping?.connection_id])
+  }, [githubProjectConnectionId, githubMapping?.connection_id, trpcClient])
 
   // The adjustments below start seeded with their first-render deps: as
   // effects, their mount runs only re-set the initial values.
@@ -351,7 +351,7 @@ export function useIntegrationsTab({
       .finally(() => {
         setLoadingGithubSyncProjects(false)
       })
-  }, [githubProjectConnectionId, githubMapping?.external_project_id])
+  }, [githubProjectConnectionId, githubMapping?.external_project_id, trpcClient])
 
   // Linear sync teams: clear without a connection, else flag the load below.
   const linearSyncTeamsDeps = [linearProjectConnectionId, mapping?.external_team_id]
@@ -396,7 +396,7 @@ export function useIntegrationsTab({
       .finally(() => {
         setLoadingLinearSyncTeams(false)
       })
-  }, [linearProjectConnectionId, mapping?.external_team_id])
+  }, [linearProjectConnectionId, mapping?.external_team_id, trpcClient])
 
   // Linear sync projects: clear without connection + team, else flag the load below.
   const linearSyncProjectsDeps = [
@@ -442,7 +442,7 @@ export function useIntegrationsTab({
       .finally(() => {
         setLoadingLinearSyncProjects(false)
       })
-  }, [linearProjectConnectionId, linearSyncTeamId, mapping?.external_project_id])
+  }, [linearProjectConnectionId, linearSyncTeamId, mapping?.external_project_id, trpcClient])
 
   // Linear import teams: clear without a connection, else flag the load below.
   const linearImportTeamsDeps = [linearProjectConnectionId]
@@ -480,7 +480,7 @@ export function useIntegrationsTab({
       .finally(() => {
         setLoadingLinearImportTeams(false)
       })
-  }, [linearProjectConnectionId])
+  }, [linearProjectConnectionId, trpcClient])
 
   // Linear import projects: clear without connection + team, else flag the load below.
   const linearImportProjectsDeps = [linearProjectConnectionId, linearImportTeamId]
@@ -515,7 +515,7 @@ export function useIntegrationsTab({
       .finally(() => {
         setLoadingLinearImportProjects(false)
       })
-  }, [linearProjectConnectionId, linearImportTeamId])
+  }, [linearProjectConnectionId, linearImportTeamId, trpcClient])
 
   const handleSelectIntegrationEntry = (
     entry: IntegrationSetupEntry,

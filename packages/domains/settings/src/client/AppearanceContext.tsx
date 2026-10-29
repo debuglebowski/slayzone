@@ -111,24 +111,23 @@ export function AppearanceProvider({
   const trpc = useTRPC()
 
   const allSettingsQuery = useQuery(trpc.settings.getAll.queryOptions())
+  const { refetch: refetchAllSettings } = allSettingsQuery
   // `mutate` keeps one identity (the mutation result object does not).
   const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
 
   // External retriggers (revision bump + the legacy 'sz:settings-changed'
   // CustomEvent fired by other windows/handlers) refetch the settings snapshot.
   useEffect(() => {
-    void allSettingsQuery.refetch()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsRevision])
+    void refetchAllSettings()
+  }, [settingsRevision, refetchAllSettings])
 
   useEffect(() => {
     const handler = (): void => {
-      void allSettingsQuery.refetch()
+      void refetchAllSettings()
     }
     window.addEventListener('sz:settings-changed', handler)
     return () => window.removeEventListener('sz:settings-changed', handler)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refetchAllSettings])
 
   const all = allSettingsQuery.data
   const settings = useMemo(() => (all ? parseAppearance(all) : appearanceDefaults), [all])

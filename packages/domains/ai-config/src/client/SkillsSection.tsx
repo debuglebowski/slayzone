@@ -132,7 +132,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     return () => {
       stale = true
     }
-  }, [scope, isProject, projectId, projectPath, version])
+  }, [scope, isProject, projectId, projectPath, version, trpcClient])
 
   useEffect(() => {
     if (!isProject || !projectId) return

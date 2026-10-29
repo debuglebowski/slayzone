@@ -478,7 +478,7 @@ export function useTasksData(): UseTasksDataReturn {
     return () => {
       delete w.__slayzone_refreshData
     }
-  }, [queryClient, trpc, loadGroups])
+  }, [queryClient, trpc, loadGroups, afterFullBoardReload])
 
   // External changes: the app's ONE `tasks-changed` subscription (CLI → REST →
   // notify bus, agent state, other windows). It refreshes the board AND every

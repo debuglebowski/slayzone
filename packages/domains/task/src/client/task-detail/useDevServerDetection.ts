@@ -66,9 +66,10 @@ export function useDevServerDetection({
     })
   }, [settingsRevision, trpcClient])
 
+  const taskId = task?.id
   useEffect(() => {
-    if (!task) return
-    const sid = getMainSessionId(task.id)
+    if (!taskId) return
+    const sid = getMainSessionId(taskId)
 
     const handleUrl = (url: string) => {
       if (browserOpenRef.current || devUrlDismissedRef.current.has(url)) return
@@ -95,7 +96,7 @@ export function useDevServerDetection({
     })
 
     return unsub
-  }, [task?.id, subscribeDevServer, getMainSessionId, trpcClient])
+  }, [taskId, subscribeDevServer, getMainSessionId, trpcClient])
 
   return {
     detectedDevUrl,

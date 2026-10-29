@@ -72,6 +72,8 @@ export function UserSettingsDialog({
   const defaultModeQuery = useQuery(
     trpc.settings.get.queryOptions({ key: 'default_terminal_mode' }, { enabled: open })
   )
+  // `refetch` keeps one identity (the query result object does not).
+  const { refetch: refetchDefaultMode } = defaultModeQuery
   const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
 
   // Opening, or a new stored value while open, re-seeds the mode (which a local pick
@@ -94,11 +96,11 @@ export function UserSettingsDialog({
   useEffect(() => {
     if (!open) return
     const onSettingsChanged = () => {
-      void defaultModeQuery.refetch()
+      void refetchDefaultMode()
     }
     window.addEventListener('sz:settings-changed', onSettingsChanged)
     return () => window.removeEventListener('sz:settings-changed', onSettingsChanged)
-  }, [open, defaultModeQuery.refetch])
+  }, [open, refetchDefaultMode])
 
   const onDefaultTerminalModeChange = useCallback(
     (mode: TerminalMode) => {
@@ -116,8 +118,8 @@ export function UserSettingsDialog({
 
   useEffect(() => {
     if (!open) return
-    void defaultModeQuery.refetch()
-  }, [open, initialTab, defaultModeQuery.refetch])
+    void refetchDefaultMode()
+  }, [open, initialTab, refetchDefaultMode])
 
   const navigateTo = (tab: string) => {
     setActiveTab(tab)

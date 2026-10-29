@@ -595,13 +595,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
   const hasOpenSecondary = !!task && openTaskWindowIds.includes(task.id)
 
-  // Sync description from global state when changed externally
+  // Sync description from global state when changed externally. `undefined`
+  // only when there is no task (a loaded task has string | null).
+  const taskDescription = task?.description
+  const taskDescriptionFormat = task?.description_format
   useEffect(() => {
-    if (task) {
-      setDescriptionValue(normalizeDescription(task.description, task.description_format))
-      descriptionDirty.current = false
-    }
-  }, [task?.description, task?.description_format])
+    if (taskDescription === undefined || taskDescriptionFormat === undefined) return
+    setDescriptionValue(normalizeDescription(taskDescription, taskDescriptionFormat))
+    descriptionDirty.current = false
+  }, [taskDescription, taskDescriptionFormat])
 
   // Browser tabs state
   const defaultBrowserTabs: BrowserTabsState = {
@@ -1615,7 +1617,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   useEffect(() => {
     devServerAutoOpenCallbackRef.current = openDevServerInBrowser
-  }, [openDevServerInBrowser])
+  }, [openDevServerInBrowser, devServerAutoOpenCallbackRef])
 
   // ⌘-clicked markdown links in the description: in-app browser / external.
   const handleDescriptionOpenLink = useStableCallback((href: string, target: LinkOpenTarget) => {

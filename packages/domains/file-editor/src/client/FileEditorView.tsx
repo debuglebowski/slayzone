@@ -224,9 +224,12 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
     useEffect(() => {
       if (isRestoring) return
       const openPaths = filePathsKey ? filePathsKey.split('\0') : []
+      // Read from the key (content-equal to fileViewModes) so a new-but-equal map
+      // object doesn't re-emit.
+      const viewModes = JSON.parse(fileViewModesKey) as Record<string, MarkdownViewMode>
       const modes: Record<string, MarkdownViewMode> = {}
       for (const p of openPaths) {
-        if (fileViewModes[p]) modes[p] = fileViewModes[p]
+        if (viewModes[p]) modes[p] = viewModes[p]
       }
       onChangeRef.current?.({
         files: openPaths,

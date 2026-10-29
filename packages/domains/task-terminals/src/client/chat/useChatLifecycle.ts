@@ -247,6 +247,7 @@ export function useChatLifecycle({
   // Diagnostic: log every inFlight transition (incl. baseline post-hydrate) with
   // the counters that drive `isInFlight` plus the last 5 timeline kinds. Captures
   // evidence next time the indicator gets stuck without forcing a repro.
+  // Re-runs on any other `state` change are no-ops: the guard only records a flip.
   const prevInFlightRef = useRef<boolean | null>(null)
   useEffect(() => {
     if (hydrating) return
@@ -254,19 +255,7 @@ export function useChatLifecycle({
     prevInFlightRef.current = inFlight
     if (prev === inFlight) return
     recordInFlightFlip(trpcClient, prev, inFlight, { tabId, taskId, mode }, state)
-  }, [
-    inFlight,
-    hydrating,
-    tabId,
-    taskId,
-    mode,
-    state.sessionId,
-    state.userMessagesSent,
-    state.resultCount,
-    state.sessionEnded,
-    state.timeline,
-    trpcClient
-  ])
+  }, [inFlight, hydrating, tabId, taskId, mode, state, trpcClient])
 
   return { resetting, restarting, displaySessionEnded, handleReset, handleRestart }
 }

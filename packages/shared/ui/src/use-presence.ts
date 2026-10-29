@@ -22,7 +22,7 @@ export function usePresence(
     if (active || !mounted) return
     const t = setTimeout(() => setMounted(false), exitMs)
     return () => clearTimeout(t)
-  }, [active, mounted])
+  }, [active, mounted, exitMs])
 
   return { mounted, state: active ? 'open' : 'closed' }
 }

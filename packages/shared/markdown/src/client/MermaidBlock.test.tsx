@@ -103,7 +103,7 @@ describe('MermaidBlock', () => {
   function CommitProbe({ log, code }: { log: string[]; code: string }) {
     useLayoutEffect(() => {
       log.push(document.querySelector('[data-probe-root]')?.innerHTML ?? '<no root>')
-    }, [code])
+    }, [code, log])
     return null
   }
 

@@ -101,7 +101,7 @@ export function useTabLifecycle({
       }
       return changed ? next : prev
     })
-  }, [tasks])
+  }, [tasks, setTerminalFocusRequests])
 }
 
 /**

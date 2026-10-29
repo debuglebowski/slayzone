@@ -580,7 +580,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       unregisterTestTerminalLinks(sessionId, linkProviderRef.current)
       linkProviderRef.current = null
     }
-  }, [initTerminal, sessionId])
+  }, [initTerminal, sessionId, mode])
 
   // Subscribe to PTY events via context (survives view switches)
   // Batch writes with rAF to avoid per-chunk canvas repaints during fast output.
@@ -859,6 +859,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [isActive, isInitializing, ptyState, sessionId, trpcClient])
 
   // Sync terminal theme with app theme / terminal theme settings
+  // (the resolved theme is a static registry entry: its identity changes only with
+  // the theme id / variant).
   useEffect(() => {
     const contrastRatio = resolvedTerminalVariant === 'light' ? 4.5 : 1
     if (terminalRef.current) {
@@ -895,7 +897,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       cursor: t.cursor ?? '#ffffff',
       ansi: ansi.length === 16 ? ansi : undefined
     })
-  }, [terminalThemeId, contentVariant, trpcClient])
+  }, [resolvedTerminalTheme, resolvedTerminalVariant, trpcClient])
 
   // Handle resize
   useEffect(() => {
