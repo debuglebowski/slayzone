@@ -31,6 +31,7 @@ vi.mock('@slayzone/transport/client', () => ({
     capturedOnData = opts.enabled ? opts.onData : null
   }
 }))
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 
 const shortcuts = new Map<string, { handler: () => void; enabled: boolean }>()
 vi.mock('@slayzone/ui', async (importOriginal) => ({

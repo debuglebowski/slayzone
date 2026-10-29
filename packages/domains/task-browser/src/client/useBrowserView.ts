@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import { useBrowserViewLifecycle } from './useBrowserViewLifecycle'
 import { useBrowserViewBounds } from './useBrowserViewBounds'

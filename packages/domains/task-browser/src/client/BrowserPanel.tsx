@@ -10,7 +10,8 @@ import {
   createRef
 } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { track } from '@slayzone/telemetry/client'
 import {
   cn,

@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { DeviceEmulation } from '../shared'
 

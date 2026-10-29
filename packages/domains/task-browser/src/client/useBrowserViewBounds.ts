@@ -1,6 +1,7 @@
 import { useCallback, useRef, useEffect, useInsertionEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 
 interface UseBrowserViewBoundsOpts {

@@ -11,7 +11,7 @@ const destroyView = vi.fn(() => Promise.resolve())
 const client = {
   app: { browser: { createView: { mutate: createView }, destroyView: { mutate: destroyView } } }
 }
-vi.mock('@slayzone/transport/client', () => ({ useTRPCClient: () => client }))
+vi.mock('./trpc', () => ({ useTRPCClient: () => client }))
 
 const { useBrowserViewLifecycle } = await import('./useBrowserViewLifecycle')
 

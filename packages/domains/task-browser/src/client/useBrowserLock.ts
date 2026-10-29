@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type { BrowserTab, BrowserTabsState } from '../shared'
 import { useSetBrowserTabLocked } from './BrowserTaskSource'

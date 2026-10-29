@@ -18,7 +18,7 @@ const trpc = {
     }
   }
 }
-vi.mock('@slayzone/transport/client', () => ({ useTRPC: () => trpc }))
+vi.mock('./trpc', () => ({ useTRPC: () => trpc }))
 
 const mutations = new Map<unknown, { mutate: unknown; mutateAsync: unknown }>()
 vi.mock('@tanstack/react-query', () => ({

@@ -1,5 +1,5 @@
 import { useState, useEffect, useEffectEvent, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 
 interface DesktopHandoffPolicy {
   protocol: string

@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 import type { BrowserTabTheme } from '../shared'
 

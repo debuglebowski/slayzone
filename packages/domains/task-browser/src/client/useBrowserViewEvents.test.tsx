@@ -22,6 +22,7 @@ vi.mock('@slayzone/transport/client', () => ({
     if (opts.enabled) capturedOnData = opts.onData
   }
 }))
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 
 import { useBrowserViewEvents } from './useBrowserViewEvents'
 
