@@ -2507,9 +2507,18 @@ importers:
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs
+      '@slayzone/notify':
+        specifier: workspace:*
+        version: link:../../shared/notify
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/tabs-state':
         specifier: workspace:*
         version: link:../tabs-state

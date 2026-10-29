@@ -16,7 +16,10 @@
   },
   "dependencies": {
     "@slayzone/dialogs": "workspace:*",
+    "@slayzone/notify": "workspace:*",
+    "@slayzone/projects": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/tabs-state": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",

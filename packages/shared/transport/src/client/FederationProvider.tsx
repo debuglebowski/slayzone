@@ -1,7 +1,10 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { QueryClient } from '@tanstack/react-query'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
-import { getOrCreateHubClient, type HubWsClient } from './trpc'
+// The value import stays on `./trpc`: it is the seam federation.test.tsx mocks. The
+// whole-app typing it carries is dropped here — `ws` is the router-agnostic runtime type.
+import { getOrCreateHubClient } from './trpc'
+import type { RuntimeHubWsClient } from './runtime'
 import { makeQueryClient } from './provider'
 import { useHubRegistryStore } from './hubRegistryStore'
 
@@ -9,7 +12,7 @@ import { useHubRegistryStore } from './hubRegistryStore'
  * Multi-hub federation — the outer, stable provider.
  *
  * Owns the hub-client registry: for every hub in `hubs` it lazily creates one WS
- * client (via the module-scope registry in trpc.ts) AND one dedicated
+ * client (via the module-scope registry in runtime.ts) AND one dedicated
  * React-Query QueryClient. A per-hub QueryClient is the load-bearing choice —
  * project/task ids are only unique within a hub's own DB, so isolated caches make
  * cross-hub key collisions structurally impossible; the ~500 existing
@@ -26,7 +29,8 @@ import { useHubRegistryStore } from './hubRegistryStore'
 
 export type ResolvedHub = {
   entry: HubEntry
-  ws: HubWsClient
+  /** Router-agnostic: a caller re-types it through its own view's `TypedHubWsClient`. */
+  ws: RuntimeHubWsClient
   queryClient: QueryClient
 }
 

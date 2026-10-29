@@ -1,11 +1,7 @@
 import { useCallback } from 'react'
 import { useTabStore } from '@slayzone/tabs-state'
-import {
-  getClientForHub,
-  getHubIdForTask,
-  useHubOwnershipStore,
-  useTRPCClient
-} from '@slayzone/transport/client'
+import { getHubIdForTask, useHubOwnershipStore } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from './trpc'
 import { getDoneStatus, type Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task-contracts'
 import { toast } from '@slayzone/ui'

@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useTabStore } from '@slayzone/tabs-state'
-import { getClientForHub, getHubIdForTask, useTRPCClient } from '@slayzone/transport/client'
+import { getHubIdForTask } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from './trpc'
 
 export interface CloseTaskTabOptions {
   /** A write in flight for the task; a temporary task's delete waits for it. */

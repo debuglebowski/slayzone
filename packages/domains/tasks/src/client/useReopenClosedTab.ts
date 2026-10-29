@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useTabStore, type ClosedTabRestorer } from '@slayzone/tabs-state'
-import { getClientForHub, useHubOwnershipStore, useTRPCClient } from '@slayzone/transport/client'
+import { useHubOwnershipStore } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { toast } from '@slayzone/ui'
 

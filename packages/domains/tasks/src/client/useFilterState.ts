@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react'
 import { create } from 'zustand'
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from './trpc'
 import {
   type FilterState,
   type ViewConfig,

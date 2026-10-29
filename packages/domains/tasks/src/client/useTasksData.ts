@@ -2,14 +2,17 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   electronBootstrap,
-  useTRPC,
-  useTRPCClient,
   useSubscription,
   useFederationOrNull,
-  useHubOwnershipStore,
-  getClientForHub,
-  type TrpcVanillaClient
+  useHubOwnershipStore
 } from '@slayzone/transport/client'
+import {
+  useTRPC,
+  useTRPCClient,
+  getClientForHub,
+  tasksClientOf,
+  type TasksTrpcClient
+} from './trpc'
 import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task-contracts'
 import { refreshTaskScopedQueries } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
@@ -76,8 +79,8 @@ async function runPerHub(
   ids: string[],
   lookup: Map<string, string>,
   defaultHubId: string,
-  clientForHub: (hubId: string) => TrpcVanillaClient,
-  run: (client: TrpcVanillaClient, hubIds: string[]) => Promise<unknown>
+  clientForHub: (hubId: string) => TasksTrpcClient,
+  run: (client: TasksTrpcClient, hubIds: string[]) => Promise<unknown>
 ): Promise<PerHubOutcome> {
   const groups = [...groupIdsByHub(ids, lookup, defaultHubId)]
   const results = await Promise.allSettled(
@@ -361,7 +364,7 @@ export function useTasksData(): UseTasksDataReturn {
     for (const id of [...extraGroupsRef.current.keys()]) {
       if (!liveHubIds.has(id)) extraGroupsRef.current.delete(id)
     }
-    const loadHub = (hubId: string, client: TrpcVanillaClient): void => {
+    const loadHub = (hubId: string, client: TasksTrpcClient): void => {
       void client.task.loadBoardData
         .query()
         .then((d) => {
@@ -382,7 +385,7 @@ export function useTasksData(): UseTasksDataReturn {
     for (const hub of extraHubs) {
       const resolved = fed.resolve(hub.id)
       if (!resolved) continue
-      const client = resolved.ws.client
+      const client = tasksClientOf(resolved.ws)
       loadHub(hub.id, client)
       try {
         const sub = client.notify.onTasksChanged.subscribe(undefined, {
@@ -408,24 +411,24 @@ export function useTasksData(): UseTasksDataReturn {
   // land on the right hub. Falls back to the ambient default-hub client when the
   // id isn't federated (single-hub → always the default → byte-identical).
   const clientForHub = useCallback(
-    (hubId: string | undefined): TrpcVanillaClient => {
+    (hubId: string | undefined): TasksTrpcClient => {
       if (!hubId || hubId === defaultHubId) return trpcClient
       return getClientForHub(hubId, trpcClient)
     },
     [defaultHubId, trpcClient]
   )
   const clientForProject = useCallback(
-    (projectId: string | undefined): TrpcVanillaClient =>
+    (projectId: string | undefined): TasksTrpcClient =>
       clientForHub(projectId ? ownedProjects().get(projectId) : undefined),
     [clientForHub]
   )
   const clientForTask = useCallback(
-    (taskId: string | undefined): TrpcVanillaClient =>
+    (taskId: string | undefined): TasksTrpcClient =>
       clientForHub(taskId ? ownedTasks().get(taskId) : undefined),
     [clientForHub]
   )
   const clientForGroup = useCallback(
-    (groupId: string | undefined): TrpcVanillaClient =>
+    (groupId: string | undefined): TasksTrpcClient =>
       clientForHub(groupId ? groupHubIdRef.current.get(groupId) : undefined),
     [clientForHub]
   )

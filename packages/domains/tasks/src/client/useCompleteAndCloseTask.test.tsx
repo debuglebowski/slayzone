@@ -23,6 +23,7 @@ vi.mock('@slayzone/transport/client', () => ({
   useHubOwnershipStore: { getState: () => ({ noteTaskHub: vi.fn() }) },
   useTRPCClient: () => client
 }))
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/tabs-state', () => ({
   useTabStore: Object.assign(() => undefined, {
     getState: () => tabState,

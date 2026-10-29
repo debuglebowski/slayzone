@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
-import {
-  getClientForHub,
-  getHubIdForTask,
-  useHubOwnershipStore,
-  useTRPCClient
-} from '@slayzone/transport/client'
+import { getHubIdForTask, useHubOwnershipStore } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { toast, type UndoableAction } from '@slayzone/ui'
 
