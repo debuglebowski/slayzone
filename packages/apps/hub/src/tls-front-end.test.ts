@@ -125,11 +125,21 @@ function spawnElectronChild(bin: string, env: Record<string, string>): Proc {
     env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
     stdio: ['pipe', 'pipe', 'pipe']
   })
-  const cap = (b: Buffer): void => {
-    for (const line of b.toString().split('\n')) if (line.trim()) logs.push(line)
+  // Line-buffered per stream: a chunk boundary can fall mid-line, and a half line
+  // matches nothing the tests look for.
+  const capture = (stream: NodeJS.ReadableStream | null): void => {
+    let partial = ''
+    stream?.on('data', (b: Buffer) => {
+      const lines = (partial + b.toString()).split('\n')
+      partial = lines.pop() ?? ''
+      for (const line of lines) if (line.trim()) logs.push(line)
+    })
+    stream?.on('end', () => {
+      if (partial.trim()) logs.push(partial)
+    })
   }
-  proc.stdout?.on('data', cap)
-  proc.stderr?.on('data', cap)
+  capture(proc.stdout)
+  capture(proc.stderr)
   return {
     proc,
     logs,
@@ -505,21 +515,22 @@ describe('a computer through the front end', () => {
 
   let computerId = ''
   test('the computer enrolls over wss:// through the front end, with no pin', async () => {
+    // The hub marks the row connected when it ANSWERS the enroll; the computer saves
+    // computer.state.json and logs "connected to hub" only once that answer lands.
+    // Wait on both sides, or the next test reads a state file not yet written.
     const row = await poll(
       async () => {
+        const enroll = (l: string) => l.includes('connected to hub') && l.includes('"mode":"enroll"')
+        if (!computer!.logs.some(enroll)) return null
         const r = (await trpc.computers.list.query()).find(
           (x) => x.name === 'tls-front-end-computer'
         )
         return r?.connected ? r : null
       },
       30_000,
-      `computer connected (computer logs:\n${computer!.logs.join('\n')})`
+      `computer enrolled and connected (computer logs:\n${computer!.logs.join('\n')})`
     )
     computerId = row.id
-    expect(
-      computer!.logs.some((l) => l.includes('connected to hub') && l.includes('"mode":"enroll"')),
-      'computer logged an enroll'
-    ).toBe(true)
     expect(
       computer!.logs.some((l) => l.includes('ignoring the certificate pin')),
       'a current token carries nothing to ignore'
