@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useEffect,
+  useEffectEvent,
   useImperativeHandle,
   useInsertionEffect,
   useMemo,
@@ -266,9 +267,15 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
     const savedRef = useRef<{ json: unknown; doc: string } | null>(null)
     const scrollRef = useRef<StateEffect<unknown> | null>(null)
 
-    // Create editor on mount / language change
+    // Values the view is created from, read as of creation without making
+    // them re-create it: theme + minimap are reconfigured live via compartments
+    // below, value is the initial doc.
+    const readInitial = useEffectEvent(() => ({ value, themeExt, minimap }))
+
+    // Create editor on mount / language / size-theme change
     useEffect(() => {
       if (!containerRef.current) return
+      const initial = readInitial()
 
       const searchField = buildSearchField()
       searchFieldRef.current = searchField
@@ -289,9 +296,9 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
         EditorView.lineWrapping,
         indentUnit.of('  '),
         keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
-        themeComp.current.of(themeExt),
+        themeComp.current.of(initial.themeExt),
         cmScrollbarTheme,
-        minimapComp.current.of(minimap ? buildMinimapExt() : []),
+        minimapComp.current.of(initial.minimap ? buildMinimapExt() : []),
         sizeTheme,
         searchField,
         searchDecorations(searchField),
@@ -317,13 +324,13 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
       // the view was gone, start fresh from it, as a first mount does.
       const saved = savedRef.current
       const state =
-        saved && saved.doc === value
+        saved && saved.doc === initial.value
           ? EditorState.fromJSON(saved.json, { extensions }, { history: historyField })
-          : EditorState.create({ doc: value, extensions })
+          : EditorState.create({ doc: initial.value, extensions })
       const view = new EditorView({ state, parent: containerRef.current })
       viewRef.current = view
       if (viewHandleRef) viewHandleRef.current = view
-      if (saved && saved.doc === value && scrollRef.current)
+      if (saved && saved.doc === initial.value && scrollRef.current)
         view.dispatch({ effects: scrollRef.current })
 
       return () => {
@@ -336,9 +343,7 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
         if (viewHandleRef) viewHandleRef.current = null
         searchFieldRef.current = null
       }
-      // Recreate only on language/size-theme change; theme + minimap are
-      // reconfigured live via compartments below, value is the initial doc.
-    }, [fileExt, sizeTheme])
+    }, [fileExt, sizeTheme, viewHandleRef])
 
     // Reconfigure theme at runtime
     useEffect(() => {

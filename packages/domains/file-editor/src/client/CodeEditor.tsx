@@ -1,7 +1,14 @@
-import { useEffect, useInsertionEffect, useMemo, useRef, type MutableRefObject } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useInsertionEffect,
+  useMemo,
+  useRef,
+  type MutableRefObject
+} from 'react'
 import { getThemeEditorColors, useAppearance, useTheme } from '@slayzone/ui'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState, Compartment } from '@codemirror/state'
+import { EditorState, Compartment, type Extension } from '@codemirror/state'
 import { keymap, highlightWhitespace } from '@codemirror/view'
 import { buildMinimap, cmScrollbarTheme } from './cm-shared-themes'
 import { indentMore, indentLess } from '@codemirror/commands'
@@ -138,14 +145,14 @@ export function CodeEditor({
   const whitespaceComp = useRef(new Compartment())
   const minimapComp = useRef(new Compartment())
 
-  // Create editor on mount / filePath change
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    const lang = getLanguage(filePath)
+  // Initial editor state. An Effect Event: it reads the current settings and
+  // content as of creation without making them re-create the view — they are
+  // reconfigured live via compartments below (content is the initial doc only).
+  const createInitialState = useEffectEvent((path: string, size: Extension): EditorState => {
+    const lang = getLanguage(path)
     const extensions = [
       basicSetup,
-      sizeTheme,
+      size,
       cmScrollbarTheme,
       themeComp.current.of(cmThemeExt),
       keymap.of([
@@ -184,8 +191,13 @@ export function CodeEditor({
       minimapComp.current.of(minimap ? buildMinimap() : [])
     ]
     if (lang) extensions.splice(1, 0, lang)
+    return EditorState.create({ doc: content, extensions })
+  })
 
-    const state = EditorState.create({ doc: content, extensions })
+  // Create editor on mount / filePath / size-theme change
+  useEffect(() => {
+    if (!containerRef.current) return
+    const state = createInitialState(filePath, sizeTheme)
     const view = new EditorView({ state, parent: containerRef.current })
     viewRef.current = view
     if (viewHandleRef) viewHandleRef.current = view
@@ -195,9 +207,7 @@ export function CodeEditor({
       viewRef.current = null
       if (viewHandleRef) viewHandleRef.current = null
     }
-    // Recreate only on file/size-theme change; everything else is reconfigured
-    // live via compartments below or read once as the initial doc.
-  }, [filePath, sizeTheme])
+  }, [filePath, sizeTheme, viewHandleRef])
 
   // Navigate to line/col and focus
   const onGoToRef = useRef(onGoToPositionApplied)

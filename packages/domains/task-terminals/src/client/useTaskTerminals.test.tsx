@@ -112,6 +112,18 @@ describe('useTaskTerminals active group', () => {
     expect(result.current.activeGroupId).toBe('gy')
   })
 
+  it('a reload (default mode change) keeps the user group', async () => {
+    listResult = [MAIN, tab('x', 'gx', false, 1)]
+    const hook = renderHook(({ mode }) => useTaskTerminals(TASK, mode), {
+      initialProps: { mode: 'terminal' as 'terminal' | 'claude-code' }
+    })
+    await waitFor(() => expect(hook.result.current.tabs).toHaveLength(2))
+    act(() => hook.result.current.setActiveGroupId('gx'))
+    hook.rerender({ mode: 'claude-code' })
+    await act(async () => {})
+    expect(hook.result.current.activeGroupId).toBe('gx')
+  })
+
   it('leaves the id alone while there are no groups', () => {
     listResult = []
     const { result } = renderHook(() => useTaskTerminals(TASK, 'terminal'))

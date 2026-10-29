@@ -2,7 +2,7 @@
 // ResizeHandle: capture start pointer + fractions in a ref on mousedown, attach
 // document mousemove/up, clamp via the pure applySplitResize, double-click to
 // reset. Inline-styled (no Tailwind).
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { Rect, SplitDirection } from './types'
 import { applySplitResize, resetSplitFractions } from './resize'
 import { COLORS } from './colors'
@@ -51,7 +51,9 @@ export function SplitDivider(props: SplitDividerProps) {
       onDragChange?.(null)
     }
   }
-  useEffect(() => cleanup, [])
+  // Unmount only; an Effect Event so it reports to the current onDragChange.
+  const cleanupOnUnmount = useEffectEvent(cleanup)
+  useEffect(() => () => cleanupOnUnmount(), [])
 
   const onMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault()

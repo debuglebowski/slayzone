@@ -76,17 +76,19 @@ const task = {
 } as unknown as Task
 
 const onToolbarChange = vi.fn()
+let conflictedFiles = ['a.txt']
 
 afterEach(() => {
   cleanup()
   calls.length = 0
   buttonHandlers.clear()
+  conflictedFiles = ['a.txt']
 })
 
-async function setup() {
+async function setup(projectPath = '/repo') {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
   vi.spyOn(client, 'fetchQuery').mockImplementation((async (o: { queryKey: unknown[] }) => {
-    if (o.queryKey[0] === 'getConflictedFiles') return ['a.txt']
+    if (o.queryKey[0] === 'getConflictedFiles') return conflictedFiles
     if (o.queryKey[0] === 'getCurrentBranch') return 'feature'
     return null
   }) as never)
@@ -97,7 +99,7 @@ async function setup() {
     <QueryClientProvider client={client}>
       <ConflictPhaseContent
         task={task}
-        projectPath="/repo"
+        projectPath={projectPath}
         completedStatus="done"
         isRebase={false}
         onUpdateTask={onUpdateTask}
@@ -108,7 +110,7 @@ async function setup() {
   )
   const ui = render(el())
   await act(async () => {})
-  return { ui, el, onUpdateTask, onTaskUpdated, updated }
+  return { ui, el, client, onUpdateTask, onTaskUpdated, updated }
 }
 
 describe('ConflictPhaseContent', () => {
@@ -133,5 +135,33 @@ describe('ConflictPhaseContent', () => {
       status: 'done'
     })
     expect(onTaskUpdated).toHaveBeenCalledWith(updated)
+  })
+
+  it('selects the first conflicted file, and a reload keeps the user selection', async () => {
+    conflictedFiles = ['a.txt', 'b.txt']
+    const { ui, client } = await setup()
+    expect(screen.getByText('resolve a.txt')).toBeTruthy()
+    fireEvent.click(screen.getByText('b.txt'))
+    expect(screen.getByText('resolve b.txt')).toBeTruthy()
+
+    // A new repo path re-runs the load; the user's pick stays.
+    ui.rerender(
+      <QueryClientProvider client={client}>
+        <ConflictPhaseContent
+          task={task}
+          projectPath="/repo2"
+          completedStatus="done"
+          isRebase={false}
+          onUpdateTask={vi.fn()}
+          onTaskUpdated={vi.fn()}
+          onToolbarChange={onToolbarChange}
+        />
+      </QueryClientProvider>
+    )
+    await act(async () => {})
+    expect(vi.mocked(client.fetchQuery)).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['getConflictedFiles', { path: '/repo2' }] })
+    )
+    expect(screen.getByText('resolve b.txt')).toBeTruthy()
   })
 })

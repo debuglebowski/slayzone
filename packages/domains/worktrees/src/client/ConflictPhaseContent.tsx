@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Check, X } from 'lucide-react'
@@ -47,15 +47,19 @@ export function ConflictPhaseContent({
   const [error, setError] = useState<string | null>(null)
   const [mergeContext, setMergeContext] = useState<MergeContext | null>(task.merge_context)
 
+  // The task + persist fn as of the fetch start (not a fetch trigger).
+  const readMergeContextTarget = useEffectEvent(() => ({ taskId: task.id, onUpdateTask }))
+
   // Load merge context if not on task
   useEffect(() => {
     if (!mergeContext) {
+      const target = readMergeContextTarget()
       queryClient
         .fetchQuery(trpc.worktrees.getMergeContext.queryOptions({ repoPath: projectPath }))
         .then((ctx) => {
           if (ctx) {
             setMergeContext(ctx)
-            onUpdateTask({ id: task.id, mergeContext: ctx })
+            target.onUpdateTask({ id: target.taskId, mergeContext: ctx })
           }
         })
     }
@@ -67,7 +71,8 @@ export function ConflictPhaseContent({
       .fetchQuery(trpc.worktrees.getConflictedFiles.queryOptions({ path: projectPath }))
       .then((files) => {
         setConflictedFiles(files)
-        if (files.length > 0 && !selectedFile) setSelectedFile(files[0])
+        // Keep the user's pick; otherwise start at the first file.
+        if (files.length > 0) setSelectedFile((current) => current || files[0])
       })
   }, [projectPath, queryClient, trpc])
 

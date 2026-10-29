@@ -2,6 +2,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useEffectEvent,
   useCallback,
   forwardRef,
   useImperativeHandle,
@@ -297,41 +298,32 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     onTabsChangeRef.current(next)
   }, [])
 
-  // Sync active view state to tab data (url, title, favicon)
-  useEffect(() => {
-    if (!activeViewState.url || !tabs.activeTabId) return
+  // Sync active view state to tab data (url, title, favicon). An Effect Event:
+  // each sync runs only when its view field changes, reading the active tab and
+  // commit fn as of then.
+  const patchActiveTab = useEffectEvent((patch: Partial<BrowserTab>): void => {
+    if (!tabs.activeTabId) return
     const t = tabsRef.current
-    const activeTabData = t.tabs.find((tab) => tab.id === t.activeTabId)
-    if (activeTabData && activeViewState.url !== activeTabData.url) {
-      commitTabsUpdate({
-        ...t,
-        tabs: t.tabs.map((tab) =>
-          tab.id === t.activeTabId ? { ...tab, url: activeViewState.url } : tab
-        )
-      })
+    if (patch.url !== undefined) {
+      const activeTabData = t.tabs.find((tab) => tab.id === t.activeTabId)
+      if (!activeTabData || patch.url === activeTabData.url) return
     }
+    commitTabsUpdate({
+      ...t,
+      tabs: t.tabs.map((tab) => (tab.id === t.activeTabId ? { ...tab, ...patch } : tab))
+    })
+  })
+
+  useEffect(() => {
+    if (activeViewState.url) patchActiveTab({ url: activeViewState.url })
   }, [activeViewState.url])
 
   useEffect(() => {
-    if (!activeViewState.title || !tabs.activeTabId) return
-    const t = tabsRef.current
-    commitTabsUpdate({
-      ...t,
-      tabs: t.tabs.map((tab) =>
-        tab.id === t.activeTabId ? { ...tab, title: activeViewState.title } : tab
-      )
-    })
+    if (activeViewState.title) patchActiveTab({ title: activeViewState.title })
   }, [activeViewState.title])
 
   useEffect(() => {
-    if (!activeViewState.favicon || !tabs.activeTabId) return
-    const t = tabsRef.current
-    commitTabsUpdate({
-      ...t,
-      tabs: t.tabs.map((tab) =>
-        tab.id === t.activeTabId ? { ...tab, favicon: activeViewState.favicon } : tab
-      )
-    })
+    if (activeViewState.favicon) patchActiveTab({ favicon: activeViewState.favicon })
   }, [activeViewState.favicon])
 
   // Tab requests from main: new-tab-request (Cmd+Click / middle-click on links, and

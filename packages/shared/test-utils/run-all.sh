@@ -817,7 +817,11 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/feedback/src/client/FeedbackDialog.test.tsx \
   packages/domains/search/src/SearchDialog.test.tsx \
   packages/domains/file-editor/src/client/SearchPanel.test.tsx \
+  packages/domains/file-editor/src/client/CodeEditor.test.tsx \
+  packages/shared/layout/src/SplitDivider.test.tsx \
   packages/domains/file-editor/src/client/SearchableCodeView.test.tsx \
+  packages/domains/task-browser/src/client/useBrowserViewLifecycle.test.tsx \
+  packages/domains/task/src/client/task-detail/usePersistenceSaves.test.tsx \
   packages/domains/file-editor/src/client/useFileTreeData.test.tsx \
   packages/domains/onboarding/src/client/CliInstallStep.test.tsx \
   packages/domains/onboarding/src/client/OnboardingDialog.test.tsx \

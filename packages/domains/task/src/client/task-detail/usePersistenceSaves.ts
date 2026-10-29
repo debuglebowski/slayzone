@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect } from 'react'
+import React, { useRef, useCallback, useEffect, useEffectEvent } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task-contracts'
 import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
@@ -76,15 +76,22 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
     }
   }, [trpcClient])
 
+  // Seed the url cache from the task as of a task switch. An Effect Event: a
+  // later web_panel_urls change (our own save echoing back) must not re-seed.
+  const seedWebPanelUrls = useEffectEvent((): void => {
+    if (task?.web_panel_urls) webPanelUrlsRef.current = { ...task.web_panel_urls }
+    else webPanelUrlsRef.current = {}
+  })
+
   // Initialize from task on load — flush old task's pending saves first
+  const taskId = task?.id ?? null
   useEffect(() => {
     flushPendingUrlSave()
     flushPendingEditorSave()
     flushPendingActiveArtifactSave()
-    taskIdRef.current = task?.id ?? null
-    if (task?.web_panel_urls) webPanelUrlsRef.current = { ...task.web_panel_urls }
-    else webPanelUrlsRef.current = {}
-  }, [task?.id, flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveArtifactSave])
+    taskIdRef.current = taskId
+    seedWebPanelUrls()
+  }, [taskId, flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveArtifactSave])
 
   // Flush pending saves on unmount
   useEffect(() => {
@@ -93,7 +100,7 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
       flushPendingEditorSave()
       flushPendingActiveArtifactSave()
     }
-  }, [flushPendingUrlSave, flushPendingEditorSave])
+  }, [flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveArtifactSave])
 
   const handleWebPanelUrlChange = useCallback(
     (panelId: string, url: string) => {

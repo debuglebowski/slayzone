@@ -1,6 +1,7 @@
 import {
   useState,
   useEffect,
+  useEffectEvent,
   useCallback,
   useRef,
   useImperativeHandle,
@@ -309,8 +310,11 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       })
     }
 
-    useEffect(() => {
-      const artifact = artifacts.find((a) => a.id === selectedId)
+    // Selecting an artifact resets its view state. An Effect Event: the stored
+    // mode / default are read as of the switch — a later artifacts refetch (e.g.
+    // after persisting a mode change) must not reset the view again.
+    const resetViewForSelection = useEffectEvent((id: string | null) => {
+      const artifact = artifacts.find((a) => a.id === id)
       setViewMode((artifact?.view_mode as 'preview' | 'split' | 'raw') ?? artifactDefaultViewMode)
       setFindOpen(false)
       setFindQuery('')
@@ -318,7 +322,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       setFindMatchCount(0)
       setFindMatchCase(false)
       setFindUseRegex(false)
-    }, [selectedId])
+    })
+    useEffect(() => resetViewForSelection(selectedId), [selectedId])
 
     // Reset active index when the search parameters change so the first match is the target
     useEffect(() => {

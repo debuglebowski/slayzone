@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useEffectEvent, useRef } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 
 interface DesktopHandoffPolicy {
@@ -26,10 +26,14 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
   const [viewId, setViewId] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const currentTabIdRef = useRef(tabId)
+  // url/partition/kind/desktopHandoffPolicy are the view's initial values only:
+  // read once per create (retries reuse the same snapshot), never a re-create.
+  const readInitialViewOpts = useEffectEvent(() => ({ url, partition, kind, desktopHandoffPolicy }))
 
   useEffect(() => {
     mountedRef.current = true
     currentTabIdRef.current = tabId
+    const initial = readInitialViewOpts()
 
     let createdViewId: string | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -43,11 +47,11 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
         .mutate({
           taskId,
           tabId,
-          partition,
-          url: url || 'about:blank',
+          partition: initial.partition,
+          url: initial.url || 'about:blank',
           bounds: { x: 0, y: 0, width: 1, height: 1 },
-          kind,
-          desktopHandoffPolicy
+          kind: initial.kind,
+          desktopHandoffPolicy: initial.desktopHandoffPolicy
         })
         .then((id) => {
           if (!id) {
@@ -86,7 +90,6 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
       }
       setViewId(null)
     }
-    // url/partition/kind/desktopHandoffPolicy are initial values only — intentional
   }, [tabId, taskId, trpcClient])
 
   return { viewId }

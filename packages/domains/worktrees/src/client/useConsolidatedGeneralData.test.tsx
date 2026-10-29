@@ -13,15 +13,17 @@ const toast = vi.fn()
 // The pollers run once on mount (no timers): enough to load the task branch.
 // `refetch` runs the latest fetch again (what a git change triggers).
 vi.mock('@slayzone/ui', async () => {
-  const { useEffect, useRef } = await import('react')
+  const { useEffect, useEffectEvent, useRef } = await import('react')
   return {
     toast: (m: string) => toast(m),
     useStablePoll: (fn: () => Promise<unknown>, o: { enabled: boolean }) => {
       const fnRef = useRef(fn)
       fnRef.current = fn
-      useEffect(() => {
+      // Mount-only, like the real poller's first tick.
+      const runFirst = useEffectEvent(() => {
         if (o.enabled) void fn()
-      }, [])
+      })
+      useEffect(() => runFirst(), [])
       return { refetch: () => void fnRef.current() }
     }
   }

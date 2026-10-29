@@ -82,18 +82,20 @@ export function useTaskTerminals(
         await trpcClient.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode })
         const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
         setTabs(loadedTabs)
-        // Set active to main group if current active doesn't exist
+        // Set active to main group if the current active one doesn't exist
         const loadedGroups = computeGroups(loadedTabs)
-        if (!loadedGroups.find((g) => g.id === activeGroupId)) {
-          const mainGroup = loadedGroups.find((g) => g.isMain)
-          if (mainGroup) setActiveGroupId(mainGroup.id)
+        const mainGroup = loadedGroups.find((g) => g.isMain)
+        if (mainGroup) {
+          setActiveGroupId((current) =>
+            loadedGroups.some((g) => g.id === current) ? current : mainGroup.id
+          )
         }
       } catch (err) {
         console.error('[useTaskTerminals] Failed to load tabs:', err)
       }
     }
     loadTabs()
-  }, [taskId, defaultMode])
+  }, [taskId, defaultMode, trpcClient])
 
   // Re-fetch when an external actor (CLI via REST, other window) mutates tabs.
   // Optionally focus the new tab's group if `focusTabId` is provided. Server

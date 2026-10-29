@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useEffectEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
@@ -27,10 +27,11 @@ export function useAgentTurns(
 
   // External retrigger: refetch when refreshKey identity changes. react-query
   // dedups against the in-flight mount fetch, so the initial run is a no-op.
-  useEffect(() => {
+  // An Effect Event: a worktreePath change alone re-keys the query, not this.
+  const refetchForKey = useEffectEvent(() => {
     if (worktreePath) void query.refetch()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey])
+  })
+  useEffect(() => refetchForKey(), [refreshKey])
 
   useSubscription(
     trpc.agentTurns.onChanged.subscriptionOptions(undefined, {
