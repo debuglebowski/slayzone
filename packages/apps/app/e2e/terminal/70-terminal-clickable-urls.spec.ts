@@ -78,17 +78,21 @@ test.describe('Terminal clickable URLs', () => {
     })
   })
 
-  /** Wait for URL to appear in xterm's frontend buffer */
+  /**
+   * Wait for URL to appear in xterm's frontend buffer. `excluding` skips lines
+   * holding that text — e.g. the tty's echo of the command that prints `needle`.
+   */
   async function waitForUrlInFrontendBuffer(
     mainWindow: import('@playwright/test').Page,
     sid: string,
-    needle: string
+    needle: string,
+    excluding?: string
   ) {
     await expect
       .poll(
         async () => {
           return mainWindow.evaluate(
-            ({ sessionId, needle }) => {
+            ({ sessionId, needle, excluding }) => {
               const w = window as unknown as Record<string, unknown>
               const links = w.__slayzone_terminalLinks as
                 | Record<
@@ -111,12 +115,12 @@ test.describe('Terminal clickable URLs', () => {
               if (!provider) return false
               const buf = provider._terminal.buffer.active
               for (let i = 0; i < buf.length; i++) {
-                const line = buf.getLine(i)
-                if (line?.translateToString(true).includes(needle)) return true
+                const text = buf.getLine(i)?.translateToString(true) ?? ''
+                if (text.includes(needle) && !(excluding && text.includes(excluding))) return true
               }
               return false
             },
-            { sessionId: sid, needle }
+            { sessionId: sid, needle, excluding }
           )
         },
         { timeout: 10_000, message: 'URL never appeared in xterm frontend buffer' }
@@ -333,14 +337,19 @@ test.describe('Terminal clickable URLs', () => {
     const testUrl = `https://example.com/osc8-${Date.now()}`
     const linkText = 'click-here-osc8'
 
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'URL click test' })
+    await waitForPtySession(mainWindow, sessionId)
     // Write an OSC 8 hyperlink: visible text is "click-here-osc8", URL is hidden in escape sequence
     await runCommand(
       mainWindow,
       sessionId,
       `printf '\\e]8;;${testUrl}\\e\\\\${linkText}\\e]8;;\\e\\\\'`
     )
-    await waitForBufferContains(mainWindow, sessionId, linkText)
-    await waitForUrlInFrontendBuffer(mainWindow, sessionId, linkText)
+    // The tty echoes the typed `printf …` line (it contains the link text too)
+    // well before the shell runs it. Wait for the printed OSC 8 link itself —
+    // in the pty stream, then on screen — or the click lands on the echo.
+    await waitForBufferContains(mainWindow, sessionId, `\x1b]8;;${testUrl}\x1b\\${linkText}`)
+    await waitForUrlInFrontendBuffer(mainWindow, sessionId, linkText, 'printf')
 
     // getUrlPixelCoords finds the first occurrence — which is the command prompt line
     // (literal text, not an OSC 8 link). The actual OSC 8 output is on a LATER line.
@@ -432,6 +441,8 @@ test.describe('Terminal clickable URLs', () => {
   test('Cmd+Click opens URL in browser panel (programmatic)', async ({ mainWindow }) => {
     const testUrl = `https://example.com/internal-${Date.now()}`
 
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'URL click test' })
+    await waitForPtySession(mainWindow, sessionId)
     await runCommand(mainWindow, sessionId, `echo "${testUrl}"`)
     await waitForBufferContains(mainWindow, sessionId, testUrl)
     await waitForUrlInFrontendBuffer(mainWindow, sessionId, testUrl)

@@ -80,16 +80,22 @@ test.describe('Antigravity agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    await mainWindow.evaluate(() => {
-      const events: unknown[] = []
-      ;(window as HookWindow).__agEvents = events
-      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-        onData: (ev) => {
-          events.push(ev)
-        }
-      })
-      ;(window as HookWindow).__agUnsub = () => sub.unsubscribe()
-    })
+    // Resolve on `onStarted`: the server registers the subscription asynchronously,
+    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
+    await mainWindow.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const events: unknown[] = []
+          ;(window as HookWindow).__agEvents = events
+          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (ev) => {
+              events.push(ev)
+            }
+          })
+          ;(window as HookWindow).__agUnsub = () => sub.unsubscribe()
+        })
+    )
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'antigravity',
@@ -129,16 +135,22 @@ test.describe('Antigravity agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    await mainWindow.evaluate(() => {
-      const events: unknown[] = []
-      ;(window as HookWindow).__agEvents2 = events
-      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-        onData: (ev) => {
-          events.push(ev)
-        }
-      })
-      ;(window as HookWindow).__agUnsub2 = () => sub.unsubscribe()
-    })
+    // Resolve on `onStarted`: the server registers the subscription asynchronously,
+    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
+    await mainWindow.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const events: unknown[] = []
+          ;(window as HookWindow).__agEvents2 = events
+          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (ev) => {
+              events.push(ev)
+            }
+          })
+          ;(window as HookWindow).__agUnsub2 = () => sub.unsubscribe()
+        })
+    )
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'antigravity',

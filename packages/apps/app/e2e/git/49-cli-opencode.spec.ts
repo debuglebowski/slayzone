@@ -40,18 +40,21 @@ test.describe('OpenCode CLI integration', () => {
   })
 
   test('starts and produces TUI output', async ({ mainWindow }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(mainWindow, sessionId, 30_000)
 
-    // OpenCode Bubble Tea TUI should render something
+    // OpenCode Bubble Tea TUI should render something. Its first start against
+    // this worker's fresh XDG_CONFIG_HOME bootstraps the config before drawing —
+    // opencode's own log measured 11-50s from config load to init inside the
+    // parallel suite — so the window covers a cold start, not a warm one.
     await expect
       .poll(
         async () => {
           const buf = await readFullBuffer(mainWindow, sessionId)
           return buf.length > 0
         },
-        { timeout: 30_000 }
+        { timeout: 90_000 }
       )
       .toBe(true)
   })

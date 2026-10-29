@@ -541,7 +541,7 @@ export async function launchIsolatedElectron(opts: {
 /** What `computers.list` returned when the gate last passed (diagnostic). */
 let lastGateSnapshot: { atMs: number; rows: unknown[] } | null = null
 
-async function waitForUsableComputer(page: Page, timeoutMs = 120_000): Promise<boolean> {
+export async function waitForUsableComputer(page: Page, timeoutMs = 120_000): Promise<boolean> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {

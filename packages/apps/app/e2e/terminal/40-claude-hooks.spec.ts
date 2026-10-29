@@ -72,16 +72,22 @@ test.describe('Claude agent hooks', () => {
     if (!port) return
 
     // Subscribe in renderer before firing.
-    await mainWindow.evaluate(() => {
-      const events: unknown[] = []
-      ;(window as HookWindow).__hookEvents = events
-      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-        onData: (ev) => {
-          events.push(ev)
-        }
-      })
-      ;(window as HookWindow).__hookUnsub = () => sub.unsubscribe()
-    })
+    // Resolve on `onStarted`: the server registers the subscription asynchronously,
+    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
+    await mainWindow.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const events: unknown[] = []
+          ;(window as HookWindow).__hookEvents = events
+          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (ev) => {
+              events.push(ev)
+            }
+          })
+          ;(window as HookWindow).__hookUnsub = () => sub.unsubscribe()
+        })
+    )
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'claude-code',
@@ -119,16 +125,22 @@ test.describe('Claude agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    await mainWindow.evaluate(() => {
-      const events: unknown[] = []
-      ;(window as HookWindow).__hookEvents2 = events
-      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-        onData: (ev) => {
-          events.push(ev)
-        }
-      })
-      ;(window as HookWindow).__hookUnsub2 = () => sub.unsubscribe()
-    })
+    // Resolve on `onStarted`: the server registers the subscription asynchronously,
+    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
+    await mainWindow.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const events: unknown[] = []
+          ;(window as HookWindow).__hookEvents2 = events
+          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (ev) => {
+              events.push(ev)
+            }
+          })
+          ;(window as HookWindow).__hookUnsub2 = () => sub.unsubscribe()
+        })
+    )
 
     const { status } = await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'claude-code',

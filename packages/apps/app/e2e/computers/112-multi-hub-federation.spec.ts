@@ -10,7 +10,8 @@ import {
   launchIsolatedElectron,
   projectBlob,
   clickSettings,
-  bootConfigPath
+  bootConfigPath,
+  waitForUsableComputer
 } from '../fixtures/electron'
 
 /**
@@ -436,6 +437,10 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
       await authorizeHubInApp(page, 'remote-b', hub.token)
+      // A project lives on a computer: the local hub refuses one until its
+      // auto-enrolled computer is up. The worker fixture's gate doesn't cover
+      // this isolated launch.
+      expect(await waitForUsableComputer(page)).toBe(true)
 
       // Seed a LOCAL-hub project so the union has one project from each hub.
       const localProjectId = await page.evaluate(async () => {
@@ -601,6 +606,10 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
       await authorizeHubInApp(page, 'remote-b', hub.token)
+      // A project lives on a computer: the local hub refuses one until its
+      // auto-enrolled computer is up. The worker fixture's gate doesn't cover
+      // this isolated launch.
+      expect(await waitForUsableComputer(page)).toBe(true)
 
       const localTaskId = await page.evaluate(async () => {
         const c = window.getTrpcVanillaClient()

@@ -15,9 +15,16 @@ export interface FocusHandoff {
   /**
    * A pane's xterm attached: complete a matching claim. The attach can fire
    * while the tab view is still inert/invisible (deferred tab swap) where
-   * focus() no-ops — the claim then survives for the next activation.
+   * focus() no-ops — the claim then survives for the next activation. An attach
+   * that lands while the user is typing elsewhere drops the claim instead.
    */
   paneAttached: (api: PaneFocusApi) => void
+}
+
+/** Focus is in a field the user types into — an async focus must never take it. */
+export function isEditingElement(el: Element | null): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  return el.isContentEditable || el.matches('input, textarea, select')
 }
 
 /**
@@ -26,10 +33,16 @@ export interface FocusHandoff {
  * the view is interactive. `focusLanded` (checked synchronously after every
  * focus attempt) decides which side completes the handoff; the loser leaves
  * the claim in place for the other.
+ *
+ * The attach side is asynchronous — a slow spawn attaches seconds after the
+ * activation — so by then the user may be typing somewhere else (an inline
+ * rename in the sidebar or artifacts panel). `typingElsewhere` vetoes it: taking
+ * focus there would blur the field mid-edit, and blur commits those editors.
  */
 export function createFocusHandoff(
   focusLanded: () => boolean,
-  initialClaim: boolean
+  initialClaim: boolean,
+  typingElsewhere: () => boolean = () => false
 ): FocusHandoff {
   let pending: string | boolean = initialClaim
   return {
@@ -44,6 +57,11 @@ export function createFocusHandoff(
     },
     paneAttached(api) {
       if (pending !== true && pending !== api.sessionId) return
+      if (typingElsewhere()) {
+        // The user moved on since the claim; the next activation claims anew.
+        pending = false
+        return
+      }
       api.focus()
       if (focusLanded()) pending = false
     }
@@ -64,7 +82,8 @@ export function createContainerFocusHandoff(initialClaim: boolean): ContainerFoc
   let container: Element | null = null
   const handoff = createFocusHandoff(
     () => !!container?.contains(document.activeElement),
-    initialClaim
+    initialClaim,
+    () => isEditingElement(document.activeElement) && !container?.contains(document.activeElement)
   )
   return {
     ...handoff,

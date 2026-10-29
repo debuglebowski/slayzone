@@ -92,7 +92,9 @@ describe('createContainerFocusHandoff', () => {
   it('counts focus as landed only inside its container', () => {
     const container = document.createElement('div')
     const inside = document.createElement('input')
-    const outside = document.createElement('input')
+    // Not a text field: focus in one outside the container vetoes the attach
+    // (covered below).
+    const outside = document.createElement('button')
     container.appendChild(inside)
     document.body.append(container, outside)
     try {
@@ -112,6 +114,37 @@ describe('createContainerFocusHandoff', () => {
     } finally {
       container.remove()
       outside.remove()
+    }
+  })
+
+  it('a late-attaching pane does not take focus from a field being typed in', () => {
+    const container = document.createElement('div')
+    const pane = document.createElement('textarea')
+    container.appendChild(pane)
+    const rename = document.createElement('input')
+    document.body.append(container, rename)
+    try {
+      // Task opened: the activation's focus no-ops (pane not attached yet), so
+      // the claim waits for the attach.
+      const handoff = createContainerFocusHandoff(true)
+      handoff.setContainer(container)
+      handoff.activate(() => {})
+
+      // Meanwhile the user starts an inline rename elsewhere in the task view.
+      rename.focus()
+      const focus = vi.fn(() => pane.focus())
+      handoff.paneAttached({ sessionId: 'a', focus })
+      expect(focus).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(rename)
+
+      // The user moved on: the claim is dropped, not parked for a later attach.
+      rename.blur()
+      const focus2 = vi.fn(() => pane.focus())
+      handoff.paneAttached({ sessionId: 'b', focus: focus2 })
+      expect(focus2).not.toHaveBeenCalled()
+    } finally {
+      container.remove()
+      rename.remove()
     }
   })
 

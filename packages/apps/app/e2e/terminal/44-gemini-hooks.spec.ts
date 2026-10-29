@@ -74,16 +74,22 @@ test.describe('Gemini agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    await mainWindow.evaluate(() => {
-      const w = window as HookWindow
-      w.__geminiEvents = []
-      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-        onData: (ev) => {
-          w.__geminiEvents?.push(ev)
-        }
-      })
-      w.__geminiUnsub = () => sub.unsubscribe()
-    })
+    // Resolve on `onStarted`: the server registers the subscription asynchronously,
+    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
+    await mainWindow.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const w = window as HookWindow
+          w.__geminiEvents = []
+          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (ev) => {
+              w.__geminiEvents?.push(ev)
+            }
+          })
+          w.__geminiUnsub = () => sub.unsubscribe()
+        })
+    )
 
     // The tRPC WS subscription above registers server-side asynchronously after
     // .subscribe() returns, so a POST firing before it's live misses the emit
@@ -135,16 +141,22 @@ test.describe('Gemini agent hooks', () => {
     expect(port).toBeTruthy()
     if (!port) return
 
-    await mainWindow.evaluate(() => {
-      const w = window as HookWindow
-      w.__geminiEvents2 = []
-      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
-        onData: (ev) => {
-          w.__geminiEvents2?.push(ev)
-        }
-      })
-      w.__geminiUnsub2 = () => sub.unsubscribe()
-    })
+    // Resolve on `onStarted`: the server registers the subscription asynchronously,
+    // and a hook posted before that is emitted to nobody (see 91-chat-queue).
+    await mainWindow.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const w = window as HookWindow
+          w.__geminiEvents2 = []
+          const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (ev) => {
+              w.__geminiEvents2?.push(ev)
+            }
+          })
+          w.__geminiUnsub2 = () => sub.unsubscribe()
+        })
+    )
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'gemini',
