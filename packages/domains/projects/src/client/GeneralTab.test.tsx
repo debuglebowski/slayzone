@@ -9,7 +9,7 @@ let computersData: Array<{ id: string; name: string }> = []
 const setProjectDefaultComputerSpy = vi.fn()
 const genericMutateAsync = vi.fn()
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPC: () => ({
     app: { dialog: { showOpenDialog: { mutationOptions: () => ({ __key: 'showOpenDialog' }) } } },
     projects: {

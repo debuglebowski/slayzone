@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { FolderGit2, Star } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { Project, DetectedRepo } from '@slayzone/projects-contracts'

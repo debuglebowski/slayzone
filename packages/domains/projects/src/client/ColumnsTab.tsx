@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'

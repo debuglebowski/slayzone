@@ -17,11 +17,14 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/computers": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
+    "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",

@@ -1831,12 +1831,18 @@ importers:
 
   packages/domains/projects:
     dependencies:
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -1846,6 +1852,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../test-panel

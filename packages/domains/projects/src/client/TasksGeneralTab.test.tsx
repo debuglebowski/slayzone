@@ -16,7 +16,7 @@ vi.mock('@slayzone/workflow', () => ({
 
 // tRPC tanstack layer: useTRPC returns proxy objects whose `mutationOptions`
 // are inert; useMutation surfaces `updateProjectSpy` as `mutateAsync`.
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPC: () => ({
     projects: { update: { mutationOptions: () => ({}) } }
   })

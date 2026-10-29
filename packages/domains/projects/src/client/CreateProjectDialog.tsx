@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  useTRPC,
-  useTRPCClient,
-  useFederationOrNull,
-  getHubClient
-} from '@slayzone/transport/client'
+import { useFederationOrNull } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, getHubClient } from './trpc'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'

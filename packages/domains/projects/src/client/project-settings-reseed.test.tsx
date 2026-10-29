@@ -16,6 +16,7 @@ vi.mock('@slayzone/transport/client', () => {
     useTRPC: () => new Proxy({}, { get: () => new Proxy({}, { get: () => new Proxy(inert, {}) }) })
   }
 })
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: vi.fn() }),
