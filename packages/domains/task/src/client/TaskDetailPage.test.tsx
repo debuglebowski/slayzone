@@ -263,6 +263,8 @@ vi.mock('@slayzone/transport/client', () => {
   return {
     useTRPC: () => proxy,
     useTRPCClient: () => proxy,
+    // Domain views (`typedTrpc<…>()`, e.g. file-editor's WorkspaceDirPicker) get the same proxy.
+    typedTrpc: () => ({ useTRPC: () => proxy, useTRPCClient: () => proxy }),
     useSubscription: () => undefined
   }
 })
