@@ -37,26 +37,37 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
     }
   }, [trpcClient])
 
-  // Active artifact persistence — debounced, ref-based
-  const activeArtifactIdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Active artifact persistence — debounced, ref-based. The pending save keeps the
+  // task it was selected in: a flush (task switch, unmount) sends it there, now.
+  const pendingActiveArtifactSaveRef = useRef<{
+    taskId: string
+    id: string | null
+    timer: ReturnType<typeof setTimeout>
+  } | null>(null)
 
+  // Send the pending save now (fire-and-forget); also the debounce timer's callback
   const flushPendingActiveArtifactSave = useCallback(() => {
-    if (activeArtifactIdTimerRef.current) {
-      clearTimeout(activeArtifactIdTimerRef.current)
-      activeArtifactIdTimerRef.current = null
-    }
-  }, [])
+    const pending = pendingActiveArtifactSaveRef.current
+    if (!pending) return
+    pendingActiveArtifactSaveRef.current = null
+    clearTimeout(pending.timer)
+    void trpcClient.task.update.mutate({ id: pending.taskId, activeArtifactId: pending.id })
+  }, [trpcClient])
 
   const handleActiveArtifactIdChange = useCallback(
     (id: string | null) => {
-      if (activeArtifactIdTimerRef.current) clearTimeout(activeArtifactIdTimerRef.current)
+      const previous = pendingActiveArtifactSaveRef.current
+      if (previous) clearTimeout(previous.timer)
+      pendingActiveArtifactSaveRef.current = null
       const taskId = taskIdRef.current
-      activeArtifactIdTimerRef.current = setTimeout(async () => {
-        if (!taskId) return
-        await trpcClient.task.update.mutate({ id: taskId, activeArtifactId: id })
-      }, 500)
+      if (!taskId) return
+      pendingActiveArtifactSaveRef.current = {
+        taskId,
+        id,
+        timer: setTimeout(flushPendingActiveArtifactSave, 500)
+      }
     },
-    [trpcClient]
+    [flushPendingActiveArtifactSave]
   )
 
   // Editor open files persistence — debounced, ref-based (same pattern as webPanelUrls)
