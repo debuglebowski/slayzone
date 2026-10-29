@@ -12,7 +12,7 @@ const DATA: Record<string, unknown[]> = {
   'foldersGetByTask:t2': []
 }
 
-vi.mock('@slayzone/transport/client', () => {
+vi.mock('./trpc', () => {
   const procedure = (proc: string) => ({
     queryOptions: (input: { taskId: string }, opts?: { enabled?: boolean }) => ({
       proc,

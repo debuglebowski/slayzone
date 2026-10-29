@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-vi.mock('@slayzone/transport/client', () => {
+vi.mock('./trpc', () => {
   const rows: Record<string, unknown[]> = {
     'artifacts.getByTask:t1': ['a1', 'a2', 'a3'].map((id) => ({
       id,

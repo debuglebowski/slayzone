@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { ArtifactUploader } from '@slayzone/editor/hooks'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 
 /**
  * This feature's implementation of the editor's `ArtifactUploader` contract

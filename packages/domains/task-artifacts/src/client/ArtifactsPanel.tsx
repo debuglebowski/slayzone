@@ -56,7 +56,8 @@ import {
 } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
-import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
+import { electronBootstrap } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import {
   getEffectiveRenderMode,

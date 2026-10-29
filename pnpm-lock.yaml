@@ -2294,12 +2294,18 @@ importers:
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task

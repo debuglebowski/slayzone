@@ -8,7 +8,7 @@ import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
 
-vi.mock('@slayzone/transport/client', () => {
+vi.mock('./trpc', () => {
   const options = { mutationOptions: () => ({}), queryOptions: () => ({}) }
   const proxy = new Proxy({}, { get: () => options })
   return {

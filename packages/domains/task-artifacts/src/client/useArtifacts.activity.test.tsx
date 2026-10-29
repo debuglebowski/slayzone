@@ -41,7 +41,7 @@ function mutate(proc: string, input: Record<string, unknown>): unknown {
   throw new Error(`unexpected mutation ${proc}`)
 }
 
-vi.mock('@slayzone/transport/client', () => {
+vi.mock('./trpc', () => {
   const procedure = (proc: string) => ({
     queryOptions: (input: { taskId: string }, opts?: { enabled?: boolean }) => ({
       queryKey: [['artifacts', proc], { input, type: 'query' }],

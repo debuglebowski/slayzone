@@ -17,7 +17,7 @@ const trpcClientMock = {
   }
 }
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPCClient: () => trpcClientMock
 }))
 

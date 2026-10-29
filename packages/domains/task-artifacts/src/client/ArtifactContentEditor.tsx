@@ -7,7 +7,8 @@ import {
   useInsertionEffect,
   type CSSProperties
 } from 'react'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { Button, useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import {
   RichTextEditor,

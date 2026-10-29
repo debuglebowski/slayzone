@@ -12,14 +12,15 @@ import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 
 // Stable clients, like the real providers' (the editor's callbacks depend on them).
-vi.mock('@slayzone/transport/client', () => {
+vi.mock('./trpc', () => {
   const trpc = { artifacts: { onContentChanged: { subscriptionOptions: () => ({}) } } }
   const trpcClient = {
     artifacts: { getMtime: { query: async ({ id }: { id: string }) => disk.mtime[id] ?? null } },
     app: { shell: { openExternal: { mutate: vi.fn() } } }
   }
-  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient, useSubscription: () => undefined }
+  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient }
 })
+vi.mock('@slayzone/transport/client', () => ({ useSubscription: () => undefined }))
 const appearance = {
   notesFontFamily: 'sans',
   notesCheckedHighlight: false,
