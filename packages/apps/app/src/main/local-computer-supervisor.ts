@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { SUPERVISED_STOP_SIGKILL_GRACE_MS } from '@slayzone/platform/parent-watch'
+import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 import { createChildReaper } from './child-reaper'
 
 /**
@@ -92,22 +93,14 @@ export type LocalComputerExitInfo = {
 }
 
 /** Why supervision stopped respawning: only `restart()` recovers either. */
-export type LocalComputerStall = 'backoff-exhausted' | 'needs-re-enrollment'
+export type LocalComputerStall = NonNullable<LocalComputerStatus['stalled']>
 
-/** Point-in-time view of the supervised computer, for Settings → Computers. */
-export type LocalComputerStatus = {
-  /** A computer process is alive right now. */
-  running: boolean
-  /** Set once supervision has given up; null while it is running or retrying. */
-  stalled: LocalComputerStall | null
-  /** The most recent unrequested exit (a deliberate restart/stop is not one). */
-  lastExit: {
-    code: number | null
-    signal: NodeJS.Signals | null
-    at: number
-    reason: string
-  } | null
-}
+/**
+ * Point-in-time view of the supervised computer, for Settings → Computers: the
+ * shared `LocalComputerStatus` without `unspawnedReason` — a supervisor exists only
+ * once the computer was spawned; the `app:get-local-computer-status` handler adds it.
+ */
+export type SupervisedComputerStatus = Omit<LocalComputerStatus, 'unspawnedReason'>
 
 /**
  * One line saying why a computer died, from its dying output.
@@ -183,7 +176,7 @@ export type LocalComputerOpts = {
 export type LocalComputerHandle = {
   getPid: () => number | null
   /** What Settings → Computers shows when the computer is not connected. */
-  getStatus: () => LocalComputerStatus
+  getStatus: () => SupervisedComputerStatus
   /**
    * Resolve with the exit report if the most recently spawned computer dies within
    * `windowMs` (including one that already died), else null.
