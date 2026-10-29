@@ -32,7 +32,7 @@
     "lint:react-compiler": "node scripts/check-react-compiler.mjs",
     "lint:workspace-cycles": "node scripts/check-workspace-cycles.mjs",
     "lint:deps": "knip --include dependencies,unlisted",
-    "lint:biome": "biome lint .",
+    "lint:biome": "biome lint --error-on-warnings .",
     "lint:format": "NODE_OPTIONS=--max-old-space-size=8192 biome format .",
     "lint:eslint": "eslint . --max-warnings=0",
     "lint:theme": "bash scripts/lint-theme.sh",
