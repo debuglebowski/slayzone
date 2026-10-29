@@ -13,7 +13,7 @@
 
 import { realpathSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
@@ -64,7 +64,21 @@ export const computerConfigSchema = z.object({
    * projects the user adds. No file key and no env var sets it, so nothing a hub
    * can write turns it on.
    */
-  hubMayEditRoots: z.boolean().optional()
+  hubMayEditRoots: z.boolean().optional(),
+  /**
+   * A directory whose executables take precedence over PATH for every process this
+   * computer starts — prepended in `buildSpawnEnv`, the one place both the pty and
+   * the proc handler build a child's env. Exists so tests can swap an agent CLI for
+   * a scripted fake (`@slayzone/test-utils/fake-claude`): a dir merely prepended to
+   * the inherited PATH loses, because the computer adopts the login-shell PATH with
+   * its entries FIRST at boot (login-shell-path.ts). Absolute: a relative dir would
+   * resolve against each spawn's cwd. Env channel only (`ENV_VARS.binOverrideDir`).
+   */
+  binOverrideDir: z
+    .string()
+    .min(1)
+    .refine((dir) => isAbsolute(dir), { message: 'must be an absolute path' })
+    .optional()
 })
 export type ComputerConfig = z.infer<typeof computerConfigSchema>
 
@@ -85,7 +99,9 @@ export const ENV_VARS = {
   // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
   // `HUB_` family per rule 3, matching the domain term used everywhere else
   // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/computers/join-token).
-  joinToken: 'SLAYZONE_HUB_JOIN_TOKEN'
+  joinToken: 'SLAYZONE_HUB_JOIN_TOKEN',
+  // Read only by the computer (rule 2), a directory (rule 3). See `binOverrideDir`.
+  binOverrideDir: 'SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR'
   // No alias for the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN`: it never shipped.
   // The published computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, and
   // the name it was renamed FROM only ever existed on unreleased main, so there is
@@ -328,7 +344,10 @@ export function loadComputerConfig(
     // <ROOT>/computer.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
-    ...(envJoinToken !== undefined ? { joinToken: envJoinToken } : {})
+    ...(envJoinToken !== undefined ? { joinToken: envJoinToken } : {}),
+    ...(env[ENV_VARS.binOverrideDir] !== undefined
+      ? { binOverrideDir: env[ENV_VARS.binOverrideDir] }
+      : {})
   }
 
   const result = computerConfigSchema.safeParse(merged)

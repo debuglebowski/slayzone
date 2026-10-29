@@ -24,9 +24,13 @@ const queueEvents = new TypedEmitter<{
 }>()
 
 const calls: string[] = []
+const watchdogCalls: unknown[] = []
 const ops = {
   supports: (mode: string) => mode === 'claude-chat',
-  getAutocompleteUsage: () => Promise.resolve({ foo: 1 })
+  getAutocompleteUsage: () => Promise.resolve({ foo: 1 }),
+  testSetWatchdogTimings: (timings: unknown) => {
+    watchdogCalls.push(timings)
+  }
 } as unknown as ChatDeps['ops']
 const queueOps = {
   list: (tabId: string) => {
@@ -48,6 +52,28 @@ describe('chat router', () => {
     expect(await caller.getAutocompleteUsage()).toEqual({ foo: 1 })
     await caller.queue.list({ tabId: 't1' })
     expect(calls).toEqual(['list:t1'])
+  })
+
+  // The e2e chat group shortens the watchdog per spec (audit #4) — never in a
+  // normal boot, same gate as pty-router's test procedures.
+  test('testSetWatchdogTimings is PLAYWRIGHT-gated and delegates to ops', async () => {
+    const caller = chatRouter.createCaller(ctx)
+    const timings = { startingBoundMs: 1000, runningStallMs: 1500, killGraceMs: 200 }
+    const saved = process.env.PLAYWRIGHT
+    try {
+      delete process.env.PLAYWRIGHT
+      await expect(caller.testSetWatchdogTimings({ timings })).rejects.toThrow(
+        'test-only handler unavailable'
+      )
+      expect(watchdogCalls).toEqual([])
+      process.env.PLAYWRIGHT = '1'
+      await caller.testSetWatchdogTimings({ timings })
+      await caller.testSetWatchdogTimings({ timings: null })
+      expect(watchdogCalls).toEqual([timings, null])
+    } finally {
+      if (saved === undefined) delete process.env.PLAYWRIGHT
+      else process.env.PLAYWRIGHT = saved
+    }
   })
 
   test('onEvent forwards each emit, stops after unsubscribe', async () => {

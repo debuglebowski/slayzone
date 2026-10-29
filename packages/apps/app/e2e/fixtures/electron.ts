@@ -26,6 +26,15 @@ const LAUNCH_BACKOFF_MS = [300, 1000]
 // Runtime path set in worker fixture before tests execute.
 export let TEST_PROJECT_PATH = path.join(RUNTIME_ROOT_DIR, 'default-test-project')
 
+/**
+ * A fresh `.e2e-runtime/<prefix>-<pid>-<ms>` path (not created). The name shape is
+ * what lets the global setup prune it once this process is gone
+ * (stale-runtime-dirs.ts).
+ */
+export function newRuntimeDir(prefix: string): string {
+  return path.join(RUNTIME_ROOT_DIR, `${prefix}-${process.pid}-${Date.now()}`)
+}
+
 // Worker root set during fixture init — used by createIsolatedGitRepo.
 let workerRootDir: string | undefined
 
@@ -87,6 +96,13 @@ let sessionStderrStream: fs.WriteStream | null = null
  * there makes `{ scope: 'worker' }` unassignable to `{ scope?: 'test' }`.
  */
 type ElectronWorkerFixtures = {
+  /**
+   * Extra env for the worker's shared app launch (merged last, like
+   * `launchIsolatedElectron`'s `extraEnv`). Empty by default. A fixture file that
+   * overrides it (e.g. `chat.ts`, which points the computer at the fake `claude`)
+   * gets its own worker — Playwright never shares a worker across fixture sets.
+   */
+  appExtraEnv: Record<string, string>
   electronApp: ElectronApplication
   mainWindow: Page
 }
@@ -760,8 +776,10 @@ export function cliEnv(root: string): Record<string, string> {
 }
 
 export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
+  appExtraEnv: [{}, { scope: 'worker', option: true }],
+
   electronApp: [
-    async ({}, use, workerInfo) => {
+    async ({ appExtraEnv }, use, workerInfo) => {
       if (!sharedApp) {
         const workerRoot = path.join(
           RUNTIME_ROOT_DIR,
@@ -782,7 +800,8 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
         const launched = await launchElectronWithRetry({
           userDataDir,
           workerArtifactsDir,
-          executablePath
+          executablePath,
+          ...(Object.keys(appExtraEnv).length > 0 ? { extraEnv: appExtraEnv } : {})
         })
 
         sharedApp = launched.app

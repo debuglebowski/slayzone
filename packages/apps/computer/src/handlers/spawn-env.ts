@@ -4,6 +4,7 @@
  *
  * @module computer/handlers/spawn-env
  */
+import { mergePathLists } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import type { HandlerContext } from './types'
 
@@ -38,5 +39,11 @@ export function buildSpawnEnv(
   // target stored by `slay hub use/login` — a remote sign-in silently retargeted
   // every agent toolbox on the machine.
   if (ctx.hubAddress) merged.SLAYZONE_HUB_ADDRESS = ctx.hubAddress
+  // Last, so it wins over whichever channel supplied PATH (inherited or a hub
+  // override): a configured override dir resolves before anything else. Node
+  // looks a bare command up on `env.PATH`, so this is what an agent spawn resolves.
+  if (ctx.config.binOverrideDir) {
+    merged.PATH = mergePathLists(ctx.config.binOverrideDir, merged.PATH)
+  }
   return merged
 }

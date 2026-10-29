@@ -5,6 +5,7 @@ import {
 } from './pty-manager'
 import {
   __resetForTests as resetChatTransports,
+  configureTransport,
   shutdownAll as shutdownChats
 } from './chat-transport-manager'
 import { __resetForTests as resetWarmPool } from './warm-process-manager'
@@ -35,6 +36,8 @@ export async function resetTerminalRuntimeForTest(): Promise<void> {
   resetWarmPool()
   // Clears ended sessions + in-flight spawns, re-opens the chat gate.
   resetChatTransports()
+  // A spec's shortened watchdog (chat.testSetWatchdogTimings) must not outlive it.
+  configureTransport({ watchdogTimings: undefined })
   setPtyShuttingDown(false)
   clearAllSessionUserInputMarks()
 }

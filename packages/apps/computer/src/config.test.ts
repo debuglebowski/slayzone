@@ -408,6 +408,31 @@ describe('loadComputerConfig', () => {
   })
 })
 
+describe('loadComputerConfig — binOverrideDir', () => {
+  it('reads SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR into binOverrideDir', () => {
+    const config = loadComputerConfig({
+      [ENV_VARS.hubAddress]: 'hub.example',
+      [ENV_VARS.binOverrideDir]: '/opt/fake-bin'
+    })
+    expect(ENV_VARS.binOverrideDir).toBe('SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR')
+    expect(config.binOverrideDir).toBe('/opt/fake-bin')
+  })
+
+  it('is absent when the var is unset', () => {
+    const config = loadComputerConfig({ [ENV_VARS.hubAddress]: 'hub.example' })
+    expect(config).not.toHaveProperty('binOverrideDir')
+  })
+
+  it('refuses a relative dir (it would resolve against each spawn cwd)', () => {
+    expect(() =>
+      loadComputerConfig({
+        [ENV_VARS.hubAddress]: 'hub.example',
+        [ENV_VARS.binOverrideDir]: 'fake-bin'
+      })
+    ).toThrow(/binOverrideDir/)
+  })
+})
+
 describe('assertPathAllowed', () => {
   it('accepts a path inside an allowed root and returns its canonical path', () => {
     const root = realpathSync(dir)

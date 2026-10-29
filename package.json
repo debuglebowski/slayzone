@@ -44,6 +44,7 @@
     "test:chat:perf": "npx tsx packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts",
     "test:e2e": "pnpm --filter @slayzone/app test:e2e",
     "test:e2e:perf": "pnpm --filter @slayzone/app test:e2e:perf",
+    "test:e2e:chat": "pnpm --filter @slayzone/app test:e2e:chat",
     "test:e2e:browser-modified-link": "pnpm --filter @slayzone/app exec playwright test --config playwright.config.ts e2e/browser/24-browser-panel.spec.ts -g \"prefilled task draft\" --repeat-each=5",
     "test:e2e:loop": "pnpm --filter @slayzone/app test:e2e:loop",
     "test:e2e:loop:stop": "pnpm --filter @slayzone/app test:e2e:loop:stop",

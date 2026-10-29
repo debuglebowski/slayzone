@@ -24,7 +24,8 @@
     "test:e2e:loop": "bash e2e-loop.sh",
     "test:e2e:loop:stop": "bash e2e-loop.sh --stop-on-fail",
     "test:e2e:parallel": "bash e2e-parallel.sh",
-    "test:e2e:perf": "npx playwright test --config playwright.config.ts e2e/perf/"
+    "test:e2e:perf": "npx playwright test --config playwright.config.ts e2e/perf/",
+    "test:e2e:chat": "npx playwright test --config playwright.config.ts e2e/chat/"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.1",
@@ -89,6 +90,7 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
+    "@slayzone/test-utils": "workspace:*",
     "@slayzone/theme-css": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/types": "workspace:*",

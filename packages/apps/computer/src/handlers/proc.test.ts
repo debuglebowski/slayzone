@@ -1,6 +1,6 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ComputerConfig } from '../config'
 import { createProcHandlers, ProcMethods, ProcNotifications } from './proc'
@@ -11,7 +11,10 @@ interface Notify {
   params: Record<string, unknown>
 }
 
-function makeCtx(roots: string[], { online = true }: { online?: boolean } = {}) {
+function makeCtx(
+  roots: string[],
+  { online = true, config: extra = {} }: { online?: boolean; config?: Partial<ComputerConfig> } = {}
+) {
   const notifies: Notify[] = []
   const dialer: ComputerDialer = {
     notify: (method, params) => {
@@ -23,7 +26,8 @@ function makeCtx(roots: string[], { online = true }: { online?: boolean } = {}) 
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: roots,
-    capabilities: ['proc']
+    capabilities: ['proc'],
+    ...extra
   }
   return { notifies, ctx: { dialer, config, log: () => {} } }
 }
@@ -206,6 +210,32 @@ describe('createProcHandlers — env + cwd', () => {
     await waitFor(() => exitFor(notifies, id) !== undefined)
     expect(dataFor(notifies, id, 'stdout')).toBe('injected')
     proc.disposeAll()
+  })
+})
+
+describe('createProcHandlers — binOverrideDir', () => {
+  it('a binary in the override dir shadows the same name further down PATH', async () => {
+    // The e2e fake `claude` relies on this: the computer resolves an agent's bare
+    // command name on its own PATH, whose login-shell entries come first.
+    const shadowed = join(dir, 'path-bin')
+    const override = join(dir, 'override-bin')
+    mkdirSync(shadowed)
+    mkdirSync(override)
+    writeFileSync(join(shadowed, 'slz-probe'), '#!/bin/sh\necho REAL\n', { mode: 0o755 })
+    writeFileSync(join(override, 'slz-probe'), '#!/bin/sh\necho FAKE\n', { mode: 0o755 })
+    const savedPath = process.env.PATH
+    process.env.PATH = [shadowed, savedPath].join(delimiter)
+    try {
+      const { notifies, ctx } = makeCtx(roots, { config: { binOverrideDir: override } })
+      const proc = createProcHandlers(ctx)
+      const id = 'p-override'
+      await proc.handlers[ProcMethods.procSpawn]({ sessionId: id, command: 'slz-probe' })
+      await waitFor(() => exitFor(notifies, id) !== undefined)
+      expect(dataFor(notifies, id, 'stdout')).toBe('FAKE\n')
+      proc.disposeAll()
+    } finally {
+      process.env.PATH = savedPath
+    }
   })
 })
 

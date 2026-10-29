@@ -154,6 +154,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // overrides below. `infra`: a spawned terminal must never inherit it, or an
   // agent would resolve a different notify.sh than the one wired into its hooks.
   SLAYZONE_MACHINE_DIR: 'infra',
+  // Computer-only: a directory whose executables take precedence over PATH for
+  // every process the computer starts (spawn-env.ts). The e2e chat group puts its
+  // fake `claude` there — a dir merely prepended to the inherited PATH loses to the
+  // login-shell PATH the computer adopts at boot. Infra: an agent must not inherit it.
+  SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR: 'infra',
   // per-provider config/hook/plugin path overrides (test/sandbox redirects)
   SLAYZONE_CLAUDE_SETTINGS_PATH: 'infra',
   SLAYZONE_GEMINI_SETTINGS_PATH: 'infra',

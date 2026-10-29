@@ -24,6 +24,7 @@ import {
   killAll,
   shutdownAll,
   configureTransport,
+  type TransportDeps,
   type ChatSessionInfo,
   type ShutdownOptions,
   type TransportShutdownResult
@@ -510,6 +511,18 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
   return {
     supports: (mode: string): boolean => supportsChatMode(mode),
+
+    /**
+     * E2E-only (the router gates it on PLAYWRIGHT): shorten the watchdog so a spec
+     * can prove what it does to a long silent tool (audit #4) without waiting 5
+     * minutes. `null` restores the production defaults — so does the e2e reset
+     * (runtime/test-reset.ts). Read when a watchdog ARMS: set it before the turn.
+     */
+    testSetWatchdogTimings: (
+      timings: NonNullable<TransportDeps['watchdogTimings']> | null
+    ): void => {
+      configureTransport({ watchdogTimings: timings ?? undefined })
+    },
 
     /**
      * Lazy hydrate: load persisted buffer + chat metadata into an in-memory

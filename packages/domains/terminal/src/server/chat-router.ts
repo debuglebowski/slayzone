@@ -40,7 +40,22 @@ const permissionArgs = z.object({
   ])
 })
 
+const watchdogTimings = z.object({
+  startingBoundMs: z.number().int().positive(),
+  runningStallMs: z.number().int().positive(),
+  killGraceMs: z.number().int().positive()
+})
+
 export const chatRouter = router({
+  // Test-only (PLAYWRIGHT): shorten the chat watchdog for one spec; `null` restores
+  // the defaults. Same gate as pty-router's test procedures.
+  testSetWatchdogTimings: publicProcedure
+    .input(z.object({ timings: watchdogTimings.nullable() }))
+    .mutation(({ input }) => {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      ops().testSetWatchdogTimings(input.timings)
+      return { ok: true }
+    }),
   // Core session ops
   supports: publicProcedure
     .input(z.object({ mode: z.string() }))

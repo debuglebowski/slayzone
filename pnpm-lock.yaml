@@ -553,6 +553,9 @@ importers:
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../../domains/test-panel
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@slayzone/theme-css':
         specifier: workspace:*
         version: link:../../shared/theme-css
@@ -791,6 +794,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../../domains/computers
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/node':
         specifier: ^24.19.0
         version: 24.19.0

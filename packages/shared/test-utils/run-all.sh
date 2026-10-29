@@ -248,6 +248,12 @@ run_harness packages/shared/platform/src/hub-discovery.test.ts
 run_harness packages/shared/platform/src/service-unit.test.ts
 # The vitest fs module cache key: an import whose resolution can move must change it.
 run_harness packages/shared/test-utils/fs-module-cache.test.ts
+# The scripted fake `claude` CLI the chat e2e group and transport tests drive.
+run_harness packages/shared/test-utils/fake-claude/fake-claude.test.ts
+# Recorded real-CLI transcripts (fake replay + drift check input): shape + no personal data.
+run_harness packages/shared/test-utils/fake-claude/transcripts.test.ts
+# expectKnownBug: marks one assertion as a known open bug without masking setup failures.
+run_harness packages/shared/test-utils/known-bug.test.ts
 # `slay hub` end-to-end: boots two REAL hubs in temp roots, then drives ls /
 # --hub targeting / stop through the built CLI bundle, and asserts the
 # supervised-hub refusal. Spawns hubs directly (never `hub start`), so no
@@ -754,6 +760,8 @@ run_harness packages/domains/terminal/src/server/adapters/encode-submit.test.ts
 run_harness packages/domains/terminal/src/server/adapters/gemini-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/qwen-adapter.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
+# Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.
+run_harness packages/domains/terminal/src/server/agents/claude-stream-drift.test.ts
 run_harness packages/domains/terminal/src/server/files-scan.test.ts
 run_harness packages/domains/terminal/src/server/runtime/session-registry.test.ts
 run_harness packages/domains/terminal/src/server/shell-env.test.ts
@@ -883,6 +891,12 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
   packages/domains/task-terminals/src/client/chat/chat-ui-components.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useChatLifecycle.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \

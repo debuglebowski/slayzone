@@ -92,6 +92,12 @@ describe('manifest shape', () => {
     expect(ENV_MANIFEST.SLAYZONE_HUB_SESSION_RETENTION_DAYS).toBe('infra')
   })
 
+  // Read only by the computer: a dir whose binaries shadow PATH for every process it
+  // starts (the e2e fake `claude`). A spawned agent must never inherit it.
+  test('SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR is infra', () => {
+    expect(ENV_MANIFEST.SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR).toBe('infra')
+  })
+
   test('SLAYZONE_TASK_ID is identity', () => {
     expect(ENV_MANIFEST.SLAYZONE_TASK_ID).toBe('identity')
   })

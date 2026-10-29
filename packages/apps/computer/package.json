@@ -27,6 +27,7 @@
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/test-utils": "workspace:*",
     "@types/node": "^24.19.0",
     "esbuild": "^0.28.2",
     "vitest": "^5.0.2"

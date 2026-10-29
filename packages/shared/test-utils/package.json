@@ -16,6 +16,8 @@
     "./rest-harness": "./rest-harness.ts",
     "./mcp-harness": "./mcp-harness.ts",
     "./mock-electron": "./mock-electron.ts",
-    "./test-ca": "./test-ca.ts"
+    "./test-ca": "./test-ca.ts",
+    "./fake-claude": "./fake-claude/index.ts",
+    "./known-bug": "./known-bug.ts"
   }
 }
