@@ -1,4 +1,4 @@
-import type { useTRPCClient } from '@slayzone/transport/client'
+import type { useTRPCClient } from '../trpc'
 import type { McpServerConfig, McpTarget } from '../../shared'
 import { getConfigurableMcpTargets } from '../../shared/provider-registry'
 import type { CustomMcpServer } from './types'

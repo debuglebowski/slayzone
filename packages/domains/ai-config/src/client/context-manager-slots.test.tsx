@@ -33,7 +33,7 @@ function makeClient(): unknown {
 }
 const client = makeClient()
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPCClient: () => client,
   getTrpcClient: () => client
 }))

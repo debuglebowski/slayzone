@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Library, Plus, Sparkles } from 'lucide-react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn, useDepsChanged } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, AiConfigItemType, CliProvider } from '../shared'

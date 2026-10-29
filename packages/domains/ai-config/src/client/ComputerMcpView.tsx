@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, Trash2, Lock, Server } from 'lucide-react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { Button, Input, useDepsChanged } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import type { CliProvider, McpConfigFileResult } from '../shared'

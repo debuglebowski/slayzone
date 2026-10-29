@@ -23,7 +23,7 @@ import {
   cn,
   useDepsChanged
 } from '@slayzone/ui'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { useWatchedFile } from '@slayzone/file-editor/client/useWatchedFile'
 import type { AiConfigItem, CliProvider, SyncHealth, SyncReason } from '../shared'
 import { PROVIDER_PATHS, PROVIDER_LABELS } from '../shared/provider-registry'

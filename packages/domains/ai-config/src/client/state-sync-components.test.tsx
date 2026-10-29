@@ -36,7 +36,7 @@ function makeClient(): unknown {
 
 let client = makeClient()
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPCClient: () => client
 }))
 

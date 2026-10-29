@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Plus, Save, Trash2 } from 'lucide-react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { Button, Input, Label, Textarea, cn, useDepsChanged } from '@slayzone/ui'
 import type { AiConfigItem } from '../shared'
 import { useContextManagerSlots } from './ContextManagerSlots'

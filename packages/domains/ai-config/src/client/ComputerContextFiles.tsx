@@ -8,7 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent
 } from 'react'
 import { File, FilePlus, Trash2 } from 'lucide-react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { Button, Input, Textarea, cn, useDepsChanged } from '@slayzone/ui'
 import type { CliProvider, ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 
 export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: string | null }>): {
   counts: Map<string, number>

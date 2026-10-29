@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import { PROVIDER_LABELS, PROVIDER_CAPABILITIES } from '../shared/provider-registry'
 import type { CliProvider, CliProviderInfo } from '../shared'

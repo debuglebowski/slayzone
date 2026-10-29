@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget } from '../../shared'
 import { CURATED_MCP_SERVERS } from '../../shared/mcp-registry'
 import { ALL_PROVIDERS, loadCustomServers, matchesSearch } from './mcp-helpers'

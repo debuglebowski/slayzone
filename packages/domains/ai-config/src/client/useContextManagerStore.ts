@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from './trpc'
 import type { ConfigLevel } from '../shared'
 
 export type SkillGroupBy = 'none' | 'source' | 'prefix'

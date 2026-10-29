@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { toast, useDepsChanged } from '@slayzone/ui'
 import type { SkillRegistry, SkillRegistryEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
