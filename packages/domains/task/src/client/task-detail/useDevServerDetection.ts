@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal-contracts'
 

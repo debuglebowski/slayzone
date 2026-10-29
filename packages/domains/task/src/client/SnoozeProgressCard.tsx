@@ -1,7 +1,7 @@
 import { format } from 'date-fns'
 import { AlarmClock, Gauge, X } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { isCompletedStatus } from '@slayzone/projects-contracts'

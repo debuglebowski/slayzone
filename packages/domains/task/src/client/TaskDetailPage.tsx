@@ -30,7 +30,8 @@ import {
   Expand
 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'

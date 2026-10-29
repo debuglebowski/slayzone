@@ -6,6 +6,8 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import type { Task } from '@slayzone/task-contracts'
 
 const mutateAsync = vi.fn()
+// The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({ task: { update: { mutationOptions: () => ({}) } } })
 }))

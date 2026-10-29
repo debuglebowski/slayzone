@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { getProviderLastKilledAt, decideReviveMode } from '@slayzone/task-contracts'
 

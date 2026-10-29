@@ -54,6 +54,7 @@
   "@slayzone/tags -> @slayzone/telemetry",
   "@slayzone/tags -> @slayzone/transport",
   "@slayzone/task -> @slayzone/file-editor",
+  "@slayzone/task -> @slayzone/processes",
   "@slayzone/task -> @slayzone/projects",
   "@slayzone/task -> @slayzone/tabs-state",
   "@slayzone/task -> @slayzone/tags",

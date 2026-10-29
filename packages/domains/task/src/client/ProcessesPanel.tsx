@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { Plus, Cpu, Info, Loader2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, useDepsChanged } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'

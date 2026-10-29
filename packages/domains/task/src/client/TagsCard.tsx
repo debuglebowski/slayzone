@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'

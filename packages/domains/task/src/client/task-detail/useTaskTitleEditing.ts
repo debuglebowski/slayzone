@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
 
 export interface UseTaskTitleEditingResult {

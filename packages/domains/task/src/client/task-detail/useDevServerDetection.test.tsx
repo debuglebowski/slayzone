@@ -11,6 +11,8 @@ const trpcClient = {
   settings: { get: { query: async (_i: { key: string }) => null } },
   pty: { getBuffer: { query: async (_i: { sessionId: string }) => buffer } }
 }
+// The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({ useTRPCClient: () => trpcClient }))
 
 const { useDevServerDetection } = await import('./useDevServerDetection')

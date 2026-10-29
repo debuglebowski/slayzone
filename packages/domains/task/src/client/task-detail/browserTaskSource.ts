@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import type { BrowserTaskSource } from '@slayzone/task-browser'
 
 /**

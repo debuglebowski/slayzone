@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type {
   PanelLayout,

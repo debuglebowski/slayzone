@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
 import {
   IconButton,

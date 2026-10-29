@@ -1,4 +1,5 @@
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import { holdTaskPaneEvent, isTaskPaneLive, type TaskPaneEvent } from './taskPaneEvents'
 

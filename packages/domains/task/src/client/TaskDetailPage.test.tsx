@@ -247,6 +247,8 @@ vi.mock('./task-detail/useDevServerDetection', () => {
 // .map/.find/.includes + property reads), and `.queryOptions()/.mutationOptions()/
 // .subscriptionOptions()` return harmlessly (consumed only by mocked react-query /
 // useSubscription).
+// The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => {
   // Single self-referential proxy: every property access returns the SAME proxy
   // and every call resolves to []. Stability is load-bearing — returning a fresh

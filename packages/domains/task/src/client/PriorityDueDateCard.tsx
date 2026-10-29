@@ -9,7 +9,7 @@ import { cn, PriorityIcon } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 
 interface PriorityDueDateCardProps {
   task: Task

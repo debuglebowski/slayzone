@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC, getTrpcClient } from '@slayzone/transport/client'
+import { useTRPC, getTrpcClient } from './trpc'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '@slayzone/task-contracts'
 import {
   DEFAULT_PANEL_CONFIG,

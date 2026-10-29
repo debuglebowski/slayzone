@@ -1,11 +1,7 @@
 import { useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  useTRPC,
-  useClientForTask,
-  useHubIdForTask,
-  useHubOwnershipStore
-} from '@slayzone/transport/client'
+import { useHubIdForTask, useHubOwnershipStore } from '@slayzone/transport/client'
+import { useTRPC, useClientForTask } from './trpc'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { CreateTaskInput, Task } from '@slayzone/task-contracts'

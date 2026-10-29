@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { ListChecks, MessageSquare, SearchIcon, X } from 'lucide-react'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'

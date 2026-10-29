@@ -7,6 +7,8 @@ import { cleanup, renderHook } from '@testing-library/react'
 import type { Task } from '@slayzone/task-contracts'
 
 const client = { task: { update: { mutate: vi.fn(() => Promise.resolve()) } } }
+// The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({ useTRPCClient: () => client }))
 
 const { usePersistenceSaves } = await import('./usePersistenceSaves')

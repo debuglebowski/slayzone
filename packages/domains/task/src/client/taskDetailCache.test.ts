@@ -67,6 +67,8 @@ const remoteHubClientMock = {
   workspace: { pathExists: { query: vi.fn() } }
 }
 
+// The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   getTrpcClient: () => trpcClientMock,
   getHubClient: (id: string) =>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Button, Label, Switch, Input, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { Plus, Pencil, Trash2, Star, Info } from 'lucide-react'

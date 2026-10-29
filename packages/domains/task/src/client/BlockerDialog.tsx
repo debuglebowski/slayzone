@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'

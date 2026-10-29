@@ -30,6 +30,8 @@ vi.mock('@slayzone/ui', () => ({
 
 const update = vi.fn()
 const create = vi.fn()
+// The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     processes: {

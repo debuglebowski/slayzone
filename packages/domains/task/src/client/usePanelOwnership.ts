@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 
 interface OwnershipEntry {
   panelId: string

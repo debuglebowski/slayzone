@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 
 /**

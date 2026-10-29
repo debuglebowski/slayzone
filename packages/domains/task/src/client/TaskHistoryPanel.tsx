@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { formatDistanceToNowStrict, parseISO } from 'date-fns'
 import { useDepsChanged, useVisibleInterval } from '@slayzone/ui'
 import {

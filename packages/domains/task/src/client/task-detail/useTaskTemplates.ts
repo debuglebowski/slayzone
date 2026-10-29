@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import type { Task, TaskTemplate } from '@slayzone/task-contracts'
 
 /** Loads task templates for the task's project (only for temporary tasks). */

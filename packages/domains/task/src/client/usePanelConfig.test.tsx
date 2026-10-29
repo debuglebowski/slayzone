@@ -6,6 +6,8 @@ import { act, cleanup, render } from '@testing-library/react'
 let stored: string | null = JSON.stringify({ webPanels: [], order: ['terminal'] })
 const settingsGet = vi.fn(async () => stored)
 let onSettingsData: ((event?: { keys: string[] | null }) => void) | null = null
+// The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   getTrpcClient: () => ({
     settings: { get: { query: settingsGet } },

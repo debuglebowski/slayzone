@@ -1,5 +1,5 @@
 import { createSuspenseCache } from '@slayzone/suspense'
-import { getTrpcClient, getHubClient, type TrpcVanillaClient } from '@slayzone/transport/client'
+import { getTrpcClient, getHubClient, type TaskTrpcClient } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects-contracts'
@@ -46,7 +46,7 @@ export interface TaskDetailData {
  * computer must not take the whole Task Detail page down with it.
  */
 async function checkProjectPathMissing(
-  client: TrpcVanillaClient,
+  client: TaskTrpcClient,
   taskId: string,
   path: string
 ): Promise<boolean> {

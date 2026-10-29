@@ -2197,6 +2197,9 @@ importers:
       '@milkdown/core':
         specifier: ^7.22.2
         version: 7.22.2(supports-color@7.2.0)
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -2212,15 +2215,27 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../history
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
+      '@slayzone/notify':
+        specifier: workspace:*
+        version: link:../../shared/notify
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../processes
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/suspense':
         specifier: workspace:*
         version: link:../../shared/suspense

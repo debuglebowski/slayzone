@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type {
   TaskSessionRow,
   TaskSessionsSource

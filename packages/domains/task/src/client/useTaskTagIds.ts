@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import type { Tag } from '@slayzone/tags/shared'
 
 export interface UseTaskTagIdsReturn {

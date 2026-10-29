@@ -44,7 +44,7 @@ import {
   Text,
   Trash2
 } from 'lucide-react'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import {
   PriorityIcon,
   getColumnStatusStyle,

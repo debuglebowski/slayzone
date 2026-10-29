@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useEffectEvent } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
 

@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import {
-  useTRPC,
-  useClientForProject,
-  useHubIdForProject,
-  useHubOwnershipStore
-} from '@slayzone/transport/client'
+import { useHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/client'
+import { useTRPC, useClientForProject } from './trpc'
 import { toast } from '@slayzone/ui'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
