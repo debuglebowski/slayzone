@@ -10,7 +10,7 @@ import {
   View
 } from 'react-native'
 import { type HubSession, signIn } from './hub-session'
-import { type Theme, useTheme } from './theme'
+import { type ChromeColors, useTheme } from './theme'
 
 /**
  * SPIKE-ONLY dev prefill: the simulator has no scriptable keyboard, so a dev bundle
@@ -113,7 +113,7 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (session: HubSession)
   )
 }
 
-const makeStyles = (t: Theme) =>
+const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     screen: { flex: 1, justifyContent: 'center', padding: 16, backgroundColor: t.background },
     card: {
@@ -126,7 +126,7 @@ const makeStyles = (t: Theme) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.border
     },
-    title: { fontSize: 20, fontWeight: '600', color: t.foreground, marginBottom: 12 },
+    title: { fontSize: 20, fontWeight: '600', color: t.cardForeground, marginBottom: 12 },
     label: { fontSize: 13, color: t.mutedForeground, marginTop: 12, marginBottom: 4 },
     input: {
       borderWidth: 1,
@@ -135,7 +135,7 @@ const makeStyles = (t: Theme) =>
       paddingHorizontal: 12,
       paddingVertical: 10,
       fontSize: 16,
-      color: t.foreground
+      color: t.cardForeground
     },
     error: { color: t.destructive, marginTop: 12 },
     button: {

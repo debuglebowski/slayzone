@@ -402,6 +402,9 @@ run_harness scripts/ci/turbo-cache-prune.test.mjs
 # `pnpm lint:theme` (Tailwind sources): every class-bearing module a theme-css shell renders
 # sits under an @source path, else its classes are never generated (MediaView bg-popover/90).
 run_harness scripts/check-tailwind-sources.test.mjs
+# `pnpm lint:theme` (lint-theme.sh): hardcoded color classes in renderer .tsx, and color
+# literals in the mobile app outside src/theme.ts, fail; a missing search root fails closed.
+run_harness scripts/lint-theme.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.
@@ -1027,6 +1030,9 @@ run_package_tests packages/shared/layout @slayzone/layout
 run_package_tests packages/shared/markdown @slayzone/markdown
 run_package_tests packages/shared/shortcuts @slayzone/shortcuts
 run_package_tests packages/shared/ui @slayzone/ui
+# Theme presets + the colour converter the mobile app paints with: every preset colour
+# must convert (themes.test.ts), and the choice resolution desktop and mobile share.
+run_package_tests packages/shared/theme-tokens @slayzone/theme-tokens
 
 # Security headers on every hub response (T-25): the header logic, and the built hub
 # through each handler (shell, assets, better-auth, REST, 404, /trpc, /health).

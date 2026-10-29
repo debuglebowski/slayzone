@@ -20,7 +20,7 @@
  *     updated — so the baseline only ever shrinks.
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -48,9 +48,12 @@ function sourceFiles() {
     ],
     { cwd: root, encoding: 'utf8' }
   )
+  // `existsSync`: a tracked file deleted (or moved) in the working tree but not yet
+  // committed is still in the index; it is no longer a source.
   return tracked
     .split('\n')
     .filter((f) => /\.(ts|tsx)$/.test(f))
+    .filter((f) => existsSync(join(root, f)))
     .filter((f) => !/\.(test|spec|stories|d)\.tsx?$/.test(f))
     .filter((f) => !/\/(server|main|electron|e2e|__tests__|test-utils)\//.test(f))
 }

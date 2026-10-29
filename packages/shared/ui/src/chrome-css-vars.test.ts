@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { getChromeStyleOverrides, unifiedThemes } from './index'
+import { unifiedThemes } from '@slayzone/theme-tokens'
+import { getChromeStyleOverrides } from './chrome-css-vars'
 
 /** Semantic status + diff tokens every theme must define (chat renderers, DiffView). */
 const STATUS_VARS = ['success', 'warning', 'info', 'agent'].flatMap((tone) => [
@@ -27,7 +28,7 @@ const variants = unifiedThemes.flatMap((theme) =>
   })
 )
 
-const themeCss = readFileSync(new URL('../../../theme-css/src/index.css', import.meta.url), 'utf8')
+const themeCss = readFileSync(new URL('../../theme-css/src/index.css', import.meta.url), 'utf8')
 
 /** Body of the first top-level block whose selector line matches. */
 function cssBlock(selector: RegExp): string {

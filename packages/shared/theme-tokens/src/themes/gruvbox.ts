@@ -1,4 +1,4 @@
-import type { UnifiedThemeDefinition } from '../theme-types'
+import type { UnifiedThemeDefinition } from '../types'
 
 export const gruvbox: UnifiedThemeDefinition = {
   id: 'gruvbox-dark',

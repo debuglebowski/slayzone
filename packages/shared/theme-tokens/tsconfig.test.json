@@ -1,0 +1,6 @@
+{
+  // The suites, with the repo's default ambient types (vitest's own types pull in
+  // Node's, which tsconfig.json keeps out of the sources).
+  "extends": "../../../tsconfig.base.json",
+  "include": ["src/**/*"]
+}

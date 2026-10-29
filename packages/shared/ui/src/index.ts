@@ -124,7 +124,8 @@ export * from './agent-collaboration-pill'
 // Toast
 export { Toaster, toast } from 'sonner'
 
-// Themes
+// Themes: the presets are `@slayzone/theme-tokens` data (DOM-free, shared with the
+// mobile app), re-exported here; painting them as CSS variables is ui's own.
 export {
   unifiedThemes,
   getUnifiedTheme,
@@ -132,15 +133,13 @@ export {
   getThemeChrome,
   getThemeTerminalColors,
   getThemeEditorColors,
-  applyChromeColors,
-  clearChromeColors,
-  getChromeStyleOverrides,
   type UnifiedThemeDefinition,
   type UnifiedThemeVariant,
   type ChromeColors,
-  type TerminalThemeColors
-} from './themes'
-export type { EditorThemeColors } from './theme-types'
+  type TerminalThemeColors,
+  type EditorThemeColors
+} from '@slayzone/theme-tokens'
+export { applyChromeColors, clearChromeColors, getChromeStyleOverrides } from './chrome-css-vars'
 
 // Animations
 export * from './DevServerToast'

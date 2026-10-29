@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native'
-import { type Theme, useTheme } from './theme'
+import { type ChromeColors, useTheme } from './theme'
 import { type RouterOutputs, useTRPC } from './trpc'
 
 /** Wide enough for list + detail side by side (iPad, any orientation). */
@@ -91,7 +91,7 @@ export function TaskBrowser({ hubLabel, onSignOut }: { hubLabel: string; onSignO
               style={[styles.dot, { backgroundColor: project?.color ?? theme.mutedForeground }]}
             />
             <View style={styles.rowText}>
-              <Text style={styles.rowTitle} numberOfLines={2}>
+              <Text style={[styles.rowTitle, active && styles.rowTitleActive]} numberOfLines={2}>
                 {item.title}
               </Text>
               <Text style={styles.rowMeta} numberOfLines={1}>
@@ -159,7 +159,7 @@ function TaskDetail({ task, projectName }: { task: BoardTask; projectName?: stri
   )
 }
 
-const makeStyles = (t: Theme) =>
+const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.background },
     center: {
@@ -204,6 +204,7 @@ const makeStyles = (t: Theme) =>
     dot: { width: 10, height: 10, borderRadius: 5 },
     rowText: { flex: 1 },
     rowTitle: { fontSize: 16, color: t.foreground },
+    rowTitleActive: { color: t.accentForeground },
     rowMeta: { fontSize: 12, color: t.mutedForeground, marginTop: 2 },
     detail: { padding: 20, gap: 12 },
     detailTitle: { fontSize: 22, fontWeight: '600', color: t.foreground },

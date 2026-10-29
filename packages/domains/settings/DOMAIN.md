@@ -16,7 +16,7 @@ type ThemePreference = 'light' | 'dark' | 'system'
 
 ## Client (client/)
 
-- `ThemeProvider` / `useTheme()` - Theme context
+- `ThemeProvider` / `useTheme()` - Theme context. Turns the stored choice (`app_theme_*` settings + light/dark preference) into a preset + variant with `@slayzone/theme-tokens` selection functions, the same ones the mobile app uses
 - `UserSettingsDialog` - Settings panel
 - `useViewState` - View preferences (sidebar collapsed, etc.)
 

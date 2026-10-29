@@ -1,4 +1,4 @@
-import type { UnifiedThemeDefinition } from '../theme-types'
+import type { UnifiedThemeDefinition } from '../types'
 
 export const catppuccin: UnifiedThemeDefinition = {
   id: 'catppuccin',

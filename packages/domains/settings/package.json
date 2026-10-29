@@ -38,6 +38,7 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/theme-tokens": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",

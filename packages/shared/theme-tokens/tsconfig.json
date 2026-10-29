@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // Runs in React Native as well as the renderer: no DOM, no Node, no ambient
+    // types. A `document`, `window` or `process` here fails this typecheck.
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
+}

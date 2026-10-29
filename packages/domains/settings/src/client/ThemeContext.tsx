@@ -5,27 +5,17 @@ import { useTRPC } from './trpc'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
 import { ThemeContext, useStableCallback, type ThemeContextValue } from '@slayzone/ui'
+import {
+  APP_THEME_SETTING_KEYS,
+  DEFAULT_THEME_ID,
+  LEGACY_THEME_SETTING_KEYS,
+  migrateThemeId,
+  resolveAppThemeSelection,
+  resolveThemeVariant,
+  selectChromeThemeId
+} from '@slayzone/theme-tokens'
 import { applyTheme } from './apply-theme'
 import { readThemeCache, resolveThemeCache, systemTheme, writeThemeCache } from './theme-cache'
-
-const DEFAULT_THEME_ID = 'slay'
-
-/** Maps old variant-specific IDs to unified family IDs */
-const LEGACY_ID_MAP: Record<string, string> = {
-  'slay-light': 'slay',
-  'slay-special-light': 'slay-special',
-  'default-light': 'default-dark',
-  'catppuccin-mocha': 'catppuccin',
-  'catppuccin-latte': 'catppuccin',
-  'solarized-dark': 'solarized',
-  'solarized-light': 'solarized',
-  'tokyo-night-light': 'tokyo-night',
-  'rose-pine-dawn': 'rose-pine'
-}
-
-function migrateThemeId(id: string): string {
-  return LEGACY_ID_MAP[id] ?? id
-}
 
 // "system" is resolved in the renderer (`systemTheme`, theme-cache.ts): the
 // chromium-fork sidecar has no Electron `nativeTheme`, so its server-side
@@ -34,9 +24,7 @@ function migrateThemeId(id: string): string {
 // Effective dark/light from the user's preference: explicit wins, "system" maps
 // to the OS, and a non-preference value falls back to the server's answer.
 function resolveEffective(source: ThemePreference, serverEffective: Theme): Theme {
-  if (source === 'light' || source === 'dark') return source
-  if (source === 'system') return systemTheme()
-  return serverEffective
+  return resolveThemeVariant(source, systemTheme, serverEffective)
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -71,7 +59,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 
   // Resolved
-  const themeId = splitThemes ? (theme === 'dark' ? themeIdDark : themeIdLight) : singleThemeId
+  const themeId = selectChromeThemeId(
+    { singleThemeId, split: splitThemes, themeIdDark, themeIdLight },
+    theme
+  )
   const terminalThemeId = terminalOverrideThemeId || themeId
   const editorThemeId = editorOverrideThemeId || themeId
   const contentVariant = theme
@@ -96,43 +87,45 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       ] = await Promise.all([
         queryClient.fetchQuery(trpc.settings.getEffectiveTheme.queryOptions()),
         queryClient.fetchQuery(trpc.settings.getThemeSource.queryOptions()),
-        getSetting('app_theme_id'),
-        getSetting('app_theme_split'),
-        getSetting('app_theme_id_dark'),
-        getSetting('app_theme_id_light'),
+        getSetting(APP_THEME_SETTING_KEYS.themeId),
+        getSetting(APP_THEME_SETTING_KEYS.split),
+        getSetting(APP_THEME_SETTING_KEYS.themeIdDark),
+        getSetting(APP_THEME_SETTING_KEYS.themeIdLight),
         getSetting('terminal_override_theme_id'),
         getSetting('editor_override_theme_id')
       ])
       if (disposed) return
 
       // Migrate single theme from legacy
-      let resolvedId = savedThemeId
-      if (!resolvedId) {
-        const legacyId = await getSetting('content_theme_dark').then(
-          (v) => v ?? getSetting('terminal_theme_dark')
-        )
-        resolvedId = migrateThemeId(legacyId ?? DEFAULT_THEME_ID)
-        setSettingMutation.mutate({ key: 'app_theme_id', value: resolvedId })
-      } else {
-        resolvedId = migrateThemeId(resolvedId)
+      const [legacyKey, olderLegacyKey] = LEGACY_THEME_SETTING_KEYS
+      const legacyThemeId = savedThemeId
+        ? null
+        : await getSetting(legacyKey).then((v) => v ?? getSetting(olderLegacyKey))
+      const selection = resolveAppThemeSelection({
+        themeId: savedThemeId,
+        split: savedSplit,
+        themeIdDark: savedDark,
+        themeIdLight: savedLight,
+        legacyThemeId
+      })
+      if (!savedThemeId) {
+        setSettingMutation.mutate({
+          key: APP_THEME_SETTING_KEYS.themeId,
+          value: selection.singleThemeId
+        })
       }
-
-      const isSplit = savedSplit === '1'
-      const darkId = migrateThemeId(savedDark ?? resolvedId)
-      const lightId = migrateThemeId(savedLight ?? resolvedId)
 
       const resolved = resolveEffective(source, effective)
       setTheme(resolved)
       setPreferenceState(source)
-      setSingleThemeId(resolvedId)
-      setSplitThemesState(isSplit)
-      setThemeIdDarkState(darkId)
-      setThemeIdLightState(lightId)
+      setSingleThemeId(selection.singleThemeId)
+      setSplitThemesState(selection.split)
+      setThemeIdDarkState(selection.themeIdDark)
+      setThemeIdLightState(selection.themeIdLight)
       setTerminalOverrideThemeIdState(savedTermOvrId ? migrateThemeId(savedTermOvrId) : '')
       setEditorOverrideThemeIdState(savedEditorOvrId ? migrateThemeId(savedEditorOvrId) : '')
 
-      const chromeId = isSplit ? (resolved === 'dark' ? darkId : lightId) : resolvedId
-      applyTheme(resolved, chromeId)
+      applyTheme(resolved, selectChromeThemeId(selection, resolved))
       performance.mark('sz:theme:end')
     }
 

@@ -1,4 +1,5 @@
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
+import { resolveThemeVariant, selectChromeThemeId } from '@slayzone/theme-tokens'
 
 /**
  * Last-applied theme settings, kept in localStorage so the window paints in the
@@ -59,12 +60,6 @@ export function systemTheme(): Theme {
 
 /** Effective dark/light + chrome theme id a cached setting resolves to now. */
 export function resolveThemeCache(c: ThemeCache): { theme: Theme; themeId: string } {
-  const theme =
-    c.preference === 'light' || c.preference === 'dark'
-      ? c.preference
-      : c.preference === 'system'
-        ? systemTheme()
-        : c.effective
-  const themeId = c.split ? (theme === 'dark' ? c.themeIdDark : c.themeIdLight) : c.singleThemeId
-  return { theme, themeId }
+  const theme = resolveThemeVariant(c.preference, systemTheme, c.effective)
+  return { theme, themeId: selectChromeThemeId(c, theme) }
 }

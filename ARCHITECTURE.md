@@ -47,6 +47,7 @@ packages/
     ├── trpc-server/       # @slayzone/trpc-server - tRPC procedure builders + gate chain (domains build routers here; api composes)
     ├── types/             # @slayzone/types - shared app/domain contracts
     ├── ui/                # @slayzone/ui - Radix/shadcn components
+    ├── theme-tokens/      # @slayzone/theme-tokens - theme presets as DOM-free data (desktop + mobile), theme choice, colour → hex
     └── editor/            # @slayzone/editor - Milkdown rich text
 ```
 
