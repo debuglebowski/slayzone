@@ -3,10 +3,11 @@
  * (snake_case columns), matching the store's SELECT * reads.
  */
 
-// The local-computer identity constant now lives on the lean
-// `@slayzone/platform/slayzone-config` subpath (so the computer bundle can read it
-// without the heavy server graph). Re-exported here for existing consumers.
-export { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
+// The local-computer identity constant lives on the import-free
+// `@slayzone/platform/computer-identity` leaf. NOT `slayzone-config`: that one pulls
+// node:crypto/fs/path, and this shared barrel reaches the renderer (via
+// @slayzone/projects-contracts) → Vite externalizes the built-ins → boot crash.
+export { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 
 /**
  * Row in `computers` — one enrolled computer (a machine/process that can host
