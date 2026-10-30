@@ -19,13 +19,14 @@ import {
   type UsageMap
 } from '../autocomplete-usage-store'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
-import type { ChatEffort } from '@slayzone/terminal-contracts'
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
-import type { CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
+import type { ChatModelInfo, CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
 import {
   getChatCliCommandDetails,
+  getChatCliModels,
   getChatCliSnapshot,
   saveChatCliCommandDetails,
+  saveChatCliModels,
   saveChatCliSnapshot
 } from '../chat-cli-snapshot-store'
 import {
@@ -52,7 +53,8 @@ export interface ProviderConfigEntry {
   /** Provider-specific chat model id (Claude alias / Codex model id). */
   chatModel?: string | null
   /** Reasoning effort level. `null`/missing = inherit provider default. */
-  chatEffort?: ChatEffort | null
+  /** Claude: a `ChatEffort`; Codex: any effort its model lists. */
+  chatEffort?: string | null
   /** Collaboration mode (Codex `plan`/`default`). `null`/missing = provider default. */
   chatCollaboration?: ChatCollaborationMode | null
   /** Codex Fast Mode (`serviceTier: 'fast'`). `undefined`/missing = off. */
@@ -75,7 +77,7 @@ export interface ChatDataOps {
   readProviderConfig(taskId: string, mode: string): Promise<ProviderConfigEntry>
   writeChatMode(taskId: string, mode: string, chatMode: string): Promise<void>
   writeChatModel(taskId: string, mode: string, chatModel: string): Promise<void>
-  writeChatEffort(taskId: string, mode: string, chatEffort: ChatEffort | null): Promise<void>
+  writeChatEffort(taskId: string, mode: string, chatEffort: string | null): Promise<void>
   writeChatCollaboration(
     taskId: string,
     mode: string,
@@ -134,6 +136,10 @@ export interface ChatDataOps {
   getCliSnapshot(taskId: string, mode: string): Promise<CliCommandList | null>
   /** Stored command descriptions + argument hints for the task's project + mode, or null. */
   getCliCommandDetails(taskId: string, mode: string): Promise<CliCommandDetails | null>
+  /** Store the models the CLI offers (Codex `model/list`), for the task's project + mode. */
+  saveCliModels(taskId: string, mode: string, models: ChatModelInfo[]): Promise<void>
+  /** Stored models for the task's project + mode, or null. */
+  getCliModels(taskId: string, mode: string): Promise<ChatModelInfo[] | null>
   /** A chat tab's saved draft + scroll anchor, or null. */
   getTabState(tabId: string): Promise<ChatTabState | null>
   /** Save the draft; the new revision, or null when the tab is gone. */
@@ -380,6 +386,10 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     getCliSnapshot: (taskId, mode) => getChatCliSnapshot(db, taskId, mode),
 
     getCliCommandDetails: (taskId, mode) => getChatCliCommandDetails(db, taskId, mode),
+
+    saveCliModels: (taskId, mode, models) => saveChatCliModels(db, taskId, mode, models),
+
+    getCliModels: (taskId, mode) => getChatCliModels(db, taskId, mode),
 
     getTabState: (tabId) => getChatTabState(db, tabId),
     saveTabDraft: (tabId, draft) => saveChatDraft(db, tabId, draft),

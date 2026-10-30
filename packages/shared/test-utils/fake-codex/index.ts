@@ -96,6 +96,36 @@ export class FakeCodexRun extends FakeCliRun {
   turnIds(): string[] {
     return this.entries.filter((e) => e.kind === 'turn').map((e) => e.turnId as string)
   }
+  /** `clientUserMessageId` of every `turn/start` (null when the app sent none). */
+  clientMessageIds(): Array<string | null> {
+    return this.requests('turn/start').map(
+      (r) => (r.params.clientUserMessageId as string | undefined) ?? null
+    )
+  }
+  /** `thread/revert` calls the fake carried out: the turn reverted from and how many went. */
+  reverts(): Array<{ threadId: string; beforeTurnId: string; dropped: number }> {
+    return this.entries
+      .filter((e) => e.kind === 'revert')
+      .map((e) => ({
+        threadId: e.threadId as string,
+        beforeTurnId: e.beforeTurnId as string,
+        dropped: e.dropped as number
+      }))
+  }
+  /** `thread/fork` calls: the source thread, the new one, how many turns it kept. */
+  forks(): Array<{ from: string; threadId: string; kept: number }> {
+    return this.entries
+      .filter((e) => e.kind === 'fork')
+      .map((e) => ({
+        from: e.from as string,
+        threadId: e.threadId as string,
+        kept: e.kept as number
+      }))
+  }
+  /** `thread/compact/start` calls. */
+  compactions(): number {
+    return this.entries.filter((e) => e.kind === 'compact').length
+  }
   /** Turns the fake aborted because of an interrupt. */
   interruptedTurns(): string[] {
     return this.entries.filter((e) => e.kind === 'turn-interrupted').map((e) => e.turnId as string)

@@ -717,6 +717,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.getAutocompleteUsage': none(`${HUB_CONFIG}: slash-command usage counts`),
   'chat.getCliSnapshot': checked(task('taskId')),
   'chat.getCliCommandDetails': checked(task('taskId')),
+  'chat.getModels': checked(task('taskId')),
   'chat.queue.list': checked(tab('tabId')),
   'chat.queue.push': checked(tab('tabId')),
   'chat.queue.remove': checked(ref('chatQueueItem')('id')),

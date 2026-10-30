@@ -21,6 +21,31 @@ export interface ChatModelOption {
   supportsEffort: boolean
 }
 
+/**
+ * A model as the model picker offers it, with what the provider says about it:
+ * Claude's static list, or the CLI's own `model/list` (Codex, `chat.getModels`).
+ */
+export interface ChatModelInfo extends ChatModelOption {
+  /** One line about the model (Codex `description`). */
+  description?: string
+  /** The provider's default for this account (Codex `isDefault`). */
+  isDefault?: boolean
+  /** Reasoning efforts this model accepts, in the CLI's order. Absent: the provider's fixed set. */
+  efforts?: ChatModelEffort[]
+  /** The model's own default effort (Codex `defaultReasoningEffort`). */
+  defaultEffort?: string
+}
+
+/** One reasoning effort a model accepts (Codex: any string the model lists, e.g. `ultra`). */
+export interface ChatModelEffort {
+  /** Value sent to the provider (Codex `turn/start.effort`). */
+  id: string
+  /** Display label (the id, title-cased: `xhigh` → `Xhigh`). */
+  label: string
+  /** The CLI's description of it. */
+  description?: string
+}
+
 const CLAUDE_MODELS: ChatModelOption[] = [
   { id: 'opus', label: 'Opus', supportsEffort: true },
   { id: 'sonnet', label: 'Sonnet', supportsEffort: true },

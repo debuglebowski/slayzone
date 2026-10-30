@@ -59,12 +59,7 @@ test.describe('Codex chat restart', () => {
       )
     ).toBe(true)
 
-    knownBug({
-      fixedBy: 'Codex resume',
-      what:
-        'a restart starts a NEW Codex thread (the first thread id was recorded foreign-observed): Codex forgets ' +
-        'the conversation, and the new session id makes the timeline hide every earlier turn (chat-timeline turn-init restart)'
-    })
+    // X0 bugs #4 + #5 (fixed): the same thread resumes; earlier turns stay shown.
     expect(second.resumedThread).toBe(first.threadId)
     expect(second.requests('thread/start')).toHaveLength(0)
     await expect(t.panel.getByText('about to crash')).toBeVisible({ timeout: 2_000 })
@@ -98,14 +93,16 @@ test.describe('Codex chat restart', () => {
     await t.send('one')
     await expect(t.panel.getByText('echo: one')).toBeVisible()
     await t.page.evaluate(
-      (o) => window.getTrpcVanillaClient().chat.setModel.mutate({ ...o, chatModel: 'gpt-5.4' }),
+      // A model of the CLI's own list (the fake's model/list default).
+      (o) => window.getTrpcVanillaClient().chat.setModel.mutate({ ...o, chatModel: 'gpt-6-luna' }),
       t.opts()
     )
     await t.send('two')
     await expect(t.panel.getByText('echo: two')).toBeVisible()
     const run = await t.run(0, (r) => r.requests('turn/start').length === 2)
-    expect(run.requests('turn/start')[0].params.model).toBe('gpt-5.5')
-    expect(run.requests('turn/start')[1].params.model).toBe('gpt-5.4')
+    // None chosen at first: the account's default runs (no hardcoded model, X0 bug #9).
+    expect(run.requests('turn/start')[0].params).not.toHaveProperty('model')
+    expect(run.requests('turn/start')[1].params.model).toBe('gpt-6-luna')
     expect(t.epoch.runs()).toHaveLength(1)
   })
 
@@ -146,16 +143,29 @@ test.describe('Codex chat restart', () => {
     await t.send('one')
     await expect(t.panel.getByText('echo: one')).toBeVisible()
     const run = await t.run(0)
-    // Precondition: chat sends a model the CLI never listed (chat-model-catalog.ts default).
-    expect(run.requests('turn/start')[0].params.model).toBe('gpt-5.5')
+    // X0 bug #9, server half (fixed by X1): the app asks model/list and, with no
+    // model chosen, names none — the account's default runs, never a hardcoded gpt-5.5.
+    expect(run.requests('model/list').length).toBeGreaterThan(0)
+    expect(run.requests('turn/start')[0].params).not.toHaveProperty('model')
+    // The list is stored for the project and served to the picker (`chat.getModels`).
+    await expect
+      .poll(() =>
+        t.page.evaluate(
+          async (taskId) =>
+            (
+              await window
+                .getTrpcVanillaClient()
+                .chat.getModels.query({ taskId, mode: 'codex-chat' })
+            ).map((m) => m.id),
+          t.taskId
+        )
+      )
+      .toEqual(['gpt-6-luna', 'gpt-6.1-sol'])
 
     knownBug({
-      fixedBy: 'Codex models',
-      what:
-        'the Codex model list is hardcoded (gpt-5.5 default, 5.4, 5.4-mini, 5.3-codex) and model/list is never ' +
-        'asked: on a ChatGPT login every one of them is refused ("not supported when using Codex with a ChatGPT account")'
+      fixedBy: 'Codex models (X2 picker)',
+      what: 'the model picker still lists the hardcoded Codex models, not chat.getModels'
     })
-    expect(run.requests('model/list').length).toBeGreaterThan(0)
     await t.panel.getByRole('button', { name: /^Chat model:/ }).click({ timeout: 2_000 })
     await expect(t.page.getByRole('menuitem', { name: /GPT-6 Luna/ })).toBeVisible({
       timeout: 2_000

@@ -1158,9 +1158,10 @@ test('history that cannot be read: the switch still happens, and the chat says s
   setClaudeSessionReader(null)
 })
 
-test('chat.fork is refused for a chat mode without forks (Codex), and nothing respawns', async () => {
+test('chat.fork is refused for a chat mode without forks, and nothing respawns', async () => {
   const { ops, o, spawns } = await switchSetup()
-  await expect(ops.fork({ ...o, mode: 'codex-chat', messageId: 'm1' })).rejects.toThrow(/fork/i)
+  // Every chat mode forks now (Codex since X1): a mode with no capabilities stands in.
+  await expect(ops.fork({ ...o, mode: 'no-such-chat', messageId: 'm1' })).rejects.toThrow(/fork/i)
   expect(spawns).toHaveLength(1)
   setClaudeSessionReader(null)
 })

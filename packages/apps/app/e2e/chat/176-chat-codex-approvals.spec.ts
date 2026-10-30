@@ -3,12 +3,10 @@
  * server→client requests codex-cli 0.159.2 sends (recipes approval-exec,
  * approval-file) and blocks until the app answers.
  *
- * Today no card is drawn at all: `chat-capabilities.ts` gives codex-chat
- * `promptCards: false`, so the driver's `permission-request` reaches the
- * timeline and nothing answers it — the turn waits forever (audit #1: "Codex
- * approval-required mode can't be used"). Every test asserts its preconditions
- * (the request reached the app), then marks the card as the known bug; the
- * rest of each test is the behaviour once cards exist.
+ * Audit #1 ("Codex approval-required mode can't be used") is fixed: codex-chat
+ * has prompt cards and the driver answers in each request's own vocabulary
+ * (X1). The rows a Codex card offers are still Claude's until X2's Codex prompt
+ * variant lands: the two tests that need Codex's own rows are known bugs.
  */
 import { resetApp } from '../fixtures/electron'
 import {
@@ -27,10 +25,13 @@ const CMD = { id: 'exec-approve', command: 'touch a.txt' }
 /** Once the bug is fixed the card is there at once; short waits keep the expected failure cheap. */
 const CARD_MS = 3_000
 
-const NO_CARD = {
+/** X1 drew the card (promptCards); Codex's own rows are X2's (prompt dock Codex variant). */
+const CLAUDE_ROWS = {
   audit: '#1',
-  fixedBy: 'Codex approvals',
-  what: 'no approval card for Codex (codex-chat promptCards:false): the request is never answered, the turn hangs'
+  fixedBy: 'Codex approval rows (X2)',
+  what:
+    "a Codex request gets Claude's rows: its No denies + stops the turn (cancel, not decline) and no " +
+    'allow-for-this-session row is offered'
 }
 
 /** Precondition of every card test: the fake asked, and the app has the request. */
@@ -72,7 +73,7 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('make a file')
     await requestArrived(t)
-    knownBug(NO_CARD)
+    // X0 bug #1 (fixed by X1): the request has a card, and its answer reaches Codex.
     const yes = t.panel.getByRole('button', { name: /^Yes$/ })
     await yes.click({ timeout: CARD_MS })
     await expect(t.panel.getByText('Created a.txt.')).toBeVisible()
@@ -96,7 +97,7 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('make a file')
     await requestArrived(t)
-    knownBug(NO_CARD)
+    knownBug(CLAUDE_ROWS)
     await t.panel.getByRole('button', { name: /^No$/ }).click({ timeout: CARD_MS })
     const run = await t.run(0, (r) => r.requestReplies().length === 1)
     expect(run.requestReplies()[0].decision).toBe('decline')
@@ -113,7 +114,7 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('make a file')
     await requestArrived(t)
-    knownBug(NO_CARD)
+    // X0 bug #1 (fixed by X1): the request has a card, and its answer reaches Codex.
     await expect(t.panel.getByRole('button', { name: /^Yes$/ })).toBeVisible({ timeout: CARD_MS })
     // Once drawn: the generic "Tool use" card would title it with the raw
     // JSON-RPC method (prompt-options.ts default branch) — it must show the command.
@@ -132,7 +133,7 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('make a file')
     await requestArrived(t)
-    knownBug(NO_CARD)
+    knownBug(CLAUDE_ROWS)
     await expect(t.panel.getByRole('button', { name: /^Yes$/ })).toBeVisible({ timeout: CARD_MS })
     // Once drawn: the request offers acceptForSession (`availableDecisions`), and
     // the driver must send it (codex-chat-session.fake.test.ts has the driver half).
@@ -171,7 +172,7 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('write x')
     await requestArrived(t)
-    knownBug(NO_CARD)
+    // X0 bug #1 (fixed by X1): the request has a card, and its answer reaches Codex.
     await t.panel.getByRole('button', { name: /^Yes$/ }).click({ timeout: CARD_MS })
     await expect(t.panel.getByText('Wrote x.txt.')).toBeVisible()
     const run = await t.run(0, (r) => r.requestReplies().length === 1)
@@ -210,7 +211,7 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('legacy patch')
     await requestArrived(t)
-    knownBug(NO_CARD)
+    // X0 bug #1 (fixed by X1): the request has a card, and its answer reaches Codex.
     await t.panel.getByRole('button', { name: /^Yes$/ }).click({ timeout: CARD_MS })
     const run = await t.run(0, (r) => r.requestReplies().length === 1)
     await expect(t.panel.getByText('Legacy answered.')).toBeVisible()

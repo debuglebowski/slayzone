@@ -16,6 +16,21 @@ import { E2E_OWNER_ENV } from './stale-processes'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/**
+ * Codex's own home (`config.toml` with the trust entry it writes for every cwd
+ * it starts a thread in, sessions, history, login) — per worker, like the hook
+ * paths above: a real `codex` an e2e starts (login-shell PTYs of the terminal
+ * codex specs) never writes the developer's ~/.codex. `SLAYZONE_E2E_REAL_CODEX_HOME=1`
+ * (opt-in, real-CLI runs only; fake-codex README) keeps the real home — its
+ * login is what such a run needs. Read here only.
+ */
+function codexHomeEnv(userDataDir: string): { CODEX_HOME?: string } {
+  if (process.env.SLAYZONE_E2E_REAL_CODEX_HOME === '1') return {}
+  const dir = path.join(userDataDir, '.codex')
+  fs.mkdirSync(dir, { recursive: true })
+  return { CODEX_HOME: dir }
+}
 const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
 const MAIN_JS = path.join(APP_DIR, 'out', 'main', 'index.js')
@@ -413,6 +428,7 @@ async function launchElectronWithRetry(args: {
           SLAYZONE_CLAUDE_SETTINGS_PATH: path.join(args.userDataDir, '.claude', 'settings.json'),
           SLAYZONE_GEMINI_SETTINGS_PATH: path.join(args.userDataDir, '.gemini', 'settings.json'),
           SLAYZONE_CODEX_HOOKS_PATH: path.join(args.userDataDir, '.codex', 'hooks.json'),
+          ...codexHomeEnv(args.userDataDir),
           SLAYZONE_ANTIGRAVITY_HOOKS_PATH: path.join(
             args.userDataDir,
             '.gemini',

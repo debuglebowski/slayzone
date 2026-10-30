@@ -178,6 +178,23 @@ export interface ChatDriverContext {
   chatCollaboration: string | null
   /** Whether Codex Fast Mode (`serviceTier: 'fast'`) is enabled for this spawn. */
   chatFastMode: boolean
+  /**
+   * Start as a new conversation branched off `fromSessionId` at `atMessageUuid`
+   * (see `AgentSpawnOpts.fork`): for a CLI forking over its protocol (Codex).
+   */
+  fork?: { fromSessionId: string; atMessageUuid: string }
+  /**
+   * The tab switched to this conversation (Sessions picker) and has none of its
+   * past: the driver reads it from the CLI (Codex `thread/turns/list`) and hands
+   * it over with `addHistory`. Claude's history is read from its session file
+   * by the host instead.
+   */
+  importHistory?: boolean
+  /**
+   * Commit a conversation's past to the tab as history (user messages marked
+   * `history: true`), in order, before anything the process says next.
+   */
+  addHistory?(events: AgentEvent[]): void
 }
 
 /**
@@ -264,6 +281,24 @@ export interface ChatSessionDriver {
  */
 export interface AgentBackend {
   readonly binaryName: string
+  /** The agent's name in chat's own notices ("Claude Code", "Codex"). */
+  readonly displayName: string
+  /** The command that updates the CLI, for notices (`claude update`). */
+  readonly updateCommand: string
+  /**
+   * The CLI mints the conversation id itself (Codex `thread/start`): the first
+   * id a fresh or forked spawn reports becomes the tab's conversation. Without
+   * it the host picks the id up front (`--session-id`) and any other id the CLI
+   * reports is foreign.
+   */
+  readonly mintsConversationId?: boolean
+  /**
+   * Where a fork is made: `assistant-record` (default; Claude's
+   * `--resume-session-at <uuid>`) or `message` — through the user message's
+   * whole turn (Codex `thread/fork {lastTurnId}`, the turn found by the
+   * message id). `AgentSpawnOpts.fork.atMessageUuid` is then the message id.
+   */
+  readonly forkAt?: 'assistant-record' | 'message'
   /**
    * Oldest CLI version chat is tested with. An older one still runs; the chat
    * shows an "untested version" notice. One constant per provider, easy to lower.

@@ -127,6 +127,7 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
     const kinds = l.events.map((e) => e.kind)
     expect(kinds).toEqual([
       'turn-init',
+      'cli-models',
       'stream-message-start',
       'stream-block-start',
       'stream-block-delta',
@@ -135,6 +136,7 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
       'stream-block-delta',
       'stream-block-stop',
       'stream-message-stop',
+      'context-usage',
       'result'
     ])
     const text = l.events
@@ -238,13 +240,47 @@ describe('CodexChatSession — open bugs (X0)', () => {
     await new Promise((r) => setTimeout(r, 900))
     const run = fake.current().run(0)!
     expect(run.turnIds()).toHaveLength(1)
-    await expectKnownBug(
-      {
-        fixedBy: 'Codex stop',
-        what: 'Stop before the turn/start reply sends no turn/interrupt (audit: Codex Stop does nothing)'
-      },
-      () => expect(run.interrupts().map((i) => i.turnId)).toEqual([run.turnIds()[0]])
+    // Audit "Codex Stop does nothing": the interrupt waits for the id, then goes.
+    expect(run.interrupts().map((i) => i.turnId)).toEqual([run.turnIds()[0]])
+    expect(l.events.find(isResult)).toMatchObject({ subtype: 'interrupted' })
+  })
+
+  it('a message is sent with its id (clientUserMessageId), so its turn can be found again', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')] }] })
+    await l.driver.sendUserTurn!({ id: 'msg-1', content: [{ type: 'text', text: 'hi' }] })
+    await l.waitFor(isResult)
+    const run = fake.current().run(0)!
+    expect(run.userTexts()).toEqual(['hi'])
+    expect(run.clientMessageIds()).toEqual(['msg-1'])
+  })
+
+  it('Stop before any output, then forget the message: its turn is reverted (rewind_conversation)', async () => {
+    const l = await live({
+      processes: [{ turns: [codexReply('one')], defaultTurn: [cstep.hang()] }]
+    })
+    await l.driver.sendUserTurn!({ id: 'msg-1', content: [{ type: 'text', text: 'first' }] })
+    await l.waitFor(isResult)
+    await l.driver.sendUserTurn!({ id: 'msg-2', content: [{ type: 'text', text: 'second' }] })
+    await l.driver.applyControl({ subtype: 'interrupt' }, 2000)
+    const res = await l.driver.applyControl(
+      { subtype: 'rewind_conversation', target_message_uuid: 'msg-2' },
+      2000
     )
+    expect(res).toEqual({ response: { rewound: true, prefillText: 'second' } })
+    const run = fake.current().run(0)!
+    expect(run.reverts()).toEqual([
+      { threadId: run.threadId, beforeTurnId: run.turnIds()[1], dropped: 1 }
+    ])
+  })
+
+  it('forgetting a message the thread never had answers target_not_found', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')] }] })
+    const res = await l.driver.applyControl(
+      { subtype: 'rewind_conversation', target_message_uuid: 'nope' },
+      2000
+    )
+    expect(res).toEqual({ response: { rewound: false, reason: 'target_not_found' } })
+    expect(fake.current().run(0)!.reverts()).toEqual([])
   })
 
   it('"always allow" answers acceptForSession', async () => {
@@ -263,21 +299,12 @@ describe('CodexChatSession — open bugs (X0)', () => {
     await l.waitFor((e) => e.kind === 'permission-request')
     l.driver.respondPermission({
       requestId: '0',
-      decision: {
-        behavior: 'allow',
-        updatedPermissions: [{ type: 'addRules', destination: 'session' }]
-      }
+      decision: { behavior: 'allow', scope: 'session' }
     })
     await l.waitFor(isResult)
     const run = fake.current().run(0)!
     expect(run.requestReplies()).toHaveLength(1)
-    await expectKnownBug(
-      {
-        fixedBy: 'Codex approvals',
-        what: 'allow-for-session is sent as plain accept (acceptForSession never used)'
-      },
-      () => expect(run.requestReplies()[0].decision).toBe('acceptForSession')
-    )
+    expect(run.requestReplies()[0].decision).toBe('acceptForSession')
   })
 
   it('a request the server withdrew (serverRequest/resolved after an interrupt) cancels its card', async () => {
@@ -291,15 +318,8 @@ describe('CodexChatSession — open bugs (X0)', () => {
     await l.waitFor(isResult)
     await new Promise((r) => setTimeout(r, 200))
     expect(fake.current().run(0)!.sentMethods()).toContain('serverRequest/resolved')
-    await expectKnownBug(
-      {
-        fixedBy: 'Codex approvals',
-        what: 'serverRequest/resolved ignored: the withdrawn approval stays pending'
-      },
-      () =>
-        expect(l.events.some((e) => e.kind === 'permission-cancelled' && e.requestId === '0')).toBe(
-          true
-        )
+    expect(l.events.some((e) => e.kind === 'permission-cancelled' && e.requestId === '0')).toBe(
+      true
     )
   })
 
@@ -345,10 +365,7 @@ describe('CodexChatSession — open bugs (X0)', () => {
       { kind: 'error' }
     >
     expect(err.message).toContain('not supported')
-    await expectKnownBug(
-      { fixedBy: 'Codex errors', what: 'error notifications show the raw API JSON as the message' },
-      () => expect(err.message.trimStart().startsWith('{')).toBe(false)
-    )
+    expect(err.message.trimStart().startsWith('{')).toBe(false)
   })
 
   it('a resume that fails for another reason than a missing thread is not reported as "not found"', async () => {
@@ -357,22 +374,27 @@ describe('CodexChatSession — open bugs (X0)', () => {
     })
     const shown = await l.waitFor((e) => e.kind === 'stderr' || e.kind === 'error')
     const text = shown.kind === 'stderr' ? shown.text : shown.kind === 'error' ? shown.message : ''
-    await expectKnownBug(
-      {
-        audit: '#2',
-        fixedBy: 'Codex resume',
-        what: 'any thread/resume error (timeout, network) is reported as "No conversation found" → the conversation is dropped'
-      },
-      () => expect(text).not.toMatch(/no conversation found/i)
-    )
+    // Audit #2: only a missing thread may read as "not found" (a fresh start).
+    expect(text).not.toMatch(/no conversation found/i)
+    expect(shown).toMatchObject({
+      kind: 'error',
+      detail: { phase: 'resume', fatal: true, reason: 'stream disconnected before completion' }
+    })
+  })
+
+  it('a thread the server does not have is reported as "not found" (recipe resume-missing)', async () => {
+    const l = await liveResume({}, [])
+    const shown = await l.waitFor((e) => e.kind === 'stderr' || e.kind === 'error')
+    expect(shown).toMatchObject({ kind: 'stderr' })
+    expect(shown.kind === 'stderr' && shown.text).toMatch(/no conversation found/i)
   })
 })
 
-/** Resume of a stored thread whose `thread/resume` answers `reply`. */
-async function liveResume(reply: Json): Promise<Live> {
+/** Resume of a stored thread whose `thread/resume` answers `reply` (`threads`: what the server has). */
+async function liveResume(reply: Json, threads: string[] = ['stored-thread']): Promise<Live> {
   fake.setScenario({
     processes: [{ handshake: { threadResume: reply } }],
-    threads: ['stored-thread']
+    threads
   })
   const child = spawn(path.join(fake.binDir, 'codex'), ['app-server'], {
     cwd: root,
@@ -420,3 +442,49 @@ async function liveResume(reply: Json): Promise<Live> {
     }
   }
 }
+
+describe('CodexChatSession — thread commands', () => {
+  it('/compact runs thread/compact/start: compact-status started → boundary + succeeded → result', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')] }] })
+    await l.driver.sendUserTurn!({ id: 'msg-c', content: [{ type: 'text', text: '/compact' }] })
+    await l.waitFor(isResult)
+    const run = fake.current().run(0)!
+    expect(run.compactions()).toBe(1)
+    expect(run.requests('turn/start')).toHaveLength(0)
+    const kinds = l.events
+      .map((e) => e.kind)
+      .filter((k) => k.startsWith('compact') || k === 'result')
+    expect(kinds).toEqual(['compact-status', 'compact-boundary', 'compact-status', 'result'])
+    expect(l.events.filter((e) => e.kind === 'compact-status')).toEqual([
+      { kind: 'compact-status', phase: 'started' },
+      { kind: 'compact-status', phase: 'succeeded' }
+    ])
+    expect(l.events.find((e) => e.kind === 'compact-boundary')).toEqual({
+      kind: 'compact-boundary',
+      trigger: 'manual'
+    })
+  })
+
+  it('rewind before a message gives its text back (edit & resend)', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one'), codexReply('two')] }] })
+    await l.driver.sendUserTurn!({ id: 'm1', content: [{ type: 'text', text: 'first' }] })
+    await l.waitFor(isResult)
+    await l.driver.sendUserTurn!({ id: 'm2', content: [{ type: 'text', text: 'second' }] })
+    await l.waitFor((e) => e.kind === 'result' && l.events.filter(isResult).length === 2)
+    const res = await l.driver.applyControl(
+      { subtype: 'rewind_conversation', target_message_uuid: 'm2' },
+      2000
+    )
+    expect(res).toEqual({ response: { rewound: true, prefillText: 'second' } })
+  })
+
+  it('Codex keeps no file checkpoints: rewind_files says so (nothing to restore)', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')] }] })
+    const res = await l.driver.applyControl(
+      { subtype: 'rewind_files', user_message_id: 'm1', dry_run: true },
+      2000
+    )
+    expect(res).toMatchObject({ response: { canRewind: false } })
+    expect((res as { response: { error: string } }).response.error).toMatch(/Codex/)
+  })
+})

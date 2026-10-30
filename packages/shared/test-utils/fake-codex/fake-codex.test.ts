@@ -323,8 +323,9 @@ describe('fake codex app-server — turns', () => {
     })
     const p = start()
     expect((await p.request('model/list', {})).result).toEqual({ data: [] })
-    expect((await p.request('thread/fork', {})).error).toMatchObject({ code: -32601 })
-    expect((await epoch.waitForRun(0)).unknownMethods()).toEqual(['thread/fork'])
+    // thread/fork is implemented now (X1); an API chat never calls stands in.
+    expect((await p.request('thread/archive', {})).error).toMatchObject({ code: -32601 })
+    expect((await epoch.waitForRun(0)).unknownMethods()).toEqual(['thread/archive'])
   })
 })
 
@@ -506,5 +507,47 @@ describe('fake codex app-server — replay', () => {
     const run = await epoch.waitForRun(0)
     // The recording declined (turn 3); the replay continues with the recorded output.
     expect(run.replayMismatches()).toEqual([{ requestId: 2, recorded: 'decline', got: 'accept' }])
+  })
+})
+
+describe('fake codex app-server — thread commands (X1)', () => {
+  it('turns are kept by clientUserMessageId; revert, fork and turns/list agree', async () => {
+    const epoch = fake.setScenario({
+      processes: [{ turns: [codexReply('one'), codexReply('two')] }]
+    })
+    const p = start()
+    await p.request('initialize', {})
+    const thread = (
+      (await p.request('thread/start', { cwd: root })).result as {
+        thread: { id: string }
+      }
+    ).thread.id
+    for (const [text, id] of [
+      ['first', 'm1'],
+      ['second', 'm2']
+    ]) {
+      await p.request('turn/start', {
+        threadId: thread,
+        input: [{ type: 'text', text, text_elements: [] }],
+        clientUserMessageId: id
+      })
+      await p.waitFor(
+        (m) =>
+          m.method === 'turn/completed' &&
+          p.lines.filter((l) => l.method === 'turn/completed').length === Number(id[1])
+      )
+    }
+    const list = (await p.request('thread/turns/list', { threadId: thread, sortDirection: 'asc' }))
+      .result as { data: Array<{ id: string; items: Array<{ clientId: string }> }> }
+    expect(list.data.map((t) => t.items[0].clientId)).toEqual(['m1', 'm2'])
+    const forked = (
+      await p.request('thread/fork', { threadId: thread, lastTurnId: list.data[0].id })
+    ).result as { thread: { id: string; forkedFromId: string } }
+    expect(forked.thread.forkedFromId).toBe(thread)
+    await p.request('thread/revert', { threadId: thread, beforeTurnId: list.data[1].id })
+    const run = await epoch.waitForRun(0)
+    expect(run.clientMessageIds()).toEqual(['m1', 'm2'])
+    expect(run.forks()).toEqual([{ from: thread, threadId: forked.thread.id, kept: 1 }])
+    expect(run.reverts()).toEqual([{ threadId: thread, beforeTurnId: list.data[1].id, dropped: 1 }])
   })
 })

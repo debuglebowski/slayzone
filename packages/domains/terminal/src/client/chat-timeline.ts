@@ -1807,6 +1807,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     }
     case 'cli-command-details':
       return { ...state, cliCommandDetails: cliCommandDetailsFromList(event.commands) }
+    case 'cli-models':
+      // Read through `chat.getModels` (stored per project), not the timeline.
+      return state
+    case 'context-usage':
+      // X2 replaces this with the meter case.
+      return state
     case 'user-message-delivery':
       return applyTransportEvent(state, event, ts)
     case 'session-spawn':

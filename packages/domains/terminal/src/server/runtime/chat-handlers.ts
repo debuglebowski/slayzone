@@ -79,7 +79,11 @@ import {
   chatOwnsSpawnFlags,
   stripChatOwnedFlags
 } from '@slayzone/terminal-contracts'
-import { defaultModelForMode, isValidModelForMode } from '@slayzone/terminal-contracts'
+import {
+  isValidModelForMode,
+  modelsForMode,
+  type ChatModelInfo
+} from '@slayzone/terminal-contracts'
 import { defaultChatModeForMode, isValidChatModeForMode } from '@slayzone/terminal-contracts'
 import { chatEffortToFlags, isChatEffort, type ChatEffort } from '@slayzone/terminal-contracts'
 import {
@@ -324,7 +328,7 @@ async function buildHydrateOpts(
     fresh: boolean
     chatModeOverride?: string
     chatModelOverride?: string
-    chatEffortOverride?: ChatEffort | null
+    chatEffortOverride?: string | null
     chatCollaborationOverride?: ChatCollaborationMode | null
     chatFastModeOverride?: boolean
   }
@@ -367,18 +371,22 @@ async function buildHydrateOpts(
   }
 
   // Resolve the model: override > stored (validated against the mode's
-  // catalog) > provider default. `codex-chat` defaults to a Codex model;
-  // claude-chat falls back to the account default from ~/.claude/settings.json.
-  const storedChatModel = isValidModelForMode(opts.mode, providerCfg.chatModel)
-    ? providerCfg.chatModel
-    : null
-  const resolvedChatModel: string =
+  // catalog) > provider default. codex-chat: the models its CLI reported for
+  // the account, and no model at all by default (the CLI runs the account's
+  // own); claude-chat falls back to the account default from ~/.claude/settings.json.
+  const storedChatModel =
+    opts.mode === 'codex-chat'
+      ? (await codexModelOffered(data, opts.taskId, providerCfg.chatModel))
+        ? (providerCfg.chatModel as string)
+        : null
+      : isValidModelForMode(opts.mode, providerCfg.chatModel)
+        ? providerCfg.chatModel
+        : null
+  const resolvedChatModel: string | null =
     chatModelOverride ??
     storedChatModel ??
-    (opts.mode === 'codex-chat'
-      ? defaultModelForMode(opts.mode)
-      : await resolveAccountDefaultModel())
-  const resolvedChatEffort: ChatEffort | null =
+    (opts.mode === 'codex-chat' ? null : await resolveAccountDefaultModel())
+  const resolvedChatEffort: string | null =
     chatEffortOverride !== undefined ? chatEffortOverride : (providerCfg.chatEffort ?? null)
   // Collaboration mode (Codex `plan`/`default`). Only codex-chat carries it;
   // for other providers it stays null and the driver omits `collaborationMode`.
@@ -402,15 +410,18 @@ async function buildHydrateOpts(
     const extraFlags = opts.providerFlagsOverride ?? providerCfg.flags ?? ''
     providerFlags = [
       ...providerFlags,
-      ...chatModelToFlags(resolvedChatModel),
-      ...chatEffortToFlags(resolvedChatEffort),
+      ...(resolvedChatModel ? chatModelToFlags(resolvedChatModel) : []),
+      ...chatEffortToFlags(isChatEffort(resolvedChatEffort) ? resolvedChatEffort : null),
       ...stripChatOwnedFlags(parseShellArgs(extraFlags))
     ]
   } else {
     const usedExplicitFlags = !chatModeOverride && (opts.providerFlagsOverride || providerCfg.flags)
-    if (!usedExplicitFlags && opts.mode !== 'codex-chat') {
+    if (!usedExplicitFlags && opts.mode !== 'codex-chat' && resolvedChatModel) {
       providerFlags = [...providerFlags, ...chatModelToFlags(resolvedChatModel)]
-      providerFlags = [...providerFlags, ...chatEffortToFlags(resolvedChatEffort)]
+      providerFlags = [
+        ...providerFlags,
+        ...chatEffortToFlags(isChatEffort(resolvedChatEffort) ? resolvedChatEffort : null)
+      ]
     }
   }
 
@@ -500,6 +511,36 @@ export type ClaudeSessionReader = (req: {
 }) => Promise<{ found: boolean; records: Array<Record<string, unknown>>; omitted: number }>
 
 let claudeSessionReader: ClaudeSessionReader | null = null
+/**
+ * Whether `model` is one the task's project's Codex CLI offers (its last
+ * `model/list`). Before any Codex process reported, any non-empty id passes:
+ * the driver checks it against the list at the next handshake.
+ */
+async function codexModelOffered(
+  data: ChatDataOps,
+  taskId: string,
+  model: unknown
+): Promise<boolean> {
+  if (typeof model !== 'string' || !model) return false
+  const models = await data.getCliModels(taskId, 'codex-chat').catch(() => null)
+  return !models?.length || models.some((m) => m.id === model)
+}
+
+/** Efforts Codex knows before its CLI listed any model's (0.159.2). */
+const CODEX_KNOWN_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+
+/** Whether `effort` is one a model of the project's Codex CLI offers (its last `model/list`). */
+async function codexEffortOffered(
+  data: ChatDataOps,
+  taskId: string,
+  effort: unknown
+): Promise<boolean> {
+  if (typeof effort !== 'string' || !effort) return false
+  const models = await data.getCliModels(taskId, 'codex-chat').catch(() => null)
+  if (!models?.length) return CODEX_KNOWN_EFFORTS.includes(effort)
+  return models.some((m) => m.efforts?.some((e) => e.id === effort))
+}
+
 export function setClaudeSessionReader(fn: ClaudeSessionReader | null): void {
   claudeSessionReader = fn
 }
@@ -619,8 +660,24 @@ export function createChatOps(opts: ChatHandlerOpts) {
   // live-only events: stored per project + mode here, so the `/` menu shows them
   // before the next session starts. Each spawn repeats them; only a change is written.
   const storedCliDetails = new Map<string, CliCommandDetails>()
+  // The models the CLI offers (Codex `model/list`, live-only like the details):
+  // stored per project + mode for `getModels`; only a change is written.
+  const storedCliModels = new Map<string, string>()
   if (cliDetailsListener) chatEvents.off('event', cliDetailsListener)
   cliDetailsListener = (tabId, event) => {
+    if (event.kind === 'cli-models') {
+      const info = getSessionInfo(tabId)
+      if (!info) return
+      const key = `${info.taskId}\u0000${info.mode}`
+      const json = JSON.stringify(event.models)
+      if (storedCliModels.get(key) === json) return
+      storedCliModels.set(key, json)
+      data.saveCliModels(info.taskId, info.mode, event.models).catch((err: unknown) => {
+        storedCliModels.delete(key)
+        console.error('[chat-handlers] saveCliModels failed:', err)
+      })
+      return
+    }
     if (event.kind !== 'cli-command-details') return
     const info = getSessionInfo(tabId)
     if (!info) return
@@ -976,7 +1033,12 @@ export function createChatOps(opts: ChatHandlerOpts) {
       }
       // A hand-off: a terminal still running it stops (exit awaited) first.
       if (!sameMode) await releaseConversation('terminal', o.taskId, o.conversationId)
-      const loaded = await loadConversationHistory(data, o, o.conversationId)
+      // Codex: its CLI hands the past over when it resumes the thread (the
+      // driver's `thread/turns/list`); Claude's is read from its session file.
+      const fromAgent = o.mode === 'codex-chat'
+      const loaded: Awaited<ReturnType<typeof loadConversationHistory>> = fromAgent
+        ? { history: [], notices: [] }
+        : await loadConversationHistory(data, o, o.conversationId)
       await data.recordConversation({
         taskId: o.taskId,
         mode: o.mode,
@@ -997,6 +1059,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
         },
         history: loaded.history,
         notices: loaded.notices,
+        historyFromAgent: fromAgent,
         respawnOpts: { ...built, conversationId: o.conversationId }
       })
       const info = getSessionInfo(o.tabId)
@@ -1235,16 +1298,26 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getModel: async (taskId: string, mode: string): Promise<string> => {
       const cfg = await data.readProviderConfig(taskId, mode)
       const stored = cfg.chatModel
+      // codex-chat: a stored model the account offers, else the account's
+      // default from the CLI's list; '' = not known yet (no Codex process ran
+      // for the project), the CLI then runs the account's own default.
+      if (mode === 'codex-chat') {
+        if (await codexModelOffered(data, taskId, stored)) return stored as string
+        const models = await data.getCliModels(taskId, mode).catch(() => null)
+        return (models?.find((m) => m.isDefault) ?? models?.[0])?.id ?? ''
+      }
       if (isValidModelForMode(mode, stored)) return stored
-      // No (or legacy/invalid) stored value → provider default. codex-chat uses
-      // its own default; claude-chat resolves the account default from
+      // No (or legacy/invalid) stored value → the account default from
       // `~/.claude/settings.json` (Pro → sonnet, Max → opus, …).
-      if (mode === 'codex-chat') return defaultModelForMode(mode)
       return resolveAccountDefaultModel()
     },
 
     setModel: async (o: ChatCreateOpts & { chatModel: string }): Promise<ChatSessionInfo> => {
-      if (!isValidModelForMode(o.mode, o.chatModel)) {
+      const valid =
+        o.mode === 'codex-chat'
+          ? await codexModelOffered(data, o.taskId, o.chatModel)
+          : isValidModelForMode(o.mode, o.chatModel)
+      if (!valid) {
         throw new Error(`Invalid chat model for mode ${o.mode}: ${String(o.chatModel)}`)
       }
 
@@ -1291,9 +1364,13 @@ export function createChatOps(opts: ChatHandlerOpts) {
       return created
     },
 
-    getEffort: async (taskId: string, mode: string): Promise<ChatEffort | null> => {
+    /** Claude: a `ChatEffort`. Codex: any effort its CLI's models list (`ultra`, …). */
+    getEffort: async (taskId: string, mode: string): Promise<string | null> => {
       const cfg = await data.readProviderConfig(taskId, mode)
-      const stored = cfg.chatEffort ?? null
+      const stored: unknown = cfg.chatEffort ?? null
+      if (mode === 'codex-chat') {
+        return (await codexEffortOffered(data, taskId, stored)) ? (stored as string) : null
+      }
       return isChatEffort(stored) ? stored : null
     },
 
@@ -1301,7 +1378,11 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // pass a structurally-validated string without an `as never` cast; the
     // value guard below narrows it + owns the vocabulary (single source).
     setEffort: async (o: ChatCreateOpts & { chatEffort: string }): Promise<ChatSessionInfo> => {
-      if (!isChatEffort(o.chatEffort)) {
+      const valid =
+        o.mode === 'codex-chat'
+          ? await codexEffortOffered(data, o.taskId, o.chatEffort)
+          : isChatEffort(o.chatEffort)
+      if (!valid) {
         throw new Error(`Invalid chat effort: ${String(o.chatEffort)}`)
       }
       // Pre-spawn: DB write + skeleton mutation. Effort flag takes effect on
@@ -1498,6 +1579,21 @@ export function createChatOps(opts: ChatHandlerOpts) {
       } catch (err) {
         console.error('[chat-handlers] getCliCommandDetails failed:', err)
         return null
+      }
+    },
+
+    /**
+     * The models the mode offers. Claude: the fixed list. Codex: what its CLI
+     * last reported for the task's project (`model/list`); [] until a Codex
+     * process ran there once (the CLI's own default model applies).
+     */
+    getModels: async (taskId: string, mode: string): Promise<ChatModelInfo[]> => {
+      if (mode !== 'codex-chat') return modelsForMode(mode)
+      try {
+        return (await data.getCliModels(taskId, mode)) ?? []
+      } catch (err) {
+        console.error('[chat-handlers] getCliModels failed:', err)
+        return []
       }
     }
   }

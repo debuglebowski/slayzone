@@ -80,12 +80,7 @@ test.describe('Codex chat turn', () => {
       .poll(async () => (await t.conversations()).map((c) => c.conversationId))
       .toContain(run.threadId)
 
-    knownBug({
-      fixedBy: 'Codex resume',
-      what:
-        'a fresh Codex thread id is recorded as foreign-observed (it differs from the skeleton id the ' +
-        'transport spawned with), so it is never honored: the next spawn starts a new conversation'
-    })
+    // X0 bug #4 (fixed): the id Codex minted is the tab's own conversation.
     const row = (await t.conversations()).find((c) => c.conversationId === run.threadId)
     expect(row?.origin).toBe('slay-spawned-fresh')
     expect(await t.storedThread()).toBe(run.threadId)
@@ -252,12 +247,9 @@ test.describe('Codex chat turn', () => {
       home: process.env.HOME ?? null
     }))
     expect(env.home).toBeTruthy()
-    knownBug({
-      fixedBy: 'e2e infra',
-      what:
-        'fixtures/electron.ts redirects the Claude/Gemini/Codex HOOK paths but sets no CODEX_HOME: a real codex an e2e spawns ' +
-        '(login-shell PTYs of the terminal codex specs) writes trust entries, sessions and history into the real ~/.codex'
-    })
+    // A real codex an e2e starts writes trust entries, sessions and history into
+    // CODEX_HOME: the worker's own, never the developer's ~/.codex (X0 bug #16).
     expect(env.codexHome).toMatch(/\.e2e-runtime/)
+    expect(env.codexHome).not.toBe(`${env.home}/.codex`)
   })
 })

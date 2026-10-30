@@ -179,6 +179,16 @@ async function onRequest(msg) {
       return startTurn(id, params)
     case 'turn/interrupt':
       return interrupt(id, params)
+    case 'model/list':
+      return respondWith(id, override, () => ({ data: DEFAULT_MODELS, nextCursor: null }))
+    case 'thread/turns/list':
+      return respondWith(id, override, () => turnsPage(params))
+    case 'thread/revert':
+      return respondWith(id, override, () => revertThread(params))
+    case 'thread/fork':
+      return respondWith(id, override, () => forkThread(params))
+    case 'thread/compact/start':
+      return compactThread(id, params, override)
     default:
       if (override !== undefined) return respondWith(id, override, () => ({}))
       log('unknown-method', { method })
@@ -253,6 +263,154 @@ function saveThread(id) {
   )
 }
 
+/**
+ * A thread's turns (`{id, clientId, text}`), kept per epoch — one test's turns
+ * never reach another's, and keeping them never makes a thread "known".
+ */
+const turnsDir = path.join(stateDir, 'epochs', epoch ?? 'none', 'turns')
+
+/** The thread's turns; null when the server has no such thread. */
+function threadTurns(id) {
+  if (!isKnownThread(id)) return null
+  try {
+    return JSON.parse(fs.readFileSync(path.join(turnsDir, `${id}.json`), 'utf8'))
+  } catch {
+    return []
+  }
+}
+
+function saveTurns(id, turns) {
+  fs.mkdirSync(turnsDir, { recursive: true })
+  fs.writeFileSync(path.join(turnsDir, `${id}.json`), JSON.stringify(turns))
+}
+
+function recordTurn(turnId, params, text) {
+  if (!ctx.threadId) return
+  const turns = threadTurns(ctx.threadId) ?? []
+  turns.push({ id: turnId, clientId: params?.clientUserMessageId ?? null, text })
+  saveTurns(ctx.threadId, turns)
+}
+
+/**
+ * The models `model/list` answers by default: codex-cli 0.159.2's list for the
+ * recording account, in its order (2026-10-30; default `gpt-6.1-sol`).
+ */
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const DEFAULT_MODELS = [
+  ['gpt-6.1-sol', 'GPT-6.1-Sol', true, 'low', [...EFFORTS, 'ultra']],
+  ['gpt-6-astra', 'GPT-6-Astra', false, 'low', [...EFFORTS, 'ultra']],
+  ['gpt-6-luna', 'GPT-6-Luna', false, 'medium', EFFORTS]
+].map(([id, displayName, isDefault, defaultReasoningEffort, efforts]) => ({
+  id,
+  model: id,
+  displayName,
+  description: `${displayName} (fake)`,
+  hidden: false,
+  isDefault,
+  defaultReasoningEffort,
+  supportedReasoningEfforts: efforts.map((reasoningEffort) => ({
+    reasoningEffort,
+    description: `${reasoningEffort} effort`
+  })),
+  upgrade: null
+}))
+
+/** `thread/turns/list` (codex-cli 0.159.2: newest first unless `sortDirection: 'asc'`). */
+function turnsPage(params) {
+  const turns = threadTurns(params?.threadId)
+  if (turns === null) {
+    return { error: { code: -32600, message: `thread not found: ${params?.threadId}` } }
+  }
+  const data = turns.map((t) => ({
+    id: t.id,
+    status: 'completed',
+    error: null,
+    itemsView: 'full',
+    items: [
+      {
+        type: 'userMessage',
+        id: `user-${t.id}`,
+        clientId: t.clientId,
+        content: [{ type: 'text', text: t.text, text_elements: [] }]
+      }
+    ]
+  }))
+  if (params?.sortDirection !== 'asc') data.reverse()
+  return { data, nextCursor: null }
+}
+
+/** `thread/revert`: drop `beforeTurnId` and every later turn (recipe thread-commands). */
+function revertThread(params) {
+  const turns = threadTurns(params?.threadId)
+  const at = turns ? turns.findIndex((t) => t.id === params?.beforeTurnId) : -1
+  if (at < 0) {
+    return { error: { code: -32600, message: `turn not found: ${params?.beforeTurnId}` } }
+  }
+  log('revert', {
+    threadId: params.threadId,
+    beforeTurnId: params.beforeTurnId,
+    dropped: turns.length - at
+  })
+  saveTurns(params.threadId, turns.slice(0, at))
+  return { thread: { ...threadObject(), id: params.threadId, turns: [] } }
+}
+
+/** `thread/fork`: a new thread with the source's turns through `lastTurnId` (or before `beforeTurnId`). */
+function forkThread(params) {
+  const source = params?.threadId
+  const turns = threadTurns(source)
+  if (turns === null)
+    return { error: { code: -32600, message: `no rollout found for thread id ${source}` } }
+  let keep = turns
+  if (params.lastTurnId)
+    keep = turns.slice(0, turns.findIndex((t) => t.id === params.lastTurnId) + 1)
+  else if (params.beforeTurnId)
+    keep = turns.slice(
+      0,
+      Math.max(
+        0,
+        turns.findIndex((t) => t.id === params.beforeTurnId)
+      )
+    )
+  ctx.threadId = randomUUID()
+  ctx.cwd = params?.cwd ?? ctx.cwd
+  saveThread(ctx.threadId)
+  saveTurns(ctx.threadId, keep)
+  log('fork', { from: source, threadId: ctx.threadId, kept: keep.length })
+  return { ...threadResponse(params), thread: { ...threadObject(), forkedFromId: source } }
+}
+
+/**
+ * `thread/compact/start`: `{}` at once, then the compaction runs as a turn —
+ * turn/started, a `contextCompaction` item, turn/completed (recipe thread-commands).
+ */
+async function compactThread(id, params, override) {
+  const ok = await respondWith(id, override, () => ({}))
+  if (!ok) return
+  log('compact', { threadId: params?.threadId })
+  const started = Date.now()
+  ctx.turnId = randomUUID()
+  const itemId = randomUUID()
+  await emit(turnStartedEvent())
+  await emit({
+    method: 'item/started',
+    params: {
+      item: { type: 'contextCompaction', id: itemId },
+      threadId: '{{threadId}}',
+      turnId: '{{turnId}}'
+    }
+  })
+  await emit({
+    method: 'item/completed',
+    params: {
+      item: { type: 'contextCompaction', id: itemId },
+      threadId: '{{threadId}}',
+      turnId: '{{turnId}}'
+    }
+  })
+  await emit(turnCompletedEvent('completed', started))
+}
+
 function isKnownThread(id) {
   if (typeof id !== 'string' || !id) return false
   if ((scenario?.threads ?? []).includes(id)) return true
@@ -278,6 +436,7 @@ async function startTurn(id, params) {
     await writeMessage({ id, result: { turn: turnObject(turnId, 'inProgress') } })
     return true
   }
+  recordTurn(turnId, params, text)
   turnQueue.push({ turnId, text, params, reply })
   if (turnRunning) log('turn-start-while-running', { turnId })
   if (!turnRunning) void drainTurns().catch((err) => fail(err))

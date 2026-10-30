@@ -6,7 +6,8 @@
  * The full machine-generated bindings (450+ files) live outside the repo;
  * regenerate + diff against this file on a `codex` CLI upgrade with:
  *   codex app-server generate-ts --out <dir>
- * See `test/fixtures/codex-app-server/SPIKE.md`. Verified: codex-cli 0.132.0.
+ * See `test/fixtures/codex-app-server/SPIKE.md`. Verified: codex-cli 0.159.2 (the
+ * drift check reads its full surface: `@slayzone/test-utils/fake-codex/protocol-surface.json`).
  *
  * @module agents/codex/codex-protocol
  */
@@ -43,10 +44,12 @@ export interface CodexTurnStartParams {
   approvalPolicy?: CodexApprovalPolicy
   sandboxPolicy?: CodexSandboxPolicy
   model?: string
-  effort?: CodexReasoningEffort
+  effort?: string
   collaborationMode?: CodexCollaborationMode
   /** OpenAI service tier. `'fast'` enables Codex Fast Mode (faster delivery). */
   serviceTier?: string
+  /** Comes back as the user item's `clientId` (chat: the outbox message id). */
+  clientUserMessageId?: string
 }
 export type CodexUserInput = { type: 'text'; text: string; text_elements: [] }
 
@@ -79,11 +82,43 @@ export type CodexSandboxPolicy =
       excludeTmpdirEnvVar: boolean
       excludeSlashTmp: boolean
     }
-export type CodexReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+/** Any effort the model lists (0.159.2: `low` … `xhigh`, `max`, `ultra`). */
+export type CodexReasoningEffort = string
+
+/** One row of `model/list` (subset). */
+export interface CodexModel {
+  id: string
+  model: string
+  displayName: string
+  description: string
+  hidden: boolean
+  isDefault: boolean
+  defaultReasoningEffort: string
+  supportedReasoningEfforts: Array<{ reasoningEffort: string; description: string }>
+}
+export interface CodexModelListResponse {
+  data: CodexModel[]
+  nextCursor?: string | null
+}
 
 /** `turn/start` response. */
 export interface CodexTurnStartResponse {
   turn: { id: string }
+}
+
+/** `thread/turns/list` response (subset; `itemsView: 'full'`). */
+export interface CodexTurnsListResponse {
+  data: Array<{
+    id: string
+    status?: string
+    items?: Array<{
+      type: string
+      id?: string
+      clientId?: string | null
+      content?: Array<{ type?: string; text?: string }>
+    }>
+  }>
+  nextCursor?: string | null
 }
 
 // ---- Notification payloads ----
@@ -171,5 +206,31 @@ export interface CodexTokenBreakdown {
   reasoningOutputTokens: number
 }
 
-/** Approval decision sent back to the server (command + file-change share enough). */
-export type CodexApprovalDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+/**
+ * v2 approval decision (`CommandExecutionApprovalDecision`; file changes take
+ * the four plain words only).
+ */
+export type CodexApprovalDecision =
+  | 'accept'
+  | 'acceptForSession'
+  | 'decline'
+  | 'cancel'
+  | { acceptWithExecpolicyAmendment: { execpolicy_amendment: string[] } }
+  | {
+      applyNetworkPolicyAmendment: {
+        network_policy_amendment: { host: string; action: 'allow' | 'deny' }
+      }
+    }
+
+/** Legacy `ReviewDecision` (`execCommandApproval` / `applyPatchApproval`). */
+export type CodexReviewDecision =
+  | 'approved'
+  | 'approved_for_session'
+  | { denied: { rejection: string } }
+  | 'abort'
+  | { approved_execpolicy_amendment: { proposed_execpolicy_amendment: string[] } }
+  | {
+      network_policy_amendment: {
+        network_policy_amendment: { host: string; action: 'allow' | 'deny' }
+      }
+    }

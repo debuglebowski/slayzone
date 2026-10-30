@@ -6,24 +6,9 @@
  */
 import { resetApp } from '../fixtures/electron'
 import type { CodexChatTask } from '../fixtures/chat-codex'
-import {
-  codexEchoTurn,
-  cstep,
-  cx,
-  expect,
-  knownBug,
-  streamReply,
-  test
-} from '../fixtures/chat-codex'
+import { codexEchoTurn, cstep, cx, expect, streamReply, test } from '../fixtures/chat-codex'
 
 /** Today's Stop (chat-handlers `stopTurn` without `liveInterrupt`): SIGTERM + respawn. */
-const STOP_RESPAWNS = {
-  audit: 'Codex Stop does nothing',
-  fixedBy: 'Codex stop',
-  what:
-    'Stop on Codex kills the app-server and respawns it (codex-chat liveInterrupt:false) instead of ' +
-    'turn/interrupt in place, like the TUI'
-}
 
 /** Stop reached the agent: an interrupt arrived, or the process was signalled. */
 async function stopReached(t: CodexChatTask): Promise<void> {
@@ -70,7 +55,7 @@ test.describe('Codex chat stop', () => {
       .poll(async () => (await t.events()).some((e) => e.event.kind === 'interrupted'))
       .toBe(true)
 
-    knownBug(STOP_RESPAWNS)
+    // X0 bug #2 (fixed): turn/interrupt in place, no respawn.
     const run = await t.run(0)
     expect(run.signals()).toEqual([])
     expect(run.interrupts()).toEqual([{ turnId: run.turnIds()[0], current: run.turnIds()[0] }])
@@ -102,7 +87,7 @@ test.describe('Codex chat stop', () => {
     await stopReached(t)
     await expect(t.sendButton).toBeVisible()
 
-    knownBug(STOP_RESPAWNS)
+    // X0 bug #2 (fixed): turn/interrupt in place, no respawn.
     const run = await t.run(0)
     expect(run.signals()).toEqual([])
     expect(run.interruptedTurns()).toHaveLength(1)
@@ -141,7 +126,7 @@ test.describe('Codex chat stop', () => {
 
     // Today the respawn hides it; the driver half (codex-chat-session.fake.test.ts)
     // shows the in-place path then sends no turn/interrupt before the id is known.
-    knownBug(STOP_RESPAWNS)
+    // X0 bug #2 (fixed): turn/interrupt in place, no respawn.
     expect(run.signals()).toEqual([])
     await t.run(0, (r) => r.turnIds().length === 1, 5_000)
     await expect

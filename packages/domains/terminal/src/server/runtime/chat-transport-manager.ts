@@ -36,7 +36,6 @@ import { ChatEventLog, type BufferedEvent } from '../chat-events-store'
 // `chatModel` is an opaque, provider-specific model id (`claude --model`
 // alias for claude-chat, Codex model id for codex-chat) — typed as `string`.
 // The provider-aware catalog (`shared/chat-model-catalog.ts`) owns validity.
-import type { ChatEffort } from '@slayzone/terminal-contracts'
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
 import type { AgentStateRecorder } from './pty-manager'
@@ -324,7 +323,8 @@ export interface ChatSessionInfo {
   /** Resolved chat model id this session was spawned with. */
   chatModel?: string | null
   /** Resolved reasoning effort this session was spawned with. `null` = inherit. */
-  chatEffort?: ChatEffort | null
+  /** Claude: a `ChatEffort`; Codex: any effort its model lists (`ultra`, …). */
+  chatEffort?: string | null
   /** Resolved collaboration mode this session was spawned with. `null` = provider default. */
   chatCollaboration?: ChatCollaborationMode | null
   /** Whether Codex Fast Mode was enabled for this session's spawn. */
@@ -372,7 +372,7 @@ interface ChatTab {
   /** Resolved chat model id this session was spawned with. */
   chatModel: string | null
   /** Resolved reasoning effort this session was spawned with. */
-  chatEffort: ChatEffort | null
+  chatEffort: string | null
   /** Resolved collaboration mode this session was spawned with. */
   chatCollaboration: ChatCollaborationMode | null
   /** Whether Codex Fast Mode was enabled for this session's spawn. */
@@ -422,6 +422,8 @@ interface ChatTab {
    * now (the CLI keeps it), whether or not its id reached the DB yet.
    */
   sessionConfirmed: boolean
+  /** The next (resuming) spawn reads the conversation's past from the CLI (a switch, Codex). */
+  pendingHistoryImport: boolean
   /**
    * A fork (plan 3.3) the CLI has not confirmed yet: `sessionId` is the fork's
    * id, and every spawn until the CLI reports it forks again — an unconfirmed
@@ -642,8 +644,8 @@ function fireWatchdog(tab: ChatTab): void {
         code: 'watchdog-killed',
         text:
           vector === 'stuck-starting'
-            ? 'Claude Code did not start in time and was stopped.'
-            : 'Claude Code stopped responding and was stopped.',
+            ? `${tab.backend.displayName} did not start in time and was stopped.`
+            : `${tab.backend.displayName} stopped responding and was stopped.`,
         detail: { vector }
       })
     }
@@ -849,6 +851,17 @@ function commitEvent(tab: ChatTab, event: AgentEvent): void {
   // `claude --resume X` in the PTY) is recorded as `foreign-observed` — audit
   // trail only, never the resume target. See conversation-id-robustness plan.
   const extracted = tab.proc?.driver.extractSessionId(event) ?? null
+  // A CLI that mints the id (Codex): the first one a fresh or forked spawn
+  // reports IS the conversation slay started — there was nothing to match.
+  if (
+    extracted &&
+    tab.backend.mintsConversationId &&
+    !tab.usedResume &&
+    !tab.sessionConfirmed &&
+    extracted !== tab.sessionId
+  ) {
+    tab.sessionId = extracted
+  }
   const forked = Boolean(tab.proc?.fork) && extracted === tab.sessionId
   if (extracted && extracted === tab.sessionId) {
     tab.sessionConfirmed = true
@@ -878,7 +891,7 @@ function checkCliVersion(tab: ChatTab, version: string | undefined): void {
     id: randomUUID(),
     level: 'warning',
     code: 'cli-version-untested',
-    text: `Untested Claude Code version ${version}: chat is tested with ${minimum} and newer. Some things may not work; update with \`claude update\`.`,
+    text: `Untested ${tab.backend.displayName} version ${version}: chat is tested with ${minimum} and newer. Some things may not work; update with \`${tab.backend.updateCommand}\`.`,
     detail: { version, minimum }
   })
 }
@@ -898,7 +911,7 @@ function noteRefusedOption(tab: ChatTab, stderr: string): void {
     id: randomUUID(),
     level: 'warning',
     code: 'cli-option-refused',
-    text: `This Claude Code does not support \`${flag}\`; chat starts it without that option from now on. Retry to start it again, or update with \`claude update\`.`,
+    text: `This ${tab.backend.displayName} does not support \`${flag}\`; chat starts it without that option from now on. Retry to start it again, or update with \`${tab.backend.updateCommand}\`.`,
     detail: { flag }
   })
 }
@@ -933,7 +946,27 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
     event.detail !== null &&
     (event.detail as { fatal?: unknown }).fatal === true
   ) {
-    routeHostEvent(tab, event)
+    const detail = event.detail as { phase?: unknown; reason?: unknown }
+    if (detail.phase === 'fork' && proc.fork && tab.pendingFork) {
+      // The CLI could not branch the conversation (Codex `thread/fork`): the
+      // tab goes back to the original once this process ended (`onForkFailure`).
+      proc.forkFailed = true
+    } else if (detail.phase === 'resume') {
+      // The resume failed, but not because the conversation is gone: it stays
+      // the tab's (no fresh start, nothing cleared) and Retry resumes it.
+      proc.resumeSettled = true
+      const reason = typeof detail.reason === 'string' ? detail.reason : event.message
+      routeHostEvent(tab, {
+        kind: 'notice',
+        id: randomUUID(),
+        level: 'warning',
+        code: 'resume-failed-kept',
+        text: `${tab.backend.displayName} could not reopen the conversation (${reason}). It is kept: press Retry to try again.`,
+        detail: { reason }
+      })
+    } else {
+      routeHostEvent(tab, event)
+    }
     if (!proc.ended) {
       proc.kill('SIGTERM')
       // Backstop: if SIGTERM is ignored, the watchdog escalates to SIGKILL
@@ -1093,7 +1126,7 @@ function onResumeFailure(tab: ChatTab, proc: ChatProcess): void {
     id: randomUUID(),
     level: 'warning',
     code: 'resume-failed-fresh-start',
-    text: 'The previous conversation could not be resumed, so Claude Code started a new one. It does not remember the earlier messages.'
+    text: `The previous conversation could not be resumed, so ${tab.backend.displayName} started a new one. It does not remember the earlier messages.`
   })
   setImmediate(() => {
     void respawnFresh(tab).catch((err) => {
@@ -1188,7 +1221,7 @@ function onForkFailure(tab: ChatTab, proc: ChatProcess): void {
     id: randomUUID(),
     level: 'error',
     code: 'fork-failed',
-    text: 'Claude Code could not fork from that message, so this chat stays in the original conversation.'
+    text: `${tab.backend.displayName} could not fork from that message, so this chat stays in the original conversation.`
   })
   setImmediate(() => {
     if (tab.closed || tab.proc !== proc) return
@@ -1285,7 +1318,8 @@ export interface CreateChatOpts {
   /** Resolved chat model id for the spawn (provider-specific). */
   chatModel?: string | null
   /** Resolved reasoning effort for the spawn (claude --effort). */
-  chatEffort?: ChatEffort | null
+  /** Claude: a `ChatEffort`; Codex: any effort its model lists (`ultra`, …). */
+  chatEffort?: string | null
   /** Resolved collaboration mode for the spawn (Codex `turn/start.collaborationMode`). */
   chatCollaboration?: ChatCollaborationMode | null
   /** Whether Codex Fast Mode (`serviceTier: 'fast'`) is enabled for the spawn. */
@@ -1430,6 +1464,7 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
     cliVersion: opts.cliVersion ?? null,
     optionalFlagsRefused: false,
     sessionConfirmed: Boolean(opts.conversationId),
+    pendingHistoryImport: false,
     pendingFork: null,
     closed: false
   } as Omit<ChatTab, 'log' | 'outbox'> as ChatTab
@@ -1481,7 +1516,8 @@ function createOutbox(tab: ChatTab): ChatOutbox {
       if (tab.closed) throw new ChatTransportError('This chat tab was closed.')
       await ensureSpawned(tab.tabId)
       const proc = current()
-      if (!proc || !proc.ready) throw new ChatTransportError('Claude Code is not running.')
+      if (!proc || !proc.ready)
+        throw new ChatTransportError(`${tab.backend.displayName} is not running.`)
       return proc
     },
     onChange: ({ id, state, error }) => {
@@ -1570,6 +1606,12 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
   if (isShuttingDown) {
     throw new ChatTransportError('Cannot spawn chat session while app is shutting down.')
   }
+  // A conversation a process already confirmed is resumed, also when the
+  // caller never stored it (a restart of a dead tab): starting over would drop
+  // its context (Codex: a new thread; Claude: `--session-id` of a used id).
+  if (!tab.respawnOpts.conversationId && tab.sessionConfirmed && !tab.pendingFork) {
+    tab.respawnOpts = { ...tab.respawnOpts, conversationId: tab.sessionId }
+  }
   const opts = tab.respawnOpts
   const backend = tab.backend
   const resume = Boolean(opts.conversationId)
@@ -1581,6 +1623,9 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
   // A new process has no prompt pending (the old one's expired with it).
   tab.pendingPrompts.clear()
   const fork = tab.pendingFork
+  // One spawn reads a switched-to conversation's past from the CLI (Codex).
+  const importHistory = tab.pendingHistoryImport && resume
+  tab.pendingHistoryImport = false
   const { args } = backend.buildSpawnArgs({
     sessionId,
     resume,
@@ -1691,9 +1736,15 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
       chatEffort: tab.chatEffort,
       chatMode: tab.chatMode,
       chatCollaboration: tab.chatCollaboration,
-      chatFastMode: tab.chatFastMode
+      chatFastMode: tab.chatFastMode,
+      ...(fork ? { fork } : {}),
+      ...(importHistory ? { importHistory } : {})
     },
     hooks: {
+      onHistory: (p, events) => {
+        if (tab.proc !== p || tab.closed) return
+        for (const event of events) commitHistory(tab, event)
+      },
       onSpawned: (p) => {
         if (tab.proc !== p || tab.closed) return
         // The FIRST event of this process's contribution: lets the renderer
@@ -1985,7 +2036,7 @@ export function updateSessionChatModel(tabId: string, model: string | null): voi
  * `chat:setEffort` so a skeleton session reflects the new value before the
  * next spawn picks it up via buildSpawnArgs.
  */
-export function updateSessionChatEffort(tabId: string, effort: ChatEffort | null): void {
+export function updateSessionChatEffort(tabId: string, effort: string | null): void {
   const tab = tabs.get(tabId)
   if (!tab) return
   tab.chatEffort = effort
@@ -2269,7 +2320,7 @@ async function forgetPopped(tab: ChatTab, id: string): Promise<void> {
   const proc = liveProcess(tab.tabId)
   let problem: string | null = null
   if (!proc?.driver.applyControl) {
-    problem = 'Claude Code is not running'
+    problem = `${tab.backend.displayName} is not running`
   } else {
     try {
       const res = controlPayload(
@@ -2291,7 +2342,7 @@ async function forgetPopped(tab: ChatTab, id: string): Promise<void> {
     id: randomUUID(),
     level: 'warning',
     code: 'stop-rewind-failed',
-    text: 'The stopped message is back in the message box, but Claude Code may still remember it.',
+    text: `The stopped message is back in the message box, but ${tab.backend.displayName} may still remember it.`,
     detail: { messageId: id, error: problem }
   })
 }
@@ -2331,6 +2382,8 @@ export async function switchTabConversation(
     history: AgentEvent[]
     notices: AgentEvent[]
     respawnOpts?: CreateChatOpts
+    /** The history comes from the agent's CLI on its next start (Codex), not `history`. */
+    historyFromAgent?: boolean
   }
 ): Promise<void> {
   const tab = requireTab(tabId)
@@ -2338,6 +2391,7 @@ export async function switchTabConversation(
     routeHostEvent(tab, opts.branch)
     for (const event of opts.history) commitHistory(tab, event)
     for (const notice of opts.notices) routeHostEvent(tab, notice)
+    tab.pendingHistoryImport = opts.historyFromAgent === true
     tab.pendingFork = null
     tab.sessionId = opts.conversationId
     tab.sessionConfirmed = true
@@ -2474,7 +2528,11 @@ function rewindTarget(tab: ChatTab, messageId: string, scope: RewindScope): stri
  * Where a fork from `messageId` ends: the last main-chain assistant record of
  * that message's turn (`--resume-session-at`). Null: the turn has no answer.
  */
-function forkPoint(tab: ChatTab, messageId: string): string | null {
+function forkPoint(
+  tab: ChatTab,
+  messageId: string,
+  opts: { anyAnswer?: boolean } = {}
+): string | null {
   const events = tab.log.events
   let start = -1
   for (let i = events.length - 1; i >= 0; i--) {
@@ -2490,10 +2548,10 @@ function forkPoint(tab: ChatTab, messageId: string): string | null {
     if (e.kind === 'user-message' || e.kind === 'conversation-branch') break
     if (
       (e.kind === 'assistant-text' || e.kind === 'assistant-thinking' || e.kind === 'tool-call') &&
-      e.uuid &&
+      (e.uuid || opts.anyAnswer) &&
       e.parentToolUseId == null
     ) {
-      at = e.uuid
+      at = e.uuid ?? messageId
     }
   }
   return at
@@ -2520,10 +2578,14 @@ export async function forkTab(
   if (turnInFlight(tab)) {
     await stopTurn(tabId, { restorePrompt: false, respawnOpts: opts.respawnOpts })
   }
-  const at = forkPoint(tab, opts.messageId)
+  // A CLI forking at a user message (Codex: through its turn) needs only an answer.
+  const at =
+    tab.backend.forkAt === 'message'
+      ? forkPoint(tab, opts.messageId, { anyAnswer: true }) && opts.messageId
+      : forkPoint(tab, opts.messageId)
   if (!at)
     throw new ChatTransportError(
-      'Claude has not answered that message: there is nothing to fork yet.'
+      `${tab.backend.displayName} has not answered that message: there is nothing to fork yet.`
     )
   if (tab.pendingFork || !tab.sessionConfirmed) {
     throw new ChatTransportError('Send a message in this conversation before forking it again.')
@@ -2568,7 +2630,8 @@ function requireTab(tabId: string): ChatTab {
 async function controllableProcess(tab: ChatTab): Promise<ChatProcess> {
   await ensureSpawned(tab.tabId)
   const proc = liveProcess(tab.tabId)
-  if (!proc?.driver.applyControl) throw new ChatTransportError('Claude Code is not running.')
+  if (!proc?.driver.applyControl)
+    throw new ChatTransportError(`${tab.backend.displayName} is not running.`)
   return proc
 }
 
@@ -2673,7 +2736,7 @@ export async function rewindTab(
     )
     if (done?.rewound !== true) {
       throw new ChatTransportError(
-        `Claude Code could not rewind the conversation: ${typeof done?.error === 'string' ? done.error : 'refused'}`
+        `${tab.backend.displayName} could not rewind the conversation: ${typeof done?.error === 'string' ? done.error : 'refused'}`
       )
     }
     if (opts.scope === 'before' && typeof done.prefillText === 'string')

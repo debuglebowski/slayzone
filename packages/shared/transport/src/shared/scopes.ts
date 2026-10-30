@@ -468,6 +468,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.getInfo': 'agent',
   'chat.getMode': 'agent',
   'chat.getModel': 'agent',
+  'chat.getModels': 'agent',
   'chat.getReplay': 'agent',
   'chat.hydrate': 'agent',
   'chat.inspectPermissions': 'agent',

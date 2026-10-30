@@ -74,6 +74,7 @@ export function fakeHub(opts: {
     'chat.start': () => null,
     'chat.getMode': () => 'auto-accept',
     'chat.getModel': () => 'opus',
+    'chat.getModels': () => [],
     'chat.getEffort': () => null,
     'chat.getAutoEligibility': () => ({ eligible: false, optedIn: false }),
     'chat.setMode': (input) => ({ chatMode: input.chatMode }),

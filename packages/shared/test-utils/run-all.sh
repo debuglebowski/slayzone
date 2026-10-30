@@ -68,6 +68,8 @@ run_harness packages/domains/task-terminals/src/server/task-terminals-router.tes
 # Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
+# Codex chat models through the chat ops: getModels / getModel / setModel against the CLI's model/list (X1).
+run_harness packages/domains/terminal/src/server/runtime/chat-handlers-codex.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-handlers.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-attachment-guard.test.ts
@@ -378,6 +380,8 @@ run_harness packages/shared/db-migrations/src/v172-chat-cli-snapshots-migration.
 run_harness packages/shared/db-migrations/src/v173-claude-chat-mode-migration.test.ts
 run_harness packages/shared/db-migrations/src/v175-conversation-handoff-fork-origins-migration.test.ts
 run_harness packages/shared/db-migrations/src/v177-chat-composer-migration.test.ts
+# v178 (Codex chat, X1): chat_cli_models — the models a chat CLI offers, per project + mode.
+run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -609,6 +613,10 @@ run_harness packages/domains/terminal/src/server/adapters/hook-driven-modes.test
 # Terminal — Codex Chat (codex-chat mode) driver + transport + adapter
 run_harness packages/domains/terminal/src/server/agents/codex/codex-app-server-client.test.ts
 run_harness packages/domains/terminal/src/server/agents/codex/codex-chat-session.test.ts
+# Codex server→client requests: approvals, questions, permissions, MCP input, withdrawals (X1).
+run_harness packages/domains/terminal/src/server/agents/codex/codex-server-requests.test.ts
+# Codex turn data: CLI version, model/list, model + effort per turn, readable errors, live command output, context usage (X1).
+run_harness packages/domains/terminal/src/server/agents/codex/codex-driver-turns.test.ts
 # The Codex driver against the fake app-server as a child process + its open bugs (expectKnownBug).
 run_harness packages/domains/terminal/src/server/agents/codex/codex-chat-session.fake.test.ts
 # Codex protocol drift check: driver vs the pinned CLI's protocol surface + recorded runs.
@@ -617,6 +625,8 @@ run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
+# Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts
 # Spawn CLI-version hint (summarized thinking) + command tasks through the transport (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-command-tasks.test.ts

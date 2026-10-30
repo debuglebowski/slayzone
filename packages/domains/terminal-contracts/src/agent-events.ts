@@ -7,6 +7,7 @@
  */
 
 import type { ChatAttachment } from './chat-attachments'
+import type { ChatModelInfo } from './chat-model-catalog'
 
 export type AgentEvent =
   | TurnInitEvent
@@ -52,6 +53,8 @@ export type AgentEvent =
   | CommandTaskOutputEvent
   | ConversationBranchEvent
   | CliCommandDetailsEvent
+  | ContextUsageEvent
+  | CliModelsEvent
 
 /**
  * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
@@ -189,6 +192,11 @@ export interface UserMessageDeliveryEvent {
 export type NoticeCode =
   /** The stored conversation could not be resumed; a fresh one was started. */
   | 'resume-failed-fresh-start'
+  /**
+   * Resuming the stored conversation failed for another reason than "it does
+   * not exist" (timeout, network, crash): it is kept, and Retry resumes it.
+   */
+  | 'resume-failed-kept'
   /** The agent stopped responding and was stopped by the watchdog. */
   | 'watchdog-killed'
   /** The agent's CLI version has not been tested with chat. */
@@ -245,6 +253,29 @@ export interface UserReplayEvent {
 export interface CliCommandDetailsEvent {
   kind: 'cli-command-details'
   commands: Array<{ name: string; description: string; argumentHint: string }>
+}
+
+/**
+ * How full the context window is (Codex `thread/tokenUsage/updated`): saved,
+ * so a reload shows the meter again. Claude derives it from its calls' usage.
+ */
+export interface ContextUsageEvent {
+  kind: 'context-usage'
+  /** Tokens the conversation occupies (Codex: `last.totalTokens`). */
+  contextTokens: number
+  /** The model's context window; null when the CLI did not report one. */
+  contextWindow: number | null
+}
+
+/**
+ * The models the CLI offers this account, with their reasoning efforts (Codex
+ * `model/list`, hidden models left out), at every handshake. Live only, like
+ * `cli-command-details`: it describes the CLI, not the conversation. The last
+ * list is stored per project + mode and served by `chat.getModels`.
+ */
+export interface CliModelsEvent {
+  kind: 'cli-models'
+  models: ChatModelInfo[]
 }
 
 export interface TurnInitEvent {
@@ -625,8 +656,21 @@ export interface PermissionRequestEvent {
  * "No"); `deny` alone hands `message` to the model and the turn continues.
  */
 export type PermissionDecision =
-  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
+  | {
+      behavior: 'allow'
+      updatedInput?: Record<string, unknown>
+      updatedPermissions?: unknown[]
+      /** Codex: allow for the rest of the session (`acceptForSession`), not just this once. */
+      scope?: 'session'
+      /** Codex: allow and add the rule the request proposed (exec policy or a network host). */
+      amendment?: PermissionAmendment
+    }
   | { behavior: 'deny'; message: string; interrupt?: boolean }
+
+/** A rule a Codex approval may add so similar requests stop asking. */
+export type PermissionAmendment =
+  | { kind: 'execpolicy'; command: string[] }
+  | { kind: 'network'; host: string; action: 'allow' | 'deny' }
 
 /**
  * The CLI withdrew a pending permission request (`control_cancel_request`),

@@ -4226,6 +4226,24 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 178,
+    up: (db) => {
+      // Codex chat (X1): the models a chat CLI offers the account (Codex
+      // `model/list` at each handshake), per project + chat mode like
+      // `chat_cli_command_details`, so the model picker lists them before a
+      // session starts. `models` is a JSON array of `ChatModelInfo`.
+      db.exec(`
+        CREATE TABLE chat_cli_models (
+          project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          mode        TEXT NOT NULL,
+          models      TEXT NOT NULL,
+          observed_at INTEGER NOT NULL,
+          PRIMARY KEY (project_id, mode)
+        );
+      `)
+    }
   }
 ]
 

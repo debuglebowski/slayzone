@@ -99,6 +99,8 @@ Template variables in every string: `{{threadId}}`, `{{turnId}}`, `{{cwd}}`,
 - `turn/interrupt {threadId, turnId}` → `{}`, the turn ends `idle` + `turn/completed {interrupted}` with **no `item/completed` for a running item**, then `serverRequest/resolved` for each request left unanswered (recipes `interrupt-command`, `approval-interrupt`). Without `turnId` → error (it is required).
 - **stdin closed** → exit 0 at once, even mid-turn (recipe `stdin-close-mid-turn`).
 - **SIGTERM** → exit 0 at once, nothing more on stdout (recipe `sigterm-mid-turn`).
+- `model/list` → three of 0.159.2's models for the recording account (default `gpt-6.1-sol`; efforts `low`…`max`, `ultra` on two). Override with `methods: {'model/list': {result}}`.
+- `turn/start {clientUserMessageId}` → kept on the thread's turn (`clientId`), so `thread/turns/list` (newest first unless `sortDirection: 'asc'`) finds it; `thread/revert {beforeTurnId}` drops that turn and later ones; `thread/fork {lastTurnId | beforeTurnId}` copies the turns into a new thread (works on a thread no spawn has loaded, as 0.159.2); `thread/compact/start` → `{}`, then a turn with one `contextCompaction` item (spike 2026-10-30).
 - Any other client method → `-32601`, logged (`run.unknownMethods()`).
 
 ### Harness failures (fail closed)
@@ -118,6 +120,7 @@ run.turnIds(); run.interrupts()          // [{turnId the app named (null = none)
 run.interruptedTurns(); run.serverRequests(); run.requestReplies() // [{requestId, method, decision, reply}]
 run.abandonedRequests(); run.lateReplies(); run.unknownMethods(); run.replayMismatches()
 run.sentMethods(); run.signals(); run.exit(); run.entries
+run.clientMessageIds(); run.reverts(); run.forks(); run.compactions()
 ```
 
 A run is live: every accessor re-reads `state/epochs/<n>/procs/<i>/log.jsonl`.
@@ -191,3 +194,4 @@ test('…', async ({ codexChat }) => {
 - Same shape, guard and `knownBug()` as the Claude harness (`fixtures/chat.ts`).
 - The worker's bin override holds only `codex`: these specs never start Claude.
 - Startup stays `manual` (the reset's); `openTask` pre-spawns like the Restart button.
+- Every e2e app gets its own `CODEX_HOME` (`<worker dir>/.codex`, set by `fixtures/electron.ts`), so a real `codex` an e2e starts never writes the developer's `~/.codex`. A run against the REAL CLI needs the real login: set `SLAYZONE_E2E_REAL_CODEX_HOME=1` (opt-in, default off, read only by the e2e fixtures) — use one fixed scratch cwd and move the session files it creates out of `~/.codex/sessions` afterwards.

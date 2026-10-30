@@ -6,7 +6,7 @@
  * found" and the conversation is dropped for good).
  */
 import { resetApp } from '../fixtures/electron'
-import { codexEchoTurn, codexReply, expect, knownBug, test } from '../fixtures/chat-codex'
+import { codexEchoTurn, codexReply, expect, test } from '../fixtures/chat-codex'
 
 const STORED = '0b6c1a52-5f6e-4d55-9c7e-2a9a3f1e6d02'
 
@@ -68,10 +68,7 @@ test.describe('Codex chat resume', () => {
     )
     expect(notice).toBeTruthy()
 
-    knownBug({
-      fixedBy: 'Codex resume',
-      what: 'the resume-failed notice on a Codex tab says "Claude Code started a new one"'
-    })
+    // X0 bug #7 (fixed): the notice names Codex.
     expect(String(notice?.event.text)).not.toContain('Claude')
     expect(String(notice?.event.text)).toContain('Codex')
   })
@@ -94,24 +91,37 @@ test.describe('Codex chat resume', () => {
               }
             }
           },
-          // Whatever the app does next: resume again (right) or start fresh (the bug).
+          // Retry: the same thread again.
           { defaultTurn: codexEchoTurn() }
         ]
       }
     })
     await t.run(0, (r) => r.requests('thread/resume').length === 1)
+    // X0 bug #6 / audit #2 (fixed): not a fresh start — the conversation is kept,
+    // the notice says why, and Retry resumes it.
+    await expect
+      .poll(async () =>
+        (await t.events()).some(
+          (e) => e.event.kind === 'notice' && e.event.code === 'resume-failed-kept'
+        )
+      )
+      .toBe(true)
+    expect(
+      (await t.events()).some(
+        (e) => e.event.kind === 'notice' && e.event.code === 'resume-failed-fresh-start'
+      )
+    ).toBe(false)
+    await expect(
+      t.panel.getByText('stream disconnected before completion', { exact: false })
+    ).toBeVisible()
+    expect(await t.storedThread()).toBe(STORED)
+    await t.panel.getByRole('button', { name: /Session ended, click to restart/ }).click()
     const next = await t.run(1, (r) => r.notifications().includes('initialized'))
     await t.send('still there?')
     await expect(t.panel.getByText('echo: still there?')).toBeVisible()
-
-    knownBug({
-      audit: '#2',
-      fixedBy: 'Codex resume',
-      what:
-        'any thread/resume error (timeout, network, auth) is reported as "No conversation found": the app ' +
-        'starts a new thread and the stored conversation is gone for good'
-    })
     expect(next.requests('thread/start')).toHaveLength(0)
     expect(next.resumedThread).toBe(STORED)
+    // The earlier history is still shown.
+    await expect(t.panel.getByText('an earlier answer')).toBeVisible()
   })
 })

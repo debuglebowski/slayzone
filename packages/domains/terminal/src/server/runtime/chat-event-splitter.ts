@@ -130,6 +130,7 @@ export class ChatEventSplitter {
         return { live: [], saved: [event] }
       }
       case 'cli-command-details':
+      case 'cli-models':
         // Describes the CLI, not the conversation (stored per project instead).
         return { live: [event], saved: [] }
       default: {

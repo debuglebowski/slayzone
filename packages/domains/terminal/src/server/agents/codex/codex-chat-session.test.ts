@@ -69,6 +69,11 @@ async function handshake(h: Harness, threadId = 'thread-1'): Promise<void> {
   await flush()
 }
 
+/** The JSON-RPC id of the last `turn/start` the driver sent (model/list numbers in between). */
+function turnStartId(h: Harness): unknown {
+  return h.sent.filter((m) => m.method === 'turn/start').at(-1)?.id
+}
+
 /** Fixture notification lines (the `method`-bearing turn stream). */
 function fixtureNotifications(): string[] {
   const raw = readFileSync(
@@ -207,7 +212,7 @@ describe('CodexChatSession', () => {
     await handshake(h, '019e4a93-9480-7280-8300-f9507263082e')
     h.driver.sendUserMessage('Reply with exactly the two characters: OK')
     // turn/start response (id 3).
-    h.driver.handleLine(JSON.stringify({ id: 3, result: { turn: { id: 'turn-1' } } }))
+    h.driver.handleLine(JSON.stringify({ id: turnStartId(h), result: { turn: { id: 'turn-1' } } }))
     for (const line of fixtureNotifications()) h.driver.handleLine(line)
 
     const kinds = h.emitted.map((e) => e.kind)
@@ -241,7 +246,7 @@ describe('CodexChatSession', () => {
     const h = makeHarness()
     await handshake(h, '019e4a93-9480-7280-8300-f9507263082e')
     h.driver.sendUserMessage('hi')
-    h.driver.handleLine(JSON.stringify({ id: 3, result: { turn: { id: 'turn-1' } } }))
+    h.driver.handleLine(JSON.stringify({ id: turnStartId(h), result: { turn: { id: 'turn-1' } } }))
     for (const line of fixtureNotifications()) h.driver.handleLine(line)
     const result = h.emitted.find((e) => e.kind === 'result')
     expect(
@@ -382,12 +387,12 @@ describe('CodexChatSession', () => {
     )
   })
 
-  test('turn/start maps reasoning effort (max → xhigh, unknown dropped)', async () => {
+  test('turn/start passes a Codex effort through (max is one since 0.15x; unknown dropped)', async () => {
     const max = makeHarness({ chatEffort: 'max' })
     await handshake(max)
     max.driver.sendUserMessage('go')
     const t1 = max.sent.find((m) => m.method === 'turn/start')!
-    expect((t1.params as Record<string, unknown>).effort, 'max clamps to xhigh').toEqual('xhigh')
+    expect((t1.params as Record<string, unknown>).effort, 'max is sent as max').toEqual('max')
 
     const bogus = makeHarness({ chatEffort: 'banana' })
     await handshake(bogus)
@@ -404,7 +409,7 @@ describe('CodexChatSession', () => {
     const h = makeHarness()
     await handshake(h, 'thread-i')
     h.driver.sendUserMessage('go')
-    h.driver.handleLine(JSON.stringify({ id: 3, result: { turn: { id: 'turn-i' } } }))
+    h.driver.handleLine(JSON.stringify({ id: turnStartId(h), result: { turn: { id: 'turn-i' } } }))
     await flush()
     void h.driver.applyControl({ subtype: 'interrupt' }, CONTROL_TIMEOUT_MS)
     const interrupt = h.sent.find((m) => m.method === 'turn/interrupt')
@@ -484,7 +489,7 @@ describe('CodexChatSession', () => {
     ).toBeTruthy()
   })
 
-  test('respondPermission allow replies with accept', async () => {
+  test('respondPermission allow on a legacy request replies approved', async () => {
     const h = makeHarness()
     await handshake(h)
     h.driver.handleLine(
@@ -497,10 +502,12 @@ describe('CodexChatSession', () => {
     expect(allowed, 'respondPermission should report success for a known request').toBeTruthy()
     const reply = h.sent.find((m) => m.id === 51)
     expect(reply, 'expected a JSON-RPC reply for id 51').not.toBe(undefined)
-    expect((reply!.result as Record<string, unknown>).decision, 'allow → accept').toEqual('accept')
+    expect((reply!.result as Record<string, unknown>).decision, 'allow → approved').toEqual(
+      'approved'
+    )
   })
 
-  test('respondPermission deny replies with decline', async () => {
+  test('respondPermission deny on a legacy request replies denied (ReviewDecision)', async () => {
     const h = makeHarness()
     await handshake(h)
     h.driver.handleLine(JSON.stringify({ id: 52, method: 'applyPatchApproval', params: {} }))
@@ -509,7 +516,9 @@ describe('CodexChatSession', () => {
       decision: { behavior: 'deny', message: 'no' } as PermissionDecision
     })
     const reply = h.sent.find((m) => m.id === 52)!
-    expect((reply.result as Record<string, unknown>).decision, 'deny → decline').toEqual('decline')
+    expect((reply.result as Record<string, unknown>).decision, 'deny → denied').toEqual({
+      denied: { rejection: 'no' }
+    })
   })
 
   test('respondPermission for an unknown request returns false', async () => {
@@ -659,7 +668,9 @@ describe('CodexChatSession', () => {
     const h = makeHarness()
     await handshake(h)
     h.driver.sendUserMessage('go')
-    h.driver.handleLine(JSON.stringify({ id: 3, error: { code: -1, message: 'turn boom' } }))
+    h.driver.handleLine(
+      JSON.stringify({ id: turnStartId(h), error: { code: -1, message: 'turn boom' } })
+    )
     await flush()
     const err = h.emitted.find((e) => e.kind === 'error')
     expect(

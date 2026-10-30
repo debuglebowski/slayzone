@@ -59,13 +59,16 @@ const HANDLED_NOTIFICATIONS = new Set([
   'thread/tokenUsage/updated',
   'turn/plan/updated',
   'turn/completed',
-  'error'
+  'error',
+  'serverRequest/resolved',
+  'item/commandExecution/outputDelta'
 ])
 
 /** Handled, but on their own they emit nothing (state the driver keeps). */
 const HANDLED_SILENT: Record<string, string> = {
   'turn/started': 'stores the turn id `turn/interrupt` needs',
-  'thread/tokenUsage/updated': "folded into the turn's `result` usage"
+  'item/commandExecution/outputDelta': 'kept for the command card to poll (`commandTaskOutput`)',
+  'serverRequest/resolved': 'closes a card only while its request is still pending'
 }
 
 /**
@@ -73,8 +76,6 @@ const HANDLED_SILENT: Record<string, string> = {
  * gap, not noise: the reason says what is lost (X0 report lists them).
  */
 const KNOWN_UNHANDLED: Record<string, string> = {
-  'item/commandExecution/outputDelta':
-    'live output of a running command (audit: "Live output of a running command")',
   'item/commandExecution/terminalInteraction': 'input written to an interactive command',
   'item/fileChange/outputDelta': 'live progress of a patch being applied',
   'item/fileChange/patchUpdated': 'a patch changed while it was being applied',
@@ -82,8 +83,6 @@ const KNOWN_UNHANDLED: Record<string, string> = {
   'item/plan/delta': 'plan-mode plan text, streamed',
   'item/reasoning/summaryPartAdded':
     'section break between reasoning summary parts (parts run together)',
-  'serverRequest/resolved':
-    'an approval answered or withdrawn by the server (after an interrupt the card stays)',
   'turn/diff/updated': "the turn's unified diff (files-changed panel)",
   'thread/compacted': 'context was compacted',
   'thread/status/changed': 'active/idle, `waitingOnApproval`, `systemError` flags',
@@ -155,23 +154,24 @@ const KNOWN_IGNORED: Record<string, string> = {
   'windowsSandbox/setupCompleted': 'Windows sandbox setup API unused'
 }
 
-/** Server→client requests the driver answers (approvals → `permission-request`). */
+/** Server→client requests the user answers from a card (→ `permission-request`). */
 const HANDLED_REQUESTS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
   'applyPatchApproval',
-  'execCommandApproval'
+  'execCommandApproval',
+  'item/tool/requestUserInput',
+  'mcpServer/elicitation/request',
+  'item/permissions/requestApproval'
 ])
 
-/** Requests the driver refuses (-32601) though the user should see them. */
-const KNOWN_UNHANDLED_REQUESTS: Record<string, string> = {
-  'item/tool/requestUserInput':
-    "Codex asks the user a question (plan mode's request_user_input): refused, the tool fails",
-  'mcpServer/elicitation/request':
-    'an MCP server asks for input or approval: refused, the MCP tool fails',
-  'item/permissions/requestApproval': 'Codex asks for extra permissions: refused',
-  'currentTime/read': "the client's current time: refused (impact unknown)"
+/** Requests the driver answers itself, with no card. */
+const HANDLED_SILENT_REQUESTS: Record<string, string> = {
+  'currentTime/read': "answered with the host's clock"
 }
+
+/** Requests the driver refuses (-32601) though the user should see them. */
+const KNOWN_UNHANDLED_REQUESTS: Record<string, string> = {}
 
 /** Requests that cannot reach chat's sessions. */
 const KNOWN_IGNORED_REQUESTS: Record<string, string> = {
@@ -190,7 +190,8 @@ const HANDLED_ITEMS = new Set([
   'mcpToolCall',
   'dynamicToolCall',
   'webSearch',
-  'userMessage'
+  'userMessage',
+  'contextCompaction'
 ])
 const HANDLED_SILENT_ITEMS: Record<string, string> = {
   userMessage: 'echo of the message chat already recorded'
@@ -198,7 +199,6 @@ const HANDLED_SILENT_ITEMS: Record<string, string> = {
 /** Item types dropped today (nothing reaches the timeline). */
 const KNOWN_UNHANDLED_ITEMS: Record<string, string> = {
   plan: 'plan-mode proposed plan',
-  contextCompaction: 'context compaction marker',
   imageView: 'an image the agent looked at',
   imageGeneration: 'an image the agent generated',
   collabAgentToolCall: 'a call to a collaborating agent',
@@ -280,6 +280,13 @@ const SAMPLE: Record<string, Json> = {
   'item/reasoning/summaryTextDelta': { itemId: 'r1', delta: 'hm' },
   'turn/plan/updated': { explanation: null, plan: [{ step: 's', status: 'pending' }] },
   'turn/completed': { turn: { id: 't', status: 'completed', durationMs: 1 } },
+  'thread/tokenUsage/updated': {
+    tokenUsage: {
+      last: { totalTokens: 10, inputTokens: 9, cachedInputTokens: 0, outputTokens: 1 },
+      total: { totalTokens: 10, inputTokens: 9, cachedInputTokens: 0, outputTokens: 1 },
+      modelContextWindow: 100
+    }
+  },
   error: { error: { message: 'x' }, willRetry: false }
 }
 
@@ -364,6 +371,7 @@ describe('codex protocol drift: classification is complete and true', () => {
   it('every server request is handled or listed exactly once; refused ones get -32601', async () => {
     const all = [
       ...HANDLED_REQUESTS,
+      ...Object.keys(HANDLED_SILENT_REQUESTS),
       ...Object.keys(KNOWN_UNHANDLED_REQUESTS),
       ...Object.keys(KNOWN_IGNORED_REQUESTS)
     ]
@@ -380,6 +388,9 @@ describe('codex protocol drift: classification is complete and true', () => {
       if (HANDLED_REQUESTS.has(m)) {
         expect({ m, kinds: out.map((e) => e.kind) }).toEqual({ m, kinds: ['permission-request'] })
         expect(reply).toBeUndefined()
+      } else if (m in HANDLED_SILENT_REQUESTS) {
+        expect({ m, kinds: out.map((e) => e.kind) }).toEqual({ m, kinds: [] })
+        expect({ m, ok: reply !== undefined && 'result' in reply }).toEqual({ m, ok: true })
       } else {
         expect({ m, kinds: out.map((e) => e.kind) }).toEqual({ m, kinds: [] })
         expect({ m, error: (reply?.error as Json | undefined)?.code }).toEqual({ m, error: -32601 })
@@ -495,7 +506,9 @@ describe('codex protocol drift: what the driver sends', () => {
     const h = await harness()
     await h.feed(JSON.stringify({ id: 7, method, params: { itemId: 'i' } }))
     h.driver.respondPermission({ requestId: '7', decision })
-    return (h.sent.find((s) => s.id === 7)?.result as Json | undefined)?.decision
+    const sent = (h.sent.find((s) => s.id === 7)?.result as Json | undefined)?.decision
+    // The surface names an object decision by its key (`{denied}`).
+    return sent && typeof sent === 'object' ? `{${Object.keys(sent)[0]}}` : sent
   }
 
   for (const method of [
@@ -515,16 +528,8 @@ describe('codex protocol drift: what the driver sends', () => {
       const allow = await decisionFor(method, ALLOW)
       const deny = await decisionFor(method, DENY)
       expect(allow).toBeDefined()
-      await expectKnownBug(
-        {
-          fixedBy: 'Codex approvals',
-          what: 'legacy approvals answered with v2 decisions (accept/decline), not approved/denied'
-        },
-        () => {
-          expect(accepted).toContain(allow)
-          expect(accepted).toContain(deny)
-        }
-      )
+      expect(accepted).toContain(allow)
+      expect(accepted).toContain(deny)
     })
   }
 })
@@ -537,6 +542,18 @@ describe('codex protocol drift: recorded runs through the driver', () => {
       let h: Harness | null = null
       let turnsCompleted = 0
       let results = 0
+      // A recorded reply names the RECORDER's request id; the driver may number its
+      // requests differently (it sends requests the recorder did not, e.g.
+      // model/list). Map each reply to the driver's request of the same method
+      // and ordinal; a recorded reply to a request the driver never sent is dropped.
+      let recordedMethods = new Map<unknown, { method: string; n: number }>()
+      let recordedCounts = new Map<string, number>()
+      const driverIdFor = (recordedId: unknown): unknown => {
+        const rec = recordedMethods.get(recordedId)
+        if (!rec || !h) return recordedId
+        const sent = h.sent.filter((m) => m.method === rec.method && m.id !== undefined)
+        return sent[rec.n]?.id
+      }
       // Which processes resumed a thread (their first request after initialize).
       const resumed = new Set<number>()
       let proc = -1
@@ -547,6 +564,8 @@ describe('codex protocol drift: recorded runs through the driver', () => {
       for (const r of records) {
         if (r.kind === 'process') {
           if (h) results += h.emitted.filter((e) => e.kind === 'result').length
+          recordedMethods = new Map()
+          recordedCounts = new Map()
           h = await harness({ resume: resumed.has(r.index), sessionId: '{{threadId}}' }, false)
           await flush()
           continue
@@ -554,6 +573,11 @@ describe('codex protocol drift: recorded runs through the driver', () => {
         if (!h) continue
         if (r.kind === 'stdin') {
           const msg = JSON.parse(r.line) as Json
+          if (typeof msg.method === 'string' && msg.id !== undefined) {
+            const n = recordedCounts.get(msg.method) ?? 0
+            recordedCounts.set(msg.method, n + 1)
+            recordedMethods.set(msg.id, { method: msg.method, n })
+          }
           if (msg.method === 'turn/start') {
             const input = ((msg.params as Json).input as Array<{ text: string }>)[0]?.text ?? ''
             h.driver.sendUserMessage(input)
@@ -581,10 +605,16 @@ describe('codex protocol drift: recorded runs through the driver', () => {
         if (method && msg.id !== undefined && !(method in surface.serverRequests))
           problems.push(`request ${method} not in the surface`)
         if (method === 'turn/completed') turnsCompleted += 1
+        let line = r.line
+        if (method === undefined && msg.id !== undefined) {
+          const id = driverIdFor(msg.id)
+          if (id === undefined) continue
+          line = JSON.stringify({ ...msg, id })
+        }
         const warn = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => {
           problems.push(`parse error: ${a.map(String).join(' ').slice(0, 200)}`)
         })
-        await h.feed(r.line)
+        await h.feed(line)
         warn.mockRestore()
       }
       if (h) results += h.emitted.filter((e) => e.kind === 'result').length

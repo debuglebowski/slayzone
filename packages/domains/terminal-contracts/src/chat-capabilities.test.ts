@@ -23,27 +23,29 @@ test('Claude Code chat: every capability', () => {
     filesChanged: true,
     diffComments: true,
     commandPalette: true,
+    compact: true,
     agentStartedTurns: true
   })
 })
 
-test('Codex chat keeps today’s behavior: no new capabilities', () => {
+test('Codex chat: prompt cards, live Stop + effort, rewind, fork, sessions, compact, files changed', () => {
   expect(chatCapabilitiesForMode('codex-chat')).toEqual({
     nativeSlashCommands: false,
     promptHistory: false,
-    promptCards: false,
-    liveInterrupt: false,
-    liveEffort: false,
-    rewind: false,
-    fork: false,
-    sessions: false,
+    promptCards: true,
+    liveInterrupt: true,
+    liveEffort: true,
+    rewind: true,
+    fork: true,
+    sessions: true,
     handoff: false,
     attachments: 'paths',
     restoreComposerState: false,
     editableQueue: false,
-    filesChanged: false,
-    diffComments: false,
-    commandPalette: false,
+    filesChanged: true,
+    diffComments: true,
+    commandPalette: true,
+    compact: true,
     agentStartedTurns: false
   })
 })
@@ -65,6 +67,7 @@ test('unknown / non-chat modes get nothing', () => {
     filesChanged: false,
     diffComments: false,
     commandPalette: false,
+    compact: false,
     agentStartedTurns: false
   })
 })

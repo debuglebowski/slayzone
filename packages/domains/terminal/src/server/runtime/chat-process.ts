@@ -41,6 +41,8 @@ export interface ChatProcessHooks {
   onStartError(proc: ChatProcess, err: Error): void
   /** An event arrived after this process ended or was replaced (dropped). */
   onStale?(proc: ChatProcess, event: AgentEvent): void
+  /** The driver read a switched-to conversation's past (`ChatDriverContext.addHistory`). */
+  onHistory?(proc: ChatProcess, events: AgentEvent[]): void
 }
 
 export interface ChatProcessOptions {
@@ -49,7 +51,7 @@ export interface ChatProcessOptions {
   handle: ChatProcHandle
   driver: ChatSessionDriver
   /** Driver context minus the IO members this class supplies. */
-  ctx: Omit<ChatDriverContext, 'write' | 'emit'>
+  ctx: Omit<ChatDriverContext, 'write' | 'emit' | 'addHistory'>
   hooks: ChatProcessHooks
   /** In-process child: its pid can be probed for liveness. */
   probeable: boolean
@@ -137,7 +139,11 @@ export class ChatProcess implements OutboxProcess {
         p.catch(() => undefined)
         return p
       },
-      emit: (event) => this.emit(event)
+      emit: (event) => this.emit(event),
+      addHistory: (events) => {
+        if (this.ended || this.replaced) return
+        this.hooks.onHistory?.(this, events)
+      }
     }
 
     this.handle.onSpawn(() => {

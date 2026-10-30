@@ -1,7 +1,7 @@
 /**
  * What a chat provider can do, asked by the chat UI instead of checking
  * "is this Claude?". One entry per chat mode; a mode not listed gets nothing.
- * Codex keeps today's behavior until its own phase flips these on.
+ * Codex gains them as its chat catches up (Codex chat plan, X1/X2).
  *
  * Features gated on the data a provider reports (e.g. the context meter,
  * which only renders when results carry a context window) don't need an
@@ -59,6 +59,8 @@ export interface ChatCapabilities {
   diffComments: boolean
   /** The chat's actions are in the app's Cmd+K palette while the tab is active. */
   commandPalette: boolean
+  /** `/compact` compacts the conversation: the chat offers Compact (Cmd+K, the `/` menu). */
+  compact: boolean
   /**
    * The provider starts turns by itself (Claude Code answers a finished
    * background task or a hook with init, output and a result — no user
@@ -84,6 +86,7 @@ const NONE: ChatCapabilities = {
   filesChanged: false,
   diffComments: false,
   commandPalette: false,
+  compact: false,
   agentStartedTurns: false
 }
 
@@ -104,9 +107,31 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     filesChanged: true,
     diffComments: true,
     commandPalette: true,
+    compact: true,
     agentStartedTurns: true
   },
-  'codex-chat': NONE
+  'codex-chat': {
+    ...NONE,
+    // Approvals, questions, permission and MCP input requests (app-server server requests).
+    promptCards: true,
+    // `turn/interrupt` in place; a Stop before the turn has an id waits for it.
+    liveInterrupt: true,
+    // Effort is a `turn/start` param: the next turn takes it, no restart.
+    liveEffort: true,
+    // `thread/revert` (history only: Codex keeps no file checkpoints).
+    rewind: true,
+    // `thread/fork {lastTurnId}` through the message's turn.
+    fork: true,
+    // The task's Codex threads; a switched-to one's past comes from `thread/turns/list`.
+    sessions: true,
+    // `turn/diff`-free: from the file-change items (X2).
+    filesChanged: true,
+    diffComments: true,
+    // The Cmd+K Chat page is client-only; Compact lives on it.
+    commandPalette: true,
+    // `/compact` → `thread/compact/start` (the driver).
+    compact: true
+  }
 }
 
 export function chatCapabilitiesForMode(mode: string): ChatCapabilities {

@@ -433,6 +433,8 @@ export const MIN_TESTED_CLAUDE_CLI_VERSION = '2.1.312'
  */
 export const claudeChatBackend: AgentBackend = {
   binaryName: claudeCodeAdapter.binaryName,
+  displayName: 'Claude Code',
+  updateCommand: 'claude update',
   minTestedCliVersion: MIN_TESTED_CLAUDE_CLI_VERSION,
   // File checkpoints: `rewind_files` restores Edit/Write/NotebookEdit changes to
   // before a message (plan 3.3). Off, the CLI answers "File rewinding is not

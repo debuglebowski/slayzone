@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
+import type { ChatModelInfo, CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
 
 /**
  * Last slash-command list a chat CLI advertised, per project + chat mode
@@ -96,6 +96,58 @@ export async function saveChatCliCommandDetails(
          observed_at = excluded.observed_at`
     )
     .run(mode, JSON.stringify(details), now, taskId)
+}
+
+/**
+ * Upsert the models the CLI offers for the project of `taskId` (`chat_cli_models`,
+ * migration v178). No-op for an unknown task.
+ */
+export async function saveChatCliModels(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  models: ChatModelInfo[],
+  now: number = Date.now()
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO chat_cli_models (project_id, mode, models, observed_at)
+       SELECT project_id, ?, ?, ? FROM tasks WHERE id = ? AND project_id IS NOT NULL
+       ON CONFLICT (project_id, mode) DO UPDATE SET
+         models = excluded.models,
+         observed_at = excluded.observed_at`
+    )
+    .run(mode, JSON.stringify(models), now, taskId)
+}
+
+/** Stored models for the project of `taskId`, or null (none yet / corrupt row). */
+export async function getChatCliModels(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string
+): Promise<ChatModelInfo[] | null> {
+  const row = (await db
+    .prepare(
+      `SELECT m.models FROM chat_cli_models m
+         JOIN tasks t ON t.project_id = m.project_id
+        WHERE t.id = ? AND m.mode = ?`
+    )
+    .get(taskId, mode)) as { models: string } | undefined
+  if (!row) return null
+  try {
+    const v = JSON.parse(row.models) as unknown
+    if (!Array.isArray(v)) return null
+    return v.filter(
+      (m): m is ChatModelInfo =>
+        !!m &&
+        typeof m === 'object' &&
+        typeof (m as ChatModelInfo).id === 'string' &&
+        typeof (m as ChatModelInfo).label === 'string' &&
+        typeof (m as ChatModelInfo).supportsEffort === 'boolean'
+    )
+  } catch {
+    return null
+  }
 }
 
 /** Stored details for the project of `taskId`, or null (none yet / corrupt row). */

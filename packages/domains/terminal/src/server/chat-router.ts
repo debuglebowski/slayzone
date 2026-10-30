@@ -34,7 +34,18 @@ const permissionArgs = z.object({
     z.object({
       behavior: z.literal('allow'),
       updatedInput: z.record(z.string(), z.unknown()).optional(),
-      updatedPermissions: z.array(z.unknown()).optional()
+      updatedPermissions: z.array(z.unknown()).optional(),
+      scope: z.literal('session').optional(),
+      amendment: z
+        .discriminatedUnion('kind', [
+          z.object({ kind: z.literal('execpolicy'), command: z.array(z.string()) }),
+          z.object({
+            kind: z.literal('network'),
+            host: z.string(),
+            action: z.enum(['allow', 'deny'])
+          })
+        ])
+        .optional()
     }),
     z.object({
       behavior: z.literal('deny'),
@@ -259,6 +270,13 @@ export const chatRouter = router({
   getCliCommandDetails: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getCliCommandDetails(input.taskId, input.mode)),
+  /**
+   * The models the mode offers: Claude's fixed list, or the models the Codex CLI
+   * last reported for the task's project (`model/list`; [] until one ran).
+   */
+  getModels: publicProcedure
+    .input(z.object({ taskId: z.string(), mode: z.string() }))
+    .query(({ input }) => ops().getModels(input.taskId, input.mode)),
 
   // A tab's composer state: draft + scroll anchor, restored after a remount / reload.
   tabState: router({
