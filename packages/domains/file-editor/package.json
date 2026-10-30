@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
+    "./dir-picker": "./src/shared/dir-picker.ts",
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",

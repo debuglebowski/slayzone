@@ -6,6 +6,8 @@ import { useTRPC, useTRPCClient } from '../trpc'
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
+// The status words every client shows (the mobile app too): one implementation.
+import { computerStatus } from '@slayzone/computers/labels'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import { FolderCog, Loader2, Plus, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
 import { useComputerActions } from './ComputerActions'
@@ -219,37 +221,6 @@ export interface HubCardProps {
   primary?: ReactNode
   more: ReactNode
   headerTestId: string
-}
-
-/**
- * Connection state and last-seen as ONE field.
- *
- * They were two columns, and for a connected computer both read "Connected" — the
- * second carried information only while disconnected. Merged, the cell always
- * answers "can this take work right now, and if not, when did it last check in".
- */
-/**
- * Five states, not two.
- *
- * `usable` has been computed by the router all along and read by nothing —
- * "socket open" and "can take work" differ while a computer has gone silent but
- * its watchdog has not reaped it yet, and that gap is exactly when a binary
- * Connected/Offline lies. REVOKED outranks everything: it is a deliberate act,
- * and reporting connectivity for a computer whose credential was pulled would
- * describe the wrong thing entirely.
- */
-function computerStatus(row: {
-  connected: boolean
-  usable?: boolean
-  lastSeenAt: number | null
-  revokedAt?: number | null
-}): { label: string; tone: HubStatusTone } {
-  if (row.revokedAt != null) return { label: 'Revoked', tone: 'bad' }
-  if (row.usable) return { label: 'Connected', tone: 'ok' }
-  // Socket open but silent — it will be reaped, and until then it cannot take work.
-  if (row.connected) return { label: 'Not responding', tone: 'bad' }
-  if (row.lastSeenAt == null) return { label: 'Never connected', tone: 'idle' }
-  return { label: `Offline · last seen ${new Date(row.lastSeenAt).toLocaleString()}`, tone: 'idle' }
 }
 
 /**

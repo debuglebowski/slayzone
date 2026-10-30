@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
+    "./labels": "./src/shared/computer-labels.ts",
     "./server": "./src/server/index.ts"
   },
   "scripts": {

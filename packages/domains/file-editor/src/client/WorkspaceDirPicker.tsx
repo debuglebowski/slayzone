@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
+import { pickerStartDir } from '../shared/dir-picker'
 import { ChevronRight, CornerLeftUp, Folder, FolderGit2, FolderPlus, HardDrive } from 'lucide-react'
 import {
   Button,
@@ -84,21 +85,17 @@ export function WorkspaceDirPicker({
   const home = rootsQuery.data?.home ?? null
 
   /**
-   * Where to open: the caller's path if it is actually inside the target's roots,
-   * else home, else the first root. A stale project path from ANOTHER machine
-   * would otherwise open the picker on a directory the computer will refuse.
+   * Where to open (`pickerStartDir`, shared with the mobile app): the caller's path
+   * if it is inside the target's roots, else home, else the first root.
    *
    * Derived rather than pushed into state by an effect — the roots arrive
    * asynchronously, and setting state on their arrival is a cascading render for
    * a value that is a pure function of them.
    */
-  const defaultCwd = useMemo(() => {
-    if (roots.length === 0) return null
-    const inRoots = (p: string): boolean => roots.some((r) => p === r || p.startsWith(r + sep))
-    if (defaultPath && inRoots(defaultPath)) return defaultPath
-    if (home && inRoots(home)) return home
-    return roots[0]
-  }, [roots, defaultPath, home, sep])
+  const defaultCwd = useMemo(
+    () => pickerStartDir({ roots, sep, home, defaultPath }),
+    [roots, defaultPath, home, sep]
+  )
 
   const cwd = navigated ?? defaultCwd
   const setCwd = setNavigated

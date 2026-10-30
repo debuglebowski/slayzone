@@ -7,7 +7,8 @@ import type { BoardData, BoardTask, HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { TaskBrowser, type TaskBrowserProps } from './TaskBrowser'
 
-// The task's artifacts link reads its hub (its own suite tests it).
+// The task's computer card and artifacts link read their hub (their own suites test them).
+jest.mock('./computers/TaskComputer', () => ({ TaskComputer: () => null }))
 jest.mock('./artifacts/TaskArtifactsLink', () => ({ TaskArtifactsLink: () => null }))
 
 const home = hubEntryOf('home.example')
@@ -80,6 +81,7 @@ function props(fields: Partial<TaskBrowserProps>): TaskBrowserProps {
     onRetry: jest.fn(),
     onSignOut: jest.fn(),
     onManageHubs: jest.fn(),
+    onShowProjects: jest.fn(),
     onSearchArtifacts: jest.fn(),
     onOpenAgent: jest.fn(),
     onShowAgents: jest.fn(),
@@ -187,10 +189,13 @@ describe('TaskBrowser', () => {
     expect(p.onManageHubs).toHaveBeenCalled()
   })
 
-  it('opens artifact search', async () => {
+  it('opens the projects screen and artifact search', async () => {
     const p = props({ feeds: [loaded(home, boardOf('Home'))] })
     await render(<TaskBrowser {...p} />)
-    await userEvent.setup().press(screen.getByText('Search'))
+    const user = userEvent.setup()
+    await user.press(screen.getByText('Projects'))
+    expect(p.onShowProjects).toHaveBeenCalled()
+    await user.press(screen.getByText('Search'))
     expect(p.onSearchArtifacts).toHaveBeenCalled()
   })
 

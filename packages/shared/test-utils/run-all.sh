@@ -785,6 +785,8 @@ run_harness packages/domains/projects/src/client/useProjectLockGuard.test.ts
 run_harness packages/domains/projects-contracts/src/columns.test.ts
 run_harness packages/domains/projects-contracts/src/resolve-repo.test.ts
 run_harness packages/domains/projects-contracts/src/placements.test.ts
+run_harness packages/domains/computers/src/shared/computer-labels.test.ts
+run_harness packages/domains/file-editor/src/shared/dir-picker.test.ts
 run_harness packages/domains/dialogs/src/useDialogStore.test.ts
 run_harness packages/domains/task-browser/src/client/dom-picker.test.ts
 run_harness packages/domains/task-browser/src/client/scale.test.ts

@@ -4,6 +4,7 @@ import type { TaskRow } from './hub-board'
 import { useHubFeeds } from './hub-connections'
 import { useHubSessions } from './hub-sessions'
 import { ARTIFACT_SEARCH } from './artifacts/routes'
+import { PROJECTS } from './projects/routes'
 import { AGENTS, agentHref, findSession, HUBS, taskHref } from './routes'
 import { SPLIT_MIN_WIDTH, TaskBrowser } from './TaskBrowser'
 
@@ -41,6 +42,7 @@ export function HomeScreen({
       onRetry={retry}
       onSignOut={signOut}
       onManageHubs={() => router.push(HUBS)}
+      onShowProjects={() => router.push(PROJECTS)}
       onSearchArtifacts={() => router.push(ARTIFACT_SEARCH)}
       onOpenAgent={(row) => router.push(agentHref(row.hubLabel, row.task.id))}
       onShowAgents={() => router.push(AGENTS)}

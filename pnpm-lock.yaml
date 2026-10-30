@@ -935,6 +935,12 @@ importers:
       '@expo/metro-runtime':
         specifier: ~58.0.15
         version: 58.0.15(@expo/log-box@58.0.13)(expo@58.0.21)(react-dom@19.3.1(react@19.3.1))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)(utf-8-validate@6.0.6))(react@19.3.1)
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../../domains/computers
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
       '@slayzone/hub-auth':
         specifier: workspace:*
         version: link:../../domains/hub-auth
@@ -944,6 +950,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task

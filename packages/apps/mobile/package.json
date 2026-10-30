@@ -12,9 +12,12 @@
   "dependencies": {
     "@expo/dom-webview": "~58.0.2",
     "@expo/metro-runtime": "~58.0.15",
+    "@slayzone/computers": "workspace:*",
+    "@slayzone/file-editor": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",
     "@slayzone/markdown": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",

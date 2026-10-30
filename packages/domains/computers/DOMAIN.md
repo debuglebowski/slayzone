@@ -8,6 +8,11 @@ store only, no tRPC router yet.
 ## Contracts (shared/)
 
 - `ComputerRecord`, `JoinToken`, `DEFAULT_LOCAL_COMPUTER_NAME`
+- `computer-labels.ts` — the words every client shows for a computer: `computerStatus`
+  (Revoked / Connected / Not responding / Never connected / Offline · last seen),
+  `computerName` (null = Local), `inheritComputerLabel`, `runsOnLabel`, `OFFLINE_MARK`,
+  `NO_COMPUTERS_NOTE`. Pure, also exported alone as `@slayzone/computers/labels` (desktop
+  Settings → Connections and a task's Computer card, and the mobile app).
 
 ## Server (server/)
 

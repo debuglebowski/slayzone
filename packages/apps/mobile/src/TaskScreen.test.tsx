@@ -4,7 +4,8 @@ import type { BoardData, HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { TaskScreen } from './TaskScreen'
 
-// The task's artifacts link reads its hub (its own suite tests it).
+// The task's computer card and artifacts link read their hub (their own suites test them).
+jest.mock('./computers/TaskComputer', () => ({ TaskComputer: () => null }))
 jest.mock('./artifacts/TaskArtifactsLink', () => ({ TaskArtifactsLink: () => null }))
 
 const home = hubEntryOf('home.example')

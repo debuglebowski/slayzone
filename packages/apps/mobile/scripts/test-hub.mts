@@ -168,9 +168,10 @@ export interface TestHub {
   createUser(email: string): Promise<{ email: string; password: string }>
   /**
    * Enrol and run a computer owned by `forUser`, its folders jailed to `allowedRoot`
-   * (`binOverrideDir`: executables that win over PATH, e.g. fake-claude's).
+   * (`binOverrideDir`: executables that win over PATH, e.g. fake-claude's). Returns
+   * what stops it (a computer going offline); everything stops on exit anyway.
    */
-  startComputer(opts: { forUser: string; allowedRoot: string; binOverrideDir?: string }): void
+  startComputer(opts: { forUser: string; allowedRoot: string; binOverrideDir?: string }): () => void
 }
 
 /** Boot a hub of this checkout in `dir` (state, HOME, logs) on 127.0.0.1:`port`. */
@@ -223,6 +224,8 @@ export async function startTestHub(opts: {
     },
     startComputer({ forUser, allowedRoot, binOverrideDir }) {
       const n = ++computers
+      let stop: (() => void) | null = null
+      let stopped = false
       const croot = path.join(opts.dir, `computer-${n}`)
       mkdirSync(croot, { recursive: true })
       writeFileSync(
@@ -241,7 +244,8 @@ export async function startTestHub(opts: {
           fail(`join token: ${minted.status} ${minted.text.slice(0, 200)}`)
           return
         }
-        runBuilt(path.join(REPO, 'packages/apps/computer/dist/bin.cjs'), {
+        if (stopped) return
+        stop = runBuilt(path.join(REPO, 'packages/apps/computer/dist/bin.cjs'), {
           cwd: croot,
           log: path.join(opts.dir, `computer-${n}.log`),
           env: {
@@ -256,6 +260,10 @@ export async function startTestHub(opts: {
           }
         })
       }, fail)
+      return () => {
+        stopped = true
+        stop?.()
+      }
     }
   }
 }

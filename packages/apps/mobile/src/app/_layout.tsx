@@ -72,6 +72,8 @@ function Root() {
               <Stack.Screen name="agent/[hub]/[id]" />
               <Stack.Screen name="hubs" />
               <Stack.Screen name="add-hub" />
+              <Stack.Screen name="projects/index" />
+              <Stack.Screen name="projects/[hub]/[id]" />
               <Stack.Screen name="artifacts/index" />
               <Stack.Screen name="artifacts/[hub]/[task]/index" />
               <Stack.Screen name="artifacts/[hub]/[task]/[id]" />

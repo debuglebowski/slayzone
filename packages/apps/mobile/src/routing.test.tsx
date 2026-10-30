@@ -38,7 +38,13 @@ jest.mock('./agents/AgentScreen', () => ({
     )
   }
 }))
-// The task screen's artifacts link reads its hub (its own suite tests it).
+// The task screen's computer card and artifacts link read their hub (own suites test them).
+jest.mock('./computers/TaskComputer', () => ({
+  TaskComputer: ({ row }: { row: { task: { id: string } } }) => {
+    const { Text } = jest.requireActual('react-native')
+    return <Text>{`computer of ${row.task.id}`}</Text>
+  }
+}))
 jest.mock('./artifacts/TaskArtifactsLink', () => ({
   TaskArtifactsLink: (p: { hubAddress: string; taskId: string }) => {
     const { Text } = jest.requireActual('react-native')
@@ -59,6 +65,9 @@ jest.mock('@slayzone/transport/client', () => ({
   ...jest.requireActual('@slayzone/transport/client'),
   HubScope: ({ children }: { children: ReactNode }) => children
 }))
+// A hub card's account and computers talk to that hub (tRPC); here only which screen a
+// route opens matters.
+jest.mock('./hubs/HubDetails', () => ({ HubDetails: () => null }))
 
 const { hubEntryOf } = jest.requireActual('./hub-session') as typeof import('./hub-session')
 const home: HubSession = { entry: hubEntryOf('home.example'), token: 't' }
@@ -125,6 +134,8 @@ describe('routing', () => {
   })
 
   it.each([
+    '/projects',
+    '/projects/home.example/p',
     '/artifacts',
     '/artifacts/home.example/t0',
     '/artifacts/home.example/t0/a1'
@@ -148,8 +159,17 @@ describe('routing', () => {
     await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
     expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
     expect(screen).toHavePathname('/task/home.example/t0')
-    // With its artifacts.
+    // With the computer it runs on and its artifacts.
+    expect(screen.getByText('computer of t0')).toBeOnTheScreen()
     expect(screen.getByText('artifacts of home.example t0')).toBeOnTheScreen()
+  })
+
+  it("home opens every hub's projects", async () => {
+    mockSessions.kept = [home]
+    mockFeeds.list = [homeFeed]
+    await renderRouter(ROUTES, { initialUrl: '/' })
+    await userEvent.setup().press(await screen.findByText('Projects'))
+    expect(screen).toHavePathname('/projects')
   })
 
   it('home opens artifact search', async () => {

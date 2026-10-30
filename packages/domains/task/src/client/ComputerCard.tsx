@@ -2,6 +2,14 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+// The words every client shows for a computer choice (the mobile app too).
+import {
+  computerName,
+  inheritComputerLabel,
+  NO_COMPUTERS_NOTE,
+  OFFLINE_MARK,
+  runsOnLabel
+} from '@slayzone/computers/labels'
 
 /**
  * Per-task computer selector (hub/computer split, wave 3 UI).
@@ -54,10 +62,7 @@ export function ComputerCard({
     setBinding(taskComputerId)
   }
 
-  const nameFor = (id: string | null): string => {
-    if (id == null) return 'Local'
-    return computers.find((r) => r.id === id)?.name ?? 'Unknown computer'
-  }
+  const nameFor = (id: string | null): string => computerName(computers, id)
 
   const handleChange = async (value: string): Promise<void> => {
     const computerId = value === INHERIT_VALUE ? null : value
@@ -75,7 +80,7 @@ export function ComputerCard({
     return (
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Computer</label>
-        <p className="text-sm text-muted-foreground">No computers — runs locally</p>
+        <p className="text-sm text-muted-foreground">{NO_COMPUTERS_NOTE}</p>
       </div>
     )
   }
@@ -91,7 +96,7 @@ export function ComputerCard({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={INHERIT_VALUE}>
-            Inherit project default ({nameFor(projectDefaultComputerId)})
+            {inheritComputerLabel(nameFor(projectDefaultComputerId))}
           </SelectItem>
           {computers.map((computer) => (
             <SelectItem key={computer.id} value={computer.id}>
@@ -101,13 +106,13 @@ export function ComputerCard({
                   contradict the semantics. */}
               {computer.name}
               {computer.usable === false ? (
-                <span className="text-muted-foreground ml-1.5 text-xs">offline</span>
+                <span className="text-muted-foreground ml-1.5 text-xs">{OFFLINE_MARK}</span>
               ) : null}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <p className="mt-1 text-xs text-muted-foreground">Runs on {nameFor(effectiveId)}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{runsOnLabel(nameFor(effectiveId))}</p>
     </div>
   )
 }
