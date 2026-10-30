@@ -1,3 +1,4 @@
+import { CloudOff } from 'lucide-react'
 import type { HubBadge } from '@slayzone/transport/client'
 
 /** Corner dot in the hub's color: which hub a rail tile lives on (2+ hubs only). */
@@ -12,15 +13,23 @@ export function HubDot({ badge }: { badge: HubBadge }) {
   )
 }
 
-/** Pill naming the hub a tree project row lives on (2+ hubs only). */
+/**
+ * Badge naming the hub a tree project row lives on (2+ hubs only), tinted with
+ * the hub's color. An unreachable hub says so with an icon.
+ */
 export function HubPill({ badge }: { badge: HubBadge }) {
   return (
     <span
       data-hub-badge={badge.label}
-      title={badge.unreachable ? `${badge.label} is unreachable` : undefined}
-      className="flex h-4 max-w-[96px] shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] font-medium leading-none text-muted-foreground"
+      title={badge.unreachable ? `${badge.label} is unreachable` : `Hub: ${badge.label}`}
+      className="inline-flex h-[18px] max-w-[112px] shrink-0 items-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold leading-none"
+      style={{
+        backgroundColor: `color-mix(in oklch, ${badge.color} 14%, transparent)`,
+        borderColor: `color-mix(in oklch, ${badge.color} 40%, transparent)`,
+        color: `color-mix(in oklch, ${badge.color} 60%, var(--foreground))`
+      }}
     >
-      <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: badge.color }} />
+      {badge.unreachable && <CloudOff aria-label="unreachable" className="size-2.5 shrink-0" />}
       <span className="truncate">{badge.label}</span>
     </span>
   )

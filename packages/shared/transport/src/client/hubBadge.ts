@@ -18,13 +18,21 @@ export interface HubBadge {
  *  a reconnect blip should not grey anything out. */
 export const HUB_UNREACHABLE_GRACE_MS = 2_000
 
+/** Hue per hub, in hub-list order: distinct at a glance, and never red, which
+ *  would read as an error. Past the list, golden-angle steps from its last hue. */
+const HUB_HUES = [250, 150, 300, 60, 200, 100, 330, 30] as const
+
 /**
- * The color of the hub at `index` in the hub list. Golden-angle hue steps, so
- * every hub gets a hue far from all the others however many there are. A value,
- * like a project's color, not a theme token: it names a hub, not a role.
+ * The color of the hub at `index` in the hub list. A value, like a project's
+ * color, not a theme token: it names a hub, not a role. OKLCH keeps every hue at
+ * the same perceived lightness.
  */
 export function hubBadgeColor(index: number): string {
-  return `hsl(${Math.round((index * 137.508) % 360)} 70% 55%)`
+  const hue =
+    index < HUB_HUES.length
+      ? HUB_HUES[index]
+      : Math.round((HUB_HUES[HUB_HUES.length - 1] + (index - HUB_HUES.length + 1) * 137.508) % 360)
+  return `oklch(0.72 0.15 ${hue})`
 }
 
 const NONE: ReadonlySet<string> = new Set()
