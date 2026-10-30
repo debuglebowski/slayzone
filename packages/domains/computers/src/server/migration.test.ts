@@ -317,20 +317,28 @@ describe('v176 legacy project path → folder on the local computer', () => {
     }
   })
 
-  it('leaves a folder the local computer already reported alone', () => {
+  // 0.36 already kept a "ready" copy of each folder (seeded from the column). The
+  // computer may not list it under this hub any more (its record keyed by an old
+  // hub address, or not there at all), and a ready row it does not report is
+  // dropped on connect — the project would lose its folder. So every legacy path
+  // is handed to the computer again, as pending, with the column's path (what
+  // the 0.36 settings showed).
+  it('re-delivers a folder 0.36 already had a copy of, with the path the project showed', () => {
     const raw = migratedTo(175)
     try {
-      project(raw, 'p1', '/Users/me/old')
-      raw
-        .prepare(
-          `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
-           VALUES (?, 'p1', '/Users/me/moved', 'ready', 1)`
-        )
-        .run(LOCAL)
+      project(raw, 'p1', '/Users/me/app')
+      project(raw, 'p2', '/Users/me/new')
+      const ins = raw.prepare(
+        `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+         VALUES (?, ?, ?, 'ready', 1)`
+      )
+      ins.run(LOCAL, 'p1', '/Users/me/app')
+      ins.run(LOCAL, 'p2', '/Users/me/old')
       runMigrations(raw)
 
       expect(placements(raw)).toEqual([
-        { computer_id: LOCAL, project_id: 'p1', root_path: '/Users/me/moved', status: 'ready' }
+        { computer_id: LOCAL, project_id: 'p1', root_path: '/Users/me/app', status: 'pending' },
+        { computer_id: LOCAL, project_id: 'p2', root_path: '/Users/me/new', status: 'pending' }
       ])
     } finally {
       raw.close()

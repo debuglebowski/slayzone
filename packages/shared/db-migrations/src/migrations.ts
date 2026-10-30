@@ -4170,14 +4170,21 @@ export const migrations: Migration[] = [
       // The column is left as is: a build from before still reads its paths.
       // The local computer's id, frozen: `deterministicLocalComputerId('local-computer')`
       // (computers/server/store.ts; migration.test.ts asserts they match).
+      // A row 0.36 already kept for the local computer is replaced too: it was
+      // `ready` without the computer having to list it under this hub, and a ready
+      // row the computer does not report is dropped on connect — the project would
+      // lose its folder. Pending is delivered (again) instead, with the column's
+      // path: what the 0.36 settings showed.
       const LOCAL = 'f01a216a-4803-4214-98eb-f9e28951e1bb'
       db.prepare(
         `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
            SELECT ?, id, path, 'pending', ? FROM projects
             WHERE path IS NOT NULL AND path <> ''
-              AND NOT EXISTS (SELECT 1 FROM project_placements c
-                               WHERE c.computer_id = ? AND c.project_id = projects.id)`
-      ).run(LOCAL, Date.now(), LOCAL)
+         ON CONFLICT(computer_id, project_id) DO UPDATE SET
+           root_path = excluded.root_path,
+           status = 'pending',
+           updated_at = excluded.updated_at`
+      ).run(LOCAL, Date.now())
       db.prepare(
         `UPDATE projects SET default_computer_id = ?
           WHERE default_computer_id IS NULL

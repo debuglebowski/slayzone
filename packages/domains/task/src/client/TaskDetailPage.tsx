@@ -65,8 +65,10 @@ import {
   getDoneStatus,
   isCompletedStatus,
   isTerminalStatus,
+  placementOn,
   resolveRepoPath,
-  taskProjectRoot
+  taskProjectRoot,
+  workComputerId
 } from '@slayzone/projects-contracts'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { isChatSupported } from '@slayzone/terminal-contracts'
@@ -439,6 +441,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // The project's folder on the computer this task's work runs on (a project has
   // one folder per computer; see @slayzone/projects-contracts placements.ts).
   const projectRoot = taskProjectRoot(task, project)
+  // Its folder there in any state: a folder that is chosen but gone (missing) is
+  // "not found", not "no folder" — the same message as before folders moved.
+  const chosenFolder = placementOn(project, workComputerId(task, project))?.path ?? null
 
   // Multi-repo detection (drives the *task-bound* axis: terminal cwd, editor root, browser, worktree creation)
   const detectedRepos = useTaskDetectedRepos(projectRoot, project?.id)
@@ -3345,7 +3350,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         // a computer that was simply offline.
                         <div className="h-full flex items-center justify-center text-muted-foreground">
                           <div className="text-center p-8">
-                            {!projectRoot && !effectiveRepoPath ? (
+                            {!projectRoot && !effectiveRepoPath && !chosenFolder ? (
                               // A project needs no folder; its agents do, on the
                               // computer this task runs on. Picked here, it is
                               // recorded on that computer (the hub routes by task).
@@ -3417,7 +3422,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <>
                                 <p className="mb-2">Folder not found on this task’s machine</p>
                                 <p className="text-sm font-mono text-xs">
-                                  {effectiveRepoPath ?? projectRoot}
+                                  {effectiveRepoPath ?? projectRoot ?? chosenFolder}
                                 </p>
                                 <p className="text-sm mt-2">
                                   It may have moved or been deleted. Pick it again in project

@@ -140,7 +140,9 @@ vi.mock('@slayzone/projects-contracts', () => ({
   isTerminalStatus: () => false,
   isCompletedStatus: () => false,
   resolveRepoPath: () => ({ path: null, detected: false }),
-  taskProjectRoot: () => null
+  taskProjectRoot: () => null,
+  placementOn: () => null,
+  workComputerId: () => null
 }))
 
 vi.mock('@slayzone/task-contracts', () => ({
