@@ -53,7 +53,8 @@ vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => trpc,
   useTRPCClient: () => ({}),
-  useSubscription: () => undefined
+  useSubscription: () => undefined,
+  hubAllows: async () => true
 }))
 
 type Kids = { children?: React.ReactNode }

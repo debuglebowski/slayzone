@@ -6,6 +6,9 @@ import { act, cleanup, render } from '@testing-library/react'
 let stored: string | null = JSON.stringify({ webPanels: [], order: ['terminal'] })
 const settingsGet = vi.fn(async () => stored)
 let onSettingsData: ((event?: { keys: string[] | null }) => void) | null = null
+// May this session subscribe to the settings-changed stream? A full one may; a web
+// session may not (the hub refuses it, `scopes.ts`).
+const hubAllows = vi.fn(async (_client: unknown, _path: string) => true)
 // The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
 vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
@@ -20,6 +23,7 @@ vi.mock('@slayzone/transport/client', () => ({
       }
     }
   }),
+  hubAllows,
   useTRPC: () => ({ settings: { set: { mutationOptions: () => ({}) } } })
 }))
 // TanStack's contract: a NEW result object on every render whose `mutateAsync` is
@@ -113,6 +117,18 @@ describe('usePanelConfig (shared store)', () => {
       key: 'panel_config',
       value: JSON.stringify(next)
     })
+  })
+
+  it('a session the hub refuses the stream to (web) never subscribes; window events still reload', async () => {
+    hubAllows.mockResolvedValueOnce(false)
+    render(<Consumer name="web" />)
+    await settle()
+    expect(hubAllows).toHaveBeenLastCalledWith(expect.anything(), 'notify.onSettingsChanged')
+    expect(onSettingsData).toBeNull()
+    const calls = settingsGet.mock.calls.length
+    await act(async () => void window.dispatchEvent(new CustomEvent('panel-config-changed')))
+    await settle()
+    expect(settingsGet.mock.calls.length).toBe(calls + 1)
   })
 
   it('in-window change events still reload (Settings dialog, e2e)', async () => {

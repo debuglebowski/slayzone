@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { hubAllows, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../../trpc'
 import { parseTerminalOptionAsMeta, safeRandomUUID, type TerminalOptionAsMeta } from '@slayzone/ui'
 import {
@@ -237,8 +237,21 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
   const applyPanelConfig = (pc: string | null | undefined): void => {
     if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
   }
+  // A web session may not subscribe — the hub refuses it (`scopes.ts`) — so ask
+  // first (`hubAllows`).
+  const [settingsChangedAllowed, setSettingsChangedAllowed] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    void hubAllows(trpcClient, 'notify.onSettingsChanged').then((allowed) => {
+      if (!disposed) setSettingsChangedAllowed(allowed)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [trpcClient])
   useSubscription(
     trpc.notify.onSettingsChanged.subscriptionOptions(undefined, {
+      enabled: settingsChangedAllowed,
       onData: (event) => {
         if (!event?.keys) {
           void allSettingsQuery

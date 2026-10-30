@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useMutation } from '@tanstack/react-query'
+import { hubAllows } from '@slayzone/transport/client'
 import { useTRPC, getTrpcClient } from './trpc'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '@slayzone/task-contracts'
 import {
@@ -12,6 +13,7 @@ import { mergePanelOrder, mergePredefinedWebPanels } from '@slayzone/task-contra
 
 const SETTINGS_KEY = 'panel_config'
 const CHANGE_EVENT = 'panel-config-changed'
+const SETTINGS_CHANGED_PATH = 'notify.onSettingsChanged'
 
 function parseConfig(raw: string | null | undefined): PanelConfig {
   if (raw) {
@@ -89,20 +91,27 @@ const panelConfigStore = (() => {
     // In-window writes (another hook instance, the Settings dialog, e2e).
     window.addEventListener(CHANGE_EVENT, onWindowChange)
     // External settings changes (CLI, other windows — a secondary task window gets
-    // this window's edits here) — replaces `app.onSettingsChanged`.
+    // this window's edits here) — replaces `app.onSettingsChanged`. A web session may
+    // not subscribe — the hub refuses it (`scopes.ts`) — so ask first (`hubAllows`).
     let sub: { unsubscribe: () => void } | null = null
+    let stopped = false
     try {
-      sub = getTrpcClient().notify.onSettingsChanged.subscribe(undefined, {
-        // Every `settings.set` (any window) signals its key: reload only for ours,
-        // or for an unscoped ping (older hub, CLI/REST) that may have written it.
-        onData: (event: { keys: string[] | null } | undefined) => {
-          if (!event?.keys || event.keys.includes(SETTINGS_KEY)) void reload()
-        }
+      const client = getTrpcClient()
+      void hubAllows(client, SETTINGS_CHANGED_PATH).then((allowed) => {
+        if (!allowed || stopped) return
+        sub = client.notify.onSettingsChanged.subscribe(undefined, {
+          // Every `settings.set` (any window) signals its key: reload only for ours,
+          // or for an unscoped ping (older hub, CLI/REST) that may have written it.
+          onData: (event: { keys: string[] | null } | undefined) => {
+            if (!event?.keys || event.keys.includes(SETTINGS_KEY)) void reload()
+          }
+        })
       })
     } catch {
       /* no client yet / subscriptions unsupported — window events still apply */
     }
     stopExternal = () => {
+      stopped = true
       window.removeEventListener(CHANGE_EVENT, onWindowChange)
       sub?.unsubscribe()
     }
