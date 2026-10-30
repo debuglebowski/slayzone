@@ -8,7 +8,7 @@ import { type ChromeColors, useTheme } from './theme'
 const MAX_CONTENT_WIDTH = 720
 
 /**
- * The hubs this app is signed in to, in sign-in order, like desktop's Settings →
+ * The Hubs tab: the hubs this app is signed in to, in sign-in order, like desktop's Settings →
  * Connections: each with its connection, who the app is signed in as there, its
  * computers (live), and Sign out (which removes it: its tasks and agents leave every
  * list, its bearer and the theme kept from it are forgotten). Add a hub opens the
@@ -18,23 +18,18 @@ export function HubsScreen({
   feeds,
   sessions,
   onAdd,
-  onSignOut,
-  onBack
+  onSignOut
 }: {
   feeds: readonly HubFeed[]
   sessions: readonly HubSession[]
   onAdd: () => void
   onSignOut: (hubId: string) => void
-  onBack: () => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
-          <Text style={styles.link}>‹ Home</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>Hubs</Text>
         <Pressable onPress={onAdd} hitSlop={8} accessibilityRole="button">
           <Text style={styles.link}>Add a hub</Text>

@@ -94,7 +94,7 @@ describe('TaskScreen (phone)', () => {
       />
     )
     expect(screen.getByText('Not signed in to other.example')).toBeOnTheScreen()
-    await userEvent.setup().press(screen.getByText('‹ Home'))
+    await userEvent.setup().press(screen.getByText('‹ Back'))
     expect(onBack).toHaveBeenCalled()
   })
 

@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from 'expo-router'
-import { TaskArtifactsRoute, versionParam } from '../../../../artifacts/ArtifactRoutes'
+import { TaskArtifactsRoute, versionParam } from '../../../../../../artifacts/ArtifactRoutes'
 
 /**
  * `/artifacts/<hub address>/<task id>/<artifact id>[?version=<n>]` (deep link

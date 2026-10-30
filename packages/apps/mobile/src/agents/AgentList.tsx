@@ -80,60 +80,8 @@ export function AgentRows({
   )
 }
 
-/** How many agents home shows before "All agents (N)". */
-export const HOME_AGENT_LIMIT = 5
-
-/** Home's Agents section: the first agents (what needs the user first) + a link to all. */
-export function AgentsSection({
-  rows,
-  showHub,
-  onOpen,
-  onShowAll
-}: {
-  rows: readonly AgentRow[]
-  showHub: boolean
-  onOpen: (row: AgentRow) => void
-  onShowAll: () => void
-}) {
-  const theme = useTheme()
-  const styles = makeStyles(theme)
-  return (
-    <View testID="agents-section">
-      <View style={styles.sectionHeader}>
-        <Text style={styles.section}>Agents</Text>
-        {rows.length > HOME_AGENT_LIMIT ? (
-          <Pressable onPress={onShowAll} hitSlop={8} accessibilityRole="button">
-            <Text style={styles.link}>All agents ({rows.length})</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {rows.length === 0 ? (
-        <Text style={styles.note}>No agents</Text>
-      ) : (
-        <AgentRows rows={rows.slice(0, HOME_AGENT_LIMIT)} showHub={showHub} onOpen={onOpen} />
-      )}
-    </View>
-  )
-}
-
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingRight: 16
-    },
-    section: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: t.mutedForeground,
-      textTransform: 'uppercase',
-      paddingHorizontal: 16,
-      paddingTop: 16,
-      paddingBottom: 4
-    },
-    link: { fontSize: 13, color: t.foreground, fontWeight: '500', paddingTop: 12 },
     group: {
       fontSize: 12,
       color: t.mutedForeground,
@@ -141,7 +89,6 @@ const makeStyles = (t: ChromeColors) =>
       paddingTop: 8,
       paddingBottom: 2
     },
-    note: { color: t.mutedForeground, paddingHorizontal: 16, paddingVertical: 8 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -8,6 +8,7 @@ import { renderRouter, screen } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
 import { Dimensions } from 'react-native'
 import type { HubSession } from '../hub-session'
+import { redirectSystemPath } from '../app/+native-intent'
 
 const mockSessions: { kept: HubSession[] } = { kept: [] }
 
@@ -104,6 +105,17 @@ describe('artifact routes', () => {
     expect(
       await screen.findByText('list t1 split {"artifactId":"a1","version":null}', undefined, MOUNT)
     ).toBeOnTheScreen()
+  })
+
+  it("a link to a task's artifacts opens them in the Search tab", async () => {
+    await renderRouter('src/app', {
+      initialUrl: redirectSystemPath({
+        path: 'slayzone://artifacts/home.example/t1',
+        initial: true
+      })
+    })
+    expect(await screen.findByText('list t1 list null', undefined, MOUNT)).toBeOnTheScreen()
+    expect(screen).toHaveSegments(['(tabs)', '(search)', 'artifacts', '[hub]', '[task]'])
   })
 
   it('a hub the app is not signed in to says so', async () => {

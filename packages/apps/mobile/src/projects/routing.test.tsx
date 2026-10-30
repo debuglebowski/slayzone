@@ -7,6 +7,7 @@ import { userEvent } from '@testing-library/react-native'
 import { renderRouter, screen, within } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
 import { Dimensions } from 'react-native'
+import { redirectSystemPath } from '../app/+native-intent'
 import type { HubFeed } from '../hub-board'
 import type { HubSession } from '../hub-session'
 import { boardOf, createFakeHubs, feedOf, homeHub, projectOf, taskOf } from '../hubs/testing'
@@ -91,6 +92,16 @@ describe('projects routing', () => {
     await renderRouter(ROUTES, { initialUrl: '/projects/home.example/p' })
     await userEvent.setup().press(await screen.findByText('Write spec'))
     expect(screen).toHavePathname('/task/home.example/t0')
+  })
+
+  it('a link to a project opens it in the Tasks tab; its tasks push there too', async () => {
+    await renderRouter(ROUTES, {
+      initialUrl: redirectSystemPath({ path: 'slayzone://projects/home.example/p', initial: true })
+    })
+    const detail = within(await screen.findByTestId('project-detail-p'))
+    expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'projects', '[hub]', '[id]'])
+    await userEvent.setup().press(detail.getByText('Write spec'))
+    expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
   })
 
   it('a project link to a hub the app is not signed in to says so', async () => {

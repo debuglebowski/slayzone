@@ -1,6 +1,32 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
-import type { HubProblem } from './hub-board'
+import { type HubFeed, type HubProblem, hubProblem } from './hub-board'
 import { type ChromeColors, useTheme } from './theme'
+
+/**
+ * A banner for every hub with a problem (`HubBanner`), in sign-in order; none while all
+ * are fine. The tabs that list hub data put it under their header (Agents, Tasks).
+ */
+export function HubBanners({
+  feeds,
+  onRetry,
+  onSignOut
+}: {
+  feeds: readonly HubFeed[]
+  onRetry: (hubId: string) => void
+  onSignOut: (hubId: string) => void
+}) {
+  return feeds.map((feed) => {
+    const problem = hubProblem(feed)
+    return problem ? (
+      <HubBanner
+        key={problem.hub.id}
+        problem={problem}
+        onRetry={() => onRetry(problem.hub.id)}
+        onSignOut={() => onSignOut(problem.hub.id)}
+      />
+    ) : null
+  })
+}
 
 /**
  * What is wrong with one hub, above the list: it can't be reached, it is still

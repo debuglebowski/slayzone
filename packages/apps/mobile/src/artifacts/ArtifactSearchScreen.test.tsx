@@ -60,7 +60,6 @@ describe('ArtifactSearchScreen', () => {
         sessions={[home, work]}
         feeds={[feedOf(home, 'Launch'), feedOf(work, 'Offsite')]}
         onOpen={onOpen}
-        onBack={jest.fn()}
       />
     )
     const user = userEvent.setup()
@@ -91,14 +90,7 @@ describe('ArtifactSearchScreen', () => {
         : { status: 200, body: reportWith('b1', 'notes.md', 1, '(x') }
     )
     globalThis.fetch = fetch as unknown as typeof globalThis.fetch
-    await render(
-      <ArtifactSearchScreen
-        sessions={[home, work]}
-        feeds={[]}
-        onOpen={jest.fn()}
-        onBack={jest.fn()}
-      />
-    )
+    await render(<ArtifactSearchScreen sessions={[home, work]} feeds={[]} onOpen={jest.fn()} />)
     const user = userEvent.setup()
     await user.press(screen.getByRole('button', { name: 'Match case' }))
     await user.press(screen.getByRole('button', { name: 'Regular expression' }))

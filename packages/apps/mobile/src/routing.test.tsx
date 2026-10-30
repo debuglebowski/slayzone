@@ -10,6 +10,7 @@ import type { ReactNode } from 'react'
 import { Dimensions } from 'react-native'
 import type { BoardData, HubFeed } from './hub-board'
 import type { HubSession } from './hub-session'
+import { redirectSystemPath } from './app/+native-intent'
 
 const mockSessions: { kept: HubSession[] } = { kept: [] }
 const mockFeeds: { list: HubFeed[] } = { list: [] }
@@ -126,6 +127,25 @@ beforeEach(() => {
 
 const ROUTES = 'src/app'
 
+/** Home's feed, its hub unreachable (the per-hub banner). */
+const homeUnreachable: HubFeed = {
+  ...homeFeed,
+  connection: { status: 'connecting', error: null },
+  board: { data: undefined, pending: false, error: 'connect ECONNREFUSED', refreshing: false }
+}
+
+/** Queries inside one tab's stack (every tab stays mounted). */
+const tab = (name: 'agents' | 'tasks' | 'search' | 'hubs') =>
+  within(screen.getByTestId(`tab-${name}`))
+
+/** A link from outside the app, as Expo Router receives it (`app/+native-intent.tsx`). */
+const link = (url: string) => redirectSystemPath({ path: url, initial: true })
+
+const signedIn = (feed: HubFeed = homeFeed) => {
+  mockSessions.kept = [home]
+  mockFeeds.list = [feed]
+}
+
 describe('routing', () => {
   it('signed out, every route leads to sign-in', async () => {
     await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
@@ -134,6 +154,12 @@ describe('routing', () => {
   })
 
   it.each([
+    '/',
+    '/agents',
+    '/tasks',
+    '/hubs',
+    '/add-hub',
+    '/agent/home.example/t0',
     '/projects',
     '/projects/home.example/p',
     '/artifacts',
@@ -145,117 +171,198 @@ describe('routing', () => {
     expect(screen).toHavePathname('/sign-in')
   })
 
-  it('signed in, opens home with every hub’s tasks', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    expect(await screen.findByText('Write spec')).toBeOnTheScreen()
-    expect(screen).toHavePathname('/')
+  describe('tabs', () => {
+    it('the app opens on the Agents tab', async () => {
+      signedIn(homeWithAgent)
+      await renderRouter(ROUTES, { initialUrl: '/' })
+      expect(await screen.findByText('Running')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(agents)'])
+    })
+
+    it('the old /agents link opens the Agents tab', async () => {
+      signedIn(homeWithAgent)
+      await renderRouter(ROUTES, { initialUrl: '/agents' })
+      expect(await screen.findByText('Running')).toBeOnTheScreen()
+      expect(screen).toHavePathname('/')
+    })
+
+    it("Tasks: every hub's tasks", async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/tasks' })
+      expect(await screen.findByText('Write spec')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'tasks'])
+    })
+
+    it('Search: artifact search', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/artifacts' })
+      expect(await screen.findByText('artifact search')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(search)', 'artifacts'])
+    })
+
+    it('Hubs: the signed-in hubs', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/hubs' })
+      expect(await screen.findByText('Add a hub')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(hubs)', 'hubs'])
+    })
+
+    it('a tab root has no back button', async () => {
+      signedIn(homeWithAgent)
+      await renderRouter(ROUTES, { initialUrl: '/' })
+      await screen.findByText('Running')
+      expect(screen.queryByText('‹ Home')).toBeNull()
+    })
   })
 
-  it('a deep link to a task opens it (phone: its own screen)', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
-    expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
-    expect(screen).toHavePathname('/task/home.example/t0')
-    // With the computer it runs on and its artifacts.
-    expect(screen.getByText('computer of t0')).toBeOnTheScreen()
-    expect(screen.getByText('artifacts of home.example t0')).toBeOnTheScreen()
+  describe('the connection banner', () => {
+    it.each([
+      ['agents', '/'],
+      ['tasks', '/tasks']
+    ] as const)('shows in the %s tab', async (name, url) => {
+      signedIn(homeUnreachable)
+      await renderRouter(ROUTES, { initialUrl: url })
+      await screen.findAllByTestId(`hub-banner-${home.entry.id}`)
+      expect(tab(name).getByTestId(`hub-banner-${home.entry.id}`)).toBeOnTheScreen()
+    })
   })
 
-  it("home opens every hub's projects", async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    await userEvent.setup().press(await screen.findByText('Projects'))
-    expect(screen).toHavePathname('/projects')
+  // Each layout names the screen its stack starts at with `anchor`;
+  // `initialRouteName` is deprecated and warns once per layout.
+  it('the layouts use no deprecated settings', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    signedIn()
+    await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
+    await screen.findByText('Spec notes')
+    const deprecated = warn.mock.calls.filter((args) => String(args[0]).includes('deprecated'))
+    warn.mockRestore()
+    expect(deprecated).toEqual([])
   })
 
-  it('home opens artifact search', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    await userEvent.setup().press(await screen.findByText('Search'))
-    expect(screen).toHavePathname('/artifacts')
-    expect(await screen.findByText('artifact search')).toBeOnTheScreen()
+  describe('pushes stay in their tab', () => {
+    it('Agents: an agent opens in the Agents tab', async () => {
+      signedIn(homeWithAgent)
+      await renderRouter(ROUTES, { initialUrl: '/' })
+      await screen.findByText('Running')
+      await userEvent.setup().press(tab('agents').getByText('Write spec'))
+      expect(screen).toHavePathname('/agent/home.example/t0')
+      expect(screen).toHaveSegments(['(tabs)', '(agents)', 'agent', '[hub]', '[id]'])
+      expect(tab('agents').getByText('agent screen home.example t0 main')).toBeOnTheScreen()
+    })
+
+    it('Tasks: a task opens in the Tasks tab (phone)', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/tasks' })
+      await userEvent.setup().press(await screen.findByText('Write spec'))
+      expect(screen).toHavePathname('/task/home.example/t0')
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
+    })
+
+    it('Tasks: Projects opens in the Tasks tab', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/tasks' })
+      await userEvent.setup().press(await screen.findByText('Projects'))
+      expect(screen).toHavePathname('/projects')
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'projects'])
+    })
+
+    it('Tasks: a task’s agent opens in the Tasks tab', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/tasks' })
+      const user = userEvent.setup()
+      await user.press(await screen.findByText('Write spec'))
+      await user.press(tab('tasks').getByText('Agent ›'))
+      expect(screen).toHavePathname('/agent/home.example/t0')
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'agent', '[hub]', '[id]'])
+      expect(tab('tasks').getByText('agent screen home.example t0 main')).toBeOnTheScreen()
+    })
+
+    it('Hubs: Add a hub opens in the Hubs tab; back returns to the list', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/hubs' })
+      await userEvent.setup().press(await screen.findByText('Add a hub'))
+      expect(screen).toHavePathname('/add-hub')
+      expect(screen).toHaveSegments(['(tabs)', '(hubs)', 'add-hub'])
+      expect(screen.getByText('Sign in to another hub')).toBeOnTheScreen()
+      await userEvent.setup().press(screen.getByText('Cancel'))
+      expect(screen).toHavePathname('/hubs')
+    })
   })
 
-  it('a deep link to a task on an iPad shows it beside the list', async () => {
+  describe('deep links', () => {
+    it('a task opens in the Tasks tab, above the list (phone)', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
+      expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
+      expect(screen).toHavePathname('/task/home.example/t0')
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
+      // With the computer it runs on and its artifacts.
+      expect(tab('tasks').getByText('computer of t0')).toBeOnTheScreen()
+      expect(tab('tasks').getByText('artifacts of home.example t0')).toBeOnTheScreen()
+      await userEvent.setup().press(tab('tasks').getByText('‹ Back'))
+      expect(screen).toHavePathname('/tasks')
+    })
+
+    it('a task on an iPad shows it beside the list', async () => {
+      tablet()
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
+      expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
+      // The row in the list, and the title of the detail beside it.
+      expect(tab('tasks').getAllByText('Write spec')).toHaveLength(2)
+    })
+
+    it("a task's agents open in the Agents tab, on its hub", async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/home.example/t0') })
+      expect(await screen.findByText('agent screen home.example t0 main')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(agents)', 'agent', '[hub]', '[id]'])
+    })
+
+    it('opens the agent tab an agent link names (?tab=)', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/home.example/t0?tab=side') })
+      expect(await screen.findByText('agent screen home.example t0 side')).toBeOnTheScreen()
+    })
+
+    it('a path without its tab still opens the screen', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
+      expect(await screen.findAllByText('Spec notes')).not.toHaveLength(0)
+      expect(screen).toHavePathname('/task/home.example/t0')
+    })
+
+    it('an agent link to a hub the app is not signed in to says so', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/other.example/t0') })
+      expect(await screen.findByText('Not signed in to other.example')).toBeOnTheScreen()
+    })
+  })
+
+  it('on an iPad, a tapped task shows beside the list', async () => {
     tablet()
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
-    expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
-    // The row in the list, and the title of the detail beside it.
-    expect(screen.getAllByText('Write spec')).toHaveLength(2)
+    signedIn()
+    await renderRouter(ROUTES, { initialUrl: '/tasks' })
+    await screen.findAllByText('Write spec')
+    await userEvent.setup().press(tab('tasks').getAllByText('Write spec')[0])
+    expect(screen).toHavePathnameWithParams('/tasks?hub=home.example&task=t0')
   })
 
-  it('tapping a task on a phone opens its screen', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    await userEvent.setup().press(await screen.findByText('Write spec'))
-    expect(screen).toHavePathname('/task/home.example/t0')
-  })
-
-  it('opens the hubs screen and its sign-in for another hub', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    const user = userEvent.setup()
-    await user.press(await screen.findByText('Hubs'))
-    expect(screen).toHavePathname('/hubs')
-    await user.press(screen.getByText('Add a hub'))
-    expect(screen).toHavePathname('/add-hub')
-    expect(screen.getByText('Sign in to another hub')).toBeOnTheScreen()
-  })
-
-  it('signing out of the last hub returns to sign-in', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    await userEvent.setup().press(await screen.findByText('Sign out'))
+  // A session whose hub is gone must never trap the user (fix of 2026-10-29): before
+  // its board fails (no banner yet), the Hubs tab still signs out of it.
+  it('while a hub is still loading, the Hubs tab signs out of it', async () => {
+    signedIn({ ...homeFeed, board: { ...homeFeed.board, data: undefined, pending: true } })
+    await renderRouter(ROUTES, { initialUrl: '/hubs' })
+    await userEvent.setup().press(await tab('hubs').findByText('Sign out'))
     await act(async () => undefined)
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
   })
 
-  it("a deep link to a task's agents opens them on its hub (a tab as ?tab=)", async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/agent/home.example/t0' })
-    expect(await screen.findByText('agent screen home.example t0 main')).toBeOnTheScreen()
-  })
-
-  it('opens the tab an agent link names', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/agent/home.example/t0?tab=side' })
-    expect(await screen.findByText('agent screen home.example t0 side')).toBeOnTheScreen()
-  })
-
-  it('an agent link to a hub the app is not signed in to says so', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeFeed]
-    await renderRouter(ROUTES, { initialUrl: '/agent/other.example/t0' })
-    expect(await screen.findByText('Not signed in to other.example')).toBeOnTheScreen()
-  })
-
-  it('tapping an agent on home opens its agent screen', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeWithAgent]
-    await renderRouter(ROUTES, { initialUrl: '/' })
-    const agents = await screen.findByTestId('agents-section')
-    await userEvent.setup().press(within(agents).getByText('Write spec'))
-    expect(screen).toHavePathname('/agent/home.example/t0')
-  })
-
-  it('the agents screen lists every agent and opens one', async () => {
-    mockSessions.kept = [home]
-    mockFeeds.list = [homeWithAgent]
-    await renderRouter(ROUTES, { initialUrl: '/agents' })
-    expect(await screen.findByText('Running')).toBeOnTheScreen()
-    await userEvent.setup().press(screen.getByText('Write spec'))
-    expect(screen).toHavePathname('/agent/home.example/t0')
+  it('signing out of the last hub (Hubs tab) returns to sign-in', async () => {
+    signedIn()
+    await renderRouter(ROUTES, { initialUrl: '/hubs' })
+    await userEvent.setup().press(await screen.findByText('Sign out'))
+    await act(async () => undefined)
+    expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
   })
 })

@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from 'expo-router'
-import { TaskArtifactsRoute } from '../../../../artifacts/ArtifactRoutes'
+import { TaskArtifactsRoute } from '../../../../../../artifacts/ArtifactRoutes'
 
 /** `/artifacts/<hub address>/<task id>`: a task's artifacts, on that hub. */
 export default function TaskArtifacts() {

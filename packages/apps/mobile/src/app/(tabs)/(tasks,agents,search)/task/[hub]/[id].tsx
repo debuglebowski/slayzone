@@ -1,17 +1,17 @@
 import { HubScope } from '@slayzone/transport/client'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useWindowDimensions } from 'react-native'
-import { useHubFeeds } from '../../../hub-connections'
-import { useHubSessions } from '../../../hub-sessions'
-import { HomeScreen } from '../../../HomeScreen'
-import { agentHref, findSession, HOME } from '../../../routes'
-import { SPLIT_MIN_WIDTH } from '../../../TaskBrowser'
-import { TaskScreen } from '../../../TaskScreen'
+import { useHubFeeds } from '../../../../../hub-connections'
+import { useHubSessions } from '../../../../../hub-sessions'
+import { agentHref, findSession, TASKS } from '../../../../../routes'
+import { SPLIT_MIN_WIDTH } from '../../../../../TaskBrowser'
+import { TaskScreen } from '../../../../../TaskScreen'
+import { TasksScreen } from '../../../../../TasksScreen'
 
 /**
  * `/task/<hub address>/<task id>` (deep link `slayzone://task/<hub>/<id>`). Phone: the
  * task on its own screen, inside its hub's scope (anything it writes goes to the hub
- * that owns the task). Wide screen: home with the task beside the list.
+ * that owns the task). Wide screen: the tasks list with the task beside it.
  */
 export default function TaskRoute() {
   const { hub, id } = useLocalSearchParams<{ hub: string; id: string }>()
@@ -22,7 +22,7 @@ export default function TaskRoute() {
 
   if (width >= SPLIT_MIN_WIDTH) {
     return (
-      <HomeScreen
+      <TasksScreen
         selectedHub={hub}
         selectedTask={id}
         select={(row) => router.setParams({ hub: row.hubLabel, id: row.task.id })}
@@ -30,7 +30,7 @@ export default function TaskRoute() {
     )
   }
 
-  const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
+  const back = () => (router.canGoBack() ? router.back() : router.replace(TASKS))
   const screen = (
     <TaskScreen
       hubAddress={hub}

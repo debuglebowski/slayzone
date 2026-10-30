@@ -5,11 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme, useThemeVariant } from './theme'
 
 /** The window: safe-area insets in the theme's background, a status bar readable on it. */
-export function Screen({ children }: { children: ReactNode }) {
+export function Screen({ children, testID }: { children: ReactNode; testID?: string }) {
   const theme = useTheme()
   const variant = useThemeVariant()
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]}>
+    <SafeAreaView testID={testID} style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={variant === 'dark' ? 'light' : 'dark'} />
       {children}
     </SafeAreaView>

@@ -1,11 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useWindowDimensions } from 'react-native'
-import { useHubFeeds } from '../../hub-connections'
-import { useHubSessions } from '../../hub-sessions'
-import { projectHref } from '../../projects/routes'
-import { ProjectsScreen } from '../../projects/ProjectsScreen'
-import { findSession, HOME, taskHref } from '../../routes'
-import { SPLIT_MIN_WIDTH } from '../../TaskBrowser'
+import { useHubFeeds } from '../../../../hub-connections'
+import { useHubSessions } from '../../../../hub-sessions'
+import { projectHref } from '../../../../projects/routes'
+import { ProjectsScreen } from '../../../../projects/ProjectsScreen'
+import { findSession, TASKS, taskHref } from '../../../../routes'
+import { SPLIT_MIN_WIDTH } from '../../../../TaskBrowser'
 
 /** `/projects`: every hub's projects; on a wide screen `?hub=&project=` is the one beside the list. */
 export default function ProjectsRoute() {
@@ -27,7 +27,7 @@ export default function ProjectsRoute() {
           : router.push(projectHref(row.hubLabel, row.project.id))
       }
       onOpenTask={(row) => router.push(taskHref(row.hubLabel, row.task.id))}
-      onBack={() => (router.canGoBack() ? router.back() : router.replace(HOME))}
+      onBack={() => (router.canGoBack() ? router.back() : router.replace(TASKS))}
     />
   )
 }

@@ -26,7 +26,7 @@ import { hubTarget } from './hub-rest'
 import { artifactHref, taskArtifactsHref } from './routes'
 import { ScreenHeader } from './ScreenHeader'
 
-/** `/artifacts`: search every hub. */
+/** `/artifacts` (the Search tab's root): search every hub. */
 export function ArtifactSearchRoute() {
   const router = useRouter()
   const { sessions = [] } = useHubSessions()
@@ -36,7 +36,6 @@ export function ArtifactSearchRoute() {
       sessions={sessions}
       feeds={feeds}
       onOpen={(r) => router.push(artifactHref(r.hubLabel, r.taskId, r.artifactId))}
-      onBack={() => (router.canGoBack() ? router.back() : router.replace(HOME))}
     />
   )
 }

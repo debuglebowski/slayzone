@@ -80,24 +80,22 @@ function props(fields: Partial<TaskBrowserProps>): TaskBrowserProps {
     onSelect: jest.fn(),
     onRetry: jest.fn(),
     onSignOut: jest.fn(),
-    onManageHubs: jest.fn(),
     onShowProjects: jest.fn(),
-    onSearchArtifacts: jest.fn(),
     onOpenAgent: jest.fn(),
-    onShowAgents: jest.fn(),
     ...fields
   }
 }
 
 describe('TaskBrowser', () => {
-  // A session whose hub is gone must still be able to sign out: Sign out stays while
-  // the board loads and when it fails (fix of 2026-10-29).
-  it('offers Sign out while the board is loading', async () => {
+  // A session whose hub is gone must still be able to sign out (fix of 2026-10-29):
+  // while the board loads, from the Hubs tab (`routing.test.tsx`); once it fails, also
+  // from its banner here.
+  it('shows the first load under way, no tasks yet', async () => {
     const p = props({ feeds: [loading(home)] })
     await render(<TaskBrowser {...p} />)
 
-    await userEvent.setup().press(screen.getByText('Sign out'))
-    expect(p.onSignOut).toHaveBeenCalledWith(home.id)
+    expect(screen.getByText('Tasks')).toBeOnTheScreen()
+    expect(screen.queryByText('No tasks')).toBeNull()
   })
 
   it("says when a hub can't be reached, with Retry and Sign out", async () => {
@@ -182,78 +180,28 @@ describe('TaskBrowser', () => {
     expect(screen.getByText('About First')).toBeOnTheScreen()
   })
 
-  it('opens the hubs screen', async () => {
+  it("opens every hub's projects", async () => {
     const p = props({ feeds: [loaded(home, boardOf('Home'))] })
     await render(<TaskBrowser {...p} />)
-    await userEvent.setup().press(screen.getByText('Hubs'))
-    expect(p.onManageHubs).toHaveBeenCalled()
-  })
-
-  it('opens the projects screen and artifact search', async () => {
-    const p = props({ feeds: [loaded(home, boardOf('Home'))] })
-    await render(<TaskBrowser {...p} />)
-    const user = userEvent.setup()
-    await user.press(screen.getByText('Projects'))
+    await userEvent.setup().press(screen.getByText('Projects'))
     expect(p.onShowProjects).toHaveBeenCalled()
-    await user.press(screen.getByText('Search'))
-    expect(p.onSearchArtifacts).toHaveBeenCalled()
   })
 
-  it("lists every hub's agents above the tasks, what needs the user first", async () => {
-    const p = props({
-      feeds: [
-        loaded(
-          home,
-          boardOf('Home', 'Busy', 'Asks you!'),
-          agentsOf({ 't0:t0': 'running', 't1:t1': 'idle' })
-        ),
-        loaded(work, boardOf('Work', 'Remote'), agentsOf({ 't0:t0': 'error' }, { 't0:t0': 2 }))
-      ]
-    })
-    await render(<TaskBrowser {...p} />)
-
-    const agents = within(screen.getByTestId('agents-section'))
-    const titles = agents
-      .getAllByTestId(/^agent-row-/)
-      .map((row) => within(row).getByTestId('agent-title').props.children)
-    expect(titles).toEqual(['Asks you!', 'Remote', 'Busy'])
-    expect(agents.getByText('Waiting for you')).toBeOnTheScreen()
-    expect(agents.getByText('Idle · Unread · Home · home.example')).toBeOnTheScreen()
-    expect(agents.getByText('Error · 2 jobs · Work · work.example')).toBeOnTheScreen()
-  })
-
-  it('opens an agent with its hub', async () => {
+  it('lists no agents: they have their own tab', async () => {
     const p = props({
       feeds: [loaded(home, boardOf('Home', 'Busy'), agentsOf({ 't0:t0': 'running' }))]
     })
     await render(<TaskBrowser {...p} />)
-    await userEvent.setup().press(within(screen.getByTestId('agents-section')).getByText('Busy'))
+    expect(screen.queryByText('Running')).toBeNull()
+    expect(screen.getAllByText('Busy')).toHaveLength(1)
+  })
+
+  it("on a wide screen, the shown task's Agent opens its agent screen", async () => {
+    const p = props({ layout: 'split', feeds: [loaded(home, boardOf('Home', 'Busy'))] })
+    await render(<TaskBrowser {...p} />)
+    await userEvent.setup().press(screen.getByText('Agent ›'))
     expect(p.onOpenAgent).toHaveBeenCalledWith(
       expect.objectContaining({ hubId: home.id, task: expect.objectContaining({ id: 't0' }) })
     )
-  })
-
-  it('says when no agent has a session', async () => {
-    const p = props({ feeds: [loaded(home, boardOf('Home', 'Quiet'))] })
-    await render(<TaskBrowser {...p} />)
-    expect(within(screen.getByTestId('agents-section')).getByText('No agents')).toBeOnTheScreen()
-  })
-
-  it('shows the first agents and a link to all of them', async () => {
-    const titles = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
-    const p = props({
-      feeds: [
-        loaded(
-          home,
-          boardOf('Home', ...titles),
-          agentsOf(Object.fromEntries(titles.map((_, i) => [`t${i}:t${i}`, 'running'])))
-        )
-      ]
-    })
-    await render(<TaskBrowser {...p} />)
-    const agents = within(screen.getByTestId('agents-section'))
-    expect(agents.getAllByTestId(/^agent-row-/)).toHaveLength(5)
-    await userEvent.setup().press(agents.getByText('All agents (7)'))
-    expect(p.onShowAgents).toHaveBeenCalled()
   })
 })

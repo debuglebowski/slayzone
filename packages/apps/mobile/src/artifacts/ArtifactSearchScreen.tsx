@@ -28,13 +28,11 @@ import { extensionBadge } from './viewer-kind'
 export function ArtifactSearchScreen({
   sessions,
   feeds,
-  onOpen,
-  onBack
+  onOpen
 }: {
   sessions: readonly HubSession[]
   feeds: readonly HubFeed[]
   onOpen: (result: HubArtifactSearchResult) => void
-  onBack: () => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -62,7 +60,7 @@ export function ArtifactSearchScreen({
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Search artifacts" onBack={onBack} backLabel="Home" />
+      <ScreenHeader title="Search artifacts" />
       <View style={styles.bar}>
         <TextInput
           testID="artifact-search-input"

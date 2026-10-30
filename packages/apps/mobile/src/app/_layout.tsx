@@ -6,8 +6,11 @@
  *   frame is already in the user's theme). No navigator yet, so nothing navigates.
  * - Then one `HubConnections` for every signed-in hub (all hubs merged in one list)
  *   and the screens, behind `Stack.Protected` guards: signed out, only `/sign-in`;
- *   signed in, everything else (`/add-hub` signs in to another hub). A sign-in or the
- *   last sign-out flips the guards and Expo Router moves to the first allowed screen.
+ *   signed in, the tabs (`(tabs)/_layout.tsx`: Agents · Tasks · Search · Hubs, every
+ *   other screen pushed inside one of them). A sign-in or the last sign-out flips the
+ *   guards and Expo Router moves to the first allowed screen.
+ * - Safe area: the sign-in screen pads itself (`Screen`); each tab measures its own,
+ *   which includes the tab bar (`TabStack`).
  * - Theme: the PRIMARY hub's, the one signed in first. One source keeps the app's look
  *   stable — signing in to another hub, or one hub being slow or unreachable, never
  *   repaints it — and the launch's first frame (the theme read last) is that hub's,
@@ -63,32 +66,20 @@ function Root() {
   return (
     <HubConnections sessions={sessions}>
       <HubThemeProvider hubId={sessions[0]?.entry.id ?? null}>
-        <Screen>
-          <Screens>
-            <Stack.Protected guard={signedIn}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="task/[hub]/[id]" />
-              <Stack.Screen name="agents" />
-              <Stack.Screen name="agent/[hub]/[id]" />
-              <Stack.Screen name="hubs" />
-              <Stack.Screen name="add-hub" />
-              <Stack.Screen name="projects/index" />
-              <Stack.Screen name="projects/[hub]/[id]" />
-              <Stack.Screen name="artifacts/index" />
-              <Stack.Screen name="artifacts/[hub]/[task]/index" />
-              <Stack.Screen name="artifacts/[hub]/[task]/[id]" />
-            </Stack.Protected>
-            <Stack.Protected guard={!signedIn}>
-              <Stack.Screen name="sign-in" />
-            </Stack.Protected>
-          </Screens>
-        </Screen>
+        <Screens>
+          <Stack.Protected guard={signedIn}>
+            <Stack.Screen name="(tabs)" />
+          </Stack.Protected>
+          <Stack.Protected guard={!signedIn}>
+            <Stack.Screen name="sign-in" />
+          </Stack.Protected>
+        </Screens>
       </HubThemeProvider>
     </HubConnections>
   )
 }
 
-/** The screen stack: no native header (screens draw their own), the theme's background. */
+/** The root stack: no native header (screens draw their own), the theme's background. */
 function Screens({ children }: { children: ReactNode }) {
   const theme = useTheme()
   return (

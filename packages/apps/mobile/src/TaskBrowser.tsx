@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
-import { AgentsSection } from './agents/AgentList'
-import { type AgentRow, mergeHubAgents } from './agents/hub-agents'
-import { HubBanner } from './HubBanner'
+import type { AgentRow } from './agents/hub-agents'
+import { HubBanners } from './HubBanner'
 import { type HubFeed, hubProblem, mergeHubTasks, type TaskRow } from './hub-board'
 import { TaskDetail } from './TaskDetail'
 import { type ChromeColors, useTheme } from './theme'
@@ -21,23 +20,17 @@ export interface TaskBrowserProps {
   onSelect: (row: TaskRow) => void
   onRetry: (hubId: string) => void
   onSignOut: (hubId: string) => void
-  onManageHubs: () => void
   /** "Projects": every hub's projects. */
   onShowProjects: () => void
-  /** "Search": search every hub's artifacts. */
-  onSearchArtifacts: () => void
-  /** An agent (or, beside the list, the shown task's "Agent ›") was tapped: its agent screen. */
+  /** Beside the list, the shown task's "Agent ›" was tapped: its agent screen. */
   onOpenAgent: (row: Pick<AgentRow, 'hubId' | 'hubLabel' | 'task'>) => void
-  /** "All agents": the agents screen. */
-  onShowAgents: () => void
 }
 
 /**
- * Home: every signed-in hub's agents (what needs the user first, `AgentsSection`),
- * then their tasks in one read-only list (the board rows of `task.loadBoardData`, the
- * procedure the desktop board loads), each row tagged with its hub when there are
- * several. A hub that can't be reached gets a banner with Retry and Sign out; the
- * other hubs' rows stay.
+ * The Tasks tab: every signed-in hub's tasks in one read-only list (the board rows of
+ * `task.loadBoardData`, the procedure the desktop board loads), each row tagged with
+ * its hub when there are several. A hub that can't be reached gets a banner with
+ * Retry and Sign out; the other hubs' rows stay. The header opens every hub's projects.
  */
 export function TaskBrowser({
   feeds,
@@ -46,20 +39,12 @@ export function TaskBrowser({
   onSelect,
   onRetry,
   onSignOut,
-  onManageHubs,
   onShowProjects,
-  onSearchArtifacts,
-  onOpenAgent,
-  onShowAgents
+  onOpenAgent
 }: TaskBrowserProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const rows = useMemo(() => mergeHubTasks(feeds), [feeds])
-  const agentRows = useMemo(() => mergeHubAgents(feeds), [feeds])
-  const problems = feeds.flatMap((feed) => {
-    const problem = hubProblem(feed)
-    return problem ? [problem] : []
-  })
   const severalHubs = feeds.length > 1
   const onlyHub = feeds.length === 1 ? feeds[0].hub : null
   const loading = rows.length === 0 && feeds.some((f) => f.board.pending && !hubProblem(f))
@@ -68,7 +53,9 @@ export function TaskBrowser({
   const header = (
     <View style={styles.header}>
       <View style={styles.headerText}>
-        <Text style={styles.headerTitle}>Home</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">
+          Tasks
+        </Text>
         <Text style={styles.headerSub} numberOfLines={1}>
           {onlyHub ? onlyHub.label : `${feeds.length} hubs`}
         </Text>
@@ -76,29 +63,10 @@ export function TaskBrowser({
       <Pressable onPress={onShowProjects} hitSlop={8} accessibilityRole="button">
         <Text style={styles.link}>Projects</Text>
       </Pressable>
-      <Pressable onPress={onSearchArtifacts} hitSlop={8} accessibilityRole="button">
-        <Text style={styles.link}>Search</Text>
-      </Pressable>
-      <Pressable onPress={onManageHubs} hitSlop={8} accessibilityRole="button">
-        <Text style={styles.link}>Hubs</Text>
-      </Pressable>
-      {/* One hub: sign out of it right here, as before there could be several. */}
-      {onlyHub ? (
-        <Pressable onPress={() => onSignOut(onlyHub.id)} hitSlop={8} accessibilityRole="button">
-          <Text style={styles.link}>Sign out</Text>
-        </Pressable>
-      ) : null}
     </View>
   )
 
-  const banners = problems.map((problem) => (
-    <HubBanner
-      key={problem.hub.id}
-      problem={problem}
-      onRetry={() => onRetry(problem.hub.id)}
-      onSignOut={() => onSignOut(problem.hub.id)}
-    />
-  ))
+  const banners = <HubBanners feeds={feeds} onRetry={onRetry} onSignOut={onSignOut} />
 
   if (loading) {
     return (
@@ -123,17 +91,6 @@ export function TaskBrowser({
     <FlatList
       data={rows}
       keyExtractor={(row) => row.key}
-      ListHeaderComponent={
-        <View>
-          <AgentsSection
-            rows={agentRows}
-            showHub={severalHubs}
-            onOpen={onOpenAgent}
-            onShowAll={onShowAgents}
-          />
-          <Text style={styles.section}>Tasks</Text>
-        </View>
-      }
       ListEmptyComponent={<Text style={styles.note}>No tasks</Text>}
       refreshing={refreshing}
       onRefresh={() => {
@@ -211,15 +168,6 @@ const makeStyles = (t: ChromeColors) =>
     headerTitle: { fontSize: 22, fontWeight: '700', color: t.foreground },
     headerSub: { fontSize: 12, color: t.mutedForeground },
     link: { fontSize: 15, color: t.foreground, fontWeight: '500' },
-    section: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: t.mutedForeground,
-      textTransform: 'uppercase',
-      paddingHorizontal: 16,
-      paddingTop: 16,
-      paddingBottom: 4
-    },
     note: { color: t.mutedForeground, paddingHorizontal: 16, paddingVertical: 8 },
     split: { flex: 1, flexDirection: 'row' },
     listPane: {

@@ -58,7 +58,7 @@ function setup() {
       }
     }
   })
-  const handlers = { onAdd: jest.fn(), onSignOut: jest.fn(), onBack: jest.fn() }
+  const handlers = { onAdd: jest.fn(), onSignOut: jest.fn() }
   const feeds: HubFeed[] = [
     feedOf(homeHub, undefined, { connection: { status: 'open', error: null } }),
     feedOf(workHub, undefined, {

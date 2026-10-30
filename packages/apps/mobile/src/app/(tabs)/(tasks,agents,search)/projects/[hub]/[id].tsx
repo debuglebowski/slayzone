@@ -1,12 +1,12 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useWindowDimensions } from 'react-native'
-import { useHubFeeds } from '../../../hub-connections'
-import { useHubSessions } from '../../../hub-sessions'
-import { ProjectScreen } from '../../../projects/ProjectScreen'
-import { ProjectsScreen } from '../../../projects/ProjectsScreen'
-import { PROJECTS } from '../../../projects/routes'
-import { findSession, taskHref } from '../../../routes'
-import { SPLIT_MIN_WIDTH } from '../../../TaskBrowser'
+import { useHubFeeds } from '../../../../../hub-connections'
+import { useHubSessions } from '../../../../../hub-sessions'
+import { ProjectScreen } from '../../../../../projects/ProjectScreen'
+import { ProjectsScreen } from '../../../../../projects/ProjectsScreen'
+import { PROJECTS } from '../../../../../projects/routes'
+import { findSession, taskHref } from '../../../../../routes'
+import { SPLIT_MIN_WIDTH } from '../../../../../TaskBrowser'
 
 /**
  * `/projects/<hub address>/<project id>`. Phone: the project on its own screen (it

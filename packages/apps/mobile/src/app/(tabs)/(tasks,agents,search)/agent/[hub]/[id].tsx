@@ -1,11 +1,11 @@
 import { HubScope } from '@slayzone/transport/client'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
-import { AgentScreen } from '../../../agents/AgentScreen'
-import { useHubFeeds } from '../../../hub-connections'
-import { useHubSessions } from '../../../hub-sessions'
-import { findSession, HOME } from '../../../routes'
-import { type ChromeColors, useTheme } from '../../../theme'
+import { AgentScreen } from '../../../../../agents/AgentScreen'
+import { useHubFeeds } from '../../../../../hub-connections'
+import { useHubSessions } from '../../../../../hub-sessions'
+import { AGENTS, findSession } from '../../../../../routes'
+import { type ChromeColors, useTheme } from '../../../../../theme'
 
 /**
  * `/agent/<hub address>/<task id>?tab=<tab id>` (deep link `slayzone://agent/…`): a
@@ -17,7 +17,7 @@ export default function AgentRoute() {
   const router = useRouter()
   const { sessions = [] } = useHubSessions()
   const { feeds } = useHubFeeds()
-  const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
+  const back = () => (router.canGoBack() ? router.back() : router.replace(AGENTS))
   const session = findSession(sessions, hub)
   const feed = session && feeds.find((f) => f.hub.id === session.entry.id)
   if (!session || !feed) return <NotSignedIn hubAddress={hub} onBack={back} />
@@ -42,7 +42,7 @@ function NotSignedIn({ hubAddress, onBack }: { hubAddress: string; onBack: () =>
     <View style={styles.screen}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
-          <Text style={styles.link}>‹ Home</Text>
+          <Text style={styles.link}>‹ Back</Text>
         </Pressable>
       </View>
       <Text style={styles.note}>Not signed in to {hubAddress}</Text>

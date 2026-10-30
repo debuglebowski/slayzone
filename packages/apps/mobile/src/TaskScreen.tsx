@@ -47,7 +47,7 @@ export function TaskScreen({
     <View style={styles.screen}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
-          <Text style={styles.link}>‹ Home</Text>
+          <Text style={styles.link}>‹ Back</Text>
         </Pressable>
         {row ? (
           <Pressable
