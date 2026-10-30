@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useChatProvider } from './ChatViewContext'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,9 +22,12 @@ const TITLE = { edit: 'Edit & resend', rewind: 'Rewind to here', fork: 'Fork fro
 const ACTION = { edit: 'Edit', rewind: 'Rewind', fork: 'Fork' }
 const BUSY = { edit: 'Rewinding…', rewind: 'Rewinding…', fork: 'Forking…' }
 const WHAT = {
-  edit: 'Claude forgets this message and everything after it. Its text goes back into the message box to edit and send again.',
-  rewind: 'Claude keeps this message and its answer and forgets everything after it.',
-  fork: 'Starts a new conversation with everything up to this answer. The current conversation stays as it is, in Sessions.'
+  edit: (agent: string) =>
+    `${agent} forgets this message and everything after it. Its text goes back into the message box to edit and send again.`,
+  rewind: (agent: string) =>
+    `${agent} keeps this message and its answer and forgets everything after it.`,
+  fork: () =>
+    'Starts a new conversation with everything up to this answer. The current conversation stays as it is, in Sessions.'
 }
 
 /**
@@ -66,6 +70,7 @@ function RewindDialogBody({
   onConfirm: (choice: RewindChoice) => void
 }): React.JSX.Element {
   const [picked, setPicked] = useState<RewindChoice | null>(null)
+  const provider = useChatProvider()
   const codeReady = preview.status === 'ready' && preview.value.canRewind
   const choices: RewindChoice[] =
     pending.kind === 'fork'
@@ -81,7 +86,7 @@ function RewindDialogBody({
     <AlertDialogContent data-testid="rewind-dialog">
       <AlertDialogHeader>
         <AlertDialogTitle>{TITLE[pending.kind]}</AlertDialogTitle>
-        <AlertDialogDescription>{WHAT[pending.kind]}</AlertDialogDescription>
+        <AlertDialogDescription>{WHAT[pending.kind](provider.agent)}</AlertDialogDescription>
       </AlertDialogHeader>
       {choices.length > 0 && (
         <div className="space-y-3 text-sm">

@@ -1,13 +1,19 @@
 import { applyPatch, type StructuredPatchHunk } from 'diff'
 import type { FileDiff } from '@slayzone/diff-view'
 import {
-  fileChangeOf,
+  CODEX_FILE_CHANGE_TOOL,
+  SHELL_TOOL_NAMES,
+  codexChangeContent,
+  codexChangeHunks,
+  codexFileChanges,
+  fileChangesOf,
   selectFoldedIndexes,
+  type CodexFileChange,
   type TimelineItem,
   type ToolInvocation
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from '../claude-patch-to-filediff'
-import { notebookEditDiff, textChangeDiff } from '../tool-cards/file-diffs'
+import { codexChangeFileDiff, notebookEditDiff, textChangeDiff } from '../tool-cards/file-diffs'
 
 /** One call of the agent's file tools on a file. */
 export interface FileEdit {
@@ -19,6 +25,8 @@ export interface FileEdit {
   after: string | null
   /** Inside a sub-agent: its card sits in the sub-agent row, not on the timeline. */
   nested: boolean
+  /** A Codex file change: this file's part of the call (one call can change several files). */
+  codexChange?: CodexFileChange
 }
 
 /** A file the conversation changed. */
@@ -78,9 +86,37 @@ function contentOf(invocation: ToolInvocation): { before: string | null; after: 
 }
 
 /**
- * Every file the agent's file tools (Edit, Write, MultiEdit, NotebookEdit)
- * changed in the conversation as it is now: what a rewind, fork or switch
- * folded away is left out, like on the timeline. Files in first-changed order.
+ * One file of a Codex file change. Codex sends a new file's content and an
+ * edit's hunks: an edit's content is known when the file's previous edit left a
+ * known content (`previousAfter`) — it is assumed nothing else changed the file
+ * in between (Codex reports no originals to check against).
+ */
+function codexContentOf(
+  change: CodexFileChange,
+  previousAfter: string | null
+): { before: string | null; after: string | null } {
+  const own = codexChangeContent(change)
+  if (own.before !== null && own.after !== null) return own
+  const before = own.before ?? previousAfter
+  if (before === null) return { before: null, after: own.after }
+  if (own.after !== null) return { before, after: own.after }
+  const hunks = codexChangeHunks(change)
+  if (hunks.length === 0) return { before, after: before }
+  const out = applyPatch(before, {
+    oldFileName: undefined,
+    newFileName: undefined,
+    oldHeader: undefined,
+    newHeader: undefined,
+    hunks: hunks as StructuredPatchHunk[]
+  })
+  return { before, after: typeof out === 'string' ? out : null }
+}
+
+/**
+ * Every file the agent's file tools (Edit, Write, MultiEdit, NotebookEdit,
+ * Codex file changes) changed in the conversation as it is now: what a rewind,
+ * fork or switch folded away is left out, like on the timeline. Files in
+ * first-changed order.
  */
 export function collectSessionFileChanges(timeline: readonly TimelineItem[]): SessionFileChanges {
   const folded = selectFoldedIndexes(timeline)
@@ -88,18 +124,26 @@ export function collectSessionFileChanges(timeline: readonly TimelineItem[]): Se
   let shellCommands = 0
   timeline.forEach((it, i) => {
     if (it.kind !== 'tool' || folded.has(i)) return
-    if (it.invocation.name === 'Bash') shellCommands++
-    const change = fileChangeOf(it.invocation)
-    if (!change) return
-    const edit: FileEdit = {
-      toolUseId: it.invocation.id,
-      invocation: it.invocation,
-      ...contentOf(it.invocation),
-      nested: it.parentToolUseId != null
+    if (SHELL_TOOL_NAMES.has(it.invocation.name)) shellCommands++
+    const changes = fileChangesOf(it.invocation)
+    if (changes.length === 0) return
+    const codexChanges =
+      it.invocation.name === CODEX_FILE_CHANGE_TOOL ? codexFileChanges(it.invocation) : null
+    for (const change of changes) {
+      const entry = byPath.get(change.path)
+      const codexChange = codexChanges?.find((c) => c.path === change.path)
+      const previousAfter = entry ? entry.edits[entry.edits.length - 1].after : null
+      const edit: FileEdit = {
+        toolUseId: it.invocation.id,
+        invocation: it.invocation,
+        ...(codexChange
+          ? { ...codexContentOf(codexChange, previousAfter), codexChange }
+          : contentOf(it.invocation)),
+        nested: it.parentToolUseId != null
+      }
+      if (entry) entry.edits.push(edit)
+      else byPath.set(change.path, { path: change.path, edits: [edit], created: change.created })
     }
-    const entry = byPath.get(change.path)
-    if (entry) entry.edits.push(edit)
-    else byPath.set(change.path, { path: change.path, edits: [edit], created: change.created })
   })
   return { files: [...byPath.values()], shellCommands }
 }
@@ -110,8 +154,7 @@ export function countSessionFiles(timeline: readonly TimelineItem[]): number {
   const paths = new Set<string>()
   timeline.forEach((it, i) => {
     if (it.kind !== 'tool' || folded.has(i)) return
-    const change = fileChangeOf(it.invocation)
-    if (change) paths.add(change.path)
+    for (const change of fileChangesOf(it.invocation)) paths.add(change.path)
   })
   return paths.size
 }
@@ -121,6 +164,7 @@ export function editDiff(path: string, edit: FileEdit): FileDiff | null {
   const { invocation } = edit
   const res = invocation.result?.structured
   if (invocation.name === 'NotebookEdit') return notebookEditDiff(invocation.input, res)
+  if (edit.codexChange) return codexChangeFileDiff(edit.codexChange)
   if (edit.before !== null && edit.after !== null) {
     return textChangeDiff(path, edit.before, edit.after)
   }

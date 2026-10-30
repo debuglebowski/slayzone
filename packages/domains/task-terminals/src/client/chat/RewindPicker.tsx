@@ -11,18 +11,21 @@ import {
 } from '@slayzone/ui'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import type { ConversationActionsView } from './useConversationActions'
+import { useChatProvider } from './ChatViewContext'
 
 /** Esc Esc / "Rewind…" pick a message to edit & resend; "Fork from a message…" to fork. */
 export type RewindPickerKind = 'edit' | 'fork'
 
-const COPY: Record<RewindPickerKind, { title: string; what: string }> = {
+const COPY: Record<RewindPickerKind, { title: string; what: (agent: string) => string }> = {
   edit: {
     title: 'Rewind to before a message',
-    what: 'Claude forgets the message and everything after it; its text comes back into the message box.'
+    what: (agent) =>
+      `${agent} forgets the message and everything after it; its text comes back into the message box.`
   },
   fork: {
     title: 'Fork from a message',
-    what: 'A new conversation with everything up to that message’s answer; this one stays as it is.'
+    what: () =>
+      'A new conversation with everything up to that message’s answer; this one stays as it is.'
   }
 }
 
@@ -66,6 +69,7 @@ export function RewindPicker({
     return out.reverse()
   }, [timeline, view.activeIds])
 
+  const provider = useChatProvider()
   const copy = kind ? COPY[kind] : null
   const Icon = kind === 'fork' ? GitFork : CornerUpLeft
   return (
@@ -79,7 +83,7 @@ export function RewindPicker({
         <>
           <div className="px-3 pt-3">
             <DialogTitle className="text-sm">{copy.title}</DialogTitle>
-            <DialogDescription className="text-xs">{copy.what}</DialogDescription>
+            <DialogDescription className="text-xs">{copy.what(provider.agent)}</DialogDescription>
           </div>
           <CommandInput data-testid="rewind-picker-input" placeholder="Search messages…" />
           <CommandList>

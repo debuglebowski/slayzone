@@ -8,7 +8,8 @@ const NEARLY_FULL = 0.9
 /**
  * Composer footer readout: how full the context window is and what the session
  * cost so far. Shows only what the provider reported (no window → tokens only;
- * no accounting → no cost); nothing at all when it reported nothing (Codex).
+ * no accounting → no cost: Codex shows the context only); nothing at all when
+ * it reported nothing.
  */
 export function ContextMeter({ summary }: { summary: UsageSummary | null }) {
   if (!summary) return null

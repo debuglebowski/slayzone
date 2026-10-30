@@ -12,7 +12,6 @@ import {
   cstep,
   cx,
   expect,
-  knownBug,
   streamReply,
   test
 } from '../fixtures/chat-codex'
@@ -174,11 +173,6 @@ test.describe('Codex chat turn', () => {
     // Precondition: the card for this command exists.
     await expect(t.panel.getByText('npm test', { exact: false }).first()).toBeVisible()
 
-    knownBug({
-      audit: 'Codex tool cards',
-      fixedBy: 'Codex tool cards',
-      what: 'Codex commands and file edits render as raw JSON in a generic card'
-    })
     // A Bash-like card: the command as a title, no JSON keys from the item.
     await expect(t.panel.getByText(/"command"\s*:/)).toHaveCount(0)
     await expect(t.panel.getByText(/"cwd"\s*:/)).toHaveCount(0)
@@ -215,11 +209,6 @@ test.describe('Codex chat turn', () => {
     await expect(t.panel.getByText('Edited notes.txt.')).toBeVisible()
     await expect(t.panel.getByText('notes.txt', { exact: false }).first()).toBeVisible()
 
-    knownBug({
-      audit: 'Codex tool cards',
-      fixedBy: 'Codex tool cards',
-      what: 'Codex commands and file edits render as raw JSON in a generic card'
-    })
     await expect(t.panel.getByText(/"changes"\s*:/)).toHaveCount(0)
     await expect(t.panel.getByText('hello codex', { exact: true }).first()).toBeVisible({
       timeout: 2_000
@@ -232,11 +221,9 @@ test.describe('Codex chat turn', () => {
       scenario: { processes: [{ defaultTurn: codexEchoTurn() }] }
     })
     await expect(t.composer).toBeEnabled()
-    knownBug({
-      fixedBy: 'Codex chat polish',
-      what: 'the Codex composer says "Ask Claude anything…"'
+    await expect(t.composer).toHaveAttribute('placeholder', 'Ask Codex anything…', {
+      timeout: 2_000
     })
-    await expect(t.composer).not.toHaveAttribute('placeholder', /Claude/, { timeout: 2_000 })
   })
 
   test('e2e isolation: the app runs Codex with a per-worker CODEX_HOME, not the real ~/.codex', async ({

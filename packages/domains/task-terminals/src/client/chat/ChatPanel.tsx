@@ -12,8 +12,7 @@ import {
   useAppearance,
   safeClipboardWriteText,
   useStableCallback,
-  usePaletteContribution,
-  type AgentEffort
+  usePaletteContribution
 } from '@slayzone/ui'
 import {
   hasPendingPrompt,
@@ -24,7 +23,7 @@ import {
   selectUsageSummary,
   useChatSession
 } from '@slayzone/terminal/client'
-import { chatCapabilitiesForMode, modelSupportsEffortForMode } from '@slayzone/terminal-contracts'
+import { chatCapabilitiesForMode, chatProviderForMode } from '@slayzone/terminal-contracts'
 import type { AgentState } from '@slayzone/terminal-contracts'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { useChatAttachments } from './attachments/useChatAttachments'
@@ -34,6 +33,7 @@ import { RowUiStateContext, RowUiStateStore, collapseAllRows } from './row-ui-st
 import { TimelineRevealContext } from './timeline-reveal'
 import { useChatMode } from './useChatMode'
 import { useChatModel } from './useChatModel'
+import { useChatModels } from './useChatModels'
 import { useChatEffort } from './useChatEffort'
 import { useChatCollaboration } from './useChatCollaboration'
 import { useChatFastMode } from './useChatFastMode'
@@ -53,7 +53,7 @@ import { CommandTaskContext } from './tool-cards'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
 import { RewindPicker, type RewindPickerKind } from './RewindPicker'
-import { chatPaletteCommands } from './palette/chat-palette-commands'
+import { chatPaletteCommands, compactAction } from './palette/chat-palette-commands'
 import { ToolFocusContext, ToolFocusStore } from './tool-cards/tool-focus'
 import { FilesChangedPanel } from './files-changed/FilesChangedPanel'
 import { countSessionFiles } from './files-changed/session-file-changes'
@@ -154,6 +154,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       tabId,
       cwd
     })
+    const models = useChatModels({ taskId, mode, sessionKey: state.sessionId })
+    const effortLevels = chatModel ? models.effortLevels(chatModel) : undefined
     const { chatEffort, effortChanging, handleEffortChange } = useChatEffort({
       taskId,
       mode,
@@ -213,6 +215,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       getArtifactFilePath,
       scrollToBottom,
       handleEffortChange,
+      ...(effortLevels ? { effortIds: effortLevels.map((l) => l.id) } : {}),
       handleModelChange,
       cliCommands,
       attachmentsUsedBytes: selectConversationAttachmentBytes(state),
@@ -365,18 +368,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // The chat's page in the app's Cmd+K palette while this tab is the active one
     // (the focused tab wins when a split shows two).
     // Compiler-memoized: identity changes only when an input does.
+    const compact = compactAction(chatCapabilitiesForMode(mode), (text) => {
+      void composer.sendCommand(text)
+    })
     const paletteCommands = chatPaletteCommands({
       mode,
       inFlight,
       canRewind: conversation.view.canRewind,
       canFork: conversation.view.canFork,
       openRewind,
-      ...(chatCapabilitiesForMode(mode).nativeSlashCommands
-        ? { compact: () => void composer.sendCommand('/compact') }
-        : {}),
+      ...(compact ? { compact } : {}),
       ...(onShowSessions ? { showSessions: onShowSessions } : {}),
       ...(chatModel && !inFlight && !modelChanging
-        ? { model: { current: chatModel, change: (id) => void handleModelChange(id) } }
+        ? {
+            model: {
+              current: chatModel,
+              options: models.models,
+              change: (id) => void handleModelChange(id)
+            }
+          }
         : {}),
       ...(!inFlight
         ? {
@@ -391,11 +401,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             }
           }
         : {}),
-      ...(chatModel && modelSupportsEffortForMode(mode, chatModel) && !inFlight && !effortChanging
+      ...(chatModel && models.supportsEffort(chatModel) && !inFlight && !effortChanging
         ? {
             effort: {
               current: chatEffort,
-              change: (next) => void handleEffortChange(next as AgentEffort)
+              ...(effortLevels ? { options: effortLevels } : {}),
+              change: (next) => void handleEffortChange(next)
             }
           }
         : {}),
@@ -442,6 +453,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         fileEditsOpenByDefault: appearance.chatFileEditsOpenByDefault,
         showMessageMeta: appearance.chatShowMessageMeta,
         search: { query: search.query, caseSensitive: search.caseSensitive },
+        provider: chatProviderForMode(mode),
         setChatMode: handleModeChange,
         sendMessage: (text: string) => {
           void sendMessage(text)
@@ -480,6 +492,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         appearance.chatShowMessageMeta,
         search.query,
         search.caseSensitive,
+        mode,
         handleModeChange,
         sendMessage,
         retryMessage,
@@ -653,6 +666,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         handleModeChange={handleModeChange}
                         autoCapability={autoCapability}
                         chatModel={chatModel}
+                        models={models}
                         handleModelChange={handleModelChange}
                         modelChanging={modelChanging}
                         chatEffort={chatEffort}

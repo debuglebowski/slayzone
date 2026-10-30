@@ -1,7 +1,11 @@
 import { createContext, useContext } from 'react'
 import type { AgentMode } from '@slayzone/ui'
 import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
-import type { PermissionDecision } from '@slayzone/terminal-contracts'
+import {
+  chatProviderForMode,
+  type ChatProviderInfo,
+  type PermissionDecision
+} from '@slayzone/terminal-contracts'
 import type { ConversationActionsView } from './useConversationActions'
 import type { DiffLineComment } from './diff-comments/format'
 
@@ -28,6 +32,11 @@ export interface ChatViewState {
     query: string
     caseSensitive: boolean
   }
+  /**
+   * Who the chat talks to: how its text names the agent ("Ask Codex…",
+   * "Claude is waiting…"). Read it with `useChatProvider` (absent: Claude Code).
+   */
+  provider?: ChatProviderInfo
   /**
    * Switch the chat's permission mode. Wired by ChatPanel to `useChatMode`'s
    * handleModeChange.
@@ -105,7 +114,8 @@ export interface ChatViewState {
   addDiffComment?: (comment: DiffLineComment) => void
 }
 
-export const ChatViewContext = createContext<ChatViewState>({
+/** What a chat view without a provider value sees (harnesses, previews). */
+export const defaultChatView: ChatViewState = {
   collapseSignal: 0,
   finalOnly: false,
   fileEditsOpenByDefault: true,
@@ -113,8 +123,17 @@ export const ChatViewContext = createContext<ChatViewState>({
   search: { query: '', caseSensitive: false },
   timeline: [],
   childIndex: new Map()
-})
+}
+
+export const ChatViewContext = createContext<ChatViewState>(defaultChatView)
 
 export function useChatView(): ChatViewState {
   return useContext(ChatViewContext)
+}
+
+const DEFAULT_PROVIDER = chatProviderForMode('claude-chat')
+
+/** Who the chat talks to (Claude Code when the view doesn't say). */
+export function useChatProvider(): ChatProviderInfo {
+  return useContext(ChatViewContext).provider ?? DEFAULT_PROVIDER
 }

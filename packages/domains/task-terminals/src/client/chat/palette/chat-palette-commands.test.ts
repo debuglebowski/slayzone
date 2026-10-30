@@ -5,6 +5,7 @@
  */
 import { describe, expect, test, vi } from 'vitest'
 import { flattenPaletteCommands, type PaletteCommand } from '@slayzone/ui'
+import { modelsForMode } from '@slayzone/terminal-contracts'
 import { chatPaletteCommands, type ChatPaletteInput } from './chat-palette-commands'
 
 function input(over: Partial<ChatPaletteInput> = {}): ChatPaletteInput {
@@ -16,7 +17,7 @@ function input(over: Partial<ChatPaletteInput> = {}): ChatPaletteInput {
     openRewind: vi.fn(),
     compact: vi.fn(),
     showSessions: vi.fn(),
-    model: { current: 'opus', change: vi.fn() },
+    model: { current: 'opus', options: modelsForMode('claude-chat'), change: vi.fn() },
     permissionMode: { current: 'auto-accept', change: vi.fn(), autoAvailable: false },
     effort: { current: 'high', change: vi.fn() },
     handoff: vi.fn(),

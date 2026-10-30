@@ -40,7 +40,6 @@ import {
   readCodexProtocolSurface,
   readTranscript
 } from '@slayzone/test-utils/fake-codex'
-import { expectKnownBug } from '@slayzone/test-utils/known-bug'
 import type { ChatDriverContext, ChatSessionDriver, PermissionDecision } from '../types'
 import { codexChatBackend } from './codex-chat-session'
 

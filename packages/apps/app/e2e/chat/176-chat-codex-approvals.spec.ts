@@ -15,7 +15,6 @@ import {
   cstep,
   cx,
   expect,
-  knownBug,
   test,
   type CodexChatTask,
   type CodexStep
@@ -26,14 +25,6 @@ const CMD = { id: 'exec-approve', command: 'touch a.txt' }
 const CARD_MS = 3_000
 
 /** X1 drew the card (promptCards); Codex's own rows are X2's (prompt dock Codex variant). */
-const CLAUDE_ROWS = {
-  audit: '#1',
-  fixedBy: 'Codex approval rows (X2)',
-  what:
-    "a Codex request gets Claude's rows: its No denies + stops the turn (cancel, not decline) and no " +
-    'allow-for-this-session row is offered'
-}
-
 /** Precondition of every card test: the fake asked, and the app has the request. */
 async function requestArrived(t: CodexChatTask): Promise<void> {
   await t.run(0, (r) => r.serverRequests().length === 1)
@@ -97,7 +88,6 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('make a file')
     await requestArrived(t)
-    knownBug(CLAUDE_ROWS)
     await t.panel.getByRole('button', { name: /^No$/ }).click({ timeout: CARD_MS })
     const run = await t.run(0, (r) => r.requestReplies().length === 1)
     expect(run.requestReplies()[0].decision).toBe('decline')
@@ -133,7 +123,6 @@ test.describe('Codex chat approvals', () => {
     })
     await t.send('make a file')
     await requestArrived(t)
-    knownBug(CLAUDE_ROWS)
     await expect(t.panel.getByRole('button', { name: /^Yes$/ })).toBeVisible({ timeout: CARD_MS })
     // Once drawn: the request offers acceptForSession (`availableDecisions`), and
     // the driver must send it (codex-chat-session.fake.test.ts has the driver half).
@@ -215,8 +204,8 @@ test.describe('Codex chat approvals', () => {
     await t.panel.getByRole('button', { name: /^Yes$/ }).click({ timeout: CARD_MS })
     const run = await t.run(0, (r) => r.requestReplies().length === 1)
     await expect(t.panel.getByText('Legacy answered.')).toBeVisible()
-    // Then the driver half (codex-protocol-drift.test.ts, expectKnownBug): legacy
-    // requests are answered accept/decline, their schema wants approved/denied.
+    // The driver half (codex-protocol-drift.test.ts): a legacy request is answered
+    // with its schema's ReviewDecision (approved/denied), not accept/decline.
     expect(run.requestReplies()[0].decision).toBe('approved')
   })
 })

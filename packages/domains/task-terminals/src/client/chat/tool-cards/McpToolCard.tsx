@@ -1,6 +1,7 @@
 import { Plug } from 'lucide-react'
 import { LinkText, ToolShell, type ToolProps } from './card-shell'
 import { mcpResultBlocks, parseMcpToolName, type McpBlock } from './mcp'
+import { codexMcpInvocation } from './codex-items'
 
 function InputValue({ value }: { value: unknown }) {
   if (typeof value === 'string') {
@@ -63,8 +64,13 @@ function inputSummary(input: unknown): string {
     .slice(0, 120)
 }
 
-/** An MCP tool (`mcp__<server>__<tool>`): server + tool name, readable input and output. */
-export function McpToolCard({ invocation, timestamp }: ToolProps) {
+/**
+ * An MCP tool (`mcp__<server>__<tool>`, Codex `mcp/<server>/<tool>`): server +
+ * tool name, readable input and output.
+ */
+export function McpToolCard({ invocation: call, timestamp }: ToolProps) {
+  // A Codex call carries its item: read the arguments and what the tool returned.
+  const invocation = codexMcpInvocation(call)
   const name = parseMcpToolName(invocation.name)
   const input =
     invocation.input && typeof invocation.input === 'object'

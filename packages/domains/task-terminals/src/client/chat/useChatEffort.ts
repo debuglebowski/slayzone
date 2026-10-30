@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
-import { toast, useStableCallback, type AgentEffort } from '@slayzone/ui'
+import { toast, useStableCallback } from '@slayzone/ui'
 import { DEFAULT_CHAT_EFFORT } from '@slayzone/terminal-contracts'
 
+/**
+ * A reasoning effort: one of Claude's levels, or (Codex) any level the chosen
+ * model lists (`chat.getModels` → `efforts`).
+ */
+type ChatEffortValue = string
+
 interface SessionInfoLite {
-  chatEffort?: AgentEffort | null
+  chatEffort?: ChatEffortValue | null
 }
 
 interface UseChatEffortOpts {
@@ -23,7 +29,7 @@ async function hydrateChatEffort(
   trpcClient: TRPCClient,
   { taskId, mode, tabId }: { taskId: string; mode: string; tabId: string },
   isCancelled: () => boolean,
-  setChatEffortState: (v: AgentEffort) => void
+  setChatEffortState: (v: ChatEffortValue) => void
 ): Promise<void> {
   try {
     const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
@@ -35,7 +41,7 @@ async function hydrateChatEffort(
     const cached = (await trpcClient.chat.getEffort.query({
       taskId,
       mode
-    })) as AgentEffort | null
+    })) as ChatEffortValue | null
     if (!isCancelled()) setChatEffortState(cached ?? DEFAULT_CHAT_EFFORT)
   } catch {
     /* keep DEFAULT_CHAT_EFFORT */
@@ -44,8 +50,8 @@ async function hydrateChatEffort(
 
 async function applyChatEffort(
   trpcClient: TRPCClient,
-  args: { tabId: string; taskId: string; mode: string; cwd: string; chatEffort: AgentEffort },
-  setChatEffortState: (v: AgentEffort) => void,
+  args: { tabId: string; taskId: string; mode: string; cwd: string; chatEffort: ChatEffortValue },
+  setChatEffortState: (v: ChatEffortValue) => void,
   setEffortChanging: (v: boolean) => void
 ): Promise<void> {
   setEffortChanging(true)
@@ -71,7 +77,7 @@ async function applyChatEffort(
  */
 export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
   const trpcClient = useTRPCClient()
-  const [chatEffort, setChatEffortState] = useState<AgentEffort>(DEFAULT_CHAT_EFFORT)
+  const [chatEffort, setChatEffortState] = useState<ChatEffortValue>(DEFAULT_CHAT_EFFORT)
   const [effortChanging, setEffortChanging] = useState(false)
 
   // Reads the latest trpcClient; hydration re-runs only on task/mode/tab change.
@@ -90,7 +96,7 @@ export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
   }, [taskId, mode, tabId, hydrate])
 
   const handleEffortChange = useCallback(
-    async (next: AgentEffort) => {
+    async (next: ChatEffortValue) => {
       if (next === chatEffort || effortChanging) return
       await applyChatEffort(
         trpcClient,

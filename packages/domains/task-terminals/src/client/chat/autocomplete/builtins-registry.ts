@@ -1,4 +1,8 @@
-import { modelsForMode, type ChatCapabilities } from '@slayzone/terminal-contracts'
+import {
+  chatProviderForMode,
+  modelsForMode,
+  type ChatCapabilities
+} from '@slayzone/terminal-contracts'
 import type { BuiltinCommand, AcceptCtx } from './types'
 import { rankByName } from './ranking'
 import { resetChat } from './chat-actions'
@@ -42,18 +46,18 @@ export const builtinCommands: BuiltinCommand[] = [
   },
   {
     name: 'bug',
-    description: 'Open Claude Code issue tracker',
+    description: "Report a bug in the agent's CLI",
     cliCollision: 'app-wins',
     run(ctx) {
-      ctx.navigate.openExternal('https://github.com/anthropics/claude-code/issues/new')
+      ctx.navigate.openExternal(chatProviderForMode(ctx.session.mode).issuesUrl)
     }
   },
   {
     name: 'release-notes',
-    description: 'Open Claude Code releases page',
+    description: "Open the agent CLI's releases page",
     cliCollision: 'app-wins',
     run(ctx) {
-      ctx.navigate.openExternal('https://github.com/anthropics/claude-code/releases')
+      ctx.navigate.openExternal(chatProviderForMode(ctx.session.mode).releasesUrl)
     }
   },
   {
@@ -66,11 +70,13 @@ export const builtinCommands: BuiltinCommand[] = [
   },
   {
     name: 'memory',
-    description: 'Open project CLAUDE.md',
+    description: "Open the project's instructions file for the agent",
     cliCollision: 'app-wins',
     run(ctx) {
       const sep = ctx.session.cwd.endsWith('/') ? '' : '/'
-      ctx.navigate.openFile(`${ctx.session.cwd}${sep}CLAUDE.md`)
+      ctx.navigate.openFile(
+        `${ctx.session.cwd}${sep}${chatProviderForMode(ctx.session.mode).memoryFile}`
+      )
     }
   },
   {
@@ -99,12 +105,23 @@ export const builtinCommands: BuiltinCommand[] = [
   },
   {
     name: 'init',
-    description: 'Ask Claude to create CLAUDE.md for this project',
+    description: "Ask the agent to write the project's instructions file",
     cliCollision: 'cli-wins',
     async run(ctx) {
+      const { memoryFile } = chatProviderForMode(ctx.session.mode)
       await ctx.submit(
-        'Initialize a CLAUDE.md file for this codebase. Include the stack, architecture, commands, and any conventions you can infer from the code.'
+        `Initialize a ${memoryFile} file for this codebase. Include the stack, architecture, commands, and any conventions you can infer from the code.`
       )
+    }
+  },
+  {
+    name: 'compact',
+    description: 'Summarize the conversation to free up context',
+    // The CLI's own /compact (Claude Code lists it) wins; Codex lists none.
+    cliCollision: 'cli-wins',
+    available: (caps) => caps.compact,
+    async run(ctx) {
+      await ctx.submit('/compact')
     }
   },
   {

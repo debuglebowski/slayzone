@@ -17,14 +17,14 @@ import {
 import {
   chatCapabilitiesForMode,
   chatModesForMode,
-  modelsForMode,
-  modelSupportsEffortForMode,
+  chatProviderForMode,
   modeSupportsCollaboration,
   modeSupportsFastMode
 } from '@slayzone/terminal-contracts'
 import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contracts'
 import type { UsageSummary } from '@slayzone/terminal/client'
 import type { UseChatAttachmentsResult } from './attachments/useChatAttachments'
+import type { ChatModelsView } from './chat-models'
 import { AttachmentChip } from './attachments/AttachmentChip'
 import { ChatQueueList, type ChatQueueListProps } from './ChatQueueList'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
@@ -90,6 +90,8 @@ export interface ChatComposerProps {
   handleModeChange: ModeApi['handleModeChange']
   autoCapability: ModeApi['autoCapability']
   chatModel: ModelApi['chatModel']
+  /** The models (and their effort levels) the provider offers (`useChatModels`). */
+  models: ChatModelsView
   handleModelChange: ModelApi['handleModelChange']
   modelChanging: ModelApi['modelChanging']
   chatEffort: EffortApi['chatEffort']
@@ -143,6 +145,7 @@ export function ChatComposer({
   handleModeChange,
   autoCapability,
   chatModel,
+  models,
   handleModelChange,
   modelChanging,
   chatEffort,
@@ -266,7 +269,11 @@ export function ChatComposer({
                 setCursorPos(el.selectionStart ?? el.value.length)
               }}
               onKeyDown={onKeyDown}
-              placeholder={displaySessionEnded ? 'Session ended' : 'Ask Claude anything…'}
+              placeholder={
+                displaySessionEnded
+                  ? 'Session ended'
+                  : `Ask ${chatProviderForMode(mode).agent} anything…`
+              }
               disabled={displaySessionEnded}
               rows={1}
               className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 max-h-[240px] py-0.5 leading-normal"
@@ -333,10 +340,13 @@ export function ChatComposer({
                 variant="text"
                 autoCapability={autoCapability}
               />
-              {chatModel && (
+              {/* Null until hydrated; '' = the provider's default (Codex before it listed models). */}
+              {chatModel !== null && (
                 <AgentModelPill
                   model={chatModel}
-                  models={modelsForMode(mode)}
+                  models={models.models}
+                  emptyLabel="Default"
+                  emptyHint={`${chatProviderForMode(mode).product} lists its models once it has started.`}
                   onChange={(next) => {
                     void handleModelChange(next)
                   }}
@@ -344,9 +354,12 @@ export function ChatComposer({
                   variant="text"
                 />
               )}
-              {chatModel && modelSupportsEffortForMode(mode, chatModel) && (
+              {chatModel && models.supportsEffort(chatModel) && (
                 <AgentEffortPill
                   effort={chatEffort}
+                  {...(models.effortLevels(chatModel)
+                    ? { levels: models.effortLevels(chatModel) }
+                    : {})}
                   onChange={(next) => {
                     void handleEffortChange(next)
                   }}

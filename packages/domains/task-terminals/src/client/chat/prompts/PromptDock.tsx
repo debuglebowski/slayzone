@@ -3,10 +3,11 @@ import { MessageCircleQuestion } from 'lucide-react'
 import { toast } from '@slayzone/ui'
 import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
-import { useChatView } from '../ChatViewContext'
+import { useChatProvider, useChatView } from '../ChatViewContext'
 import { PermissionPrompt } from './PermissionPrompt'
 import { QuestionPrompt } from './QuestionPrompt'
 import { PlanPrompt } from './PlanPrompt'
+import { CODEX_QUESTIONS, CodexQuestionPrompt } from './CodexQuestionPrompt'
 import type { PromptKeyHandler } from './prompt-keys'
 
 export type { PromptKeyHandler } from './prompt-keys'
@@ -48,6 +49,7 @@ export function PromptDock({
     timeline,
     sendMessage
   } = useChatView()
+  const provider = useChatProvider()
   const pending = promptCards ? (prompts ?? []).filter((p) => p.status === 'pending') : []
   const current = pending[0] ?? null
   const rootRef = useRef<HTMLElement | null>(null)
@@ -72,7 +74,8 @@ export function PromptDock({
     if (!respondPermission) return Promise.resolve(false)
     return respondPermission({ requestId: current.requestId, decision, optionId }).then(
       (ok) => {
-        if (!ok) toast('This request is no longer active — Claude stopped waiting for it.')
+        if (!ok)
+          toast(`This request is no longer active — ${provider.agent} stopped waiting for it.`)
         return ok
       },
       (err: unknown) => {
@@ -86,6 +89,16 @@ export function PromptDock({
   if (current.toolName === 'AskUserQuestion') {
     body = (
       <QuestionPrompt
+        key={current.requestId}
+        prompt={current}
+        submitting={submitting}
+        answer={answer}
+        keysRef={keysRef}
+      />
+    )
+  } else if (current.toolName === CODEX_QUESTIONS) {
+    body = (
+      <CodexQuestionPrompt
         key={current.requestId}
         prompt={current}
         submitting={submitting}
@@ -125,12 +138,12 @@ export function PromptDock({
       ref={rootRef}
       data-prompt-dock
       tabIndex={-1}
-      aria-label="Claude is waiting for your answer"
+      aria-label={`${provider.agent} is waiting for your answer`}
       className="mx-3 mb-2 max-h-[55vh] overflow-y-auto rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <MessageCircleQuestion className="size-3" />
-        <span>Claude is waiting for your answer</span>
+        <span>{provider.agent} is waiting for your answer</span>
         {pending.length > 1 && <span className="ml-auto">1 of {pending.length}</span>}
       </div>
       {body}

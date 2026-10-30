@@ -3,15 +3,7 @@
  * change between turns (model, mode: applied per turn/start, no respawn).
  */
 import { resetApp } from '../fixtures/electron'
-import {
-  codexEchoTurn,
-  codexReply,
-  cstep,
-  expect,
-  knownBug,
-  streamReply,
-  test
-} from '../fixtures/chat-codex'
+import { codexEchoTurn, codexReply, cstep, expect, streamReply, test } from '../fixtures/chat-codex'
 
 test.describe('Codex chat restart', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -162,10 +154,6 @@ test.describe('Codex chat restart', () => {
       )
       .toEqual(['gpt-6-luna', 'gpt-6.1-sol'])
 
-    knownBug({
-      fixedBy: 'Codex models (X2 picker)',
-      what: 'the model picker still lists the hardcoded Codex models, not chat.getModels'
-    })
     await t.panel.getByRole('button', { name: /^Chat model:/ }).click({ timeout: 2_000 })
     await expect(t.page.getByRole('menuitem', { name: /GPT-6 Luna/ })).toBeVisible({
       timeout: 2_000

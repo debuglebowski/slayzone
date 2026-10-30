@@ -1,9 +1,10 @@
 import type { TimelineItem, ToolInvocation } from './chat-timeline'
+import { CODEX_FILE_CHANGE_TOOL, codexChangeCounts, codexFileChanges } from './codex-file-changes'
 
 /**
  * Claude Code's file tools: what they changed is in their structured result
- * (`filePath` + `structuredPatch`, notebook paths). Codex names its file changes
- * `codex/fileChange`, so its turns never get a row.
+ * (`filePath` + `structuredPatch`, notebook paths). Codex's file changes
+ * (`codex/fileChange`, several files per call) are read by `fileChangesOf`.
  */
 export const FILE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'Edit',
@@ -80,6 +81,30 @@ export function fileChangeOf(
   }
 }
 
+/** Tools that run a shell command: files they change can't be seen from the stream. */
+export const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(['Bash', 'codex/commandExecution'])
+
+/**
+ * Every file one finished call changed, with its line counts: a Claude file
+ * tool's one file, each file of a Codex file change; none for other tools, a
+ * call that failed, was declined, denied or has no result yet.
+ */
+export function fileChangesOf(
+  invocation: ToolInvocation
+): Array<{ path: string; additions: number | null; deletions: number | null; created: boolean }> {
+  if (invocation.name === CODEX_FILE_CHANGE_TOOL) {
+    if (invocation.status !== 'done' || invocation.denied || !invocation.result) return []
+    if (invocation.result.isError) return []
+    return codexFileChanges(invocation).map((change) => ({
+      path: change.path,
+      ...codexChangeCounts(change),
+      created: change.kind === 'add'
+    }))
+  }
+  const one = fileChangeOf(invocation)
+  return one ? [one] : []
+}
+
 const addCounts = (a: number | null, b: number | null): number | null =>
   a === null || b === null ? null : a + b
 
@@ -112,22 +137,26 @@ export function turnFilesChangedRow(timeline: readonly TimelineItem[]): Timeline
   for (let i = start; i < end; i++) {
     const it = timeline[i]
     if (it.kind !== 'tool') continue
-    if (it.invocation.name === 'Bash') shellCommands++
-    const change = fileChangeOf(it.invocation)
-    if (!change) continue
+    if (SHELL_TOOL_NAMES.has(it.invocation.name)) shellCommands++
+    const changes = fileChangesOf(it.invocation)
+    if (changes.length === 0) continue
     lastToolUseId = it.invocation.id
-    const prev = files.get(change.path)
-    files.set(
-      change.path,
-      prev
-        ? {
-            ...prev,
-            toolUseIds: [...prev.toolUseIds, it.invocation.id],
-            additions: addCounts(prev.additions, change.additions),
-            deletions: addCounts(prev.deletions, change.deletions)
-          }
-        : { ...change, toolUseIds: [it.invocation.id] }
-    )
+    for (const change of changes) {
+      const prev = files.get(change.path)
+      files.set(
+        change.path,
+        prev
+          ? {
+              ...prev,
+              toolUseIds: prev.toolUseIds.includes(it.invocation.id)
+                ? prev.toolUseIds
+                : [...prev.toolUseIds, it.invocation.id],
+              additions: addCounts(prev.additions, change.additions),
+              deletions: addCounts(prev.deletions, change.deletions)
+            }
+          : { ...change, toolUseIds: [it.invocation.id] }
+      )
+    }
   }
   if (lastToolUseId === null) return null
   return {

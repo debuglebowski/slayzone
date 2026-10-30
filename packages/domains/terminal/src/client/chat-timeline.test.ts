@@ -1795,11 +1795,12 @@ describe('context + session cost', () => {
     expect(other.usage.contextWindow).toBe(1_000_000)
   })
 
-  test('provider without per-model accounting (Codex shape) → no usage summary, footer cost unchanged', () => {
+  test('provider without per-model accounting (Codex shape) → no usage summary, no footer cost', () => {
     const s = run([ev.turnInit(), { kind: 'user-message', text: 'a' }, costResult(0, {})])
     expect(selectUsageSummary(s)).toBeNull()
     const result = s.timeline.find((i) => i.kind === 'result')
-    expect(result?.kind === 'result' && result.turnCostUsd).toBe(0)
+    // No cost reported is not a $0 turn: the footer shows no amount.
+    expect(result?.kind === 'result' && result.turnCostUsd).toBeUndefined()
   })
 
   test('selectUsageSummary exposes only what was reported', () => {

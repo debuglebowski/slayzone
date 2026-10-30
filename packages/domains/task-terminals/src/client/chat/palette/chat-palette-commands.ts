@@ -16,7 +16,7 @@ import {
   Square
 } from 'lucide-react'
 import { agentEffortOptions, agentModeLabel, type PaletteCommand } from '@slayzone/ui'
-import { chatModesForMode, modelsForMode } from '@slayzone/terminal-contracts'
+import { chatModesForMode, type ChatCapabilities } from '@slayzone/terminal-contracts'
 import type { RewindPickerKind } from '../RewindPicker'
 
 /** What the chat offers the palette right now (absent = not now / not this provider). */
@@ -31,9 +31,19 @@ export interface ChatPaletteInput {
   compact?: () => void
   /** The task's Sessions picker. */
   showSessions?: () => void
-  model?: { current: string; change: (id: string) => void }
+  /** The models offered (`chat.getModels`). */
+  model?: {
+    current: string
+    options: Array<{ id: string; label: string }>
+    change: (id: string) => void
+  }
   permissionMode?: { current: string; change: (mode: string) => void; autoAvailable: boolean }
-  effort?: { current: string; change: (effort: string) => void }
+  /** `options`: the model's own levels (Codex); absent: Claude's. */
+  effort?: {
+    current: string
+    options?: Array<{ id: string; label: string }>
+    change: (effort: string) => void
+  }
   /** "Continue in terminal". */
   handoff?: () => void
   filesChanged?: { count: number; open: () => void }
@@ -46,6 +56,14 @@ export interface ChatPaletteInput {
   reset: () => void
   /** Commands other parts of the chat add (e.g. the turn outline). */
   extra?: PaletteCommand[]
+}
+
+/** "Compact conversation": sends `/compact` where the provider compacts on request. */
+export function compactAction(
+  capabilities: ChatCapabilities,
+  send: (text: string) => void
+): (() => void) | undefined {
+  return capabilities.compact ? () => send('/compact') : undefined
 }
 
 /** One picker page: the options, the current one checked. */
@@ -134,7 +152,7 @@ export function chatPaletteCommands(input: ChatPaletteInput): PaletteCommand[] {
       page: pickerPage(
         'chat-model',
         'Model',
-        modelsForMode(input.mode),
+        input.model.options,
         input.model.current,
         input.model.change
       )
@@ -166,7 +184,7 @@ export function chatPaletteCommands(input: ChatPaletteInput): PaletteCommand[] {
       page: pickerPage(
         'chat-effort',
         'Effort',
-        agentEffortOptions(),
+        input.effort.options ?? agentEffortOptions(),
         input.effort.current,
         input.effort.change
       )

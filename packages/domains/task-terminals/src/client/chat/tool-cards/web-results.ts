@@ -1,4 +1,4 @@
-/** Readable views of Claude Code's WebSearch / WebFetch tool results. */
+/** Readable views of Claude Code's WebSearch / WebFetch tool results (and Codex's web search). */
 
 export interface WebLink {
   title: string
@@ -53,15 +53,21 @@ export function webSearchView(
   structured: unknown,
   rawContent: unknown
 ): WebSearchView {
+  // Codex starts a search with an empty query: the completed item has the real one.
+  const action = isRecord(structured) && isRecord(structured.action) ? structured.action : {}
   const query =
     str(isRecord(input) ? input.query : undefined) ||
-    str(isRecord(structured) ? structured.query : undefined)
+    str(isRecord(structured) ? structured.query : undefined) ||
+    str(action.query)
   if (isRecord(structured) && Array.isArray(structured.results)) {
     const links: WebLink[] = []
     const notes: string[] = []
     for (const r of structured.results) {
       if (typeof r === 'string') {
         if (r.trim()) notes.push(r.trim())
+      } else if (isRecord(r) && typeof r.url === 'string') {
+        // Codex: `{type:'text_result', title, url, snippet, domain}`.
+        links.push({ title: str(r.title) || r.url, url: r.url })
       } else if (isRecord(r)) links.push(...toLinks(r.content))
     }
     return {

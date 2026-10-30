@@ -818,6 +818,9 @@ run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.codex.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/chat-models.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/compact-entry.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline-palette.test.ts
@@ -840,6 +843,8 @@ run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
 # indexes = scans after every event.
 run_harness packages/domains/terminal/src/client/chat-timeline-replay.test.ts
 run_harness packages/domains/terminal/src/client/turn-file-changes.test.ts
+run_harness packages/domains/terminal/src/client/codex-file-changes.test.ts
+run_harness packages/domains/terminal/src/client/chat-timeline.codex-usage.test.ts
 run_harness packages/domains/terminal/src/client/persistent-index.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/client/chat-timeline-streaming.test.ts
@@ -875,6 +880,7 @@ run_harness packages/domains/terminal-contracts/src/chat-effort.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
@@ -1013,10 +1019,14 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatScrollMemory.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/provider-wording.test.tsx \
+  packages/domains/task-terminals/src/client/chat/prompts/codex-approvals.test.tsx \
+  packages/shared/ui/src/agent-pills.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/BashCard.test.tsx \
+  packages/domains/task-terminals/src/client/chat/tool-cards/codex-cards.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatTimeline.streaming.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatTimeline.codex.test.tsx \
   packages/domains/task-terminals/src/client/chat/virtual-timeline.test.tsx \

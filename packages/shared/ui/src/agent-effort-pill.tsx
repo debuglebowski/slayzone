@@ -67,14 +67,34 @@ const FAST_MODE_META: Record<'normal' | 'fast', FastModeMeta> = {
   }
 }
 
+/**
+ * One reasoning effort a model accepts, as the provider lists it (Codex
+ * `model/list`: any string, e.g. `minimal`).
+ */
+export interface AgentEffortLevel {
+  id: string
+  label: string
+  description?: string
+}
+
+/** The Claude levels, in order, as pill levels. */
+const CLAUDE_LEVELS: AgentEffortLevel[] = EFFORT_ORDER.map((id) => ({
+  id,
+  label: EFFORT_META[id].label,
+  description: EFFORT_META[id].description
+}))
+
 /** The effort levels in order, with the picker's names. */
 export function agentEffortOptions(): Array<{ id: AgentEffort; label: string }> {
   return EFFORT_ORDER.map((id) => ({ id, label: EFFORT_META[id].label }))
 }
 
 export interface AgentEffortPillProps {
-  effort: AgentEffort
-  onChange: (next: AgentEffort) => void
+  /** One of `levels`' ids (the Claude levels when `levels` is absent). */
+  effort: string
+  onChange: (next: string) => void
+  /** The levels the current model accepts (provider-listed); absent: the Claude levels. */
+  levels?: AgentEffortLevel[]
   disabled?: boolean
   compact?: boolean
   /** Visual style. `pill` = chip (default). `text` = plain inline text. */
@@ -94,6 +114,7 @@ export interface AgentEffortPillProps {
 export function AgentEffortPill({
   effort,
   onChange,
+  levels,
   disabled,
   compact,
   variant = 'pill',
@@ -102,7 +123,16 @@ export function AgentEffortPill({
   fastMode,
   onFastModeChange
 }: AgentEffortPillProps) {
-  const meta = EFFORT_META[effort]
+  const list = levels ?? CLAUDE_LEVELS
+  const known = (EFFORT_META as Record<string, EffortMeta | undefined>)[effort]
+  const listed = list.find((l) => l.id === effort)
+  const meta: EffortMeta = levels
+    ? {
+        label: listed?.label ?? effort,
+        short: listed?.label ?? effort,
+        description: listed?.description ?? ''
+      }
+    : (known ?? { label: effort, short: effort, description: '' })
   const fastSection = showFastMode && onFastModeChange
   return (
     <DropdownMenu>
@@ -124,27 +154,28 @@ export function AgentEffortPill({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        {EFFORT_ORDER.map((lvl) => {
-          const itemMeta = EFFORT_META[lvl]
-          const selected = lvl === effort
+        {list.map((lvl) => {
+          const selected = lvl.id === effort
           return (
             <DropdownMenuItem
-              key={lvl}
+              key={lvl.id}
               onSelect={(e) => {
-                if (lvl === effort) {
+                if (lvl.id === effort) {
                   e.preventDefault()
                   return
                 }
-                onChange(lvl)
+                onChange(lvl.id)
               }}
               className={cn('flex items-start gap-2 py-2', selected && 'bg-accent/40')}
             >
               <Brain className="size-4 mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium">{itemMeta.label}</div>
-                <div className="text-[11px] text-muted-foreground leading-snug">
-                  {itemMeta.description}
-                </div>
+                <div className="text-xs font-medium">{lvl.label}</div>
+                {lvl.description ? (
+                  <div className="text-[11px] text-muted-foreground leading-snug">
+                    {lvl.description}
+                  </div>
+                ) : null}
               </div>
               {selected && (
                 <span className="text-[10px] text-muted-foreground self-center">current</span>

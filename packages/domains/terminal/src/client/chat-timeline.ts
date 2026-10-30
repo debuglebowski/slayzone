@@ -141,9 +141,10 @@ export type TimelineItem =
       /**
        * This turn's cost. `totalCostUsd` is the CLI's running session total, so
        * a provider that reports per-model accounting gets the delta to the
-       * previous result; otherwise it equals `totalCostUsd` (Codex: 0).
+       * previous result; otherwise it equals `totalCostUsd`. Absent when the
+       * provider reported no cost (no accounting, total 0 — Codex): no `$0`.
        */
-      turnCostUsd: number
+      turnCostUsd?: number
       /** Concatenated assistant-text from this turn, for the footer Copy button. */
       copyText: string | null
       timestamp: number
@@ -1477,7 +1478,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         isError: event.isError && !stopped,
         durationMs: event.durationMs,
         totalCostUsd: event.totalCostUsd,
-        turnCostUsd,
+        ...(turnCostUsd !== undefined ? { turnCostUsd } : {}),
         numTurns: event.numTurns,
         text: event.text,
         copyText,
@@ -1811,8 +1812,21 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // Read through `chat.getModels` (stored per project), not the timeline.
       return state
     case 'context-usage':
-      // X2 replaces this with the meter case.
-      return state
+      // Codex reports the context directly (Claude: `applyContextUsage` from its calls).
+      if (
+        state.usage.contextTokens === event.contextTokens &&
+        state.usage.contextWindow === event.contextWindow
+      ) {
+        return state
+      }
+      return {
+        ...state,
+        usage: {
+          ...state.usage,
+          contextTokens: event.contextTokens,
+          contextWindow: event.contextWindow
+        }
+      }
     case 'user-message-delivery':
       return applyTransportEvent(state, event, ts)
     case 'session-spawn':
@@ -2071,9 +2085,12 @@ function applyResultCost(
   usage: SessionUsage,
   model: string | null,
   event: Extract<AgentEvent, { kind: 'result' }>
-): { usage: SessionUsage; turnCostUsd: number } {
+): { usage: SessionUsage; turnCostUsd: number | undefined } {
   const models = event.modelUsage ?? {}
-  if (Object.keys(models).length === 0) return { usage, turnCostUsd: event.totalCostUsd }
+  if (Object.keys(models).length === 0) {
+    // No accounting: a total of 0 means no cost was reported (Codex), not a free turn.
+    return { usage, turnCostUsd: event.totalCostUsd > 0 ? event.totalCostUsd : undefined }
+  }
   const total = event.totalCostUsd
   const turnCostUsd = total >= usage.lastTotalCostUsd ? total - usage.lastTotalCostUsd : total
   return {

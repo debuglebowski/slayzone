@@ -1,5 +1,6 @@
 import { structuredPatch } from 'diff'
 import type { FileDiff } from '@slayzone/diff-view'
+import { codexChangeHunks, type CodexFileChange } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from '../claude-patch-to-filediff'
 
 /**
@@ -106,4 +107,19 @@ export function notebookEditDiff(input: unknown, structured: unknown): FileDiff 
   if (oldText === undefined) return null
   const ext = LANGUAGE_EXT[language.toLowerCase()] ?? 'txt'
   return textChangeDiff(`${notebookPath}#${cellId ?? 'new'}.${ext}`, oldText, newText)
+}
+
+/** One file of a Codex file change, in the shape DiffView takes. */
+export function codexChangeFileDiff(change: CodexFileChange): FileDiff | null {
+  const diff = claudeEditResultToFileDiff({
+    filePath: change.path,
+    structuredPatch: codexChangeHunks(change)
+  })
+  if (!diff) return null
+  return {
+    ...diff,
+    oldPath: change.movedFrom ?? null,
+    isNew: change.kind === 'add',
+    isDeleted: change.kind === 'delete'
+  }
 }

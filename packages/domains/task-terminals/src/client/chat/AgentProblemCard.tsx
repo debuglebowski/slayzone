@@ -1,11 +1,7 @@
 import { AlertTriangle } from 'lucide-react'
 import type { TimelineItem } from '@slayzone/terminal/client'
+import { chatProviderForBinary } from '@slayzone/terminal-contracts'
 import { useChatView } from './ChatViewContext'
-
-const PRODUCT: Record<string, { name: string; install: string }> = {
-  claude: { name: 'Claude Code', install: 'https://claude.com/claude-code' },
-  codex: { name: 'Codex', install: 'https://github.com/openai/codex' }
-}
 
 /** The agent could not be started — what happened, and the way out. */
 export function AgentProblemCard({
@@ -15,8 +11,8 @@ export function AgentProblemCard({
 }): React.JSX.Element {
   const { restartAgent, takeOver, onOpenUrl } = useChatView()
   const inUse = item.code === 'conversation-in-use'
-  const product = item.binary ? PRODUCT[item.binary] : undefined
-  const name = product?.name ?? item.binary ?? 'The agent'
+  const product = item.binary ? chatProviderForBinary(item.binary) : null
+  const name = product?.product ?? item.binary ?? 'The agent'
   const title =
     item.code === 'cli-not-installed'
       ? `${name} isn't installed`
@@ -67,7 +63,7 @@ export function AgentProblemCard({
           <button
             type="button"
             className="rounded px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            onClick={() => onOpenUrl(product.install)}
+            onClick={() => onOpenUrl(product.installUrl)}
           >
             How to install
           </button>

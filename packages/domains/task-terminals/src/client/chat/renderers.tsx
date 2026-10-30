@@ -1,5 +1,5 @@
 import { useContext, useDeferredValue, useEffect, useState, useMemo } from 'react'
-import { useChatView } from './ChatViewContext'
+import { useChatProvider, useChatView } from './ChatViewContext'
 import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
 import { useToolFocusRequest } from './tool-cards/tool-focus'
 import {
@@ -59,6 +59,8 @@ import { HookOutputRow } from './HookOutputRow'
 import { NoticeRow } from './NoticeRow'
 import {
   BashCard,
+  CodexCommandCard,
+  CodexFileChangeCard,
   McpToolCard,
   MultiEditCard,
   NotebookEditCard,
@@ -236,8 +238,12 @@ export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 're
         )}
         <span>{(item.durationMs / 1000).toFixed(1)}s</span>
         <span>·</span>
-        <span>${item.turnCostUsd.toFixed(4)}</span>
-        <span>·</span>
+        {item.turnCostUsd !== undefined && (
+          <>
+            <span data-testid="chat-turn-cost">${item.turnCostUsd.toFixed(4)}</span>
+            <span>·</span>
+          </>
+        )}
         <span>
           {item.numTurns} turn{item.numTurns === 1 ? '' : 's'}
         </span>
@@ -292,6 +298,7 @@ export function InterruptedBlock({
 }: {
   item: Extract<TimelineItem, { kind: 'interrupted' }>
 }) {
+  const provider = useChatProvider()
   return (
     <div
       data-testid="chat-interrupted"
@@ -299,7 +306,7 @@ export function InterruptedBlock({
       className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-warning-foreground"
     >
       {item.reason === 'already-in-conversation'
-        ? 'Not run again: Claude Code already had this message'
+        ? `Not run again: ${provider.agent} already had this message`
         : 'Turn interrupted'}
     </div>
   )
@@ -880,7 +887,11 @@ export const toolRenderers: Record<string, React.FC<ToolProps>> = {
   Grep: ToolCallGrep,
   TodoWrite: ToolCallTodoWrite,
   ExitPlanMode: ToolCallExitPlanMode,
-  AskUserQuestion: ToolCallAskUserQuestion
+  AskUserQuestion: ToolCallAskUserQuestion,
+  // Codex chat (names from the Codex driver).
+  'codex/commandExecution': CodexCommandCard,
+  'codex/fileChange': CodexFileChangeCard,
+  'codex/webSearch': WebSearchCard
 }
 
 /** Tools whose card shows its own prompt status. */

@@ -309,7 +309,10 @@ function TurnResult({ item, s }: { item: Item<'result'>; s: Styles }) {
     )
   }
   const secs = Math.max(1, Math.round(item.durationMs / 1000))
-  const cost = item.turnCostUsd > 0 ? ` · $${item.turnCostUsd.toFixed(2)}` : ''
+  const cost =
+    item.turnCostUsd !== undefined && item.turnCostUsd > 0
+      ? ` · $${item.turnCostUsd.toFixed(2)}`
+      : ''
   return (
     <Text style={[s.line, s.muted, s.result]}>
       Done in {secs}s{cost}

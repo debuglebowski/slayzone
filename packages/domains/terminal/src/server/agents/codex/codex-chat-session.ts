@@ -943,13 +943,27 @@ class CodexChatSession implements ChatSessionDriver {
     return Promise.resolve({ ok: true })
   }
 
-  respondPermission(args: { requestId: string; decision: PermissionDecision }): boolean {
+  respondPermission(args: {
+    requestId: string
+    decision: PermissionDecision
+    optionId?: string
+  }): boolean {
     const client = this.client
     if (!client) return false
     const req = this.pendingRequests.get(args.requestId)
     if (!req) return false
     this.pendingRequests.delete(args.requestId)
     client.respond(req.id, codexReplyFor(req, args.decision))
+    // Recorded like Claude's answers: the card closes now (a cancel brings no
+    // tool result) and a reload shows what was picked.
+    if (this.ctx) {
+      this.emit(this.ctx, {
+        kind: 'permission-resolved',
+        requestId: args.requestId,
+        decision: args.decision,
+        ...(args.optionId ? { optionId: args.optionId } : {})
+      })
+    }
     // A question has no "stop" answer of its own: decline, then stop the turn.
     if (
       req.method === 'item/tool/requestUserInput' &&

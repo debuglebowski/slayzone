@@ -20,6 +20,7 @@
     "./test-ca": "./test-ca.ts",
     "./fake-claude": "./fake-claude/index.ts",
     "./fake-codex": "./fake-codex/index.ts",
+    "./fake-codex/recorded": "./fake-codex/recorded.ts",
     "./chat-long-session": "./chat-long-session/index.ts",
     "./known-bug": "./known-bug.ts"
   }

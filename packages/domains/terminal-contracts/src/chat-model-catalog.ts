@@ -4,13 +4,12 @@
  * terminal mode so the model picker, the IPC handlers, and the spawn path all
  * resolve the right list per provider.
  *
- * Claude models mirror `chat-model.ts` (`claude --model` aliases). Codex model
- * ids are verified against `codex app-server`'s `model/list` (codex-cli
- * 0.132.0); re-check on a CLI upgrade — see `test/fixtures/codex-app-server/`.
+ * Claude models mirror `chat-model.ts` (`claude --model` aliases). Codex's
+ * models come from its CLI (`model/list`, served by `chat.getModels`); the
+ * desktop chat keeps no Codex list of its own.
  *
  * @module shared/chat-model-catalog
  */
-import { DEFAULT_CHAT_MODEL } from './chat-model'
 
 export interface ChatModelOption {
   /** Model id passed to the provider (`claude --model` alias / Codex model id). */
@@ -52,6 +51,11 @@ const CLAUDE_MODELS: ChatModelOption[] = [
   { id: 'haiku', label: 'Haiku', supportsEffort: false }
 ]
 
+/**
+ * A fixed Codex list (codex-cli 0.132.0). Only the mobile app's model picker
+ * still reads it (`apps/mobile/src/chat/chat-controls.ts`); move it onto
+ * `chat.getModels`, then drop this.
+ */
 const CODEX_MODELS: ChatModelOption[] = [
   { id: 'gpt-5.5', label: 'GPT-5.5', supportsEffort: true },
   { id: 'gpt-5.4', label: 'GPT-5.4', supportsEffort: true },
@@ -59,17 +63,9 @@ const CODEX_MODELS: ChatModelOption[] = [
   { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsEffort: true }
 ]
 
-/** Codex's own default (`isDefault` in `model/list`). */
-const CODEX_DEFAULT_MODEL = 'gpt-5.5'
-
 /** Models offered for a terminal mode. Codex modes get the Codex set; all else Claude. */
 export function modelsForMode(mode: string): ChatModelOption[] {
   return mode === 'codex-chat' ? CODEX_MODELS : CLAUDE_MODELS
-}
-
-/** Fallback model id for a mode when nothing is stored. */
-export function defaultModelForMode(mode: string): string {
-  return mode === 'codex-chat' ? CODEX_DEFAULT_MODEL : DEFAULT_CHAT_MODEL
 }
 
 /** True when `v` is a model id valid for the given mode. */

@@ -7,7 +7,7 @@ import {
   useState,
   type SetStateAction
 } from 'react'
-import { toast, useStableCallback, type AgentEffort, type AgentModel } from '@slayzone/ui'
+import { toast, useStableCallback, type AgentModel } from '@slayzone/ui'
 import {
   attachmentEncodedBytes,
   chatCapabilitiesForMode,
@@ -41,6 +41,9 @@ import type {
   NavigateActions
 } from './autocomplete/types'
 
+/** Claude's effort levels (`/effort` when the model lists none of its own). */
+const CLAUDE_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
 export interface UseChatComposerOpts {
   tabId: string
   taskId: string
@@ -58,7 +61,9 @@ export interface UseChatComposerOpts {
   navigate: NavigateActions
   getArtifactFilePath: (id: string) => Promise<string | null>
   scrollToBottom: () => void
-  handleEffortChange: (next: AgentEffort) => Promise<void>
+  handleEffortChange: (next: string) => Promise<void>
+  /** Effort levels `/effort` accepts (the model's own, from `chat.getModels`); absent: Claude's. */
+  effortIds?: readonly string[]
   handleModelChange: (next: AgentModel) => Promise<void>
   /** The chat CLI's slash commands (live or last known); null when unknown / not offered. */
   cliCommands: CliCommandList | null
@@ -102,6 +107,7 @@ export function useChatComposer({
   getArtifactFilePath,
   scrollToBottom,
   handleEffortChange,
+  effortIds,
   handleModelChange,
   cliCommands,
   attachmentsUsedBytes = 0,
@@ -314,13 +320,17 @@ export function useChatComposer({
       const effortMatch = /^\/effort\s+(\S+)\s*$/.exec(text)
       if (effortMatch) {
         const raw = effortMatch[1].toLowerCase()
-        const valid = ['low', 'medium', 'high', 'xhigh', 'max'] as const
-        if (!(valid as readonly string[]).includes(raw)) {
-          toast(`Invalid effort level "${raw}". Use: ${valid.join(', ')}`)
+        const valid = effortIds ?? CLAUDE_EFFORTS
+        if (!valid.includes(raw)) {
+          toast(
+            valid.length > 0
+              ? `Invalid effort level "${raw}". Use: ${valid.join(', ')}`
+              : 'This model has no effort levels.'
+          )
           return
         }
         setDraft('')
-        await handleEffortChange(raw as (typeof valid)[number])
+        await handleEffortChange(raw)
         toast(`Effort set to ${raw}`)
         return
       }
@@ -444,6 +454,7 @@ export function useChatComposer({
       autocomplete,
       scrollToBottom,
       handleEffortChange,
+      effortIds,
       handleModelChange,
       capabilities.nativeSlashCommands,
       capabilities.attachments,

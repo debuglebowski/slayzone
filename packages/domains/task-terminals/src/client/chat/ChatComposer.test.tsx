@@ -21,6 +21,7 @@ vi.mock('@slayzone/editor/hooks', () => ({
 }))
 
 import { ChatComposer, type ChatComposerProps } from './ChatComposer'
+import { chatModelsView } from './chat-models'
 import type { AutocompleteSource } from './autocomplete/types'
 
 // jsdom ships no ResizeObserver; Radix popper content (Display popover, pill menus)
@@ -129,6 +130,7 @@ function makeProps(over: Partial<ChatComposerProps> = {}): ChatComposerProps {
     chatFastMode: false,
     handleFastModeChange: vi.fn(() => Promise.resolve()),
     fastModeChanging: false,
+    models: chatModelsView(over.mode ?? 'claude-chat', undefined),
     ...over
   }
 }
@@ -315,6 +317,18 @@ describe('ChatComposer send / stop', () => {
   })
 })
 
+describe('ChatComposer names the provider', () => {
+  it('Claude chat: "Ask Claude anything…"', () => {
+    setup()
+    expect(textarea().placeholder).toBe('Ask Claude anything…')
+  })
+
+  it('Codex chat: "Ask Codex anything…"', () => {
+    setup({ mode: 'codex-chat', chatModel: 'gpt-5.5' })
+    expect(textarea().placeholder).toBe('Ask Codex anything…')
+  })
+})
+
 describe('ChatComposer ended session', () => {
   it('disables the textarea and Send, with a "Session ended" placeholder', () => {
     setup({ displaySessionEnded: true, draft: 'hi' })
@@ -373,6 +387,65 @@ describe('ChatComposer pills', () => {
     cleanup()
     setup({ mode: 'codex-chat', chatMode: 'auto-accept-edits', chatModel: 'gpt-5.5' })
     expect(button(/^Collaboration mode:/)).toBeDefined()
+  })
+
+  it('Codex: the model pill offers the models the CLI listed, the effort pill that model’s levels', () => {
+    setup({
+      mode: 'codex-chat',
+      chatModel: 'gpt-6-luna',
+      chatEffort: 'medium',
+      models: chatModelsView('codex-chat', [
+        {
+          id: 'gpt-6-luna',
+          label: 'GPT-6 Luna',
+          supportsEffort: true,
+          isDefault: true,
+          efforts: [
+            { id: 'low', label: 'Low' },
+            { id: 'medium', label: 'Medium' },
+            { id: 'ultra', label: 'Ultra' }
+          ]
+        },
+        { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', supportsEffort: true, efforts: [] }
+      ])
+    })
+    fireEvent.keyDown(button(/^Chat model: GPT-6 Luna/), { key: 'Enter' })
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual([
+      expect.stringContaining('GPT-6 Luna'),
+      expect.stringContaining('GPT-6.1 Sol')
+    ])
+    cleanup()
+    setup({
+      mode: 'codex-chat',
+      chatModel: 'gpt-6-luna',
+      chatEffort: 'medium',
+      models: chatModelsView('codex-chat', [
+        {
+          id: 'gpt-6-luna',
+          label: 'GPT-6 Luna',
+          supportsEffort: true,
+          efforts: [
+            { id: 'low', label: 'Low' },
+            { id: 'medium', label: 'Medium' },
+            { id: 'ultra', label: 'Ultra' }
+          ]
+        }
+      ])
+    })
+    fireEvent.keyDown(button(/^Reasoning effort: Medium/), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /Ultra/ }))
+    expect(props.handleEffortChange).toHaveBeenCalledWith('ultra')
+  })
+
+  it('Codex with no model known yet (getModel → empty): the pill says Default', () => {
+    setup({ mode: 'codex-chat', chatModel: '' })
+    expect(button(/^Chat model: Default/)).toBeDefined()
+  })
+
+  it('Codex before it listed models: the model pill says Default, no effort pill', () => {
+    setup({ mode: 'codex-chat', chatModel: 'gpt-5.5' })
+    expect(button(/^Chat model: Default/)).toBeDefined()
+    expect(queryButton(/^Reasoning effort/)).toBeNull()
   })
 
   it('a rejected mode change is swallowed', async () => {

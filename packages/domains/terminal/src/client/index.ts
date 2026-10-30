@@ -70,7 +70,24 @@ export {
   selectFoldedIndexes,
   selectConversationAttachmentBytes
 } from './chat-timeline'
-export { FILE_TOOL_NAMES, fileChangeOf, type TurnFileChange } from './turn-file-changes'
+export {
+  FILE_TOOL_NAMES,
+  SHELL_TOOL_NAMES,
+  fileChangeOf,
+  fileChangesOf,
+  type TurnFileChange
+} from './turn-file-changes'
+export {
+  CODEX_FILE_CHANGE_TOOL,
+  codexChangeContent,
+  codexChangeCounts,
+  codexChangeHunks,
+  codexFileChanges,
+  parseUnifiedHunks,
+  type CodexChangeKind,
+  type CodexFileChange,
+  type CodexPatchHunk
+} from './codex-file-changes'
 export { LiveBlockStore, LiveBlockStoreContext, useLiveBlock } from './live-blocks'
 export { parsePartialJson } from './partial-json'
 export {

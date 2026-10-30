@@ -4,6 +4,7 @@ import { buildPlanOptions, feedbackDenial, REJECT_MESSAGE } from './prompt-optio
 import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
 import type { PromptAnswer } from './PermissionPrompt'
 import { PromptRows } from './PromptRows'
+import { useChatProvider } from '../ChatViewContext'
 
 interface PlanPromptProps {
   prompt: ChatPrompt
@@ -30,7 +31,8 @@ export function PlanPrompt({
   sendMessage,
   keysRef
 }: PlanPromptProps) {
-  const options = buildPlanOptions({ autoModeAvailable })
+  const provider = useChatProvider()
+  const options = buildPlanOptions({ autoModeAvailable, agent: provider.agent })
   const [selected, setSelected] = useState(0)
   const [writing, setWriting] = useState(false)
   const [feedback, setFeedback] = useState('')
@@ -92,18 +94,18 @@ export function PlanPrompt({
     <div className="space-y-2">
       <div className="text-sm font-semibold text-foreground">Ready to code?</div>
       <div className="text-xs text-muted-foreground">
-        Here is Claude&apos;s plan: see the plan card above.
+        Here is {provider.agent}&apos;s plan: see the plan card above.
       </div>
       <div className="text-sm text-foreground">
-        Claude has written up a plan and is ready to execute. Would you like to proceed?
+        {provider.agent} has written up a plan and is ready to execute. Would you like to proceed?
       </div>
       <PromptRows options={options} selected={selected} disabled={submitting} onChoose={choose} />
       {writing && (
         <div className="space-y-1">
           <textarea
             autoFocus
-            aria-label="Tell Claude what to change"
-            placeholder="Tell Claude what to change"
+            aria-label={`Tell ${provider.agent} what to change`}
+            placeholder={`Tell ${provider.agent} what to change`}
             value={feedback}
             disabled={submitting}
             rows={2}

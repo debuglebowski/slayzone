@@ -39,6 +39,13 @@ export interface AgentModelPillProps {
    * claude-chat callers need no change; codex-chat passes its own catalog.
    */
   models?: AgentModelOption[]
+  /**
+   * The provider listed no models yet (`models` given and empty): the pill
+   * reads `emptyLabel` (e.g. "Default") and the menu shows `emptyHint`.
+   * Without it, an empty list falls back to the Claude set.
+   */
+  emptyLabel?: string
+  emptyHint?: string
   disabled?: boolean
   /** Visual style. `pill` = chip (default). `text` = plain inline text. */
   variant?: 'pill' | 'text'
@@ -49,12 +56,19 @@ export function AgentModelPill({
   model,
   onChange,
   models,
+  emptyLabel,
+  emptyHint,
   disabled,
   variant = 'pill',
   className
 }: AgentModelPillProps) {
-  const list = models && models.length > 0 ? models : DEFAULT_MODELS
-  const meta = list.find((m) => m.id === model) ?? { id: model, label: model, description: '' }
+  const unlisted = emptyLabel !== undefined && models !== undefined && models.length === 0
+  const list = unlisted ? [] : models && models.length > 0 ? models : DEFAULT_MODELS
+  const meta = list.find((m) => m.id === model) ?? {
+    id: model,
+    label: unlisted || !model ? (emptyLabel ?? model) : model,
+    description: ''
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -75,6 +89,9 @@ export function AgentModelPill({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
+        {unlisted && emptyHint && (
+          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{emptyHint}</div>
+        )}
         {list.map((m) => {
           const selected = m.id === model
           return (

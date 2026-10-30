@@ -1,7 +1,16 @@
 /** MCP tool naming and result content, for the MCP tool card. */
 
-/** `mcp__<server>__<tool>` (Claude Code's MCP tool names) → its parts, else null. */
+/**
+ * An MCP tool name → its parts, else null: `mcp__<server>__<tool>` (Claude
+ * Code) or `mcp/<server>/<tool>` (the Codex chat driver).
+ */
 export function parseMcpToolName(name: string): { server: string; tool: string } | null {
+  if (name.startsWith('mcp/')) {
+    const rest = name.slice('mcp/'.length)
+    const sep = rest.indexOf('/')
+    if (sep <= 0 || sep + 1 >= rest.length) return null
+    return { server: rest.slice(0, sep), tool: rest.slice(sep + 1) }
+  }
   if (!name.startsWith('mcp__')) return null
   const rest = name.slice('mcp__'.length)
   const sep = rest.indexOf('__')

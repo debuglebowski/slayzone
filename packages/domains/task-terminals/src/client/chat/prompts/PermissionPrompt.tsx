@@ -10,6 +10,9 @@ import {
 } from './prompt-options'
 import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
 import { PromptRows } from './PromptRows'
+import { CodexApprovalPreview } from './CodexApprovalPreview'
+import { isCodexApproval } from './codex-approval-options'
+import { useChatProvider } from '../ChatViewContext'
 
 export interface PromptAnswer {
   (optionId: string, decision: PermissionDecision): Promise<boolean>
@@ -57,6 +60,7 @@ function EditLines({ oldText, newText }: { oldText: unknown; newText: unknown })
 
 /** What the tool would do: the command, the edit, the new file, the URL, the arguments. */
 function ToolPreview({ prompt }: { prompt: ChatPrompt }) {
+  if (isCodexApproval(prompt.toolName)) return <CodexApprovalPreview prompt={prompt} />
   const input = asRecord(prompt.input)
   const box =
     'rounded-md border border-border bg-surface-1 font-mono text-xs overflow-auto max-h-64'
@@ -168,10 +172,12 @@ export function PermissionPrompt({
   answer,
   keysRef
 }: PermissionPromptProps) {
+  const provider = useChatProvider()
   const view: PermissionView = buildPermissionView(prompt.request, {
     autoModeAvailable,
     cwd,
-    agentName
+    agentName,
+    agent: provider.agent
   })
   const [selected, setSelected] = useState(view.defaultIndex)
   // The row whose typed feedback is being written ("Tab to amend" / WebFetch's No).
@@ -265,8 +271,8 @@ export function PermissionPrompt({
       {amendFor && (
         <input
           autoFocus
-          aria-label="No, and tell Claude what to do differently"
-          placeholder="No, and tell Claude what to do differently"
+          aria-label={`No, and tell ${provider.agent} what to do differently`}
+          placeholder={`No, and tell ${provider.agent} what to do differently`}
           value={feedback}
           disabled={submitting}
           onChange={(e) => setFeedback(e.target.value)}

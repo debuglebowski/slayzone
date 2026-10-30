@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { ChevronDown, ChevronRight, CircleCheck, CircleX, Loader2, ShieldAlert } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { ToolInvocation } from '@slayzone/terminal/client'
-import { useChatView } from '../ChatViewContext'
+import { useChatProvider, useChatView } from '../ChatViewContext'
 import { LinkifiedText } from '../LinkifiedText'
 import { useRowUiState } from '../row-ui-state'
 import { HOOK_TONE, hookLabel } from '../hook-labels'
@@ -73,6 +73,7 @@ function resultTextOf(invocation: ToolInvocation): string {
 
 /** A PreToolUse hook stopped the call: which hook, who saw its reason, the reason. */
 function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy']> }) {
+  const provider = useChatProvider()
   return (
     <div
       data-testid="chat-tool-blocked"
@@ -81,15 +82,18 @@ function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy
       <div className="flex items-center gap-2">
         <ShieldAlert className="size-3 shrink-0" />
         <span className="font-medium min-w-0 truncate">
-          {hookLabel({
-            hookName: block.hookName,
-            hookEvent: 'PreToolUse',
-            effect: 'blocked',
-            text: block.text
-          })}
+          {hookLabel(
+            {
+              hookName: block.hookName,
+              hookEvent: 'PreToolUse',
+              effect: 'blocked',
+              text: block.text
+            },
+            provider.agent
+          )}
         </span>
         <span className="shrink-0 rounded-sm border border-current/30 px-1 text-[10px] uppercase tracking-wide opacity-80">
-          {block.audience === 'agent' ? 'Sent to Claude' : 'Shown only to you'}
+          {block.audience === 'agent' ? `Sent to ${provider.agent}` : 'Shown only to you'}
         </span>
       </div>
       {block.text && (

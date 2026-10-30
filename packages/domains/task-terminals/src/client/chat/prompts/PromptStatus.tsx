@@ -4,7 +4,7 @@ import {
   type ChatPrompt,
   type ToolInvocation
 } from '@slayzone/terminal/client'
-import { useChatView } from '../ChatViewContext'
+import { useChatProvider, useChatView } from '../ChatViewContext'
 import { buildPermissionView } from './prompt-options'
 
 /** The prompt raised for a tool call, when this provider answers prompts with cards. */
@@ -50,17 +50,18 @@ export function QuestionStatus({
   invocation: ToolInvocation
 }) {
   const answers = answersOf(prompt, invocation)
+  const provider = useChatProvider()
   if (prompt?.status === 'pending') {
     return <StatusText>Answer below ↓</StatusText>
   }
   if (prompt?.status === 'expired' || prompt?.status === 'cancelled') {
-    return <StatusText>Expired — Claude is no longer waiting for this answer.</StatusText>
+    return <StatusText>Expired — {provider.agent} is no longer waiting for this answer.</StatusText>
   }
   if (prompt?.decision?.behavior === 'deny') {
     return (
       <StatusText>
         {prompt.optionId === 'clarify'
-          ? 'User asked Claude for more questions'
+          ? `User asked ${provider.agent} for more questions`
           : 'User declined to answer questions'}
       </StatusText>
     )
@@ -68,7 +69,9 @@ export function QuestionStatus({
   if (!answers) return null
   return (
     <div className="space-y-0.5">
-      {prompt?.decision && <StatusText>User answered Claude&apos;s questions:</StatusText>}
+      {prompt?.decision && (
+        <StatusText>User answered {provider.agent}&apos;s questions:</StatusText>
+      )}
       {Object.entries(answers).map(([q, a]) => (
         <div key={q} className="text-xs text-foreground/90">
           {`${q} → ${a}`}
@@ -106,6 +109,7 @@ export function PlanStatus({ prompt }: { prompt: ChatPrompt | null }) {
 export function PromptStatusLine({ toolUseId }: { toolUseId: string }) {
   const prompt = usePromptFor(toolUseId)
   const { autoModeAvailable, cwd } = useChatView()
+  const provider = useChatProvider()
   if (!prompt) return null
   let text: string | null = null
   if (prompt.status === 'pending') text = 'Waiting for your approval below ↓'
@@ -115,7 +119,8 @@ export function PromptStatusLine({ toolUseId }: { toolUseId: string }) {
       prompt.optionId && prompt.optionId !== 'yes'
         ? buildPermissionView(prompt.request, {
             autoModeAvailable: autoModeAvailable ?? false,
-            cwd: cwd ?? ''
+            cwd: cwd ?? '',
+            agent: provider.agent
           }).options.find((o) => o.id === prompt.optionId)
         : undefined
     text = row ? `Allowed · ${row.label.replace(/^Yes, and /, '')}` : 'Allowed'

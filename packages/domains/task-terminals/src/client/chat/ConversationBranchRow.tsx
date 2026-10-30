@@ -1,6 +1,6 @@
 import { GitBranch, History, Undo2 } from 'lucide-react'
 import type { TimelineItem } from '@slayzone/terminal/client'
-import { useChatView } from './ChatViewContext'
+import { useChatProvider, useChatView } from './ChatViewContext'
 
 /**
  * Where the conversation changed shape (rewind, fork, switch). What it no
@@ -13,11 +13,12 @@ export function ConversationBranchRow({
   item: Extract<TimelineItem, { kind: 'conversation-branch' }>
 }): React.JSX.Element {
   const { branches } = useChatView()
+  const provider = useChatProvider()
   const open = branches?.isOpen(item.id) ?? false
   const Icon = item.reason === 'forked' ? GitBranch : item.reason === 'rewound' ? Undo2 : History
   const label =
     item.reason === 'rewound'
-      ? 'Rewound: Claude forgot what came after this point'
+      ? `Rewound: ${provider.agent} forgot what came after this point`
       : item.reason === 'forked'
         ? 'Forked into a new conversation'
         : item.reason === 'fork-failed'

@@ -1,8 +1,7 @@
 /**
  * CodexChatSession against the fake `codex app-server` (`@slayzone/test-utils/
- * fake-codex`) as a real child process, plus the driver's still-open bugs found
- * by the X0 safety net (each `expectKnownBug`: green while the bug is there,
- * fails once it is fixed — then make it a plain assertion).
+ * fake-codex`) as a real child process, including the driver bugs the X0
+ * safety net found (all fixed now: plain assertions).
  *
  * Wire facts used below are codex-cli 0.159.2's, as recorded
  * (fake-codex/transcripts): server request ids count from 0, an answered or
@@ -24,7 +23,6 @@ import {
   type CodexScenario,
   type FakeCodex
 } from '@slayzone/test-utils/fake-codex'
-import { expectKnownBug } from '@slayzone/test-utils/known-bug'
 import type { ChatDriverContext, ChatSessionDriver } from '../types'
 import { codexChatBackend } from './codex-chat-session'
 
@@ -208,6 +206,34 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
     ).toEqual(['accept', 'decline'])
   })
 
+  it('an answer is recorded (permission-resolved, with the row picked): the card closes at once and a reload knows it', async () => {
+    // Like Claude's driver: without it the card stays until a tool result or the
+    // server's withdrawal — and a "No, stop" (cancel) brings neither.
+    const cmd = { id: 'exec-r', command: 'rm -rf build' }
+    const l = await live({
+      processes: [
+        {
+          defaultTurn: [
+            cstep.emit(cx.commandStarted(cmd)),
+            cstep.approveCommand(cmd, { cancel: [cstep.endTurn('interrupted')] })
+          ]
+        }
+      ]
+    })
+    l.driver.sendUserMessage('clean')
+    await l.waitFor((e) => e.kind === 'permission-request')
+    const decision = { behavior: 'deny' as const, message: '', interrupt: true }
+    expect(l.driver.respondPermission({ requestId: '0', decision, optionId: 'cancel' })).toBe(true)
+    expect(l.events.find((e) => e.kind === 'permission-resolved')).toEqual({
+      kind: 'permission-resolved',
+      requestId: '0',
+      decision,
+      optionId: 'cancel'
+    })
+    await l.waitFor(isResult)
+    expect(fake.current().run(0)!.requestReplies()[0].decision).toBe('cancel')
+  })
+
   it('Stop mid-turn: turn/interrupt names the running turn; the turn ends interrupted', async () => {
     const l = await live({
       processes: [
@@ -324,33 +350,47 @@ describe('CodexChatSession — open bugs (X0)', () => {
   })
 
   it('live command output (item/commandExecution/outputDelta) reaches chat while the command runs', async () => {
+    // The command-task path (plan 3.9, contract X1 → X2): a `command-task` for the
+    // tool id while it runs, and `commandTaskOutput` serves what it printed so far.
+    const cmd = { id: 'exec-o', command: 'build' }
     const l = await live({
       processes: [
         {
           turns: [
-            commandTurn({
-              id: 'exec-o',
-              command: 'build',
-              chunks: ['step 1\n', 'step 2\n'],
-              gapMs: 50
-            })
+            [
+              cstep.emit(cx.commandStarted(cmd)),
+              cstep.emit(cx.commandOutput(cmd.id, 'step 1\n')),
+              cstep.sleep(1_500),
+              cstep.emit(cx.commandOutput(cmd.id, 'step 2\n')),
+              cstep.emit(cx.commandCompleted({ ...cmd, output: 'step 1\nstep 2\n' })),
+              ...codexReply('Built.')
+            ]
           ]
         }
       ]
     })
     l.driver.sendUserMessage('build')
+    await l.waitFor(
+      (e) => e.kind === 'command-task' && e.toolUseId === cmd.id && e.status === 'running'
+    )
+    expect(l.driver.commandTaskOutput).toBeDefined()
+    const read = () => l.driver.commandTaskOutput!(cmd.id)
+    // While it runs (before its result): the output so far.
+    let running = await read()
+    for (let i = 0; i < 50 && !('output' in running && running.output.includes('step 1')); i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      running = await read()
+    }
+    expect(running).toMatchObject({ state: 'running', output: 'step 1\n', truncated: false })
+    expect(l.events.some((e) => e.kind === 'tool-result' && e.toolUseId === cmd.id)).toBe(false)
+    // Once it ended: the whole output, and its command-task says so.
     await l.waitFor(isResult)
-    const beforeResult = l.events.slice(
-      0,
-      l.events.findIndex((e) => e.kind === 'tool-result')
-    )
-    await expectKnownBug(
-      {
-        fixedBy: 'Codex live output',
-        what: 'outputDelta dropped: nothing shows until the command ends'
-      },
-      () => expect(JSON.stringify(beforeResult)).toContain('step 1')
-    )
+    expect(await read()).toMatchObject({ state: 'ended', output: 'step 1\nstep 2\n' })
+    expect(
+      l.events.some(
+        (e) => e.kind === 'command-task' && e.toolUseId === cmd.id && e.status === 'completed'
+      )
+    ).toBe(true)
   })
 
   it('an API error is shown as its message, not as the raw JSON blob 0.159.2 sends (recipe bad-model)', async () => {

@@ -13,6 +13,7 @@ import { useRowUiState } from './row-ui-state'
 import { HighlightedText } from './HighlightedText'
 import { CHAT_CARD_INDENT, HoverTimestamp } from './tool-cards/card-shell'
 import { HOOK_TONE, hookLabel } from './hook-labels'
+import { useChatProvider } from './ChatViewContext'
 
 type HookItem = Extract<TimelineItem, { kind: 'hook' }>
 
@@ -31,6 +32,7 @@ function EffectIcon({ effect }: { effect: HookItem['effect'] }) {
  * timeline. Problems start open; added context starts collapsed.
  */
 export function HookOutputRow({ item }: { item: HookItem }) {
+  const provider = useChatProvider()
   const hasText = item.text.trim().length > 0
   // Kept while scrolled away; "Collapse all" closes it.
   const [open, setOpen] = useRowUiState('hook', hasText && item.effect !== 'context', false)
@@ -51,10 +53,10 @@ export function HookOutputRow({ item }: { item: HookItem }) {
           )}
         >
           <EffectIcon effect={item.effect} />
-          <span className="font-medium min-w-0 truncate">{hookLabel(item)}</span>
+          <span className="font-medium min-w-0 truncate">{hookLabel(item, provider.agent)}</span>
           {item.effect !== 'context' && hasText && (
             <span className="shrink-0 rounded-sm border border-current/30 px-1 text-[10px] uppercase tracking-wide opacity-80">
-              {item.audience === 'agent' ? 'Sent to Claude' : 'Shown only to you'}
+              {item.audience === 'agent' ? `Sent to ${provider.agent}` : 'Shown only to you'}
             </span>
           )}
           {hasText && (

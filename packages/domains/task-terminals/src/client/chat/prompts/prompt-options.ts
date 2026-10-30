@@ -19,6 +19,7 @@
  * @module chat/prompts/prompt-options
  */
 import type { PermissionDecision, PermissionRequestEvent } from '@slayzone/terminal-contracts'
+import { buildCodexApprovalView, isCodexApproval } from './codex-approval-options'
 
 /** The CLI's own text for a rejected tool call (and what a bare TUI reject sends). */
 export const REJECT_MESSAGE =
@@ -68,6 +69,8 @@ export interface PermissionViewCtx {
   cwd: string
   /** Subagent type of the agent that asked, when known. */
   agentName?: string | null
+  /** How the chat names its agent (`ChatProviderInfo.agent`); default `Claude`. */
+  agent?: string
 }
 
 /** TUI names of permission modes in "switch to …" rows. */
@@ -207,6 +210,7 @@ export function buildPermissionView(
   req: PermissionRequestEvent,
   ctx: PermissionViewCtx
 ): PermissionView {
+  if (isCodexApproval(req.toolName)) return buildCodexApprovalView(req, ctx)
   const input = asRecord(req.input)
   const filePath = str(input.file_path) ?? str(input.notebook_path)
   const fileName = req.description ?? (filePath ? basename(filePath) : undefined)
@@ -226,11 +230,12 @@ export function buildPermissionView(
   }
 
   const isWebFetch = req.toolName === 'WebFetch'
+  const agent = ctx.agent ?? 'Claude'
   options.push(
     isWebFetch
       ? {
           id: 'no-feedback',
-          label: 'No, and tell Claude what to do differently (esc)',
+          label: `No, and tell ${agent} what to do differently (esc)`,
           decision: null,
           needsFeedback: true
         }
@@ -288,8 +293,8 @@ export function buildPermissionView(
       } catch {
         domain = undefined
       }
-      if (domain) view.subtitle = `Claude wants to fetch content from ${domain}`
-      view.question = 'Do you want to allow Claude to fetch this content?'
+      if (domain) view.subtitle = `${agent} wants to fetch content from ${domain}`
+      view.question = `Do you want to allow ${agent} to fetch this content?`
       break
     }
     default: {
@@ -307,7 +312,10 @@ export function buildPermissionView(
  * is a session `setMode` update; "manually approve edits" is a plain allow,
  * after which the CLI leaves plan mode for `default` (Ask before edits).
  */
-export function buildPlanOptions(ctx: { autoModeAvailable: boolean }): PromptOption[] {
+export function buildPlanOptions(ctx: {
+  autoModeAvailable: boolean
+  agent?: string
+}): PromptOption[] {
   return [
     ctx.autoModeAvailable
       ? {
@@ -326,7 +334,7 @@ export function buildPlanOptions(ctx: { autoModeAvailable: boolean }): PromptOpt
     { id: 'plan-manual', label: 'Yes, manually approve edits', decision: { behavior: 'allow' } },
     {
       id: 'plan-feedback',
-      label: 'Tell Claude what to change',
+      label: `Tell ${ctx.agent ?? 'Claude'} what to change`,
       decision: null,
       needsFeedback: true
     }
