@@ -29,11 +29,28 @@ test('project-wide views use the resolved computer; a task its own computer firs
   expect(taskProjectRoot({ computer_id: null }, project)).toBe('/ready')
 })
 
-// A hub one release behind (multi-hub federation, a stale sidecar) sends projects
-// without placements. That is "no folder known", never a crash in a render path.
-test('a project from a hub that sends no placements has no folder, and does not throw', () => {
-  const older = { id: 'p', name: 'Old' } as unknown as Project
-  expect(placementOn(older, 'c1')).toBeNull()
-  expect(defaultProjectRoot(older)).toBeNull()
-  expect(taskProjectRoot({ computer_id: 'c1' }, older)).toBeNull()
+// A hub from before folders moved to computers (an older remote hub, a hub process
+// not yet restarted after an update) sends no placements, only its one `path`: the
+// folder it starts every agent in, whichever computer runs it. Showing "no folder"
+// there would be a false claim.
+test('a project from an older hub (no placements) uses its path, on any computer', () => {
+  const older = { id: 'p', name: 'Old', path: '/old/app' } as unknown as Project
+  expect(placementOn(older, 'c1')).toMatchObject({ path: '/old/app', status: 'ready' })
+  expect(defaultProjectRoot(older)).toBe('/old/app')
+  expect(taskProjectRoot({ computer_id: 'c1' }, older)).toBe('/old/app')
+  expect(taskProjectRoot({ computer_id: null }, older)).toBe('/old/app')
+})
+
+test('a project from an older hub with no path has no folder, and does not throw', () => {
+  for (const path of [undefined, null, '']) {
+    const older = { id: 'p', name: 'Old', path } as unknown as Project
+    expect(placementOn(older, 'c1')).toBeNull()
+    expect(defaultProjectRoot(older)).toBeNull()
+  }
+})
+
+// A current hub's empty list is "no folder anywhere", even if a stray `path` came along.
+test('placements, when present, win over any path', () => {
+  const current = { placements: [], resolved_computer_id: 'c1', path: '/x' } as unknown as Project
+  expect(defaultProjectRoot(current)).toBeNull()
 })

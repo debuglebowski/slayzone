@@ -19,10 +19,18 @@ export function placementOn(
   project: Pick<Project, 'placements'> | null | undefined,
   computerId: string | null | undefined
 ): ProjectPlacement | null {
-  if (!project || !computerId) return null
-  // `placements` is absent on a project from a hub one release behind (federation,
-  // a stale sidecar): no folder known there, not a crash.
-  return project.placements?.find((p) => p.computer_id === computerId) ?? null
+  if (!project) return null
+  if (project.placements === undefined) {
+    // A hub from before folders moved to computers (an older remote hub, a hub
+    // process not yet restarted after an update) sends no placements, only its one
+    // `path`: the folder it starts every agent in, whichever computer runs it.
+    const { path } = project as { path?: unknown }
+    return typeof path === 'string' && path !== ''
+      ? { computer_id: computerId ?? '', path, status: 'ready' }
+      : null
+  }
+  if (!computerId) return null
+  return project.placements.find((p) => p.computer_id === computerId) ?? null
 }
 
 /**
