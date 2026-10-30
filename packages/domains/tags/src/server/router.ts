@@ -11,6 +11,7 @@ import {
 } from './tag-store'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getTaskTriggerBus } from './task-trigger-bus'
+import { signalBoardChanged, signalTasksChanged } from './tags-router-deps'
 
 const createTagInput = z.object({
   name: z.string().min(1),
@@ -30,21 +31,33 @@ const updateTagInput = z.object({
 export const tagsRouter = router({
   list: publicProcedure.query(({ ctx }) => listAllTags(ctx.db)),
 
-  create: publicProcedure
-    .input(createTagInput)
-    .mutation(({ ctx, input }) => createTag(ctx.db, input)),
+  // A project's tags show on every card, filter and picker: each change to the tags
+  // themselves reloads every client's board (after the write lands).
+  create: publicProcedure.input(createTagInput).mutation(async ({ ctx, input }) => {
+    const tag = await createTag(ctx.db, input)
+    signalBoardChanged()
+    return tag
+  }),
 
-  update: publicProcedure
-    .input(updateTagInput)
-    .mutation(({ ctx, input }) => updateTag(ctx.db, input)),
+  update: publicProcedure.input(updateTagInput).mutation(async ({ ctx, input }) => {
+    const tag = await updateTag(ctx.db, input)
+    signalBoardChanged()
+    return tag
+  }),
 
-  delete: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => deleteTag(ctx.db, input.id)),
+  delete: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const result = await deleteTag(ctx.db, input.id)
+    signalBoardChanged()
+    return result
+  }),
 
   reorder: publicProcedure
     .input(z.object({ tagIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => reorderTags(ctx.db, input.tagIds)),
+    .mutation(async ({ ctx, input }) => {
+      const result = await reorderTags(ctx.db, input.tagIds)
+      signalBoardChanged()
+      return result
+    }),
 
   getForTask: publicProcedure
     .input(z.object({ taskId: z.string() }))
@@ -63,6 +76,8 @@ export const tagsRouter = router({
       // legacy `ipcMain.emit('db:taskTags:setForTask:done', null, taskId, tagIds)`
       // (tags/electron/handlers.ts). No-op when no started engine listens.
       getTaskTriggerBus()?.emit('db:taskTags:setForTask:done', null, input.taskId, input.tagIds)
+      // Only this task's tags changed: every other client patches its row.
+      signalTasksChanged([input.taskId])
     })
 })
 

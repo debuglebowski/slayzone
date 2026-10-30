@@ -126,7 +126,11 @@ export type ProcedureScope = Scope | 'never'
  * `agentTurns.list/onChanged`, `history.*`, `usageAnalytics.*`,
  * `agentLifecycle.onEvent`, `notify.onTasksChanged` → `read`.
  * `task.testRecordPendingSpawn` is carved out to `never` (a test hook, not part
- * of the CRUD surface it happens to live in).
+ * of the CRUD surface it happens to live in), and so is `task.startMainAgent`: it
+ * names only a task, but it STARTS a process with that task's stored mode,
+ * provider flags and base dir — all of which `tasks` can write (`task.update`) —
+ * so granting it would turn "edit a task" into "choose what runs", the line
+ * `pty.create` / `chat.start` hold.
  *
  * ── granted narrowly (settings) ─────────────────────────────────────────────
  * `settings.getEffectiveTheme` / `getThemeSource` / `onThemeChanged` /
@@ -715,6 +719,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.restore': 'tasks',
   'task.setBlockers': 'tasks',
   'task.setBrowserTabLocked': 'tasks',
+  'task.startMainAgent': 'never',
   'task.switchConversation': 'tasks',
   'task.testRecordPendingSpawn': 'never',
   'task.unarchive': 'tasks',

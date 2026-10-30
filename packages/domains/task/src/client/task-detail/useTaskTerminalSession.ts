@@ -10,7 +10,7 @@ import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'
 import { takeTaskPaneEvents } from '../taskPaneEvents'
-import { readCurrentConversationId } from '../main-terminal-props'
+import { readCurrentConversationId } from '../../shared/main-terminal'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null

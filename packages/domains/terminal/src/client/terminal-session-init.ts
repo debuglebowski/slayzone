@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { useTRPCClient } from './trpc'
 import { safeRandomUUID } from '@slayzone/ui'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
+import { spawnConversationIds } from '@slayzone/terminal-contracts'
 import { createXterm, registerTestTerminalLinks } from './xterm-init'
 import type { WebLinkProvider } from './web-link-provider'
 import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
@@ -750,22 +751,21 @@ export async function initTerminalSession(
       // persisted exclusively by Claude's real SessionStart hook
       // (rest-api/agent-hook.ts persistConversationId), so only confirmed ids
       // are ever stored. See plans/conv-id-robustness-v2.md.
-      let newConversationId = conversationIdRef.current
-      if (
-        mode !== 'terminal' &&
-        supportsSessionId &&
-        !newConversationId &&
-        !existingConversationIdRef.current
-      ) {
-        newConversationId = safeRandomUUID()
-      }
-
-      // Create PTY — plain terminal mode doesn't use conversation IDs
-      const isAiMode = mode !== 'terminal'
-      const effectiveConversationId = isAiMode ? newConversationId : undefined
-      const effectiveExistingConversationId = isAiMode
-        ? existingConversationIdRef.current
-        : undefined
+      //
+      // Plain terminal mode doesn't use conversation IDs. The rule is shared with
+      // the hub's `task.startMainAgent` (`spawnConversationIds`).
+      const {
+        conversationId: effectiveConversationId,
+        existingConversationId: effectiveExistingConversationId
+      } = spawnConversationIds(
+        {
+          mode,
+          supportsSessionId,
+          conversationId: conversationIdRef.current,
+          existingConversationId: existingConversationIdRef.current
+        },
+        safeRandomUUID
+      )
       // Capture dims before async gap so PTY starts at correct size
       createCols = terminal.cols
       createRows = terminal.rows

@@ -101,6 +101,9 @@ run_harness packages/apps/hub/src/diagnostics-retention.test.ts
 # Host-kill stamp: fires where the pty sessions are (the side-car), not on the
 # host, whose session registry has been empty since slice 9.
 run_harness packages/apps/hub/src/host-kill.test.ts
+# Chat agents' state changes reach clients on pty.onStateChange (chat session id, same
+# shape, owner-gated) — before, only the hub's own listeners saw them.
+run_harness packages/apps/hub/src/chat-state-push.test.ts
 # Hub — idle-close wiring: the hub runs the sweep + config + browser engagement
 # touch (all were host-only after slice 9, so idle-close never fired).
 run_harness packages/apps/hub/src/idle-close.test.ts
@@ -476,6 +479,9 @@ run_harness packages/domains/terminal/src/server/chat-router.test.ts
 run_harness packages/domains/terminal/src/server/pty-router.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
 run_harness packages/apps/api/src/routers/task.test.ts
+# Order/blocker, tag and artifact writes signal notify.onTasksChanged naming their tasks
+# (they emitted nothing, so other clients never saw them live); a burst stays merged.
+run_harness packages/apps/api/src/routers/task-change-signals.test.ts
 run_harness packages/apps/api/src/routers/template.test.ts
 run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 # Cross-domain: task+tags+history activity-event recording + cursor pagination.
@@ -763,6 +769,12 @@ run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
+# A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
+# shared by the desktop task page and the hub's task.startMainAgent.
+run_harness packages/domains/task/src/shared/main-terminal.test.ts
+# task.startMainAgent: the hub starts a task's main agent (pty or chat) only when none is
+# live, once under concurrent calls, with the cwd resolved on the hub.
+run_harness packages/domains/task/src/server/main-agent.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
@@ -785,6 +797,8 @@ run_harness packages/domains/terminal/src/server/skills.test.ts
 run_harness packages/domains/terminal/src/server/commands.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-event-handler.test.ts
 run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
+# The conversation ids a fresh agent spawn passes (desktop terminal + hub startMainAgent).
+run_harness packages/domains/terminal-contracts/src/spawn-conversation-ids.test.ts
 run_harness packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-effort.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
@@ -836,7 +850,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
-  packages/domains/task/src/client/main-terminal-props.test.ts \
   packages/domains/task/src/client/terminal-first.test.ts \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
   packages/domains/task/src/client/BlockerDialog.test.tsx \

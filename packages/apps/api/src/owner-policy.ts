@@ -1120,6 +1120,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.reorder': checked(task('taskIds[]')),
   'task.reorderPinned': checked(task('taskIds[]')),
   'task.setBrowserTabLocked': checked(task('taskId')),
+  // Starts the task's agent where the task's computer is (placement gates that too).
+  'task.startMainAgent': checked(task('taskId')),
   // Blockers can cross projects: the other side is filtered too.
   'task.getBlockers': then(checked(task('taskId')), taskRows),
   'task.getAllBlockedTaskIds': listed(ids('task')),

@@ -4,7 +4,7 @@ import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { useTerminalModes } from '@slayzone/terminal/client'
 import { requestAgentStart } from '@slayzone/task-terminals'
 import { TaskShell } from './TaskShell'
-import { mainTerminalProps } from './main-terminal-props'
+import { mainTerminalProps } from '../shared/main-terminal'
 import { useHubId } from '@slayzone/transport/client'
 import {
   getTerminalFirst,

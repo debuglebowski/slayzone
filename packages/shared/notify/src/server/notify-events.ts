@@ -37,6 +37,16 @@ export function emitSettingsChanged(change?: SettingsChange): void {
   notifyEvents?.emit('settings-changed', change)
 }
 
+/**
+ * Signal that task data was written — the `tasks-changed` a router outside the task
+ * domain fires (tags, artifacts), through a seam api wires. Same bus, same contract as
+ * the task ops' own `onMutation`: name the tasks only when the write touched nothing
+ * else the board shows (`TasksChange`). Best-effort, like `emitSettingsChanged`.
+ */
+export function emitTasksChanged(change?: TasksChange): void {
+  notifyEvents?.emit('tasks-changed', change)
+}
+
 export function setNotifyEvents(ev: TypedEmitter<NotifyEventMap>): void {
   notifyEvents = ev
 }

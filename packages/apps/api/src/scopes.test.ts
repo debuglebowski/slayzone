@@ -63,6 +63,7 @@ describe('SCOPE_POLICY — specific classifications', () => {
     ['pty.setShellOverride', 'changes which binary a terminal launches'],
     ['chat.start', 'creates a session with an attacker-chosen mode + cwd'],
     ['chat.reset', 're-creates a session with an attacker-chosen mode + cwd'],
+    ['task.startMainAgent', 'starts a process with flags/cwd a tasks-scoped session can write'],
     ['workspace.setAllowedRoots', 'mutates the filesystem sandbox itself'],
     ['app.browser.executeJs', 'arbitrary JS eval in a live WebContentsView'],
     ['app.shell.openExternal', 'opens an arbitrary URL/path on the hub machine'],

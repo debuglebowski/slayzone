@@ -9,6 +9,12 @@ import type { ArtifactDownloadHost } from '@slayzone/task/server'
 export type ArtifactsRouterDeps = {
   /** The host side of an artifact download, built from the capability bridge. */
   getDownloadHost: () => ArtifactDownloadHost
+  /**
+   * Tell every client these tasks' artifacts changed — `notify.onTasksChanged`
+   * naming them, the signal clients refresh `artifacts.getByTask` and
+   * `artifacts.foldersGetByTask` on (a task's per-task queries).
+   */
+  onTasksChanged: (taskIds: readonly string[]) => void
 }
 
 let deps: ArtifactsRouterDeps | null = null
@@ -23,4 +29,13 @@ export function getArtifactsRouterDeps(): ArtifactsRouterDeps {
       'artifacts router deps not initialized — @slayzone/api wires them when it composes the router'
     )
   return deps
+}
+
+/**
+ * Best-effort, unlike the downloads: a write must not fail because nobody is told
+ * (a bare router in a unit test wires no host).
+ */
+export function signalTasksChanged(taskIds: Iterable<string | null | undefined>): void {
+  const ids = [...new Set([...taskIds].filter((id): id is string => !!id))]
+  if (ids.length > 0) deps?.onTasksChanged(ids)
 }

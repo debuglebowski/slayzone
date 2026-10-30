@@ -1,6 +1,15 @@
+/**
+ * How a task's MAIN agent is started: its spawn props and its working directory.
+ *
+ * DOM-free and shared by every place that starts it — the desktop task page (and its
+ * terminal-first pane) and the hub's `task.startMainAgent` — so a client and the hub
+ * can never start the same session two different ways. Pure: the caller supplies the
+ * rows and the child repos detected on the machine that owns the project.
+ */
 import type { Task } from '@slayzone/task-contracts'
 import { getProviderFlags } from '@slayzone/task-contracts'
-import type { Project } from '@slayzone/projects-contracts'
+import type { DetectedRepo, Project } from '@slayzone/projects-contracts'
+import { resolveRepoPath } from '@slayzone/projects-contracts'
 import type { ExecutionContext, TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
 
 /**
@@ -54,6 +63,76 @@ export function mainTerminalProps(
     providerFlags: getProviderFlags(task.provider_config, task.terminal_mode),
     executionContext: project?.execution_context
   }
+}
+
+type RepoTask = Pick<Task, 'worktree_path' | 'base_dir' | 'repo_name'>
+type RepoProject = Pick<Project, 'path' | 'selected_repo'>
+
+/**
+ * The child repo a task is bound to: its own pick, else the project default. No
+ * fallback to the first detected repo — a wrapper folder stays the wrapper folder,
+ * so the terminal and editor never silently jump into an arbitrary child repo.
+ */
+export function taskRepoName(
+  task: RepoTask | null | undefined,
+  project: RepoProject | null | undefined
+): string | null {
+  return task?.repo_name ?? project?.selected_repo ?? null
+}
+
+/**
+ * The directory a task's work is bound to (terminal, editor, browser, worktree
+ * creation): its worktree, else its base dir, else the project's resolved repo
+ * (`resolveRepoPath` over the detected child repos).
+ */
+export function taskRepoPath(
+  task: RepoTask | null | undefined,
+  resolvedRepoPath: string | null
+): string | null {
+  return task?.worktree_path ?? task?.base_dir ?? resolvedRepoPath
+}
+
+/** The main terminal's cwd from the task-bound directory: it, else the project root. */
+export function mainTerminalCwdFrom(
+  repoPath: string | null | undefined,
+  project: Pick<Project, 'path'> | null | undefined
+): string | null {
+  return repoPath || project?.path || null
+}
+
+/**
+ * The main terminal's cwd. `detectedRepos` are the project's child repos, discovered
+ * on the machine that owns it; they only matter when a child repo is bound
+ * (`taskRepoName`) and the task has no worktree or base dir. Null = nowhere to run.
+ */
+export function mainTerminalCwd(
+  task: RepoTask | null | undefined,
+  project: RepoProject | null | undefined,
+  detectedRepos: readonly DetectedRepo[]
+): string | null {
+  const resolved = resolveRepoPath(
+    project?.path ?? null,
+    [...detectedRepos],
+    taskRepoName(task, project)
+  )
+  return mainTerminalCwdFrom(taskRepoPath(task, resolved.path), project)
+}
+
+/**
+ * Whether `mainTerminalCwd` needs the detected child repos: only when a child repo is
+ * bound and no worktree or base dir overrides it. Lets a caller skip a discovery
+ * round-trip to the project's machine.
+ */
+export function mainTerminalCwdNeedsRepos(
+  task: RepoTask | null | undefined,
+  project: RepoProject | null | undefined
+): boolean {
+  return (
+    !task?.worktree_path &&
+    !task?.base_dir &&
+    !!project?.path &&
+    taskRepoName(task, project) !== null
+  )
 }
 
 /**

@@ -23,6 +23,7 @@ export {
   setNotifyEvents,
   getNotifyEvents,
   emitSettingsChanged,
+  emitTasksChanged,
   type NotifyEventMap,
   type SettingsChange
 } from '@slayzone/notify/server'

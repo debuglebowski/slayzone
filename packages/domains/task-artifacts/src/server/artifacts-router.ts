@@ -21,9 +21,10 @@ import type {
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task-contracts'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
-import { createArtifactStore } from './artifact-store'
-import { getArtifactsRouterDeps } from './artifacts-router-deps'
+import { createArtifactStore, type ArtifactStore } from './artifact-store'
+import { getArtifactsRouterDeps, signalTasksChanged } from './artifacts-router-deps'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
@@ -66,6 +67,75 @@ const versionRef = z.union([z.number(), z.string()])
 
 const store = (dataRoot: string): ReturnType<typeof createArtifactStore> =>
   createArtifactStore(dataRoot)
+
+// Every write tells the other clients when it changed what `getByTask` or
+// `foldersGetByTask` answers for a task — `notify.onTasksChanged` naming that task,
+// the signal clients already refresh those per-task queries on (a dedicated
+// artifacts stream would duplicate its scoping, coalescing and owner filtering).
+// A write that leaves both lists as they were (the editor's content autosave: the
+// working copy is not in them) says nothing; the file watcher's `onContentChanged`
+// covers content.
+
+/** The tasks that own these rows. */
+async function taskIdsOf(
+  db: SlayzoneDb,
+  table: 'task_artifacts' | 'artifact_folders',
+  ids: readonly string[]
+): Promise<string[]> {
+  if (ids.length === 0) return []
+  const rows = await db.all<{ task_id: string }>(
+    `SELECT DISTINCT task_id FROM ${table} WHERE id IN (${ids.map(() => '?').join(', ')})`,
+    [...ids]
+  )
+  return rows.map((r) => r.task_id)
+}
+
+const folderRow = (db: SlayzoneDb, id: string) =>
+  db.get<Record<string, unknown> & { task_id: string }>(
+    'SELECT * FROM artifact_folders WHERE id = ?',
+    [id]
+  )
+
+/** Run a write to one artifact; signal its task when the row `getByTask` lists for it changed. */
+async function changingArtifact<T>(
+  s: ArtifactStore,
+  db: SlayzoneDb,
+  artifactId: string,
+  write: () => Promise<T>
+): Promise<T> {
+  const before = await s.getArtifact(db, artifactId)
+  const result = await write()
+  const after = await s.getArtifact(db, artifactId)
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    signalTasksChanged([before?.task_id, after?.task_id])
+  }
+  return result
+}
+
+/** Run a write to one folder; signal its task when the folder's row changed. */
+async function changingFolder<T>(
+  db: SlayzoneDb,
+  folderId: string,
+  write: () => Promise<T>
+): Promise<T> {
+  const before = await folderRow(db, folderId)
+  const result = await write()
+  const after = await folderRow(db, folderId)
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    signalTasksChanged([before?.task_id, after?.task_id])
+  }
+  return result
+}
+
+/** Run a write that creates artifacts / folders; signal the tasks it created them in. */
+async function creating<T>(
+  write: () => Promise<T>,
+  tasksOf: (result: T) => Iterable<string | null | undefined>
+): Promise<T> {
+  const result = await write()
+  signalTasksChanged(tasksOf(result))
+  return result
+}
 
 const realOrResolved = (p: string): string => {
   try {
@@ -114,21 +184,29 @@ export const artifactsRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).getArtifact(ctx.db, input.id)),
 
-  create: publicProcedure
-    .input(createArtifactInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).createArtifact(ctx.db, input)),
+  create: publicProcedure.input(createArtifactInput).mutation(({ ctx, input }) =>
+    creating(
+      () => store(ctx.dataRoot).createArtifact(ctx.db, input),
+      (a) => [a?.task_id]
+    )
+  ),
 
-  update: publicProcedure
-    .input(updateArtifactInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).updateArtifact(ctx.db, input)),
+  update: publicProcedure.input(updateArtifactInput).mutation(({ ctx, input }) => {
+    const s = store(ctx.dataRoot)
+    return changingArtifact(s, ctx.db, input.id, () => s.updateArtifact(ctx.db, input))
+  }),
 
-  delete: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).deleteArtifact(ctx.db, input.id)),
+  delete: publicProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => {
+    const s = store(ctx.dataRoot)
+    return changingArtifact(s, ctx.db, input.id, () => s.deleteArtifact(ctx.db, input.id))
+  }),
 
-  reorder: publicProcedure
-    .input(reorderInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).reorderArtifacts(ctx.db, input)),
+  reorder: publicProcedure.input(reorderInput).mutation(async ({ ctx, input }) => {
+    const ids = Array.isArray(input) ? input : input.artifactIds
+    const taskIds = await taskIdsOf(ctx.db, 'task_artifacts', ids)
+    await store(ctx.dataRoot).reorderArtifacts(ctx.db, input)
+    signalTasksChanged(taskIds)
+  }),
 
   readContent: publicProcedure
     .input(z.object({ id: z.string() }))
@@ -145,22 +223,34 @@ export const artifactsRouter = router({
   // --- Binary uploads (bytes via superjson) ---
   // `upload`/`uploadDir` read a client-named path off the hub's disk (see
   // assertPasteSourcesAreHubStorage); `uploadBlob` carries the bytes and never does.
-  upload: hubLocalProcedure
-    .input(uploadInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).uploadArtifact(ctx.db, input)),
+  upload: hubLocalProcedure.input(uploadInput).mutation(({ ctx, input }) =>
+    creating(
+      () => store(ctx.dataRoot).uploadArtifact(ctx.db, input),
+      (a) => [a?.task_id]
+    )
+  ),
 
-  uploadBlob: publicProcedure
-    .input(uploadBlobInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).uploadArtifactBlob(ctx.db, input)),
+  uploadBlob: publicProcedure.input(uploadBlobInput).mutation(({ ctx, input }) =>
+    creating(
+      () => store(ctx.dataRoot).uploadArtifactBlob(ctx.db, input),
+      (a) => [a?.task_id]
+    )
+  ),
 
   pasteFiles: publicProcedure.input(pasteFilesInput).mutation(({ ctx, input }) => {
     assertPasteSourcesAreHubStorage(ctx.dataRoot, input.sourcePaths)
-    return store(ctx.dataRoot).pasteArtifactFiles(ctx.db, input)
+    return creating(
+      () => store(ctx.dataRoot).pasteArtifactFiles(ctx.db, input),
+      (rows) => rows.map((a) => a.task_id)
+    )
   }),
 
-  uploadDir: hubLocalProcedure
-    .input(uploadDirInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).uploadArtifactDir(ctx.db, input)),
+  uploadDir: hubLocalProcedure.input(uploadDirInput).mutation(({ ctx, input }) =>
+    creating(
+      () => store(ctx.dataRoot).uploadArtifactDir(ctx.db, input),
+      (r) => [...r.folders.map((f) => f.task_id), ...r.artifacts.map((a) => a.task_id)]
+    )
+  ),
 
   cleanupTask: publicProcedure
     .input(z.object({ taskId: z.string() }))
@@ -183,13 +273,25 @@ export const artifactsRouter = router({
     .input(z.object({ artifactId: z.string(), versionRef }))
     .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactVersion(ctx.db, input)),
 
+  // A version write signals when it moved the artifact's row (its current version);
+  // naming or pruning history does not, today — `changingArtifact` decides.
   versionsCreate: publicProcedure
     .input(z.object({ artifactId: z.string(), name: z.string().nullable().optional() }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).createArtifactVersion(ctx.db, input)),
+    .mutation(({ ctx, input }) => {
+      const s = store(ctx.dataRoot)
+      return changingArtifact(s, ctx.db, input.artifactId, () =>
+        s.createArtifactVersion(ctx.db, input)
+      )
+    }),
 
   versionsRename: publicProcedure
     .input(z.object({ artifactId: z.string(), versionRef, newName: z.string().nullable() }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).renameArtifactVersion(ctx.db, input)),
+    .mutation(({ ctx, input }) => {
+      const s = store(ctx.dataRoot)
+      return changingArtifact(s, ctx.db, input.artifactId, () =>
+        s.renameArtifactVersion(ctx.db, input)
+      )
+    }),
 
   versionsDiff: publicProcedure
     .input(z.object({ artifactId: z.string(), a: versionRef, b: versionRef.optional() }))
@@ -205,11 +307,21 @@ export const artifactsRouter = router({
         dryRun: z.boolean().optional()
       })
     )
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).pruneArtifactVersions(ctx.db, input)),
+    .mutation(({ ctx, input }) => {
+      const s = store(ctx.dataRoot)
+      return changingArtifact(s, ctx.db, input.artifactId, () =>
+        s.pruneArtifactVersions(ctx.db, input)
+      )
+    }),
 
   versionsSetCurrent: publicProcedure
     .input(z.object({ artifactId: z.string(), versionRef }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).setCurrentArtifactVersion(ctx.db, input)),
+    .mutation(({ ctx, input }) => {
+      const s = store(ctx.dataRoot)
+      return changingArtifact(s, ctx.db, input.artifactId, () =>
+        s.setCurrentArtifactVersion(ctx.db, input)
+      )
+    }),
 
   // --- Folders ---
   foldersGetByTask: publicProcedure
@@ -218,23 +330,47 @@ export const artifactsRouter = router({
 
   foldersGetOrCreateByName: publicProcedure
     .input(z.object({ taskId: z.string(), name: z.string() }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).getOrCreateFolderByName(ctx.db, input)),
+    .mutation(async ({ ctx, input }) => {
+      const count = async (): Promise<number> =>
+        (
+          await ctx.db.get<{ n: number }>(
+            'SELECT COUNT(*) AS n FROM artifact_folders WHERE task_id = ?',
+            [input.taskId]
+          )
+        )?.n ?? 0
+      const before = await count()
+      const folder = await store(ctx.dataRoot).getOrCreateFolderByName(ctx.db, input)
+      // Only a create changes the task's folders; a get changes nothing.
+      if ((await count()) !== before) signalTasksChanged([input.taskId])
+      return folder
+    }),
 
-  foldersCreate: publicProcedure
-    .input(createFolderInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).createFolder(ctx.db, input)),
+  foldersCreate: publicProcedure.input(createFolderInput).mutation(({ ctx, input }) =>
+    creating(
+      () => store(ctx.dataRoot).createFolder(ctx.db, input),
+      (f) => [f?.task_id]
+    )
+  ),
 
   foldersUpdate: publicProcedure
     .input(updateFolderInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).updateFolder(ctx.db, input)),
+    .mutation(({ ctx, input }) =>
+      changingFolder(ctx.db, input.id, () => store(ctx.dataRoot).updateFolder(ctx.db, input))
+    ),
 
   foldersDelete: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).deleteFolder(ctx.db, input.id)),
+    .mutation(({ ctx, input }) =>
+      changingFolder(ctx.db, input.id, () => store(ctx.dataRoot).deleteFolder(ctx.db, input.id))
+    ),
 
   foldersReorder: publicProcedure
     .input(z.object({ parentId: z.string().nullable(), folderIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).reorderFolders(ctx.db, input)),
+    .mutation(async ({ ctx, input }) => {
+      const taskIds = await taskIdsOf(ctx.db, 'artifact_folders', input.folderIds)
+      await store(ctx.dataRoot).reorderFolders(ctx.db, input)
+      signalTasksChanged(taskIds)
+    }),
 
   // --- Download (needs the Electron host via AppDeps) ---
   downloadFile: publicProcedure

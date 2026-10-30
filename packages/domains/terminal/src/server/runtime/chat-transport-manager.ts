@@ -23,6 +23,7 @@ import type { ChatEffort } from '@slayzone/terminal-contracts'
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
 import type { AgentStateRecorder } from './pty-manager'
+import { ptyEvents } from './pty-events'
 import {
   chatSpawnError,
   childProcessToHandle,
@@ -89,7 +90,11 @@ export interface TransportDeps {
     code: number | null,
     signal: string | null
   ) => void
-  /** Broadcast state transitions on `pty:state-change` so the existing UI reflects chat activity. */
+  /**
+   * Broadcast state transitions to clients: the default publishes them on the pty
+   * event stream (`pty.onStateChange`, see `publishChatStateChange`), so every
+   * client sees chat activity exactly as it sees a terminal agent's.
+   */
   broadcastStateChange: (
     sessionId: string,
     newState: ChatTerminalState,
@@ -161,6 +166,31 @@ export type ChatEventMap = {
 }
 export const chatEvents = new TypedEmitter<ChatEventMap>()
 
+/**
+ * A chat agent's state change, onto the stream `pty.onStateChange` reads — the same
+ * `{ sessionId, newState, oldState }` a terminal agent's carries, keyed
+ * `${taskId}:${tabId}`, so every client follows chat agents live with the
+ * subscription it already holds (and the owner gate filters them like any session).
+ *
+ * `not-spawned` is not a client state: a tab hydrated but never started has no
+ * process, which in the shared vocabulary is `dead` (`isAliveTerminalState`), and
+ * the session registry lists it as no session at all. A transition never LANDS in
+ * `not-spawned` (only hydrate sets it); one that leaves it is reported from `dead`.
+ */
+function publishChatStateChange(
+  sessionId: string,
+  newState: ChatTerminalState,
+  oldState: ChatTerminalState
+): void {
+  if (newState === 'not-spawned') return
+  ptyEvents.emit(
+    'state-change',
+    sessionId,
+    newState,
+    oldState === 'not-spawned' ? 'dead' : oldState
+  )
+}
+
 const noEventStore: ChatEventStore = {
   load: async () => [],
   insert: async () => 'inserted'
@@ -178,6 +208,7 @@ const defaultDeps: TransportDeps = {
     electronBroadcast('chat:exit')(tabId, sessionId, code, signal)
   },
   broadcastStateChange: (sessionId, newState, oldState) => {
+    publishChatStateChange(sessionId, newState, oldState)
     electronBroadcast('pty:state-change')(sessionId, newState, oldState)
   },
   persistEvent: () => {

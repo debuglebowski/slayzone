@@ -11,7 +11,9 @@ import { setDiagnosticsRouterDeps } from '@slayzone/diagnostics/server'
 import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/server'
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
-import { setWorktreesRouterDeps } from '@slayzone/worktrees/server'
+import { setTagsRouterDeps } from '@slayzone/tags/server'
+import { detectChildRepos, setWorktreesRouterDeps } from '@slayzone/worktrees/server'
+import { setMainAgentDeps } from '@slayzone/task/server'
 import { setHostCapabilitiesDeps } from '@slayzone/host-capabilities/server'
 import { setUsageRouterDeps } from '@slayzone/terminal/server'
 import { setTaskBrowserRouterDeps } from '@slayzone/task-browser/server'
@@ -22,7 +24,7 @@ import { setExportImportOpsFactory } from '@slayzone/settings/server'
 import { createAccessScope } from './access'
 import { filterManagedComputers, mayManageComputer } from './computer-access'
 import { buildExportImportOps } from './export-import'
-import { getAppDeps, getComputersDepsOrNull } from './app-deps'
+import { emitTasksChanged, getAppDeps, getComputersDepsOrNull } from './app-deps'
 import { accessRequestOf, ownedProjectIds } from './owner-gate'
 
 setDiagnosticsRouterDeps({
@@ -47,7 +49,24 @@ setWorktreesRouterDeps({
   shellOpenPath: (absPath) => getAppDeps().shellOpenPath(absPath)
 })
 
+// Task writes outside the task domain (a task's tags, its artifacts) signal on the
+// notify bus the task ops' own `onMutation` uses, naming the tasks they touched.
+const onTasksChanged = (taskIds: readonly string[]): void => emitTasksChanged({ taskIds })
+
+setTagsRouterDeps({ onTasksChanged, onBoardChanged: () => emitTasksChanged() })
+
+// `task.startMainAgent` resolves a multi-repo project's child repos the way the
+// `worktrees.detectChildRepos` procedure does — same discovery, same workspace fs —
+// addressed by the task, so it runs on the computer the task's agent runs on.
+setMainAgentDeps({
+  detectChildRepos: async (target, projectPath) => {
+    const { fs, resolveComputer } = getWorkspaceDeps()
+    return detectChildRepos(fs, await resolveComputer(target), projectPath)
+  }
+})
+
 setArtifactsRouterDeps({
+  onTasksChanged,
   getDownloadHost: () => {
     const deps = getAppDeps()
     return {

@@ -1,6 +1,6 @@
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import { plainMainTerminalCwd } from './main-terminal-props'
+import { plainMainTerminalCwd } from '../shared/main-terminal'
 
 /**
  * Tasks whose tab should show their main terminal BEFORE the task page has loaded

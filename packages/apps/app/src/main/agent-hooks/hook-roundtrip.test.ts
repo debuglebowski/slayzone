@@ -63,6 +63,8 @@ vi.mock('@slayzone/task/server', async () => {
     taskRouter: router({}),
     agentSessionsRouter: router({}),
     templateRouter: router({}),
+    // api wires `task.startMainAgent`'s repo-discovery seam at load.
+    setMainAgentDeps: () => {},
     recordConversation: vi.fn(),
     findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
     findOwnedSpawnForConversation: vi.fn(async () => null),

@@ -44,7 +44,12 @@ import type {
 } from '@slayzone/task-contracts'
 import type { TaskTemplate } from '@slayzone/task-contracts'
 import type { TaskDetailData } from './taskDetailCache'
-import { mainTerminalProps } from './main-terminal-props'
+import {
+  mainTerminalCwdFrom,
+  mainTerminalProps,
+  taskRepoName,
+  taskRepoPath
+} from '../shared/main-terminal'
 import {
   BUILTIN_PANEL_IDS,
   getProviderFlags,
@@ -431,13 +436,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Task-bound repo name: only what the user has explicitly bound to this task or to the project default.
   // Intentionally NO fallback to first-detected — wrapper folder stays wrapper folder for the bound axis,
   // so the terminal/editor don't silently jump into an arbitrary child repo.
-  const effectiveRepoName = task?.repo_name ?? project?.selected_repo ?? null
+  const effectiveRepoName = taskRepoName(task, project)
   const resolvedRepo = useMemo(
     () => resolveRepoPath(project?.path ?? null, detectedRepos, effectiveRepoName),
     [project?.path, detectedRepos, effectiveRepoName]
   )
   // Effective repo path (worktree > resolved child repo > project path) — drives terminal/editor/browser/worktree.
-  const effectiveRepoPath = task?.worktree_path ?? task?.base_dir ?? resolvedRepo.path
+  // Shared with the hub's `task.startMainAgent` (../shared/main-terminal).
+  const effectiveRepoPath = taskRepoPath(task, resolvedRepo.path)
 
   // Git-panel viewing axis: ephemeral, repo selection here does NOT change the task-bound path.
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
@@ -3001,7 +3007,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           isTemporary={task.is_temporary}
                           isActive={isActive}
                           hasShortcutFocus={shortcutActive}
-                          cwd={effectiveRepoPath || project?.path || ''}
+                          cwd={mainTerminalCwdFrom(effectiveRepoPath, project) ?? ''}
                           // Spawn props shared with the terminal-first pane (one
                           // derivation — see mainTerminalProps). The hydration gate
                           // (`conversationHydrated`) holds the main tab's auto-spawn

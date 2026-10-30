@@ -4,6 +4,7 @@ import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from './events'
 import { recordPendingSpawn, recordConversation, isHonoredConversation, deleteSession } from './ops'
 import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
+import { startMainAgent } from './main-agent'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import {
@@ -245,18 +246,36 @@ export const taskRouter = router({
       return r
     }),
 
+  // Order and blocker writes name the rows they moved / (un)blocked, so every other
+  // client patches them live (`notify.onTasksChanged`).
   reorder: publicProcedure
     .input(z.object({ taskIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => ops().reorderTasksOp(ctx.db, input.taskIds)),
+    .mutation(({ ctx, input }) => ops().reorderTasksOp(ctx.db, input.taskIds, deps())),
 
   reorderPinned: publicProcedure
     .input(z.object({ taskIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => ops().reorderPinnedTasksOp(ctx.db, input.taskIds)),
+    .mutation(({ ctx, input }) => ops().reorderPinnedTasksOp(ctx.db, input.taskIds, deps())),
 
   setBrowserTabLocked: publicProcedure
     .input(z.object({ taskId: z.string(), tabId: z.string(), locked: z.boolean() }))
     .mutation(({ ctx, input }) =>
       ops().setBrowserTabLockedOp(ctx.db, input.taskId, input.tabId, input.locked, deps())
+    ),
+
+  // Start the task's main agent on the hub: spawn props, cwd (repo discovery on the
+  // task's computer), resume conversation and execution context resolved from what
+  // the hub stores, the same way the desktop resolves them. Starts only when no
+  // session is live; a concurrent call joins the start in flight. See ./main-agent.ts.
+  startMainAgent: publicProcedure
+    .input(
+      z.object({
+        taskId: z.string(),
+        cols: z.number().int().positive().optional(),
+        rows: z.number().int().positive().optional()
+      })
+    )
+    .mutation(({ ctx, input }) =>
+      startMainAgent(ctx.db, input, (id) => ops().getTaskOp(ctx.db, id))
     ),
 
   // --- Dependencies ---
@@ -272,15 +291,21 @@ export const taskRouter = router({
 
   addBlocker: publicProcedure
     .input(z.object({ taskId: z.string(), blockerTaskId: z.string() }))
-    .mutation(({ ctx, input }) => ops().addBlockerOp(ctx.db, input.taskId, input.blockerTaskId)),
+    .mutation(({ ctx, input }) =>
+      ops().addBlockerOp(ctx.db, input.taskId, input.blockerTaskId, deps())
+    ),
 
   removeBlocker: publicProcedure
     .input(z.object({ taskId: z.string(), blockerTaskId: z.string() }))
-    .mutation(({ ctx, input }) => ops().removeBlockerOp(ctx.db, input.taskId, input.blockerTaskId)),
+    .mutation(({ ctx, input }) =>
+      ops().removeBlockerOp(ctx.db, input.taskId, input.blockerTaskId, deps())
+    ),
 
   setBlockers: publicProcedure
     .input(z.object({ taskId: z.string(), blockerTaskIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => ops().setBlockersOp(ctx.db, input.taskId, input.blockerTaskIds)),
+    .mutation(({ ctx, input }) =>
+      ops().setBlockersOp(ctx.db, input.taskId, input.blockerTaskIds, deps())
+    ),
 
   // --- Board ---
   loadBoardData: publicProcedure.query(({ ctx }) => ops().loadBoardDataOp(ctx.db)),

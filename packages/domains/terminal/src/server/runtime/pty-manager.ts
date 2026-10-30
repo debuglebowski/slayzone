@@ -6,7 +6,7 @@ import { getPtyHostBridge, onPtyHostBus, type PtySessionWindow } from '../pty-ho
 import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
-import { TypedEmitter } from '@slayzone/platform/events'
+import { ptyEvents } from './pty-events'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import {
   containsSubmitEnter,
@@ -91,58 +91,11 @@ export { filterBufferData }
  * Transport-agnostic PTY event stream (IPC → tRPC migration, slice 3 / P17).
  * Every `webContents.send('pty:*', ...)` below ALSO fans out through this
  * emitter (dual-emit), so the tRPC `pty` router's subscriptions can mirror the
- * exact IPC event surface while the renderer is still on IPC (renderer cutover
- * is slice 5). The emitter is window-agnostic — it fires regardless of which
- * BrowserWindow currently owns the session — so it carries the GLOBAL event,
- * not a per-window stream. Reuses the shared TypedEmitter (P6).
+ * exact IPC event surface. Defined in ./pty-events (the chat transport publishes
+ * its state changes onto it too, and cannot import this module); re-exported
+ * here so every existing importer keeps its path.
  */
-export type PtyEventMap = {
-  data: [sessionId: string, data: string, seq: number]
-  'state-change': [sessionId: string, newState: TerminalState, oldState: TerminalState]
-  'title-change': [sessionId: string, title: string]
-  /** `exitReason`: lifecycle cause the code cannot carry (`startup-timeout`,
-   *  `computer-restarted`, `spawn-failed`, …) — distinct from the adapter's `errorCode`.
-   *  `exitDetail`: the owner's own words for it — on `spawn-failed`, the computer's
-   *  refusal ("posix_spawnp failed. … Fix: …"). */
-  exit: [
-    sessionId: string,
-    exitCode: number | null,
-    errorCode: string | null,
-    exitReason?: string | null,
-    exitDetail?: string | null
-  ]
-  // Fired SYNCHRONOUSLY the instant `createPty` decides to replace a live
-  // session at this id (respawn/mode-switch/warm-pool adopt) — strictly
-  // BEFORE `killPty` and before the new session is registered. `exit` for the
-  // outgoing process is NOT a substitute: `killPty` only SIGKILLs, it does not
-  // await `finalizeSessionExit` (real onExit, or the watchdog fallback), so
-  // that `exit` can land well after the new session already has live hook
-  // state. A listener that must reset per-session state on id reuse (e.g. the
-  // agent-hook route's subagent tracker) needs THIS event, not `exit`, or it
-  // either inherits the outgoing session's stale state (too late) or wipes the
-  // incoming session's fresh state (too late the other way, once `exit`
-  // finally arrives).
-  replacing: [sessionId: string]
-  /** Count of claude background jobs (Bash run_in_background / Monitor) still
-   *  running under the session — a separate fact from `state` (see agent-tree.ts). */
-  'background-jobs': [sessionId: string, count: number]
-  prompt: [sessionId: string, prompt: unknown]
-  'session-detected': [sessionId: string, conversationId: string]
-  'dev-server-detected': [sessionId: string, url: string]
-  'respawn-suggested': [taskId: string]
-  'ensure-alive': [taskId: string, reqId: number, force: boolean]
-  'hibernate-warn': [sessionId: string, graceSecs: number]
-  'hibernate-cancelled': [sessionId: string]
-  hibernated: [sessionId: string]
-  // Per-process CPU/RSS sampler snapshot, keyed by sessionId. Dual-emitted
-  // alongside the legacy `pty:stats` webContents.send (host poller).
-  stats: [stats: Record<string, { cpu: number; rss: number }>]
-  // PTY dimensions need a renderer-side re-fit (e.g. after floating-agent
-  // reattach). Dual-emitted alongside the legacy `pty:resize-needed` send.
-  'resize-needed': [sessionId: string]
-}
-
-export const ptyEvents = new TypedEmitter<PtyEventMap>()
+export { ptyEvents, type PtyEventMap } from './pty-events'
 
 // Session-provenance ledger (hub/computer split, wave 1). Null until the
 // composition root injects a DB via `setDatabase` — every call site guards on

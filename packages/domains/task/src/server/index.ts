@@ -15,6 +15,13 @@ export {
 // the deps are injected by the composition roots (hub, Electron main).
 export { taskRouter } from './task-router'
 export { setTaskDeps, getTaskOps } from './task-router-deps'
+// `task.startMainAgent`'s repo-discovery seam (api wires worktrees' `detectChildRepos`).
+export {
+  setMainAgentDeps,
+  type MainAgentDeps,
+  type StartMainAgentInput,
+  type StartMainAgentResult
+} from './main-agent'
 export type { TaskRouter, TaskMounts } from './router-mounts'
 
 export {
