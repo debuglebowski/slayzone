@@ -51,6 +51,12 @@ PTY (node-pty)
 ### `/prompt-options`
 - What a chat prompt card offers (rows + wire answers), pure: shared by the desktop prompt dock and the mobile app
 
+### `/tab-label`
+- `getTabLabel` / `getModeLabel` / `numberDuplicateLabels` (`client/get-tab-label.ts`), pure: what desktop's tab bar calls a tab; the mobile app's agent screen names tabs the same way
+
+### `/slash-commands`
+- The chat's `/` commands without the menu (`autocomplete/slash-commands.ts`), DOM-free: the builtins registry + `availableBuiltins`, the CLI's list (`cliCommandItems`), command files as the CLI names them (`customCommandItems`, `takesArguments`, `expandCommandBody`, `transformCommandSubmit`), `rankByName`, `resolveEnter`, `resetChat`. The desktop autocomplete sources build on the same functions; the mobile chat's `/` menu uses them directly
+
 ### `/shared`
 - `TerminalTab` - Tab data type
 - `CreateTerminalTabInput` / `UpdateTerminalTabInput` - Input types

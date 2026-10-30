@@ -1,3 +1,4 @@
+import { NO_AGENT_SESSIONS } from './agents/hub-agents'
 import type { HubConnection } from '@slayzone/transport/client'
 import { hubEntryOf } from './hub-session'
 import {
@@ -44,6 +45,7 @@ function feed(hub: typeof home, fields: Partial<HubFeed> = {}): HubFeed {
     connection: OPEN,
     stalled: false,
     board: { data: undefined, pending: true, error: null, refreshing: false },
+    agents: NO_AGENT_SESSIONS,
     ...fields
   }
 }

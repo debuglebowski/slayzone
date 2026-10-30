@@ -1,4 +1,4 @@
-import { modelsForMode } from '@slayzone/terminal-contracts'
+import { modelsForMode, type ChatCapabilities } from '@slayzone/terminal-contracts'
 import type { BuiltinCommand, AcceptCtx } from './types'
 import { rankByName } from './ranking'
 import { resetChat } from './chat-actions'
@@ -161,6 +161,21 @@ export function rankBuiltins(items: BuiltinCommand[], filter: string): BuiltinCo
 
 export function filterBuiltins(filter: string): BuiltinCommand[] {
   return rankBuiltins(builtinCommands, filter)
+}
+
+export interface BuiltinsSourceOpts {
+  /** Commands the chat CLI runs itself (its list minus terminal-only ones); empty when unknown. */
+  cliCommandNames: ReadonlySet<string>
+  capabilities: ChatCapabilities
+}
+
+/** Builtins offered for this chat: available for the mode, and not shadowed by a CLI-native command. */
+export function availableBuiltins(opts: BuiltinsSourceOpts): BuiltinCommand[] {
+  return builtinCommands.filter(
+    (b) =>
+      (b.available?.(opts.capabilities) ?? true) &&
+      !(b.cliCollision === 'cli-wins' && opts.cliCommandNames.has(b.name))
+  )
 }
 
 export type AcceptCtxRef = AcceptCtx

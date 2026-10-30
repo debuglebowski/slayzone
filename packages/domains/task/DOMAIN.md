@@ -24,6 +24,8 @@ Also exports validation schemas (`createTaskSchema`, `updateTaskSchema`) and for
 `src/shared/main-terminal.ts` - how a task's MAIN agent starts (spawn props, cwd:
 worktree > base dir > bound child repo > project root). DOM-free; the task page and
 the hub's `task.startMainAgent` both use it, so they cannot start a session two ways.
+Exported DOM-free as `@slayzone/task/main-terminal` (its contract imports go through
+DOM-free subpaths): the mobile chat resolves a chat tab's folder with it.
 
 ## Server (server/)
 

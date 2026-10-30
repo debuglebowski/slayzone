@@ -15,13 +15,16 @@ export function TaskScreen({
   taskId,
   sessions,
   feeds,
-  onBack
+  onBack,
+  onOpenAgent
 }: {
   hubAddress: string
   taskId: string
   sessions: readonly HubSession[]
   feeds: readonly HubFeed[]
   onBack: () => void
+  /** The task's agent screen (its agent can be started there). */
+  onOpenAgent: (taskId: string) => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -46,6 +49,15 @@ export function TaskScreen({
         <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
           <Text style={styles.link}>‹ Home</Text>
         </Pressable>
+        {row ? (
+          <Pressable
+            onPress={() => onOpenAgent(row.task.id)}
+            hitSlop={8}
+            accessibilityRole="button"
+          >
+            <Text style={styles.link}>Agent ›</Text>
+          </Pressable>
+        ) : null}
       </View>
       {body}
     </View>
@@ -59,6 +71,7 @@ const makeStyles = (t: ChromeColors) =>
     header: {
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
       paddingHorizontal: 16,
       paddingVertical: 12,
       borderBottomWidth: StyleSheet.hairlineWidth,

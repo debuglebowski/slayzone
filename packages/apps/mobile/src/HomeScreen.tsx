@@ -3,13 +3,13 @@ import { useWindowDimensions } from 'react-native'
 import type { TaskRow } from './hub-board'
 import { useHubFeeds } from './hub-connections'
 import { useHubSessions } from './hub-sessions'
-import { findSession, HUBS, taskHref } from './routes'
+import { AGENTS, agentHref, findSession, HUBS, taskHref } from './routes'
 import { SPLIT_MIN_WIDTH, TaskBrowser } from './TaskBrowser'
 
 /**
  * Home, wired to the app: every hub's feed, the signed-in sessions, navigation. A
- * phone opens a tapped task on its own screen; a wide screen (iPad) shows it beside
- * the list (`select`: the route keeps the choice in its params, so a deep link to a
+ * tapped agent opens its agent screen. A phone opens a tapped task on its own
+ * screen; a wide screen (iPad) shows it beside the list (`select`: the route keeps the choice in its params, so a deep link to a
  * task opens it the same way).
  */
 export function HomeScreen({
@@ -40,6 +40,8 @@ export function HomeScreen({
       onRetry={retry}
       onSignOut={signOut}
       onManageHubs={() => router.push(HUBS)}
+      onOpenAgent={(row) => router.push(agentHref(row.hubLabel, row.task.id))}
+      onShowAgents={() => router.push(AGENTS)}
     />
   )
 }

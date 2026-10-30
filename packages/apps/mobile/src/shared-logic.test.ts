@@ -5,8 +5,14 @@
  * here, and so does any runtime import of a desktop-only package: each is mocked to
  * throw when loaded. (Type-only imports are erased and never load.)
  */
-import type { PermissionRequestEvent } from '@slayzone/terminal-contracts'
+import {
+  arrowKey,
+  type PermissionRequestEvent,
+  stripOscReplies,
+  TERMINAL_STATE_LABELS
+} from '@slayzone/terminal-contracts'
 import type { Task } from '@slayzone/task-contracts'
+import { clearAllConversationIds } from '@slayzone/task-contracts/types'
 import {
   applyFilters,
   columnToCreateTaskDraft,
@@ -20,7 +26,14 @@ import { selectPendingPrompts } from '@slayzone/terminal/chat-prompts'
 import { initialState, reducer } from '@slayzone/terminal/reducer'
 import { suppressDeviceStatusReplies } from '@slayzone/terminal/suppress-device-status'
 import { getTerminalThemeById, terminalThemes } from '@slayzone/terminal/terminal-themes'
+import {
+  applyStateChange,
+  EMPTY_TERMINAL_STATE,
+  reconcile,
+  sessionStateOf
+} from '@slayzone/terminal/terminal-state'
 import { buildPermissionView, REJECT_MESSAGE } from '@slayzone/task-terminals/prompt-options'
+import { getTabLabel } from '@slayzone/task-terminals/tab-label'
 
 jest.mock('@slayzone/ui', () => {
   throw new Error('@slayzone/ui (desktop UI kit) loaded')
@@ -133,5 +146,39 @@ describe('@slayzone/terminal terminal helpers', () => {
     }
     suppressDeviceStatusReplies({ parser } as never)
     expect(registered).toEqual([{ final: 'n' }, { prefix: '?', final: 'n' }])
+  })
+})
+
+describe('agents (phase 1)', () => {
+  it('runs the terminal-state rules desktop runs', () => {
+    let state = {
+      ...EMPTY_TERMINAL_STATE,
+      ...applyStateChange(EMPTY_TERMINAL_STATE, 'a:a', 'running', 1)
+    }
+    state = { ...state, ...reconcile(state, [], ['b:b'], 5) }
+    expect(sessionStateOf(state, 'a:a')).toBe('dead')
+    expect(sessionStateOf(state, 'b:b')).toBe('hibernated')
+    expect(TERMINAL_STATE_LABELS.hibernated).toBe('Paused')
+  })
+
+  it('names tabs, strips OSC replies, encodes keys and clears conversations like desktop', () => {
+    expect(
+      getTabLabel({
+        id: 't',
+        taskId: 't',
+        groupId: 't',
+        label: null,
+        mode: 'codex',
+        isMain: true,
+        position: 0,
+        createdAt: '',
+        agentState: 'running'
+      })
+    ).toBe('Codex')
+    expect(stripOscReplies('a\x1b]11;rgb:0/0/0\x07b')).toBe('ab')
+    expect(arrowKey('up', true)).toBe('\x1bOA')
+    expect(clearAllConversationIds({ codex: { conversationId: 'c' } })).toEqual({
+      codex: { conversationId: null }
+    })
   })
 })

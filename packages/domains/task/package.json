@@ -24,7 +24,8 @@
     "./client/TaskPaneEventCatcher": "./src/client/TaskPaneEventCatcher.tsx",
     "./client/ResizeHandle": "./src/client/ResizeHandle.tsx",
     "./client/usePanelSizes": "./src/client/usePanelSizes.ts",
-    "./client/usePanelConfig": "./src/client/usePanelConfig.ts"
+    "./client/usePanelConfig": "./src/client/usePanelConfig.ts",
+    "./main-terminal": "./src/shared/main-terminal.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

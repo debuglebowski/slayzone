@@ -8,8 +8,11 @@ describe('routes', () => {
     expect(taskHref('[::1]:8788', 'a/b')).toBe('/task/%5B%3A%3A1%5D%3A8788/a%2Fb')
   })
 
-  it('names an agent session the same way', () => {
-    expect(agentHref('hub.example.com', 's1')).toBe('/agent/hub.example.com/s1')
+  it("names a task's agents the same way; a tab other than the main one as a parameter", () => {
+    expect(agentHref('hub.example.com', 't1')).toBe('/agent/hub.example.com/t1')
+    expect(agentHref('127.0.0.1:8788', 't1', 'tab 2')).toBe(
+      '/agent/127.0.0.1%3A8788/t1?tab=tab%202'
+    )
   })
 
   it('finds the session of a hub address from a route', () => {

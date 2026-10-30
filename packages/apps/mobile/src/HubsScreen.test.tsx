@@ -1,5 +1,6 @@
 import type { HubConnection } from '@slayzone/transport/client'
 import { render, screen, userEvent, within } from '@testing-library/react-native'
+import { NO_AGENT_SESSIONS } from './agents/hub-agents'
 import type { HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { HubsScreen } from './HubsScreen'
@@ -11,7 +12,8 @@ const feed = (hub: typeof home, connection: HubConnection, stalled = false): Hub
   hub,
   connection,
   stalled,
-  board: { data: undefined, pending: true, error: null, refreshing: false }
+  board: { data: undefined, pending: true, error: null, refreshing: false },
+  agents: NO_AGENT_SESSIONS
 })
 
 function setup() {

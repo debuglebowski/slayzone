@@ -5,10 +5,11 @@
 // Workspace packages resolve to their TypeScript sources outside node_modules, so jest
 // transforms them like the app's own files. Registry packages are left untransformed
 // except the ones the preset lists and the ESM-only ones the app reaches at runtime
-// (superjson, the tRPC transformer, and its dependencies): jest runs CommonJS.
+// (superjson, the tRPC transformer, and its dependencies; marked, the chat's markdown
+// lexer): jest runs CommonJS.
 const { transformIgnorePatterns } = require('jest-expo/ios/jest-preset')
 
-const ESM_ONLY = ['superjson', 'copy-anything', 'is-what']
+const ESM_ONLY = ['superjson', 'copy-anything', 'is-what', 'marked']
 const PRESET_ALLOWLIST_START = '/node_modules/(?!('
 
 const [nodeModules, ...rest] = transformIgnorePatterns

@@ -1,0 +1,4873 @@
+{
+  "source": "Recorded by packages/apps/mobile/scripts/record-chat-fixture.mts from a SlayZone hub with fake-claude (packages/shared/test-utils/fake-claude) playing scripted turns and the real recorded transcripts permission-bash + ask-user-question: every chat.* message a client subscribed with {tabIds:[tabId]} received, per action.",
+  "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+  "taskId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+  "mode": "claude-chat",
+  "cwdPlaceholder": "{{cwd}}",
+  "segments": [
+    {
+      "action": "open",
+      "wire": []
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Say hello and list the files",
+        "id": "msg-1"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-1",
+              "text": "Say hello and list the files",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Say hello and list the files"
+                }
+              ]
+            },
+            "seq": 0
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "session-spawn",
+              "spawnId": "0eebcb07-5a9e-470a-9e4e-0a6571e87e73"
+            },
+            "seq": 1
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-1",
+              "state": "sending"
+            },
+            "seq": 1,
+            "live": 1
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-1",
+              "state": "delivered"
+            },
+            "seq": 2
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "cli-command-details",
+              "commands": [
+                {
+                  "name": "goal",
+                  "description": "Set a goal Claude keeps working toward",
+                  "argumentHint": "<condition>"
+                }
+              ]
+            },
+            "seq": 2,
+            "live": 2
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 3
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-start",
+              "messageId": "msg_stream_1"
+            },
+            "seq": 3,
+            "live": 3
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-start",
+              "blockIndex": 0,
+              "blockType": "thinking"
+            },
+            "seq": 3,
+            "live": 4
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "thinking",
+              "text": "The user wants "
+            },
+            "seq": 3,
+            "live": 5
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "thinking",
+              "text": "a greeting."
+            },
+            "seq": 3,
+            "live": 6
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "signature",
+              "text": "fake-signature"
+            },
+            "seq": 3,
+            "live": 7
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-thinking",
+              "messageId": "msg_stream_1",
+              "text": "The user wants a greeting.",
+              "hasSignature": true,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "82d93505-0b86-4846-a65a-8d67fbeaa5d1"
+            },
+            "seq": 4
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-stop",
+              "blockIndex": 0
+            },
+            "seq": 4,
+            "live": 8
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-start",
+              "blockIndex": 1,
+              "blockType": "text"
+            },
+            "seq": 4,
+            "live": 9
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 1,
+              "deltaType": "text",
+              "text": "Hello"
+            },
+            "seq": 4,
+            "live": 10
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 1,
+              "deltaType": "text",
+              "text": " from"
+            },
+            "seq": 4,
+            "live": 11
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 1,
+              "deltaType": "text",
+              "text": " the **fake** CLI."
+            },
+            "seq": 4,
+            "live": 12
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_stream_1",
+              "text": "Hello from the **fake** CLI.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "56bbcae1-6c15-4e77-8e96-c5f39770d804"
+            },
+            "seq": 5
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-stop",
+              "blockIndex": 1
+            },
+            "seq": 5,
+            "live": 13
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-start",
+              "blockIndex": 2,
+              "blockType": "tool_use",
+              "toolUseId": "toolu_ls",
+              "toolName": "Bash"
+            },
+            "seq": 5,
+            "live": 14
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 2,
+              "deltaType": "input_json",
+              "text": "{\"command\":\"ls "
+            },
+            "seq": 5,
+            "live": 15
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 2,
+              "deltaType": "input_json",
+              "text": "-la\",\"descriptio"
+            },
+            "seq": 5,
+            "live": 16
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 2,
+              "deltaType": "input_json",
+              "text": "n\":\"List files\"}"
+            },
+            "seq": 5,
+            "live": 17
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-call",
+              "id": "toolu_ls",
+              "name": "Bash",
+              "input": {
+                "command": "ls -la",
+                "description": "List files"
+              },
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "570bef13-95d2-4b73-bad0-9c45dcf85f0a"
+            },
+            "seq": 6
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-stop",
+              "blockIndex": 2
+            },
+            "seq": 6,
+            "live": 18
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-stop"
+            },
+            "seq": 6,
+            "live": 19
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-result",
+              "toolUseId": "toolu_ls",
+              "isError": false,
+              "rawContent": "README.md\nsrc",
+              "structured": null
+            },
+            "seq": 7
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-start",
+              "messageId": "msg_stream_2"
+            },
+            "seq": 7,
+            "live": 20
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-start",
+              "blockIndex": 0,
+              "blockType": "text"
+            },
+            "seq": 7,
+            "live": 21
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": "Two "
+            },
+            "seq": 7,
+            "live": 22
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": "files."
+            },
+            "seq": 7,
+            "live": 23
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_stream_2",
+              "text": "Two files.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "407c0fbf-50f6-4db0-9bc1-648166e70b52"
+            },
+            "seq": 8
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-stop",
+              "blockIndex": 0
+            },
+            "seq": 8,
+            "live": 24
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-stop"
+            },
+            "seq": 8,
+            "live": 25
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 1,
+              "durationApiMs": 1,
+              "numTurns": 1,
+              "totalCostUsd": 0,
+              "stopReason": "end_turn",
+              "terminalReason": null,
+              "text": "Two files.",
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 9
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-1",
+              "state": "answered"
+            },
+            "seq": 10
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-1",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Use the Bash tool to run exactly: touch created-by-claude.txt",
+        "id": "msg-2"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-2",
+              "text": "Use the Bash tool to run exactly: touch created-by-claude.txt",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Use the Bash tool to run exactly: touch created-by-claude.txt"
+                }
+              ]
+            },
+            "seq": 11
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-2",
+              "state": "sending"
+            },
+            "seq": 11,
+            "live": 26
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-2",
+              "state": "delivered"
+            },
+            "seq": 12
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "claude-haiku-5-5",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "CronCreate",
+                "CronDelete",
+                "CronList",
+                "DesignSync",
+                "Edit",
+                "EnterPlanMode",
+                "EnterWorktree",
+                "ExitPlanMode",
+                "ExitWorktree",
+                "ListAgents",
+                "Monitor",
+                "NotebookEdit",
+                "PushNotification",
+                "Read",
+                "RemoteTrigger",
+                "ReportFindings",
+                "ScheduleWakeup",
+                "SendMessage",
+                "Skill",
+                "TaskStop",
+                "WebSearch",
+                "Workflow",
+                "Write"
+              ],
+              "permissionMode": "default",
+              "slashCommands": [
+                "deep-research",
+                "design",
+                "design-sync",
+                "dataviz",
+                "update-config",
+                "verify",
+                "debug",
+                "code-review",
+                "simplify",
+                "batch",
+                "fewer-permission-prompts",
+                "doctor",
+                "loop",
+                "schedule",
+                "claude-api",
+                "workflow-authoring",
+                "run",
+                "run-skill-generator",
+                "plugin-authoring",
+                "agents",
+                "auto-mode-setup",
+                "autocompact",
+                "clear",
+                "color",
+                "compact",
+                "config",
+                "output-style",
+                "context",
+                "effort",
+                "fast",
+                "focus",
+                "heapdump",
+                "init",
+                "mcp",
+                "import",
+                "model",
+                "__remote-workflow",
+                "workflow-launch-exec",
+                "reload-plugins",
+                "reload-skills",
+                "rename",
+                "ultrareview",
+                "security-review",
+                "usage-credits",
+                "extra-usage",
+                "usage",
+                "insights",
+                "recap",
+                "skill-doctor",
+                "goal",
+                "design-consent",
+                "design-revoke",
+                "list-agents",
+                "team-onboarding"
+              ],
+              "terminalSlashCommands": ["doctor", "color", "focus", "reload-plugins"],
+              "skills": [
+                "deep-research",
+                "design",
+                "design-sync",
+                "dataviz",
+                "update-config",
+                "verify",
+                "debug",
+                "code-review",
+                "simplify",
+                "batch",
+                "fewer-permission-prompts",
+                "doctor",
+                "loop",
+                "schedule",
+                "claude-api",
+                "workflow-authoring",
+                "run",
+                "run-skill-generator",
+                "plugin-authoring"
+              ],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 13
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-call",
+              "id": "toolu_015HidQZoy4Ydd5mvZ37pP65",
+              "name": "Bash",
+              "input": {
+                "command": "touch created-by-claude.txt",
+                "description": "Create empty file created-by-claude.txt in working directory"
+              },
+              "usage": {
+                "inputTokens": 3972,
+                "outputTokens": 16,
+                "cacheReadInputTokens": 29892,
+                "cacheCreationInputTokens": 3712
+              },
+              "uuid": "4242984e-5b16-42c3-8863-26524085d3fa"
+            },
+            "seq": 14
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "permission-request",
+              "requestId": "220e6d0a-a6f0-429b-be38-5d7997746276",
+              "toolName": "Bash",
+              "toolUseId": "toolu_015HidQZoy4Ydd5mvZ37pP65",
+              "input": {
+                "command": "touch created-by-claude.txt",
+                "description": "Create empty file created-by-claude.txt in working directory"
+              },
+              "permissionSuggestions": [
+                {
+                  "type": "addRules",
+                  "rules": [
+                    {
+                      "toolName": "Bash",
+                      "ruleContent": "touch created-by-claude.txt"
+                    }
+                  ],
+                  "behavior": "allow",
+                  "destination": "localSettings"
+                },
+                {
+                  "type": "addDirectories",
+                  "directories": ["{{cwd}}"],
+                  "destination": "session"
+                },
+                {
+                  "type": "setMode",
+                  "mode": "acceptEdits",
+                  "destination": "session"
+                }
+              ],
+              "displayName": "Bash",
+              "description": "Create empty file created-by-claude.txt in working directory",
+              "blockedPath": "{{cwd}}/created-by-claude.txt"
+            },
+            "seq": 15
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-2",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "respondPermission",
+      "input": {
+        "requestId": "220e6d0a-a6f0-429b-be38-5d7997746276",
+        "optionId": "yes",
+        "decision": {
+          "behavior": "allow"
+        }
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "permission-resolved",
+              "requestId": "220e6d0a-a6f0-429b-be38-5d7997746276",
+              "decision": {
+                "behavior": "allow",
+                "updatedInput": {
+                  "command": "touch created-by-claude.txt",
+                  "description": "Create empty file created-by-claude.txt in working directory"
+                }
+              },
+              "optionId": "yes"
+            },
+            "seq": 16
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "rate-limit",
+              "status": "allowed",
+              "rateLimitType": "five_hour",
+              "resetsAt": 1800000000,
+              "overageStatus": "rejected"
+            },
+            "seq": 17
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-result",
+              "toolUseId": "toolu_015HidQZoy4Ydd5mvZ37pP65",
+              "isError": false,
+              "rawContent": "(Bash completed with no output)",
+              "structured": {
+                "stdout": "",
+                "stderr": "",
+                "interrupted": false,
+                "isImage": false,
+                "noOutputExpected": true
+              }
+            },
+            "seq": 18
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_011CgWfriHCNRRcgrfDAx4RV",
+              "text": "I ran `touch created-by-claude.txt` in the working directory. It completed with no output, so the file should now exist there.",
+              "usage": {
+                "inputTokens": 26,
+                "outputTokens": 8,
+                "cacheReadInputTokens": 33604,
+                "cacheCreationInputTokens": 4080
+              },
+              "uuid": "d005cbfc-8b36-4daf-8e70-3dce9bc557ba"
+            },
+            "seq": 19
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 5946,
+              "durationApiMs": 1937,
+              "numTurns": 2,
+              "totalCostUsd": 0.0026606600000000005,
+              "stopReason": "end_turn",
+              "terminalReason": "completed",
+              "text": "I ran `touch created-by-claude.txt` in the working directory. It completed with no output, so the file should now exist there.",
+              "modelUsage": {
+                "claude-haiku-5-5": {
+                  "inputTokens": 3998,
+                  "outputTokens": 135,
+                  "cacheReadInputTokens": 63496,
+                  "cacheCreationInputTokens": 7792,
+                  "costUsd": 0.0026606600000000005,
+                  "contextWindow": 1000000,
+                  "maxOutputTokens": 128000
+                }
+              },
+              "usage": {
+                "inputTokens": 3998,
+                "outputTokens": 135,
+                "cacheReadInputTokens": 63496,
+                "cacheCreationInputTokens": 7792
+              },
+              "permissionDenials": []
+            },
+            "seq": 20
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-2",
+              "state": "answered"
+            },
+            "seq": 21
+          }
+        }
+      ],
+      "output": true
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Use the Bash tool to run exactly: rm created-by-claude.txt",
+        "id": "msg-3"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-3",
+              "text": "Use the Bash tool to run exactly: rm created-by-claude.txt",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Use the Bash tool to run exactly: rm created-by-claude.txt"
+                }
+              ]
+            },
+            "seq": 22
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-3",
+              "state": "sending"
+            },
+            "seq": 22,
+            "live": 27
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-3",
+              "state": "delivered"
+            },
+            "seq": 23
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "claude-haiku-5-5",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "CronCreate",
+                "CronDelete",
+                "CronList",
+                "DesignSync",
+                "Edit",
+                "EnterPlanMode",
+                "EnterWorktree",
+                "ExitPlanMode",
+                "ExitWorktree",
+                "ListAgents",
+                "Monitor",
+                "NotebookEdit",
+                "PushNotification",
+                "Read",
+                "RemoteTrigger",
+                "ReportFindings",
+                "ScheduleWakeup",
+                "SendMessage",
+                "Skill",
+                "TaskStop",
+                "WebSearch",
+                "Workflow",
+                "Write"
+              ],
+              "permissionMode": "default",
+              "slashCommands": [
+                "deep-research",
+                "design",
+                "design-sync",
+                "dataviz",
+                "update-config",
+                "verify",
+                "debug",
+                "code-review",
+                "simplify",
+                "batch",
+                "fewer-permission-prompts",
+                "doctor",
+                "loop",
+                "schedule",
+                "claude-api",
+                "workflow-authoring",
+                "run",
+                "run-skill-generator",
+                "plugin-authoring",
+                "agents",
+                "auto-mode-setup",
+                "autocompact",
+                "clear",
+                "color",
+                "compact",
+                "config",
+                "output-style",
+                "context",
+                "effort",
+                "fast",
+                "focus",
+                "heapdump",
+                "init",
+                "mcp",
+                "import",
+                "model",
+                "__remote-workflow",
+                "workflow-launch-exec",
+                "reload-plugins",
+                "reload-skills",
+                "rename",
+                "ultrareview",
+                "security-review",
+                "usage-credits",
+                "extra-usage",
+                "usage",
+                "insights",
+                "recap",
+                "skill-doctor",
+                "goal",
+                "design-consent",
+                "design-revoke",
+                "list-agents",
+                "team-onboarding"
+              ],
+              "terminalSlashCommands": ["doctor", "color", "focus", "reload-plugins"],
+              "skills": [
+                "deep-research",
+                "design",
+                "design-sync",
+                "dataviz",
+                "update-config",
+                "verify",
+                "debug",
+                "code-review",
+                "simplify",
+                "batch",
+                "fewer-permission-prompts",
+                "doctor",
+                "loop",
+                "schedule",
+                "claude-api",
+                "workflow-authoring",
+                "run",
+                "run-skill-generator",
+                "plugin-authoring"
+              ],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 24
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-call",
+              "id": "toolu_01Bo2Eg3ZDfBGcaqRpyLzoYt",
+              "name": "Bash",
+              "input": {
+                "command": "rm created-by-claude.txt",
+                "description": "Remove created-by-claude.txt from working directory"
+              },
+              "usage": {
+                "inputTokens": 27,
+                "outputTokens": 16,
+                "cacheReadInputTokens": 37684,
+                "cacheCreationInputTokens": 91
+              },
+              "uuid": "4eff1494-befd-4dbe-88d6-1fc8b61fe106"
+            },
+            "seq": 25
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "permission-request",
+              "requestId": "b5dc19c5-3414-4cd8-b1c9-4796b0fc960c",
+              "toolName": "Bash",
+              "toolUseId": "toolu_01Bo2Eg3ZDfBGcaqRpyLzoYt",
+              "input": {
+                "command": "rm created-by-claude.txt",
+                "description": "Remove created-by-claude.txt from working directory"
+              },
+              "permissionSuggestions": [
+                {
+                  "type": "addRules",
+                  "rules": [
+                    {
+                      "toolName": "Bash",
+                      "ruleContent": "rm created-by-claude.txt"
+                    }
+                  ],
+                  "behavior": "allow",
+                  "destination": "localSettings"
+                },
+                {
+                  "type": "addDirectories",
+                  "directories": ["{{cwd}}"],
+                  "destination": "session"
+                },
+                {
+                  "type": "setMode",
+                  "mode": "acceptEdits",
+                  "destination": "session"
+                }
+              ],
+              "displayName": "Bash",
+              "description": "Remove created-by-claude.txt from working directory",
+              "blockedPath": "{{cwd}}/created-by-claude.txt"
+            },
+            "seq": 26
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-3",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "respondPermission",
+      "input": {
+        "requestId": "b5dc19c5-3414-4cd8-b1c9-4796b0fc960c",
+        "optionId": "no",
+        "decision": {
+          "behavior": "deny",
+          "message": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+          "interrupt": true
+        }
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "permission-resolved",
+              "requestId": "b5dc19c5-3414-4cd8-b1c9-4796b0fc960c",
+              "decision": {
+                "behavior": "deny",
+                "message": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+                "interrupt": true
+              },
+              "optionId": "no"
+            },
+            "seq": 27
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "interrupted"
+            },
+            "seq": 28
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-result",
+              "toolUseId": "toolu_01Bo2Eg3ZDfBGcaqRpyLzoYt",
+              "isError": true,
+              "rawContent": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+              "structured": null
+            },
+            "seq": 29
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "error_during_execution",
+              "isError": true,
+              "durationMs": 0,
+              "durationApiMs": 0,
+              "numTurns": 3,
+              "totalCostUsd": 0,
+              "stopReason": "tool_use",
+              "terminalReason": "aborted_tools",
+              "text": null,
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 30
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-3",
+              "state": "cancelled"
+            },
+            "seq": 31
+          }
+        }
+      ],
+      "output": true
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Count slowly",
+        "id": "msg-4"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-4",
+              "text": "Count slowly",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Count slowly"
+                }
+              ]
+            },
+            "seq": 32
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-4",
+              "state": "sending"
+            },
+            "seq": 32,
+            "live": 28
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-4",
+              "state": "delivered"
+            },
+            "seq": 33
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 34
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-start",
+              "messageId": "msg_slow"
+            },
+            "seq": 34,
+            "live": 29
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-start",
+              "blockIndex": 0,
+              "blockType": "text"
+            },
+            "seq": 34,
+            "live": 30
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": "Counting"
+            },
+            "seq": 34,
+            "live": 31
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-4",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "queue.push",
+      "input": {
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "send": "And then this",
+        "original": "And then this",
+        "id": "msg-q1",
+        "content": [
+          {
+            "type": "text",
+            "text": "And then this"
+          }
+        ]
+      },
+      "wire": [
+        {
+          "kind": "queue-changed",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042"
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": " one,"
+            },
+            "seq": 34,
+            "live": 32
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": " two,"
+            },
+            "seq": 34,
+            "live": 33
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": " three."
+            },
+            "seq": 34,
+            "live": 34
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_slow",
+              "text": "Counting one, two, three.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "fa5ba869-e4d1-48c5-a38f-c8a88bc8b832"
+            },
+            "seq": 35
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-stop",
+              "blockIndex": 0
+            },
+            "seq": 35,
+            "live": 35
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-stop"
+            },
+            "seq": 35,
+            "live": 36
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 1,
+              "durationApiMs": 1,
+              "numTurns": 1,
+              "totalCostUsd": 0,
+              "stopReason": "end_turn",
+              "terminalReason": null,
+              "text": "done",
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 36
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-4",
+              "state": "answered"
+            },
+            "seq": 37
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-q1",
+              "text": "And then this",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "And then this"
+                }
+              ]
+            },
+            "seq": 38
+          }
+        },
+        {
+          "kind": "queue-changed",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042"
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-q1",
+              "state": "sending"
+            },
+            "seq": 38,
+            "live": 37
+          }
+        },
+        {
+          "kind": "queue-drained",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "original": "And then this"
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-q1",
+              "state": "delivered"
+            },
+            "seq": 39
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 40
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_fake_1",
+              "text": "Answer to the queued message.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "0ef831c3-090a-402a-9067-8995237d7291"
+            },
+            "seq": 41
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 1,
+              "durationApiMs": 1,
+              "numTurns": 1,
+              "totalCostUsd": 0,
+              "stopReason": "end_turn",
+              "terminalReason": null,
+              "text": "Answer to the queued message.",
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 42
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-q1",
+              "state": "answered"
+            },
+            "seq": 43
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-q1",
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "send": "And then this",
+        "original": "And then this",
+        "position": 0,
+        "createdAt": "2026-10-30 12:22:28",
+        "content": [
+          {
+            "type": "text",
+            "text": "And then this"
+          }
+        ]
+      },
+      "queue": [
+        {
+          "id": "msg-q1",
+          "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+          "send": "And then this",
+          "original": "And then this",
+          "position": 0,
+          "createdAt": "2026-10-30 12:22:28",
+          "content": [
+            {
+              "type": "text",
+              "text": "And then this"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Work on something long",
+        "id": "msg-5"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-5",
+              "text": "Work on something long",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Work on something long"
+                }
+              ]
+            },
+            "seq": 44
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-5",
+              "state": "sending"
+            },
+            "seq": 44,
+            "live": 38
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-5",
+              "state": "delivered"
+            },
+            "seq": 45
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 46
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-message-start",
+              "messageId": "msg_hang"
+            },
+            "seq": 46,
+            "live": 39
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-start",
+              "blockIndex": 0,
+              "blockType": "text"
+            },
+            "seq": 46,
+            "live": 40
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": "Working on "
+            },
+            "seq": 46,
+            "live": 41
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "stream-block-delta",
+              "blockIndex": 0,
+              "deltaType": "text",
+              "text": "it"
+            },
+            "seq": 46,
+            "live": 42
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-5",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "abortAndPop",
+      "input": {
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "taskId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "mode": "claude-chat",
+        "cwd": "{{cwd}}",
+        "providerFlagsOverride": null
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_hang",
+              "text": "Working on it"
+            },
+            "seq": 47
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "interrupted"
+            },
+            "seq": 48
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "error_during_execution",
+              "isError": true,
+              "durationMs": 0,
+              "durationApiMs": 0,
+              "numTurns": 2,
+              "totalCostUsd": 0,
+              "stopReason": null,
+              "terminalReason": "aborted_streaming",
+              "text": null,
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 49
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-5",
+              "state": "cancelled"
+            },
+            "seq": 50
+          }
+        }
+      ],
+      "output": {
+        "popped": false,
+        "text": null,
+        "id": null,
+        "content": null
+      }
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Start the dev server in the background",
+        "id": "msg-6"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-6",
+              "text": "Start the dev server in the background",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Start the dev server in the background"
+                }
+              ]
+            },
+            "seq": 51
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-6",
+              "state": "sending"
+            },
+            "seq": 51,
+            "live": 43
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-6",
+              "state": "delivered"
+            },
+            "seq": 52
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 53
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-call",
+              "id": "toolu_bg",
+              "name": "Bash",
+              "input": {
+                "command": "npm run dev",
+                "run_in_background": true,
+                "description": "Start the dev server"
+              },
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "85caf792-bf41-44d5-b0e9-e0009c1e30a3"
+            },
+            "seq": 54
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "command-task",
+              "taskId": "bgtask1",
+              "toolUseId": "toolu_bg",
+              "status": "running",
+              "backgrounded": true,
+              "description": "Start the dev server",
+              "startedAt": 1793362948966
+            },
+            "seq": 55
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-result",
+              "toolUseId": "toolu_bg",
+              "isError": false,
+              "rawContent": "Command running in background with ID: bgtask1. Output is being written to: /tmp/fake-claude/8377d1fe-3997-4de3-b749-f880b02d2dad/tasks/bgtask1.output",
+              "structured": null
+            },
+            "seq": 56
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_fake_3",
+              "text": "The dev server runs in the background.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "a165bdef-2090-43be-967b-59d3c7e14334"
+            },
+            "seq": 57
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 1,
+              "durationApiMs": 1,
+              "numTurns": 1,
+              "totalCostUsd": 0,
+              "stopReason": "end_turn",
+              "terminalReason": null,
+              "text": "ok",
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 58
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-6",
+              "state": "answered"
+            },
+            "seq": 59
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-6",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "stopCommandTask",
+      "input": {
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "taskId": "bgtask1"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "command-task",
+              "taskId": "bgtask1",
+              "toolUseId": "toolu_bg",
+              "status": "killed",
+              "backgrounded": true,
+              "description": "Start the dev server",
+              "startedAt": 1793362948966,
+              "endedAt": 1793362948995
+            },
+            "seq": 60
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "command-task",
+              "taskId": "bgtask1",
+              "toolUseId": "toolu_bg",
+              "status": "killed",
+              "backgrounded": true,
+              "description": "Start the dev server",
+              "startedAt": 1793362948966,
+              "endedAt": 1793362948995
+            },
+            "seq": 61
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "command-task-output",
+              "taskId": "bgtask1",
+              "toolUseId": "toolu_bg",
+              "output": "\n[killed]\n",
+              "totalBytes": 10,
+              "truncated": false
+            },
+            "seq": 62
+          }
+        }
+      ]
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Use the AskUserQuestion tool to ask me which color I prefer, with exactly two options: Red and Blue. After I answer, reply with only the color I picked.",
+        "id": "msg-7"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-7",
+              "text": "Use the AskUserQuestion tool to ask me which color I prefer, with exactly two options: Red and Blue. After I answer, reply with only the color I picked.",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Use the AskUserQuestion tool to ask me which color I prefer, with exactly two options: Red and Blue. After I answer, reply with only the color I picked."
+                }
+              ]
+            },
+            "seq": 63
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-7",
+              "state": "sending"
+            },
+            "seq": 63,
+            "live": 44
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-7",
+              "state": "delivered"
+            },
+            "seq": 64
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "claude-haiku-5-5",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "CronCreate",
+                "CronDelete",
+                "CronList",
+                "DesignSync",
+                "Edit",
+                "EnterPlanMode",
+                "EnterWorktree",
+                "ExitPlanMode",
+                "ExitWorktree",
+                "ListAgents",
+                "Monitor",
+                "NotebookEdit",
+                "PushNotification",
+                "Read",
+                "RemoteTrigger",
+                "ReportFindings",
+                "ScheduleWakeup",
+                "SendMessage",
+                "Skill",
+                "TaskStop",
+                "WebSearch",
+                "Workflow",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [
+                "deep-research",
+                "design",
+                "design-sync",
+                "dataviz",
+                "update-config",
+                "verify",
+                "debug",
+                "code-review",
+                "simplify",
+                "batch",
+                "fewer-permission-prompts",
+                "doctor",
+                "loop",
+                "schedule",
+                "claude-api",
+                "workflow-authoring",
+                "run",
+                "run-skill-generator",
+                "plugin-authoring",
+                "agents",
+                "auto-mode-setup",
+                "autocompact",
+                "clear",
+                "color",
+                "compact",
+                "config",
+                "output-style",
+                "context",
+                "effort",
+                "fast",
+                "focus",
+                "heapdump",
+                "init",
+                "mcp",
+                "import",
+                "model",
+                "__remote-workflow",
+                "workflow-launch-exec",
+                "reload-plugins",
+                "reload-skills",
+                "rename",
+                "ultrareview",
+                "security-review",
+                "usage-credits",
+                "extra-usage",
+                "usage",
+                "insights",
+                "recap",
+                "skill-doctor",
+                "goal",
+                "design-consent",
+                "design-revoke",
+                "list-agents",
+                "team-onboarding"
+              ],
+              "terminalSlashCommands": ["doctor", "color", "focus", "reload-plugins"],
+              "skills": [
+                "deep-research",
+                "design",
+                "design-sync",
+                "dataviz",
+                "update-config",
+                "verify",
+                "debug",
+                "code-review",
+                "simplify",
+                "batch",
+                "fewer-permission-prompts",
+                "doctor",
+                "loop",
+                "schedule",
+                "claude-api",
+                "workflow-authoring",
+                "run",
+                "run-skill-generator",
+                "plugin-authoring"
+              ],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 65
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-call",
+              "id": "toolu_012KJULDHf4fNbQKa4oaTe44",
+              "name": "AskUserQuestion",
+              "input": {
+                "questions": [
+                  {
+                    "question": "Which color do you prefer?",
+                    "header": "Color",
+                    "multiSelect": false,
+                    "options": [
+                      {
+                        "label": "Red",
+                        "description": "Pick red"
+                      },
+                      {
+                        "label": "Blue",
+                        "description": "Pick blue"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "usage": {
+                "inputTokens": 3973,
+                "outputTokens": 24,
+                "cacheReadInputTokens": 29892,
+                "cacheCreationInputTokens": 3741
+              },
+              "uuid": "980a4b7f-609a-4573-8910-384d29500d30"
+            },
+            "seq": 66
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "permission-request",
+              "requestId": "9d7b70ae-7384-4cf5-98f9-38de3b1da8ae",
+              "toolName": "AskUserQuestion",
+              "toolUseId": "toolu_012KJULDHf4fNbQKa4oaTe44",
+              "input": {
+                "questions": [
+                  {
+                    "question": "Which color do you prefer?",
+                    "header": "Color",
+                    "options": [
+                      {
+                        "label": "Red",
+                        "description": "Pick red"
+                      },
+                      {
+                        "label": "Blue",
+                        "description": "Pick blue"
+                      }
+                    ],
+                    "multiSelect": false
+                  }
+                ]
+              },
+              "displayName": "AskUserQuestion",
+              "requiresUserInteraction": true
+            },
+            "seq": 67
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-7",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "respondPermission",
+      "input": {
+        "requestId": "9d7b70ae-7384-4cf5-98f9-38de3b1da8ae",
+        "optionId": "answer",
+        "decision": {
+          "behavior": "allow",
+          "updatedInput": {
+            "questions": [
+              {
+                "question": "Which color do you prefer?",
+                "header": "Color",
+                "options": [
+                  {
+                    "label": "Red",
+                    "description": "Pick red"
+                  },
+                  {
+                    "label": "Blue",
+                    "description": "Pick blue"
+                  }
+                ],
+                "multiSelect": false
+              }
+            ],
+            "answers": {
+              "Which color do you prefer?": "Red"
+            }
+          }
+        }
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "permission-resolved",
+              "requestId": "9d7b70ae-7384-4cf5-98f9-38de3b1da8ae",
+              "decision": {
+                "behavior": "allow",
+                "updatedInput": {
+                  "questions": [
+                    {
+                      "question": "Which color do you prefer?",
+                      "header": "Color",
+                      "options": [
+                        {
+                          "label": "Red",
+                          "description": "Pick red"
+                        },
+                        {
+                          "label": "Blue",
+                          "description": "Pick blue"
+                        }
+                      ],
+                      "multiSelect": false
+                    }
+                  ],
+                  "answers": {
+                    "Which color do you prefer?": "Red"
+                  }
+                }
+              },
+              "optionId": "answer"
+            },
+            "seq": 68
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "rate-limit",
+              "status": "allowed",
+              "rateLimitType": "five_hour",
+              "resetsAt": 1800000000,
+              "overageStatus": "rejected"
+            },
+            "seq": 69
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "tool-result",
+              "toolUseId": "toolu_012KJULDHf4fNbQKa4oaTe44",
+              "isError": false,
+              "rawContent": "Your questions have been answered: \"Which color do you prefer?\"=\"Blue\". You can now continue with these answers in mind.",
+              "structured": {
+                "questions": [
+                  {
+                    "question": "Which color do you prefer?",
+                    "header": "Color",
+                    "options": [
+                      {
+                        "label": "Red",
+                        "description": "Pick red"
+                      },
+                      {
+                        "label": "Blue",
+                        "description": "Pick blue"
+                      }
+                    ],
+                    "multiSelect": false
+                  }
+                ],
+                "answers": {
+                  "Which color do you prefer?": "Blue"
+                }
+              }
+            },
+            "seq": 70
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_011CgWfsUdh3xjFW6Udaa87A",
+              "text": "Blue",
+              "usage": {
+                "inputTokens": 26,
+                "outputTokens": 5,
+                "cacheReadInputTokens": 33633,
+                "cacheCreationInputTokens": 4144
+              },
+              "uuid": "c90d4bcd-546d-458e-b758-bf62c22c29bc"
+            },
+            "seq": 71
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 2694,
+              "durationApiMs": 2124,
+              "numTurns": 2,
+              "totalCostUsd": 0.0026796500000000004,
+              "stopReason": "end_turn",
+              "terminalReason": "completed",
+              "text": "Blue",
+              "modelUsage": {
+                "claude-haiku-5-5": {
+                  "inputTokens": 3999,
+                  "outputTokens": 135,
+                  "cacheReadInputTokens": 63525,
+                  "cacheCreationInputTokens": 7885,
+                  "costUsd": 0.0026796500000000004,
+                  "contextWindow": 1000000,
+                  "maxOutputTokens": 128000
+                }
+              },
+              "usage": {
+                "inputTokens": 3999,
+                "outputTokens": 135,
+                "cacheReadInputTokens": 63525,
+                "cacheCreationInputTokens": 7885
+              },
+              "permissionDenials": []
+            },
+            "seq": 72
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-7",
+              "state": "answered"
+            },
+            "seq": 73
+          }
+        }
+      ],
+      "output": true
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "Never mind this one",
+        "id": "msg-8"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-8",
+              "text": "Never mind this one",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Never mind this one"
+                }
+              ]
+            },
+            "seq": 74
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-8",
+              "state": "sending"
+            },
+            "seq": 74,
+            "live": 45
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-8",
+              "state": "delivered"
+            },
+            "seq": 75
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-8",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "abortAndPop",
+      "input": {
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "taskId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "mode": "claude-chat",
+        "cwd": "{{cwd}}",
+        "providerFlagsOverride": null
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-popped",
+              "text": "Never mind this one",
+              "id": "msg-8"
+            },
+            "seq": 76
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-8",
+              "state": "cancelled"
+            },
+            "seq": 77
+          }
+        }
+      ],
+      "output": {
+        "popped": true,
+        "text": "Never mind this one",
+        "id": "msg-8",
+        "content": [
+          {
+            "type": "text",
+            "text": "Never mind this one"
+          }
+        ]
+      }
+    },
+    {
+      "action": "send",
+      "input": {
+        "text": "One more thing",
+        "id": "msg-9"
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "msg-9",
+              "text": "One more thing",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One more thing"
+                }
+              ]
+            },
+            "seq": 78
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-9",
+              "state": "sending"
+            },
+            "seq": 78,
+            "live": 46
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-9",
+              "state": "delivered"
+            },
+            "seq": 79
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 80
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_fake_4",
+              "text": "Sure, noted.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "9f791813-5ec0-43e7-bc35-c5f9e5353d68"
+            },
+            "seq": 81
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 1,
+              "durationApiMs": 1,
+              "numTurns": 1,
+              "totalCostUsd": 0,
+              "stopReason": "end_turn",
+              "terminalReason": null,
+              "text": "Sure, noted.",
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 82
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "msg-9",
+              "state": "answered"
+            },
+            "seq": 83
+          }
+        }
+      ],
+      "output": {
+        "id": "msg-9",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "rewind",
+      "input": {
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "taskId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "mode": "claude-chat",
+        "cwd": "{{cwd}}",
+        "providerFlagsOverride": null,
+        "messageId": "msg-9",
+        "scope": "before",
+        "conversation": true,
+        "files": false
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "conversation-branch",
+              "reason": "rewound",
+              "messageId": "msg-9"
+            },
+            "seq": 84
+          }
+        }
+      ],
+      "output": {
+        "prefillText": "One more thing",
+        "files": null
+      }
+    },
+    {
+      "action": "desktop-send",
+      "input": {
+        "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+        "message": {
+          "id": "desk-1",
+          "content": [
+            {
+              "type": "attachment",
+              "attachment": {
+                "artifactId": "141260af-fc64-46eb-b8df-f35e0ae4c988",
+                "name": "notes.txt",
+                "kind": "text",
+                "mediaType": "text/plain",
+                "size": 9
+              }
+            },
+            {
+              "type": "text",
+              "text": "Summarize the attached notes"
+            }
+          ]
+        }
+      },
+      "wire": [
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message",
+              "id": "desk-1",
+              "text": "Summarize the attached notes",
+              "content": [
+                {
+                  "type": "attachment",
+                  "attachment": {
+                    "artifactId": "141260af-fc64-46eb-b8df-f35e0ae4c988",
+                    "name": "notes.txt",
+                    "kind": "text",
+                    "mediaType": "text/plain",
+                    "size": 9,
+                    "contentHash": "409baa381eaebfc8c71676ecb0eed6659ea7510b4b42f101b152c7f0696150c5"
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "Summarize the attached notes"
+                }
+              ]
+            },
+            "seq": 85
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "desk-1",
+              "state": "sending"
+            },
+            "seq": 85,
+            "live": 47
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "desk-1",
+              "state": "delivered"
+            },
+            "seq": 86
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "turn-init",
+              "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+              "model": "opus",
+              "cwd": "{{cwd}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "permissionMode": "acceptEdits",
+              "slashCommands": [],
+              "skills": [],
+              "cliVersion": "2.1.312"
+            },
+            "seq": 87
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "assistant-text",
+              "messageId": "msg_fake_5",
+              "text": "Your notes say: buy milk.",
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "uuid": "99e0aa35-3278-4f7a-bec3-5e0e022e5d29"
+            },
+            "seq": 88
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "result",
+              "subtype": "success",
+              "isError": false,
+              "durationMs": 1,
+              "durationApiMs": 1,
+              "numTurns": 1,
+              "totalCostUsd": 0,
+              "stopReason": "end_turn",
+              "terminalReason": null,
+              "text": "Your notes say: buy milk.",
+              "modelUsage": {},
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              },
+              "permissionDenials": []
+            },
+            "seq": 89
+          }
+        },
+        {
+          "kind": "event",
+          "data": {
+            "tabId": "936dc610-3323-4d3a-aa08-a8fa36c6a042",
+            "event": {
+              "kind": "user-message-delivery",
+              "id": "desk-1",
+              "state": "answered"
+            },
+            "seq": 90
+          }
+        }
+      ],
+      "output": {
+        "id": "desk-1",
+        "state": "queued"
+      }
+    },
+    {
+      "action": "reconnect",
+      "wire": []
+    }
+  ],
+  "finalReplay": {
+    "events": [
+      {
+        "seq": 0,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-1",
+          "text": "Say hello and list the files",
+          "content": [
+            {
+              "type": "text",
+              "text": "Say hello and list the files"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 1,
+        "event": {
+          "kind": "session-spawn",
+          "spawnId": "0eebcb07-5a9e-470a-9e4e-0a6571e87e73"
+        }
+      },
+      {
+        "seq": 2,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-1",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 3,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 4,
+        "event": {
+          "kind": "assistant-thinking",
+          "messageId": "msg_stream_1",
+          "text": "The user wants a greeting.",
+          "hasSignature": true,
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "82d93505-0b86-4846-a65a-8d67fbeaa5d1"
+        }
+      },
+      {
+        "seq": 5,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_stream_1",
+          "text": "Hello from the **fake** CLI.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "56bbcae1-6c15-4e77-8e96-c5f39770d804"
+        }
+      },
+      {
+        "seq": 6,
+        "event": {
+          "kind": "tool-call",
+          "id": "toolu_ls",
+          "name": "Bash",
+          "input": {
+            "command": "ls -la",
+            "description": "List files"
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "570bef13-95d2-4b73-bad0-9c45dcf85f0a"
+        }
+      },
+      {
+        "seq": 7,
+        "event": {
+          "kind": "tool-result",
+          "toolUseId": "toolu_ls",
+          "isError": false,
+          "rawContent": "README.md\nsrc",
+          "structured": null
+        }
+      },
+      {
+        "seq": 8,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_stream_2",
+          "text": "Two files.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "407c0fbf-50f6-4db0-9bc1-648166e70b52"
+        }
+      },
+      {
+        "seq": 9,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 1,
+          "durationApiMs": 1,
+          "numTurns": 1,
+          "totalCostUsd": 0,
+          "stopReason": "end_turn",
+          "terminalReason": null,
+          "text": "Two files.",
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 10,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-1",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 11,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-2",
+          "text": "Use the Bash tool to run exactly: touch created-by-claude.txt",
+          "content": [
+            {
+              "type": "text",
+              "text": "Use the Bash tool to run exactly: touch created-by-claude.txt"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 12,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-2",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 13,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "claude-haiku-5-5",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterPlanMode",
+            "EnterWorktree",
+            "ExitPlanMode",
+            "ExitWorktree",
+            "ListAgents",
+            "Monitor",
+            "NotebookEdit",
+            "PushNotification",
+            "Read",
+            "RemoteTrigger",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "WebSearch",
+            "Workflow",
+            "Write"
+          ],
+          "permissionMode": "default",
+          "slashCommands": [
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "loop",
+            "schedule",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring",
+            "agents",
+            "auto-mode-setup",
+            "autocompact",
+            "clear",
+            "color",
+            "compact",
+            "config",
+            "output-style",
+            "context",
+            "effort",
+            "fast",
+            "focus",
+            "heapdump",
+            "init",
+            "mcp",
+            "import",
+            "model",
+            "__remote-workflow",
+            "workflow-launch-exec",
+            "reload-plugins",
+            "reload-skills",
+            "rename",
+            "ultrareview",
+            "security-review",
+            "usage-credits",
+            "extra-usage",
+            "usage",
+            "insights",
+            "recap",
+            "skill-doctor",
+            "goal",
+            "design-consent",
+            "design-revoke",
+            "list-agents",
+            "team-onboarding"
+          ],
+          "terminalSlashCommands": ["doctor", "color", "focus", "reload-plugins"],
+          "skills": [
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "loop",
+            "schedule",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring"
+          ],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 14,
+        "event": {
+          "kind": "tool-call",
+          "id": "toolu_015HidQZoy4Ydd5mvZ37pP65",
+          "name": "Bash",
+          "input": {
+            "command": "touch created-by-claude.txt",
+            "description": "Create empty file created-by-claude.txt in working directory"
+          },
+          "usage": {
+            "inputTokens": 3972,
+            "outputTokens": 16,
+            "cacheReadInputTokens": 29892,
+            "cacheCreationInputTokens": 3712
+          },
+          "uuid": "4242984e-5b16-42c3-8863-26524085d3fa"
+        }
+      },
+      {
+        "seq": 15,
+        "event": {
+          "kind": "permission-request",
+          "requestId": "220e6d0a-a6f0-429b-be38-5d7997746276",
+          "toolName": "Bash",
+          "toolUseId": "toolu_015HidQZoy4Ydd5mvZ37pP65",
+          "input": {
+            "command": "touch created-by-claude.txt",
+            "description": "Create empty file created-by-claude.txt in working directory"
+          },
+          "permissionSuggestions": [
+            {
+              "type": "addRules",
+              "rules": [
+                {
+                  "toolName": "Bash",
+                  "ruleContent": "touch created-by-claude.txt"
+                }
+              ],
+              "behavior": "allow",
+              "destination": "localSettings"
+            },
+            {
+              "type": "addDirectories",
+              "directories": ["{{cwd}}"],
+              "destination": "session"
+            },
+            {
+              "type": "setMode",
+              "mode": "acceptEdits",
+              "destination": "session"
+            }
+          ],
+          "displayName": "Bash",
+          "description": "Create empty file created-by-claude.txt in working directory",
+          "blockedPath": "{{cwd}}/created-by-claude.txt"
+        }
+      },
+      {
+        "seq": 16,
+        "event": {
+          "kind": "permission-resolved",
+          "requestId": "220e6d0a-a6f0-429b-be38-5d7997746276",
+          "decision": {
+            "behavior": "allow",
+            "updatedInput": {
+              "command": "touch created-by-claude.txt",
+              "description": "Create empty file created-by-claude.txt in working directory"
+            }
+          },
+          "optionId": "yes"
+        }
+      },
+      {
+        "seq": 17,
+        "event": {
+          "kind": "rate-limit",
+          "status": "allowed",
+          "rateLimitType": "five_hour",
+          "resetsAt": 1800000000,
+          "overageStatus": "rejected"
+        }
+      },
+      {
+        "seq": 18,
+        "event": {
+          "kind": "tool-result",
+          "toolUseId": "toolu_015HidQZoy4Ydd5mvZ37pP65",
+          "isError": false,
+          "rawContent": "(Bash completed with no output)",
+          "structured": {
+            "stdout": "",
+            "stderr": "",
+            "interrupted": false,
+            "isImage": false,
+            "noOutputExpected": true
+          }
+        }
+      },
+      {
+        "seq": 19,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_011CgWfriHCNRRcgrfDAx4RV",
+          "text": "I ran `touch created-by-claude.txt` in the working directory. It completed with no output, so the file should now exist there.",
+          "usage": {
+            "inputTokens": 26,
+            "outputTokens": 8,
+            "cacheReadInputTokens": 33604,
+            "cacheCreationInputTokens": 4080
+          },
+          "uuid": "d005cbfc-8b36-4daf-8e70-3dce9bc557ba"
+        }
+      },
+      {
+        "seq": 20,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 5946,
+          "durationApiMs": 1937,
+          "numTurns": 2,
+          "totalCostUsd": 0.0026606600000000005,
+          "stopReason": "end_turn",
+          "terminalReason": "completed",
+          "text": "I ran `touch created-by-claude.txt` in the working directory. It completed with no output, so the file should now exist there.",
+          "modelUsage": {
+            "claude-haiku-5-5": {
+              "inputTokens": 3998,
+              "outputTokens": 135,
+              "cacheReadInputTokens": 63496,
+              "cacheCreationInputTokens": 7792,
+              "costUsd": 0.0026606600000000005,
+              "contextWindow": 1000000,
+              "maxOutputTokens": 128000
+            }
+          },
+          "usage": {
+            "inputTokens": 3998,
+            "outputTokens": 135,
+            "cacheReadInputTokens": 63496,
+            "cacheCreationInputTokens": 7792
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 21,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-2",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 22,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-3",
+          "text": "Use the Bash tool to run exactly: rm created-by-claude.txt",
+          "content": [
+            {
+              "type": "text",
+              "text": "Use the Bash tool to run exactly: rm created-by-claude.txt"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 23,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-3",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 24,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "claude-haiku-5-5",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterPlanMode",
+            "EnterWorktree",
+            "ExitPlanMode",
+            "ExitWorktree",
+            "ListAgents",
+            "Monitor",
+            "NotebookEdit",
+            "PushNotification",
+            "Read",
+            "RemoteTrigger",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "WebSearch",
+            "Workflow",
+            "Write"
+          ],
+          "permissionMode": "default",
+          "slashCommands": [
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "loop",
+            "schedule",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring",
+            "agents",
+            "auto-mode-setup",
+            "autocompact",
+            "clear",
+            "color",
+            "compact",
+            "config",
+            "output-style",
+            "context",
+            "effort",
+            "fast",
+            "focus",
+            "heapdump",
+            "init",
+            "mcp",
+            "import",
+            "model",
+            "__remote-workflow",
+            "workflow-launch-exec",
+            "reload-plugins",
+            "reload-skills",
+            "rename",
+            "ultrareview",
+            "security-review",
+            "usage-credits",
+            "extra-usage",
+            "usage",
+            "insights",
+            "recap",
+            "skill-doctor",
+            "goal",
+            "design-consent",
+            "design-revoke",
+            "list-agents",
+            "team-onboarding"
+          ],
+          "terminalSlashCommands": ["doctor", "color", "focus", "reload-plugins"],
+          "skills": [
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "loop",
+            "schedule",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring"
+          ],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 25,
+        "event": {
+          "kind": "tool-call",
+          "id": "toolu_01Bo2Eg3ZDfBGcaqRpyLzoYt",
+          "name": "Bash",
+          "input": {
+            "command": "rm created-by-claude.txt",
+            "description": "Remove created-by-claude.txt from working directory"
+          },
+          "usage": {
+            "inputTokens": 27,
+            "outputTokens": 16,
+            "cacheReadInputTokens": 37684,
+            "cacheCreationInputTokens": 91
+          },
+          "uuid": "4eff1494-befd-4dbe-88d6-1fc8b61fe106"
+        }
+      },
+      {
+        "seq": 26,
+        "event": {
+          "kind": "permission-request",
+          "requestId": "b5dc19c5-3414-4cd8-b1c9-4796b0fc960c",
+          "toolName": "Bash",
+          "toolUseId": "toolu_01Bo2Eg3ZDfBGcaqRpyLzoYt",
+          "input": {
+            "command": "rm created-by-claude.txt",
+            "description": "Remove created-by-claude.txt from working directory"
+          },
+          "permissionSuggestions": [
+            {
+              "type": "addRules",
+              "rules": [
+                {
+                  "toolName": "Bash",
+                  "ruleContent": "rm created-by-claude.txt"
+                }
+              ],
+              "behavior": "allow",
+              "destination": "localSettings"
+            },
+            {
+              "type": "addDirectories",
+              "directories": ["{{cwd}}"],
+              "destination": "session"
+            },
+            {
+              "type": "setMode",
+              "mode": "acceptEdits",
+              "destination": "session"
+            }
+          ],
+          "displayName": "Bash",
+          "description": "Remove created-by-claude.txt from working directory",
+          "blockedPath": "{{cwd}}/created-by-claude.txt"
+        }
+      },
+      {
+        "seq": 27,
+        "event": {
+          "kind": "permission-resolved",
+          "requestId": "b5dc19c5-3414-4cd8-b1c9-4796b0fc960c",
+          "decision": {
+            "behavior": "deny",
+            "message": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+            "interrupt": true
+          },
+          "optionId": "no"
+        }
+      },
+      {
+        "seq": 28,
+        "event": {
+          "kind": "interrupted"
+        }
+      },
+      {
+        "seq": 29,
+        "event": {
+          "kind": "tool-result",
+          "toolUseId": "toolu_01Bo2Eg3ZDfBGcaqRpyLzoYt",
+          "isError": true,
+          "rawContent": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+          "structured": null
+        }
+      },
+      {
+        "seq": 30,
+        "event": {
+          "kind": "result",
+          "subtype": "error_during_execution",
+          "isError": true,
+          "durationMs": 0,
+          "durationApiMs": 0,
+          "numTurns": 3,
+          "totalCostUsd": 0,
+          "stopReason": "tool_use",
+          "terminalReason": "aborted_tools",
+          "text": null,
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 31,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-3",
+          "state": "cancelled"
+        }
+      },
+      {
+        "seq": 32,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-4",
+          "text": "Count slowly",
+          "content": [
+            {
+              "type": "text",
+              "text": "Count slowly"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 33,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-4",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 34,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 35,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_slow",
+          "text": "Counting one, two, three.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "fa5ba869-e4d1-48c5-a38f-c8a88bc8b832"
+        }
+      },
+      {
+        "seq": 36,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 1,
+          "durationApiMs": 1,
+          "numTurns": 1,
+          "totalCostUsd": 0,
+          "stopReason": "end_turn",
+          "terminalReason": null,
+          "text": "done",
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 37,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-4",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 38,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-q1",
+          "text": "And then this",
+          "content": [
+            {
+              "type": "text",
+              "text": "And then this"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 39,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-q1",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 40,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 41,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_fake_1",
+          "text": "Answer to the queued message.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "0ef831c3-090a-402a-9067-8995237d7291"
+        }
+      },
+      {
+        "seq": 42,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 1,
+          "durationApiMs": 1,
+          "numTurns": 1,
+          "totalCostUsd": 0,
+          "stopReason": "end_turn",
+          "terminalReason": null,
+          "text": "Answer to the queued message.",
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 43,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-q1",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 44,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-5",
+          "text": "Work on something long",
+          "content": [
+            {
+              "type": "text",
+              "text": "Work on something long"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 45,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-5",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 46,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 47,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_hang",
+          "text": "Working on it"
+        }
+      },
+      {
+        "seq": 48,
+        "event": {
+          "kind": "interrupted"
+        }
+      },
+      {
+        "seq": 49,
+        "event": {
+          "kind": "result",
+          "subtype": "error_during_execution",
+          "isError": true,
+          "durationMs": 0,
+          "durationApiMs": 0,
+          "numTurns": 2,
+          "totalCostUsd": 0,
+          "stopReason": null,
+          "terminalReason": "aborted_streaming",
+          "text": null,
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 50,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-5",
+          "state": "cancelled"
+        }
+      },
+      {
+        "seq": 51,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-6",
+          "text": "Start the dev server in the background",
+          "content": [
+            {
+              "type": "text",
+              "text": "Start the dev server in the background"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 52,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-6",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 53,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 54,
+        "event": {
+          "kind": "tool-call",
+          "id": "toolu_bg",
+          "name": "Bash",
+          "input": {
+            "command": "npm run dev",
+            "run_in_background": true,
+            "description": "Start the dev server"
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "85caf792-bf41-44d5-b0e9-e0009c1e30a3"
+        }
+      },
+      {
+        "seq": 55,
+        "event": {
+          "kind": "command-task",
+          "taskId": "bgtask1",
+          "toolUseId": "toolu_bg",
+          "status": "running",
+          "backgrounded": true,
+          "description": "Start the dev server",
+          "startedAt": 1793362948966
+        }
+      },
+      {
+        "seq": 56,
+        "event": {
+          "kind": "tool-result",
+          "toolUseId": "toolu_bg",
+          "isError": false,
+          "rawContent": "Command running in background with ID: bgtask1. Output is being written to: /tmp/fake-claude/8377d1fe-3997-4de3-b749-f880b02d2dad/tasks/bgtask1.output",
+          "structured": null
+        }
+      },
+      {
+        "seq": 57,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_fake_3",
+          "text": "The dev server runs in the background.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "a165bdef-2090-43be-967b-59d3c7e14334"
+        }
+      },
+      {
+        "seq": 58,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 1,
+          "durationApiMs": 1,
+          "numTurns": 1,
+          "totalCostUsd": 0,
+          "stopReason": "end_turn",
+          "terminalReason": null,
+          "text": "ok",
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 59,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-6",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 60,
+        "event": {
+          "kind": "command-task",
+          "taskId": "bgtask1",
+          "toolUseId": "toolu_bg",
+          "status": "killed",
+          "backgrounded": true,
+          "description": "Start the dev server",
+          "startedAt": 1793362948966,
+          "endedAt": 1793362948995
+        }
+      },
+      {
+        "seq": 61,
+        "event": {
+          "kind": "command-task",
+          "taskId": "bgtask1",
+          "toolUseId": "toolu_bg",
+          "status": "killed",
+          "backgrounded": true,
+          "description": "Start the dev server",
+          "startedAt": 1793362948966,
+          "endedAt": 1793362948995
+        }
+      },
+      {
+        "seq": 62,
+        "event": {
+          "kind": "command-task-output",
+          "taskId": "bgtask1",
+          "toolUseId": "toolu_bg",
+          "output": "\n[killed]\n",
+          "totalBytes": 10,
+          "truncated": false
+        }
+      },
+      {
+        "seq": 63,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-7",
+          "text": "Use the AskUserQuestion tool to ask me which color I prefer, with exactly two options: Red and Blue. After I answer, reply with only the color I picked.",
+          "content": [
+            {
+              "type": "text",
+              "text": "Use the AskUserQuestion tool to ask me which color I prefer, with exactly two options: Red and Blue. After I answer, reply with only the color I picked."
+            }
+          ]
+        }
+      },
+      {
+        "seq": 64,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-7",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 65,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "claude-haiku-5-5",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterPlanMode",
+            "EnterWorktree",
+            "ExitPlanMode",
+            "ExitWorktree",
+            "ListAgents",
+            "Monitor",
+            "NotebookEdit",
+            "PushNotification",
+            "Read",
+            "RemoteTrigger",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "WebSearch",
+            "Workflow",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "loop",
+            "schedule",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring",
+            "agents",
+            "auto-mode-setup",
+            "autocompact",
+            "clear",
+            "color",
+            "compact",
+            "config",
+            "output-style",
+            "context",
+            "effort",
+            "fast",
+            "focus",
+            "heapdump",
+            "init",
+            "mcp",
+            "import",
+            "model",
+            "__remote-workflow",
+            "workflow-launch-exec",
+            "reload-plugins",
+            "reload-skills",
+            "rename",
+            "ultrareview",
+            "security-review",
+            "usage-credits",
+            "extra-usage",
+            "usage",
+            "insights",
+            "recap",
+            "skill-doctor",
+            "goal",
+            "design-consent",
+            "design-revoke",
+            "list-agents",
+            "team-onboarding"
+          ],
+          "terminalSlashCommands": ["doctor", "color", "focus", "reload-plugins"],
+          "skills": [
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "loop",
+            "schedule",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring"
+          ],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 66,
+        "event": {
+          "kind": "tool-call",
+          "id": "toolu_012KJULDHf4fNbQKa4oaTe44",
+          "name": "AskUserQuestion",
+          "input": {
+            "questions": [
+              {
+                "question": "Which color do you prefer?",
+                "header": "Color",
+                "multiSelect": false,
+                "options": [
+                  {
+                    "label": "Red",
+                    "description": "Pick red"
+                  },
+                  {
+                    "label": "Blue",
+                    "description": "Pick blue"
+                  }
+                ]
+              }
+            ]
+          },
+          "usage": {
+            "inputTokens": 3973,
+            "outputTokens": 24,
+            "cacheReadInputTokens": 29892,
+            "cacheCreationInputTokens": 3741
+          },
+          "uuid": "980a4b7f-609a-4573-8910-384d29500d30"
+        }
+      },
+      {
+        "seq": 67,
+        "event": {
+          "kind": "permission-request",
+          "requestId": "9d7b70ae-7384-4cf5-98f9-38de3b1da8ae",
+          "toolName": "AskUserQuestion",
+          "toolUseId": "toolu_012KJULDHf4fNbQKa4oaTe44",
+          "input": {
+            "questions": [
+              {
+                "question": "Which color do you prefer?",
+                "header": "Color",
+                "options": [
+                  {
+                    "label": "Red",
+                    "description": "Pick red"
+                  },
+                  {
+                    "label": "Blue",
+                    "description": "Pick blue"
+                  }
+                ],
+                "multiSelect": false
+              }
+            ]
+          },
+          "displayName": "AskUserQuestion",
+          "requiresUserInteraction": true
+        }
+      },
+      {
+        "seq": 68,
+        "event": {
+          "kind": "permission-resolved",
+          "requestId": "9d7b70ae-7384-4cf5-98f9-38de3b1da8ae",
+          "decision": {
+            "behavior": "allow",
+            "updatedInput": {
+              "questions": [
+                {
+                  "question": "Which color do you prefer?",
+                  "header": "Color",
+                  "options": [
+                    {
+                      "label": "Red",
+                      "description": "Pick red"
+                    },
+                    {
+                      "label": "Blue",
+                      "description": "Pick blue"
+                    }
+                  ],
+                  "multiSelect": false
+                }
+              ],
+              "answers": {
+                "Which color do you prefer?": "Red"
+              }
+            }
+          },
+          "optionId": "answer"
+        }
+      },
+      {
+        "seq": 69,
+        "event": {
+          "kind": "rate-limit",
+          "status": "allowed",
+          "rateLimitType": "five_hour",
+          "resetsAt": 1800000000,
+          "overageStatus": "rejected"
+        }
+      },
+      {
+        "seq": 70,
+        "event": {
+          "kind": "tool-result",
+          "toolUseId": "toolu_012KJULDHf4fNbQKa4oaTe44",
+          "isError": false,
+          "rawContent": "Your questions have been answered: \"Which color do you prefer?\"=\"Blue\". You can now continue with these answers in mind.",
+          "structured": {
+            "questions": [
+              {
+                "question": "Which color do you prefer?",
+                "header": "Color",
+                "options": [
+                  {
+                    "label": "Red",
+                    "description": "Pick red"
+                  },
+                  {
+                    "label": "Blue",
+                    "description": "Pick blue"
+                  }
+                ],
+                "multiSelect": false
+              }
+            ],
+            "answers": {
+              "Which color do you prefer?": "Blue"
+            }
+          }
+        }
+      },
+      {
+        "seq": 71,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_011CgWfsUdh3xjFW6Udaa87A",
+          "text": "Blue",
+          "usage": {
+            "inputTokens": 26,
+            "outputTokens": 5,
+            "cacheReadInputTokens": 33633,
+            "cacheCreationInputTokens": 4144
+          },
+          "uuid": "c90d4bcd-546d-458e-b758-bf62c22c29bc"
+        }
+      },
+      {
+        "seq": 72,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 2694,
+          "durationApiMs": 2124,
+          "numTurns": 2,
+          "totalCostUsd": 0.0026796500000000004,
+          "stopReason": "end_turn",
+          "terminalReason": "completed",
+          "text": "Blue",
+          "modelUsage": {
+            "claude-haiku-5-5": {
+              "inputTokens": 3999,
+              "outputTokens": 135,
+              "cacheReadInputTokens": 63525,
+              "cacheCreationInputTokens": 7885,
+              "costUsd": 0.0026796500000000004,
+              "contextWindow": 1000000,
+              "maxOutputTokens": 128000
+            }
+          },
+          "usage": {
+            "inputTokens": 3999,
+            "outputTokens": 135,
+            "cacheReadInputTokens": 63525,
+            "cacheCreationInputTokens": 7885
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 73,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-7",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 74,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-8",
+          "text": "Never mind this one",
+          "content": [
+            {
+              "type": "text",
+              "text": "Never mind this one"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 75,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-8",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 76,
+        "event": {
+          "kind": "user-message-popped",
+          "text": "Never mind this one",
+          "id": "msg-8"
+        }
+      },
+      {
+        "seq": 77,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-8",
+          "state": "cancelled"
+        }
+      },
+      {
+        "seq": 78,
+        "event": {
+          "kind": "user-message",
+          "id": "msg-9",
+          "text": "One more thing",
+          "content": [
+            {
+              "type": "text",
+              "text": "One more thing"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 79,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-9",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 80,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 81,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_fake_4",
+          "text": "Sure, noted.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "9f791813-5ec0-43e7-bc35-c5f9e5353d68"
+        }
+      },
+      {
+        "seq": 82,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 1,
+          "durationApiMs": 1,
+          "numTurns": 1,
+          "totalCostUsd": 0,
+          "stopReason": "end_turn",
+          "terminalReason": null,
+          "text": "Sure, noted.",
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 83,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "msg-9",
+          "state": "answered"
+        }
+      },
+      {
+        "seq": 84,
+        "event": {
+          "kind": "conversation-branch",
+          "reason": "rewound",
+          "messageId": "msg-9"
+        }
+      },
+      {
+        "seq": 85,
+        "event": {
+          "kind": "user-message",
+          "id": "desk-1",
+          "text": "Summarize the attached notes",
+          "content": [
+            {
+              "type": "attachment",
+              "attachment": {
+                "artifactId": "141260af-fc64-46eb-b8df-f35e0ae4c988",
+                "name": "notes.txt",
+                "kind": "text",
+                "mediaType": "text/plain",
+                "size": 9,
+                "contentHash": "409baa381eaebfc8c71676ecb0eed6659ea7510b4b42f101b152c7f0696150c5"
+              }
+            },
+            {
+              "type": "text",
+              "text": "Summarize the attached notes"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 86,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "desk-1",
+          "state": "delivered"
+        }
+      },
+      {
+        "seq": 87,
+        "event": {
+          "kind": "turn-init",
+          "sessionId": "8377d1fe-3997-4de3-b749-f880b02d2dad",
+          "model": "opus",
+          "cwd": "{{cwd}}",
+          "tools": [
+            "Task",
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "NotebookEdit",
+            "Read",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write"
+          ],
+          "permissionMode": "acceptEdits",
+          "slashCommands": [],
+          "skills": [],
+          "cliVersion": "2.1.312"
+        }
+      },
+      {
+        "seq": 88,
+        "event": {
+          "kind": "assistant-text",
+          "messageId": "msg_fake_5",
+          "text": "Your notes say: buy milk.",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "uuid": "99e0aa35-3278-4f7a-bec3-5e0e022e5d29"
+        }
+      },
+      {
+        "seq": 89,
+        "event": {
+          "kind": "result",
+          "subtype": "success",
+          "isError": false,
+          "durationMs": 1,
+          "durationApiMs": 1,
+          "numTurns": 1,
+          "totalCostUsd": 0,
+          "stopReason": "end_turn",
+          "terminalReason": null,
+          "text": "Your notes say: buy milk.",
+          "modelUsage": {},
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "permissionDenials": []
+        }
+      },
+      {
+        "seq": 90,
+        "event": {
+          "kind": "user-message-delivery",
+          "id": "desk-1",
+          "state": "answered"
+        }
+      }
+    ],
+    "live": {
+      "afterSeq": 90,
+      "liveSeq": 47,
+      "events": []
+    }
+  }
+}

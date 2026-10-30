@@ -7,16 +7,23 @@
     "start": "expo start --dev-client",
     "ios": "expo run:ios",
     "test": "jest",
-    "typecheck": "tsgo --noEmit -p tsconfig.json && tsgo --noEmit -p tsconfig.test.json"
+    "typecheck": "tsgo --noEmit -p tsconfig.json && tsgo --noEmit -p tsconfig.test.json && tsgo --noEmit -p tsconfig.scripts.json"
   },
   "dependencies": {
+    "@expo/dom-webview": "~58.0.2",
     "@expo/metro-runtime": "~58.0.15",
     "@slayzone/hub-auth": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
+    "@slayzone/task-terminals": "workspace:*",
     "@slayzone/tasks": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/theme-tokens": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
+    "@xterm/xterm": "6.1.0-beta.304",
     "expo": "~58.0.21",
     "expo-constants": "~58.0.14",
     "expo-file-system": "~58.0.13",
@@ -24,7 +31,9 @@
     "expo-router": "~58.0.28",
     "expo-secure-store": "~58.0.2",
     "expo-status-bar": "~58.0.4",
+    "marked": "^18.0.14",
     "react": "19.3.1",
+    "react-dom": "19.3.1",
     "react-native": "0.88.1",
     "react-native-safe-area-context": "~5.10.1",
     "react-native-screens": "~4.30.0"
@@ -32,10 +41,7 @@
   "devDependencies": {
     "@react-native/jest-preset": "0.88.1",
     "@slayzone/api": "workspace:*",
-    "@slayzone/task-contracts": "workspace:*",
-    "@slayzone/task-terminals": "workspace:*",
-    "@slayzone/terminal": "workspace:*",
-    "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/test-utils": "workspace:*",
     "@testing-library/react-native": "^14.0.1",
     "@trpc/server": "^11.19.0",
     "@types/jest": "^30.0.0",
@@ -47,7 +53,8 @@
   "expo": {
     "install": {
       "exclude": [
-        "react"
+        "react",
+        "react-dom"
       ]
     }
   }

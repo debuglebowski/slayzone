@@ -27,8 +27,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from 'react'
+import { NO_AGENT_SESSIONS } from './agents/hub-agents'
+import { useHubAgentSessions } from './agents/use-hub-agent-sessions'
 import {
   type HubBoardState,
   type HubClient,
@@ -128,7 +131,8 @@ function notReported(hub: HubEntry): HubFeed {
     hub,
     connection: { status: 'connecting', error: null },
     stalled: false,
-    board: PENDING_BOARD
+    board: PENDING_BOARD,
+    agents: NO_AGENT_SESSIONS
   }
 }
 
@@ -143,8 +147,10 @@ function HubFeedScope({ hub, onFeed }: { hub: HubEntry; onFeed: Report }) {
 
 /**
  * One hub's feed: its board (`task.loadBoardData`, the procedure the desktop board
- * loads), reloaded when the hub says its tasks changed (`notify.onTasksChanged`), and
- * its connection. Must sit inside that hub's `HubScope`. Renders nothing.
+ * loads), reloaded when the hub says its tasks changed (`notify.onTasksChanged`), its
+ * agent sessions (`useHubAgentSessions`), and its connection. Everything shown of the
+ * hub loads again by itself when its socket comes back (`useReloadOnReconnect`). Must
+ * sit inside that hub's `HubScope`. Renders nothing.
  */
 export function HubFeedSource({
   hub,
@@ -164,6 +170,8 @@ export function HubFeedSource({
     })
   )
   const stalled = useStalled(connection !== null && connection.status !== 'open')
+  const agents = useHubAgentSessions()
+  useReloadOnReconnect(connection)
 
   const { data, isPending, isRefetching, error } = boardQ
   const message = error ? error.message : null
@@ -173,12 +181,39 @@ export function HubFeedSource({
   )
 
   useEffect(() => {
-    onFeed(hub.id, { hub, connection, stalled, board })
-  }, [onFeed, hub, connection, stalled, board])
+    onFeed(hub.id, { hub, connection, stalled, board, agents })
+  }, [onFeed, hub, connection, stalled, board, agents])
   // Signed out of: nothing of this hub stays in the list.
   useEffect(() => () => onFeed(hub.id, null), [onFeed, hub.id])
 
   return null
+}
+
+/**
+ * The hub's socket opens again after it failed or dropped: everything this hub's
+ * screens show loads again (the queries of its `HubScope`), as Retry would. What the
+ * hub pushed while the socket was down (`notify.onTasksChanged`, agent state…) never
+ * arrives. A socket that opens without having failed (a first connect, or a first
+ * attempt that hung past the connect deadline) reloads only the loads that failed
+ * meanwhile; the others are still on their way.
+ */
+function useReloadOnReconnect(connection: HubConnection | null): void {
+  const queryClient = useQueryClient()
+  const lostSinceOpen = useRef(false)
+  const wasOpen = useRef(connection?.status === 'open')
+  useEffect(() => {
+    const open = connection?.status === 'open'
+    const opened = open && !wasOpen.current
+    wasOpen.current = open
+    if (connection && !open && connection.error) lostSinceOpen.current = true
+    if (!opened) return
+    if (lostSinceOpen.current) {
+      lostSinceOpen.current = false
+      void queryClient.invalidateQueries()
+    } else {
+      void queryClient.refetchQueries({ predicate: (query) => query.state.status === 'error' })
+    }
+  }, [connection, queryClient])
 }
 
 /** `down` has held for `UNREACHABLE_GRACE_MS`. */

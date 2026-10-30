@@ -583,6 +583,8 @@ run_harness packages/domains/terminal/src/server/agent-tree.test.ts
 # Terminal — renderer state store reconcile/self-heal. Was never registered here,
 # so its 22 assertions only ran if someone happened to invoke the file by hand.
 run_harness packages/domains/terminal/src/client/useTerminalStateStore.test.ts
+run_harness packages/domains/terminal/src/client/terminal-state-reducer.test.ts
+run_harness packages/domains/terminal/src/client/terminal-state-labels.test.ts
 # Terminal — idle-close engagement (browser/other-panel interaction keeps agent warm)
 run_harness packages/domains/terminal/src/server/engagement.test.ts
 run_harness packages/domains/terminal/src/server/session-error-gate.test.ts
@@ -849,6 +851,7 @@ run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
+run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
 run_harness packages/shared/diff-view/src/parse-diff.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts

@@ -1,5 +1,8 @@
+import type { TerminalState } from '@slayzone/terminal-contracts'
+import { EMPTY_TERMINAL_STATE } from '@slayzone/terminal/terminal-state'
 import type { HubConnection } from '@slayzone/transport/client'
 import { render, screen, userEvent, within } from '@testing-library/react-native'
+import { type HubAgentSessions, NO_AGENT_SESSIONS } from './agents/hub-agents'
 import type { BoardData, BoardTask, HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { TaskBrowser, type TaskBrowserProps } from './TaskBrowser'
@@ -21,7 +24,9 @@ function boardOf(projectName: string, ...titles: string[]): BoardData {
           priority: 2,
           project_id: 'p1',
           parent_id: null,
-          description: `About ${title}`
+          description: `About ${title}`,
+          // A title ending in "!" is unread (needs_attention).
+          needs_attention: title.endsWith('!')
         }) as BoardTask
     ),
     projects: [{ id: 'p1', name: projectName, color: null }],
@@ -35,19 +40,32 @@ const loading = (hub: typeof home): HubFeed => ({
   hub,
   connection: OPEN,
   stalled: false,
-  board: { data: undefined, pending: true, error: null, refreshing: false }
+  board: { data: undefined, pending: true, error: null, refreshing: false },
+  agents: NO_AGENT_SESSIONS
 })
-const loaded = (hub: typeof home, data: BoardData): HubFeed => ({
+const loaded = (
+  hub: typeof home,
+  data: BoardData,
+  agents: HubAgentSessions = NO_AGENT_SESSIONS
+): HubFeed => ({
   hub,
   connection: OPEN,
   stalled: false,
-  board: { data, pending: false, error: null, refreshing: false }
+  board: { data, pending: false, error: null, refreshing: false },
+  agents
 })
 const unreachable = (hub: typeof home): HubFeed => ({
   hub,
   connection: FAILED,
   stalled: true,
-  board: { data: undefined, pending: true, error: null, refreshing: false }
+  board: { data: undefined, pending: true, error: null, refreshing: false },
+  agents: NO_AGENT_SESSIONS
+})
+/** Agent sessions by session id (`t0:t0` = task t0's main tab). */
+const agentsOf = (byId: Record<string, TerminalState>, jobs: Record<string, number> = {}) => ({
+  state: { ...EMPTY_TERMINAL_STATE, byId, jobsById: jobs },
+  loaded: true,
+  error: null
 })
 
 function props(fields: Partial<TaskBrowserProps>): TaskBrowserProps {
@@ -59,6 +77,8 @@ function props(fields: Partial<TaskBrowserProps>): TaskBrowserProps {
     onRetry: jest.fn(),
     onSignOut: jest.fn(),
     onManageHubs: jest.fn(),
+    onOpenAgent: jest.fn(),
+    onShowAgents: jest.fn(),
     ...fields
   }
 }
@@ -161,5 +181,63 @@ describe('TaskBrowser', () => {
     await render(<TaskBrowser {...p} />)
     await userEvent.setup().press(screen.getByText('Hubs'))
     expect(p.onManageHubs).toHaveBeenCalled()
+  })
+
+  it("lists every hub's agents above the tasks, what needs the user first", async () => {
+    const p = props({
+      feeds: [
+        loaded(
+          home,
+          boardOf('Home', 'Busy', 'Asks you!'),
+          agentsOf({ 't0:t0': 'running', 't1:t1': 'idle' })
+        ),
+        loaded(work, boardOf('Work', 'Remote'), agentsOf({ 't0:t0': 'error' }, { 't0:t0': 2 }))
+      ]
+    })
+    await render(<TaskBrowser {...p} />)
+
+    const agents = within(screen.getByTestId('agents-section'))
+    const titles = agents
+      .getAllByTestId(/^agent-row-/)
+      .map((row) => within(row).getByTestId('agent-title').props.children)
+    expect(titles).toEqual(['Asks you!', 'Remote', 'Busy'])
+    expect(agents.getByText('Waiting for you')).toBeOnTheScreen()
+    expect(agents.getByText('Idle · Unread · Home · home.example')).toBeOnTheScreen()
+    expect(agents.getByText('Error · 2 jobs · Work · work.example')).toBeOnTheScreen()
+  })
+
+  it('opens an agent with its hub', async () => {
+    const p = props({
+      feeds: [loaded(home, boardOf('Home', 'Busy'), agentsOf({ 't0:t0': 'running' }))]
+    })
+    await render(<TaskBrowser {...p} />)
+    await userEvent.setup().press(within(screen.getByTestId('agents-section')).getByText('Busy'))
+    expect(p.onOpenAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ hubId: home.id, task: expect.objectContaining({ id: 't0' }) })
+    )
+  })
+
+  it('says when no agent has a session', async () => {
+    const p = props({ feeds: [loaded(home, boardOf('Home', 'Quiet'))] })
+    await render(<TaskBrowser {...p} />)
+    expect(within(screen.getByTestId('agents-section')).getByText('No agents')).toBeOnTheScreen()
+  })
+
+  it('shows the first agents and a link to all of them', async () => {
+    const titles = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+    const p = props({
+      feeds: [
+        loaded(
+          home,
+          boardOf('Home', ...titles),
+          agentsOf(Object.fromEntries(titles.map((_, i) => [`t${i}:t${i}`, 'running'])))
+        )
+      ]
+    })
+    await render(<TaskBrowser {...p} />)
+    const agents = within(screen.getByTestId('agents-section'))
+    expect(agents.getAllByTestId(/^agent-row-/)).toHaveLength(5)
+    await userEvent.setup().press(agents.getByText('All agents (7)'))
+    expect(p.onShowAgents).toHaveBeenCalled()
   })
 })

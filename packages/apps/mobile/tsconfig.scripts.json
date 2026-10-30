@@ -1,0 +1,11 @@
+{
+  // The end-to-end Node scripts (scripts/*.mts, run with tsx; see scripts/test-hub.mts)
+  // and the app modules they drive, with Node's globals.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["scripts/**/*"],
+  "exclude": []
+}

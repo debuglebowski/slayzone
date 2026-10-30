@@ -95,6 +95,8 @@ DOM-free subpaths (the mobile app bundles them into React Native; `packages/apps
 - `./chat-prompts` - prompt model of the timeline (`chat-prompts.ts`)
 - `./terminal-themes` - terminal colour themes
 - `./suppress-device-status` - xterm parser hooks that stop device-status / XTVERSION replies
+- `./terminal-state` - the terminal-state rules (`terminal-state-reducer.ts`): session state from the hub's pushes + `sessionList` snapshots; `useTerminalStateStore` applies them
+- `./live-blocks` - `LiveBlockStore` / `useLiveBlock`: what streams into each chat row, outside React state (React only, no DOM)
 
 ## Safety Patterns
 
@@ -236,6 +238,10 @@ const handleTerminalReady = useCallback((api) => {
 ### 2026-10 DOM-free subpaths for the mobile app
 
 `./chat-prompts`, `./terminal-themes` and `./suppress-device-status` export the pure client modules as they are (no move): desktop keeps importing them through `./client` and relative paths, unchanged. The mobile app reaches them without the `./client` barrel, which loads xterm and React components.
+
+### 2026-10 Terminal-state rules as plain reducers
+
+`useTerminalStateStore`'s rules (hibernated swallowing the kill's `dead`, fill-only hydrate, the 4-pass reconcile with its dispatch-freshness guard, background-job counts) moved verbatim into `terminal-state-reducer.ts`: functions `(state, event, now) → patch`. The zustand store applies the patches with `set`; the mobile app's agent list runs the same functions over its per-hub state. One set of rules, no fork; the store's own suite still covers every rule through the store.
 
 ### 2026-10 Session size readable (`attach.size`, `pty.onResize`)
 

@@ -4,7 +4,7 @@ import { useWindowDimensions } from 'react-native'
 import { useHubFeeds } from '../../../hub-connections'
 import { useHubSessions } from '../../../hub-sessions'
 import { HomeScreen } from '../../../HomeScreen'
-import { findSession, HOME } from '../../../routes'
+import { agentHref, findSession, HOME } from '../../../routes'
 import { SPLIT_MIN_WIDTH } from '../../../TaskBrowser'
 import { TaskScreen } from '../../../TaskScreen'
 
@@ -32,7 +32,14 @@ export default function TaskRoute() {
 
   const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
   const screen = (
-    <TaskScreen hubAddress={hub} taskId={id} sessions={sessions} feeds={feeds} onBack={back} />
+    <TaskScreen
+      hubAddress={hub}
+      taskId={id}
+      sessions={sessions}
+      feeds={feeds}
+      onBack={back}
+      onOpenAgent={(taskId) => router.push(agentHref(hub, taskId))}
+    />
   )
   const session = findSession(sessions, hub)
   return session ? <HubScope hubId={session.entry.id}>{screen}</HubScope> : screen

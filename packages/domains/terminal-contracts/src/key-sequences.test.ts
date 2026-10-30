@@ -2,7 +2,16 @@
  * containsSubmitEnter tests — submit-Enter detection across input encodings.
  */
 import { expect, test } from 'vitest'
-import { containsSubmitEnter, KITTY_SHIFT_ENTER } from './key-sequences.js'
+import {
+  arrowKey,
+  BACKSPACE,
+  containsSubmitEnter,
+  ctrlKey,
+  ESCAPE,
+  KITTY_SHIFT_ENTER,
+  SHIFT_TAB,
+  TAB
+} from './key-sequences.js'
 
 // Legacy encodings — must keep matching.
 test('CR matches', () => expect(containsSubmitEnter('\r')).toBe(true))
@@ -31,3 +40,31 @@ test('empty string does not match', () => expect(containsSubmitEnter('')).toBe(f
 test('bare ESC does not match', () => expect(containsSubmitEnter('\x1b')).toBe(false))
 test('CSI 13~ (legacy F3-style) does not match', () =>
   expect(containsSubmitEnter('\x1b[13~')).toBe(false))
+
+// Keys a client without a keyboard sends (the phone's key bar): the bytes a
+// terminal (xterm) sends for the same key, so the program cannot tell them apart.
+test('Esc, Tab, Shift+Tab, Backspace bytes', () => {
+  expect(ESCAPE).toBe('\x1b')
+  expect(TAB).toBe('\t')
+  expect(SHIFT_TAB).toBe('\x1b[Z')
+  expect(BACKSPACE).toBe('\x7f')
+})
+
+test('Ctrl+letter is the letter’s C0 control byte', () => {
+  expect(ctrlKey('c')).toBe('\x03')
+  expect(ctrlKey('C')).toBe('\x03')
+  expect(ctrlKey('d')).toBe('\x04')
+  expect(ctrlKey('a')).toBe('\x01')
+  expect(ctrlKey('z')).toBe('\x1a')
+  expect(() => ctrlKey('1')).toThrow()
+  expect(() => ctrlKey('cc')).toThrow()
+})
+
+test('arrow keys follow the cursor-key mode (DECCKM)', () => {
+  expect(arrowKey('up', false)).toBe('\x1b[A')
+  expect(arrowKey('down', false)).toBe('\x1b[B')
+  expect(arrowKey('right', false)).toBe('\x1b[C')
+  expect(arrowKey('left', false)).toBe('\x1b[D')
+  expect(arrowKey('up', true)).toBe('\x1bOA')
+  expect(arrowKey('left', true)).toBe('\x1bOD')
+})

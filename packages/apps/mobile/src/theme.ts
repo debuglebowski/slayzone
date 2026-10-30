@@ -1,9 +1,11 @@
 import {
   type ChromeColors,
   getThemeChromeHex,
+  getThemeTerminalColors,
   type HubThemeSettings,
   type NativeTheme,
   resolveNativeTheme,
+  type TerminalThemeColors,
   type Theme,
   unifiedThemes
 } from '@slayzone/theme-tokens'
@@ -30,7 +32,7 @@ import { useColorScheme } from 'react-native'
  *   variant uses its dark one.
  */
 
-export type { ChromeColors }
+export type { ChromeColors, TerminalThemeColors }
 
 // Every preset converted once, at import: a colour the converter cannot read fails at
 // startup, never mid-render, and every later lookup is a cache hit.
@@ -49,6 +51,16 @@ function useNativeTheme(): NativeTheme {
 /** The chrome colours to paint with, as hex. The same object while the choice holds. */
 export function useTheme(): ChromeColors {
   return useNativeTheme().colors
+}
+
+/**
+ * The terminal's colours: the painted preset's terminal palette in the painted
+ * variant — desktop's terminal (`getThemeTerminalColors(themeId, variant)`). The same
+ * object while the choice holds.
+ */
+export function useTerminalColors(): TerminalThemeColors {
+  const { themeId, variant } = useNativeTheme()
+  return getThemeTerminalColors(themeId, variant)
 }
 
 /** Dark or light — for what follows the theme outside the palette (status bar). */

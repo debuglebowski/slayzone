@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AgentsSection } from './agents/AgentList'
+import { type AgentRow, mergeHubAgents } from './agents/hub-agents'
 import { HubBanner } from './HubBanner'
 import { type HubFeed, hubProblem, mergeHubTasks, type TaskRow } from './hub-board'
 import { TaskDetail } from './TaskDetail'
@@ -20,13 +22,18 @@ export interface TaskBrowserProps {
   onRetry: (hubId: string) => void
   onSignOut: (hubId: string) => void
   onManageHubs: () => void
+  /** An agent (or, beside the list, the shown task's "Agent ›") was tapped: its agent screen. */
+  onOpenAgent: (row: Pick<AgentRow, 'hubId' | 'hubLabel' | 'task'>) => void
+  /** "All agents": the agents screen. */
+  onShowAgents: () => void
 }
 
 /**
- * Home: the tasks of every signed-in hub in one read-only list (the board rows of
- * `task.loadBoardData`, the procedure the desktop board loads), each row tagged with
- * its hub when there are several. A hub that can't be reached gets a banner with
- * Retry and Sign out; the other hubs' rows stay.
+ * Home: every signed-in hub's agents (what needs the user first, `AgentsSection`),
+ * then their tasks in one read-only list (the board rows of `task.loadBoardData`, the
+ * procedure the desktop board loads), each row tagged with its hub when there are
+ * several. A hub that can't be reached gets a banner with Retry and Sign out; the
+ * other hubs' rows stay.
  */
 export function TaskBrowser({
   feeds,
@@ -35,11 +42,14 @@ export function TaskBrowser({
   onSelect,
   onRetry,
   onSignOut,
-  onManageHubs
+  onManageHubs,
+  onOpenAgent,
+  onShowAgents
 }: TaskBrowserProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const rows = useMemo(() => mergeHubTasks(feeds), [feeds])
+  const agentRows = useMemo(() => mergeHubAgents(feeds), [feeds])
   const problems = feeds.flatMap((feed) => {
     const problem = hubProblem(feed)
     return problem ? [problem] : []
@@ -103,8 +113,12 @@ export function TaskBrowser({
       keyExtractor={(row) => row.key}
       ListHeaderComponent={
         <View>
-          <Text style={styles.section}>Agents</Text>
-          <Text style={styles.note}>Agents of every hub will show here.</Text>
+          <AgentsSection
+            rows={agentRows}
+            showHub={severalHubs}
+            onOpen={onOpenAgent}
+            onShowAll={onShowAgents}
+          />
           <Text style={styles.section}>Tasks</Text>
         </View>
       }
@@ -151,7 +165,11 @@ export function TaskBrowser({
           <View style={styles.listPane}>{list}</View>
           <View style={styles.detailPane}>
             {shown ? (
-              <TaskDetail row={shown} showHub={severalHubs} />
+              <TaskDetail
+                row={shown}
+                showHub={severalHubs}
+                onOpenAgent={() => onOpenAgent(shown)}
+              />
             ) : (
               <Text style={styles.note}>Select a task</Text>
             )}

@@ -40,7 +40,11 @@ export {
   type BrowserDeviceDefaults
 } from './AppearanceContext'
 export { useTheme, ThemeContext, type ThemeContextValue } from './ThemeContext'
-export { getTerminalStateStyle, type TerminalStateStyle } from './terminal-state'
+export {
+  ATTENTION_STATE_STYLE,
+  getTerminalStateStyle,
+  type TerminalStateStyle
+} from './terminal-state'
 export { TerminalProgressDot, type TerminalProgressDotProps } from './terminal-progress-dot'
 export {
   getTaskStatusStyle,

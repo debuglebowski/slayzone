@@ -32,3 +32,33 @@ const KITTY_PLAIN_ENTER_RE = /\x1b\[13(?:;1(?::\d+)?)?u/
 export function containsSubmitEnter(data: string): boolean {
   return data.includes('\r') || data.includes('\n') || KITTY_PLAIN_ENTER_RE.test(data)
 }
+
+/** Escape — the interrupt key of Claude Code and Codex, and every TUI's "back". */
+export const ESCAPE = '\x1b'
+
+export const TAB = '\t'
+
+/** Shift+Tab (back-tab, CSI Z) — Claude Code cycles its permission mode with it. */
+export const SHIFT_TAB = '\x1b[Z'
+
+/** Backspace as terminals send it (DEL, 0x7F). */
+export const BACKSPACE = '\x7f'
+
+/** Ctrl+`letter` (a–z, either case) as its C0 control byte: Ctrl+C = 0x03. */
+export function ctrlKey(letter: string): string {
+  if (!/^[a-zA-Z]$/.test(letter)) throw new Error(`ctrlKey: not a letter: ${letter}`)
+  return String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64)
+}
+
+export type ArrowKey = 'up' | 'down' | 'right' | 'left'
+
+const ARROW_FINAL: Record<ArrowKey, string> = { up: 'A', down: 'B', right: 'C', left: 'D' }
+
+/**
+ * An arrow key's bytes in the terminal's current cursor-key mode (DECCKM, which a
+ * program turns on with `CSI ? 1 h`): `ESC [ A` normally, `ESC O A` in application
+ * mode — what xterm sends for the same key.
+ */
+export function arrowKey(key: ArrowKey, applicationCursorKeys: boolean): string {
+  return `${applicationCursorKeys ? '\x1bO' : '\x1b['}${ARROW_FINAL[key]}`
+}

@@ -1,4 +1,5 @@
 import { render, screen, userEvent } from '@testing-library/react-native'
+import { NO_AGENT_SESSIONS } from './agents/hub-agents'
 import type { BoardData, HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { TaskScreen } from './TaskScreen'
@@ -10,7 +11,8 @@ const feed = (data: BoardData | undefined, pending = false): HubFeed => ({
   hub: home,
   connection: { status: 'open', error: null },
   stalled: false,
-  board: { data, pending, error: null, refreshing: false }
+  board: { data, pending, error: null, refreshing: false },
+  agents: NO_AGENT_SESSIONS
 })
 
 const board = {
@@ -40,6 +42,7 @@ describe('TaskScreen (phone)', () => {
         sessions={[session]}
         feeds={[feed(board)]}
         onBack={jest.fn()}
+        onOpenAgent={jest.fn()}
       />
     )
     expect(screen.getByText('A subtask')).toBeOnTheScreen()
@@ -54,6 +57,7 @@ describe('TaskScreen (phone)', () => {
         sessions={[session]}
         feeds={[feed(undefined, true)]}
         onBack={jest.fn()}
+        onOpenAgent={jest.fn()}
       />
     )
     expect(screen.getByTestId('task-loading')).toBeOnTheScreen()
@@ -67,6 +71,7 @@ describe('TaskScreen (phone)', () => {
         sessions={[session]}
         feeds={[feed(board)]}
         onBack={jest.fn()}
+        onOpenAgent={jest.fn()}
       />
     )
     expect(screen.getByText('No such task on home.example')).toBeOnTheScreen()
@@ -81,10 +86,27 @@ describe('TaskScreen (phone)', () => {
         sessions={[session]}
         feeds={[feed(board)]}
         onBack={onBack}
+        onOpenAgent={jest.fn()}
       />
     )
     expect(screen.getByText('Not signed in to other.example')).toBeOnTheScreen()
     await userEvent.setup().press(screen.getByText('‹ Home'))
     expect(onBack).toHaveBeenCalled()
+  })
+
+  it("opens the task's agent (where it can be started)", async () => {
+    const onOpenAgent = jest.fn()
+    await render(
+      <TaskScreen
+        hubAddress="home.example"
+        taskId="sub"
+        sessions={[session]}
+        feeds={[feed(board)]}
+        onBack={jest.fn()}
+        onOpenAgent={onOpenAgent}
+      />
+    )
+    await userEvent.setup().press(screen.getByText('Agent ›'))
+    expect(onOpenAgent).toHaveBeenCalledWith('sub')
   })
 })

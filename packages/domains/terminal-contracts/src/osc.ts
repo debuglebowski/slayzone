@@ -9,3 +9,15 @@ export function extractOscTitle(data: string): string | undefined {
   }
   return title
 }
+
+/**
+ * Drop OSC strings (`ESC ] … BEL` / `ESC ] … ESC \`) from bytes a client is about to
+ * write to a pty. In that direction they are only ever a terminal's ANSWERS to colour
+ * queries, never user input — and the server is the sole authority for answering
+ * (synchronously, `computeSyncQueryResponse`): a client's answer is stale by
+ * construction and lands as escape bytes in the program's stdin (it broke gh CLI's
+ * interactive prompts). Everything else — keystrokes, CSI keys — passes unchanged.
+ */
+export function stripOscReplies(data: string): string {
+  return data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+}

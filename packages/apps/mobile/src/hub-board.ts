@@ -11,6 +11,7 @@
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { HubConnection, ResolvedHub, TypedHubWsClient } from '@slayzone/transport/client'
 import type { AppRouter } from '@slayzone/api'
+import type { HubAgentSessions } from './agents/hub-agents'
 import type { RouterOutputs } from './trpc'
 
 export type BoardData = RouterOutputs['task']['loadBoardData']
@@ -36,6 +37,8 @@ export interface HubFeed {
   /** Not connected for longer than `UNREACHABLE_GRACE_MS`. */
   stalled: boolean
   board: HubBoardState
+  /** Its agent sessions (`use-hub-agent-sessions.ts`). */
+  agents: HubAgentSessions
 }
 
 /**

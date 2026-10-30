@@ -5,7 +5,7 @@
  * (`hub-connections`), the hub theme reader — so no socket opens.
  */
 import { userEvent } from '@testing-library/react-native'
-import { act, renderRouter, screen } from 'expo-router/testing-library'
+import { act, renderRouter, screen, within } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
 import { Dimensions } from 'react-native'
 import type { BoardData, HubFeed } from './hub-board'
@@ -28,6 +28,15 @@ jest.mock('./hub-session', () => {
 jest.mock('./hub-connections', () => ({
   HubConnections: ({ children }: { children: ReactNode }) => children,
   useHubFeeds: () => ({ feeds: mockFeeds.list, retry: () => undefined, clientFor: () => null })
+}))
+// The agent screen talks to its hub (tRPC); here only which one a route opens matters.
+jest.mock('./agents/AgentScreen', () => ({
+  AgentScreen: (props: { feed: HubFeed; taskId: string; tabId?: string }) => {
+    const { Text } = jest.requireActual('react-native')
+    return (
+      <Text>{`agent screen ${props.feed.hub.label} ${props.taskId} ${props.tabId ?? 'main'}`}</Text>
+    )
+  }
 }))
 jest.mock('./hub-theme', () => ({
   HubThemeProvider: ({ children }: { children: ReactNode }) => children
@@ -62,7 +71,18 @@ const homeFeed: HubFeed = {
   hub: home.entry,
   connection: { status: 'open', error: null },
   stalled: false,
-  board: { data: board, pending: false, error: null, refreshing: false }
+  board: { data: board, pending: false, error: null, refreshing: false },
+  agents: {
+    state: { byId: {}, hibernated: {}, lastPushedAt: {}, jobsById: {} },
+    loaded: true,
+    error: null
+  }
+}
+
+/** Home's feed, with task t0's main agent running. */
+const homeWithAgent: HubFeed = {
+  ...homeFeed,
+  agents: { ...homeFeed.agents, state: { ...homeFeed.agents.state, byId: { 't0:t0': 'running' } } }
 }
 
 /** A phone-sized window (the default test window is 750 wide: an iPad split). */
@@ -145,11 +165,42 @@ describe('routing', () => {
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
   })
 
-  it('opens an agent route (a placeholder until the agents phase)', async () => {
+  it("a deep link to a task's agents opens them on its hub (a tab as ?tab=)", async () => {
     mockSessions.kept = [home]
-    await renderRouter(ROUTES, { initialUrl: '/agent/home.example/s1' })
-    expect(
-      await screen.findByText('Agent sessions on home.example will open here.')
-    ).toBeOnTheScreen()
+    mockFeeds.list = [homeFeed]
+    await renderRouter(ROUTES, { initialUrl: '/agent/home.example/t0' })
+    expect(await screen.findByText('agent screen home.example t0 main')).toBeOnTheScreen()
+  })
+
+  it('opens the tab an agent link names', async () => {
+    mockSessions.kept = [home]
+    mockFeeds.list = [homeFeed]
+    await renderRouter(ROUTES, { initialUrl: '/agent/home.example/t0?tab=side' })
+    expect(await screen.findByText('agent screen home.example t0 side')).toBeOnTheScreen()
+  })
+
+  it('an agent link to a hub the app is not signed in to says so', async () => {
+    mockSessions.kept = [home]
+    mockFeeds.list = [homeFeed]
+    await renderRouter(ROUTES, { initialUrl: '/agent/other.example/t0' })
+    expect(await screen.findByText('Not signed in to other.example')).toBeOnTheScreen()
+  })
+
+  it('tapping an agent on home opens its agent screen', async () => {
+    mockSessions.kept = [home]
+    mockFeeds.list = [homeWithAgent]
+    await renderRouter(ROUTES, { initialUrl: '/' })
+    const agents = await screen.findByTestId('agents-section')
+    await userEvent.setup().press(within(agents).getByText('Write spec'))
+    expect(screen).toHavePathname('/agent/home.example/t0')
+  })
+
+  it('the agents screen lists every agent and opens one', async () => {
+    mockSessions.kept = [home]
+    mockFeeds.list = [homeWithAgent]
+    await renderRouter(ROUTES, { initialUrl: '/agents' })
+    expect(await screen.findByText('Running')).toBeOnTheScreen()
+    await userEvent.setup().press(screen.getByText('Write spec'))
+    expect(screen).toHavePathname('/agent/home.example/t0')
   })
 })

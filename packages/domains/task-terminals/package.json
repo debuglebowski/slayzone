@@ -13,7 +13,9 @@
     "./client": "./src/client/index.ts",
     "./client/TaskSessionsSource": "./src/client/agent-sessions/TaskSessionsSource.ts",
     "./hibernated-sessions": "./src/client/hibernated-sessions.ts",
-    "./prompt-options": "./src/client/chat/prompts/prompt-options.ts"
+    "./prompt-options": "./src/client/chat/prompts/prompt-options.ts",
+    "./tab-label": "./src/client/get-tab-label.ts",
+    "./slash-commands": "./src/client/chat/autocomplete/slash-commands.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

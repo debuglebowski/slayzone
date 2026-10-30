@@ -21,37 +21,22 @@ import { getTrpcClient, listHubClients, useTRPC, useTRPCClient } from './trpc'
 import type { TerminalState } from '@slayzone/terminal-contracts'
 import { listHibernatedSessionIds } from './hibernated-sessions-source'
 import { taskIdFromSessionId } from './session-id'
+import {
+  ALIVE_STATES,
+  applyBackgroundJobs,
+  applyExit,
+  applyHibernated,
+  applyStateChange,
+  clearSession,
+  EMPTY_TERMINAL_STATE,
+  hydrate,
+  reconcile,
+  type SessionInfoLite,
+  sessionStateOf,
+  type TerminalStateData
+} from './terminal-state-reducer'
 
-// `background` (main agent done, its background subagents still working) is as
-// alive as `running` — it must count for useActiveTaskIds AND be eligible for the
-// reconcile Pass-2 sweep, or a background session that dropped its exit event
-// would never converge to 'dead'.
-const ALIVE_STATES: ReadonlySet<TerminalState> = new Set(['running', 'background', 'idle'])
-
-interface SessionInfoLite {
-  sessionId: string
-  state: TerminalState
-  /** Claude background jobs still running; absent = none. */
-  backgroundJobs?: number
-}
-
-export interface TerminalStateStore {
-  /** sessionId -> state. Immutable updates only so primitive selectors stay
-   *  `===`-stable for useSyncExternalStore (no tearing / infinite loops). */
-  byId: Record<string, TerminalState>
-  /** sessionId set (as a Record) the idle-close feature hibernated — the PTY is
-   *  dead but we synthesize 'hibernated' (💤) until reopen. Read by the actions
-   *  to swallow the kill's 'dead' and to skip reconcile; no selector reads it. */
-  hibernated: Record<string, true>
-  /** sessionId -> Date.now() of the last push event (state-change/exit/hibernated)
-   *  applied to that sid. Lets `reconcile` tell a fresher push apart from a
-   *  `sessionList` snapshot dispatched before the push landed — see `reconcile`. */
-  lastPushedAt: Record<string, number>
-  /** sessionId -> count of claude background jobs (Bash run_in_background /
-   *  Monitor) still running. Absent = none. A separate fact from `byId`: a
-   *  running dev server doesn't change the agent's state. */
-  jobsById: Record<string, number>
-
+export interface TerminalStateStore extends TerminalStateData {
   /** pty:state-change → adopt newState (swallow the kill's 'dead' while hibernated). */
   applyStateChange: (sessionId: string, newState: TerminalState) => void
   /** pty:exit → 'dead' (preserve 'hibernated'). */
@@ -64,17 +49,9 @@ export interface TerminalStateStore {
   clearSession: (sessionId: string) => void
   /** Seed from session.list() on init — fill-only, never overwrite a known value. */
   hydrate: (sessions: SessionInfoLite[]) => void
-  /** Self-heal: converge local state to the authoritative session list.
-   *  `hibernatedIds` (the persisted `terminal_tabs.agent_state = 'auto_stopped'` set) is the
-   *  authority for the 💤 state, which the live `sessions` list can't carry
-   *  (hibernating kills the PTY → it vanishes from the list). Passing it lets
-   *  any window heal hibernation it never received the window-targeted IPC for.
-   *  Omit it to reconcile only liveness (legacy callers / tests).
-   *  `dispatchedAt` (Date.now() taken before the `sessionList` fetch started) lets
-   *  a sid with a push newer than the fetch keep its fresher local value instead
-   *  of being stomped by the (now-stale) snapshot — see the flicker this fixes
-   *  in `reconcile`'s body. Omit for callers without a fetch-start timestamp
-   *  (legacy callers / tests) — freshness check is skipped, old behavior. */
+  /** Self-heal: converge local state to the authoritative session list
+   *  (`reconcile` in terminal-state-reducer.ts says how `hibernatedIds` and
+   *  `dispatchedAt` are used; omit them for legacy liveness-only behaviour). */
   reconcile: (
     sessions: SessionInfoLite[],
     hibernatedIds?: readonly string[],
@@ -84,177 +61,30 @@ export interface TerminalStateStore {
   getSessionState: (sessionId: string) => TerminalState
 }
 
+// The rules are the DOM-free reducers (`terminal-state-reducer.ts`, shared with the
+// phone); this store only applies their patches.
 export const useTerminalStateStore = create<TerminalStateStore>()(
   subscribeWithSelector((set, get) => ({
-    byId: {},
-    hibernated: {},
-    lastPushedAt: {},
-    jobsById: {},
+    ...EMPTY_TERMINAL_STATE,
 
     applyStateChange: (sessionId, newState) =>
-      set((s) => {
-        const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
-        if (s.hibernated[sessionId]) {
-          // The kill's own 'dead' must not clear 💤; any other transition means
-          // a real reopen/respawn — drop the marker and flow through.
-          if (newState === 'dead') return { lastPushedAt }
-          const { [sessionId]: _omit, ...hibernated } = s.hibernated
-          return { hibernated, byId: { ...s.byId, [sessionId]: newState }, lastPushedAt }
-        }
-        if (s.byId[sessionId] === newState) return { lastPushedAt }
-        return { byId: { ...s.byId, [sessionId]: newState }, lastPushedAt }
-      }),
+      set((s) => applyStateChange(s, sessionId, newState, Date.now())),
 
-    applyExit: (sessionId) =>
-      set((s) => {
-        const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
-        // A dead pty took its background jobs with it.
-        const { [sessionId]: _j, ...jobsById } = s.jobsById
-        const jobs = sessionId in s.jobsById ? { jobsById } : {}
-        if (s.hibernated[sessionId]) return { lastPushedAt, ...jobs } // keep 'hibernated', not 'dead'
-        if (s.byId[sessionId] === 'dead') return { lastPushedAt, ...jobs }
-        return {
-          byId: { ...s.byId, [sessionId]: 'dead' },
-          lastPushedAt,
-          ...jobs
-        }
-      }),
+    applyExit: (sessionId) => set((s) => applyExit(s, sessionId, Date.now())),
 
     applyBackgroundJobs: (sessionId, count) =>
-      set((s) => {
-        const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
-        if ((s.jobsById[sessionId] ?? 0) === count) return { lastPushedAt }
-        if (count > 0)
-          return {
-            jobsById: { ...s.jobsById, [sessionId]: count },
-            lastPushedAt
-          }
-        const { [sessionId]: _j, ...jobsById } = s.jobsById
-        return { jobsById, lastPushedAt }
-      }),
+      set((s) => applyBackgroundJobs(s, sessionId, count, Date.now())),
 
-    applyHibernated: (sessionId) =>
-      set((s) => ({
-        hibernated: { ...s.hibernated, [sessionId]: true },
-        byId: { ...s.byId, [sessionId]: 'hibernated' },
-        lastPushedAt: { ...s.lastPushedAt, [sessionId]: Date.now() }
-      })),
+    applyHibernated: (sessionId) => set((s) => applyHibernated(s, sessionId, Date.now())),
 
-    clearSession: (sessionId) =>
-      set((s) => {
-        const { [sessionId]: _b, ...byId } = s.byId
-        const { [sessionId]: _h, ...hibernated } = s.hibernated
-        const { [sessionId]: _p, ...lastPushedAt } = s.lastPushedAt
-        const { [sessionId]: _j, ...jobsById } = s.jobsById
-        return { byId, hibernated, lastPushedAt, jobsById }
-      }),
+    clearSession: (sessionId) => set((s) => clearSession(s, sessionId)),
 
-    hydrate: (sessions) =>
-      set((s) => {
-        const byId = { ...s.byId }
-        const jobsById = { ...s.jobsById }
-        let changed = false
-        for (const { sessionId, state, backgroundJobs } of sessions) {
-          if (byId[sessionId] === undefined) {
-            byId[sessionId] = state
-            changed = true
-          }
-          if (backgroundJobs && jobsById[sessionId] === undefined) {
-            jobsById[sessionId] = backgroundJobs
-            changed = true
-          }
-        }
-        return changed ? { byId, jobsById } : {}
-      }),
+    hydrate: (sessions) => set((s) => hydrate(s, sessions)),
 
     reconcile: (sessions, hibernatedIds, dispatchedAt) =>
-      set((s) => {
-        // A push (state-change/exit) newer than the moment this reconcile's
-        // fetch was dispatched carries information the fetch's snapshot
-        // couldn't have seen — the snapshot is stale for that sid, so skip the
-        // stomp instead of overwriting a fresher local value with a stale one
-        // (was: fresh 'running' -> flickered to a stale 'idle' every 15s/focus
-        // reconcile that happened to straddle a hook-driven transition).
-        const isStale = (sid: string): boolean =>
-          dispatchedAt !== undefined && (s.lastPushedAt[sid] ?? 0) > dispatchedAt
-        const present = new Map(sessions.map((x) => [x.sessionId, x.state]))
-        // `null` = caller passed no set → reconcile liveness only, preserving the
-        // legacy local-marker behavior. A set (even empty) = DB is authoritative.
-        const hibSet = hibernatedIds ? new Set(hibernatedIds) : null
-        const byId = { ...s.byId }
-        const hibernated = { ...s.hibernated }
-        let changed = false
+      set((s) => reconcile(s, sessions, hibernatedIds, dispatchedAt)),
 
-        // Pass 0 — adopt the DB hibernated set (authoritative). Wins over a stale
-        // list entry (the killed PTY can linger ~100ms in session:list). A
-        // genuine reopen clears the DB flag, so a sid still in the set is asleep.
-        if (hibSet) {
-          for (const sid of hibSet) {
-            if (byId[sid] !== 'hibernated') {
-              byId[sid] = 'hibernated'
-              changed = true
-            }
-            if (!hibernated[sid]) {
-              hibernated[sid] = true
-              changed = true
-            }
-          }
-        }
-
-        // Pass 1 — adopt backend drift (dropped running->idle) + fill missing.
-        // Never revive a locally-'dead' sid (a respawn re-creates via its own
-        // IPC; avoids flicker on a list that raced ahead of a just-applied exit).
-        // A hibernated sid (per DB authority, or locally when no set given) is
-        // dead-on-backend by design — skip it so a stale list entry can't revive
-        // it. When a set IS given and the sid dropped out of it but is alive in
-        // the list, that's a cross-window reopen → clear the marker + flow through.
-        for (const [sid, listState] of present) {
-          const lockedHibernated = hibSet ? hibSet.has(sid) : !!s.hibernated[sid]
-          if (lockedHibernated) continue
-          if (hibSet && hibernated[sid]) {
-            delete hibernated[sid]
-            changed = true
-          }
-          const cur = byId[sid]
-          if (cur === undefined) {
-            byId[sid] = listState
-            changed = true
-          } else if (cur !== listState && cur !== 'dead' && !isStale(sid)) {
-            byId[sid] = listState
-            changed = true
-          }
-        }
-
-        // Pass 2 — a locally-alive sid absent from the list has exited (the
-        // list excludes dead/ended/not-spawned), so a dropped pty:exit converges.
-        // Skip hibernated: it's absent-but-asleep, not dead. (We never clear a
-        // marker here — only positive alive evidence in Pass 1 clears it — so a
-        // DB-write lag right after hibernate can't flicker 💤 off.)
-        for (const sid of Object.keys(byId)) {
-          if (hibernated[sid]) continue
-          if (ALIVE_STATES.has(byId[sid]) && !present.has(sid) && !isStale(sid)) {
-            byId[sid] = 'dead'
-            changed = true
-          }
-        }
-
-        // Pass 3 — background-job counts: the list is authoritative for every
-        // sid it doesn't contradict a fresher push for (absent = none).
-        const jobsById = { ...s.jobsById }
-        const listedJobs = new Map(sessions.map((x) => [x.sessionId, x.backgroundJobs ?? 0]))
-        for (const sid of new Set([...Object.keys(jobsById), ...listedJobs.keys()])) {
-          if (isStale(sid)) continue
-          const want = listedJobs.get(sid) ?? 0
-          if ((jobsById[sid] ?? 0) === want) continue
-          if (want > 0) jobsById[sid] = want
-          else delete jobsById[sid]
-          changed = true
-        }
-
-        return changed ? { byId, hibernated, jobsById } : {}
-      }),
-
-    getSessionState: (sessionId) => get().byId[sessionId] ?? 'starting'
+    getSessionState: (sessionId) => sessionStateOf(get(), sessionId)
   }))
 )
 

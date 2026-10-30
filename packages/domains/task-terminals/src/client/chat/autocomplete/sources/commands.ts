@@ -1,37 +1,19 @@
 import type { CommandInfo } from '@slayzone/terminal-contracts'
-import type { AutocompleteSource, ChatListApi, SubmitTransform } from '../types'
+import type { AutocompleteSource, ChatListApi } from '../types'
 import { rankByName } from '../ranking'
 import { spliceReplace } from '../useAutocomplete'
+import { expandCommandBody, transformCommandSubmit } from '../custom-command-items'
 import { renderCommandItem } from './render-command'
+
+// Moved to the DOM-free `../custom-command-items` (also exported as
+// `@slayzone/task-terminals/slash-commands`); re-exported for this source's importers.
+export { expandCommandBody, transformCommandSubmit }
 
 export function filterCommands(items: CommandInfo[], filter: string): CommandInfo[] {
   return rankByName(items, filter, {
     getName: (c) => c.name,
     getDescription: (c) => c.description
   })
-}
-
-/** Expand `$ARGUMENTS` token in command body with the rest-of-line after the cmd name. */
-export function expandCommandBody(body: string, args: string): string {
-  return body.replace(/\$ARGUMENTS/g, args)
-}
-
-/**
- * If draft starts with `/<name>` and `<name>` matches a loaded command, return the expanded
- * template body (with args spliced in) as the text to actually send. Otherwise return null.
- */
-export function transformCommandSubmit(
-  draft: string,
-  items: CommandInfo[]
-): SubmitTransform | null {
-  if (!draft.startsWith('/')) return null
-  const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(draft.trim())
-  if (!match) return null
-  const [, name, rawArgs] = match
-  const cmd = items.find((c) => c.name === name)
-  if (!cmd) return null
-  const args = rawArgs?.trim() ?? ''
-  return { send: expandCommandBody(cmd.body, args).trim() }
 }
 
 export function createCommandsSource(

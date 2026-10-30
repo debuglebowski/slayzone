@@ -1,23 +1,10 @@
-import type { ChatCapabilities } from '@slayzone/terminal-contracts'
 import type { AutocompleteSource, BuiltinCommand } from '../types'
-import { rankBuiltins, builtinCommands } from '../builtins-registry'
+import { availableBuiltins, rankBuiltins, type BuiltinsSourceOpts } from '../builtins-registry'
 import { spliceReplace } from '../useAutocomplete'
 import { renderBuiltinItem } from './render-builtin'
 
-export interface BuiltinsSourceOpts {
-  /** Commands the chat CLI runs itself (its list minus terminal-only ones); empty when unknown. */
-  cliCommandNames: ReadonlySet<string>
-  capabilities: ChatCapabilities
-}
-
-/** Builtins offered for this chat: available for the mode, and not shadowed by a CLI-native command. */
-export function availableBuiltins(opts: BuiltinsSourceOpts): BuiltinCommand[] {
-  return builtinCommands.filter(
-    (b) =>
-      (b.available?.(opts.capabilities) ?? true) &&
-      !(b.cliCollision === 'cli-wins' && opts.cliCommandNames.has(b.name))
-  )
-}
+// Moved to the DOM-free registry (also exported as `@slayzone/task-terminals/slash-commands`).
+export { availableBuiltins, type BuiltinsSourceOpts }
 
 export function createBuiltinsSource(opts: BuiltinsSourceOpts): AutocompleteSource<BuiltinCommand> {
   const items = availableBuiltins(opts)

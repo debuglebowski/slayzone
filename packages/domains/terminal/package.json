@@ -21,7 +21,9 @@
     "./reducer": "./src/client/chat-timeline.ts",
     "./chat-prompts": "./src/client/chat-prompts.ts",
     "./terminal-themes": "./src/client/terminal-themes.ts",
-    "./suppress-device-status": "./src/client/suppress-device-status.ts"
+    "./suppress-device-status": "./src/client/suppress-device-status.ts",
+    "./terminal-state": "./src/client/terminal-state-reducer.ts",
+    "./live-blocks": "./src/client/live-blocks.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

@@ -2,14 +2,19 @@
  * How a task's MAIN agent is started: its spawn props and its working directory.
  *
  * DOM-free and shared by every place that starts it — the desktop task page (and its
- * terminal-first pane) and the hub's `task.startMainAgent` — so a client and the hub
- * can never start the same session two different ways. Pure: the caller supplies the
+ * terminal-first pane), the hub's `task.startMainAgent`, and the mobile chat (which
+ * must hydrate a chat tab in the exact folder desktop would) — so no two of them can
+ * start the same session two different ways. Pure: the caller supplies the
  * rows and the child repos detected on the machine that owns the project.
  */
 import type { Task } from '@slayzone/task-contracts'
-import { getProviderFlags } from '@slayzone/task-contracts'
+// DOM-free subpaths, not the barrels: the mobile app imports this module too
+// (`@slayzone/task/main-terminal`), and projects-contracts' barrel loads a desktop
+// UI module at runtime.
+import { getProviderFlags } from '@slayzone/task-contracts/types'
 import type { DetectedRepo, Project } from '@slayzone/projects-contracts'
-import { resolveRepoPath, taskProjectRoot } from '@slayzone/projects-contracts'
+import { taskProjectRoot } from '@slayzone/projects-contracts/placements'
+import { resolveRepoPath } from '@slayzone/projects-contracts/resolve-repo'
 import type { ExecutionContext, TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
 
 /**

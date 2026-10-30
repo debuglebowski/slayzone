@@ -7,7 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { useTRPCClient } from './trpc'
 import { safeRandomUUID } from '@slayzone/ui'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
-import { spawnConversationIds } from '@slayzone/terminal-contracts'
+import { spawnConversationIds, stripOscReplies } from '@slayzone/terminal-contracts'
 import { createXterm, registerTestTerminalLinks } from './xterm-init'
 import type { WebLinkProvider } from './web-link-provider'
 import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
@@ -711,7 +711,7 @@ export async function initTerminalSession(
         hasCalledFirstInputRef.current = true
         onFirstInputRef.current?.()
       }
-      const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      const filtered = stripOscReplies(data)
       if (filtered) inputGate.input(filtered)
     })
 

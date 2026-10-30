@@ -12,5 +12,9 @@ type View = TrpcView<AppRouter>
 const view: View = trpcFor<AppRouter>()
 
 export const useTRPC: View['useTRPC'] = view.useTRPC
+/** The nearest hub scope's vanilla client (imperative calls: attach, lifecycle, chat sends). */
+export const useTRPCClient: View['useTRPCClient'] = view.useTRPCClient
+/** A hub's vanilla client, as `useTRPCClient` returns it. */
+export type HubTrpcClient = ReturnType<View['useTRPCClient']>
 
 export type RouterOutputs = inferRouterOutputs<AppRouter>

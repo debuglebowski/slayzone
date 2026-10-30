@@ -2,7 +2,25 @@
  * OSC title extraction tests
  */
 import { expect, test } from 'vitest'
-import { extractOscTitle } from './osc.js'
+import { extractOscTitle, stripOscReplies } from './osc.js'
+
+// Client → pty input: OSC strings are answers to colour queries, never user input.
+test('stripOscReplies drops a BEL-terminated OSC reply', () => {
+  expect(stripOscReplies('\x1b]11;rgb:0000/0000/0000\x07')).toBe('')
+})
+
+test('stripOscReplies drops an ST-terminated OSC reply and keeps the keystrokes around it', () => {
+  expect(stripOscReplies('a\x1b]10;rgb:ffff/ffff/ffff\x1b\\b')).toBe('ab')
+})
+
+test('stripOscReplies leaves plain input and other escapes alone', () => {
+  expect(stripOscReplies('ls -la\r')).toBe('ls -la\r')
+  expect(stripOscReplies('\x1b[A\x1b')).toBe('\x1b[A\x1b')
+})
+
+test('stripOscReplies drops every reply in one write', () => {
+  expect(stripOscReplies('\x1b]10;x\x07\x1b]11;y\x07z')).toBe('z')
+})
 
 test('extracts OSC 0 title (BEL terminator)', () => {
   expect(extractOscTitle('\x1b]0;my-title\x07')).toBe('my-title')
