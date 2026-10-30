@@ -4,6 +4,9 @@ import type { BoardData, HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { TaskScreen } from './TaskScreen'
 
+// The task's artifacts link reads its hub (its own suite tests it).
+jest.mock('./artifacts/TaskArtifactsLink', () => ({ TaskArtifactsLink: () => null }))
+
 const home = hubEntryOf('home.example')
 const session = { entry: home, token: 't' }
 

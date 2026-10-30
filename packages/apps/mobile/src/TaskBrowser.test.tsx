@@ -7,6 +7,9 @@ import type { BoardData, BoardTask, HubFeed } from './hub-board'
 import { hubEntryOf } from './hub-session'
 import { TaskBrowser, type TaskBrowserProps } from './TaskBrowser'
 
+// The task's artifacts link reads its hub (its own suite tests it).
+jest.mock('./artifacts/TaskArtifactsLink', () => ({ TaskArtifactsLink: () => null }))
+
 const home = hubEntryOf('home.example')
 const work = hubEntryOf('work.example')
 
@@ -77,6 +80,7 @@ function props(fields: Partial<TaskBrowserProps>): TaskBrowserProps {
     onRetry: jest.fn(),
     onSignOut: jest.fn(),
     onManageHubs: jest.fn(),
+    onSearchArtifacts: jest.fn(),
     onOpenAgent: jest.fn(),
     onShowAgents: jest.fn(),
     ...fields
@@ -181,6 +185,13 @@ describe('TaskBrowser', () => {
     await render(<TaskBrowser {...p} />)
     await userEvent.setup().press(screen.getByText('Hubs'))
     expect(p.onManageHubs).toHaveBeenCalled()
+  })
+
+  it('opens artifact search', async () => {
+    const p = props({ feeds: [loaded(home, boardOf('Home'))] })
+    await render(<TaskBrowser {...p} />)
+    await userEvent.setup().press(screen.getByText('Search'))
+    expect(p.onSearchArtifacts).toHaveBeenCalled()
   })
 
   it("lists every hub's agents above the tasks, what needs the user first", async () => {

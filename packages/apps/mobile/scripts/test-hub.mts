@@ -1,6 +1,7 @@
 /**
  * Test hubs for the mobile app's end-to-end Node scripts in this folder
- * (`record-chat-fixture.mts`, `two-hub-agents.mts`). Not run by any test suite.
+ * (`record-chat-fixture.mts`, `two-hub-agents.mts`, `artifacts/check-artifacts.mts`).
+ * Not run by any test suite.
  *
  * Each script boots its own hub(s) and computer(s) from this checkout's builds, signs a
  * phone account in the way the app does (password sign-in, then one bearer socket per
@@ -308,6 +309,8 @@ export interface PhoneHub {
   /** The app's hub entry (`hub-session.ts` `hubEntryOf`). */
   entry: { id: string; kind: 'remote'; label: string; url: string }
   client: HubClient
+  /** The bearer the app keeps for the hub (sent on its REST calls too). */
+  token: string
   /** Drop the socket as a network loss would; the client reconnects and resubscribes. */
   dropSocket(): void
   close(): void
@@ -332,6 +335,7 @@ export async function signInPhone(
     entry,
     // Re-typed for the app router, as the app's `ownerClient` does.
     client: ws.client as unknown as HubClient,
+    token: signed.token,
     dropSocket: () => {
       // @trpc/client's open socket (internal field names differ across minors).
       const internals = ws.wsClient as unknown as {

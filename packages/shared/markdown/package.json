@@ -6,7 +6,8 @@
   "main": "./src/client/index.ts",
   "types": "./src/client/index.ts",
   "exports": {
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./mermaid-config": "./src/mermaid-config.ts"
   },
   "scripts": {
     "test": "vitest run",

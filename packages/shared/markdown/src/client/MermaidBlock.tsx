@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useSyncExternalStore, useMemo } from 'react'
 import { useDepsChanged } from '@slayzone/ui'
 import { MediaView } from './MediaView'
+import { mermaidInitOptions } from '../mermaid-config'
 
 /**
  * Reads `dark`/`light` from the `<html>` element and re-subscribes when the
@@ -28,19 +29,13 @@ let mermaidTheme: 'dark' | 'default' | null = null
 let mermaidIdCounter = 0
 const svgCache = new Map<string, string>()
 
-// `layout: 'dagre'`: mermaid 12 lays out flowchart/state/class/ER diagrams with ELK by
-// default; dagre keeps them looking as they always have (and as artifact exports render).
+// Options: `mermaidInitOptions` (shared with the phone's artifact pages).
 async function getMermaid(theme: 'dark' | 'light'): Promise<Mermaid> {
   const target: 'dark' | 'default' = theme === 'dark' ? 'dark' : 'default'
 
   if (!mermaidInflight) {
     mermaidInflight = import('mermaid').then((mod) => {
-      mod.default.initialize({
-        startOnLoad: false,
-        theme: target,
-        securityLevel: 'strict',
-        layout: 'dagre'
-      })
+      mod.default.initialize(mermaidInitOptions(theme))
       mermaidTheme = target
       return mod.default
     })
@@ -50,7 +45,7 @@ async function getMermaid(theme: 'dark' | 'light'): Promise<Mermaid> {
   const m = await mermaidInflight
   if (mermaidTheme !== target) {
     svgCache.clear()
-    m.initialize({ startOnLoad: false, theme: target, securityLevel: 'strict', layout: 'dagre' })
+    m.initialize(mermaidInitOptions(theme))
     mermaidTheme = target
   }
   return m

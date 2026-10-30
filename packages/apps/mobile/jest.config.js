@@ -6,7 +6,7 @@
 // transforms them like the app's own files. Registry packages are left untransformed
 // except the ones the preset lists and the ESM-only ones the app reaches at runtime
 // (superjson, the tRPC transformer, and its dependencies; marked, the chat's markdown
-// lexer): jest runs CommonJS.
+// lexer and the artifact pages' markdown parser): jest runs CommonJS.
 const { transformIgnorePatterns } = require('jest-expo/ios/jest-preset')
 
 const ESM_ONLY = ['superjson', 'copy-anything', 'is-what', 'marked']

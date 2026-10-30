@@ -4,6 +4,21 @@ import { BlobStore } from './blob-store'
 import type { DbLike } from './db'
 import { getCurrentVersion } from './resolve'
 import { readVersionContent } from './mutations'
+import type {
+  ArtifactSearchMatch,
+  ArtifactSearchReport,
+  ArtifactSearchResult,
+  SkippedLargeArtifact
+} from '../shared/types'
+
+// The report's wire types live in `../shared` (the phone reads them too); re-exported here
+// for the server-side callers that always imported them from this module.
+export type {
+  ArtifactSearchMatch,
+  ArtifactSearchReport,
+  ArtifactSearchResult,
+  SkippedLargeArtifact
+}
 
 /**
  * Artifact title + content search.
@@ -21,37 +36,6 @@ import { readVersionContent } from './mutations'
 
 export interface SearchMatcher {
   test: (s: string) => boolean
-}
-
-export interface ArtifactSearchMatch {
-  type: 'title' | 'content'
-  line?: number
-  snippet: string
-  contextBefore?: string | null
-  contextAfter?: string | null
-}
-
-export interface ArtifactSearchResult {
-  artifactId: string
-  taskId: string
-  title: string
-  matches: ArtifactSearchMatch[]
-}
-
-/** An artifact whose CURRENT version exceeded {@link MAX_SCAN_BYTES}. */
-export interface SkippedLargeArtifact {
-  /** The artifact title — what the CLI's stderr notice names. */
-  label: string
-  size: number
-}
-
-export interface ArtifactSearchReport {
-  results: ArtifactSearchResult[]
-  /** Size of the addressable set, i.e. the CLI footer's "Scanned N artifacts". */
-  scannedCount: number
-  /** `limit` was hit AND there were more candidates behind it. */
-  truncated: boolean
-  skippedLarge: SkippedLargeArtifact[]
 }
 
 export interface ArtifactSearchOptions {

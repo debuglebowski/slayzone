@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ArtifactFolder, TaskArtifact } from '@slayzone/task-contracts'
+import { groupArtifactTree } from '../shared/tree'
 
 interface UseArtifactTreeArgs {
   taskId: string
@@ -68,24 +69,10 @@ export function useArtifactTree({
 
   // --- Build tree structure from folders + artifacts ---
 
-  const { childFolders, artifactsByFolder } = useMemo(() => {
-    const cf = new Map<string | null, ArtifactFolder[]>()
-    for (const f of folders) {
-      const arr = cf.get(f.parent_id) ?? []
-      arr.push(f)
-      cf.set(f.parent_id, arr)
-    }
-    const ab = new Map<string | null, TaskArtifact[]>()
-    for (const a of artifacts) {
-      const arr = ab.get(a.folder_id) ?? []
-      arr.push(a)
-      ab.set(a.folder_id, arr)
-    }
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-    for (const arr of cf.values()) arr.sort((a, b) => collator.compare(a.name, b.name))
-    for (const arr of ab.values()) arr.sort((a, b) => collator.compare(a.title, b.title))
-    return { childFolders: cf, artifactsByFolder: ab }
-  }, [folders, artifacts])
+  const { childFolders, artifactsByFolder } = useMemo(
+    () => groupArtifactTree(folders, artifacts),
+    [folders, artifacts]
+  )
 
   // --- "Move to" folder list for context menu ---
 

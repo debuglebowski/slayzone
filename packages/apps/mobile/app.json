@@ -17,6 +17,18 @@
         }
       }
     },
-    "plugins": ["expo-router", "expo-secure-store"]
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SlayZone uploads the photos you pick to a task's artifacts.",
+          "cameraPermission": "SlayZone uploads the photos you take to a task's artifacts.",
+          "microphonePermission": false
+        }
+      ],
+      "./plugins/with-artifact-page-assets"
+    ]
   }
 }

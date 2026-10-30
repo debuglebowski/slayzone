@@ -127,6 +127,10 @@ minimumReleaseAgeExclude:
   # and PKCE hashing (Hermes has no crypto.subtle), at SDK 58's pins.
   - expo-crypto@58.0.7 # 2026-11-15
   - expo-web-browser@58.0.7 # 2026-11-26
+  # Mobile wave 1, artifacts (2026-10-30): photo/camera upload — the version SDK 58 pins
+  # (bundledNativeModules.json of expo 58.0.21) and its own dependency.
+  - expo-image-loader@58.0.3 # 2026-10-31
+  - expo-image-picker@58.0.10 # 2026-10-31
 
 # Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
 nodeLinker: hoisted

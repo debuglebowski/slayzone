@@ -38,6 +38,20 @@ jest.mock('./agents/AgentScreen', () => ({
     )
   }
 }))
+// The task screen's artifacts link reads its hub (its own suite tests it).
+jest.mock('./artifacts/TaskArtifactsLink', () => ({
+  TaskArtifactsLink: (p: { hubAddress: string; taskId: string }) => {
+    const { Text } = jest.requireActual('react-native')
+    return <Text>{`artifacts of ${p.hubAddress} ${p.taskId}`}</Text>
+  }
+}))
+// Search reads every hub (its own suite tests it); here only that home opens it.
+jest.mock('./artifacts/ArtifactSearchScreen', () => ({
+  ArtifactSearchScreen: () => {
+    const { Text } = jest.requireActual('react-native')
+    return <Text>artifact search</Text>
+  }
+}))
 jest.mock('./hub-theme', () => ({
   HubThemeProvider: ({ children }: { children: ReactNode }) => children
 }))
@@ -110,6 +124,16 @@ describe('routing', () => {
     expect(screen).toHavePathname('/sign-in')
   })
 
+  it.each([
+    '/artifacts',
+    '/artifacts/home.example/t0',
+    '/artifacts/home.example/t0/a1'
+  ])('signed out, %s leads to sign-in', async (url) => {
+    await renderRouter(ROUTES, { initialUrl: url })
+    expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
+    expect(screen).toHavePathname('/sign-in')
+  })
+
   it('signed in, opens home with every hub’s tasks', async () => {
     mockSessions.kept = [home]
     mockFeeds.list = [homeFeed]
@@ -124,6 +148,17 @@ describe('routing', () => {
     await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
     expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
     expect(screen).toHavePathname('/task/home.example/t0')
+    // With its artifacts.
+    expect(screen.getByText('artifacts of home.example t0')).toBeOnTheScreen()
+  })
+
+  it('home opens artifact search', async () => {
+    mockSessions.kept = [home]
+    mockFeeds.list = [homeFeed]
+    await renderRouter(ROUTES, { initialUrl: '/' })
+    await userEvent.setup().press(await screen.findByText('Search'))
+    expect(screen).toHavePathname('/artifacts')
+    expect(await screen.findByText('artifact search')).toBeOnTheScreen()
   })
 
   it('a deep link to a task on an iPad shows it beside the list', async () => {

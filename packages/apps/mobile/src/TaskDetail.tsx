@@ -1,11 +1,13 @@
 import { PRIORITY_LABELS } from '@slayzone/tasks/board'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { TaskArtifactsLink } from './artifacts/TaskArtifactsLink'
 import type { TaskRow } from './hub-board'
 import { type ChromeColors, useTheme } from './theme'
 
 /**
  * A task, read-only: title, project, status, priority, its hub, description; with
- * `onOpenAgent`, a link to its agent screen.
+ * `onOpenAgent`, a link to its agent screen; a link to its artifacts (it scopes itself to
+ * the task's hub: the iPad split has no hub scope).
  */
 export function TaskDetail({
   row,
@@ -33,6 +35,7 @@ export function TaskDetail({
           <Text style={styles.link}>Agent ›</Text>
         </Pressable>
       ) : null}
+      <TaskArtifactsLink hubId={row.hubId} hubAddress={row.hubLabel} taskId={task.id} />
       <Text style={styles.body}>{task.description?.trim() || 'No description'}</Text>
     </ScrollView>
   )

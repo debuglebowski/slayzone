@@ -72,6 +72,9 @@ function Root() {
               <Stack.Screen name="agent/[hub]/[id]" />
               <Stack.Screen name="hubs" />
               <Stack.Screen name="add-hub" />
+              <Stack.Screen name="artifacts/index" />
+              <Stack.Screen name="artifacts/[hub]/[task]/index" />
+              <Stack.Screen name="artifacts/[hub]/[task]/[id]" />
             </Stack.Protected>
             <Stack.Protected guard={!signedIn}>
               <Stack.Screen name="sign-in" />

@@ -12,6 +12,7 @@ import {
   useMemo,
   useState
 } from 'react'
+import { forgetArtifactCache } from './artifacts/files'
 import { type HubSession, type HubSessionStore, hubSessions } from './hub-session'
 import { hubThemeCache } from './theme-cache'
 
@@ -21,8 +22,9 @@ export interface HubSessionsValue {
   /** A sign-in finished (`signIn` already kept it): list it. */
   signedIn: (session: HubSession) => void
   /**
-   * Sign out of one hub: forget its bearer and the theme kept from it. Its socket and
-   * cache close when it leaves the federation (`HubConnections`).
+   * Sign out of one hub: forget its bearer, the theme kept from it and the artifact
+   * files downloaded from it. Its socket and cache close when it leaves the federation
+   * (`HubConnections`).
    */
   signOut: (hubId: string) => void
 }
@@ -35,13 +37,18 @@ export function useHubSessions(): HubSessionsValue {
   return value
 }
 
+const DEVICE_ARTIFACT_FILES = { forget: forgetArtifactCache }
+
 export function HubSessionsProvider({
   store = hubSessions,
   themeCache = hubThemeCache,
+  artifactFiles = DEVICE_ARTIFACT_FILES,
   children
 }: {
   store?: HubSessionStore
   themeCache?: { forget(hubId: string): void }
+  /** The artifact files downloaded from a hub (`artifacts/files.ts`), deleted on its sign-out. */
+  artifactFiles?: { forget(hubId: string): void }
   children: ReactNode
 }) {
   const [sessions, setSessions] = useState<HubSession[] | undefined>(undefined)
@@ -65,10 +72,11 @@ export function HubSessionsProvider({
   const signOut = useCallback(
     (hubId: string) => {
       themeCache.forget(hubId)
+      artifactFiles.forget(hubId)
       void store.forget(hubId)
       setSessions((current) => current?.filter((s) => s.entry.id !== hubId))
     },
-    [store, themeCache]
+    [store, themeCache, artifactFiles]
   )
 
   const value = useMemo(() => ({ sessions, signedIn, signOut }), [sessions, signedIn, signOut])

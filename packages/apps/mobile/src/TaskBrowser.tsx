@@ -22,6 +22,8 @@ export interface TaskBrowserProps {
   onRetry: (hubId: string) => void
   onSignOut: (hubId: string) => void
   onManageHubs: () => void
+  /** "Search": search every hub's artifacts. */
+  onSearchArtifacts: () => void
   /** An agent (or, beside the list, the shown task's "Agent ›") was tapped: its agent screen. */
   onOpenAgent: (row: Pick<AgentRow, 'hubId' | 'hubLabel' | 'task'>) => void
   /** "All agents": the agents screen. */
@@ -43,6 +45,7 @@ export function TaskBrowser({
   onRetry,
   onSignOut,
   onManageHubs,
+  onSearchArtifacts,
   onOpenAgent,
   onShowAgents
 }: TaskBrowserProps) {
@@ -67,6 +70,9 @@ export function TaskBrowser({
           {onlyHub ? onlyHub.label : `${feeds.length} hubs`}
         </Text>
       </View>
+      <Pressable onPress={onSearchArtifacts} hitSlop={8} accessibilityRole="button">
+        <Text style={styles.link}>Search</Text>
+      </Pressable>
       <Pressable onPress={onManageHubs} hitSlop={8} accessibilityRole="button">
         <Text style={styles.link}>Hubs</Text>
       </Pressable>

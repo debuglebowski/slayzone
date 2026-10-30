@@ -88,3 +88,36 @@ export interface SeedReport {
   seeded: number
   skippedMissing: number
 }
+
+// --- Search (`GET /api/artifacts/search`, `searchArtifacts` in ../server/search.ts) ---
+
+export interface ArtifactSearchMatch {
+  type: 'title' | 'content'
+  line?: number
+  snippet: string
+  contextBefore?: string | null
+  contextAfter?: string | null
+}
+
+export interface ArtifactSearchResult {
+  artifactId: string
+  taskId: string
+  title: string
+  matches: ArtifactSearchMatch[]
+}
+
+/** An artifact whose CURRENT version exceeded the scan limit (`MAX_SCAN_BYTES`, server). */
+export interface SkippedLargeArtifact {
+  /** The artifact title — what the CLI's stderr notice names. */
+  label: string
+  size: number
+}
+
+export interface ArtifactSearchReport {
+  results: ArtifactSearchResult[]
+  /** Size of the addressable set, i.e. the CLI footer's "Scanned N artifacts". */
+  scannedCount: number
+  /** `limit` was hit AND there were more candidates behind it. */
+  truncated: boolean
+  skippedLarge: SkippedLargeArtifact[]
+}
