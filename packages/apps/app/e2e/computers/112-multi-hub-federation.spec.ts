@@ -515,6 +515,23 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(projectBlob(page, 'LO')).toBeVisible({ timeout: 30_000 })
       await expect(projectBlob(page, 'RE')).toBeVisible({ timeout: 30_000 })
 
+      // (1b) PROJECT SETTINGS read the OWNING hub — the remote project's default
+      // computer is a computer of the remote hub, so a dialog asking the local hub
+      // would not find it and show an empty select.
+      await withHubClient(remoteHubUrl, (c) =>
+        c.computers.setProjectDefaultComputer.mutate({
+          projectId: remoteProjectId,
+          computerId: hubComputer!.computerId
+        })
+      )
+      await page.evaluate(() => (window as unknown as FederationWindow).__slayzone_refreshData?.())
+      await projectBlob(page, 'RE').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: 'Settings' }).click()
+      await expect(page.locator('#default-computer')).toHaveText('e2e-remote-hub-computer', {
+        timeout: 15_000
+      })
+      await page.keyboard.press('Escape')
+
       // (2) ISOLATION — the LOCAL hub's OWN DB holds Local-P but NOT Remote-P.
       // The window vanilla client IS the local hub (the merge lives only in the
       // renderer hook), so its projects.list is the local DB's raw truth.

@@ -15,6 +15,12 @@ import {
   UpdateToast
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
+import {
+  HubScope,
+  useFederationOrNull,
+  useHubIdForProject,
+  useHubIdForTask
+} from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/dialogs'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
@@ -198,6 +204,14 @@ export function AppDialogs({
   updateVersion,
   setUpdateToastDismissed
 }: AppDialogsProps): React.JSX.Element {
+  // Dialogs about one project or task talk to the hub that owns it; the rest
+  // stay on the default hub.
+  const ownerHubIds = {
+    editTask: useOwnerHubId({ taskId: editingTask?.id }),
+    deleteTask: useOwnerHubId({ taskId: deletingTask?.id }),
+    projectSettings: useOwnerHubId({ projectId: editingProject?.id }),
+    deleteProject: useOwnerHubId({ projectId: deletingProject?.id })
+  }
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
@@ -222,26 +236,30 @@ export function AppDialogs({
       )}
       {shouldMount('editTask', !!editingTask) && (
         <Suspense fallback={null}>
-          <EditTaskDialog
-            task={editingTask}
-            open={!!editingTask}
-            onOpenChange={(open) => {
-              if (!open) useDialogStore.getState().closeEditTask()
-            }}
-            onUpdated={handleTaskUpdated}
-          />
+          <OwnerHubScope hubId={ownerHubIds.editTask}>
+            <EditTaskDialog
+              task={editingTask}
+              open={!!editingTask}
+              onOpenChange={(open) => {
+                if (!open) useDialogStore.getState().closeEditTask()
+              }}
+              onUpdated={handleTaskUpdated}
+            />
+          </OwnerHubScope>
         </Suspense>
       )}
       {shouldMount('deleteTask', !!deletingTask) && (
         <Suspense fallback={null}>
-          <DeleteTaskDialog
-            task={deletingTask}
-            open={!!deletingTask}
-            onOpenChange={(open) => {
-              if (!open) useDialogStore.getState().closeDeleteTask()
-            }}
-            onDeleted={handleTaskDeleted}
-          />
+          <OwnerHubScope hubId={ownerHubIds.deleteTask}>
+            <DeleteTaskDialog
+              task={deletingTask}
+              open={!!deletingTask}
+              onOpenChange={(open) => {
+                if (!open) useDialogStore.getState().closeDeleteTask()
+              }}
+              onDeleted={handleTaskDeleted}
+            />
+          </OwnerHubScope>
         </Suspense>
       )}
       {shouldMount('createProject', createProjectOpen) && (
@@ -257,31 +275,35 @@ export function AppDialogs({
       )}
       {shouldMount('projectSettings', !!editingProject) && (
         <Suspense fallback={null}>
-          <ProjectSettingsDialog
-            project={editingProject}
-            open={!!editingProject}
-            onOpenChange={(open) => !open && closeProjectSettings()}
-            initialTab={projectSettingsInitialTab}
-            groupBy={testGroupBy}
-            onGroupByChange={setTestGroupBy}
-            integrationOnboardingProvider={projectSettingsOnboardingProvider}
-            onIntegrationOnboardingHandled={() => setProjectSettingsOnboardingProvider(null)}
-            onUpdated={handleProjectUpdated}
-            onChanged={handleProjectChanged}
-            renderTemplatesTab={(projectId) => <TemplatesSettingsTab projectId={projectId} />}
-          />
+          <OwnerHubScope hubId={ownerHubIds.projectSettings}>
+            <ProjectSettingsDialog
+              project={editingProject}
+              open={!!editingProject}
+              onOpenChange={(open) => !open && closeProjectSettings()}
+              initialTab={projectSettingsInitialTab}
+              groupBy={testGroupBy}
+              onGroupByChange={setTestGroupBy}
+              integrationOnboardingProvider={projectSettingsOnboardingProvider}
+              onIntegrationOnboardingHandled={() => setProjectSettingsOnboardingProvider(null)}
+              onUpdated={handleProjectUpdated}
+              onChanged={handleProjectChanged}
+              renderTemplatesTab={(projectId) => <TemplatesSettingsTab projectId={projectId} />}
+            />
+          </OwnerHubScope>
         </Suspense>
       )}
       {shouldMount('deleteProject', !!deletingProject) && (
         <Suspense fallback={null}>
-          <DeleteProjectDialog
-            project={deletingProject}
-            open={!!deletingProject}
-            onOpenChange={(open) => {
-              if (!open) useDialogStore.getState().closeDeleteProject()
-            }}
-            onDeleted={handleProjectDeleted}
-          />
+          <OwnerHubScope hubId={ownerHubIds.deleteProject}>
+            <DeleteProjectDialog
+              project={deletingProject}
+              open={!!deletingProject}
+              onOpenChange={(open) => {
+                if (!open) useDialogStore.getState().closeDeleteProject()
+              }}
+              onDeleted={handleProjectDeleted}
+            />
+          </OwnerHubScope>
         </Suspense>
       )}
       {groupSettingsTarget && (
@@ -417,4 +439,30 @@ export function AppDialogs({
       <Toaster position="bottom-right" theme="dark" closeButton />
     </>
   )
+}
+
+/** The hub that owns the given task, else project; null = the default hub. */
+function useOwnerHubId({
+  projectId,
+  taskId
+}: {
+  projectId?: string
+  taskId?: string
+}): string | null {
+  const projectHubId = useHubIdForProject(projectId)
+  const taskHubId = useHubIdForTask(taskId)
+  return taskHubId ?? projectHubId ?? null
+}
+
+/** `children` on the hub `hubId` (default hub when null, or with no federation). */
+function OwnerHubScope({
+  hubId,
+  children
+}: {
+  hubId: string | null
+  children: React.ReactNode
+}): React.JSX.Element {
+  const fed = useFederationOrNull()
+  if (!fed || !hubId) return <>{children}</>
+  return <HubScope hubId={hubId}>{children}</HubScope>
 }
