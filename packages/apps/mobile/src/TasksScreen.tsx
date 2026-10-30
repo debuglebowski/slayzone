@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router'
 import { useWindowDimensions } from 'react-native'
 import { boardPrefsFile } from './board/board-prefs-file'
-import { newTaskHref } from './board/routes'
+import { newTaskHref } from './task-edit/routes'
 import type { TaskRow } from './hub-board'
 import { useHubFeeds } from './hub-connections'
 import { useHubSessions } from './hub-sessions'

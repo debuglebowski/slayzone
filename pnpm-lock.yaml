@@ -953,6 +953,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../../domains/projects-contracts
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../../domains/tags
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
@@ -980,6 +983,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/workflow':
+        specifier: workspace:*
+        version: link:../../shared/workflow
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)

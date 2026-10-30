@@ -16,7 +16,7 @@ import {
 } from './board/board-prefs'
 import { FilterSheet } from './board/FilterSheet'
 import { type Measure, ProjectBoard } from './board/ProjectBoard'
-import type { NewTaskTarget } from './board/routes'
+import type { NewTaskParams } from './task-edit/routes'
 import { HubBanners } from './HubBanner'
 import { findTaskRow, type HubFeed, hubProblem, rowKey, type TaskRow } from './hub-board'
 import { findProjectRow, mergeHubProjects, type ProjectRow } from './projects/hub-projects'
@@ -47,7 +47,7 @@ export interface TaskBrowserProps {
   /** Beside the board, the shown task's "Agent ›" was tapped: its agent screen. */
   onOpenAgent: (row: Pick<AgentRow, 'hubId' | 'hubLabel' | 'task'>) => void
   /** "+": create a task in the shown project (a column's "+": with its status). */
-  onNewTask: (target: NewTaskTarget) => void
+  onNewTask: (target: NewTaskParams) => void
   /** What the board remembers on this device (`board-prefs-file.ts`). */
   prefs: BoardPrefsStore
   /** Tests: how drop targets are measured. */

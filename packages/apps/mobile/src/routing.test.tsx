@@ -52,6 +52,37 @@ jest.mock('./artifacts/TaskArtifactsLink', () => ({
     return <Text>{`artifacts of ${p.hubAddress} ${p.taskId}`}</Text>
   }
 }))
+// The task editor writes to its hub (its own suites test it): here its title, notes and
+// the cards it is handed.
+jest.mock('./task-edit/TaskEditor', () => ({
+  TaskEditor: (p: import('./task-edit/TaskEditor').TaskEditorProps) => {
+    const { Text } = jest.requireActual('react-native')
+    return (
+      <>
+        <Text>{p.row.task.title}</Text>
+        <Text>{p.row.task.description}</Text>
+        {p.children}
+      </>
+    )
+  }
+}))
+// Creating writes to a hub (its own suite tests it): here what the route hands it.
+jest.mock('./task-edit/NewTaskScreen', () => ({
+  NewTaskScreen: (p: import('./task-edit/NewTaskScreen').NewTaskScreenProps) => {
+    const { Pressable, Text } = jest.requireActual('react-native')
+    return (
+      <>
+        <Text>{`new task ${p.hubAddress} ${p.projectId} ${p.status ?? '-'} ${p.parentId ?? '-'}`}</Text>
+        <Pressable onPress={() => p.onCreated(p.hubAddress, 'new1')}>
+          <Text>stand-in create</Text>
+        </Pressable>
+        <Pressable onPress={p.onCancel}>
+          <Text>stand-in cancel</Text>
+        </Pressable>
+      </>
+    )
+  }
+}))
 // Search reads every hub (its own suite tests it); here only that home opens it.
 jest.mock('./artifacts/ArtifactSearchScreen', () => ({
   ArtifactSearchScreen: () => {
@@ -271,6 +302,26 @@ describe('routing', () => {
       await userEvent.setup().press(await screen.findByText('Projects'))
       expect(screen).toHavePathname('/projects')
       expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'projects'])
+    })
+
+    it('Tasks: new-task opens in the Tasks tab with its params; created, the task replaces it', async () => {
+      signedIn()
+      await renderRouter(ROUTES, {
+        initialUrl: '/new-task?hub=home.example&project=p&status=todo&parent=t0'
+      })
+      expect(await screen.findByText('new task home.example p todo t0')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'new-task'])
+      await userEvent.setup().press(screen.getByText('stand-in create'))
+      expect(screen).toHavePathname('/task/home.example/new1')
+      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
+    })
+
+    it('Tasks: new-task without status or parent; Cancel leaves it', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/new-task?hub=home.example&project=p' })
+      expect(await screen.findByText('new task home.example p - -')).toBeOnTheScreen()
+      await userEvent.setup().press(screen.getByText('stand-in cancel'))
+      expect(screen).toHavePathname('/tasks')
     })
 
     it('Tasks: a task’s agent opens in the Tasks tab', async () => {

@@ -51,6 +51,25 @@ describe('Markdown', () => {
     open.mockRestore()
   })
 
+  it('hands links to onLink first; a link it takes is not opened as a web link', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined)
+    const onLink = jest.fn((href: string) => href.startsWith('artifact:'))
+    await render(
+      <Markdown
+        text={'[spec](artifact:a1), [img](artifact:a2) and [site](https://example.com)'}
+        onLink={onLink}
+      />
+    )
+    const user = userEvent.setup()
+    await user.press(screen.getByText('spec'))
+    expect(onLink).toHaveBeenLastCalledWith('artifact:a1')
+    expect(open).not.toHaveBeenCalled()
+    await user.press(screen.getByText('site'))
+    expect(onLink).toHaveBeenLastCalledWith('https://example.com')
+    expect(open).toHaveBeenCalledWith('https://example.com')
+    open.mockRestore()
+  })
+
   it('renders text that is still streaming, unfinished markup included', async () => {
     await render(<Markdown text={'Partial **bol'} />)
     expect(screen.getByText(/Partial/)).toBeOnTheScreen()

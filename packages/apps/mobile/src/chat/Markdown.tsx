@@ -4,7 +4,9 @@
  * by `marked`'s lexer (pure JS, no DOM, no native module) and drawn here. Text that is
  * still streaming renders as far as it goes: an unfinished `**` shows as typed.
  *
- * Links open in the browser, web links only. Images show as their alt text, linked.
+ * Links open in the browser, web links only — unless `onLink` takes them first (a task
+ * description's `artifact:` links open the artifact). Images show as their alt text,
+ * linked.
  */
 import { lexer, type Token, type Tokens } from 'marked'
 import { memo, type ReactNode, useMemo } from 'react'
@@ -13,19 +15,30 @@ import { type ChromeColors, useTheme } from '../theme'
 
 export const Markdown = memo(function Markdown({
   text,
-  muted = false
+  muted = false,
+  onLink
 }: {
   text: string
   /** Secondary text (thinking): the muted foreground. */
   muted?: boolean
+  /** A link was pressed: true = handled here, else it opens as a web link. */
+  onLink?: (href: string) => boolean
 }) {
   const theme = useTheme()
-  const styles = useMemo(() => makeStyles(theme, muted), [theme, muted])
+  const styles = useMemo<Styles>(
+    () => ({
+      ...makeStyles(theme, muted),
+      openLink: (href: string) => {
+        if (!onLink?.(href)) openWebLink(href)
+      }
+    }),
+    [theme, muted, onLink]
+  )
   const tokens = useMemo(() => lexer(text), [text])
   return <View>{blocks(tokens, styles, 'b')}</View>
 })
 
-type Styles = ReturnType<typeof makeStyles>
+type Styles = ReturnType<typeof makeStyles> & { openLink: (href: string) => void }
 
 function blocks(tokens: readonly Token[], s: Styles, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = []
@@ -196,7 +209,7 @@ function inlineToken(token: Token, s: Styles, key: string): ReactNode {
     case 'link': {
       const t = token as Tokens.Link
       return (
-        <Text key={key} style={s.link} onPress={() => openWebLink(t.href)} accessibilityRole="link">
+        <Text key={key} style={s.link} onPress={() => s.openLink(t.href)} accessibilityRole="link">
           {inline(t.tokens, s, key)}
         </Text>
       )
@@ -204,7 +217,7 @@ function inlineToken(token: Token, s: Styles, key: string): ReactNode {
     case 'image': {
       const t = token as Tokens.Image
       return (
-        <Text key={key} style={s.link} onPress={() => openWebLink(t.href)} accessibilityRole="link">
+        <Text key={key} style={s.link} onPress={() => s.openLink(t.href)} accessibilityRole="link">
           {t.text || t.href}
         </Text>
       )

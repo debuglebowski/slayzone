@@ -29,6 +29,20 @@ import { TaskBrowser, type TaskBrowserProps } from './TaskBrowser'
 // The task's computer card and artifacts link read their hub (their own suites test them).
 jest.mock('./computers/TaskComputer', () => ({ TaskComputer: () => null }))
 jest.mock('./artifacts/TaskArtifactsLink', () => ({ TaskArtifactsLink: () => null }))
+// The task editor writes to its hub (its own suites test it): here its title, notes and
+// the cards it is handed.
+jest.mock('./task-edit/TaskEditor', () => ({
+  TaskEditor: (p: import('./task-edit/TaskEditor').TaskEditorProps) => {
+    const { Text } = jest.requireActual('react-native')
+    return (
+      <>
+        <Text>{p.row.task.title}</Text>
+        <Text>{p.row.task.description}</Text>
+        {p.children}
+      </>
+    )
+  }
+}))
 
 const mockHubs = createFakeHubs()
 jest.mock('@slayzone/transport/client', () => {

@@ -34,7 +34,7 @@ export function TaskScreen({
 
   let body: ReactNode
   if (!session) body = <Text style={styles.note}>Not signed in to {hubAddress}</Text>
-  else if (row) body = <TaskDetail row={row} showHub={feeds.length > 1} />
+  else if (row) body = <TaskDetail row={row} showHub={feeds.length > 1} onDeleted={onBack} />
   else if (feed?.board.pending)
     body = (
       <View style={styles.center} testID="task-loading">

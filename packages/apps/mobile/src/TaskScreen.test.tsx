@@ -7,6 +7,22 @@ import { TaskScreen } from './TaskScreen'
 // The task's computer card and artifacts link read their hub (their own suites test them).
 jest.mock('./computers/TaskComputer', () => ({ TaskComputer: () => null }))
 jest.mock('./artifacts/TaskArtifactsLink', () => ({ TaskArtifactsLink: () => null }))
+// The editor talks to the task's hub (its own suites test it); here: what it is handed.
+jest.mock('./task-edit/TaskEditor', () => {
+  const { Pressable, Text } = jest.requireActual('react-native')
+  return {
+    TaskEditor: (p: import('./task-edit/TaskEditor').TaskEditorProps) => (
+      <>
+        <Text>{p.row.task.title}</Text>
+        <Text>{p.row.task.description}</Text>
+        <Pressable onPress={p.onDeleted}>
+          <Text>stand-in delete</Text>
+        </Pressable>
+        {p.children}
+      </>
+    )
+  }
+})
 
 const home = hubEntryOf('home.example')
 const session = { entry: home, token: 't' }
@@ -95,6 +111,22 @@ describe('TaskScreen (phone)', () => {
     )
     expect(screen.getByText('Not signed in to other.example')).toBeOnTheScreen()
     await userEvent.setup().press(screen.getByText('‹ Back'))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('a deleted task leaves its screen', async () => {
+    const onBack = jest.fn()
+    await render(
+      <TaskScreen
+        hubAddress="home.example"
+        taskId="sub"
+        sessions={[session]}
+        feeds={[feed(board)]}
+        onBack={onBack}
+        onOpenAgent={jest.fn()}
+      />
+    )
+    await userEvent.setup().press(screen.getByText('stand-in delete'))
     expect(onBack).toHaveBeenCalled()
   })
 
