@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFederationOrNull } from './FederationProvider'
-import { NO_SOCKET, useConnectionState } from './hubConnection'
 
 /**
  * Which hub something lives on, for marking it when the client lists more than
@@ -28,36 +27,70 @@ export function hubBadgeColor(index: number): string {
   return `hsl(${Math.round((index * 137.508) % 360)} 70% 55%)`
 }
 
-/** The badge of a hub in the nearest federation; null with one hub or none. */
-export function useHubBadge(hubId: string | null | undefined): HubBadge | null {
+const NONE: ReadonlySet<string> = new Set()
+
+/** Every hub's badge in the nearest federation, by hub id; null with one hub or none. */
+export function useHubBadges(): ReadonlyMap<string, HubBadge> | null {
   const fed = useFederationOrNull()
-  const hubs = fed?.hubs ?? []
-  const index = hubId ? hubs.findIndex((h) => h.id === hubId) : -1
-  const shown = hubs.length > 1 && index >= 0
-  const resolved = shown && hubId ? fed?.resolve(hubId) : null
-  const connection = useConnectionState(resolved?.ws.wsClient.connectionState ?? NO_SOCKET)
-  const unreachable = useHeldFor(
-    connection.status === 'connecting' && connection.error !== null,
-    HUB_UNREACHABLE_GRACE_MS
-  )
-  if (!shown || !hubId) return null
-  return { hubId, label: hubs[index].label, color: hubBadgeColor(index), unreachable }
+  const [unreachable, setUnreachable] = useState<ReadonlySet<string>>(NONE)
+
+  useEffect(() => {
+    if (!fed || fed.hubs.length < 2) return
+    const mark = (hubId: string, down: boolean): void =>
+      setUnreachable((prev) => {
+        if (prev.has(hubId) === down) return prev
+        const next = new Set(prev)
+        if (down) next.add(hubId)
+        else next.delete(hubId)
+        return next
+      })
+    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    const unsubs: Array<() => void> = []
+    for (const hub of fed.hubs) {
+      const source = fed.resolve(hub.id)?.ws.wsClient.connectionState
+      if (!source) continue
+      const onState = (state: ReturnType<typeof source.get>): void => {
+        const failing = state.state === 'connecting' && state.error !== null
+        if (!failing) {
+          clearTimeout(timers.get(hub.id))
+          timers.delete(hub.id)
+          mark(hub.id, false)
+        } else if (!timers.has(hub.id)) {
+          timers.set(
+            hub.id,
+            setTimeout(() => mark(hub.id, true), HUB_UNREACHABLE_GRACE_MS)
+          )
+        }
+      }
+      onState(source.get())
+      const subscription = source.subscribe({ next: onState })
+      unsubs.push(() => subscription.unsubscribe())
+    }
+    return () => {
+      for (const unsub of unsubs) unsub()
+      for (const timer of timers.values()) clearTimeout(timer)
+    }
+  }, [fed])
+
+  const hubs = fed?.hubs
+  return useMemo(() => {
+    if (!hubs || hubs.length < 2) return null
+    return new Map(
+      hubs.map((hub, index) => [
+        hub.id,
+        {
+          hubId: hub.id,
+          label: hub.label,
+          color: hubBadgeColor(index),
+          unreachable: unreachable.has(hub.id)
+        }
+      ])
+    )
+  }, [hubs, unreachable])
 }
 
-/** `value` has been true for `ms` without a break. */
-function useHeldFor(value: boolean, ms: number): boolean {
-  const [held, setHeld] = useState(false)
-  // Each stretch counts its own time: a change restarts it (React's "adjust
-  // state when a prop changes" pattern, during render).
-  const [was, setWas] = useState(value)
-  if (value !== was) {
-    setWas(value)
-    setHeld(false)
-  }
-  useEffect(() => {
-    if (!value) return
-    const timer = setTimeout(() => setHeld(true), ms)
-    return () => clearTimeout(timer)
-  }, [value, ms])
-  return value && held
+/** The badge of one hub in the nearest federation; null with one hub or none. */
+export function useHubBadge(hubId: string | null | undefined): HubBadge | null {
+  const badges = useHubBadges()
+  return (hubId && badges?.get(hubId)) || null
 }

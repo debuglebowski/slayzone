@@ -690,6 +690,18 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await hub.stop()
       hub = null
       await expect(tile).toHaveAttribute('data-hub-unreachable', '', { timeout: 20_000 })
+
+      // Same in the tree view: the project row carries the hub dot and greys out.
+      await page.evaluate(() =>
+        (
+          window as unknown as { __slayzone_tabStore: { setState: (s: unknown) => void } }
+        ).__slayzone_tabStore.setState({ sidebarView: 'tree' })
+      )
+      // A project without tasks only shows with "Show all projects".
+      await page.getByRole('button', { name: 'Show all projects' }).click()
+      const row = page.getByRole('button', { name: /^(Expand|Collapse) Wakeup-P$/ }).locator('..')
+      await expect(row.locator('[data-hub-badge]')).toHaveAttribute('data-hub-badge', 'B')
+      await expect(row).toHaveAttribute('data-hub-unreachable', '')
     } finally {
       if (launched) await launched.close()
       if (hubComputer) await hubComputer.stop()

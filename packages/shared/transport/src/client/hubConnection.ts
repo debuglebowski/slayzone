@@ -78,7 +78,7 @@ export function useConnectionState(source: ConnectionStateSource): HubConnection
 }
 
 /** A state that never changes, read for a hub the federation does not list. */
-export const NO_SOCKET: ConnectionStateSource = behaviorSubject<ConnectionState>({
+const NO_SOCKET: ConnectionStateSource = behaviorSubject<ConnectionState>({
   type: 'state',
   state: 'idle',
   error: null

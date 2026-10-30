@@ -34,6 +34,7 @@ export {
 export {
   hubBadgeColor,
   useHubBadge,
+  useHubBadges,
   HUB_UNREACHABLE_GRACE_MS,
   type HubBadge
 } from './hubBadge'

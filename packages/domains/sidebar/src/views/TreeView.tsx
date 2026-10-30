@@ -54,6 +54,8 @@ import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
 import { resolveProjectDrop, applyProjectDrop } from './projectDrop'
 import logo from '../assets/logo.svg'
 import type { SidebarViewContext } from './types'
+import { useHubBadges, useHubOwnershipStore } from '@slayzone/transport/client'
+import { HubPill } from '../HubDot'
 import type { Tag } from '@slayzone/tags/shared'
 import {
   TreeGroupHeader,
@@ -146,6 +148,8 @@ export function TreeView({
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treeShowTags = useTabStore((s) => s.treeShowTags)
+  const hubBadges = useHubBadges()
+  const hubIdByProject = useHubOwnershipStore((s) => s.hubIdByProject)
   // Task id → resolved tags in tag sort order. Empty when the toggle is off so
   // rows skip the lookup entirely.
   const tagsByTaskId = useMemo(() => {
@@ -1295,6 +1299,8 @@ export function TreeView({
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
     const staleSkillCount = staleSkillCounts.get(project.id) ?? 0
+    const projectHubId = hubIdByProject.get(project.id)
+    const hubBadge = (projectHubId && hubBadges?.get(projectHubId)) || null
     const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
     const cols = columnsByProjectId?.get(project.id) ?? null
     // Flat row list: headers + tasks in DFS order. Non-temp header rows
@@ -1359,10 +1365,14 @@ export function TreeView({
           >
             <div
               {...listeners}
+              data-hub-unreachable={hubBadge?.unreachable ? '' : undefined}
               style={{
                 backgroundColor: `color-mix(in oklch, ${project.color} ${projectIsActive(project.id) ? 22 : 10}%, transparent)`
               }}
-              className="group/projectrow relative flex h-10 items-center transition-[filter] hover:brightness-125"
+              className={cn(
+                'group/projectrow relative flex h-10 items-center transition-[filter] hover:brightness-125',
+                hubBadge?.unreachable && 'opacity-50'
+              )}
             >
               <Collapsible.Trigger
                 aria-label={isOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
@@ -1381,6 +1391,7 @@ export function TreeView({
                   className="flex flex-1 items-center gap-2 rounded-md py-1.5 text-sm font-semibold min-w-0"
                 >
                   <span className="truncate text-left">{project.name}</span>
+                  {hubBadge && <HubPill badge={hubBadge} />}
                   {project.starred && (
                     <Star
                       aria-label="Starred"
