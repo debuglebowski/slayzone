@@ -10,7 +10,15 @@ import {
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
-import type { AgentEvent, PermissionDecision, UserContentBlock } from '@slayzone/terminal-contracts'
+import type {
+  AgentEvent,
+  PermissionDecision,
+  RewindFilesPreview,
+  RewindResult,
+  RewindScope,
+  StopResult,
+  UserContentBlock
+} from '@slayzone/terminal-contracts'
 import { userMessageText } from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from './chat-prompts'
 import {
@@ -80,11 +88,37 @@ export interface UseChatSessionResult {
   /**
    * Stop the current turn. If no assistant progress arrived since the user's
    * last message, that message is cancelled instead of leaving an `interrupted`
-   * marker — Claude CLI parity. Returns `popped: true` + the cancelled text so
-   * the caller can restore it to the chat input field.
+   * marker — Claude CLI parity. Returns `popped: true` + the cancelled message
+   * (`id`, `content` with its attachments, `text`) so the caller can restore it
+   * to the chat input field.
    */
-  abortAndPop: () => Promise<{ popped: boolean; text: string | null }>
+  abortAndPop: () => Promise<StopResult>
   kill: () => Promise<void>
+  /**
+   * The agent was refused because the terminal runs this conversation: stop the
+   * terminal (its exit awaited) and start the agent here.
+   */
+  takeOver: () => Promise<void>
+  /**
+   * What restoring the files to a past message would change (a dry run; may
+   * start the agent). `scope` as in `rewind`.
+   */
+  rewindPreview: (messageId: string, scope: RewindScope) => Promise<RewindFilesPreview>
+  /**
+   * Edit & resend (`before`) or rewind to here (`after`): the conversation, the
+   * files, or both — live, the agent keeps running. Rejects with why it could not.
+   */
+  rewind: (args: {
+    messageId: string
+    scope: RewindScope
+    conversation: boolean
+    files: boolean
+  }) => Promise<RewindResult>
+  /**
+   * Fork from a past message, in this tab: a new conversation up to the end of
+   * that message's turn (the original stays in Sessions). Rejects with why not.
+   */
+  fork: (messageId: string) => Promise<void>
   /** Clear timeline + ended-state immediately (UX). New turn-init refills on next session. */
   reset: () => void
 }
@@ -553,7 +587,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     await trpcClient.chat.interrupt.mutate(createOpts())
   }
 
-  const abortAndPop = async (): Promise<{ popped: boolean; text: string | null }> => {
+  const abortAndPop = async (): Promise<StopResult> => {
     // Main is authoritative: walks its own buffer to decide pop vs marker. The
     // synthetic event (`user-message-popped` or `interrupted`) flows back via
     // `chat:event`; reducer mutates the timeline. Return value tells the caller
@@ -564,6 +598,25 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const kill = async (): Promise<void> => {
     await trpcClient.chat.kill.mutate({ tabId: opts.tabId })
   }
+
+  const takeOver = async (): Promise<void> => {
+    await trpcClient.chat.takeOver.mutate(createOpts())
+  }
+
+  // The marker (`conversation-branch`) and any notice arrive as events; these
+  // return only what the caller acts on (the dry run, the text to edit).
+  const rewindPreview = (messageId: string, scope: RewindScope): Promise<RewindFilesPreview> =>
+    trpcClient.chat.rewindPreview.mutate({ ...createOpts(), messageId, scope })
+
+  const rewind = (args: {
+    messageId: string
+    scope: RewindScope
+    conversation: boolean
+    files: boolean
+  }): Promise<RewindResult> => trpcClient.chat.rewind.mutate({ ...createOpts(), ...args })
+
+  const fork = (messageId: string): Promise<void> =>
+    trpcClient.chat.fork.mutate({ ...createOpts(), messageId }).then(() => undefined)
 
   const reset = (): void => {
     discardPendingLive()
@@ -587,6 +640,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     interrupt,
     abortAndPop,
     kill,
+    takeOver,
+    rewindPreview,
+    rewind,
+    fork,
     reset
   }
 }

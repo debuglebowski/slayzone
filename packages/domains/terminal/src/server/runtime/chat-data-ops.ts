@@ -25,10 +25,10 @@ import { getChatCliSnapshot, saveChatCliSnapshot } from '../chat-cli-snapshot-st
 export interface ProviderConfigEntry {
   conversationId?: string | null
   /**
-   * Chat-transport session id. Separate from PTY's conversationId because the two
-   * transports store Claude sessions under different paths — a session spawned via
-   * PTY `claude --session-id X` is NOT resumable by `claude -p --resume X` (headless
-   * stream-json store differs).
+   * Chat-transport session id — its own field because chat and terminal are two
+   * modes with their own current conversation. The CLI's store is the same: a
+   * TUI session resumes under `claude -p --resume X` and the reverse (2.1.312,
+   * chat-a check R1), which is what the chat ↔ terminal hand-off relies on.
    */
   chatConversationId?: string | null
   flags?: string | null
@@ -72,6 +72,10 @@ export interface ChatDataOps {
   getModeDefaultFlags(mode: string): Promise<string | null>
   /** Append to the task_conversations ledger (+ transition-slice dual-writes). */
   recordConversation(input: RecordConversationInput): Promise<void>
+  /** Did this task run `conversationId` in `mode` (honored, not deleted)? */
+  isHonoredConversation(taskId: string, mode: string, conversationId: string): Promise<boolean>
+  /** The conversation `mode` resumes next for this task (the ledger's current). */
+  getCurrentConversationId(taskId: string, mode: string): Promise<string | null>
   /**
    * Monotonic `tasks.last_interaction_at` bump. Returns true when the row
    * changed (drives the `tasks:changed` renderer notify at the call site).
@@ -221,6 +225,12 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     },
 
     recordConversation: (input) => taskStore.recordConversation(db, input),
+
+    isHonoredConversation: (taskId, mode, conversationId) =>
+      taskStore.isHonoredConversation(db, taskId, mode, conversationId),
+
+    getCurrentConversationId: (taskId, mode) =>
+      taskStore.getCurrentConversationId(db, taskId, mode),
 
     bumpLastInteraction: async (taskId, now) => {
       const res = await db

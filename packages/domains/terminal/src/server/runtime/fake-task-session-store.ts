@@ -15,7 +15,13 @@ export interface TaskSessionStoreCall {
  * (default true). The real SQL is covered by task's own op tests.
  */
 export function createFakeTaskSessionStore(
-  opts: { bindResult?: boolean } = {}
+  opts: {
+    bindResult?: boolean
+    /** `isHonoredConversation` answer (default true). */
+    honored?: boolean
+    /** `getCurrentConversationId` answer per mode (default none). */
+    current?: Record<string, string>
+  } = {}
 ): TaskSessionStore & {
   calls: TaskSessionStoreCall[]
 } {
@@ -41,6 +47,14 @@ export function createFakeTaskSessionStore(
     },
     markSessionDead: async (db, args) => {
       calls.push({ method: 'markSessionDead', db, args })
+    },
+    isHonoredConversation: async (db, taskId, mode, conversationId) => {
+      calls.push({ method: 'isHonoredConversation', db, args: { taskId, mode, conversationId } })
+      return opts.honored ?? true
+    },
+    getCurrentConversationId: async (db, taskId, mode) => {
+      calls.push({ method: 'getCurrentConversationId', db, args: { taskId, mode } })
+      return opts.current?.[mode] ?? null
     }
   }
 }

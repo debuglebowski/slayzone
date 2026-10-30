@@ -2,11 +2,18 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from './events'
-import { recordPendingSpawn, recordConversation, isHonoredConversation, deleteSession } from './ops'
+import {
+  recordPendingSpawn,
+  recordConversation,
+  switchConversation,
+  isHonoredConversation,
+  deleteSession
+} from './ops'
 import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
 import { startMainAgent } from './main-agent'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
+import { releaseChatConversation } from '@slayzone/terminal/server'
 import {
   getTaskBus,
   getTaskOps,
@@ -156,22 +163,40 @@ export const taskRouter = router({
   // conversation this task+mode already owns can be selected. Returns the
   // refreshed task.
   switchConversation: publicProcedure
-    .input(z.object({ id: z.string(), mode: z.string(), conversationId: z.string() }))
+    .input(
+      z.object({
+        id: z.string(),
+        mode: z.string(),
+        conversationId: z.string(),
+        // The mode that ran it. The chat ↔ terminal partner: the conversation
+        // moves over (a hand-off, chat A); absent = `mode` itself.
+        sourceMode: z.string().optional()
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const existing = await ops().getTaskOp(ctx.db, input.id)
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-      if (!(await isHonoredConversation(ctx.db, input.id, input.mode, input.conversationId))) {
+      const outcome = await switchConversation(
+        ctx.db,
+        {
+          taskId: input.id,
+          mode: input.mode,
+          conversationId: input.conversationId,
+          ...(input.sourceMode ? { sourceMode: input.sourceMode } : {})
+        },
+        // Never two processes on one conversation: a chat still running it stops
+        // (and has exited) before the terminal resumes it.
+        { release: releaseChatConversation }
+      )
+      if (outcome !== 'switched') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Not a session of this task'
+          message:
+            outcome === 'not-partner'
+              ? `A ${input.sourceMode} session cannot move to ${input.mode}`
+              : 'Not a session of this task'
         })
       }
-      await recordConversation(ctx.db, {
-        taskId: input.id,
-        mode: input.mode,
-        conversationId: input.conversationId,
-        origin: 'user-selected'
-      })
       getTaskOnMutation()?.()
       const r = await ops().getTaskOp(ctx.db, input.id)
       if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })

@@ -10,16 +10,23 @@
  *   - DB chatConversationId is cleared
  *   - persisted chat_events for the tab are wiped
  */
-import { expect, test } from 'vitest'
+import { afterEach, expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type Database from 'better-sqlite3'
-import { backfillChatModes, createChatOps, registerChatHandlers } from './chat-handlers'
+import {
+  backfillChatModes,
+  createChatOps,
+  registerChatHandlers,
+  setClaudeSessionReader
+} from './chat-handlers'
 import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
 import { persistChatEvent } from '../chat-events-store'
+import { fakeChild, type FakeChild, until } from './chat-transport-testkit'
+import { registerConversationHolder } from './live-conversations'
 import {
   createSlayzoneDbAdapter,
   createTestHarness
@@ -961,4 +968,295 @@ test('boot backfill leaves Claude chat entries to the default mode; Codex unchan
   expect(read('task-bf-codex')).toEqual({ 'codex-chat': { chatMode: 'bypass' } })
   const ops = createChatOps(localChatOpts(db))
   expect(await ops.getMode('task-bf-claude', 'claude-chat')).toBe('auto-accept')
+})
+
+// ---- chat A: live effort (3.11) ----
+
+async function liveEffortSetup(answer: 'success' | 'error') {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  const taskId = `task-effort-${answer}`
+  const tabId = `tab-effort-${answer}`
+  seedTask(db, taskId, null, tabId)
+  const spawns: Array<{ args: string[]; child: FakeChild }> = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: (_cmd, args) => {
+      const child = fakeChild({ exitOnKill: true })
+      if (answer === 'error') child.answer('apply_flag_settings', () => ({ error: 'refused' }))
+      else child.answer('apply_flag_settings', () => ({ success: undefined }))
+      spawns.push({ args, child })
+      setImmediate(() => child.emitter.emit('spawn'))
+      return child.child
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  const o = { tabId, taskId, mode: 'claude-chat', cwd: '/tmp', providerFlagsOverride: null }
+  await ipc.invoke('chat:start', o)
+  await until(() => mgr.getSessionTerminalState(tabId) === 'idle')
+  const storedEffort = () => {
+    const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as {
+      provider_config: string
+    }
+    return (JSON.parse(row.provider_config) as Record<string, { chatEffort?: string }>)[
+      'claude-chat'
+    ]?.chatEffort
+  }
+  return { ipc, o, spawns, storedEffort }
+}
+
+test('chat:setEffort on a live Claude process applies it live (apply_flag_settings), no respawn', async () => {
+  const { ipc, o, spawns, storedEffort } = await liveEffortSetup('success')
+  const info = (await ipc.invoke('chat:setEffort', { ...o, chatEffort: 'high' })) as {
+    chatEffort: string
+  }
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0].child.controlRequests('apply_flag_settings')).toEqual([
+    { subtype: 'apply_flag_settings', settings: { effortLevel: 'high' } }
+  ])
+  expect(info.chatEffort).toBe('high')
+  expect(storedEffort()).toBe('high')
+})
+
+test('chat:setEffort falls back to a respawn with --effort when the CLI refuses the live change', async () => {
+  const { ipc, o, spawns, storedEffort } = await liveEffortSetup('error')
+  await ipc.invoke('chat:setEffort', { ...o, chatEffort: 'low' })
+  expect(spawns).toHaveLength(2)
+  const args = spawns[1].args
+  expect(args[args.indexOf('--effort') + 1]).toBe('low')
+  expect(storedEffort()).toBe('low')
+})
+
+// ---- chat A: switching conversations (Sessions picker, plan 3.6) ----
+
+const PICKED = '22222222-3333-4444-8555-666666666666'
+
+async function switchSetup(
+  opts: {
+    honored?: boolean
+    current?: Record<string, string>
+    reader?: Parameters<typeof setClaudeSessionReader>[0]
+  } = {}
+) {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  const taskId = `task-switch-${Math.random().toString(36).slice(2)}`
+  const tabId = `tab-${taskId}`
+  seedTask(db, taskId, null, tabId)
+  const spawns: string[][] = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: (_cmd, args) => {
+      spawns.push(args)
+      const child = fakeChild({ exitOnKill: true })
+      setImmediate(() => child.emitter.emit('spawn'))
+      return child.child
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const store = createFakeTaskSessionStore({ honored: opts.honored ?? true, current: opts.current })
+  const ops = createChatOps({ dataOps: createDbChatDataOps(createSlayzoneDbAdapter(db), store) })
+  setClaudeSessionReader(
+    opts.reader ??
+      (async () => ({
+        found: true,
+        omitted: 0,
+        records: [
+          { type: 'user', uuid: 'h1', message: { role: 'user', content: 'picked conversation' } },
+          {
+            type: 'assistant',
+            uuid: 'h2',
+            message: {
+              id: 'msg_h2',
+              role: 'assistant',
+              content: [{ type: 'text', text: 'its answer' }]
+            }
+          }
+        ]
+      }))
+  )
+  const o = { tabId, taskId, mode: 'claude-chat', cwd: '/tmp', providerFlagsOverride: null }
+  await ops.start(o)
+  await until(() => mgr.getSessionTerminalState(tabId) === 'idle')
+  const kinds = () =>
+    (
+      db
+        .prepare('SELECT event FROM chat_events WHERE tab_id = ? ORDER BY seq')
+        .all(tabId) as Array<{ event: string }>
+    ).map((r) => JSON.parse(r.event) as { kind: string; [k: string]: unknown })
+  return { ops, o, spawns, store, kinds, tabId }
+}
+
+test('chat.switchConversation resumes the picked conversation, with its history; same mode = user-selected', async () => {
+  const { ops, o, spawns, store, kinds } = await switchSetup()
+  await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-chat' })
+  expect(spawns).toHaveLength(2)
+  expect(spawns[1][spawns[1].indexOf('--resume') + 1]).toBe(PICKED)
+  expect(store.calls.find((c) => c.method === 'recordConversation')?.args).toMatchObject({
+    conversationId: PICKED,
+    mode: 'claude-chat',
+    origin: 'user-selected',
+    legacyJsonField: 'chatConversationId'
+  })
+  await until(() => kinds().some((e) => e.kind === 'assistant-text'))
+  const events = kinds()
+  const at = events.findIndex((e) => e.kind === 'conversation-branch')
+  expect(events[at]).toMatchObject({
+    reason: 'switched',
+    conversationId: PICKED,
+    source: 'sessions',
+    title: 'picked conversation'
+  })
+  expect(events[at + 1]).toMatchObject({ kind: 'user-message', id: 'h1', history: true })
+  setClaudeSessionReader(null)
+})
+
+test('picking a terminal conversation is a hand-off: checked against the terminal mode, recorded as handoff', async () => {
+  const { ops, o, store } = await switchSetup()
+  await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-code' })
+  expect(store.calls.find((c) => c.method === 'isHonoredConversation')?.args).toMatchObject({
+    mode: 'claude-code',
+    conversationId: PICKED
+  })
+  expect(store.calls.find((c) => c.method === 'recordConversation')?.args).toMatchObject({
+    mode: 'claude-chat',
+    origin: 'handoff'
+  })
+  setClaudeSessionReader(null)
+})
+
+test('a conversation this task never ran is refused, nothing switches', async () => {
+  const { ops, o, spawns } = await switchSetup({ honored: false })
+  await expect(
+    ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-chat' })
+  ).rejects.toThrow(/not a conversation of this task/i)
+  expect(spawns).toHaveLength(1)
+  setClaudeSessionReader(null)
+})
+
+test('history that cannot be read: the switch still happens, and the chat says so', async () => {
+  const { ops, o, spawns, kinds } = await switchSetup({
+    reader: async () => {
+      throw new Error('unimplemented on this computer')
+    }
+  })
+  await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-chat' })
+  expect(spawns).toHaveLength(2)
+  expect(kinds().find((e) => e.kind === 'notice')).toMatchObject({ code: 'history-unavailable' })
+  setClaudeSessionReader(null)
+})
+
+test('chat.fork is refused for a chat mode without forks (Codex), and nothing respawns', async () => {
+  const { ops, o, spawns } = await switchSetup()
+  await expect(ops.fork({ ...o, mode: 'codex-chat', messageId: 'm1' })).rejects.toThrow(/fork/i)
+  expect(spawns).toHaveLength(1)
+  setClaudeSessionReader(null)
+})
+
+test('chat.fork of a message the conversation does not hold is refused', async () => {
+  const { ops, o, spawns } = await switchSetup()
+  await expect(ops.fork({ ...o, messageId: 'nope' })).rejects.toThrow(/not in the conversation/)
+  expect(spawns).toHaveLength(1)
+  setClaudeSessionReader(null)
+})
+
+// ---- chat A, plan 3.10: the chat ↔ terminal hand-off ----
+
+/** A terminal side that runs `conversationId` until released (records the order of things). */
+function fakeTerminal(conversationId: string, order: string[]): { live: () => boolean } {
+  let live = true
+  registerConversationHolder('terminal', {
+    isLive: (_taskId, conv) => live && conv === conversationId,
+    release: async (taskId, conv) => {
+      order.push(`release ${taskId === '' ? '?' : 'task'} ${conv}`)
+      live = false
+    }
+  })
+  return { live: () => live }
+}
+
+afterEach(() => {
+  registerConversationHolder('terminal', { isLive: () => false, release: async () => {} })
+})
+
+test('continue in terminal: the chat process stops and is gone, then the terminal is told the conversation', async () => {
+  const { ops, o, store, tabId } = await switchSetup()
+  await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-chat' })
+  const result = await ops.continueInTerminal(o)
+  expect(result).toEqual({ conversationId: PICKED })
+  expect(mgr.getSessionInfo(tabId)).toBeNull()
+  expect(store.calls.filter((c) => c.method === 'recordConversation').at(-1)?.args).toMatchObject({
+    mode: 'claude-code',
+    conversationId: PICKED,
+    origin: 'handoff'
+  })
+  setClaudeSessionReader(null)
+})
+
+test('continue in chat: the terminal is released first, then the chat shows its history and resumes it', async () => {
+  const order: string[] = []
+  const { ops, o, spawns, store, kinds } = await switchSetup({ current: { 'claude-code': PICKED } })
+  fakeTerminal(PICKED, order)
+  const info = await ops.continueInChat(o)
+  expect(info.sessionId).toBe(PICKED)
+  expect(order).toEqual([`release task ${PICKED}`])
+  expect(store.calls.filter((c) => c.method === 'recordConversation').at(-1)?.args).toMatchObject({
+    mode: 'claude-chat',
+    conversationId: PICKED,
+    origin: 'handoff',
+    legacyJsonField: 'chatConversationId'
+  })
+  expect(spawns.at(-1)?.[spawns.at(-1)!.indexOf('--resume') + 1]).toBe(PICKED)
+  await until(() => kinds().some((e) => e.kind === 'assistant-text'))
+  expect(kinds().find((e) => e.kind === 'conversation-branch')).toMatchObject({
+    reason: 'switched',
+    source: 'terminal'
+  })
+  setClaudeSessionReader(null)
+})
+
+test('a chat never resumes a conversation the terminal runs: it says so; "continue here" releases the terminal and starts', async () => {
+  const order: string[] = []
+  const { ops, o, spawns, kinds } = await switchSetup()
+  await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-chat' })
+  mgr.kill(o.tabId)
+  await until(() => mgr.getSessionInfo(o.tabId)?.ended === true)
+  const before = spawns.length
+  fakeTerminal(PICKED, order)
+  await expect(ops.start(o)).rejects.toThrow(/running in the terminal/)
+  expect(spawns).toHaveLength(before)
+  expect(
+    kinds()
+      .filter((e) => e.kind === 'error')
+      .at(-1)
+  ).toMatchObject({
+    detail: { code: 'conversation-in-use' }
+  })
+
+  await ops.takeOver(o)
+  expect(order).toEqual([`release task ${PICKED}`])
+  expect(spawns).toHaveLength(before + 1)
+  expect(spawns.at(-1)?.[spawns.at(-1)!.indexOf('--resume') + 1]).toBe(PICKED)
+  setClaudeSessionReader(null)
+})
+
+test('picking a terminal session in the chat releases the terminal running it first', async () => {
+  const order: string[] = []
+  const { ops, o } = await switchSetup()
+  fakeTerminal(PICKED, order)
+  await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-code' })
+  expect(order).toEqual([`release task ${PICKED}`])
+  setClaudeSessionReader(null)
 })

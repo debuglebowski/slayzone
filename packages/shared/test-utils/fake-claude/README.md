@@ -121,6 +121,25 @@ The defaults copy CLI 2.1.312 behaviour as recorded:
 - **SIGTERM**: exit 143. Set `onSigterm` to keep talking first; this is how a replaced process that still emits events is scripted.
 - **`--allow-dangerously-skip-permissions`** leaves the mode at `default`, as on the real CLI. Only `--dangerously-skip-permissions` means bypass.
 
+### Conversation control (chat A)
+
+As 2.1.312 behaves (chat-a checks R1–R6, R3b):
+
+- **Session file**: with `CLAUDE_CONFIG_DIR` set (never otherwise), the fake keeps the conversation in `<CLAUDE_CONFIG_DIR>/projects/<encoded cwd>/<id>.jsonl`: user and assistant records chained by `parentUuid`, append-only. Every streamed assistant line carries its record's `uuid`; a scripted uuid played again gets a new one.
+- **`--resume`** seeds the conversation from the active branch of that file (the last main-chain record, walked back through `parentUuid`).
+- **Fork**: `--resume S --resume-session-at A --fork-session --session-id N` copies S up to record `A` into N. S is only read; N is written with its first record (an unused fork leaves no file). An unknown `A` exits 1 with the CLI's `No message found with message.uuid of: …`.
+- **Dedupe**: a user message whose `uuid` the conversation already holds is acked `completed` only and runs no turn.
+- **`rewind_conversation`** answers `{rewound, targetMessageUuid, prefillText, precedingAssistantUuid}` or `{rewound:false, reason:'target_not_found'}`; the next message branches off the record before the target.
+- **`rewind_files`** needs `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true` (else the CLI's error). Checkpoints come from the scenario's `fileCheckpoints` (by user-message index); a dry run reports, a real run writes the `restore` files.
+- **`interrupt`** answers the real `still_queued`; `cancel_async_message` withdraws a queued message (`{cancelled}`).
+- **`apply_flag_settings`** is acked with no response body and sets `{{effort}}`.
+- `controlResponses[subtype]` may also be `{success: payload}` or `{error}`.
+- `ackDelayMs` / `ackDelayFrom` delay a message's acks (the message is already in the conversation), for the restart-between-write-and-ack window.
+- `{ parallel: Step[][] }` runs branches at once (two prompts pending together).
+- **TUI**: a process script `{ tui: true }` plays the interactive CLI (no `-p`): it logs its argv and env, stays up, and exits on a signal. Without one, a TUI-style spawn is still argv drift.
+- The `start` log entry records `env` (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`, `CLAUDE_CONFIG_DIR`), `at` and `peersAlive` (other fake processes alive at start).
+- `session-file.ts`: `writeSessionFile` (seed a conversation), `readSessionFile`, `sessionFilePath`, `fileSha256`.
+
 ### Harness failures (fail closed)
 
 | Exit | Meaning | Where it is reported |
@@ -142,6 +161,8 @@ run.decisions()          // answers to the fake's can_use_tool requests
 run.hostReplies()        // replies to hostRequest steps (or 'timeout')
 run.cancels(); run.lateAnswers(); run.replayMismatches()
 run.signals(); run.exit(); run.stdoutLines(); run.entries   // raw log
+run.forked; run.tui; run.env; run.peersAliveAtStart       // chat A
+run.rewound(); run.duplicateUserUuids(); run.controlRequests('rewind_files')
 ```
 
 A `FakeRun` is live: every accessor re-reads
@@ -232,6 +253,8 @@ test('…', async ({ chat }) => {
 })
 ```
 
+- **Session files**: every worker gets its own `CLAUDE_CONFIG_DIR` (`chat.claudeConfigDir`); `t.sessionFile(id)` is a conversation's file in the task's repo.
+- **Terminal agents**: a TUI pty runs `claude` through the user's login shell, whose rc files put the real CLI first on PATH again — the bin override cannot reach it. A spec that needs a live terminal agent points the claude-code mode's commands at the fake by absolute path (see `154-chat-handoff.spec.ts`) or stubs spawns with `pty.testSetPtyCreateCapture`.
 - **Startup mode**: chat specs keep `manual` startup. Any other mode turns on the warm pool, which pre-boots a TUI `claude` through a login shell.
 - **Spawning**: `openTask` spawns the agent the way the Restart button does (`chat.start`) and waits for `session-spawn`. Pass `spawn: 'on-send'` to test the lazy path.
 - **Watchdog**: `chat.setWatchdogTimings({...})` shortens the watchdog. It is a PLAYWRIGHT-only tRPC seam, and the defaults come back after each test.

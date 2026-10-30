@@ -1125,7 +1125,7 @@ test('permission-request AskUserQuestion → broadcast, no auto-deny', async () 
   expect(events.some((e) => e.kind === 'permission-request')).toBe(true)
 })
 
-test('permission-request → flips terminal state to idle + sets awaitingUserInput', async () => {
+test('permission-request → flips terminal state to idle + holds the gate until it is answered', async () => {
   await setup()
   const stateChanges: { next: string; old: string }[] = []
   const fake = makeFakeChild()
@@ -1168,7 +1168,8 @@ test('permission-request → flips terminal state to idle + sets awaitingUserInp
   expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(true)
   expect(stateChanges.some((s) => s.old === 'running' && s.next === 'idle')).toBe(true)
 
-  // Subsequent assistant-text (SDK resumed after user answered) clears flag
+  // Progress alone does not release the gate (with parallel prompts another
+  // may still wait — P2 open item); the prompt's own answer does.
   fake._stdout.write(
     JSON.stringify({
       type: 'assistant',
@@ -1176,6 +1177,13 @@ test('permission-request → flips terminal state to idle + sets awaitingUserInp
     }) + '\n'
   )
   await new Promise((r) => setImmediate(r))
+  expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(true)
+  expect(
+    mgr.respondToPermissionRequest('tab-ask-state', {
+      requestId: 'cu_state_1',
+      decision: { behavior: 'allow', updatedInput: { answers: {} } }
+    })
+  ).toBe(true)
   expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(false)
 })
 

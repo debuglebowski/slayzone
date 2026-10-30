@@ -63,6 +63,8 @@ export interface ChatTimelineProps {
   copySessionId: () => void
   setCollapseSignal: Dispatch<SetStateAction<number>>
   handleReset: () => void | Promise<void>
+  /** "Continue in terminal" (main tab, a conversation exists). */
+  onHandoff?: () => void
   resetting: boolean
 }
 
@@ -99,7 +101,8 @@ export function ChatTimeline({
   copySessionId,
   setCollapseSignal,
   handleReset,
-  resetting
+  resetting,
+  onHandoff
 }: ChatTimelineProps) {
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
@@ -227,6 +230,11 @@ export function ChatTimeline({
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
           </ContextMenuSub>
+          {onHandoff && (
+            <ContextMenuItem data-testid="chat-continue-in-terminal" onSelect={onHandoff}>
+              Continue in terminal
+            </ContextMenuItem>
+          )}
           <ContextMenuItem
             onSelect={() => {
               void handleReset()

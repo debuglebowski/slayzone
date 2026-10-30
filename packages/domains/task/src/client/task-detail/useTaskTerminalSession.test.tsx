@@ -71,7 +71,8 @@ function setup(initial: Task) {
         getMainSessionId,
         resetTaskState: vi.fn(),
         subscribeSessionDetected,
-        setTerminalKey: vi.fn()
+        setTerminalKey: vi.fn(),
+        agentCwd: '/tmp/repo'
       }),
     { initialProps: { t: initial }, wrapper }
   )

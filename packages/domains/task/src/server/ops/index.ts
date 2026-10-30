@@ -62,6 +62,7 @@ export {
 // v147 agent-session tables during the transition slice).
 export {
   recordConversation,
+  switchConversation,
   recordPendingSpawn,
   prunePendingSpawns
 } from './task-conversations.js'

@@ -24,8 +24,16 @@ export function encodeClaudeProjectDir(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
+/**
+ * Where Claude Code keeps its state: `CLAUDE_CONFIG_DIR` when set (the CLI reads
+ * it), else `~/.claude`. Read per call — tests and the e2e harness set it.
+ */
+export function claudeConfigDir(): string {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+}
+
 export function claudeProjectDir(cwd: string): string {
-  return join(homedir(), '.claude', 'projects', encodeClaudeProjectDir(cwd))
+  return join(claudeConfigDir(), 'projects', encodeClaudeProjectDir(cwd))
 }
 
 export function claudeTranscriptPath(cwd: string, conversationId: string): string {
@@ -44,7 +52,7 @@ const DEFAULT_CLEANUP_PERIOD_DAYS = 30
 export function claudeTranscriptRetentionMs(): number | null {
   let days: unknown = DEFAULT_CLEANUP_PERIOD_DAYS
   try {
-    const settings = JSON.parse(readFileSync(join(homedir(), '.claude', 'settings.json'), 'utf8'))
+    const settings = JSON.parse(readFileSync(join(claudeConfigDir(), 'settings.json'), 'utf8'))
     if (settings && typeof settings === 'object' && 'cleanupPeriodDays' in settings) {
       days = settings.cleanupPeriodDays
     }

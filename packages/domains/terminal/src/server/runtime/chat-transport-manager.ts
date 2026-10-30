@@ -3,9 +3,17 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentEvent,
   CommandTaskOutput,
-  OutgoingUserMessage
+  OutgoingUserMessage,
+  ResultEvent
 } from '@slayzone/terminal-contracts'
-import { userMessageText } from '@slayzone/terminal-contracts'
+import { chatCapabilitiesForMode, userMessageText } from '@slayzone/terminal-contracts'
+import type {
+  RewindFilesPreview,
+  RewindResult,
+  RewindScope,
+  StopResult,
+  UserContentBlock
+} from '@slayzone/terminal-contracts'
 import type { ChatSessionStateEntry } from '@slayzone/terminal-contracts'
 import type { AgentBackend, ChatSessionDriver, PermissionDecision } from '../agents/types'
 import { getBackend } from '../agents/registry'
@@ -16,6 +24,11 @@ import { TypedEmitter } from '@slayzone/platform/events'
 import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { ConversationOrigin } from '@slayzone/terminal-contracts'
+import {
+  conversationInUseMessage,
+  isConversationLive,
+  registerConversationHolder
+} from './live-conversations'
 import { ChatEventLog, type BufferedEvent } from '../chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
@@ -373,14 +386,18 @@ interface ChatTab {
   /** Timestamp (ms) of the last forward-progress signal while `running`. */
   watchdogLastProgress: number
   /**
-   * True while the CLI is parked on an inbound `permission-request` (e.g.
-   * AskUserQuestion). Drives the idle flip so tab indicators / kanban /
-   * automations see "waiting on user", but also gates the queue drainer:
-   * draining a queued user_message into stdin mid-tool would interleave with
-   * the pending tool_result the SDK still expects. Cleared on the first
-   * non-permission event after the user answers.
+   * The prompts (`permission-request` ids: permission cards, AskUserQuestion,
+   * plan approval) the CLI is parked on. Non-empty drives the idle flip, so tab
+   * indicators / kanban / automations see "waiting on user", and gates the queue
+   * drainer: draining a queued user_message into stdin mid-tool would interleave
+   * with the pending tool_result the SDK still expects. A COUNT, not a flag:
+   * with parallel tool calls the first answer must not reopen the gate while
+   * another prompt still waits. Emptied by each prompt's answer or withdrawal,
+   * and by the turn's end.
    */
-  awaitingUserInput: boolean
+  pendingPrompts: Set<string>
+  /** The user stopped the current turn: its aborted `result` is an end, not an error. */
+  turnInterrupted: boolean
   /** Any assistant progress (live or saved) since the last user message. */
   turnProgress: boolean
   /** Live-event counter (see `TransportDeps.broadcastEvent`). */
@@ -402,6 +419,12 @@ interface ChatTab {
    * now (the CLI keeps it), whether or not its id reached the DB yet.
    */
   sessionConfirmed: boolean
+  /**
+   * A fork (plan 3.3) the CLI has not confirmed yet: `sessionId` is the fork's
+   * id, and every spawn until the CLI reports it forks again — an unconfirmed
+   * fork wrote nothing, so the same id is still free (chat-a check R3b).
+   */
+  pendingFork: { fromSessionId: string; atMessageUuid: string } | null
   /** Removed (tab closed / reset): nothing may touch it any more. */
   closed: boolean
 }
@@ -648,11 +671,21 @@ function transitionState(tab: ChatTab, next: ChatTerminalState): void {
   // give the queue drainer a chance to push the next user-message. Scheduled
   // via setImmediate so the drain's dispatch path doesn't re-enter the event
   // pipeline inside the current event tick.
-  if (next === 'idle' && queueDrainer) {
-    const tabId = tab.tabId
-    const drain = queueDrainer
-    setImmediate(() => drain(tabId))
-  }
+  if (next === 'idle') kickQueueDrainer(tab)
+}
+
+/**
+ * Let the queue drainer try the next message (it re-checks the gate itself).
+ * On every move into `idle`, and whenever the gate may have opened while idle:
+ * the last in-flight message settled (the CLI acks `completed` AFTER the turn's
+ * result) or the last pending prompt went. Scheduled via setImmediate so the
+ * drain's dispatch path doesn't re-enter the event pipeline in this tick.
+ */
+function kickQueueDrainer(tab: ChatTab): void {
+  if (!queueDrainer || tab.closed || tab.terminalState !== 'idle') return
+  const tabId = tab.tabId
+  const drain = queueDrainer
+  setImmediate(() => drain(tabId))
 }
 
 let queueDrainer: ((tabId: string) => void) | null = null
@@ -686,7 +719,7 @@ export function getSessionTerminalState(tabId: string): ChatTerminalState | null
  */
 export function isSessionAwaitingUserInput(tabId: string): boolean {
   const tab = tabs.get(tabId)
-  return tab ? tab.awaitingUserInput : false
+  return tab ? tab.pendingPrompts.size > 0 : false
 }
 
 /**
@@ -697,7 +730,9 @@ export function isSessionAwaitingUserInput(tabId: string): boolean {
 export function isReadyForQueuedMessage(tabId: string): boolean {
   const tab = tabs.get(tabId)
   if (!tab || tab.closed || tab.ended || tab.respawning) return false
-  return tab.terminalState === 'idle' && !tab.awaitingUserInput && tab.outbox.inFlight() === 0
+  return (
+    tab.terminalState === 'idle' && tab.pendingPrompts.size === 0 && tab.outbox.inFlight() === 0
+  )
 }
 
 // ---- event pipeline ----
@@ -739,37 +774,32 @@ function commitEvent(tab: ChatTab, event: AgentEvent): void {
     // Turn parks on user input (a permission card, AskUserQuestion, plan
     // approval) — flip to idle so tab indicators, kanban cards, and automations
     // see the same "waiting on user" state PTY adapters signal via completion
-    // stamp / approval modal. `awaitingUserInput` gates the queue drainer so a
+    // stamp / approval modal. The pending set gates the queue drainer so a
     // queued user-message doesn't interleave with the SDK's pending tool_result.
-    tab.awaitingUserInput = true
+    tab.pendingPrompts.add(event.requestId)
     transitionState(tab, 'idle')
   } else {
-    // Clear the gate only on events that prove the SDK consumed the
-    // control_response and resumed forward progress. stderr / rate-limit /
-    // control-response / unknown can fire mid-park and must NOT release the
-    // gate, or a `chat:queue:push` would race the SDK's pending tool_result.
-    // `permission-resolved` = the host just answered; `permission-cancelled` =
-    // the CLI withdrew the prompt.
-    if (
-      event.kind === 'assistant-text' ||
-      event.kind === 'assistant-thinking' ||
-      event.kind === 'tool-call' ||
-      event.kind === 'tool-result' ||
-      event.kind === 'turn-init' ||
-      event.kind === 'user-message' ||
+    // Only a prompt's own answer (`permission-resolved`) or withdrawal
+    // (`permission-cancelled`) takes it out of the set; the turn's end clears
+    // it. Progress events don't: with parallel prompts, a tool that ran after
+    // the first answer must not reopen the gate while the second still waits.
+    if (event.kind === 'permission-resolved' || event.kind === 'permission-cancelled') {
+      tab.pendingPrompts.delete(event.requestId)
+      if (tab.pendingPrompts.size === 0) kickQueueDrainer(tab)
+    } else if (
       event.kind === 'result' ||
       event.kind === 'interrupted' ||
-      event.kind === 'process-exit' ||
-      event.kind === 'permission-resolved' ||
-      event.kind === 'permission-cancelled'
+      event.kind === 'process-exit'
     ) {
-      tab.awaitingUserInput = false
+      tab.pendingPrompts.clear()
     }
-    // An answer resumes the parked turn: back to running, so the tab stops
-    // reading "needs you" while the approved tool runs. The TUI's plain "No"
-    // (deny + interrupt) ends the turn instead — its `result` settles the state.
+    // An answer resumes the parked turn once nothing else waits: back to
+    // running, so the tab stops reading "needs you" while the approved tool
+    // runs. The TUI's plain "No" (deny + interrupt) ends the turn instead — its
+    // `result` settles the state.
     if (
       event.kind === 'permission-resolved' &&
+      tab.pendingPrompts.size === 0 &&
       !(event.decision.behavior === 'deny' && event.decision.interrupt)
     ) {
       transitionState(tab, 'running')
@@ -787,7 +817,10 @@ function commitEvent(tab: ChatTab, event: AgentEvent): void {
     if (event.kind === 'tool-call') {
       transitionState(tab, 'running')
     } else if (event.kind === 'result') {
-      transitionState(tab, event.isError ? 'error' : 'idle')
+      // A turn the user stopped ends with the CLI's aborted result: an end, not
+      // a failure (the same for the TUI's plain "No", deny + interrupt).
+      const stopped = tab.turnInterrupted || isAbortedResult(event)
+      transitionState(tab, event.isError && !stopped ? 'error' : 'idle')
     } else if (event.kind === 'process-exit') {
       transitionState(tab, 'dead')
     }
@@ -813,13 +846,19 @@ function commitEvent(tab: ChatTab, event: AgentEvent): void {
   // `claude --resume X` in the PTY) is recorded as `foreign-observed` — audit
   // trail only, never the resume target. See conversation-id-robustness plan.
   const extracted = tab.proc?.driver.extractSessionId(event) ?? null
-  if (extracted && extracted === tab.sessionId) tab.sessionConfirmed = true
+  const forked = Boolean(tab.proc?.fork) && extracted === tab.sessionId
+  if (extracted && extracted === tab.sessionId) {
+    tab.sessionConfirmed = true
+    tab.pendingFork = null
+  }
   if (extracted && tab.onPersistSessionId) {
     const origin =
       extracted === tab.sessionId
-        ? tab.usedResume
-          ? 'slay-spawned-resume'
-          : 'slay-spawned-fresh'
+        ? forked
+          ? 'slay-spawned-fork'
+          : tab.usedResume
+            ? 'slay-spawned-resume'
+            : 'slay-spawned-fresh'
         : 'foreign-observed'
     tab.onPersistSessionId({ conversationId: extracted, origin })
   }
@@ -921,6 +960,21 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
   if (!shown) return
   if (shown.kind === 'stderr') noteRefusedOption(tab, shown.text)
 
+  // The user took this turn's message back (Stop before any output): whatever the
+  // turn still says is gone from the conversation too (rewound), so it never
+  // reaches the timeline. Its end settles the state.
+  if (proc.discardTurn && DISCARDED_TURN_KINDS.has(shown.kind)) {
+    if (shown.kind === 'result' || shown.kind === 'interrupted') {
+      proc.discardTurn = false
+      proc.openTools.clear()
+      tab.outbox.onResult(proc.gen)
+      tab.pendingPrompts.clear()
+      transitionState(tab, 'idle')
+    }
+    return
+  }
+
+  if (opensAgentTurn(tab, shown)) markAgentTurnStarted(tab)
   trackTools(proc, shown)
   if (isProgressEventKind(shown.kind)) noteProgress(tab)
   if (shown.kind === 'result') tab.outbox.onResult(proc.gen)
@@ -930,6 +984,25 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
   for (const live of split.live) broadcastLive(tab, live)
   for (const saved of split.saved) commitEvent(tab, saved)
 }
+
+/** What a popped turn may still say: its output and its end. */
+const DISCARDED_TURN_KINDS: ReadonlySet<AgentEvent['kind']> = new Set<AgentEvent['kind']>([
+  'assistant-text',
+  'assistant-thinking',
+  'tool-call',
+  'tool-result',
+  'sub-agent',
+  'agent-plan',
+  'command-output',
+  'permission-request',
+  'stream-message-start',
+  'stream-block-start',
+  'stream-block-delta',
+  'stream-block-stop',
+  'stream-message-stop',
+  'result',
+  'interrupted'
+])
 
 /** Open/close tool calls (the watchdog bounds a silent turn by them). */
 function trackTools(proc: ChatProcess, event: AgentEvent): void {
@@ -970,9 +1043,32 @@ function isTurnProgress(kind: AgentEvent['kind']): boolean {
   )
 }
 
+/**
+ * The agent started a turn by itself — Claude Code answers a finished
+ * background task (`task_notification`) with a new turn no user message opened:
+ * its first main-thread output while the tab is between turns. `turn-init` alone
+ * is not one (Codex sends it at handshake), nor output while a prompt waits (that
+ * turn is parked, not over), nor a background sub-agent's output.
+ */
+function opensAgentTurn(tab: ChatTab, event: AgentEvent): boolean {
+  if (tab.terminalState !== 'idle' && tab.terminalState !== 'error') return false
+  if (tab.pendingPrompts.size > 0) return false
+  if (event.kind === 'turn-init' || !isTurnProgress(event.kind)) return false
+  return !('parentToolUseId' in event) || event.parentToolUseId == null
+}
+
+/** A turn the agent opened (`opensAgentTurn`): running until its result. */
+function markAgentTurnStarted(tab: ChatTab): void {
+  tab.turnInterrupted = false
+  transitionState(tab, 'running')
+  tab.watchdogLastProgress = Date.now()
+  armWatchdog(tab)
+}
+
 /** The outbox is writing a user message: the turn starts now. */
 function markTurnStarted(tab: ChatTab): void {
   tab.turnProgress = false
+  tab.turnInterrupted = false
   markSessionUserInput(stateKey(tab))
   transitionState(tab, 'running')
   tab.watchdogLastProgress = Date.now()
@@ -1025,12 +1121,31 @@ function handleProcessExit(
   signal: string | null
 ): void {
   const current = !tab.closed && tabs.get(tab.tabId) === tab && tab.proc === proc
-  // Undelivered messages of a REPLACED process (or a failed resume) go to the
-  // next one; any other end fails them, visibly.
-  const resend = proc.replaced || proc.resumeFailed
+  // A fork the CLI refused: it ends on its own, before confirming, with an error
+  // (an unknown fork point exits 1 at startup — chat-a check R3b).
+  if (
+    current &&
+    proc.fork &&
+    tab.pendingFork &&
+    !proc.replaced &&
+    !proc.stopRequested &&
+    code !== 0
+  ) {
+    proc.forkFailed = true
+  }
+  // Undelivered messages of a REPLACED process (or a failed resume / fork) go to
+  // the next one; any other end fails them, visibly.
+  const resend = proc.replaced || proc.resumeFailed || proc.forkFailed
   if (!tab.closed) {
     // A failed resume never had a conversation: even what it confirmed is re-sent.
-    tab.outbox.onProcessEnded(proc.gen, { resend, resendDelivered: proc.resumeFailed })
+    tab.outbox.onProcessEnded(proc.gen, {
+      resend,
+      resendDelivered: proc.resumeFailed || proc.forkFailed
+    })
+  }
+  if (proc.forkFailed) {
+    onForkFailure(tab, proc)
+    return
   }
   // If this process was already replaced in the tab (respawn, reset, a failed
   // resume), swallow the exit so the UI doesn't revert to "Session ended".
@@ -1050,6 +1165,34 @@ function handleProcessExit(
   routeHostEvent(tab, { kind: 'process-exit', code, signal })
   deps.broadcastExit(tab.tabId, tab.sessionId, code, signal)
   clearSessionUserInputMark(stateKey(tab))
+}
+
+/**
+ * The CLI refused a fork: the tab goes back to the conversation it forked from
+ * (a process resumes it at once, as before the fork), and says so. The fork's
+ * marker is answered by `fork-failed`, which unfolds it.
+ */
+function onForkFailure(tab: ChatTab, proc: ChatProcess): void {
+  const from = proc.fork!.fromSessionId
+  clearWatchdog(tab)
+  tab.pendingFork = null
+  tab.sessionId = from
+  tab.sessionConfirmed = true
+  tab.respawnOpts = { ...tab.respawnOpts, conversationId: from }
+  routeHostEvent(tab, { kind: 'conversation-branch', reason: 'fork-failed', conversationId: from })
+  routeHostEvent(tab, {
+    kind: 'notice',
+    id: randomUUID(),
+    level: 'error',
+    code: 'fork-failed',
+    text: 'Claude Code could not fork from that message, so this chat stays in the original conversation.'
+  })
+  setImmediate(() => {
+    if (tab.closed || tab.proc !== proc) return
+    void respawnTab(tab, { ...tab.respawnOpts }).catch((err) => {
+      console.error('[chat-transport] resume after a refused fork failed:', err)
+    })
+  })
 }
 
 /** The agent could not be started: visible error, `dead`, waiting messages failed. */
@@ -1206,6 +1349,32 @@ export async function hydrateSession(opts: CreateChatOpts): Promise<ChatSessionI
   }
 }
 
+/**
+ * After a restart: a fork the CLI never confirmed (no message was sent in it, so
+ * the task still names the original) is still the tab's conversation — the
+ * saved `forked` marker says so. The next spawn forks again.
+ */
+function rearmPendingFork(tab: ChatTab, history: readonly BufferedEvent[]): void {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const e = history[i].event
+    if (e.kind !== 'conversation-branch') continue
+    if (
+      e.reason === 'forked' &&
+      e.conversationId &&
+      e.fromConversationId &&
+      e.atMessageUuid &&
+      tab.sessionId === e.fromConversationId
+    ) {
+      tab.pendingFork = { fromSessionId: e.fromConversationId, atMessageUuid: e.atMessageUuid }
+      tab.sessionId = e.conversationId
+      tab.sessionConfirmed = false
+      tab.usedResume = false
+      tab.respawnOpts = { ...tab.respawnOpts, conversationId: null }
+    }
+    return
+  }
+}
+
 async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
   const backend = getBackend(opts.mode)
   if (!backend) {
@@ -1249,7 +1418,8 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
     watchdogTimer: null,
     watchdogKillStage: 'none',
     watchdogLastProgress: Date.now(),
-    awaitingUserInput: false,
+    pendingPrompts: new Set<string>(),
+    turnInterrupted: false,
     turnProgress: false,
     liveSeq: 0,
     respawning: null,
@@ -1257,8 +1427,10 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
     cliVersion: opts.cliVersion ?? null,
     optionalFlagsRefused: false,
     sessionConfirmed: Boolean(opts.conversationId),
+    pendingFork: null,
     closed: false
   } as Omit<ChatTab, 'log' | 'outbox'> as ChatTab
+  rearmPendingFork(tab, history)
   tab.log = new ChatEventLog(
     opts.tabId,
     deps.eventStore,
@@ -1319,8 +1491,12 @@ function createOutbox(tab: ChatTab): ChatOutbox {
       // `sending` is transient: shown, never saved.
       if (state === 'sending') broadcastLive(tab, event)
       else routeHostEvent(tab, event)
+      if (state === 'answered' || state === 'failed' || state === 'cancelled') {
+        kickQueueDrainer(tab)
+      }
     },
     onWriting: () => markTurnStarted(tab),
+    onAlreadyInConversation: (id) => onAlreadyInConversation(tab, id),
     ...(deps.outboxRetry
       ? { retryWindowMs: deps.outboxRetry.windowMs, retryBaseMs: deps.outboxRetry.baseMs }
       : {}),
@@ -1399,13 +1575,25 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
   const gen = ++tab.gen
   const spawnId = randomUUID()
   const cliVersion = tab.optionalFlagsRefused ? null : (tab.cliVersion ?? opts.cliVersion ?? null)
+  // A new process has no prompt pending (the old one's expired with it).
+  tab.pendingPrompts.clear()
+  const fork = tab.pendingFork
   const { args } = backend.buildSpawnArgs({
     sessionId,
     resume,
     cwd: opts.cwd,
     providerFlags: opts.providerFlags,
-    ...(cliVersion ? { cliVersion } : {})
+    ...(cliVersion ? { cliVersion } : {}),
+    ...(fork ? { fork } : {})
   })
+  // The agent's own env (e.g. Claude's file checkpoints) under the per-spawn overlay.
+  const env: EnvOverlay = { ...backend.spawnEnv, ...opts.env }
+  // Never two processes on one conversation (plan 3.10): the terminal runs it.
+  if (resume && isConversationLive('terminal', tab.taskId, sessionId)) {
+    const err = chatSpawnError('conversation-in-use', conversationInUseMessage('terminal'))
+    failStart(tab, err)
+    throw err
+  }
 
   tab.ended = false
   // Move out of `not-spawned` / `dead`. `onSpawn` promotes to `idle` once the
@@ -1438,7 +1626,7 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
         // contract is `Record<string, string>`, so drop unset keys rather than
         // shipping `undefined` values a zod record would reject.
         env: Object.fromEntries(
-          Object.entries(opts.env ?? {}).filter((e): e is [string, string] => e[1] !== undefined)
+          Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)
         ),
         admission: opts.admission ?? 'foreground'
       })
@@ -1463,7 +1651,7 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
         // Sanitized base (user env survives; SlayZone infra/secret/identity
         // stripped, fail closed on unmanifested SLAYZONE_*) + the per-spawn
         // overlay `opts.env` (the mcpEnv identity for this chat agent) on top.
-        env: childProcessEnv(opts.env),
+        env: childProcessEnv(env),
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false
       })
@@ -1532,6 +1720,7 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
       }
     }
   })
+  proc.fork = fork
   tab.proc = proc
   // A written message can now go out as soon as the process is ready.
   void proc.readyPromise.then(
@@ -1565,7 +1754,14 @@ export async function respawn(tabId: string, nextOpts: CreateChatOpts): Promise<
 async function respawnTab(
   tab: ChatTab,
   nextOpts: CreateChatOpts,
-  { fresh = false }: { fresh?: boolean } = {}
+  {
+    fresh = false,
+    between
+  }: {
+    fresh?: boolean
+    /** Runs once the old process is gone, before the next one starts. */
+    between?: () => void
+  } = {}
 ): Promise<void> {
   while (tab.respawning) await tab.respawning.catch(() => undefined)
   const run = (async (): Promise<void> => {
@@ -1588,6 +1784,7 @@ async function respawnTab(
       }
     }
     if (tab.closed) return
+    between?.()
     applyRespawnOpts(tab, nextOpts, fresh)
     tab.proc = null
     await startProcess(tab)
@@ -1619,6 +1816,11 @@ function applyRespawnOpts(tab: ChatTab, next: CreateChatOpts, fresh: boolean): v
     conversationId = null
     tab.sessionId = randomUUID()
     tab.sessionConfirmed = false
+    tab.pendingFork = null
+  } else if (tab.pendingFork) {
+    // An unconfirmed fork is the tab's conversation (the caller's stored id is
+    // still the original's): it forks again.
+    conversationId = null
   } else if (conversationId) {
     tab.sessionId = conversationId
   } else if (tab.sessionConfirmed) {
@@ -1857,24 +2059,636 @@ export function recordInterrupted(tabId: string): void {
 export function popLastUserMessage(tabId: string): { popped: boolean; text: string | null } {
   const tab = tabs.get(tabId)
   if (!tab || tab.closed || tab.ended) return { popped: false, text: null }
-  if (tab.turnProgress) return { popped: false, text: null }
+  const popped = popTrailingUserMessage(tab)
+  return popped ? { popped: true, text: popped.text } : { popped: false, text: null }
+}
 
-  let found: { text: string; id?: string } | null = null
+/** A message Stop took back. */
+interface PoppedMessage {
+  text: string
+  id?: string
+  content: UserContentBlock[]
+}
+
+function popTrailingUserMessage(tab: ChatTab): PoppedMessage | null {
+  if (tab.turnProgress) return null
+  let found: PoppedMessage | null = null
   const events = tab.log.events
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i].event
     if (e.kind === 'user-message') {
-      found = { text: e.text, ...(e.id ? { id: e.id } : {}) }
+      // An imported message of the conversation's past is never taken back.
+      if (e.history) return null
+      found = {
+        text: e.text,
+        ...(e.id ? { id: e.id } : {}),
+        // A row from before `content` existed: its text is the whole message.
+        content: e.content ?? [{ type: 'text', text: e.text }]
+      }
       break
     }
-    if (e.kind === 'user-message-popped') return { popped: false, text: null }
-    if (isProgressEventKind(e.kind)) return { popped: false, text: null }
+    if (e.kind === 'user-message-popped') return null
+    if (isProgressEventKind(e.kind)) return null
     // Skip non-progress, non-user events (turn-init, error, unknown, compact-boundary, delivery).
   }
-  if (found === null) return { popped: false, text: null }
-  routeHostEvent(tab, { kind: 'user-message-popped', text: found.text })
+  if (found === null) return null
+  // Only the message whose turn this is comes back: a follow-up sent while an
+  // earlier one still runs is withdrawn by Stop instead (`stopTurn`).
+  if (found.id) {
+    const oldest = tab.outbox.oldestInFlight()
+    if (oldest !== null && oldest !== found.id) return null
+  }
+  routeHostEvent(tab, {
+    kind: 'user-message-popped',
+    text: found.text,
+    ...(found.id ? { id: found.id } : {})
+  })
   if (found.id) tab.outbox.cancel(found.id)
-  return { popped: true, text: found.text }
+  return found
+}
+
+/**
+ * Claude Code already had this message — it received it before a restart, and
+ * drops a uuid it has seen (chat-a check R2b) — so no turn runs for it. Close the
+ * turn the write opened, and say so.
+ */
+function onAlreadyInConversation(tab: ChatTab, id: string): void {
+  if (tab.closed) return
+  routeHostEvent(tab, { kind: 'interrupted', reason: 'already-in-conversation' })
+  routeHostEvent(tab, {
+    kind: 'notice',
+    id: randomUUID(),
+    level: 'warning',
+    code: 'already-in-conversation',
+    text: 'Claude Code already had this message from before it restarted, so it did not run it again. A reply it gave then is not shown here.',
+    detail: { messageId: id }
+  })
+  if (tab.outbox.inFlight() === 0) transitionState(tab, 'idle')
+}
+
+/** How long Stop waits for the CLI to acknowledge an interrupt before replacing the process. */
+const STOP_INTERRUPT_TIMEOUT_MS = 3000
+/** How long one of Stop's follow-up requests (withdraw, rewind) may take. */
+const STOP_FOLLOW_UP_TIMEOUT_MS = 5000
+
+export interface StopTurnResult extends StopResult {
+  /** `interrupt`: the process stayed. `respawn`: it was replaced (the fallback). */
+  via: 'interrupt' | 'respawn'
+}
+
+/** What Stop gives back: the popped message, or nothing. */
+function stopResult(popped: PoppedMessage | null, via: StopTurnResult['via']): StopTurnResult {
+  return popped
+    ? { popped: true, text: popped.text, id: popped.id ?? null, content: popped.content, via }
+    : { popped: false, text: null, id: null, content: null, via }
+}
+
+/**
+ * Stop the running turn (Stop button / Esc, `chat.interrupt`).
+ *
+ * With `liveInterrupt` (Claude Code) the process stays: the CLI gets an
+ * `interrupt` control request, withdraws its own pending prompts, and ends the
+ * turn with an aborted result. Messages it holds queued are withdrawn
+ * (`cancel_async_message`) — before the interrupt, and any it still reports
+ * after — so Stop also stops what was waiting. Only when the interrupt is
+ * refused or not acknowledged is the process replaced (today's path).
+ *
+ * `restorePrompt`: a turn with no output yet gives its message back (`text`) and
+ * the CLI forgets it (`rewind_conversation`), so the timeline, the composer and
+ * the conversation agree. Whatever that turn still says is dropped.
+ *
+ * Without `liveInterrupt` (Codex), or with no live process: the old path —
+ * take the message back or mark the turn interrupted, then replace the process.
+ */
+export async function stopTurn(
+  tabId: string,
+  opts: {
+    restorePrompt: boolean
+    /** Spawn settings for the replacement, read only if one is needed. */
+    respawnOpts: () => Promise<CreateChatOpts>
+    interruptTimeoutMs?: number
+  }
+): Promise<StopTurnResult> {
+  const tab = tabs.get(tabId)
+  if (!tab || tab.closed) {
+    // Nothing hydrated: there is no turn to stop; start a process, as before.
+    await respawn(tabId, await opts.respawnOpts())
+    return stopResult(null, 'respawn')
+  }
+  const caps = chatCapabilitiesForMode(tab.mode)
+  const proc = liveProcess(tabId)
+  const popped = opts.restorePrompt ? popTrailingUserMessage(tab) : null
+  if (!popped) recordInterrupted(tabId)
+
+  if (!proc || !caps.liveInterrupt || !proc.driver.applyControl) {
+    await respawn(tabId, await opts.respawnOpts())
+    if (popped?.id && caps.rewind) await forgetPopped(tab, popped.id)
+    return stopResult(popped, 'respawn')
+  }
+
+  proc.interruptIssued = true
+  if (popped) proc.discardTurn = true
+  else tab.turnInterrupted = true
+  // Messages the CLI holds queued would run right after the interrupt.
+  for (const id of tab.outbox.heldByCli(proc.gen)) await withdrawQueued(tab, proc, id)
+
+  let ack: unknown
+  try {
+    ack = await proc.driver.applyControl(
+      { subtype: 'interrupt' },
+      opts.interruptTimeoutMs ?? STOP_INTERRUPT_TIMEOUT_MS
+    )
+  } catch (err) {
+    diagnostic(
+      tab,
+      'warn',
+      'chat.interrupt_fallback',
+      'interrupt not acknowledged; replacing the process',
+      {
+        error: toErrorMessage(err)
+      }
+    )
+    await respawn(tabId, await opts.respawnOpts())
+    if (popped?.id) await forgetPopped(tab, popped.id)
+    return stopResult(popped, 'respawn')
+  }
+
+  let reinterrupt = false
+  for (const id of stillQueued(ack)) {
+    if (!(await withdrawQueued(tab, proc, id))) reinterrupt = true
+  }
+  if (reinterrupt && !proc.ended) {
+    // One raced past the withdrawal and started: stop it too (once).
+    await proc.driver
+      .applyControl({ subtype: 'interrupt' }, STOP_FOLLOW_UP_TIMEOUT_MS)
+      .catch(() => undefined)
+  }
+  if (popped?.id) await forgetPopped(tab, popped.id)
+  return stopResult(popped, 'interrupt')
+}
+
+/** The ids an `interrupt` ack says the CLI still holds queued (`{still_queued}`). */
+function stillQueued(ack: unknown): string[] {
+  const queued = controlPayload(ack)?.still_queued
+  return Array.isArray(queued) ? queued.filter((id): id is string => typeof id === 'string') : []
+}
+
+/** A control response's payload (`applyControl` resolves `{response: payload}`). */
+function controlPayload(data: unknown): Record<string, unknown> | null {
+  const response = (data as { response?: unknown } | null)?.response
+  return response && typeof response === 'object' ? (response as Record<string, unknown>) : null
+}
+
+/** Withdraw one message the CLI holds queued. True when it was withdrawn. */
+async function withdrawQueued(tab: ChatTab, proc: ChatProcess, id: string): Promise<boolean> {
+  try {
+    const res = await proc.driver.applyControl?.(
+      { subtype: 'cancel_async_message', message_uuid: id },
+      STOP_FOLLOW_UP_TIMEOUT_MS
+    )
+    if (controlPayload(res)?.cancelled !== true) return false
+    tab.outbox.cancel(id)
+    return true
+  } catch (err) {
+    diagnostic(tab, 'warn', 'chat.withdraw_failed', 'cancel_async_message failed', {
+      error: toErrorMessage(err)
+    })
+    return false
+  }
+}
+
+/**
+ * The CLI forgets a message Stop gave back (it may have stored it). Its
+ * `target_not_found` means it never had it — fine either way; anything else is
+ * shown, since Claude may still remember a message the timeline no longer has.
+ */
+async function forgetPopped(tab: ChatTab, id: string): Promise<void> {
+  const proc = liveProcess(tab.tabId)
+  let problem: string | null = null
+  if (!proc?.driver.applyControl) {
+    problem = 'Claude Code is not running'
+  } else {
+    try {
+      const res = controlPayload(
+        await proc.driver.applyControl(
+          { subtype: 'rewind_conversation', target_message_uuid: id },
+          STOP_FOLLOW_UP_TIMEOUT_MS
+        )
+      )
+      if (res?.rewound !== true && res?.reason !== 'target_not_found') {
+        problem = typeof res?.error === 'string' ? res.error : 'the rewind was refused'
+      }
+    } catch (err) {
+      problem = toErrorMessage(err)
+    }
+  }
+  if (problem === null || tab.closed) return
+  routeHostEvent(tab, {
+    kind: 'notice',
+    id: randomUUID(),
+    level: 'warning',
+    code: 'stop-rewind-failed',
+    text: 'The stopped message is back in the message box, but Claude Code may still remember it.',
+    detail: { messageId: id, error: problem }
+  })
+}
+
+// ---- switching conversations (plan 3.6 Sessions picker, 3.10 hand-off) ----
+
+/**
+ * An event of the conversation's past (imported from the CLI's session file):
+ * saved and shown like any other, but it is history — it drives no state, no
+ * watchdog, no outbox, and claims no conversation id.
+ */
+function commitHistory(tab: ChatTab, event: AgentEvent): void {
+  if (tab.closed) return
+  const { seq } = tab.log.append(event)
+  deps.broadcastEvent(tab.tabId, event, seq)
+  try {
+    deps.persistEvent(tab.tabId, seq, event)
+  } catch (err) {
+    console.error('[chat-transport] persistEvent failed:', err)
+  }
+}
+
+/**
+ * Switch a tab to another conversation — the one write path for the Sessions
+ * picker, the hand-off from the terminal and going back to a fork's original.
+ * A live process is stopped first and its exit awaited (two processes never run
+ * one conversation); then the `switched` marker, the imported history and any
+ * notices go into the tab's log (it still owns every seq), and the tab runs
+ * `conversationId` from now on. With `respawnOpts` the next process starts at
+ * once (`--resume`); without, the first message starts it.
+ */
+export async function switchTabConversation(
+  tabId: string,
+  opts: {
+    conversationId: string
+    branch: AgentEvent
+    history: AgentEvent[]
+    notices: AgentEvent[]
+    respawnOpts?: CreateChatOpts
+  }
+): Promise<void> {
+  const tab = requireTab(tabId)
+  const record = (): void => {
+    routeHostEvent(tab, opts.branch)
+    for (const event of opts.history) commitHistory(tab, event)
+    for (const notice of opts.notices) routeHostEvent(tab, notice)
+    tab.pendingFork = null
+    tab.sessionId = opts.conversationId
+    tab.sessionConfirmed = true
+    tab.respawnOpts = { ...tab.respawnOpts, conversationId: opts.conversationId }
+  }
+  const live = tab.proc && !tab.proc.ended
+  if (live || opts.respawnOpts) {
+    await respawnTab(
+      tab,
+      { ...(opts.respawnOpts ?? tab.respawnOpts), conversationId: opts.conversationId },
+      {
+        between: record
+      }
+    )
+    if (!opts.respawnOpts) await ensureSpawned(tabId)
+    return
+  }
+  record()
+}
+
+/** This side of the never-two-processes guard (`live-conversations.ts`). */
+registerConversationHolder('chat', {
+  isLive: (taskId, conversationId) => {
+    for (const tab of tabs.values()) {
+      if (
+        !tab.closed &&
+        tab.taskId === taskId &&
+        tab.sessionId === conversationId &&
+        tab.proc &&
+        !tab.proc.ended
+      ) {
+        return true
+      }
+    }
+    return false
+  },
+  release: (taskId, conversationId) => releaseChatConversation(taskId, conversationId)
+})
+
+/**
+ * The conversation a tab runs, once the CLI has it (a pending fork or a fresh
+ * id nobody used yet has none to hand over).
+ */
+export function confirmedConversation(tabId: string): string | null {
+  const tab = tabs.get(tabId)
+  if (!tab || tab.closed || !tab.sessionConfirmed || tab.pendingFork) return null
+  return tab.sessionId
+}
+
+/** How long a release waits for a stopped chat process to exit. */
+const RELEASE_EXIT_TIMEOUT_MS = 5000
+
+/**
+ * The conversation moves to the terminal: every chat tab of this task running
+ * it stops, and its exit is awaited — two processes never run one conversation
+ * (plan 3.10). The tab goes (its history stays saved; it reloads on reopen).
+ */
+export async function releaseChatConversation(
+  taskId: string,
+  conversationId: string
+): Promise<void> {
+  const waits: Array<Promise<unknown>> = []
+  for (const [tabId, tab] of [...tabs]) {
+    if (tab.taskId !== taskId || tab.sessionId !== conversationId) continue
+    const proc = tab.proc
+    const flushed = removeSession(tabId)
+    if (proc && !proc.ended) {
+      waits.push(
+        Promise.race([
+          proc.exited,
+          new Promise((r) => setTimeout(r, RELEASE_EXIT_TIMEOUT_MS).unref?.())
+        ])
+      )
+    }
+    waits.push(flushed)
+  }
+  await Promise.all(waits)
+}
+
+// ---- edit & resend, rewind, code rewind (plan 3.3) ----
+
+/** How long a rewind request may take (it may restore many files). */
+const REWIND_TIMEOUT_MS = 30_000
+
+/**
+ * Which messages the conversation still holds, oldest first: the tab's user
+ * messages with an id, minus what Stop took back, what a rewind dropped, what a
+ * fork left behind, and everything before a switch. A failed message never
+ * reached it.
+ */
+function activeUserMessages(tab: ChatTab): Array<{ id: string; text: string }> {
+  const active: Array<{ id: string; text: string }> = []
+  // What the conversation held before the last fork (a refused fork restores it).
+  let beforeFork: Array<{ id: string; text: string }> | null = null
+  for (const { event: e } of tab.log.events) {
+    if (e.kind === 'user-message' && e.id) {
+      if (tab.outbox.state(e.id) !== 'failed') active.push({ id: e.id, text: e.text })
+    } else if (e.kind === 'user-message-popped' && e.id) {
+      const at = active.findIndex((m) => m.id === e.id)
+      if (at >= 0) active.splice(at, 1)
+    } else if (e.kind === 'conversation-branch') {
+      const at = e.messageId ? active.findIndex((m) => m.id === e.messageId) : -1
+      if (e.reason === 'switched') active.length = 0
+      else if (e.reason === 'rewound' && at >= 0) active.length = at
+      else if (e.reason === 'forked' && at >= 0) {
+        beforeFork = active.slice()
+        active.length = at + 1
+      } else if (e.reason === 'fork-failed' && beforeFork) {
+        active.splice(0, active.length, ...beforeFork)
+        beforeFork = null
+      }
+    }
+  }
+  return active
+}
+
+/**
+ * The user message a rewind acts on: `before` — the message itself (it and what
+ * follows go); `after` — the next one (this message and its answer stay).
+ */
+function rewindTarget(tab: ChatTab, messageId: string, scope: RewindScope): string {
+  const active = activeUserMessages(tab)
+  const at = active.findIndex((m) => m.id === messageId)
+  if (at < 0) {
+    throw new ChatTransportError('That message is not in the conversation any more.')
+  }
+  if (scope === 'before') return messageId
+  const next = active[at + 1]
+  if (!next) throw new ChatTransportError('There is nothing after that message to rewind.')
+  return next.id
+}
+
+/**
+ * Where a fork from `messageId` ends: the last main-chain assistant record of
+ * that message's turn (`--resume-session-at`). Null: the turn has no answer.
+ */
+function forkPoint(tab: ChatTab, messageId: string): string | null {
+  const events = tab.log.events
+  let start = -1
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i].event
+    if (e.kind === 'user-message' && e.id === messageId) {
+      start = i
+      break
+    }
+  }
+  let at: string | null = null
+  for (let i = start + 1; start >= 0 && i < events.length; i++) {
+    const e = events[i].event
+    if (e.kind === 'user-message' || e.kind === 'conversation-branch') break
+    if (
+      (e.kind === 'assistant-text' || e.kind === 'assistant-thinking' || e.kind === 'tool-call') &&
+      e.uuid &&
+      e.parentToolUseId == null
+    ) {
+      at = e.uuid
+    }
+  }
+  return at
+}
+
+/**
+ * Fork the conversation from a past message, in this tab (plan 3.3) — the TUI's
+ * branch. The new conversation holds everything up to the end of that
+ * message's turn: the CLI copies it (`--resume S --resume-session-at A
+ * --fork-session --session-id N`) and never writes the original, which stays in
+ * Sessions. A running turn is stopped first. What came after the message stays
+ * in the timeline, folded behind the saved `forked` marker. The fork is the
+ * tab's conversation at once; the task records it (`slay-spawned-fork`) when the
+ * CLI reports it. A refused fork brings the tab back (`onForkFailure`).
+ */
+export async function forkTab(
+  tabId: string,
+  opts: { messageId: string; respawnOpts: () => Promise<CreateChatOpts> }
+): Promise<{ conversationId: string; fromConversationId: string }> {
+  const tab = requireTab(tabId)
+  if (!activeUserMessages(tab).some((m) => m.id === opts.messageId)) {
+    throw new ChatTransportError('That message is not in the conversation any more.')
+  }
+  if (turnInFlight(tab)) {
+    await stopTurn(tabId, { restorePrompt: false, respawnOpts: opts.respawnOpts })
+  }
+  const at = forkPoint(tab, opts.messageId)
+  if (!at)
+    throw new ChatTransportError(
+      'Claude has not answered that message: there is nothing to fork yet.'
+    )
+  if (tab.pendingFork || !tab.sessionConfirmed) {
+    throw new ChatTransportError('Send a message in this conversation before forking it again.')
+  }
+  const from = tab.sessionId
+  const id = randomUUID()
+  const next = await opts.respawnOpts()
+  await respawnTab(
+    tab,
+    { ...next, conversationId: null },
+    {
+      between: () => {
+        tab.pendingFork = { fromSessionId: from, atMessageUuid: at }
+        tab.sessionId = id
+        tab.sessionConfirmed = false
+        routeHostEvent(tab, {
+          kind: 'conversation-branch',
+          reason: 'forked',
+          messageId: opts.messageId,
+          conversationId: id,
+          fromConversationId: from,
+          atMessageUuid: at
+        })
+      }
+    }
+  )
+  return { conversationId: id, fromConversationId: from }
+}
+
+/** A turn is running or parked on a prompt. */
+function turnInFlight(tab: ChatTab): boolean {
+  return tab.terminalState === 'running' || tab.pendingPrompts.size > 0
+}
+
+function requireTab(tabId: string): ChatTab {
+  const tab = tabs.get(tabId)
+  if (!tab || tab.closed) throw new ChatTransportError(`No chat session for tab ${tabId}`)
+  return tab
+}
+
+/** The live process with a control channel, starting one if needed. */
+async function controllableProcess(tab: ChatTab): Promise<ChatProcess> {
+  await ensureSpawned(tab.tabId)
+  const proc = liveProcess(tab.tabId)
+  if (!proc?.driver.applyControl) throw new ChatTransportError('Claude Code is not running.')
+  return proc
+}
+
+function toPreview(payload: Record<string, unknown> | null): RewindFilesPreview {
+  const files = Array.isArray(payload?.filesChanged)
+    ? payload.filesChanged.filter((f): f is string => typeof f === 'string')
+    : []
+  return {
+    canRewind: payload?.canRewind === true,
+    filesChanged: files,
+    insertions: typeof payload?.insertions === 'number' ? payload.insertions : 0,
+    deletions: typeof payload?.deletions === 'number' ? payload.deletions : 0,
+    ...(typeof payload?.error === 'string' ? { error: payload.error } : {})
+  }
+}
+
+/**
+ * What restoring the files would change (`rewind_files` dry run) for a message:
+ * `before` = to just before it, `after` = to just after its turn.
+ */
+export async function previewRewind(
+  tabId: string,
+  opts: { messageId: string; scope: RewindScope }
+): Promise<RewindFilesPreview> {
+  const tab = requireTab(tabId)
+  const target = rewindTarget(tab, opts.messageId, opts.scope)
+  const proc = await controllableProcess(tab)
+  return toPreview(
+    controlPayload(
+      await proc.driver.applyControl!(
+        { subtype: 'rewind_files', user_message_id: target, dry_run: true },
+        REWIND_TIMEOUT_MS
+      )
+    )
+  )
+}
+
+/**
+ * Rewind the conversation and/or the files to a message (plan 3.3), live — the
+ * process stays. `before` (edit & resend): the message and everything after it
+ * go, its text comes back to edit. `after` (rewind to here): the message and its
+ * answer stay, everything after goes. Files are restored first (the checkpoint
+ * is keyed by the message the conversation is about to forget), then the
+ * conversation. A running turn is stopped first. The timeline keeps everything,
+ * folded behind the saved `conversation-branch` marker.
+ */
+export async function rewindTab(
+  tabId: string,
+  opts: {
+    messageId: string
+    scope: RewindScope
+    conversation: boolean
+    files: boolean
+    respawnOpts: () => Promise<CreateChatOpts>
+  }
+): Promise<RewindResult> {
+  const tab = requireTab(tabId)
+  const target = rewindTarget(tab, opts.messageId, opts.scope)
+  if (turnInFlight(tab)) {
+    await stopTurn(tabId, { restorePrompt: false, respawnOpts: opts.respawnOpts })
+  }
+  let proc = await controllableProcess(tab)
+
+  let files: RewindResult['files'] = null
+  if (opts.files) {
+    const preview = toPreview(
+      controlPayload(
+        await proc.driver.applyControl!(
+          { subtype: 'rewind_files', user_message_id: target, dry_run: true },
+          REWIND_TIMEOUT_MS
+        )
+      )
+    )
+    if (!preview.canRewind) {
+      files = { restored: false, filesChanged: [], error: preview.error ?? 'No file checkpoint.' }
+    } else {
+      const done = controlPayload(
+        await proc.driver.applyControl!(
+          { subtype: 'rewind_files', user_message_id: target },
+          REWIND_TIMEOUT_MS
+        )
+      )
+      files =
+        done?.canRewind === true
+          ? { restored: true, filesChanged: preview.filesChanged }
+          : {
+              restored: false,
+              filesChanged: [],
+              error: typeof done?.error === 'string' ? done.error : 'The files were not restored.'
+            }
+    }
+  }
+
+  let prefillText: string | null = null
+  if (opts.conversation) {
+    proc = await controllableProcess(tab)
+    const done = controlPayload(
+      await proc.driver.applyControl!(
+        { subtype: 'rewind_conversation', target_message_uuid: target },
+        REWIND_TIMEOUT_MS
+      )
+    )
+    if (done?.rewound !== true) {
+      throw new ChatTransportError(
+        `Claude Code could not rewind the conversation: ${typeof done?.error === 'string' ? done.error : 'refused'}`
+      )
+    }
+    if (opts.scope === 'before' && typeof done.prefillText === 'string')
+      prefillText = done.prefillText
+    routeHostEvent(tab, { kind: 'conversation-branch', reason: 'rewound', messageId: target })
+  }
+  if (files?.restored) {
+    const n = files.filesChanged.length
+    routeHostEvent(tab, {
+      kind: 'notice',
+      id: randomUUID(),
+      level: 'info',
+      code: 'files-rewound',
+      text: `Restored ${n} ${n === 1 ? 'file' : 'files'} from Claude Code's checkpoints. Changes made by shell commands are not restored.`,
+      detail: { files: files.filesChanged }
+    })
+  }
+  return { prefillText, files }
 }
 
 /**
@@ -1892,21 +2706,30 @@ export function popLastUserMessage(tabId: string): { popped: boolean; text: stri
  * tails with `user-message`/`tool-call`, which always precede `turn-init`.
  */
 function tailIsUnfinishedTurn(buffer: BufferedEvent[]): boolean {
+  // A tool call after the last turn end is an unfinished turn — unless it is
+  // imported history (its message is marked `history`, or it follows a switch).
+  let sawToolCall = false
   for (let i = buffer.length - 1; i >= 0; i--) {
-    const k = buffer[i].event.kind
+    const e = buffer[i].event
+    const k = e.kind
     if (
       k === 'result' ||
       k === 'process-exit' ||
       k === 'interrupted' ||
       k === 'user-message-popped'
     ) {
-      return false
+      return sawToolCall
     }
-    if (k === 'user-message' || k === 'tool-call') {
-      return true
-    }
+    if (k === 'conversation-branch') return false
+    if (k === 'user-message') return !e.history
+    if (k === 'tool-call') sawToolCall = true
   }
-  return false
+  return sawToolCall
+}
+
+/** The CLI's end of a turn the user interrupted (Stop, or the TUI's plain "No"). */
+function isAbortedResult(event: ResultEvent): boolean {
+  return typeof event.terminalReason === 'string' && event.terminalReason.startsWith('aborted')
 }
 
 function isProgressEventKind(kind: AgentEvent['kind']): boolean {

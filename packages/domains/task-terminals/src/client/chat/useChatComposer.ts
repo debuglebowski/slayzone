@@ -5,7 +5,8 @@ import {
   isValidModelForMode,
   modelLabelForMode,
   modelsForMode,
-  type CliCommandList
+  type CliCommandList,
+  type StopResult
 } from '@slayzone/terminal-contracts'
 import { useTRPCClient } from '../trpc'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
@@ -37,7 +38,8 @@ export interface UseChatComposerOpts {
   sendMessage: (text: string) => Promise<void>
   inFlight: boolean
   sessionEnded: boolean
-  abortAndPop: () => Promise<{ popped: boolean; text: string | null }>
+  /** Stop; a popped message comes back whole (`id`, `content`, `text`). */
+  abortAndPop: () => Promise<StopResult>
   chatApi: ChatActions
   navigate: NavigateActions
   getArtifactFilePath: (id: string) => Promise<string | null>
@@ -365,7 +367,8 @@ export function useChatComposer({
   // Aborts the turn on the main side and — if no progress had arrived —
   // restores the popped text + attachments to the composer for editing.
   // Skips restore when the user has already started typing again (draft
-  // non-empty).
+  // non-empty). The result carries the popped message whole (`id`, `content`
+  // with its attachment blocks), not only its text.
   const handleStop = useCallback(async () => {
     void clearQueue()
     const result = await abortAndPop()

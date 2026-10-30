@@ -84,8 +84,18 @@ import { shouldHonorDetectedError } from '../session-error-gate'
 import { resolveSpawnConversation } from '../spawn-conversation'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
+import {
+  conversationInUseMessage,
+  isConversationLive,
+  registerConversationHolder
+} from './live-conversations'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
 export { filterBufferData }
+
+/** A start refused: another side runs this conversation. */
+class ConversationInUseError extends Error {
+  readonly code = 'conversation-in-use'
+}
 
 /**
  * Transport-agnostic PTY event stream (IPC → tRPC migration, slice 3 / P17).
@@ -1488,6 +1498,11 @@ export async function createPty(
       }
     }
     const resuming = !!resolvedExistingId
+    // Never two processes on one conversation (chat A, plan 3.10): a chat of this
+    // task runs it — the hand-off ("Continue in terminal") stops it first.
+    if (resolvedExistingId && isConversationLive('chat', taskId, resolvedExistingId)) {
+      throw new ConversationInUseError(conversationInUseMessage('chat'))
+    }
     // Fresh-spawn pre-mint (decision.shouldMintFresh): when the provider's
     // `initialCommand` has the literal `{id}` placeholder (today: claude-code,
     // qwen-code) and nothing is known, slay mints a UUID at spawn time and
@@ -2879,6 +2894,17 @@ export async function createPty(
     return { success: true }
   } catch (error) {
     const err = error as Error
+    // A refusal, not a spawn failure: its message is the whole story.
+    if (err instanceof ConversationInUseError) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.conversation_in_use',
+        sessionId,
+        taskId: taskIdFromSessionId(sessionId)
+      })
+      return { success: false, error: err.message }
+    }
     recordDiagnosticEvent({
       level: 'error',
       source: 'pty',
@@ -3091,6 +3117,50 @@ export function killPty(sessionId: string): boolean {
   }, KILL_FINALIZE_WATCHDOG_MS)
   return true
 }
+
+/** How long a release waits for a killed session to finish exiting. */
+const KILL_AND_WAIT_MS = 5000
+
+/**
+ * Kill a session and wait until its exit is finalized (or `timeoutMs` passes):
+ * resolves true once it is gone. `killPty` itself does not wait — a hand-off
+ * must, so the next process never overlaps this one. Unknown id: true.
+ */
+export function killPtyAndWait(sessionId: string, timeoutMs = KILL_AND_WAIT_MS): Promise<boolean> {
+  const session = sessions.get(sessionId)
+  if (!session || session.exited) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const onExit = (exited: string): void => {
+      if (exited !== sessionId) return
+      done(true)
+    }
+    const timer = setTimeout(() => done(false), timeoutMs)
+    timer.unref?.()
+    function done(ok: boolean): void {
+      clearTimeout(timer)
+      ptyEvents.off('exit', onExit)
+      resolve(ok)
+    }
+    ptyEvents.on('exit', onExit)
+    killPty(sessionId)
+  })
+}
+
+/** This side of the never-two-processes guard (`live-conversations.ts`). */
+registerConversationHolder('terminal', {
+  isLive: (taskId, conversationId) => {
+    for (const s of sessions.values()) {
+      if (s.taskId === taskId && s.conversationId === conversationId && !s.exited) return true
+    }
+    return false
+  },
+  release: async (taskId, conversationId) => {
+    const ids = [...sessions.entries()]
+      .filter(([, s]) => s.taskId === taskId && s.conversationId === conversationId && !s.exited)
+      .map(([id]) => id)
+    await Promise.all(ids.map((id) => killPtyAndWait(id)))
+  }
+})
 
 /**
  * The user revealed this session's tab: if its agent is still waiting for an

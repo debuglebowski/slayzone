@@ -225,6 +225,8 @@ export {
   // here in runtime/), but was exported only from the electron barrel — so only
   // the Electron host could run it, and a standalone hub silently never did.
   backfillChatModes,
+  setClaudeSessionReader,
+  type ClaudeSessionReader,
   type ChatOps,
   type ChatMode,
   type ChatEventContext
@@ -256,6 +258,8 @@ export {
   // column a pty-mode one does, or restore works for half your tasks.
   setAgentStateTabRecorder as setChatAgentStateTabRecorder,
   getAgentStateTabRecorder as getChatAgentStateTabRecorder,
+  // Hand-off to the terminal: no chat process may keep running the conversation.
+  releaseChatConversation,
   type ChatEventMap,
   type TransportDeps
 } from './runtime/chat-transport-manager'

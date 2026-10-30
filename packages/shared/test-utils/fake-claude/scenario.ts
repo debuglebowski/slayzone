@@ -62,6 +62,8 @@ export type Step =
   | { replay: { transcript: string; process?: number; turn?: number; speed?: number } }
   /** Run a command as a CLI task (live output, background, stop): tasks.ts. */
   | { task: CommandTaskSpec }
+  /** Run branches at the same time (parallel tool calls, each with its own prompt). */
+  | { parallel: Step[][] }
 
 /** A `can_use_tool` request body (CLI 2.1.312 field names). */
 export interface CanUseToolRequest {
@@ -83,10 +85,39 @@ export interface CanUseToolRequest {
   server_policy_ask_only?: boolean
 }
 
-export type ControlReply = 'success' | 'error' | 'ignore'
+/**
+ * How the fake answers one control request subtype: `success` (the real CLI's
+ * payload for that subtype), `error`, `ignore` (never answers), or a fixed
+ * `{ success: payload }` / `{ error: message }`.
+ */
+export type ControlReply =
+  | 'success'
+  | 'error'
+  | 'ignore'
+  | { success: Record<string, unknown> }
+  | { error: string }
+
+/**
+ * A file checkpoint the CLI keeps for one user message (2.1.312, spike item 5),
+ * answered to `rewind_files` when `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true`.
+ * Paths are relative to the process cwd. A real (non-dry-run) rewind writes
+ * `restore` (`null` deletes the file).
+ */
+export interface FileCheckpoint {
+  filesChanged: string[]
+  insertions: number
+  deletions: number
+  restore?: Record<string, string | null>
+}
 
 /** What ONE spawn of the fake does. */
 export interface ProcessScript {
+  /**
+   * Plays the interactive TUI (`claude` without `-p`): logs its argv, prints a
+   * banner, and stays alive until a signal. Without it, a spawn missing the
+   * stream-json flags is argv drift (exit 2).
+   */
+  tui?: boolean
   /** Before reading stdin (a resume that fails at startup). */
   onStart?: Step[]
   /** `turns[i]` runs when the i-th user message arrives. */
@@ -108,6 +139,17 @@ export interface ProcessScript {
    * `none` plays a CLI that sends neither (the app infers delivery).
    */
   lifecycle?: 'native' | 'none'
+  /**
+   * Hold each user message's acks (`command_lifecycle` + replay) this long after
+   * it arrived. The message is already part of the conversation (and of the
+   * session file) during the wait — the window in which a replaced process
+   * "had" a message the app never saw confirmed.
+   */
+  ackDelayMs?: number
+  /** The 0-based index of this process's first user message `ackDelayMs` applies to (default 0). */
+  ackDelayFrom?: number
+  /** `rewind_files` checkpoints, keyed by the 0-based index of this process's user messages. */
+  fileCheckpoints?: Record<string, FileCheckpoint>
 }
 
 export interface Scenario {
@@ -286,6 +328,7 @@ export const step = {
   }),
   request: (request: CanUseToolRequest, then?: { allow?: Step[]; deny?: Step[] }): Step =>
     then ? { request, then } : { request },
+  parallel: (...branches: Step[][]): Step => ({ parallel: branches }),
   hostRequest: (
     request: { subtype: string } & Record<string, unknown>,
     timeoutMs?: number

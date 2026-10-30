@@ -6,7 +6,8 @@ import {
   type ConversationOrigin
 } from '@slayzone/task-contracts'
 import { agentSessionsEvents } from '../events'
-import { isTurnTrackedMode } from './agent-sessions'
+import { chatModeForTerminal, isChatSupported } from '@slayzone/terminal-contracts'
+import { isHonoredConversation, isTurnTrackedMode } from './agent-sessions'
 
 /**
  * Append-only ledger of conversation IDs per task per provider (table
@@ -183,6 +184,43 @@ export async function recordConversation(
   // write path. A pending-spawn shadow is filtered out of the list, but firing
   // here is harmless (the refetch simply returns the same set).
   agentSessionsEvents.emit('agent-sessions:changed', { taskId })
+}
+
+/**
+ * Make one of the task's sessions the current one of `mode` (the Sessions list).
+ *
+ * `sourceMode` is the mode that ran it. The Claude family shows chat and
+ * terminal sessions in one list, so a session of the chat ↔ terminal partner
+ * may be picked too: the conversation moves over — a hand-off, recorded
+ * `handoff` (the same CLI and session files on both sides). Any other mode's
+ * session is refused (`not-partner`), and the id must be an honored, undeleted
+ * session of this task under the mode that ran it (`not-honored`).
+ *
+ * `release` stops (and awaits the exit of) a chat process still running the
+ * conversation before the ledger moves it: never two processes on one
+ * conversation. The caller passes the transport's; tests pass a recorder.
+ */
+export async function switchConversation(
+  db: SlayzoneDb,
+  args: { taskId: string; mode: string; conversationId: string; sourceMode?: string },
+  deps: { release: (taskId: string, conversationId: string) => Promise<void> }
+): Promise<'switched' | 'not-partner' | 'not-honored'> {
+  const { taskId, mode, conversationId } = args
+  const source = args.sourceMode ?? mode
+  const handoff = source !== mode
+  if (handoff && chatModeForTerminal(mode) !== source && chatModeForTerminal(source) !== mode) {
+    return 'not-partner'
+  }
+  if (!(await isHonoredConversation(db, taskId, source, conversationId))) return 'not-honored'
+  if (handoff && isChatSupported(source)) await deps.release(taskId, conversationId)
+  await recordConversation(db, {
+    taskId,
+    mode,
+    conversationId,
+    origin: handoff ? 'handoff' : 'user-selected',
+    ...(isChatSupported(mode) ? { legacyJsonField: 'chatConversationId' as const } : {})
+  })
+  return 'switched'
 }
 
 /**

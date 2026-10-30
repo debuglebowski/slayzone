@@ -57,6 +57,15 @@ describe('createChatPromptRecorder', () => {
     expect(await listPromptsForTask(db, taskId)).toHaveLength(0)
   })
 
+  test('imported history of a resumed conversation is not recorded again', async () => {
+    await record(
+      'tab-3',
+      { kind: 'user-message', text: 'from the TUI', id: 'h1', history: true },
+      ctx
+    )
+    expect(await listPromptsForTask(db, taskId)).toHaveLength(0)
+  })
+
   test('modes without prompt history (Codex chat) are not recorded', async () => {
     await record('tab-2', { kind: 'user-message', text: 'hi' }, { ...ctx, mode: 'codex-chat' })
     expect(await listPromptsForTask(db, taskId)).toHaveLength(0)

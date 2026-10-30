@@ -16,7 +16,8 @@ import {
   type FakeClaude,
   type FakeEpoch,
   type FakeRun,
-  type Scenario
+  type Scenario,
+  sessionFilePath
 } from '@slayzone/test-utils/fake-claude'
 import {
   createIsolatedGitRepo,
@@ -60,6 +61,8 @@ export interface ChatTask {
   reload(): Promise<void>
   /** `chat.<op>` input naming this tab (`{tabId, taskId, mode, cwd}`). */
   opts(): { tabId: string; taskId: string; mode: 'claude-chat'; cwd: string }
+  /** The CLI session file of a conversation in this task's repo (the fake writes it). */
+  sessionFile(sessionId: string): string
 }
 
 export interface OpenChatTaskOpts {
@@ -87,6 +90,11 @@ export interface OpenChatTaskOpts {
 
 export interface ChatHarness {
   fake: FakeClaude
+  /**
+   * The worker's `CLAUDE_CONFIG_DIR` (the app and every agent it spawns get it):
+   * the fake keeps its session files here, never in the real ~/.claude.
+   */
+  claudeConfigDir: string
   /** Set the scenario, create a claude-chat task in its own repo, open it. */
   openTask(opts: OpenChatTaskOpts): Promise<ChatTask>
   /**
@@ -123,7 +131,7 @@ export function knownBug(opts: { audit?: string; fixedBy: string; what: string }
   )
 }
 
-type ChatWorkerFixtures = { fakeClaude: FakeClaude }
+type ChatWorkerFixtures = { fakeClaude: FakeClaude; claudeConfigDir: string }
 type ChatFixtures = { chat: ChatHarness }
 
 let projectSeq = 0
@@ -138,14 +146,24 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
     { scope: 'worker' }
   ],
 
-  appExtraEnv: [
-    async ({ fakeClaude }, use) => {
-      await use({ SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR: fakeClaude.binDir })
+  claudeConfigDir: [
+    async ({}, use) => {
+      await use(newRuntimeDir('claude-config'))
     },
     { scope: 'worker' }
   ],
 
-  chat: async ({ mainWindow: page, electronApp, fakeClaude }, use) => {
+  appExtraEnv: [
+    async ({ fakeClaude, claudeConfigDir }, use) => {
+      await use({
+        SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR: fakeClaude.binDir,
+        CLAUDE_CONFIG_DIR: claudeConfigDir
+      })
+    },
+    { scope: 'worker' }
+  ],
+
+  chat: async ({ mainWindow: page, electronApp, fakeClaude, claudeConfigDir }, use) => {
     let watchdogChanged = false
     const orphansBefore = fakeClaude.orphans().length
     const db = {
@@ -173,6 +191,7 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
 
     const harness: ChatHarness = {
       fake: fakeClaude,
+      claudeConfigDir,
 
       async openTask(opts) {
         await closeAllTaskTabs(page)
@@ -247,7 +266,8 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
           panel,
           composer,
           stopButton: panel.getByRole('button', { name: 'Stop generation' }),
-          sendButton: panel.getByRole('button', { name: 'Send' }),
+          // Exact: a user message's "Edit & resend" button contains the word too.
+          sendButton: panel.getByRole('button', { name: 'Send', exact: true }),
           async send(text) {
             await expect(composer).toBeEnabled()
             await composer.fill(text)
@@ -269,7 +289,10 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
             await openTaskById(page, task.id)
             await expect(panel).toBeVisible({ timeout: 10_000 })
           },
-          opts: () => ({ tabId, taskId: task.id, mode: 'claude-chat', cwd: repo })
+          opts: () => ({ tabId, taskId: task.id, mode: 'claude-chat', cwd: repo }),
+          // The CLI keys its project dir by its real cwd (symlinks resolved).
+          sessionFile: (sessionId) =>
+            sessionFilePath(claudeConfigDir, fs.realpathSync(repo), sessionId)
         }
       },
 

@@ -63,6 +63,12 @@ export interface OutboxDeps {
   onWriting(id: string): void
   /** The CLI acks natively but sent no lifecycle event for a written message. */
   onLifecycleMissing?(gen: number): void
+  /**
+   * The CLI reported a written message `completed` without ever queuing or
+   * starting it: it already had that uuid (it got it before a restart) and
+   * dropped it — no turn runs for it (Claude Code 2.1.312, chat-a check R2b).
+   */
+  onAlreadyInConversation?(id: string): void
   /** How long a link-down write keeps being retried before it fails. */
   retryWindowMs?: number
   /** First retry delay; doubles per retry up to 8×. */
@@ -76,6 +82,8 @@ interface Entry {
   gen: number | null
   /** The write to `gen` resolved. */
   written: boolean
+  /** Where the CLI says the message is (lifecycle of `gen`): received, or its turn started. */
+  cli: 'none' | 'queued' | 'started'
   /** First link-down failure of the current attempt (retry window start). */
   linkDownSince: number | null
   retryTimer: ReturnType<typeof setTimeout> | null
@@ -115,6 +123,7 @@ export class ChatOutbox {
       state: 'queued',
       gen: null,
       written: false,
+      cli: 'none',
       linkDownSince: null,
       retryTimer: null
     })
@@ -200,13 +209,33 @@ export class ChatOutbox {
     const entry = this.entries.get(id)
     if (!entry || entry.gen !== gen) return
     if (state === 'queued' || state === 'started') {
+      if (entry.cli !== 'started') entry.cli = state
       this.deliver(entry)
     } else if (state === 'completed') {
+      const dropped = entry.cli === 'none'
       this.deliver(entry)
       this.set(entry, 'answered')
+      if (dropped) this.deps.onAlreadyInConversation?.(id)
     } else if (entry.state !== 'answered') {
       this.set(entry, 'cancelled')
     }
+  }
+
+  /** The oldest message the agent has not finished with (queued, sending, delivered), or null. */
+  oldestInFlight(): string | null {
+    for (const [id, e] of this.entries) {
+      if (e.state === 'queued' || e.state === 'sending' || e.state === 'delivered') return id
+    }
+    return null
+  }
+
+  /** Messages of `gen` the CLI holds queued (received, its turn not started yet). */
+  heldByCli(gen: number): string[] {
+    const ids: string[] = []
+    for (const [id, entry] of this.entries) {
+      if (entry.gen === gen && entry.cli === 'queued' && entry.state === 'delivered') ids.push(id)
+    }
+    return ids
   }
 
   onReplay(gen: number, id: string): void {
@@ -274,7 +303,8 @@ export class ChatOutbox {
   restore(events: Iterable<AgentEvent>): void {
     const last = new Map<string, { message: OutgoingUserMessage; state: OutboxState }>()
     for (const event of events) {
-      if (event.kind === 'user-message' && event.id) {
+      // Imported history was answered long ago, never by this tab's outbox.
+      if (event.kind === 'user-message' && event.id && !event.history) {
         last.set(event.id, {
           message: { id: event.id, content: event.content ?? [{ type: 'text', text: event.text }] },
           state: 'queued'
@@ -291,6 +321,7 @@ export class ChatOutbox {
         state,
         gen: null,
         written: false,
+        cli: 'none',
         linkDownSince: null,
         retryTimer: null
       }
@@ -317,6 +348,7 @@ export class ChatOutbox {
     this.writing = id
     entry.gen = proc.gen
     entry.written = false
+    entry.cli = 'none'
     this.set(entry, 'sending')
     this.deps.onWriting(id)
     let sent: Promise<void>

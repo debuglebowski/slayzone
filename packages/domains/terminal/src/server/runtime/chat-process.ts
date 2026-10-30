@@ -71,9 +71,20 @@ export class ChatProcess implements OutboxProcess {
   replaced = false
   /** The user interrupted a turn of this process (its 0-turn error is not a failed resume). */
   interruptIssued = false
+  /**
+   * The current turn's message was taken back (Stop before any output): the rest
+   * of the turn is dropped at the door, up to and including its end.
+   */
+  discardTurn = false
   /** A resume of this process was confirmed (or failed) — the guard is done with it. */
   resumeSettled = false
   resumeFailed = false
+  /** Started as a fork (`--fork-session`) of that conversation, ending at that record. */
+  fork: { fromSessionId: string; atMessageUuid: string } | null = null
+  /** The host asked it to stop (kill, stop, watchdog): its exit is not the CLI refusing. */
+  stopRequested = false
+  /** The CLI refused the fork (it exits at startup): the tab went back to the original. */
+  forkFailed = false
   /** Open tool calls (id → bound), for the watchdog. */
   readonly openTools = new Map<string, OpenToolBound>()
 
@@ -198,6 +209,7 @@ export class ChatProcess implements OutboxProcess {
   }
 
   kill(signal: string): void {
+    this.stopRequested = true
     try {
       this.handle.kill(signal)
     } catch {

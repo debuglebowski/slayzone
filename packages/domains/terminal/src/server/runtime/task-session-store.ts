@@ -28,6 +28,18 @@ export interface TaskSessionStore {
   recordSessionSpawn(db: SlayzoneDb, input: SessionSpawnInput): Promise<void>
   /** Mark a session's process dead (task's `markSessionDead`). */
   markSessionDead(db: SlayzoneDb, sessionId: string): Promise<void>
+  /**
+   * Did this task really run `conversationId` in `mode` (an honored, not deleted
+   * ledger row)? Task's `isHonoredConversation` — the guard before a switch.
+   */
+  isHonoredConversation(
+    db: SlayzoneDb,
+    taskId: string,
+    mode: string,
+    conversationId: string
+  ): Promise<boolean>
+  /** The conversation `mode` resumes next for this task (task's `getCurrentConversationId`). */
+  getCurrentConversationId(db: SlayzoneDb, taskId: string, mode: string): Promise<string | null>
 }
 
 /** Input of `TaskSessionStore.recordConversation` (task-conversations ledger append). */

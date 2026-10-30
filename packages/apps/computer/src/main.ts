@@ -48,6 +48,7 @@ import { startHostIdReconciler } from './host-id'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
 import { createGhHandlers } from './handlers/gh'
+import { createClaudeSessionHandlers } from './handlers/claude-session'
 import { createGitHandlers } from './handlers/git'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
@@ -190,6 +191,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...fs.handlers,
     ...createComputerConfigHandlers(ctx),
     ...createGhHandlers(ctx),
+    ...createClaudeSessionHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
 

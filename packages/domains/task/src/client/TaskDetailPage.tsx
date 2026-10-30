@@ -68,6 +68,7 @@ import {
   resolveRepoPath
 } from '@slayzone/projects-contracts'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
+import { isChatSupported } from '@slayzone/terminal-contracts'
 import {
   Button,
   IconButton,
@@ -991,9 +992,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     handleResetTerminal,
     handleSwitchSession,
     handleDeleteSession,
-    handleReattachTerminal
+    handleReattachTerminal,
+    handoffMode,
+    handleHandoff
   } = useTaskTerminalSession({
     task,
+    // The main agent's cwd, exactly as the terminal container gets it (a chat
+    // tab is identified by it).
+    agentCwd: effectiveRepoPath || project?.path || '',
     onTaskUpdated,
     shortcutActive,
     getMainSessionId,
@@ -3030,6 +3036,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onOpenFile={handleQuickOpenFile}
                           onMainReset={handleResetTerminal}
                           onSwitchSession={handleSwitchSession}
+                          {...(handoffMode ? { onMainHandoff: () => void handleHandoff() } : {})}
                           onDeleteSession={handleDeleteSession}
                           overlay={
                             isActive && loopConfigured ? (
@@ -3217,6 +3224,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                           onClick={handleCopyConversationId}
                                         >
                                           Copy conversation ID
+                                        </DropdownMenuItem>
+                                      )}
+                                      {handoffMode && (
+                                        <DropdownMenuItem
+                                          data-testid="terminal-menu-handoff"
+                                          disabled={!getConversationIdForMode(task)}
+                                          onClick={() => void handleHandoff()}
+                                        >
+                                          {isChatSupported(task.terminal_mode)
+                                            ? 'Continue in terminal'
+                                            : 'Continue in chat'}
                                         </DropdownMenuItem>
                                       )}
                                       <DropdownMenuSeparator />

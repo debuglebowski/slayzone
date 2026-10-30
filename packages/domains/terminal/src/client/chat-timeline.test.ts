@@ -12,6 +12,8 @@ import {
   isInFlight,
   isAwaitingUserQuestion,
   deriveLoadingLabel,
+  selectActiveUserIds,
+  selectFoldedIndexes,
   selectUsageSummary,
   type ChatTimelineState
 } from './chat-timeline'
@@ -2295,4 +2297,225 @@ describe('turn errors are visible', () => {
     ])
     expect(s.timeline.some((i) => i.kind === 'turn-error')).toBe(false)
   })
+})
+
+// ---- chat A: Stop as a live interrupt ----
+
+const userMsg = (text: string, id?: string): AgentEvent => ({
+  kind: 'user-message',
+  text,
+  ...(id ? { id } : {})
+})
+const abortedResult = (): AgentEvent => ({
+  kind: 'result',
+  subtype: 'error_during_execution',
+  isError: true,
+  durationMs: 0,
+  durationApiMs: 0,
+  numTurns: 1,
+  totalCostUsd: 0,
+  stopReason: null,
+  terminalReason: 'aborted_streaming',
+  text: 'Request interrupted',
+  modelUsage: {},
+  usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+  permissionDenials: []
+})
+
+test('the result of a turn the user stopped is an end, not an error: no turn-error line', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: userMsg('go', 'u1') })
+  s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+  s = reducer(s, { type: 'event', event: abortedResult() })
+  expect(s.timeline.some((it) => it.kind === 'turn-error')).toBe(false)
+  const result = s.timeline.find((it) => it.kind === 'result')
+  expect(result).toMatchObject({ isError: false })
+  expect(isInFlight(s)).toBe(false)
+})
+
+test('user-message-popped matches by id when it has one: same text, other id → nothing is removed', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: userMsg('same', 'u1') })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'same', id: 'u9' } })
+  expect(s.timeline.filter((it) => it.kind === 'user-text')).toHaveLength(1)
+  s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'same', id: 'u1' } })
+  expect(s.timeline.filter((it) => it.kind === 'user-text')).toHaveLength(0)
+  expect(isInFlight(s)).toBe(false)
+})
+
+test('a message Claude Code already had closes its turn with its reason', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: userMsg('again', 'u1') })
+  expect(isInFlight(s)).toBe(true)
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'interrupted', reason: 'already-in-conversation' }
+  })
+  expect(isInFlight(s)).toBe(false)
+  expect(s.timeline.at(-1)).toMatchObject({
+    kind: 'interrupted',
+    reason: 'already-in-conversation'
+  })
+})
+
+// ---- chat A: conversation branches (rewind, fork, switch) ----
+
+const answer = (s: ChatTimelineState, text: string): ChatTimelineState => {
+  let n = reducer(s, { type: 'event', event: ev.text(`m-${text}`, text) })
+  n = reducer(n, { type: 'event', event: ev.turnResult() })
+  return n
+}
+
+test('rewound: the fold hides the forgotten message and everything after it', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
+  s = reducer(s, { type: 'event', event: userMsg('one', 'u1') })
+  s = answer(s, 'r1')
+  const from = s.timeline.length
+  s = reducer(s, { type: 'event', event: userMsg('two', 'u2') })
+  s = answer(s, 'r2')
+  const upTo = s.timeline.length
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'conversation-branch', reason: 'rewound', messageId: 'u2' }
+  })
+  const fold = s.timeline.at(-1)
+  expect(fold).toMatchObject({ kind: 'conversation-branch', reason: 'rewound', hiddenFrom: from })
+  expect((fold as { hiddenCount: number }).hiddenCount).toBe(upTo - from)
+  expect(isInFlight(s)).toBe(false)
+})
+
+test('forked: what followed the fork point is folded; the new conversation id does not wipe the timeline', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
+  s = reducer(s, { type: 'event', event: userMsg('one', 'u1') })
+  s = answer(s, 'r1')
+  const nextTurn = s.timeline.length
+  s = reducer(s, { type: 'event', event: userMsg('two', 'u2') })
+  s = answer(s, 'r2')
+  s = reducer(s, {
+    type: 'event',
+    event: {
+      kind: 'conversation-branch',
+      reason: 'forked',
+      messageId: 'u1',
+      conversationId: 'sid-2'
+    }
+  })
+  expect(s.timeline.at(-1)).toMatchObject({ reason: 'forked', hiddenFrom: nextTurn })
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-2') })
+  expect(s.timeline.some((it) => it.kind === 'user-text' && it.text === 'one')).toBe(true)
+  expect(s.sessionId).toBe('sid-2')
+})
+
+test('fork-failed: the fork is undone — nothing folded, the same conversation goes on', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
+  s = reducer(s, { type: 'event', event: userMsg('one', 'u1') })
+  s = answer(s, 'r1')
+  s = reducer(s, { type: 'event', event: userMsg('two', 'u2') })
+  s = answer(s, 'r2')
+  s = reducer(s, {
+    type: 'event',
+    event: {
+      kind: 'conversation-branch',
+      reason: 'forked',
+      messageId: 'u1',
+      conversationId: 'sid-2'
+    }
+  })
+  const forkAt = s.timeline.length - 1
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'conversation-branch', reason: 'fork-failed', conversationId: 'sid-1' }
+  })
+  // The fork's row says it failed and folds nothing; no second row.
+  expect(s.timeline).toHaveLength(forkAt + 1)
+  expect(s.timeline[forkAt]).toMatchObject({ reason: 'fork-failed', hiddenCount: 0 })
+  expect(selectFoldedIndexes(s.timeline).size).toBe(0)
+  expect(selectActiveUserIds(s.timeline)).toEqual(['u1', 'u2'])
+  // The original goes on: its turn-init is a restart, nothing is kept pending.
+  expect(s.freshStartPending).toBe(false)
+})
+
+test('switched: the previous conversation is folded; imported history is answered, never in flight', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
+  s = reducer(s, { type: 'event', event: userMsg('old', 'u1') })
+  s = answer(s, 'r1')
+  const before = s.timeline.length
+  s = reducer(s, {
+    type: 'event',
+    event: {
+      kind: 'conversation-branch',
+      reason: 'switched',
+      conversationId: 'sid-9',
+      source: 'terminal'
+    }
+  })
+  expect(s.timeline.at(-1)).toMatchObject({
+    reason: 'switched',
+    hiddenFrom: 0,
+    hiddenCount: before
+  })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'user-message', text: 'from the TUI', id: 'h1', history: true }
+  })
+  s = reducer(s, { type: 'event', event: ev.text('h-a', 'tui answer') })
+  expect(isInFlight(s)).toBe(false)
+  expect(
+    s.timeline.find((it) => it.kind === 'user-text' && it.text === 'from the TUI')
+  ).toMatchObject({
+    id: 'h1',
+    delivery: 'answered'
+  })
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-9') })
+  expect(s.timeline.some((it) => it.kind === 'user-text' && it.text === 'from the TUI')).toBe(true)
+  // A second switch folds only what came after the first.
+  const second = s.timeline.length
+  s = reducer(s, {
+    type: 'event',
+    event: {
+      kind: 'conversation-branch',
+      reason: 'switched',
+      conversationId: 'sid-3',
+      source: 'sessions'
+    }
+  })
+  expect(s.timeline.at(-1)).toMatchObject({
+    hiddenFrom: before + 1,
+    hiddenCount: second - before - 1
+  })
+})
+
+test('selectActiveUserIds: messages still in the conversation (folds and history honoured)', () => {
+  let s: ChatTimelineState = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
+  s = reducer(s, { type: 'event', event: userMsg('one', 'u1') })
+  s = answer(s, 'r1')
+  s = reducer(s, { type: 'event', event: userMsg('two', 'u2') })
+  s = answer(s, 'r2')
+  s = reducer(s, { type: 'event', event: userMsg('legacy') })
+  s = answer(s, 'r3')
+  expect([...selectActiveUserIds(s.timeline)]).toEqual(['u1', 'u2'])
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'conversation-branch', reason: 'rewound', messageId: 'u2' }
+  })
+  expect([...selectActiveUserIds(s.timeline)]).toEqual(['u1'])
+  s = reducer(s, {
+    type: 'event',
+    event: {
+      kind: 'conversation-branch',
+      reason: 'switched',
+      conversationId: 'x',
+      source: 'sessions'
+    }
+  })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'user-message', text: 'h', id: 'h1', history: true }
+  })
+  expect([...selectActiveUserIds(s.timeline)]).toEqual(['h1'])
 })

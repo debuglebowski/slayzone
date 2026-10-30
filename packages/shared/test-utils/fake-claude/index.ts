@@ -17,6 +17,7 @@ import type { Scenario } from './scenario'
 export * from './scenario'
 export * from './stream'
 export * from './tasks'
+export * from './session-file'
 export * from './transcript'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -65,6 +66,34 @@ export class FakeRun {
     const at = this.argv.findIndex((a) => a === '--resume' || a === '--session-id')
     return at >= 0 ? this.argv[at + 1] : undefined
   }
+  /** `--resume S --fork-session`: a new conversation holding S's history. */
+  get forked(): boolean {
+    return this.argv.includes('--fork-session')
+  }
+  /** Spawned as the interactive TUI (a `tui: true` script). */
+  get tui(): boolean {
+    return this.start().tui === true
+  }
+  /** The env keys the fake records (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`, `CLAUDE_CONFIG_DIR`). */
+  get env(): Record<string, string> {
+    return (this.start().env as Record<string, string> | undefined) ?? {}
+  }
+  /** Wall-clock ms when this spawn started. */
+  get startedAt(): number {
+    return this.start().at as number
+  }
+  /** Indexes of earlier spawns of the epoch that were still alive when this one started. */
+  get peersAliveAtStart(): number[] {
+    return (this.start().peersAlive as number[] | undefined) ?? []
+  }
+  /** Targets of `rewind_conversation` requests that found their message. */
+  rewound(): string[] {
+    return this.entries.filter((e) => e.kind === 'rewound').map((e) => e.target as string)
+  }
+  /** User message uuids the conversation received a second time. */
+  duplicateUserUuids(): string[] {
+    return this.entries.filter((e) => e.kind === 'duplicate-user-uuid').map((e) => e.uuid as string)
+  }
   flag(name: string): string | undefined {
     const at = this.argv.indexOf(name)
     return at >= 0 ? this.argv[at + 1] : undefined
@@ -82,11 +111,12 @@ export class FakeRun {
       .map((m) => (m.message as { content?: unknown } | undefined)?.content)
       .filter((c): c is string => typeof c === 'string')
   }
-  /** The app's control requests (`interrupt`, `set_model`, …), in order. */
-  controlRequests(): Array<Record<string, unknown>> {
+  /** The app's control requests (`interrupt`, `set_model`, …), in order; one subtype when given. */
+  controlRequests(subtype?: string): Array<Record<string, unknown>> {
     return this.stdin()
       .filter((m) => m.type === 'control_request')
       .map((m) => m.request as Record<string, unknown>)
+      .filter((r) => subtype === undefined || r.subtype === subtype)
   }
   /** The app's decisions on `can_use_tool` requests the fake made. */
   decisions(): Array<{ requestId: string; toolName: string; behavior: string; reply: unknown }> {

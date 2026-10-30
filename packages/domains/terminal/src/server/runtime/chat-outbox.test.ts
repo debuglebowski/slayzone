@@ -337,3 +337,41 @@ test('a failed resume re-sends even a message its process had confirmed (the new
   await flush()
   expect(p2.sent).toEqual(['m1'])
 })
+
+// ---- chat A: CLI lifecycle sub-state ----
+
+test('a resent message the CLI reports completed without ever queuing it: it already had it', async () => {
+  const p = proc(1)
+  const seen: string[] = []
+  const outbox = new ChatOutbox({
+    current: () => p,
+    ensureReady: async () => p,
+    onChange: () => {},
+    onWriting: () => {},
+    onAlreadyInConversation: (id) => seen.push(id)
+  })
+  outbox.accept(msg('u1'))
+  outbox.accept(msg('u2'))
+  await flush()
+  outbox.onLifecycle(1, 'u1', 'queued')
+  outbox.onLifecycle(1, 'u1', 'started')
+  outbox.onLifecycle(1, 'u1', 'completed')
+  outbox.onLifecycle(1, 'u2', 'completed')
+  expect(seen).toEqual(['u2'])
+  expect(outbox.state('u2')).toBe('answered')
+})
+
+test('heldByCli lists messages the CLI holds queued, not the one running', async () => {
+  const p = proc(1)
+  const h = harness(p)
+  h.outbox.accept(msg('u1'))
+  h.outbox.accept(msg('u2'))
+  await flush()
+  h.outbox.onLifecycle(1, 'u1', 'queued')
+  h.outbox.onLifecycle(1, 'u1', 'started')
+  h.outbox.onLifecycle(1, 'u2', 'queued')
+  expect(h.outbox.heldByCli(1)).toEqual(['u2'])
+  expect(h.outbox.oldestInFlight()).toBe('u1')
+  h.outbox.onLifecycle(1, 'u2', 'started')
+  expect(h.outbox.heldByCli(1)).toEqual([])
+})

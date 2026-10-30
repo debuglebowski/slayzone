@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type Key } from 'react'
-import { toast, safeClipboardWriteText } from '@slayzone/ui'
+import { toast, safeClipboardWriteText, useStableCallback } from '@slayzone/ui'
 import { streamKeyOf, type TimelineItem } from '@slayzone/terminal/client'
 import { useChatSearch } from './useChatSearch'
 import { isRenderable } from './renderers'
@@ -44,9 +44,35 @@ export function useChatDisplay({
   // rendered nested inside their parent SubAgentRow, not at the chat root.
   // When `showLastMessageTools` is on, tools after the last user message are
   // preserved so the user sees what the agent is doing right now.
+  // Folds: what a rewind / fork / switch left the conversation without stays in
+  // the timeline, hidden behind its `conversation-branch` divider until opened.
+  const [openBranches, setOpenBranches] = useState<ReadonlySet<string>>(() => new Set())
+  const folded = useMemo<ReadonlySet<number>>(() => {
+    const out = new Set<number>()
+    for (const it of timeline) {
+      if (it.kind !== 'conversation-branch' || openBranches.has(it.id)) continue
+      for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) out.add(i)
+    }
+    return out
+  }, [timeline, openBranches])
+  const toggleBranch = useStableCallback((id: string): void => {
+    setOpenBranches((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  })
+  const branches = useMemo(
+    () => ({ isOpen: (id: string) => openBranches.has(id), toggle: toggleBranch }),
+    [openBranches, toggleBranch]
+  )
+
   const displayedTimeline = useMemo<TimelineItem[]>(() => {
     const isRoot = (item: TimelineItem): boolean => item.parentToolUseId == null
-    if (!finalOnly) return timeline.filter((item) => isRoot(item) && isRenderable(item))
+    if (!finalOnly) {
+      return timeline.filter((item, i) => !folded.has(i) && isRoot(item) && isRenderable(item))
+    }
     let lastUserIdx = -1
     if (showLastMessageTools) {
       for (let i = timeline.length - 1; i >= 0; i--) {
@@ -66,7 +92,7 @@ export function useChatDisplay({
     }
     for (let i = 0; i < timeline.length; i++) {
       const item = timeline[i]
-      if (!isRoot(item)) continue
+      if (!isRoot(item) || folded.has(i)) continue
       if (item.kind === 'user-text') {
         flushPending()
         out.push(item)
@@ -92,6 +118,7 @@ export function useChatDisplay({
         out.push(item)
       } else if (
         item.kind === 'interrupted' ||
+        item.kind === 'conversation-branch' ||
         item.kind === 'compaction' ||
         item.kind === 'command-output' ||
         // Failures and notices stay visible in every view.
@@ -107,7 +134,7 @@ export function useChatDisplay({
     }
     flushPending()
     return out.filter(isRenderable)
-  }, [timeline, finalOnly, showLastMessageTools])
+  }, [timeline, finalOnly, showLastMessageTools, folded])
 
   const search = useChatSearch(displayedTimeline)
 
@@ -133,6 +160,8 @@ export function useChatDisplay({
     if (streamKey) return streamKey
     if (item.kind === 'text' || item.kind === 'thinking') return `${item.kind}:${item.messageId}`
     if (item.kind === 'session-start') return `session:${item.sessionId}`
+    if (item.kind === 'conversation-branch') return item.id
+    if (item.kind === 'user-text' && item.id) return `user-text:${item.id}`
     if (item.kind === 'result') return `result:${item.timestamp}:${index}`
     if (item.kind === 'hook' && item.hookId) return `hook:${item.hookId}`
     if (item.kind === 'notice' && item.id) return `notice:${item.id}`
@@ -192,6 +221,7 @@ export function useChatDisplay({
     itemKey,
     search,
     copyAllMessages,
-    copyLastResponse
+    copyLastResponse,
+    branches
   }
 }

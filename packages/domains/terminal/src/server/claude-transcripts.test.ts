@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   encodeClaudeProjectDir,
   readClaudeTranscriptMeta,
+  claudeTranscriptExists,
   claudeTranscriptRetentionMs
 } from './claude-transcripts'
 
@@ -162,5 +163,30 @@ describe('claudeTranscriptRetentionMs', () => {
   test('unparseable file → default', () => {
     settings('not json')
     expect(claudeTranscriptRetentionMs()).toBe(30 * DAY)
+  })
+})
+
+// Claude Code keeps everything under CLAUDE_CONFIG_DIR when it is set (the
+// e2e harness and some users do): the self-heal must look where the CLI writes.
+describe('CLAUDE_CONFIG_DIR', () => {
+  const configDir = mkdtempSync(join(tmpdir(), 'ct-config-'))
+  const prev = process.env.CLAUDE_CONFIG_DIR
+  beforeAll(() => {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+  })
+  afterAll(() => {
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = prev
+  })
+  test('a transcript under CLAUDE_CONFIG_DIR exists', () => {
+    const dir = join(configDir, 'projects', encodeClaudeProjectDir('/work/repo'))
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'conv-1.jsonl'), '{}\n')
+    expect(claudeTranscriptExists('/work/repo', 'conv-1')).toBe(true)
+    expect(claudeTranscriptExists('/work/repo', 'conv-2')).toBe(false)
+  })
+  test('its settings.json sets the retention', () => {
+    writeFileSync(join(configDir, 'settings.json'), '{"cleanupPeriodDays": 7}')
+    expect(claudeTranscriptRetentionMs()).toBe(7 * 24 * 60 * 60 * 1000)
   })
 })

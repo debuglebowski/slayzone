@@ -65,6 +65,8 @@ import {
   parseMcpToolName
 } from './tool-cards'
 import { UserMessageStatus } from './UserMessageStatus'
+import { UserMessageActions } from './UserMessageActions'
+import { ConversationBranchRow } from './ConversationBranchRow'
 import { AgentProblemCard } from './AgentProblemCard'
 
 // --- Helpers ---
@@ -85,6 +87,7 @@ function useCopy(text: string): { copied: boolean; copy: () => void } {
 export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user-text' }> }) {
   return (
     <div className="group px-4 py-2 flex justify-end items-center gap-2">
+      <UserMessageActions item={item} />
       <span className="shrink-0 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
         {formatTime(item.timestamp)}
       </span>
@@ -292,10 +295,20 @@ export function StderrBlock({ item }: { item: Extract<TimelineItem, { kind: 'std
   )
 }
 
-export function InterruptedBlock(_props: { item: Extract<TimelineItem, { kind: 'interrupted' }> }) {
+export function InterruptedBlock({
+  item
+}: {
+  item: Extract<TimelineItem, { kind: 'interrupted' }>
+}) {
   return (
-    <div className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-warning-foreground">
-      Turn interrupted
+    <div
+      data-testid="chat-interrupted"
+      data-reason={item.reason}
+      className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-warning-foreground"
+    >
+      {item.reason === 'already-in-conversation'
+        ? 'Not run again: Claude Code already had this message'
+        : 'Turn interrupted'}
     </div>
   )
 }
@@ -963,6 +976,8 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <StderrBlock key={key} item={item} />
     case 'interrupted':
       return <InterruptedBlock key={key} item={item} />
+    case 'conversation-branch':
+      return <ConversationBranchRow key={key} item={item} />
     case 'plan':
       return <PlanBlock key={key} item={item} />
     case 'compaction':

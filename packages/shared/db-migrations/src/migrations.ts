@@ -4044,6 +4044,115 @@ export const migrations: Migration[] = [
       // content is their `send` text.
       db.exec(`ALTER TABLE chat_queue ADD COLUMN content TEXT;`)
     }
+  },
+  {
+    version: 175,
+    up: (db) => {
+      // Admit two honored provenance origins (chat A; see
+      // task-contracts/conversation-origins.ts):
+      //   - `handoff`: an EXISTING conversation of this task moved between the
+      //     terminal (TUI) and chat ("Continue in chat / in terminal", or picking
+      //     the other mode's session in the Sessions list). The CLI shares its
+      //     session files between both (verified on 2.1.312), so the same id
+      //     resumes on the other side. Not `user-selected`: that origin's guard
+      //     requires an honored row for the SAME (task, mode).
+      //   - `slay-spawned-fork`: a fork SlayZone spawned (`--resume S
+      //     --resume-session-at A --fork-session --session-id N`): a new
+      //     conversation with S's history. Not `slay-spawned-resume`, which
+      //     claims N existed before.
+      // Same rebuild as v151/v156 (a CHECK can't be altered in place), with the
+      // same safety: FKs off around the swap, explicit columns, every index
+      // recreated. No backfill.
+      db.exec(`PRAGMA foreign_keys = OFF;`)
+      db.exec(`
+        CREATE TABLE task_conversations_new (
+          id              TEXT PRIMARY KEY,
+          task_id         TEXT NOT NULL,
+          mode            TEXT NOT NULL,
+          conversation_id TEXT,
+          origin          TEXT NOT NULL,
+          pending_meta    TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (origin IN (
+            'slay-spawned-fresh',
+            'slay-spawned-resume',
+            'in-band-clear',
+            'user-selected',
+            'handoff',
+            'slay-spawned-fork',
+            'cas-repoint-heal',
+            'legacy-migration',
+            'foreign-observed',
+            'manual-reset',
+            'pending-spawn'
+          ))
+        );
+        -- Only rows whose task still exists: the new table enforces the foreign key (and
+        -- \`PRAGMA foreign_keys = OFF\` is a no-op inside this transaction), so one orphan
+        -- made this copy throw on every launch. No task can reach such a row.
+        INSERT INTO task_conversations_new
+          (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
+          SELECT id, task_id, mode, conversation_id, origin, pending_meta, created_at
+            FROM task_conversations
+           WHERE task_id IN (SELECT id FROM tasks);
+        DROP TABLE task_conversations;
+        ALTER TABLE task_conversations_new RENAME TO task_conversations;
+        CREATE INDEX task_conversations_lookup
+          ON task_conversations (task_id, mode, created_at DESC);
+        CREATE INDEX task_conversations_pending
+          ON task_conversations (task_id, mode, conversation_id)
+          WHERE origin = 'pending-spawn';
+
+        CREATE TABLE agent_sessions_new (
+          id              TEXT PRIMARY KEY,
+          mode            TEXT NOT NULL,
+          cwd             TEXT,
+          task_id         TEXT,
+          conversation_id TEXT,
+          origin          TEXT NOT NULL,
+          status          TEXT NOT NULL,
+          pending_meta    TEXT,
+          created_at      INTEGER NOT NULL,
+          bound_at        INTEGER,
+          tab_id          TEXT,
+          ended_at        INTEGER,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (origin IN (
+            'slay-spawned-fresh',
+            'slay-spawned-resume',
+            'in-band-clear',
+            'user-selected',
+            'handoff',
+            'slay-spawned-fork',
+            'cas-repoint-heal',
+            'legacy-migration',
+            'foreign-observed',
+            'pending-spawn'
+          )),
+          CHECK (status IN ('pooled','bound','dead'))
+        );
+        INSERT INTO agent_sessions_new
+          (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta,
+           created_at, bound_at, tab_id, ended_at)
+          SELECT id, mode, cwd, task_id, conversation_id, origin, status, pending_meta,
+                 created_at, bound_at, tab_id, ended_at
+            FROM agent_sessions;
+        DROP TABLE agent_sessions;
+        ALTER TABLE agent_sessions_new RENAME TO agent_sessions;
+        CREATE INDEX agent_sessions_task
+          ON agent_sessions (task_id, mode, created_at DESC);
+        CREATE INDEX agent_sessions_pool
+          ON agent_sessions (cwd, mode)
+          WHERE status = 'pooled';
+        CREATE INDEX agent_sessions_pending
+          ON agent_sessions (task_id, mode, conversation_id)
+          WHERE origin = 'pending-spawn';
+        CREATE INDEX agent_sessions_tab
+          ON agent_sessions (tab_id, created_at DESC);
+      `)
+      db.exec(`PRAGMA foreign_keys = ON;`)
+    }
   }
 ]
 

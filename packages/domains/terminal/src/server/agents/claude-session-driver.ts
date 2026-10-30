@@ -334,6 +334,10 @@ export const MIN_TESTED_CLAUDE_CLI_VERSION = '2.1.312'
 export const claudeChatBackend: AgentBackend = {
   binaryName: claudeCodeAdapter.binaryName,
   minTestedCliVersion: MIN_TESTED_CLAUDE_CLI_VERSION,
+  // File checkpoints: `rewind_files` restores Edit/Write/NotebookEdit changes to
+  // before a message (plan 3.3). Off, the CLI answers "File rewinding is not
+  // enabled." (spike item 5).
+  spawnEnv: { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true' },
   buildSpawnArgs: (opts) => claudeCodeAdapter.buildSpawnArgs(opts),
   createDriver: () => new ClaudeSessionDriver(),
   refusedOptionalFlag: (stderr) =>

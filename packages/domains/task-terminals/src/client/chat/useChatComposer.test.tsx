@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage, StopResult } from '@slayzone/terminal-contracts'
 import type { ChatActions, NavigateActions } from './autocomplete/types'
 
 const mocks = vi.hoisted(() => {
@@ -59,7 +59,14 @@ vi.mock('./autocomplete/useAutocomplete', async (importOriginal) => ({
 import { useChatComposer, type UseChatComposerOpts } from './useChatComposer'
 
 const sendMessage = vi.fn<(text: string) => Promise<void>>()
-const abortAndPop = vi.fn<() => Promise<{ popped: boolean; text: string | null }>>()
+const abortAndPop = vi.fn<() => Promise<StopResult>>()
+/** What Stop returns for a popped message (the whole message, as the transport sends it). */
+const popped = (text: string): StopResult => ({
+  popped: true,
+  text,
+  id: 'popped-id',
+  content: [{ type: 'text', text }]
+})
 const getArtifactFilePath = vi.fn<(id: string) => Promise<string | null>>()
 const scrollToBottom = vi.fn<() => void>()
 const handleEffortChange = vi.fn<(next: string) => Promise<void>>()
@@ -131,7 +138,7 @@ beforeEach(() => {
   mocks.autocomplete.transformSubmit.mockReset().mockReturnValue(null)
   mocks.autocomplete.bumpUsageFromMessage.mockReset().mockResolvedValue(undefined)
   sendMessage.mockReset().mockResolvedValue(undefined)
-  abortAndPop.mockReset().mockResolvedValue({ popped: false, text: null })
+  abortAndPop.mockReset().mockResolvedValue({ popped: false, text: null, id: null, content: null })
   getArtifactFilePath.mockReset().mockImplementation((id) => Promise.resolve(PATHS[id] ?? null))
   scrollToBottom.mockReset()
   handleEffortChange.mockReset().mockResolvedValue(undefined)
@@ -338,7 +345,7 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('a popped turn restores the raw text and attachments that were sent', async () => {
-    abortAndPop.mockResolvedValue({ popped: true, text: 'main-side text' })
+    abortAndPop.mockResolvedValue(popped('main-side text'))
     setup()
     attach([IMG_A])
     type('fix this')
@@ -349,7 +356,7 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('focuses the textarea after restoring', async () => {
-    abortAndPop.mockResolvedValue({ popped: true, text: 'main-side text' })
+    abortAndPop.mockResolvedValue(popped('main-side text'))
     setup()
     type('fix this')
     await send()
@@ -359,7 +366,7 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('a queued submit does not replace the in-flight snapshot', async () => {
-    abortAndPop.mockResolvedValue({ popped: true, text: 'main-side text' })
+    abortAndPop.mockResolvedValue(popped('main-side text'))
     const { rerender } = setup()
     type('first')
     await send()
@@ -372,14 +379,14 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('without a local snapshot, restores the text the main side popped', async () => {
-    abortAndPop.mockResolvedValue({ popped: true, text: 'main-side text' })
+    abortAndPop.mockResolvedValue(popped('main-side text'))
     setup()
     await stop()
     expect(composer.draft).toBe('main-side text')
   })
 
   it('does not overwrite a draft the user already started typing', async () => {
-    abortAndPop.mockResolvedValue({ popped: true, text: 'main-side text' })
+    abortAndPop.mockResolvedValue(popped('main-side text'))
     setup()
     attach([IMG_A])
     type('first')
@@ -391,7 +398,7 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('restores nothing when the turn was not popped', async () => {
-    abortAndPop.mockResolvedValue({ popped: false, text: null })
+    abortAndPop.mockResolvedValue({ popped: false, text: null, id: null, content: null })
     setup()
     type('first')
     await send()

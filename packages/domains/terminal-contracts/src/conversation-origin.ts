@@ -7,8 +7,8 @@
  * import task. Task's shared barrel re-exports it alongside
  * `HONORED_ORIGINS` / `ALL_ORIGINS`.
  *
- * If you add a value here, also add it to the CHECK constraint in migration
- * v145 — the enum/CHECK sync test (`task-conversations.test.ts`) catches drift
+ * If you add a value here, also add it to the CHECK constraint (latest rebuild:
+ * migration v175) — the enum/CHECK sync test (`task-conversations.test.ts`) catches drift
  * by asserting every value in this union INSERTs cleanly.
  */
 export type ConversationOrigin =
@@ -16,6 +16,10 @@ export type ConversationOrigin =
   | 'slay-spawned-resume'
   | 'in-band-clear'
   | 'user-selected'
+  /** An existing conversation of the task moved between the terminal and chat (v175). */
+  | 'handoff'
+  /** A fork SlayZone spawned: a new conversation holding another's history (v175). */
+  | 'slay-spawned-fork'
   | 'cas-repoint-heal'
   | 'legacy-migration'
   | 'foreign-observed'

@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   createFakeClaude,
   ev,
+  fileSha256,
+  readSessionFile,
+  sessionFilePath,
+  writeSessionFile,
   echoTurn,
   type FakeClaude,
   FAKE_CLAUDE_EXIT,
@@ -61,10 +65,12 @@ afterEach(() => {
 
 function start(
   extraArgs: string[] = ['--session-id', 'sess-1', '--model', 'haiku'],
-  args = CHAT_ARGV
+  args = CHAT_ARGV,
+  env: Record<string, string> = {}
 ): Proc {
   const child = spawn(path.join(fake.binDir, 'claude'), [...args, ...extraArgs], {
     cwd: root,
+    env: { ...process.env, ...env },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   procs.push(child)
@@ -698,5 +704,402 @@ describe('fake-claude — prompt protocol (as CLI 2.1.312)', () => {
     expect((await epoch.waitForRun(0)).replayMismatches()).toEqual([
       { requestId: req.request_id, recorded: 'allow', got: 'deny' }
     ])
+  })
+})
+
+describe('fake-claude — conversation control (chat A, as CLI 2.1.312)', () => {
+  let configDir: string
+  let cwd: string
+  beforeEach(() => {
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-claude-config-'))
+    // The fake keys its session dir by its own process.cwd(), which is the real path.
+    cwd = fs.realpathSync(root)
+  })
+  afterEach(() => fs.rmSync(configDir, { recursive: true, force: true }))
+  const withConfig = (): Record<string, string> => ({ CLAUDE_CONFIG_DIR: configDir })
+  const userWith = (text: string, uuid: string) => ({ ...user(text), uuid })
+  const control = (p: Proc, id: string, request: Record<string, unknown>) => {
+    p.send({ type: 'control_request', request_id: id, request })
+    return p.waitFor((e) => e.type === 'control_response' && JSON.stringify(e).includes(`"${id}"`))
+  }
+
+  it('writes no session file without CLAUDE_CONFIG_DIR', async () => {
+    fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start()
+    p.send(userWith('hi', 'u1'))
+    await p.waitFor(isResult)
+    expect(fs.existsSync(sessionFilePath(configDir, cwd, 'sess-1'))).toBe(false)
+  })
+
+  it('records the conversation in its session file as one parentUuid chain', async () => {
+    fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start(undefined, undefined, withConfig())
+    p.send(userWith('one', 'u1'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: one')
+    p.send(userWith('two', 'u2'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: two')
+    const records = readSessionFile(sessionFilePath(configDir, cwd, 'sess-1'))
+    expect(records.map((r) => r.type)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(records[0]).toMatchObject({ uuid: 'u1', parentUuid: null, sessionId: 'sess-1' })
+    expect(records[2]).toMatchObject({ uuid: 'u2', parentUuid: records[1].uuid })
+  })
+
+  it('rewind_conversation drops the message and what follows; the next turn branches', async () => {
+    const epoch = fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start(undefined, undefined, withConfig())
+    p.send(userWith('one', 'u1'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: one')
+    p.send(userWith('two', 'u2'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: two')
+    const a1 = readSessionFile(sessionFilePath(configDir, cwd, 'sess-1'))[1].uuid
+    expect(
+      await control(p, 'rw1', { subtype: 'rewind_conversation', target_message_uuid: 'u2' })
+    ).toMatchObject({
+      response: {
+        subtype: 'success',
+        response: {
+          rewound: true,
+          targetMessageUuid: 'u2',
+          prefillText: 'two',
+          precedingAssistantUuid: a1
+        }
+      }
+    })
+    expect(
+      await control(p, 'rw2', { subtype: 'rewind_conversation', target_message_uuid: String(a1) })
+    ).toMatchObject({ response: { response: { rewound: false, reason: 'target_not_found' } } })
+    p.send(userWith('three', 'u3'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: three')
+    const records = readSessionFile(sessionFilePath(configDir, cwd, 'sess-1'))
+    // Append-only: the rewound turn stays on disk; the new message hangs off turn 1.
+    expect(records.filter((r) => r.uuid === 'u2')).toHaveLength(1)
+    expect(records.find((r) => r.uuid === 'u3')).toMatchObject({ parentUuid: a1 })
+    expect((await epoch.waitForRun(0)).rewound()).toEqual(['u2'])
+  })
+
+  it('--resume-session-at + --fork-session: a new conversation with the history; the original is untouched', async () => {
+    const seeded = writeSessionFile({
+      configDir,
+      cwd,
+      sessionId: 'orig',
+      turns: [
+        { user: 'remember APPLE', assistant: 'OK' },
+        { user: 'remember BANANA', assistant: 'OK' }
+      ]
+    })
+    const before = fileSha256(seeded.file)
+    const epoch = fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start(
+      [
+        '--resume',
+        'orig',
+        '--resume-session-at',
+        seeded.assistantUuids[0],
+        '--fork-session',
+        '--session-id',
+        'forked'
+      ],
+      undefined,
+      withConfig()
+    )
+    p.send(userWith('three', 'u3'))
+    expect(await p.waitFor((e) => e.type === 'system' && e.subtype === 'init')).toMatchObject({
+      session_id: 'forked'
+    })
+    await p.waitFor(isResult)
+    expect(fileSha256(seeded.file)).toBe(before)
+    const fork = readSessionFile(sessionFilePath(configDir, cwd, 'forked'))
+    const users = fork.filter(
+      (r) => r.type === 'user' && typeof (r.message as { content?: unknown }).content === 'string'
+    )
+    expect(users.map((r) => (r.message as { content: string }).content)).toEqual([
+      'remember APPLE',
+      'three'
+    ])
+    expect((await epoch.waitForRun(0)).forked).toBe(true)
+  })
+
+  it('streamed assistant lines carry the uuid of their session record (what a fork resumes at)', async () => {
+    fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start(undefined, undefined, withConfig())
+    p.send(userWith('one', 'u1'))
+    const line = await p.waitFor((e) => e.type === 'assistant')
+    await p.waitFor(isResult)
+    const record = readSessionFile(sessionFilePath(configDir, cwd, 'sess-1'))[1]
+    expect(typeof line.uuid).toBe('string')
+    expect(line.uuid).toBe(record.uuid)
+  })
+
+  it('a scripted turn played again gets new record uuids, as every CLI record has its own', async () => {
+    fake.setScenario({ processes: [{ defaultTurn: echoTurn() }, { defaultTurn: echoTurn() }] })
+    const p = start(undefined, undefined, withConfig())
+    p.send(userWith('one', 'u1'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: one')
+    p.send(userWith('two', 'u2'))
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: two')
+    p.child.kill('SIGTERM')
+    const q = start(['--resume', 'sess-1'], undefined, withConfig())
+    q.send(userWith('three', 'u3'))
+    await q.waitFor((e) => isResult(e) && e.result === 'echo: three')
+    const uuids = readSessionFile(sessionFilePath(configDir, cwd, 'sess-1'))
+      .filter((r) => r.type === 'assistant')
+      .map((r) => r.uuid)
+    expect(uuids).toHaveLength(3)
+    expect(new Set(uuids).size).toBe(3)
+  })
+
+  it('a fork writes nothing before its first message (2.1.312, chat-a check R3b)', async () => {
+    const seeded = writeSessionFile({
+      configDir,
+      cwd,
+      sessionId: 'orig',
+      turns: [{ user: 'remember APPLE', assistant: 'OK' }]
+    })
+    const epoch = fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    start(
+      [
+        '--resume',
+        'orig',
+        '--resume-session-at',
+        seeded.assistantUuids[0],
+        '--fork-session',
+        '--session-id',
+        'forked'
+      ],
+      undefined,
+      withConfig()
+    )
+    await epoch.waitForRun(0)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(fs.existsSync(sessionFilePath(configDir, cwd, 'forked'))).toBe(false)
+  })
+
+  it('--resume-session-at an unknown uuid fails like the real CLI', async () => {
+    writeSessionFile({ configDir, cwd, sessionId: 'orig', turns: [{ user: 'a', assistant: 'b' }] })
+    fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start(
+      ['--resume', 'orig', '--resume-session-at', 'msg_nope'],
+      undefined,
+      withConfig()
+    )
+    expect((await p.exited).code).toBe(1)
+    expect(p.stderr()).toContain('No message found with message.uuid of: msg_nope')
+  })
+
+  it('rewind_files: refused without checkpointing; dry run reports; a real run restores', async () => {
+    const checkpoints = {
+      '0': {
+        filesChanged: ['a.txt'],
+        insertions: 1,
+        deletions: 2,
+        restore: { 'a.txt': 'v1', 'b.txt': null }
+      }
+    }
+    fake.setScenario({
+      processes: [{ defaultTurn: echoTurn(), fileCheckpoints: checkpoints }],
+      repeatLast: true
+    })
+    const off = start(undefined, undefined, withConfig())
+    off.send(userWith('edit', 'u1'))
+    await off.waitFor(isResult)
+    expect(
+      await control(off, 'f0', { subtype: 'rewind_files', user_message_id: 'u1', dry_run: true })
+    ).toMatchObject({
+      response: { response: { canRewind: false, error: 'File rewinding is not enabled.' } }
+    })
+    fs.writeFileSync(path.join(root, 'a.txt'), 'v2')
+    fs.writeFileSync(path.join(root, 'b.txt'), 'b')
+    const on = start(['--session-id', 'sess-2'], undefined, {
+      ...withConfig(),
+      CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true'
+    })
+    on.send(userWith('edit', 'u9'))
+    await on.waitFor(isResult)
+    expect(
+      await control(on, 'f1', { subtype: 'rewind_files', user_message_id: 'u9', dry_run: true })
+    ).toMatchObject({
+      response: {
+        response: {
+          canRewind: true,
+          filesChanged: [path.join(cwd, 'a.txt')],
+          insertions: 1,
+          deletions: 2
+        }
+      }
+    })
+    expect(fs.readFileSync(path.join(root, 'a.txt'), 'utf8')).toBe('v2')
+    expect(
+      await control(on, 'f2', { subtype: 'rewind_files', user_message_id: 'u9' })
+    ).toMatchObject({
+      response: { response: { canRewind: true, skippedLinks: 0 } }
+    })
+    expect(fs.readFileSync(path.join(root, 'a.txt'), 'utf8')).toBe('v1')
+    expect(fs.existsSync(path.join(root, 'b.txt'))).toBe(false)
+    expect(
+      await control(on, 'f3', { subtype: 'rewind_files', user_message_id: 'nope', dry_run: true })
+    ).toMatchObject({
+      response: {
+        response: { canRewind: false, error: 'No file checkpoint found for this message.' }
+      }
+    })
+  })
+
+  it('interrupt reports messages queued mid-turn; cancel_async_message withdraws one', async () => {
+    fake.setScenario({
+      processes: [{ turns: [[step.emit(ev.init()), step.hang()]], defaultTurn: echoTurn() }]
+    })
+    const p = start()
+    p.send(userWith('long', 'u1'))
+    await p.waitFor((e) => e.type === 'system')
+    p.send(userWith('next', 'u2'))
+    p.send(userWith('later', 'u3'))
+    await p.waitFor((e) => e.type === 'command_lifecycle' && e.command_uuid === 'u3')
+    expect(
+      await control(p, 'c1', { subtype: 'cancel_async_message', message_uuid: 'u3' })
+    ).toMatchObject({
+      response: { response: { cancelled: true } }
+    })
+    expect(
+      await control(p, 'c2', { subtype: 'cancel_async_message', message_uuid: 'u3' })
+    ).toMatchObject({
+      response: { response: { cancelled: false } }
+    })
+    expect(await control(p, 'i1', { subtype: 'interrupt' })).toMatchObject({
+      response: { response: { still_queued: ['u2'] } }
+    })
+    await p.waitFor((e) => isResult(e) && e.result === 'echo: next')
+  })
+
+  it('apply_flag_settings: acked with no response body; {{effort}} follows', async () => {
+    fake.setScenario({
+      processes: [{ defaultTurn: [step.emit(ev.init(), ev.result({ text: 'effort={{effort}}' }))] }]
+    })
+    const p = start()
+    const ack = await control(p, 'e1', {
+      subtype: 'apply_flag_settings',
+      settings: { effortLevel: 'high' }
+    })
+    expect(ack).toEqual({
+      type: 'control_response',
+      response: { subtype: 'success', request_id: 'e1' }
+    })
+    p.send(user('x'))
+    expect(await p.waitFor(isResult)).toMatchObject({ result: 'effort=high' })
+  })
+
+  it('controlResponses can answer with a fixed payload or a named error', async () => {
+    fake.setScenario({
+      processes: [
+        {
+          controlResponses: {
+            get_settings: { success: { applied: { effort: 'low' } } },
+            interrupt: { error: 'busy' }
+          },
+          defaultTurn: echoTurn()
+        }
+      ]
+    })
+    const p = start()
+    expect(await control(p, 'g1', { subtype: 'get_settings' })).toMatchObject({
+      response: { subtype: 'success', response: { applied: { effort: 'low' } } }
+    })
+    expect(await control(p, 'g2', { subtype: 'interrupt' })).toMatchObject({
+      response: { subtype: 'error', error: 'busy' }
+    })
+  })
+
+  it('ackDelayMs: the message is in the conversation before it is acked; a resumed CLI drops the resend (completed, no turn)', async () => {
+    const epoch = fake.setScenario({
+      processes: [{ ackDelayMs: 60_000, defaultTurn: echoTurn() }, { defaultTurn: echoTurn() }]
+    })
+    const p1 = start(undefined, undefined, withConfig())
+    p1.send(userWith('hello', 'u1'))
+    const run0 = await epoch.waitForRun(0, (r) => r.stdin().length === 1)
+    await expect
+      .poll(() =>
+        readSessionFile(sessionFilePath(configDir, cwd, 'sess-1')).some((r) => r.uuid === 'u1')
+      )
+      .toBe(true)
+    expect(p1.lines.some((e) => e.type === 'command_lifecycle')).toBe(false)
+    p1.child.kill('SIGKILL')
+    await p1.exited
+    const p2 = start(['--resume', 'sess-1'], undefined, withConfig())
+    p2.send(userWith('hello', 'u1'))
+    expect(
+      await p2.waitFor((e) => e.type === 'command_lifecycle' && e.command_uuid === 'u1')
+    ).toMatchObject({ state: 'completed' })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(p2.lines.some(isResult)).toBe(false)
+    expect(run0.index).toBe(0)
+    expect((await epoch.waitForRun(1)).duplicateUserUuids()).toEqual(['u1'])
+    expect(
+      readSessionFile(sessionFilePath(configDir, cwd, 'sess-1')).filter((r) => r.uuid === 'u1')
+    ).toHaveLength(1)
+  })
+
+  it('a tui script plays the interactive CLI: logs, stays up, ends on SIGTERM; peers are reported', async () => {
+    const epoch = fake.setScenario({ processes: [{ tui: true }, { tui: true }] })
+    const tui = start(['--resume', 'conv-x'], [], withConfig())
+    const run = await epoch.waitForRun(0)
+    expect(run.tui).toBe(true)
+    expect(run.env).toEqual({ CLAUDE_CONFIG_DIR: configDir })
+    expect(run.flag('--resume')).toBe('conv-x')
+    const second = start(['--resume', 'conv-x'], [])
+    expect((await epoch.waitForRun(1)).peersAliveAtStart).toEqual([0])
+    tui.child.kill('SIGTERM')
+    expect((await tui.exited).code).toBe(143)
+    second.child.kill('SIGTERM')
+    await second.exited
+  })
+
+  it('without a tui script a TUI-style spawn is still argv drift', async () => {
+    const epoch = fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start(['--resume', 'x'], [])
+    expect((await p.exited).code).toBe(FAKE_CLAUDE_EXIT.argvDrift)
+    expect(epoch.argvDrift()).toHaveLength(1)
+  })
+
+  it('parallel: both branches run at once (two prompts pending together)', async () => {
+    fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.parallel(
+                [
+                  step.request(
+                    { tool_name: 'Bash', input: {}, tool_use_id: 't1' },
+                    { allow: [step.emit(ev.text('one'))] }
+                  )
+                ],
+                [
+                  step.request(
+                    { tool_name: 'Bash', input: {}, tool_use_id: 't2' },
+                    { allow: [step.emit(ev.text('two'))] }
+                  )
+                ]
+              ),
+              step.emit(ev.result({ text: 'both' }))
+            ]
+          ]
+        }
+      ]
+    })
+    const p = start()
+    p.send(user('go'))
+    await p.waitFor((e) => e.type === 'control_request' && JSON.stringify(e).includes('t2'))
+    const reqs = p.lines.filter((e) => e.type === 'control_request')
+    expect(reqs).toHaveLength(2)
+    for (const r of reqs) {
+      p.send({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: r.request_id,
+          response: { behavior: 'allow', updatedInput: {} }
+        }
+      })
+    }
+    expect(await p.waitFor(isResult)).toMatchObject({ result: 'both' })
   })
 })

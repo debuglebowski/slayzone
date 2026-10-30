@@ -59,6 +59,8 @@ interface PaneProps {
   onClose?: (() => void) | null
   onRename?: (() => void) | null
   onResetSession?: (() => void) | null
+  /** The main agent's hand-off ("Continue in chat" / "Continue in terminal"). */
+  onHandoff?: (() => void) | null
 }
 
 export interface TerminalSplitGroupHandle {
@@ -176,6 +178,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
               agentState={pane.tab.agentState}
               isMain={pane.tab.isMain}
               isTemporary={pane.isTemporary}
+              {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
             />
           </Suspense>
         )
@@ -234,6 +237,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onClose={pane.onClose ?? null}
           onRename={pane.onRename ?? null}
           onResetSession={pane.onResetSession ?? null}
+          onHandoff={pane.onHandoff ?? null}
         >
           <div className="h-full">{terminal}</div>
         </TerminalContextMenu>

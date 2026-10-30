@@ -48,6 +48,7 @@ export type AgentEvent =
   | CliTaskEvent
   | CommandTaskEvent
   | CommandTaskOutputEvent
+  | ConversationBranchEvent
 
 /**
  * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
@@ -143,6 +144,12 @@ export interface UserMessageEvent {
   /** The outbox id (= CLI `uuid`); absent on rows from before the outbox. */
   id?: string
   content?: UserContentBlock[]
+  /**
+   * A message of the conversation's past, imported from the CLI's session file
+   * (a resumed or handed-over conversation): answered long ago — never a turn in
+   * flight, never re-sent, never taken back by Stop.
+   */
+  history?: true
 }
 
 /**
@@ -176,6 +183,18 @@ export type NoticeCode =
   | 'cli-version-untested'
   /** The agent's CLI refused an optional option; it is left out from now on. */
   | 'cli-option-refused'
+  /** Claude Code already had a re-sent message (from before a restart) and did not run it again. */
+  | 'already-in-conversation'
+  /** Stop gave a message back, but Claude Code may still remember it (its rewind failed). */
+  | 'stop-rewind-failed'
+  /** Files were restored from Claude Code's checkpoints (rewind with code). */
+  | 'files-rewound'
+  /** Only the latest part of an imported conversation is shown. */
+  | 'history-truncated'
+  /** A switched-to conversation's history could not be read. */
+  | 'history-unavailable'
+  /** Claude Code refused a fork; the chat stayed in the original conversation. */
+  | 'fork-failed'
 
 /**
  * TRANSPORT-INTERNAL (never saved or broadcast): the agent is alive and working
@@ -235,6 +254,8 @@ export interface AssistantTextEvent {
   parentToolUseId?: string
   /** Token usage of the API call that produced this message (see `TokenUsage`). */
   usage?: TokenUsage
+  /** The CLI's record uuid of this block (a fork resumes `--resume-session-at` it). */
+  uuid?: string
 }
 
 export interface AssistantThinkingEvent {
@@ -244,6 +265,8 @@ export interface AssistantThinkingEvent {
   hasSignature: boolean
   parentToolUseId?: string
   usage?: TokenUsage
+  /** The CLI's record uuid of this block. */
+  uuid?: string
 }
 
 export interface ToolCallEvent {
@@ -253,6 +276,8 @@ export interface ToolCallEvent {
   input: unknown
   parentToolUseId?: string
   usage?: TokenUsage
+  /** The CLI's record uuid of this block. */
+  uuid?: string
 }
 
 export interface ToolResultEvent {
@@ -448,6 +473,37 @@ export interface ProcessExitEvent {
 }
 
 /**
+ * The tab's conversation changed shape — saved, so a reload folds the timeline
+ * the same way. The log is insert-only: nothing is deleted, the timeline hides
+ * what the conversation no longer holds behind a fold.
+ *   - `rewound`: the CLI forgot `messageId` and everything after it (edit &
+ *     resend, rewind to here).
+ *   - `forked`: a new conversation (`conversationId`) branched off
+ *     `fromConversationId` after the turn of `messageId`; what followed belongs to
+ *     the original only.
+ *   - `switched`: the tab now runs `conversationId` (Sessions picker, hand-off from
+ *     the terminal); what came before belongs to the previous conversation, and
+ *     the history that follows is imported from the CLI's session file.
+ */
+export interface ConversationBranchEvent {
+  kind: 'conversation-branch'
+  /**
+   * `fork-failed`: the CLI refused the fork announced by the last `forked`
+   * marker — the tab stayed in the original conversation, nothing is folded.
+   */
+  reason: 'rewound' | 'forked' | 'switched' | 'fork-failed'
+  messageId?: string
+  /** `forked`: the assistant record the fork ends with (`--resume-session-at`). */
+  atMessageUuid?: string
+  conversationId?: string
+  fromConversationId?: string
+  /** `switched`: where the conversation came from. */
+  source?: 'sessions' | 'terminal'
+  /** `switched`: a first-prompt label for the divider. */
+  title?: string
+}
+
+/**
  * Synthetic event emitted when the user interrupts an in-flight turn (Stop
  * button without pop, `chat:interrupt` IPC). Persisted alongside other events
  * so timeline replay sees the turn boundary even though the original turn
@@ -455,6 +511,12 @@ export interface ProcessExitEvent {
  */
 export interface InterruptedEvent {
   kind: 'interrupted'
+  /**
+   * Why the turn ended without a reply. Absent = the user stopped it.
+   * `already-in-conversation`: Claude Code already had the message (it got it
+   * before a restart, and drops a message whose uuid it has seen), so no turn ran.
+   */
+  reason?: 'already-in-conversation'
 }
 
 /**
@@ -467,6 +529,8 @@ export interface UserMessagePoppedEvent {
   kind: 'user-message-popped'
   /** Text of the cancelled user-message (for replay matching). */
   text: string
+  /** Its message id, when it had one: matched before the text. */
+  id?: string
 }
 
 export interface ErrorEvent {

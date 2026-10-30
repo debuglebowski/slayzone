@@ -12,7 +12,7 @@ import {
   IconButton,
   cn
 } from '@slayzone/ui'
-import { useTaskSessions } from './TaskSessionsSource'
+import { useFamilySessions } from './useFamilySessions'
 
 const storageKey = (taskId: string): string => `slayzone:sessions-sidebar:${taskId}`
 
@@ -85,7 +85,14 @@ const ORIGIN_LABEL: Record<string, string> = {
   'slay-spawned-fresh': 'New session',
   'slay-spawned-resume': 'Resumed session',
   'cas-repoint-heal': 'Recovered session',
-  'legacy-migration': 'Earlier session'
+  'legacy-migration': 'Earlier session',
+  handoff: 'Handed-over session',
+  'slay-spawned-fork': 'Forked session'
+}
+
+/** Where a session of the Claude family ran, for its badge. */
+function modeLabel(mode: string): string {
+  return mode.endsWith('-chat') ? 'Chat' : 'Terminal'
 }
 
 /** Card title: first user prompt (preferred), else a provenance label. */
@@ -99,6 +106,8 @@ function sessionTitle(firstPrompt: string | null, origin: string): string {
 interface PendingAction {
   kind: 'switch' | 'delete'
   conversationId: string
+  /** The mode whose session it is (a switch from the other mode is a hand-off). */
+  mode: string
   title: string
 }
 
@@ -126,12 +135,17 @@ export function SessionsSidebar({
   agentId: string
   /** Closes the sidebar — the toggle lives in this header while open. */
   onToggle: () => void
-  /** Restarts the main agent on this conversation. Omitted → cards are inert. */
-  onSwitch?: (conversationId: string) => Promise<void>
+  /**
+   * Restarts the main agent on this conversation — `mode` is the mode that ran
+   * it (the other one of the hand-off pair: the conversation moves over).
+   * Omitted → cards are inert.
+   */
+  onSwitch?: (conversationId: string, mode: string) => Promise<void>
   /** Removes this session from the task. Omitted → no delete affordance. */
-  onDelete?: (conversationId: string) => Promise<void>
+  onDelete?: (conversationId: string, mode: string) => Promise<void>
 }): React.ReactElement {
-  const sessions = useTaskSessions(taskId, agentId, true)
+  const sessions = useFamilySessions(taskId, agentId, true)
+  const mixed = new Set(sessions.map((s) => s.mode)).size > 1
   // Stable "now" anchored at mount — relative labels don't need per-ms churn, and
   // reading the clock in render is an impure call the React Compiler rejects.
   const [now] = useState(() => Date.now())
@@ -146,7 +160,7 @@ export function SessionsSidebar({
     if (!run) return
     setBusy(true)
     try {
-      await run(pending.conversationId)
+      await run(pending.conversationId, pending.mode)
       setPending(null)
     } finally {
       setBusy(false)
@@ -190,7 +204,12 @@ export function SessionsSidebar({
                   disabled={!switchable}
                   aria-label={s.isCurrent ? undefined : `Switch to session: ${title}`}
                   onClick={() =>
-                    setPending({ kind: 'switch', conversationId: s.conversationId, title })
+                    setPending({
+                      kind: 'switch',
+                      conversationId: s.conversationId,
+                      mode: s.mode,
+                      title
+                    })
                   }
                   className={cn(
                     'block w-full rounded-md px-2.5 py-2 text-left text-sm',
@@ -215,6 +234,12 @@ export function SessionsSidebar({
                     )}
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
+                    {mixed && (
+                      <>
+                        <span data-testid="agent-session-mode">{modeLabel(s.mode)}</span>
+                        <span>·</span>
+                      </>
+                    )}
                     <span className="flex items-center gap-0.5">
                       <MessageSquare className="size-2.5" />
                       {s.messageCount}
@@ -230,7 +255,12 @@ export function SessionsSidebar({
                     className="absolute bottom-1 right-1 size-6 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                     aria-label={`Delete session: ${title}`}
                     onClick={() =>
-                      setPending({ kind: 'delete', conversationId: s.conversationId, title })
+                      setPending({
+                        kind: 'delete',
+                        conversationId: s.conversationId,
+                        mode: s.mode,
+                        title
+                      })
                     }
                   >
                     <Trash2 className="size-3" />
@@ -256,7 +286,9 @@ export function SessionsSidebar({
             <AlertDialogDescription>
               {pending?.kind === 'delete'
                 ? `Remove "${pending.title}" from this task? It disappears from the session and message history and can no longer be resumed. The agent's own transcript on disk is not touched.`
-                : `Stop the running agent and restart it on "${pending?.title}"? Any work in progress in the current session is interrupted.`}
+                : pending && pending.mode !== agentId
+                  ? `Stop the running agent and continue "${pending.title}" here? It was last used in the ${modeLabel(pending.mode).toLowerCase()}, which must not run it at the same time.`
+                  : `Stop the running agent and restart it on "${pending?.title}"? Any work in progress in the current session is interrupted.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

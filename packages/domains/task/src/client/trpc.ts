@@ -16,13 +16,14 @@ import type { ProcessesMounts } from '@slayzone/processes/server'
 import type { ProjectsMounts } from '@slayzone/projects/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
 import type { TagsMounts } from '@slayzone/tags/server'
-import type { PtyMounts } from '@slayzone/terminal/server'
+import type { ChatMounts, PtyMounts } from '@slayzone/terminal/server'
 import type { TaskMounts } from '../server/router-mounts'
 
 /**
  * Every router task's UI calls: its own `task`, `agentSessions` and `template`, plus
  * `tags`, `history`, `workspace`, `projects`, `settings`, `computers`, `processes`,
- * `pty`, `menu`, `notify` and `app.{meta,screenshot,shell,taskWindows,window}`.
+ * `pty`, `chat` (the chat tab's Sessions picker), `menu`, `notify` and
+ * `app.{meta,screenshot,shell,taskWindows,window}`.
  */
 type TaskClientMounts = TaskMounts &
   TagsMounts &
@@ -33,6 +34,7 @@ type TaskClientMounts = TaskMounts &
   ComputersMounts &
   ProcessesMounts &
   PtyMounts &
+  ChatMounts &
   MenuMounts &
   NotifyMounts &
   AppMetaMounts &

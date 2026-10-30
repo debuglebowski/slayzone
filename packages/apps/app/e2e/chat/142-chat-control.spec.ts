@@ -1,6 +1,7 @@
 /**
- * Claude Code chat: controlling a running turn — Stop, a live model change, and a
- * setting change that respawns the agent mid-turn — against the scripted fake CLI.
+ * Claude Code chat: controlling a running turn — Stop (a live interrupt), a live
+ * model change, and a setting change that respawns the agent mid-turn — against
+ * the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
@@ -10,32 +11,30 @@ test.describe('Chat control', () => {
     await resetApp(mainWindow)
   })
 
-  test('Stop before any output restores the prompt; the resumed agent answers the next message', async ({
+  test('Stop before any output restores the prompt; the same agent answers the next message', async ({
     chat
   }) => {
     const t = await chat.openTask({
       title: 'Chat stop early',
       scenario: {
-        processes: [
-          { turns: [[step.hang()]] },
-          // Stop = abortAndPop: kill, then resume the same conversation.
-          { defaultTurn: echoTurn() }
-        ]
+        // Stop = a live interrupt: the process stays (chat A; 150 has the details).
+        processes: [{ turns: [[step.hang()]], defaultTurn: echoTurn() }]
       }
     })
     await t.send('a long job')
     await t.run(0, (r) => r.userMessages().includes('a long job'))
 
     await t.stopButton.click()
-    // Nothing had arrived yet, so the message is popped back into the composer.
+    // Nothing had arrived yet, so the message is popped back into the composer…
     await expect(t.composer).toHaveValue('a long job')
-    await t.run(0, (r) => r.signals().includes('SIGTERM'))
-    // No init had echoed the session id yet, so there is nothing to resume: the
-    // replacement starts fresh (the user's text is back in the composer).
-    expect((await t.run(1)).resumed).toBe(false)
+    // …and the CLI forgot it (it may already have stored it).
+    const run = await t.run(0, (r) => r.rewound().length === 1)
+    expect(run.signals()).toEqual([])
 
+    await t.composer.fill('')
     await t.send('next one')
     await expect(t.panel.getByText('echo: next one')).toBeVisible()
+    expect(t.epoch.runs()).toHaveLength(1)
   })
 
   test('Stop after output keeps the partial turn and ends it', async ({ chat }) => {
@@ -43,8 +42,10 @@ test.describe('Chat control', () => {
       title: 'Chat stop late',
       scenario: {
         processes: [
-          { turns: [[step.emit(ev.init(), ev.text('working on it')), step.hang()]] },
-          { defaultTurn: echoTurn() }
+          {
+            turns: [[step.emit(ev.init(), ev.text('working on it')), step.hang()]],
+            defaultTurn: echoTurn()
+          }
         ]
       }
     })
@@ -53,7 +54,7 @@ test.describe('Chat control', () => {
 
     await t.stopButton.click()
     await expect(t.sendButton).toBeVisible()
-    await t.run(1)
+    await t.run(0, (r) => r.controlRequests('interrupt').length === 1)
     // Progress had arrived: the turn stays (marked interrupted), nothing is restored.
     await expect(t.panel.getByText('working on it')).toBeVisible()
     await expect(t.panel.getByText('a long job')).toBeVisible()
@@ -64,6 +65,7 @@ test.describe('Chat control', () => {
 
     await t.send('next one')
     await expect(t.panel.getByText('echo: next one')).toBeVisible()
+    expect(t.epoch.runs()).toHaveLength(1)
   })
 
   test('a model change mid-turn applies live, without a respawn', async ({ chat }) => {
@@ -135,9 +137,12 @@ test.describe('Chat control', () => {
     await t.send('start')
     await expect(t.panel.getByText('gen1 working')).toBeVisible()
 
-    // `/effort` is handled by the composer even mid-turn; an effort change always
-    // respawns a live agent (chat-handlers setEffort).
-    await t.send('/effort high')
+    // A switch to bypass has no live equivalent: it always respawns a live agent
+    // (chat-handlers setMode). (Effort changes live since chat A.)
+    await t.page.evaluate(
+      (o) => window.getTrpcVanillaClient().chat.setMode.mutate({ ...o, chatMode: 'bypass' }),
+      t.opts()
+    )
     await t.run(1)
     await t.send('after respawn')
     await expect(t.panel.getByText('GEN2: after respawn')).toBeVisible()

@@ -24,12 +24,23 @@ export type { ConversationOrigin }
  * audit trail lie. The id it names is always one that already had an honored row
  * for the same (task, mode) — `isHonoredConversation` enforces that — so the
  * provenance chain is never widened, only re-pointed.
+ *
+ * `handoff` is honored: an existing conversation of this task moved between the
+ * terminal (TUI) and chat — the same CLI session files serve both. Its guard is
+ * the other mode's honored row for the same task (`isHonoredConversation` on
+ * the source mode), so it, too, only re-points.
+ *
+ * `slay-spawned-fork` is honored: SlayZone spawned it (`--fork-session`) as a new
+ * conversation holding another's history. Distinct from `slay-spawned-resume`,
+ * which asserts the id already existed.
  */
 export const HONORED_ORIGINS: ReadonlySet<ConversationOrigin> = new Set([
   'slay-spawned-fresh',
   'slay-spawned-resume',
   'in-band-clear',
   'user-selected',
+  'handoff',
+  'slay-spawned-fork',
   'cas-repoint-heal',
   'legacy-migration'
 ])
@@ -40,6 +51,8 @@ export const ALL_ORIGINS: readonly ConversationOrigin[] = [
   'slay-spawned-resume',
   'in-band-clear',
   'user-selected',
+  'handoff',
+  'slay-spawned-fork',
   'cas-repoint-heal',
   'legacy-migration',
   'foreign-observed',

@@ -68,6 +68,12 @@ const sendInput = z.union([
   z.object({ tabId: z.string(), text: z.string() })
 ])
 
+/** A past user message + which side of it a rewind keeps (chat A, plan 3.3). */
+const rewindOpts = chatCreateOpts.extend({
+  messageId: z.string().min(1).max(200),
+  scope: z.enum(['before', 'after'])
+})
+
 export const chatRouter = router({
   // Test-only (PLAYWRIGHT): shorten the chat watchdog for one spec; `null` restores
   // the defaults. Same gate as pty-router's test procedures.
@@ -106,6 +112,32 @@ export const chatRouter = router({
   abortAndPop: publicProcedure
     .input(chatCreateOpts)
     .mutation(({ input }) => ops().abortAndPop(input)),
+  // A dry run, but it may start the agent: a mutation.
+  rewindPreview: publicProcedure
+    .input(rewindOpts)
+    .mutation(({ input }) => ops().rewindPreview(input)),
+  rewind: publicProcedure
+    .input(rewindOpts.extend({ conversation: z.boolean(), files: z.boolean() }))
+    .mutation(({ input }) => ops().rewind(input)),
+  // Fork from a past message, in this tab (the original stays in Sessions).
+  fork: publicProcedure
+    .input(chatCreateOpts.extend({ messageId: z.string().min(1).max(200) }))
+    .mutation(({ input }) => ops().fork(input)),
+  // Sessions picker: run another conversation of this task (this chat's, or the
+  // terminal's — a hand-off) in the tab.
+  switchConversation: publicProcedure
+    .input(chatCreateOpts.extend({ conversationId: z.string().uuid(), sourceMode: z.string() }))
+    .mutation(({ input }) => ops().switchConversation(input)),
+  // The chat ↔ terminal hand-off: the conversation moves, the other side stops
+  // first (never two processes on one conversation).
+  continueInTerminal: publicProcedure
+    .input(chatCreateOpts)
+    .mutation(({ input }) => ops().continueInTerminal(input)),
+  continueInChat: publicProcedure
+    .input(chatCreateOpts)
+    .mutation(({ input }) => ops().continueInChat(input)),
+  // Refused because the terminal runs the conversation: stop it, start here.
+  takeOver: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().takeOver(input)),
   kill: publicProcedure
     .input(z.object({ tabId: z.string() }))
     .mutation(({ input }) => ops().kill(input.tabId)),

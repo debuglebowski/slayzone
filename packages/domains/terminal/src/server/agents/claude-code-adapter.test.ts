@@ -919,6 +919,45 @@ describe('ClaudeCodeAdapter — hook output', () => {
       )
     ).toEqual({ kind: 'notice', id: 'n1', level: 'warning', text: 'PostToolUse:Bash says: hi' })
   })
+
+  // ---- chat A: conversation control ----
+
+  test('assistant events keep the record uuid (the fork point of --resume-session-at)', () => {
+    const base = { type: 'assistant', parent_tool_use_id: null, uuid: 'a-uuid-1' }
+    const text = claudeCodeAdapter.parseLine(
+      JSON.stringify({ ...base, message: { id: 'msg_1', content: [{ type: 'text', text: 'hi' }] } })
+    )
+    const thinking = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        ...base,
+        message: { id: 'msg_1', content: [{ type: 'thinking', thinking: 'hm', signature: 's' }] }
+      })
+    )
+    const tool = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        ...base,
+        message: { id: 'msg_1', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] }
+      })
+    )
+    expect(text).toMatchObject({ kind: 'assistant-text', uuid: 'a-uuid-1' })
+    expect(thinking).toMatchObject({ kind: 'assistant-thinking', uuid: 'a-uuid-1' })
+    expect(tool).toMatchObject({ kind: 'tool-call', uuid: 'a-uuid-1' })
+  })
+
+  test('buildSpawnArgs: a fork resumes the source at a message as a new conversation', () => {
+    const { args } = claudeCodeAdapter.buildSpawnArgs({
+      sessionId: 'new-id',
+      resume: false,
+      fork: { fromSessionId: 'src-id', atMessageUuid: 'a-uuid-1' },
+      cwd: '/tmp',
+      providerFlags: []
+    })
+    const at = (flag: string) => args[args.indexOf(flag) + 1]
+    expect(at('--resume')).toBe('src-id')
+    expect(at('--resume-session-at')).toBe('a-uuid-1')
+    expect(args).toContain('--fork-session')
+    expect(at('--session-id')).toBe('new-id')
+  })
 })
 
 describe('ClaudeCodeAdapter — token streaming + command tasks (plan 3.2 / 3.9)', () => {

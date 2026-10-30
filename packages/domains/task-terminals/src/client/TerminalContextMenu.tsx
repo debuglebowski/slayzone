@@ -31,6 +31,7 @@ import {
   RotateCw,
   ArrowDownToLine,
   Hash,
+  MessagesSquare,
   Power
 } from 'lucide-react'
 import type { TerminalHandle } from '@slayzone/terminal/client/Terminal'
@@ -53,6 +54,8 @@ interface TerminalContextMenuProps {
   onClose: (() => void) | null
   onRename: (() => void) | null
   onResetSession: (() => void) | null
+  /** "Continue in chat": hand this agent's conversation to the chat (main tab). */
+  onHandoff: (() => void) | null
 }
 
 const FONT_SIZE_MIN = 8
@@ -68,7 +71,8 @@ export function TerminalContextMenu({
   onNewGroup,
   onClose,
   onRename,
-  onResetSession
+  onResetSession,
+  onHandoff
 }: TerminalContextMenuProps) {
   const [hasSelection, setHasSelection] = useState(false)
   const { terminalFontSize } = useAppearance()
@@ -231,6 +235,16 @@ export function TerminalContextMenu({
               <Hash className="size-4" />
               Copy Conversation ID
             </ContextMenuItem>
+            {onHandoff && (
+              <ContextMenuItem
+                data-testid="terminal-continue-in-chat"
+                disabled={!conversationId}
+                onSelect={onHandoff}
+              >
+                <MessagesSquare className="size-4" />
+                Continue in Chat
+              </ContextMenuItem>
+            )}
             {onResetSession && (
               <>
                 <ContextMenuSeparator />

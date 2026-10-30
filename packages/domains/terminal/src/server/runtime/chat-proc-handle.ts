@@ -34,9 +34,14 @@ export interface ChatDisposable {
  * Why an agent process could not be started at all:
  *   - `cli-not-installed` — the binary is not on the PATH of the machine that runs it;
  *   - `spawn-refused` — that machine refused the start (path jail, policy, no computer);
- *   - `spawn-failed` — anything else that kept the process from running.
+ *   - `spawn-failed` — anything else that kept the process from running;
+ *   - `conversation-in-use` — the terminal runs this conversation (chat A, plan 3.10).
  */
-export type ChatSpawnFailureCode = 'cli-not-installed' | 'spawn-refused' | 'spawn-failed'
+export type ChatSpawnFailureCode =
+  | 'cli-not-installed'
+  | 'spawn-refused'
+  | 'spawn-failed'
+  | 'conversation-in-use'
 
 /** A start failure with a code the chat can show a fix for. */
 export interface ChatSpawnError extends Error {

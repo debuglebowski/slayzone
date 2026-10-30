@@ -203,7 +203,31 @@ export type TimelineItem =
       parentToolUseId?: string
     }
   | { kind: 'stderr'; text: string; timestamp: number; parentToolUseId?: string }
-  | { kind: 'interrupted'; timestamp: number; parentToolUseId?: string }
+  | {
+      /**
+       * The conversation changed shape here (rewind, fork, switch). Nothing is
+       * removed: the items `[hiddenFrom, hiddenFrom + hiddenCount)` are what the
+       * conversation no longer holds, folded behind this divider by the display.
+       */
+      kind: 'conversation-branch'
+      /** Stable within this timeline (its index when it was added). */
+      id: string
+      /** `fork-failed`: a `forked` row the CLI refused — it folds nothing. */
+      reason: 'rewound' | 'forked' | 'switched' | 'fork-failed'
+      hiddenFrom: number
+      hiddenCount: number
+      timestamp: number
+      source?: 'sessions' | 'terminal'
+      title?: string
+      parentToolUseId?: string
+    }
+  | {
+      kind: 'interrupted'
+      timestamp: number
+      parentToolUseId?: string
+      /** Why the turn ended without a reply; absent = the user stopped it. */
+      reason?: 'already-in-conversation'
+    }
   | {
       kind: 'plan'
       steps: AgentPlanStep[]
@@ -703,6 +727,16 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
   const ts = Date.now()
   switch (event.kind) {
     case 'user-message': {
+      if (event.history) {
+        // Imported from the conversation's past: answered long ago, never a turn.
+        const item: TimelineItem = {
+          kind: 'user-text',
+          text: event.text,
+          timestamp: ts,
+          ...(event.id ? { id: event.id, delivery: 'answered' as const } : {})
+        }
+        return { ...state, timeline: [...state.timeline, item] }
+      }
       if (event.id) {
         // Confirm the optimistic bubble with the same id in place.
         const at = findUserItem(state, event.id)
@@ -765,7 +799,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // timeline shows where the turn was cut. Persisted into the buffer so
       // replay reconstructs the boundary even if the renderer was offline.
       if (!isInFlight(state)) return state
-      const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
+      const item: TimelineItem = {
+        kind: 'interrupted',
+        timestamp: ts,
+        ...(event.reason ? { reason: event.reason } : {})
+      }
       const failed = failInFlightSubAgents(state, 'interrupted')
       return {
         ...failed,
@@ -778,15 +816,78 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         compacting: false
       }
     }
+    case 'conversation-branch': {
+      const len = state.timeline.length
+      if (event.reason === 'fork-failed') {
+        // The CLI refused the last fork: its row says so and folds nothing; the
+        // original conversation goes on (no other id is coming).
+        for (let i = len - 1; i >= 0; i--) {
+          const it = state.timeline[i]
+          if (it.kind !== 'conversation-branch' || it.reason !== 'forked') continue
+          const timeline = state.timeline.slice()
+          timeline[i] = { ...it, reason: 'fork-failed', hiddenCount: 0 }
+          return { ...state, timeline, freshStartPending: false }
+        }
+        return state
+      }
+      let from = len
+      if (event.reason === 'rewound') {
+        // The forgotten message and everything after it.
+        const at = event.messageId ? findUserItem(state, event.messageId) : -1
+        if (at >= 0) from = at
+      } else if (event.reason === 'forked') {
+        // Everything after the fork point's turn: from the next user message on.
+        const at = event.messageId ? findUserItem(state, event.messageId) : -1
+        for (let i = at + 1; at >= 0 && i < len; i++) {
+          const it = state.timeline[i]
+          if (it.kind === 'user-text' && it.parentToolUseId == null) {
+            from = i
+            break
+          }
+        }
+      } else {
+        // The whole previous conversation: everything since the last switch.
+        from = 0
+        for (let i = len - 1; i >= 0; i--) {
+          const it = state.timeline[i]
+          if (it.kind === 'conversation-branch' && it.reason === 'switched') {
+            from = i + 1
+            break
+          }
+        }
+      }
+      const item: TimelineItem = {
+        kind: 'conversation-branch',
+        id: `branch-${len}`,
+        reason: event.reason,
+        hiddenFrom: from,
+        hiddenCount: len - from,
+        timestamp: ts,
+        ...(event.source ? { source: event.source } : {}),
+        ...(event.title ? { title: event.title } : {})
+      }
+      return {
+        ...state,
+        timeline: [...state.timeline, item],
+        // A fork / switch runs another conversation id: its turn-init must not
+        // wipe the timeline (the history above stays, a divider marks the start).
+        freshStartPending: event.reason === 'rewound' ? state.freshStartPending : true
+      }
+    }
     case 'user-message-popped': {
-      // Cancel the trailing user-text whose content matches `event.text`. Skip
-      // session-start (boundary, not turn content); refuse if anything else
-      // sits between us and the matching user-text — main side gates emission
-      // so this is defensive replay-safety.
+      // Cancel the trailing user-text that matches the event — by id when both
+      // carry one, else by text. Skip session-start (boundary, not turn
+      // content); refuse if anything else sits between us and the matching
+      // user-text — main side gates emission so this is defensive replay-safety.
       for (let i = state.timeline.length - 1; i >= 0; i--) {
         const it = state.timeline[i]
         if (it.kind === 'session-start') continue
-        if (it.kind === 'user-text' && it.text === event.text) {
+        const matches =
+          it.kind === 'user-text' &&
+          (event.id !== undefined && it.id !== undefined
+            ? it.id === event.id
+            : it.text === event.text)
+        if (matches) {
           const next = state.timeline.slice()
           next.splice(i, 1)
           return {
@@ -1181,10 +1282,14 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
       const copyText = texts.length > 0 ? texts.join('\n\n') : null
       const { usage, turnCostUsd } = applyResultCost(state.usage, state.model, event)
+      // The CLI's end of a turn the user stopped (Stop, or a prompt's plain "No"):
+      // an end, not a failure.
+      const stopped =
+        typeof event.terminalReason === 'string' && event.terminalReason.startsWith('aborted')
       const item: TimelineItem = {
         kind: 'result',
         subtype: event.subtype,
-        isError: event.isError,
+        isError: event.isError && !stopped,
         durationMs: event.durationMs,
         totalCostUsd: event.totalCostUsd,
         turnCostUsd,
@@ -1196,7 +1301,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // A turn that failed without any reply: its error text (an expired login,
       // an API error) must be readable, not tucked inside the result footer.
       const turnError: TimelineItem[] =
-        event.isError && event.text && texts.length === 0
+        event.isError && !stopped && event.text && texts.length === 0
           ? [{ kind: 'turn-error', text: event.text, timestamp: ts }]
           : []
       // Mark any tools the SDK denied this turn — `result.permissionDenials`
@@ -1834,6 +1939,36 @@ export function selectUsageSummary(state: ChatTimelineState): UsageSummary | nul
 }
 
 /** Derive whether we're waiting for a response. True if user sent more messages than we've seen results for. */
+/**
+ * Timeline indexes the conversation no longer holds: every fold of a
+ * `conversation-branch` item (rewound, left behind by a fork, a previous
+ * conversation).
+ */
+export function selectFoldedIndexes(timeline: readonly TimelineItem[]): ReadonlySet<number> {
+  const folded = new Set<number>()
+  for (const it of timeline) {
+    if (it.kind !== 'conversation-branch') continue
+    for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) folded.add(i)
+  }
+  return folded
+}
+
+/**
+ * The user messages (with an id) the conversation still holds, oldest first —
+ * what edit / rewind / fork can act on (the server resolves the same list from
+ * its log). A failed message never reached the agent.
+ */
+export function selectActiveUserIds(timeline: readonly TimelineItem[]): string[] {
+  const folded = selectFoldedIndexes(timeline)
+  const ids: string[] = []
+  timeline.forEach((it, i) => {
+    if (it.kind !== 'user-text' || !it.id || folded.has(i) || it.parentToolUseId != null) return
+    if (it.delivery === 'failed') return
+    ids.push(it.id)
+  })
+  return ids
+}
+
 export function isInFlight(state: ChatTimelineState): boolean {
   return state.userMessagesSent > state.resultCount
 }

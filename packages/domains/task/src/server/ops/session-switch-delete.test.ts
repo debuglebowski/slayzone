@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { DB_PRAGMAS, type BatchOp, type SlayzoneDb } from '@slayzone/platform'
 import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/db-migrations'
 import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task-contracts'
-import { recordConversation } from './task-conversations.js'
+import { recordConversation, switchConversation } from './task-conversations.js'
 import {
   deleteSession,
   getCurrentConversationId,
@@ -455,6 +455,132 @@ describe('switch', () => {
       origin: 'user-selected'
     })
     expect(await getCurrentConversationId(db, 't1', M)).toBe('B')
+  })
+})
+
+// ── Switch across the chat ↔ terminal pair: a hand-off (chat A, v175) ──────
+// The Claude family's Sessions list shows both modes; picking the other mode's
+// session moves the conversation over. Steps share one DB, in order.
+describe('switch across modes (hand-off)', () => {
+  const CHAT = 'claude-chat'
+  let raw: Database.Database
+  let db: SlayzoneDb
+  const released: string[] = []
+  const release = async (taskId: string, conversationId: string): Promise<void> => {
+    released.push(`${taskId}:${conversationId}`)
+  }
+  beforeAll(async () => {
+    raw = migratedDb()
+    seedTask(raw, 't1')
+    db = bridge(raw)
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: CHAT,
+      conversationId: 'C',
+      origin: 'slay-spawned-fresh',
+      legacyJsonField: 'chatConversationId'
+    })
+    await markSessionFirstTurn(db, 'C')
+    await tick()
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'T',
+      origin: 'slay-spawned-fresh'
+    })
+    await markSessionFirstTurn(db, 'T')
+  })
+  afterAll(() => raw.close())
+
+  test('a chat session moves to the terminal: current there, origin handoff, chat released first', async () => {
+    await tick()
+    const r = await switchConversation(
+      db,
+      { taskId: 't1', mode: M, conversationId: 'C', sourceMode: CHAT },
+      { release }
+    )
+    expect(r).toBe('switched')
+    expect(released).toEqual(['t1:C'])
+    expect(await getCurrentConversationId(db, 't1', M)).toBe('C')
+    const rows = raw
+      .prepare(`SELECT origin FROM task_conversations WHERE mode = ? AND conversation_id = 'C'`)
+      .all(M) as { origin: string }[]
+    expect(rows.map((r) => r.origin)).toEqual(['handoff'])
+  })
+
+  test('the terminal legacy column follows the hand-off', () => {
+    const t = raw
+      .prepare(`SELECT claude_conversation_id AS c FROM tasks WHERE id = 't1'`)
+      .get() as {
+      c: string
+    }
+    expect(t.c).toBe('C')
+  })
+
+  test('a terminal session moves to chat: the chat field is the one written', async () => {
+    await tick()
+    const r = await switchConversation(
+      db,
+      { taskId: 't1', mode: CHAT, conversationId: 'T', sourceMode: M },
+      { release }
+    )
+    expect(r).toBe('switched')
+    expect(await getCurrentConversationId(db, 't1', CHAT)).toBe('T')
+    const t = raw.prepare(`SELECT provider_config AS p FROM tasks WHERE id = 't1'`).get() as {
+      p: string
+    }
+    expect(JSON.parse(t.p)[CHAT].chatConversationId).toBe('T')
+  })
+
+  test('a same-mode switch is user-selected and releases nothing', async () => {
+    released.length = 0
+    await tick()
+    const r = await switchConversation(
+      db,
+      { taskId: 't1', mode: M, conversationId: 'T' },
+      { release }
+    )
+    expect(r).toBe('switched')
+    expect(released).toEqual([])
+    const last = raw
+      .prepare(
+        `SELECT origin FROM task_conversations WHERE mode = ? ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(M) as { origin: string }
+    expect(last.origin).toBe('user-selected')
+  })
+
+  test('only the chat ↔ terminal partner may hand a session over', async () => {
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'codex',
+      conversationId: 'X',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(
+      await switchConversation(
+        db,
+        { taskId: 't1', mode: M, conversationId: 'X', sourceMode: 'codex' },
+        { release }
+      )
+    ).toBe('not-partner')
+  })
+
+  test('the session must be honored under the mode that ran it', async () => {
+    expect(
+      await switchConversation(
+        db,
+        { taskId: 't1', mode: M, conversationId: 'nope', sourceMode: CHAT },
+        { release }
+      )
+    ).toBe('not-honored')
+    expect(
+      await switchConversation(
+        db,
+        { taskId: 't2', mode: M, conversationId: 'C', sourceMode: CHAT },
+        { release }
+      )
+    ).toBe('not-honored')
   })
 })
 

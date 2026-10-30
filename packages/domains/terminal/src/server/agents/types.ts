@@ -20,6 +20,12 @@ export interface AgentSpawnOpts {
    * project saw); absent = unknown. Gates options an older CLI would reject.
    */
   cliVersion?: string
+  /**
+   * Start `sessionId` as a NEW conversation branched off `fromSessionId` at the
+   * message `atMessageUuid` (its history up to and including that record). The
+   * source conversation is never written. Used for one spawn only.
+   */
+  fork?: { fromSessionId: string; atMessageUuid: string }
 }
 
 export interface SpawnArgs {
@@ -233,6 +239,8 @@ export interface AgentBackend {
    * shows an "untested version" notice. One constant per provider, easy to lower.
    */
   readonly minTestedCliVersion?: string
+  /** Env every spawn of this agent gets (under the per-spawn overlay). */
+  readonly spawnEnv?: Readonly<Record<string, string>>
   buildSpawnArgs(opts: AgentSpawnOpts): SpawnArgs
   createDriver(): ChatSessionDriver
   /**

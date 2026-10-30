@@ -22,7 +22,13 @@ import {
   kill as killChat,
   removeSession,
   recordInterrupted,
-  popLastUserMessage,
+  stopTurn,
+  previewRewind,
+  rewindTab,
+  forkTab,
+  confirmedConversation,
+  releaseChatConversation,
+  switchTabConversation,
   getEventBufferSince,
   getSessionInfo,
   getSessionTerminalState,
@@ -35,6 +41,7 @@ import {
   type TransportShutdownResult
 } from './chat-transport-manager'
 import type { ChatDataOps, ProviderConfigEntry } from './chat-data-ops'
+import { releaseConversation } from './live-conversations'
 import {
   registerChatQueueHandlers,
   createChatQueueOps,
@@ -76,7 +83,20 @@ import {
   modeSupportsCollaboration,
   type ChatCollaborationMode
 } from '@slayzone/terminal-contracts'
-import { modeSupportsFastMode } from '@slayzone/terminal-contracts'
+import {
+  chatCapabilitiesForMode,
+  modeSupportsFastMode,
+  terminalModeForChat
+} from '@slayzone/terminal-contracts'
+import type { AgentEvent as ChatAgentEvent } from '@slayzone/terminal-contracts'
+import { claudeSessionHistory } from '../agents/claude-session-import'
+import { randomUUID } from 'node:crypto'
+import type {
+  RewindFilesPreview,
+  RewindResult,
+  RewindScope,
+  StopResult
+} from '@slayzone/terminal-contracts'
 import {
   cliCommandListFromTurnInit,
   sameCliCommandList,
@@ -452,6 +472,120 @@ async function buildHydrateOpts(
 }
 
 /**
+ * Reads a Claude Code session file's active branch ON THE COMPUTER the task's
+ * agents run on (`claudeSession.read`) — the composition root wires it once the
+ * computer gateway exists. Null (tests, a hub without computers): no history.
+ */
+export type ClaudeSessionReader = (req: {
+  taskId: string
+  computerId: string | null
+  projectId: string | null
+  cwd: string | null
+  sessionId: string
+  maxRecords: number
+  maxBytes: number
+}) => Promise<{ found: boolean; records: Array<Record<string, unknown>>; omitted: number }>
+
+let claudeSessionReader: ClaudeSessionReader | null = null
+export function setClaudeSessionReader(fn: ClaudeSessionReader | null): void {
+  claudeSessionReader = fn
+}
+
+/** How much of a resumed conversation's past the chat shows (the tab keeps 2000 events). */
+const HISTORY_MAX_RECORDS = 600
+const HISTORY_MAX_BYTES = 4 * 1024 * 1024
+
+/**
+ * A conversation's history for its tab, plus what to say when it is short or
+ * missing. Never throws: a switch still happens without its history.
+ */
+async function loadConversationHistory(
+  data: ChatDataOps,
+  o: { taskId: string; cwd: string },
+  sessionId: string
+): Promise<{ history: ChatAgentEvent[]; notices: ChatAgentEvent[]; title?: string }> {
+  const notice = (
+    code: 'history-truncated' | 'history-unavailable',
+    text: string
+  ): ChatAgentEvent => ({
+    kind: 'notice',
+    id: randomUUID(),
+    level: code === 'history-unavailable' ? 'warning' : 'info',
+    code,
+    text
+  })
+  if (!claudeSessionReader) {
+    return {
+      history: [],
+      notices: [
+        notice(
+          'history-unavailable',
+          'The earlier messages of this conversation are not shown here; Claude still remembers them.'
+        )
+      ]
+    }
+  }
+  try {
+    const res = await claudeSessionReader({
+      taskId: o.taskId,
+      computerId: await data.resolveComputerId(o.taskId),
+      projectId: await data.getTaskProjectId(o.taskId),
+      cwd: o.cwd || null,
+      sessionId,
+      maxRecords: HISTORY_MAX_RECORDS,
+      maxBytes: HISTORY_MAX_BYTES
+    })
+    if (!res.found) {
+      return {
+        history: [],
+        notices: [
+          notice(
+            'history-unavailable',
+            "This conversation's session file was not found, so its earlier messages are not shown."
+          )
+        ]
+      }
+    }
+    const history = claudeSessionHistory(res.records)
+    const first = history.find((e) => e.kind === 'user-message')
+    const title = first?.kind === 'user-message' ? first.text.slice(0, 80) : undefined
+    return {
+      history,
+      notices:
+        res.omitted > 0
+          ? [
+              notice(
+                'history-truncated',
+                `Showing the latest part of this conversation; ${res.omitted} earlier entries are not shown.`
+              )
+            ]
+          : [],
+      ...(title ? { title } : {})
+    }
+  } catch (err) {
+    return {
+      history: [],
+      notices: [
+        notice(
+          'history-unavailable',
+          `The earlier messages of this conversation could not be read (${err instanceof Error ? err.message : String(err)}); Claude still remembers them.`
+        )
+      ]
+    }
+  }
+}
+
+/** Refuse an operation the mode's provider can't do (`ChatCapabilities`). */
+function assertCapability(
+  mode: string,
+  capability: 'rewind' | 'fork' | 'sessions' | 'handoff'
+): void {
+  if (!chatCapabilitiesForMode(mode)[capability]) {
+    throw new Error(`Chat mode "${mode}" does not support ${capability}`)
+  }
+}
+
+/**
  * Build the chat ops object — the single implementation of every chat operation,
  * shared by the IPC handlers (`registerChatHandlers`) and the tRPC `chat` router
  * (injected via `setChatDeps`). Wires SQLite persistence + live-sync into the
@@ -490,7 +624,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       void (async () => {
         // Tree-view "Last interaction" sort marker — only fire on user-message
         // (clear "I interacted" signal). Agent-side bumps come via agent_turns.
-        if (event.kind === 'user-message') {
+        if (event.kind === 'user-message' && !event.history) {
           const info = getSessionInfo(tabId)
           if (info) {
             try {
@@ -566,7 +700,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     }
   })
 
-  return {
+  const ops = {
     supports: (mode: string): boolean => supportsChatMode(mode),
 
     /**
@@ -656,14 +790,22 @@ export function createChatOps(opts: ChatHandlerOpts) {
       args: { requestId: string; decision: PermissionDecision; optionId?: string }
     ): boolean => respondToPermissionRequest(tabId, args),
 
-    // Interrupt = stop the current turn but keep the session. Fast path: live
-    // `interrupt` control_request preserves the warm subprocess + conversation
-    // state. Fallback: kill + respawn with --resume (legacy path; SIGINT was
-    // unreliable on claude-code per Spike C). The identity guard in the
-    // transport's exit handler swallows the dying child's process-exit
-    // broadcast on the fallback path so the renderer doesn't flash "Session
-    // ended". Mirrors `setMode`.
+    // Interrupt = stop the current turn but keep the session. Claude Code: a
+    // live `interrupt` (the process stays; replaced only when the interrupt is not
+    // acknowledged) — `stopTurn`. Other providers keep their path: the
+    // provider's interrupt control request, else kill + respawn with --resume.
+    // The identity guard in the transport's exit handler swallows the dying
+    // child's process-exit on a respawn so the renderer doesn't flash
+    // "Session ended". Mirrors `setMode`.
     interrupt: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      if (chatCapabilitiesForMode(o.mode).liveInterrupt && getSessionInfo(o.tabId)) {
+        await stopTurn(o.tabId, {
+          restorePrompt: false,
+          respawnOpts: () => buildHydrateOpts(data, o, { fresh: false })
+        })
+        const info = getSessionInfo(o.tabId)
+        if (info) return info
+      }
       // Persist interrupted marker FIRST so replay sees the turn boundary
       // regardless of which path resolves. recordInterrupted no-ops for
       // pre-spawn skeletons (nothing to interrupt).
@@ -695,14 +837,13 @@ export function createChatOps(opts: ChatHandlerOpts) {
       return respawn(o.tabId, await buildHydrateOpts(data, o, { fresh: false }))
     },
 
-    // Stop-button / Esc path. Same kill+respawn as `interrupt`, but if no
-    // assistant progress arrived since the trailing user-message we cancel that
-    // user-message instead of leaving an `interrupted` marker — Claude CLI parity
-    // for "abort an unanswered turn and edit the prompt". Authoritative verdict
-    // (`popped`) flows back to the caller so the renderer can restore the input.
-    abortAndPop: async (o: ChatCreateOpts): Promise<{ popped: boolean; text: string | null }> => {
-      const result = popLastUserMessage(o.tabId)
-      if (!result.popped) recordInterrupted(o.tabId)
+    // Stop-button / Esc path. If no assistant output arrived since the trailing
+    // user-message, that message comes back (`popped` + `text`) instead of an
+    // `interrupted` marker — Claude CLI parity for "abort an unanswered turn and
+    // edit the prompt"; the renderer restores the input from the verdict. Claude
+    // Code is interrupted live and keeps its process (`stopTurn`); providers
+    // without a live interrupt get a fresh process, as before.
+    abortAndPop: async (o: ChatCreateOpts): Promise<StopResult> => {
       // Stop button discards queued follow-ups alongside the in-flight turn —
       // matches pre-backend behavior where handleStop did `setQueuedMessages([])`.
       try {
@@ -710,14 +851,184 @@ export function createChatOps(opts: ChatHandlerOpts) {
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
-      // Eager respawn after Stop matches Claude CLI parity — user just hit the
-      // big red button on a turn, the implicit expectation is "ready to keep
-      // chatting"; making them wait for spawn on next send is worse UX than the
-      // lazy mode the rest of the app uses for first-ever messages. The old
-      // process is stopped and its exit awaited first; nothing it still says
-      // reaches the history.
-      await respawn(o.tabId, await buildHydrateOpts(data, o, { fresh: false }))
-      return { popped: result.popped, text: result.text }
+      const result = await stopTurn(o.tabId, {
+        restorePrompt: true,
+        respawnOpts: () => buildHydrateOpts(data, o, { fresh: false })
+      })
+      return { popped: result.popped, text: result.text, id: result.id, content: result.content }
+    },
+
+    /**
+     * What restoring the files to a past message would change (a dry run): the
+     * rewind dialog's summary. `scope` as in `rewind`.
+     */
+    rewindPreview: async (
+      o: ChatCreateOpts & { messageId: string; scope: RewindScope }
+    ): Promise<RewindFilesPreview> => {
+      assertCapability(o.mode, 'rewind')
+      return previewRewind(o.tabId, { messageId: o.messageId, scope: o.scope })
+    },
+
+    /**
+     * Edit & resend (`before`: the message and what follows go; its text comes
+     * back) or rewind to here (`after`: this message and its answer stay) — the
+     * conversation, the files, or both. Live: the agent process stays.
+     */
+    rewind: async (
+      o: ChatCreateOpts & {
+        messageId: string
+        scope: RewindScope
+        conversation: boolean
+        files: boolean
+      }
+    ): Promise<RewindResult> => {
+      assertCapability(o.mode, 'rewind')
+      return rewindTab(o.tabId, {
+        messageId: o.messageId,
+        scope: o.scope,
+        conversation: o.conversation,
+        files: o.files,
+        respawnOpts: () => buildHydrateOpts(data, o, { fresh: false })
+      })
+    },
+
+    /**
+     * Fork from a past message (plan 3.3), in this tab: a new conversation with
+     * everything up to the end of that message's turn; the original is left as
+     * it is and stays in Sessions. Returns the two conversation ids.
+     */
+    fork: async (
+      o: ChatCreateOpts & { messageId: string }
+    ): Promise<{ conversationId: string; fromConversationId: string }> => {
+      assertCapability(o.mode, 'fork')
+      return forkTab(o.tabId, {
+        messageId: o.messageId,
+        respawnOpts: () => buildHydrateOpts(data, o, { fresh: false })
+      })
+    },
+
+    /**
+     * Sessions picker (plan 3.6): run another conversation of this task in the
+     * tab — one of this chat's, or (a hand-off) one the terminal ran. The
+     * current process stops first; the tab shows the picked conversation's
+     * history (read on the agent's computer) after a `switched` divider, and the
+     * agent resumes it at once.
+     */
+    switchConversation: async (
+      o: ChatCreateOpts & { conversationId: string; sourceMode: string }
+    ): Promise<ChatSessionInfo> => {
+      assertCapability(o.mode, 'sessions')
+      const sameMode = o.sourceMode === o.mode
+      if (!sameMode && o.sourceMode !== terminalModeForChat(o.mode)) {
+        throw new Error(`Cannot switch ${o.mode} to a ${o.sourceMode} conversation`)
+      }
+      if (!(await data.isHonoredConversation(o.taskId, o.sourceMode, o.conversationId))) {
+        throw new Error('That is not a conversation of this task.')
+      }
+      // A hand-off: a terminal still running it stops (exit awaited) first.
+      if (!sameMode) await releaseConversation('terminal', o.taskId, o.conversationId)
+      const loaded = await loadConversationHistory(data, o, o.conversationId)
+      await data.recordConversation({
+        taskId: o.taskId,
+        mode: o.mode,
+        conversationId: o.conversationId,
+        origin: sameMode ? 'user-selected' : 'handoff',
+        legacyJsonField: 'chatConversationId'
+      })
+      const built = await buildHydrateOpts(data, o, { fresh: false })
+      await hydrateSession(built)
+      await switchTabConversation(o.tabId, {
+        conversationId: o.conversationId,
+        branch: {
+          kind: 'conversation-branch',
+          reason: 'switched',
+          conversationId: o.conversationId,
+          source: sameMode ? 'sessions' : 'terminal',
+          ...(loaded.title ? { title: loaded.title } : {})
+        },
+        history: loaded.history,
+        notices: loaded.notices,
+        respawnOpts: { ...built, conversationId: o.conversationId }
+      })
+      const info = getSessionInfo(o.tabId)
+      if (!info) throw new Error('The chat session went away during the switch.')
+      return info
+    },
+
+    /**
+     * "Continue in terminal" (plan 3.10): the chat's conversation moves to the
+     * terminal agent. The chat process stops and its exit is awaited (the tab
+     * goes; its history stays saved), then the terminal mode's ledger names the
+     * conversation (`handoff`), so the terminal's next start resumes it. The
+     * caller switches the task's mode.
+     */
+    continueInTerminal: async (o: ChatCreateOpts): Promise<{ conversationId: string }> => {
+      assertCapability(o.mode, 'handoff')
+      const terminalMode = terminalModeForChat(o.mode)!
+      const conversationId =
+        confirmedConversation(o.tabId) ?? (await data.getCurrentConversationId(o.taskId, o.mode))
+      if (!conversationId) throw new Error('This chat has no conversation to continue yet.')
+      await releaseChatConversation(o.taskId, conversationId)
+      await data.recordConversation({
+        taskId: o.taskId,
+        mode: terminalMode,
+        conversationId,
+        origin: 'handoff'
+      })
+      return { conversationId }
+    },
+
+    /**
+     * "Continue in chat" (plan 3.10): the terminal's conversation moves into
+     * this chat tab. Every terminal process of the task running it stops (exit
+     * awaited), the chat's ledger names it (`handoff`), and the tab shows its
+     * history after a divider; the agent resumes it on the next message (at
+     * once if a chat process was running).
+     */
+    continueInChat: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      assertCapability(o.mode, 'handoff')
+      const terminalMode = terminalModeForChat(o.mode)!
+      const conversationId = await data.getCurrentConversationId(o.taskId, terminalMode)
+      if (!conversationId) throw new Error('The terminal has no conversation to continue yet.')
+      await releaseConversation('terminal', o.taskId, conversationId)
+      const loaded = await loadConversationHistory(data, o, conversationId)
+      await data.recordConversation({
+        taskId: o.taskId,
+        mode: o.mode,
+        conversationId,
+        origin: 'handoff',
+        legacyJsonField: 'chatConversationId'
+      })
+      const built = await buildHydrateOpts(data, o, { fresh: false })
+      await hydrateSession(built)
+      await switchTabConversation(o.tabId, {
+        conversationId,
+        branch: {
+          kind: 'conversation-branch',
+          reason: 'switched',
+          conversationId,
+          source: 'terminal',
+          ...(loaded.title ? { title: loaded.title } : {})
+        },
+        history: loaded.history,
+        notices: loaded.notices
+      })
+      const info = getSessionInfo(o.tabId)
+      if (!info) throw new Error('The chat session went away during the hand-off.')
+      return info
+    },
+
+    /**
+     * The chat was refused because the terminal runs its conversation
+     * (`conversation-in-use`): stop the terminal (exit awaited) and start here.
+     */
+    takeOver: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      assertCapability(o.mode, 'handoff')
+      const info = getSessionInfo(o.tabId)
+      const conversationId =
+        info?.sessionId ?? (await data.getCurrentConversationId(o.taskId, o.mode))
+      if (conversationId) await releaseConversation('terminal', o.taskId, conversationId)
+      return ops.start(o)
     },
 
     kill: (tabId: string): void => {
@@ -952,9 +1263,37 @@ export function createChatOps(opts: ChatHandlerOpts) {
         const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
       }
-      // Same kill+respawn pattern as setMode/setModel — effort flag only
-      // takes effect on a fresh process. chatEffortOverride bypasses DB so the
-      // new child uses the requested level before we persist.
+      // Live: Claude Code takes the effort over the control channel
+      // (`apply_flag_settings`, verified on 2.1.312 for every level) — the
+      // process and its conversation stay. Same shape as setMode/setModel.
+      const liveInfo = getSessionInfo(o.tabId)
+      if (
+        chatCapabilitiesForMode(o.mode).liveEffort &&
+        liveState &&
+        liveState !== 'not-spawned' &&
+        liveInfo &&
+        !liveInfo.ended
+      ) {
+        try {
+          await sendControlRequest(o.tabId, {
+            subtype: 'apply_flag_settings',
+            settings: { effortLevel: o.chatEffort }
+          })
+          await data.writeChatEffort(o.taskId, o.mode, o.chatEffort)
+          updateSessionChatEffort(o.tabId, o.chatEffort)
+          const refreshed = getSessionInfo(o.tabId)
+          if (refreshed) return refreshed
+        } catch (err) {
+          console.warn(
+            '[chat-handlers] apply_flag_settings failed, falling back to kill+respawn:',
+            err
+          )
+          // fall through
+        }
+      }
+      // Fallback (and providers without a live effort): kill + respawn — the
+      // effort flag then takes effect on the fresh process. chatEffortOverride
+      // bypasses the DB so the new child uses the requested level before we persist.
       const created = await respawn(
         o.tabId,
         await buildHydrateOpts(data, o, { fresh: false, chatEffortOverride: o.chatEffort })
@@ -1091,6 +1430,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       }
     }
   }
+  return ops
 }
 
 export type ChatOps = ReturnType<typeof createChatOps>

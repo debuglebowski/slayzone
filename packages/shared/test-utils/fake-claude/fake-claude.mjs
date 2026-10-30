@@ -8,6 +8,7 @@
 // in FAKE_CLAUDE_STATE_DIR — the app passes nothing to the fake but argv + stdin,
 // exactly as it does to the real CLI.
 
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createTaskSim } from './fake-claude-tasks.mjs'
@@ -60,14 +61,38 @@ const logFile = epochDir
   ? path.join(epochDir, 'procs', String(index), 'log.jsonl')
   : path.join(stateDir, 'unscripted.jsonl')
 
+/** Env the app is expected to set for the CLI, recorded so a test can check it. */
+const LOGGED_ENV = ['CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING', 'CLAUDE_CONFIG_DIR']
+
 // `start` is logged once the signal handlers are installed (below), so a test that
 // waits for it and then signals the process never races the default action.
 let started = false
-function logStart() {
+function logStart(extra = {}) {
   if (started) return
   started = true
-  log('start', { argv, cwd: process.cwd(), pid: process.pid, epoch, index })
+  const env = {}
+  for (const key of LOGGED_ENV) if (process.env[key] !== undefined) env[key] = process.env[key]
+  log('start', {
+    argv,
+    cwd: process.cwd(),
+    pid: process.pid,
+    epoch,
+    index,
+    env,
+    // Wall clock, so a test can order spawns of different processes.
+    at: Date.now(),
+    // Earlier spawns of this epoch still alive right now ("never two processes on
+    // one conversation" is checked from here).
+    peersAlive: peersAlive(),
+    ...extra
+  })
 }
+
+const script =
+  scenario?.processes?.[index] ??
+  (scenario?.repeatLast && scenario.processes?.length ? scenario.processes.at(-1) : undefined)
+
+if (script?.tui) await runTui()
 
 const missing = REQUIRED_FLAGS.filter((flag) => !hasFlag(flag))
 if (missing.length > 0) {
@@ -78,9 +103,6 @@ if (missing.length > 0) {
   process.exit(EXIT_ARGV_DRIFT)
 }
 
-const script =
-  scenario?.processes?.[index] ??
-  (scenario?.repeatLast && scenario.processes?.length ? scenario.processes.at(-1) : undefined)
 if (!script) {
   const text = `fake-claude: no script for spawn #${index} (epoch ${epoch ?? 'none'})\n`
   logStart()
@@ -92,8 +114,13 @@ if (!script) {
 // --- template context ---------------------------------------------------------
 
 const resumeId = flagValue('--resume')
+// `--resume S --fork-session` runs a NEW conversation (`--session-id` names it,
+// else a fresh id) holding S's history; S itself is never written (2.1.312).
+const forking = resumeId !== undefined && argv.includes('--fork-session')
 const ctx = {
-  sessionId: resumeId ?? flagValue('--session-id') ?? '',
+  sessionId: forking
+    ? (flagValue('--session-id') ?? randomUUID())
+    : (resumeId ?? flagValue('--session-id') ?? ''),
   resumed: resumeId !== undefined,
   cwd: process.cwd(),
   model: flagValue('--model') ?? 'default',
@@ -107,6 +134,203 @@ const ctx = {
   userText: '',
   turn: 0,
   spawn: index
+}
+
+// --- the conversation + its session file ---------------------------------------
+//
+// The conversation as the CLI keeps it: the active branch of main-chain records
+// (user messages, assistant blocks, tool results). It lives in the session file
+// `<CLAUDE_CONFIG_DIR>/projects/<encoded cwd>/<sessionId>.jsonl` — written ONLY
+// when CLAUDE_CONFIG_DIR is set, so a test never touches the real ~/.claude.
+// Like the real file it is append-only: a rewind does not rewrite a line, the next
+// record just points its `parentUuid` at an earlier one (a new branch).
+
+const configDir = process.env.CLAUDE_CONFIG_DIR || null
+
+function sessionFile(id) {
+  if (!configDir || !id) return null
+  return path.join(
+    configDir,
+    'projects',
+    process.cwd().replace(/[^a-zA-Z0-9]/g, '-'),
+    `${id}.jsonl`
+  )
+}
+
+/** Main-chain records of the active branch, oldest first. */
+const chain = []
+/** user message uuid → the 0-based index of this process's user messages (rewind_files). */
+const userIndexByUuid = new Map()
+let userMessageCount = 0
+
+/**
+ * The active branch of a session file: from its last main-chain user/assistant
+ * record back through `parentUuid` (every record kind counts as a link), cut after
+ * `at` when given. Null when the file does not exist.
+ */
+function readActiveBranch(id, at) {
+  const file = sessionFile(id)
+  if (!file || !fs.existsSync(file)) return null
+  const records = fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l))
+  const byUuid = new Map(records.filter((r) => r.uuid).map((r) => [r.uuid, r]))
+  const leaf = records.findLast(
+    (r) => (r.type === 'user' || r.type === 'assistant') && r.isSidechain !== true
+  )
+  const out = []
+  const seen = new Set()
+  for (let r = leaf; r && !seen.has(r.uuid); r = byUuid.get(r.parentUuid)) {
+    seen.add(r.uuid)
+    out.unshift(r)
+  }
+  if (at === undefined) return out
+  const cut = out.findIndex((r) => r.uuid === at)
+  return cut < 0 ? { missing: at } : out.slice(0, cut + 1)
+}
+
+/** A fork whose copied history is not in its file yet (see the `--resume` seeding). */
+let forkUnwritten = false
+/** Every record uuid this conversation holds (its file's, and this process's). */
+const recordUuids = new Set()
+
+function appendRecord(record) {
+  const full = {
+    parentUuid: chain.at(-1)?.uuid ?? null,
+    isSidechain: false,
+    sessionId: ctx.sessionId,
+    cwd: process.cwd(),
+    timestamp: new Date().toISOString(),
+    ...record
+  }
+  chain.push(full)
+  const file = sessionFile(ctx.sessionId)
+  if (!file) return
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const lines = forkUnwritten ? chain : [full]
+  forkUnwritten = false
+  fs.appendFileSync(file, lines.map((r) => `${JSON.stringify(r)}\n`).join(''))
+}
+
+/**
+ * Every user message uuid this conversation has seen — its session file's whole
+ * history (rewound branches included) plus this process's messages. The real CLI
+ * drops a message whose uuid it has seen (chat-a check R2b): it acks it
+ * `completed` at once and runs no turn.
+ */
+const seenUserUuids = new Set()
+
+/** A user message joins the conversation (its turn starts). */
+function recordUserMessage(entry) {
+  const uuid = entry.uuid ?? randomUUID()
+  seenUserUuids.add(uuid)
+  userIndexByUuid.set(uuid, userMessageCount++)
+  appendRecord({
+    type: 'user',
+    uuid,
+    message: { role: 'user', content: entry.content ?? entry.text }
+  })
+}
+
+/** Emitted main-chain events join the conversation too. */
+function recordEmitted(event) {
+  if (event?.parent_tool_use_id) return
+  if (event?.type === 'assistant' && event.message) {
+    appendRecord({ type: 'assistant', uuid: event.uuid ?? randomUUID(), message: event.message })
+  } else if (event?.type === 'user' && event.message && event.isReplay !== true) {
+    appendRecord({ type: 'user', uuid: event.uuid ?? randomUUID(), message: event.message })
+  }
+}
+
+function userText(record) {
+  const c = record.message?.content
+  if (typeof c === 'string') return c
+  if (!Array.isArray(c) || c[0]?.type === 'tool_result') return null
+  return c.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('')
+}
+
+/** `rewind_conversation`: drop the user message and everything after it (live, 2.1.312). */
+function rewindConversation(target) {
+  const at = chain.findIndex((r) => r.type === 'user' && r.uuid === target && userText(r) !== null)
+  if (at < 0) {
+    return {
+      rewound: false,
+      prefillText: null,
+      precedingAssistantUuid: null,
+      error: 'target not found',
+      reason: 'target_not_found'
+    }
+  }
+  const prefillText = userText(chain[at])
+  const preceding = chain.slice(0, at).findLast((r) => r.type === 'assistant')
+  chain.length = at
+  log('rewound', { target })
+  return {
+    rewound: true,
+    targetMessageUuid: target,
+    prefillText,
+    precedingAssistantUuid: preceding?.uuid ?? null
+  }
+}
+
+/** `rewind_files`: the scenario's checkpoint for that message (spike item 5 shapes). */
+function rewindFiles(userMessageId, dryRun) {
+  if (process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING !== 'true') {
+    return { canRewind: false, error: 'File rewinding is not enabled.' }
+  }
+  const at = userIndexByUuid.get(userMessageId)
+  const checkpoint = at === undefined ? undefined : script.fileCheckpoints?.[String(at)]
+  if (!checkpoint) return { canRewind: false, error: 'No file checkpoint found for this message.' }
+  if (dryRun) {
+    return {
+      canRewind: true,
+      filesChanged: checkpoint.filesChanged.map((f) => path.resolve(process.cwd(), f)),
+      insertions: checkpoint.insertions,
+      deletions: checkpoint.deletions
+    }
+  }
+  for (const [rel, content] of Object.entries(checkpoint.restore ?? {})) {
+    const file = path.resolve(process.cwd(), rel)
+    if (content === null) fs.rmSync(file, { force: true })
+    else fs.writeFileSync(file, content)
+  }
+  log('files-rewound', { userMessageId })
+  return { canRewind: true, skippedLinks: 0 }
+}
+
+// Seed from the resumed session (cut at `--resume-session-at`); a fork copies
+// that history into its own new file.
+if (resumeId !== undefined) {
+  const at = flagValue('--resume-session-at')
+  const seeded = readActiveBranch(resumeId, at)
+  if (seeded && !Array.isArray(seeded)) {
+    logStart()
+    process.stderr.write(`No message found with message.uuid of: ${seeded.missing}\n`)
+    log('exit', { code: 1 })
+    process.exit(1)
+  }
+  const file = sessionFile(resumeId)
+  if (file && fs.existsSync(file)) {
+    for (const l of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (!l.trim()) continue
+      const r = JSON.parse(l)
+      if (r.type === 'user' && typeof r.uuid === 'string') seenUserUuids.add(r.uuid)
+      if (typeof r.uuid === 'string') recordUuids.add(r.uuid)
+    }
+  }
+  for (const record of seeded ?? []) {
+    if (typeof record.uuid === 'string') recordUuids.add(record.uuid)
+    chain.push(
+      forking
+        ? { ...record, sessionId: ctx.sessionId, parentUuid: chain.at(-1)?.uuid ?? null }
+        : record
+    )
+  }
+  // A fork copies that history into its own file with its first record, not at
+  // startup (2.1.312, chat-a check R3b): an unused fork leaves no file.
+  forkUnwritten = forking
 }
 
 // --- stdin --------------------------------------------------------------------
@@ -187,8 +411,16 @@ function onStdinLine(line) {
           ? content.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('')
           : ''
     const uuid = typeof msg.uuid === 'string' ? msg.uuid : undefined
+    if (uuid && (seenUserUuids.has(uuid) || userQueue.some((e) => e.uuid === uuid))) {
+      log('duplicate-user-uuid', { uuid })
+      if (acksDelivery()) void lifecycle(uuid, 'completed')
+      return
+    }
     const entry = { text, uuid, content }
-    if (uuid && acksDelivery()) void lifecycle(uuid, 'queued')
+    // A delayed message's acks wait until its turn takes it (main()).
+    if (uuid && acksDelivery() && !ackDelayed(userMessageCount + userQueue.length)) {
+      void lifecycle(uuid, 'queued')
+    }
     if (userWaiter) {
       const w = userWaiter
       userWaiter = null
@@ -220,20 +452,20 @@ async function onControlRequest(msg) {
   const mode = script.controlResponses?.[subtype] ?? 'success'
   log('control', { subtype, request: msg.request, reply: mode })
   if (mode === 'ignore') return
-  if (mode === 'error') {
+  if (mode === 'error' || (typeof mode === 'object' && 'error' in mode)) {
     await writeLine({
       type: 'control_response',
       response: {
         subtype: 'error',
         request_id: msg.request_id,
-        error: `fake-claude: ${subtype} refused by scenario`
+        error: typeof mode === 'object' ? mode.error : `fake-claude: ${subtype} refused by scenario`
       }
     })
     return
   }
   if (await taskSim.onControl(msg)) return
   // Reply payloads as the real CLI sends them (recorded: control-requests,
-  // interrupt-* transcripts).
+  // interrupt-* transcripts, chat-a real-CLI checks).
   let payload = {}
   if (subtype === 'set_model' && typeof msg.request.model === 'string') {
     ctx.model = msg.request.model
@@ -243,10 +475,43 @@ async function onControlRequest(msg) {
     ctx.permissionMode = msg.request.mode
     payload = { mode: ctx.permissionMode }
   }
-  if (subtype === 'interrupt') payload = { still_queued: [] }
+  if (subtype === 'apply_flag_settings') {
+    const settings = msg.request.settings ?? {}
+    if ('effortLevel' in settings) ctx.effort = settings.effortLevel ?? ''
+    // 2.1.312 acks it with no `response` body at all.
+    payload = undefined
+  }
+  if (subtype === 'rewind_conversation')
+    payload = rewindConversation(msg.request.target_message_uuid)
+  if (subtype === 'rewind_files') {
+    payload = rewindFiles(msg.request.user_message_id, msg.request.dry_run === true)
+  }
+  if (subtype === 'cancel_async_message') {
+    const at = userQueue.findIndex((e) => e.uuid === msg.request.message_uuid)
+    if (at >= 0) {
+      const [entry] = userQueue.splice(at, 1)
+      if (acksDelivery()) await lifecycle(entry.uuid, 'cancelled')
+    }
+    payload = { cancelled: at >= 0 }
+  }
+  if (subtype === 'interrupt') {
+    // Messages that arrived mid-turn: the CLI still runs them after the interrupt.
+    payload = { still_queued: userQueue.map((e) => e.uuid).filter(Boolean) }
+    // Like 2.1.312: pending prompts are withdrawn (control_cancel_request) BEFORE
+    // the interrupt is acknowledged; the turn's end follows the ack.
+    if (turnRunning && turnAbort) {
+      log('interrupt', { turn: ctx.turn })
+      turnAbort.abort()
+    }
+  }
+  if (typeof mode === 'object' && 'success' in mode) payload = mode.success
   await writeLine({
     type: 'control_response',
-    response: { subtype: 'success', request_id: msg.request_id, response: payload }
+    response: {
+      subtype: 'success',
+      request_id: msg.request_id,
+      ...(payload === undefined ? {} : { response: payload })
+    }
   })
   if (subtype === 'set_permission_mode') {
     await emit({
@@ -256,10 +521,6 @@ async function onControlRequest(msg) {
       permissionMode: ctx.permissionMode,
       session_id: '{{sessionId}}'
     })
-  }
-  if (subtype === 'interrupt' && turnRunning && turnAbort) {
-    log('interrupt', { turn: ctx.turn })
-    turnAbort.abort()
   }
 }
 
@@ -338,7 +599,15 @@ async function writeLine(event) {
 
 async function emit(raw) {
   const event = substitute(raw)
+  // Like the CLI: every assistant line carries the uuid of its session record,
+  // and no two records share one — a scripted uuid played again (a reused
+  // `defaultTurn`, a resumed conversation) gets a new one.
+  if (event?.type === 'assistant' && event.message) {
+    if (typeof event.uuid !== 'string' || recordUuids.has(event.uuid)) event.uuid = randomUUID()
+    recordUuids.add(event.uuid)
+  }
   trackTools(event)
+  recordEmitted(event)
   // A status frame reporting a mode (scripted, replayed or from a prompt
   // answer) is the CLI's mode from now on.
   if (event?.type === 'system' && event.subtype === 'status') {
@@ -351,6 +620,7 @@ async function emit(raw) {
 async function emitSplit(raw, gapMs) {
   const event = substitute(raw)
   trackTools(event)
+  recordEmitted(event)
   const line = JSON.stringify(event)
   const bytes = Buffer.from(`${line}\n`, 'utf8')
   let cut = -1
@@ -499,7 +769,10 @@ async function runSteps(steps, signal) {
       exit(step.exit ?? 0)
     } else if ('replay' in step) await replay(step.replay, signal)
     else if ('task' in step) await taskSim.run(step.task, signal)
-    else throw new Error(`fake-claude: unknown step ${JSON.stringify(step)}`)
+    else if ('parallel' in step) {
+      // Branches run at once (parallel tool calls each asking for permission).
+      await Promise.all(step.parallel.map((branch) => runSteps(branch, signal)))
+    } else throw new Error(`fake-claude: unknown step ${JSON.stringify(step)}`)
   }
 }
 
@@ -661,7 +934,13 @@ async function main() {
     if (message === null) break
     const { text, uuid, content } = message
     ctx.userText = text
+    recordUserMessage(message)
     const acks = Boolean(uuid) && acksDelivery()
+    if (acks && ackDelayed(userMessageCount - 1)) {
+      // The CLI has the message (it is in the conversation) but says so late.
+      await sleep(script.ackDelayMs, null)
+      await lifecycle(uuid, 'queued')
+    }
     if (acks) {
       await lifecycle(uuid, 'started')
       await writeLine({
@@ -755,4 +1034,55 @@ function hasFlag(flag) {
 function flagValue(name) {
   const at = argv.indexOf(name)
   return at >= 0 && at + 1 < argv.length ? argv[at + 1] : undefined
+}
+
+/** Are the acks of this process's `index`-th user message held back (`ackDelayMs`)? */
+function ackDelayed(index) {
+  return Boolean(script.ackDelayMs) && index >= (script.ackDelayFrom ?? 0)
+}
+
+/** Earlier spawns of this epoch whose process is still alive (by their logged pid). */
+function peersAlive() {
+  if (!epochDir) return []
+  const alive = []
+  for (let i = 0; i < index; i++) {
+    let pid
+    try {
+      const first = fs
+        .readFileSync(path.join(epochDir, 'procs', String(i), 'log.jsonl'), 'utf8')
+        .split('\n')
+        .find((l) => l.includes('"kind":"start"'))
+      pid = first ? JSON.parse(first).pid : undefined
+    } catch {
+      continue
+    }
+    if (typeof pid !== 'number') continue
+    try {
+      process.kill(pid, 0)
+      alive.push(i)
+    } catch {
+      // gone
+    }
+  }
+  return alive
+}
+
+/**
+ * The interactive TUI (`claude` without `-p`), as far as the app can see it from
+ * outside: a process in a pty that resumes or starts a conversation and runs
+ * until it is stopped. Never returns.
+ */
+async function runTui() {
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+    process.on(signal, () => {
+      log('signal', { signal })
+      log('exit', { code: signal === 'SIGTERM' ? 143 : signal === 'SIGINT' ? 130 : 129 })
+      process.exit(signal === 'SIGTERM' ? 143 : signal === 'SIGINT' ? 130 : 129)
+    })
+  }
+  const id = flagValue('--resume') ?? flagValue('--session-id') ?? '?'
+  logStart({ tui: true })
+  process.stdout.write(`fake-claude TUI · session ${id}\r\n> `)
+  setInterval(() => undefined, 1 << 30)
+  await new Promise(() => undefined)
 }

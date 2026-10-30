@@ -9,7 +9,11 @@ import {
 } from 'react'
 import { useTRPCClient } from './trpc'
 import { usePty } from '@slayzone/terminal'
-import { isPromptCaptureMode, type TerminalMode } from '@slayzone/terminal-contracts'
+import {
+  chatCapabilitiesForMode,
+  isPromptCaptureMode,
+  type TerminalMode
+} from '@slayzone/terminal-contracts'
 import {
   matchesShortcut,
   useShortcutStore,
@@ -32,7 +36,7 @@ import {
   SessionHistoryToggleButton,
   useSessionsSidebarOpen
 } from './agent-sessions/SessionsSidebar'
-import { useTaskSessions } from './agent-sessions/TaskSessionsSource'
+import { useFamilySessions } from './agent-sessions/useFamilySessions'
 
 export interface TerminalContainerHandle {
   closeActiveGroup: () => Promise<boolean>
@@ -74,10 +78,16 @@ interface TerminalContainerProps {
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onMainReset?: () => void
+  /**
+   * The main agent's conversation moves to its chat ↔ terminal partner
+   * ("Continue in chat" / "Continue in terminal"); absent: no partner.
+   */
+  onMainHandoff?: () => void
   /** Sessions sidebar: restart the main agent on an earlier session. */
-  onSwitchSession?: (conversationId: string) => Promise<void>
+  /** `mode`: the mode that ran it — the other one of the hand-off pair means a hand-off. */
+  onSwitchSession?: (conversationId: string, mode: string) => Promise<void>
   /** Sessions sidebar: remove a session from the task. */
-  onDeleteSession?: (conversationId: string) => Promise<void>
+  onDeleteSession?: (conversationId: string, mode: string) => Promise<void>
   rightContent?: React.ReactNode
   mainTabAccessories?: React.ReactNode
   mainTabContextMenu?: React.ReactNode
@@ -110,6 +120,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onOpenUrl,
       onOpenFile,
       onMainReset,
+      onMainHandoff,
       onSwitchSession,
       onDeleteSession,
       rightContent,
@@ -185,8 +196,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // task has MORE THAN ONE session — a single-session task has no history worth
     // a separate view. Query only runs while that gate holds, so idle tasks pay
     // nothing.
-    const sessions = useTaskSessions(taskId, mainMode ?? '', canShowPrompts && !!mainMode)
-    const canShowSessions = canShowPrompts && sessions.length > 1
+    // The Sessions list also serves Claude chat (its resume picker), listing the
+    // chat's and the terminal's conversations together (one CLI session store).
+    const sessionsEnabled =
+      (activeGroup?.isMain ?? false) &&
+      !!mainMode &&
+      (isPromptCaptureMode(mainMode) || chatCapabilitiesForMode(mainMode).sessions)
+    const sessions = useFamilySessions(taskId, mainMode ?? '', sessionsEnabled)
+    const canShowSessions = sessionsEnabled && sessions.length > 1
     const [sessionsOpen, toggleSessions] = useSessionsSidebarOpen(taskId)
 
     // Notify parent when main tab active state changes
@@ -451,7 +468,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
               }
             : null,
           onRename: tab.isMain ? null : () => startTabRename(tab.id),
-          onResetSession: tab.isMain && onMainReset ? onMainReset : null
+          onResetSession: tab.isMain && onMainReset ? onMainReset : null,
+          onHandoff: tab.isMain && onMainHandoff ? onMainHandoff : null
         }
       })
     }, [
@@ -475,6 +493,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       closeGroup,
       closeTab,
       onMainReset,
+      onMainHandoff,
       claimFocus,
       startTabRename
     ])

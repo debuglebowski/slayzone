@@ -28,7 +28,8 @@ export function createChatPromptRecorder(
   db: SlayzoneDb
 ): (tabId: string, event: AgentEvent, ctx: ChatPromptContext | null) => Promise<void> {
   return async (_tabId, event, ctx) => {
-    if (event.kind !== 'user-message' || !ctx) return
+    // Imported history (a resumed conversation's past) was recorded when it was sent.
+    if (event.kind !== 'user-message' || event.history || !ctx) return
     if (!chatCapabilitiesForMode(ctx.mode).promptHistory) return
     const text = event.text
     if (!text.trim() || isSyntheticChatPrompt(text)) return

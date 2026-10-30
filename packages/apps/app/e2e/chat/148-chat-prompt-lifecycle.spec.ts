@@ -87,20 +87,24 @@ test.describe('Chat prompt lifecycle', () => {
     expect(t.epoch.runs()).toHaveLength(1)
   })
 
-  test('Stop while a prompt waits (the process is replaced): the card shows it expired', async ({
+  test('Stop while a prompt waits: the CLI withdraws it, the card expires, the process stays', async ({
     chat
   }) => {
     const t = await chat.openTask({
-      title: 'Prompt expired by respawn',
-      scenario: { processes: [{ turns: [bashTurn()] }, { defaultTurn: reply('fresh process') }] }
+      title: 'Prompt expired by Stop',
+      scenario: { processes: [{ turns: [bashTurn()], defaultTurn: reply('same process') }] }
     })
     await t.send('build it')
     await expect(t.panel.getByText('Bash command')).toBeVisible()
     await t.stopButton.click()
-    await t.run(1)
     await expect(t.panel.locator('[data-prompt-dock]')).toHaveCount(0)
     await expect(t.panel.getByText('Expired', { exact: true })).toBeVisible()
-    expect((await t.run(0)).decisions()).toEqual([])
+    const run = await t.run(0, (r) => r.cancels().length === 1)
+    expect(run.decisions()).toEqual([])
+
+    await t.send('next')
+    await expect(t.panel.getByText('same process')).toBeVisible()
+    expect(t.epoch.runs()).toHaveLength(1)
   })
 
   test('a control request the app does not implement is answered at once (no 30 s stall)', async ({

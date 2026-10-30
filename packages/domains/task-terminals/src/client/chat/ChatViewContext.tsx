@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react'
 import type { AgentMode } from '@slayzone/ui'
 import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
+import type { ConversationActionsView } from './useConversationActions'
 
 export interface ChatViewState {
   /**
@@ -40,6 +41,11 @@ export interface ChatViewState {
   retryMessage?: (id: string) => void
   /** Start the agent again (the start-failure card's Retry). */
   restartAgent?: () => void
+  /**
+   * The start was refused because the terminal runs this conversation: stop
+   * the terminal and start here (the card's "Continue here").
+   */
+  takeOver?: () => void
   /**
    * Resolve a pending `tool_use_id` with a `tool_result` content block.
    * Returns false when the adapter lacks a structured-input channel.
@@ -88,6 +94,10 @@ export interface ChatViewState {
    * Cmd+Click on file path → editor pane. Falls back to `shell.openPath`.
    */
   onOpenFile?: (filePath: string, line?: number, col?: number) => void
+  /** Edit & resend / rewind / fork on past user messages (absent: the provider can't). */
+  conversation?: ConversationActionsView
+  /** Folds of `conversation-branch` items: open (shown) or not. */
+  branches?: { isOpen: (id: string) => boolean; toggle: (id: string) => void }
 }
 
 export const ChatViewContext = createContext<ChatViewState>({

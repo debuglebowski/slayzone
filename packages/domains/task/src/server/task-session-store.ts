@@ -1,6 +1,8 @@
 import type { TaskSessionStore } from '@slayzone/terminal/server'
 import {
   bindSessionToTask,
+  getCurrentConversationId,
+  isHonoredConversation,
   markSessionDead,
   prunePendingSpawns,
   recordConversation,
@@ -22,5 +24,7 @@ export const taskSessionStore: TaskSessionStore = {
   prunePendingSpawns,
   bindSessionToTask,
   recordSessionSpawn,
-  markSessionDead
+  markSessionDead,
+  isHonoredConversation,
+  getCurrentConversationId
 }

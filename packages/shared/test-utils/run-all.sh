@@ -358,6 +358,7 @@ run_harness packages/shared/db-migrations/src/v169-ownership-migration.test.ts
 run_harness packages/shared/db-migrations/src/v171-agent-startup-migration.test.ts
 run_harness packages/shared/db-migrations/src/v172-chat-cli-snapshots-migration.test.ts
 run_harness packages/shared/db-migrations/src/v173-claude-chat-mode-migration.test.ts
+run_harness packages/shared/db-migrations/src/v175-conversation-handoff-fork-origins-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -600,6 +601,11 @@ run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.tes
 run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-agent-turn.test.ts
 run_harness packages/domains/terminal/src/server/runtime/cli-version.test.ts
 
 # Terminal — warm-process pool (per-project gate + adopt-match). Strict+electron:
@@ -612,6 +618,7 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
+run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 
 
@@ -798,6 +805,7 @@ run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test
 # One Claude process's task_* frames → command tasks (Bash/Monitor) or sub-agents; task control requests.
 run_harness packages/domains/terminal/src/server/agents/claude-command-tasks.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
+run_harness packages/domains/terminal/src/server/agents/claude-session-import.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.
 run_harness packages/domains/terminal/src/server/agents/claude-stream-drift.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-hook-output.test.ts
@@ -934,6 +942,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
   packages/domains/task-terminals/src/client/chat/chat-ui-components.test.tsx \
+  packages/domains/task-terminals/src/client/chat/conversation-actions.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
@@ -946,6 +955,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/prompts/PromptDock.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \
+  packages/domains/task-terminals/src/client/agent-sessions/family-sessions.test.ts \
   packages/domains/task/src/client/ProcessDialog.test.tsx \
   packages/domains/task/src/client/ProcessesPanel.test.tsx \
   packages/domains/task/src/client/task-detail/useTaskTitleEditing.test.tsx \

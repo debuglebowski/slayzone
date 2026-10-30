@@ -392,7 +392,13 @@ export const HubToComputerMethods = {
   /** Edit the computer's own path-jail (Settings → Computers). */
   computerSetAllowedRoots: 'computer.setAllowedRoots',
   /** Run `gh` on the computer (PR panel). One frame, not one per gh subcommand. */
-  ghExec: 'gh.exec'
+  ghExec: 'gh.exec',
+  /**
+   * Read the active branch of a Claude Code session file on the computer (a
+   * resumed or handed-over conversation's history for the chat timeline). Only
+   * that file: the path is built from the cwd and a uuid, nothing else.
+   */
+  claudeSessionRead: 'claudeSession.read'
 } as const
 
 /** Reserved method namespaces for future hub → computer exec commands. */
@@ -870,6 +876,37 @@ export const ghExecResultSchema = z.object({
   stderr: z.string()
 })
 export type GhExecResult = z.infer<typeof ghExecResultSchema>
+
+/**
+ * `claudeSession.read`: the newest records of a Claude Code conversation's
+ * active branch (user / assistant / compaction records; the CLI's bookkeeping
+ * records left out), oldest first. The cwd resolves as a spawn's does: `cwd`
+ * when the hub knows it (a worktree, a base dir), else the project's checkout on
+ * this computer.
+ */
+export const claudeSessionReadParamsSchema = z.object({
+  cwd: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  sessionId: z.string().uuid(),
+  /** Newest records to return at most. */
+  maxRecords: z.number().int().positive().max(5000),
+  /** Their total JSON size at most (large tool results are shortened first). */
+  maxBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(16 * 1024 * 1024)
+})
+export type ClaudeSessionReadParams = z.infer<typeof claudeSessionReadParamsSchema>
+
+export const claudeSessionReadResultSchema = z.object({
+  /** False: no session file for that id in that cwd's project dir. */
+  found: z.boolean(),
+  records: z.array(z.record(z.string(), z.unknown())),
+  /** Older records of the branch that were not sent (the caps). */
+  omitted: z.number().int().nonnegative()
+})
+export type ClaudeSessionReadResult = z.infer<typeof claudeSessionReadResultSchema>
 
 export const computerShutdownParamsSchema = z.object({
   reason: z.string().optional(),

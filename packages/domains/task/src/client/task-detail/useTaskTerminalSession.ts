@@ -5,7 +5,13 @@ import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { getProviderLastKilledAt, decideReviveMode } from '@slayzone/task-contracts'
 
-import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal-contracts'
+import {
+  chatModeForTerminal,
+  isChatSupported,
+  SESSION_ID_COMMANDS,
+  SESSION_ID_UNAVAILABLE,
+  terminalModeForChat
+} from '@slayzone/terminal-contracts'
 import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'
@@ -14,6 +20,8 @@ import { readCurrentConversationId } from '../../shared/main-terminal'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
+  /** The main agent's cwd (a chat tab is identified by it). */
+  agentCwd: string
   onTaskUpdated: (task: Task) => void
   shortcutActive: boolean | undefined
   getMainSessionId: (id: string) => string
@@ -34,9 +42,14 @@ export interface UseTaskTerminalSessionResult {
   handleRestartTerminal: () => Promise<void>
   handleStopAgent: () => Promise<void>
   handleResetTerminal: () => Promise<void>
-  handleSwitchSession: (conversationId: string) => Promise<void>
-  handleDeleteSession: (conversationId: string) => Promise<void>
+  /** `mode`: the mode that ran it; the hand-off partner's means the conversation moves over. */
+  handleSwitchSession: (conversationId: string, mode: string) => Promise<void>
+  handleDeleteSession: (conversationId: string, mode: string) => Promise<void>
   handleReattachTerminal: () => void
+  /** The main agent's chat ↔ terminal partner mode; null: no hand-off. */
+  handoffMode: string | null
+  /** Move the main agent's conversation to `handoffMode` (the other side stops first). */
+  handleHandoff: () => Promise<void>
 }
 
 /**
@@ -46,6 +59,7 @@ export interface UseTaskTerminalSessionResult {
  */
 export function useTaskTerminalSession({
   task,
+  agentCwd,
   onTaskUpdated,
   shortcutActive,
   getMainSessionId,
@@ -238,8 +252,21 @@ export function useTaskTerminalSession({
   // refreshed `currentConversationByMode`, so the respawn runs `--resume <picked>`
   // and the switch survives a reopen even if the agent never confirms.
   const handleSwitchSession = useCallback(
-    async (conversationId: string) => {
+    async (conversationId: string, fromMode: string) => {
       if (!task) return
+      if (isChatSupported(task.terminal_mode)) {
+        // Chat (its resume picker): the chat tab stops its agent, shows the picked
+        // conversation's history and resumes it — one server op, no remount.
+        await trpcClient.chat.switchConversation.mutate({
+          tabId: task.id,
+          taskId: task.id,
+          mode: task.terminal_mode,
+          cwd: agentCwd,
+          conversationId,
+          sourceMode: fromMode
+        })
+        return
+      }
       const mainSessionId = getMainSessionId(task.id)
       resetTaskState(mainSessionId)
       // See handleRestartTerminal — claim the next mount before the kill so the
@@ -249,26 +276,76 @@ export function useTaskTerminalSession({
       const updated = await trpcClient.task.switchConversation.mutate({
         id: task.id,
         mode: task.terminal_mode,
-        conversationId
+        conversationId,
+        // A chat conversation picked here moves over (a hand-off).
+        sourceMode: fromMode
       })
       onTaskUpdated(updated)
       await new Promise((r) => setTimeout(r, 100))
       markSkipCache(mainSessionId)
       setTerminalKey((k) => k + 1)
     },
-    [task, resetTaskState, onTaskUpdated, getMainSessionId, trpcClient, setTerminalKey]
+    [task, agentCwd, resetTaskState, onTaskUpdated, getMainSessionId, trpcClient, setTerminalKey]
   )
+
+  // Hand-off (chat A, plan 3.10): the main agent's conversation moves to its
+  // chat ↔ terminal partner. The server stops the side that runs it (its exit
+  // awaited) and points the other side's ledger at it; the task then switches
+  // mode WITHOUT clearing conversation ids (a mode switch starts fresh), and
+  // the remounted agent resumes it.
+  const handoffMode = task
+    ? isChatSupported(task.terminal_mode)
+      ? terminalModeForChat(task.terminal_mode)
+      : chatModeForTerminal(task.terminal_mode)
+    : null
+  const handleHandoff = useCallback(async () => {
+    if (!task || !handoffMode) return
+    const mainSessionId = getMainSessionId(task.id)
+    if (isChatSupported(task.terminal_mode)) {
+      await trpcClient.chat.continueInTerminal.mutate({
+        tabId: task.id,
+        taskId: task.id,
+        mode: task.terminal_mode,
+        cwd: agentCwd
+      })
+      // The terminal starts at once (no Start gate) and resumes it.
+      markForceStart(mainSessionId)
+    } else {
+      // Its last output is ignored; the server stops the process.
+      resetTaskState(mainSessionId)
+      await trpcClient.chat.continueInChat.mutate({
+        tabId: task.id,
+        taskId: task.id,
+        mode: handoffMode,
+        cwd: agentCwd
+      })
+    }
+    const updated = await updateTask({ id: task.id, terminalMode: handoffMode })
+    if (updated) onTaskUpdated(updated)
+    markSkipCache(mainSessionId)
+    setTerminalKey((k) => k + 1)
+  }, [
+    task,
+    handoffMode,
+    agentCwd,
+    getMainSessionId,
+    resetTaskState,
+    trpcClient,
+    updateTask,
+    onTaskUpdated,
+    setTerminalKey
+  ])
 
   // Delete a session from the task (sessions sidebar). No kill/remount: the
   // server refuses to delete the CURRENT session, so the live agent is never
   // running on what this removes. Only the task is refreshed — the sidebar list
   // itself refetches off `agentSessions.onChanged`.
   const handleDeleteSession = useCallback(
-    async (conversationId: string) => {
+    async (conversationId: string, mode: string) => {
       if (!task) return
       const updated = await trpcClient.task.deleteConversation.mutate({
         id: task.id,
-        mode: task.terminal_mode,
+        mode,
         conversationId
       })
       onTaskUpdated(updated)
@@ -431,6 +508,8 @@ export function useTaskTerminalSession({
     handleResetTerminal,
     handleSwitchSession,
     handleDeleteSession,
-    handleReattachTerminal
+    handleReattachTerminal,
+    handoffMode,
+    handleHandoff
   }
 }

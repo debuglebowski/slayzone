@@ -36,6 +36,8 @@ import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 import { CommandTaskContext } from './tool-cards'
+import { useConversationActions } from './useConversationActions'
+import { RewindDialog } from './RewindDialog'
 
 export interface ChatPanelHandle {
   focus: () => void
@@ -64,6 +66,8 @@ export interface ChatPanelProps {
   /** The task's main tab (the startup mode applies to it). */
   isMain?: boolean
   isTemporary?: boolean
+  /** "Continue in terminal": hand the conversation to the terminal agent (main tab). */
+  onHandoff?: () => void
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -80,7 +84,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       onOpenFile,
       agentState,
       isMain,
-      isTemporary
+      isTemporary,
+      onHandoff
     } = props
     const {
       state,
@@ -95,6 +100,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       sendToolResult,
       respondPermission,
       abortAndPop,
+      rewindPreview,
+      rewind,
+      fork,
+      takeOver,
       reset: resetTimeline
     } = useChatSession({
       tabId,
@@ -198,6 +207,20 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const display = useChatDisplay({ timeline, finalOnly, showLastMessageTools, scrollRef })
     const { search } = display
 
+    // Edit & resend / rewind / fork on past messages; edit puts the text back
+    // into the composer (the same draft Stop restores).
+    const conversation = useConversationActions({
+      mode,
+      timeline,
+      rewindPreview,
+      rewind,
+      fork,
+      prefill: (text: string) => {
+        composer.setDraft(text)
+        composer.textareaRef.current?.focus()
+      }
+    })
+
     const copySessionId = useCallback(() => {
       if (!state.sessionId) return
       void safeClipboardWriteText(state.sessionId)
@@ -263,6 +286,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         restartAgent: () => {
           void handleRestart()
         },
+        takeOver: () => {
+          takeOver().catch((err: unknown) =>
+            toast(`Couldn't continue here: ${err instanceof Error ? err.message : String(err)}`)
+          )
+        },
         sendToolResult,
         promptCards,
         prompts,
@@ -273,7 +301,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         timeline,
         childIndex: state.childIndex,
         onOpenUrl,
-        onOpenFile: handleOpenFile
+        onOpenFile: handleOpenFile,
+        conversation: conversation.view,
+        branches: display.branches
       }),
       [
         collapseSignal,
@@ -286,6 +316,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         sendMessage,
         retryMessage,
         handleRestart,
+        takeOver,
         sendToolResult,
         promptCards,
         prompts,
@@ -296,7 +327,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         timeline,
         state.childIndex,
         onOpenUrl,
-        handleOpenFile
+        handleOpenFile,
+        conversation.view,
+        display.branches
       ]
     )
 
@@ -410,9 +443,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 setCollapseSignal={setCollapseSignal}
                 handleReset={handleReset}
                 resetting={resetting}
+                {...(onHandoff && state.sessionId ? { onHandoff } : {})}
               />
 
               <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
+              <RewindDialog dialog={conversation.dialog} />
 
               <ChatComposer
                 appearance={appearance}

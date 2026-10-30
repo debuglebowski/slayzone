@@ -65,7 +65,19 @@ export const claudeCodeAdapter: AgentAdapter = {
     ) {
       base.push('--thinking-display', 'summarized')
     }
-    if (opts.resume) {
+    if (opts.fork) {
+      // 2.1.312 (chat-a check R3): the source is read, never written; `--session-id`
+      // names the new conversation.
+      base.push(
+        '--resume',
+        opts.fork.fromSessionId,
+        '--resume-session-at',
+        opts.fork.atMessageUuid,
+        '--fork-session',
+        '--session-id',
+        opts.sessionId
+      )
+    } else if (opts.resume) {
       base.push('--resume', opts.sessionId)
     } else {
       base.push('--session-id', opts.sessionId)
@@ -483,6 +495,9 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
   if (!message) return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
   const messageId = message.id ?? ''
   const blocks = Array.isArray(message.content) ? message.content : []
+  // The record's own uuid (not message.id): what `--resume-session-at` and the
+  // session file's parentUuid chain name.
+  const recordUuid = typeof obj.uuid === 'string' ? { uuid: obj.uuid } : {}
 
   // A slash command the CLI ran locally (`/context`, `/usage`, a failed
   // `/compact`, …) comes back as a synthetic assistant message tagged with
@@ -514,7 +529,8 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
       messageId,
       text: block.text ?? '',
       parentToolUseId: parent,
-      ...(usage ? { usage } : {})
+      ...(usage ? { usage } : {}),
+      ...recordUuid
     }
   }
   if (block.type === 'thinking') {
@@ -524,7 +540,8 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
       text: block.thinking ?? '',
       hasSignature: Boolean(block.signature),
       parentToolUseId: parent,
-      ...(usage ? { usage } : {})
+      ...(usage ? { usage } : {}),
+      ...recordUuid
     }
   }
   if (block.type === 'tool_use') {
@@ -534,7 +551,8 @@ function parseAssistant(obj: Record<string, unknown>, parent: string | undefined
       name: block.name ?? '',
       input: block.input,
       parentToolUseId: parent,
-      ...(usage ? { usage } : {})
+      ...(usage ? { usage } : {}),
+      ...recordUuid
     }
   }
   return { kind: 'unknown', reason: 'unknown-type', raw: obj }
