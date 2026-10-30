@@ -117,13 +117,16 @@ export const ptyRouter = router({
   // server. Replaces three serial renderer→server round trips (exists → getState
   // → getBufferSince) per terminal — ~50 of them on a renderer boot. `buffer` is
   // read whether or not the PTY is live, exactly as `getBufferSince` would answer.
+  // `size`: the session's terminal size now (null = no session), for a client that
+  // renders it without resizing it (the phone; changes follow on `onResize`).
   attach: publicProcedure
     .input(z.object({ sessionId: z.string(), afterSeq: z.number() }))
     .query(async ({ input }) => {
       const exists = await ops().ptyExists(input.sessionId)
       const state = await ops().ptyGetState(input.sessionId)
       const buffer = await ops().ptyGetBufferSince(input.sessionId, input.afterSeq)
-      return { exists, state, buffer }
+      const size = await ops().ptyGetSize(input.sessionId)
+      return { exists, state, buffer, size }
     }),
   list: publicProcedure.query(() => ops().ptyList()),
   chatList: publicProcedure.query(() => ops().chatList()),
@@ -196,6 +199,16 @@ export const ptyRouter = router({
       const ev = getPtyDeps().events
       ev.on('background-jobs', handler)
       return () => ev.off('background-jobs', handler)
+    })
+  ),
+  /** A session's terminal size changed (`pty.resize`): what `attach.size` reports now. */
+  onResize: publicProcedure.subscription(() =>
+    observable<{ sessionId: string; cols: number; rows: number }>((emit) => {
+      const handler = (sessionId: string, cols: number, rows: number): void =>
+        emit.next({ sessionId, cols, rows })
+      const ev = getPtyDeps().events
+      ev.on('resize', handler)
+      return () => ev.off('resize', handler)
     })
   ),
   onTitleChange: publicProcedure.subscription(() =>

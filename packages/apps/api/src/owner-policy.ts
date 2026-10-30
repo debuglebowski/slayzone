@@ -1072,6 +1072,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.onData': streamed(on('sessionId', 'session')),
   'pty.onStateChange': streamed(on('sessionId', 'session')),
   'pty.onBackgroundJobs': streamed(on('sessionId', 'session')),
+  'pty.onResize': streamed(on('sessionId', 'session')),
   'pty.onTitleChange': streamed(on('sessionId', 'session')),
   'pty.onExit': streamed(on('sessionId', 'session')),
   'pty.onPrompt': streamed(on('sessionId', 'session')),

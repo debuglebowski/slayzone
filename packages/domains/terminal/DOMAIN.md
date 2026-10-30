@@ -237,3 +237,7 @@ const handleTerminalReady = useCallback((api) => {
 
 `./chat-prompts`, `./terminal-themes` and `./suppress-device-status` export the pure client modules as they are (no move): desktop keeps importing them through `./client` and relative paths, unchanged. The mobile app reaches them without the `./client` barrel, which loads xterm and React components.
 
+### 2026-10 Session size readable (`attach.size`, `pty.onResize`)
+
+The hub keeps each pty session's terminal size (spawn size, then every successful `resizePty`, clamped as the pty got it): `getPtySize`, `pty.attach` → `size`, and the `resize` event → `pty.onResize`. Read-only: nothing changes how a session is sized. It exists for a client that shows a session WITHOUT sizing it — the phone renders at the size the desktop set, scaled to its screen, because two clients resizing one terminal fight (each SIGWINCH re-lays out the agent's TUI for the other).
+

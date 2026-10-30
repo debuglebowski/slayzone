@@ -8,6 +8,7 @@ import {
   writePty,
   submitPty,
   resizePty,
+  getPtySize,
   killPty,
   touchPty,
   interruptPty,
@@ -381,6 +382,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptySubmit = (sessionId: string, text: string) => submitPty(sessionId, text)
   const ptyResize = (sessionId: string, cols: number, rows: number) =>
     resizePty(sessionId, cols, rows)
+  const ptyGetSize = (sessionId: string) => getPtySize(sessionId)
   const ptyKill = (sessionId: string) => killPty(sessionId)
   const ptyTouch = (sessionId: string) => touchPty(sessionId)
   const ptyInterrupt = (sessionId: string) => interruptPty(sessionId)
@@ -458,6 +460,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     ptyWrite,
     ptySubmit,
     ptyResize,
+    ptyGetSize,
     ptyKill,
     ptyTouch,
     ptyInterrupt,

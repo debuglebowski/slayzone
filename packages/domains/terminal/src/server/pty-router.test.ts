@@ -1,5 +1,5 @@
 /**
- * pty tRPC router — `onData`'s server-side session filter.
+ * pty tRPC router — `onData`'s server-side session filter, `attach`, `onResize`.
  *
  * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
@@ -75,7 +75,8 @@ describe('pty router', () => {
         ptyExists: (id: string) => id === 'live',
         ptyGetState: (id: string) => (id === 'live' ? 'running' : null),
         ptyGetBufferSince: (id: string, after: number) =>
-          id === 'live' ? { ...live, afterSeq: after } : null
+          id === 'live' ? { ...live, afterSeq: after } : null,
+        ptyGetSize: (id: string) => (id === 'live' ? { cols: 132, rows: 41 } : null)
       } as unknown as PtyDeps['ops'],
       events
     } as unknown as PtyDeps)
@@ -83,12 +84,27 @@ describe('pty router', () => {
     expect(await caller.attach({ sessionId: 'live', afterSeq: 2 })).toEqual({
       exists: true,
       state: 'running',
-      buffer: { ...live, afterSeq: 2 }
+      buffer: { ...live, afterSeq: 2 },
+      size: { cols: 132, rows: 41 }
     })
     expect(await caller.attach({ sessionId: 'gone', afterSeq: -1 })).toEqual({
       exists: false,
       state: null,
-      buffer: null
+      buffer: null,
+      size: null
     })
+  })
+
+  // A client that must not resize the agent's terminal (the phone) renders at the
+  // session's size: read at attach (above), followed through `onResize`.
+  test('onResize streams each session size change', async () => {
+    const caller = ptyRouter.createCaller(ctx)
+    const obs = await caller.onResize()
+    const got: Array<{ sessionId: string; cols: number; rows: number }> = []
+    const sub = obs.subscribe({ next: (v) => got.push(v) })
+    events.emit('resize', 'sess-a', 100, 30)
+    sub.unsubscribe()
+    events.emit('resize', 'sess-a', 90, 30)
+    expect(got).toEqual([{ sessionId: 'sess-a', cols: 100, rows: 30 }])
   })
 })

@@ -56,6 +56,9 @@ export type PtyEventMap = {
   // PTY dimensions need a renderer-side re-fit (e.g. after floating-agent
   // reattach). Dual-emitted alongside the legacy `pty:resize-needed` send.
   'resize-needed': [sessionId: string]
+  /** The session's terminal size changed (a client's `pty.resize`). A client that
+   *  renders the session without sizing it (the phone) follows this. */
+  resize: [sessionId: string, cols: number, rows: number]
 }
 
 export const ptyEvents = new TypedEmitter<PtyEventMap>()

@@ -589,6 +589,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'pty.modesTest': 'user',
   'pty.modesUpdate': 'user',
   'pty.onBackgroundJobs': 'user',
+  'pty.onResize': 'user',
   'pty.onData': 'user',
   'pty.onDevServerDetected': 'user',
   'pty.onEnsureAlive': 'user',

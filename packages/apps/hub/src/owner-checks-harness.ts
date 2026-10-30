@@ -522,6 +522,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onStateChange': (o) =>
     getPtyDeps().events.emit('state-change', o.session, 'running', 'idle'),
   'pty.onBackgroundJobs': (o) => getPtyDeps().events.emit('background-jobs', o.session, 1),
+  'pty.onResize': (o) => getPtyDeps().events.emit('resize', o.session, 100, 30),
   'pty.onTitleChange': (o) => getPtyDeps().events.emit('title-change', o.session, o.mark),
   'pty.onExit': (o) => getPtyDeps().events.emit('exit', o.session, 0, null),
   'pty.onPrompt': (o) => getPtyDeps().events.emit('prompt', o.session, { mark: o.mark }),

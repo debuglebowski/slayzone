@@ -178,6 +178,7 @@ run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 # The hub decides an agent's computer and folder before the spawn (task sessions and
 # the project-wide agent panel); an explicit folder wins, none known = none guessed.
 run_harness packages/domains/terminal/src/server/runtime/spawn-target.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-size.test.ts
 # Doctor asks the task's computer whether node-pty can start terminals there.
 run_harness packages/domains/terminal/src/server/runtime/runtime-doctor.test.ts
 # Idle sweep runs windowless: idle-close countdown/hibernate + silence-timer idle flip.

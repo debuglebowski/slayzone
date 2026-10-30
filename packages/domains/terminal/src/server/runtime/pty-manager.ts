@@ -294,6 +294,11 @@ interface PtySession {
   // still records everything.
   suppressOutput?: boolean
   buffer: RingBuffer
+  // The terminal size the process has now: the spawn size, then every successful
+  // resize (clamped, as the pty got it). Read by clients that render the session
+  // without sizing it (`getPtySize`, the `resize` event).
+  cols: number
+  rows: number
   lastOutputTime: number
   // Timestamp of the last GENUINE user interaction with this terminal, reported
   // by the renderer (real DOM keydown/mouse/wheel/paste/focus — NOT PTY bytes,
@@ -1868,6 +1873,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // Only check for session errors if we're trying to resume
       checkingForSessionError: resuming,
       buffer: new RingBuffer(MAX_BUFFER_SIZE),
+      cols: spawnOptions.cols,
+      rows: spawnOptions.rows,
       lastOutputTime: Date.now(),
       lastUserInteractionAt: Date.now(),
       conversationId: effectiveConversationId ?? null,
@@ -3076,7 +3083,19 @@ export function resizePty(sessionId: string, cols: number, rows: number): boolea
     })
     return false
   }
+  if (session.cols !== safeCols || session.rows !== safeRows) {
+    session.cols = safeCols
+    session.rows = safeRows
+    ptyEvents.emit('resize', sessionId, safeCols, safeRows)
+  }
   return true
+}
+
+/** The session's terminal size now (spawn size, then the last resize); null = no
+ *  such session. */
+export function getPtySize(sessionId: string): { cols: number; rows: number } | null {
+  const session = sessions.get(sessionId)
+  return session ? { cols: session.cols, rows: session.rows } : null
 }
 
 export function killPty(sessionId: string): boolean {
