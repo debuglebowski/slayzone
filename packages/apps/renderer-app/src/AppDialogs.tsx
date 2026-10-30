@@ -132,6 +132,10 @@ interface AppDialogsProps {
   onCompleteTask: (taskId: string) => Promise<void>
   /** ⌘⇧T reopen-last-closed-tab, restoring a discarded temp task (HomeView's useReopenClosedTab). */
   onReopenClosedTab: () => Promise<void>
+  /** First-run onboarding runs on this host (mountApp's `onboarding`). Off: neither the
+   *  onboarding dialog nor its follow-up CLI-install prompt ever mounts (and HomeView
+   *  shows no Getting Started checklist, so nothing opens the tour). */
+  onboarding: boolean
   /**
    * Onboarding close-flow handlers from HomeView's useOnboardingChecklist (the
    * checklist hook lives there to feed the sidebar). Finishing onboarding marks
@@ -161,6 +165,7 @@ export function AppDialogs({
   onOpenTask,
   onCompleteTask,
   onReopenClosedTab,
+  onboarding,
   startTour,
   markSetupGuideCompleted
 }: AppDialogsProps): React.JSX.Element {
@@ -302,12 +307,13 @@ export function AppDialogs({
 
   // Mount onboarding on a fresh install (onboarding_completed !== 'true') or when
   // explicitly reopened from the checklist. Once mounted it stays mounted so
-  // close/reopen animations work (mirrors canonical App.tsx).
+  // close/reopen animations work (mirrors canonical App.tsx). Never on a host
+  // without onboarding.
   const [shouldMountOnboarding, setShouldMountOnboarding] = useState(false)
   // Latch on as soon as the store opens it — adjusted during render.
-  if (onboardingOpen && !shouldMountOnboarding) setShouldMountOnboarding(true)
+  if (onboarding && onboardingOpen && !shouldMountOnboarding) setShouldMountOnboarding(true)
   useEffect(() => {
-    if (onboardingOpen) return
+    if (!onboarding || onboardingOpen) return
     let cancelled = false
     void trpcClient.settings.get.query({ key: 'onboarding_completed' }).then((v) => {
       if (!cancelled && v !== 'true') setShouldMountOnboarding(true)
@@ -315,7 +321,7 @@ export function AppDialogs({
     return () => {
       cancelled = true
     }
-  }, [onboardingOpen, trpcClient])
+  }, [onboarding, onboardingOpen, trpcClient])
 
   // Auto-open the changelog when the running version differs from last-seen.
   const [autoChangelogOpen, lastSeenVersion, dismissAutoChangelog] = useChangelogAutoOpen()
@@ -541,12 +547,15 @@ export function AppDialogs({
         </Suspense>
       )}
 
-      {/* CLI-install — self-managed open: checks onboarding_completed +
-          cli_install_dismissed + whether the slay CLI is already installed, then
-          installs via trpc app.meta.installCli (routes to the sidecar). */}
-      <Suspense fallback={null}>
-        <CliInstallDialog />
-      </Suspense>
+      {/* CLI-install — onboarding's follow-up. Self-managed open: checks
+          onboarding_completed + cli_install_dismissed + whether the slay CLI is
+          already installed, then installs via trpc app.meta.installCli (routes to
+          the sidecar). */}
+      {onboarding && (
+        <Suspense fallback={null}>
+          <CliInstallDialog />
+        </Suspense>
+      )}
 
       {/* Animated tour — opened via the checklist's "Take a tour" (startTour →
           openAnimatedTour) or the post-onboarding toast. Store-driven. */}

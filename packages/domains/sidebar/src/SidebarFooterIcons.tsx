@@ -16,7 +16,8 @@ interface SidebarFooterIconsProps {
   onSettings: () => void
   onUsageAnalytics: () => void
   onLeaderboard: () => void
-  onboardingChecklist: OnboardingChecklistState
+  /** Null: no Getting Started entry (a host without onboarding, the web shell). */
+  onboardingChecklist: OnboardingChecklistState | null
   /** Convex backend configured — gates the leaderboard + feedback entry points. */
   convexConfigured?: boolean
   /** App-supplied feedback entry (rendered when convex is configured). */
@@ -56,11 +57,13 @@ export function SidebarFooterIcons({
       {actions}
       <TerminalStatusPopover tasks={tasks} onTaskClick={onTaskClick} side={tooltipSide} />
 
-      <GettingStartedPopover
-        layout={layout}
-        tooltipSide={tooltipSide}
-        onboardingChecklist={onboardingChecklist}
-      />
+      {onboardingChecklist && (
+        <GettingStartedPopover
+          layout={layout}
+          tooltipSide={tooltipSide}
+          onboardingChecklist={onboardingChecklist}
+        />
+      )}
       {convexConfigured && (
         <Tooltip>
           <TooltipTrigger asChild>

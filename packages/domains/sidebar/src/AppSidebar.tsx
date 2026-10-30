@@ -39,7 +39,8 @@ interface AppSidebarProps {
   onOpenTaskInBackground?: (taskId: string) => void
   onCreateTemporaryTask?: (projectId: string) => void
   zenMode?: boolean
-  onboardingChecklist: OnboardingChecklistState
+  /** Null: no Getting Started entry (a host without onboarding, the web shell). */
+  onboardingChecklist: OnboardingChecklistState | null
   /** App injects the tRPC call toggling native window-button visibility; fork no-ops. */
   onSetWindowButtonVisibility?: (visible: boolean) => void
   /** Convex backend configured — gates the leaderboard + feedback entry points. */

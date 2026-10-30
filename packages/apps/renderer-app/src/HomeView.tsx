@@ -99,7 +99,12 @@ const testWindow = window as unknown as Record<string, unknown>
 testWindow.__slayzone_tabStore ??= useTabStore
 testWindow.__slayzone_dialogStore ??= useDialogStore
 
-export function HomeView(): React.JSX.Element {
+export function HomeView({
+  onboarding
+}: {
+  /** First-run onboarding runs on this host (mountApp's `onboarding`). */
+  onboarding: boolean
+}): React.JSX.Element {
   const rawData = useTasksData()
   const trpcClient = useTRPCClient()
   // Convex backend configured for this host — gates the leaderboard + feedback entry points.
@@ -491,7 +496,8 @@ export function HomeView(): React.JSX.Element {
   // Electron renderer (no reimplementation). Setup-guide / take-tour flip store
   // dialogs; community + X open through the sidecar's app.shell.openExternal;
   // leaderboard flips the overlay view. startTour / markSetupGuideCompleted feed
-  // AppDialogs' onboarding close-flow.
+  // AppDialogs' onboarding close-flow. Off (no onboarding on this host): no
+  // checklist, so the sidebar has no Getting Started entry.
   const {
     checklist: onboardingChecklist,
     startTour,
@@ -499,6 +505,7 @@ export function HomeView(): React.JSX.Element {
   } = useOnboardingChecklist({
     projectCount: projects.length,
     hasCreatedTask: data.tasks.some((t) => !t.is_temporary),
+    enabled: onboarding,
     leaderboardAvailable: convexConfigured,
     onCheckLeaderboard: () => useTabStore.getState().setActiveView('leaderboard'),
     onJoinCommunity: () =>
@@ -924,6 +931,7 @@ export function HomeView(): React.JSX.Element {
         onOpenTask={openTask}
         onCompleteTask={completeAndCloseTask}
         onReopenClosedTab={reopenClosedTab}
+        onboarding={onboarding}
         startTour={startTour}
         markSetupGuideCompleted={markSetupGuideCompleted}
       />

@@ -55,8 +55,16 @@ function withWindowId(serverUrl: string, windowId: number | null | undefined): s
   return `${serverUrl}${serverUrl.includes('?') ? '&' : '?'}windowId=${windowId}`
 }
 
-// Contract consumed by @slayzone/chromium-shell: a no-arg `mountApp()`.
-export async function mountApp(): Promise<void> {
+/** What the mounting shell turns on. Every field defaults to the desktop (fork) app. */
+export interface MountAppOptions {
+  /** First-run onboarding: the onboarding dialog, its follow-up CLI-install prompt and
+   *  the sidebar's Getting Started checklist. The web shell has none: off. Default on. */
+  onboarding?: boolean
+}
+
+// Contract consumed by @slayzone/chromium-shell (`mountApp()`, every default) and
+// @slayzone/web-shell (`mountApp({ onboarding: false })`).
+export async function mountApp({ onboarding = true }: MountAppOptions = {}): Promise<void> {
   const el = document.getElementById('root')
   if (!el) throw new Error('[renderer-app] #root element not found')
   const hash = typeof window !== 'undefined' ? window.location.hash : ''
@@ -118,7 +126,7 @@ export async function mountApp(): Promise<void> {
               <AppearanceProvider settingsRevision={0}>
                 <UndoProvider>
                   <TooltipProvider delayDuration={0}>
-                    <HomeView />
+                    <HomeView onboarding={onboarding} />
                   </TooltipProvider>
                 </UndoProvider>
               </AppearanceProvider>

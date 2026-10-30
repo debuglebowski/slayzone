@@ -70,7 +70,8 @@ async function boot(): Promise<void> {
   initTrpcClient(trpcUrl, { links: [authInvalidationLink()] })
 
   const { mountApp } = await import('@slayzone/renderer-app')
-  await mountApp()
+  // The web shell has no onboarding (MountAppOptions in renderer-app's main.tsx).
+  await mountApp({ onboarding: false })
   if (signIn.authRequired) mountSignOut()
 }
 

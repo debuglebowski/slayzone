@@ -49,6 +49,8 @@ export interface OnboardingChecklistState {
 interface UseOnboardingChecklistOptions {
   projectCount: number
   hasCreatedTask: boolean
+  /** False (a host without onboarding, the web shell): no settings I/O, `checklist` null. */
+  enabled?: boolean
   /** Convex runs here (`useLeaderboardAuth().configured`). False: no leaderboard step. */
   leaderboardAvailable: boolean
   onCheckLeaderboard: () => void
@@ -57,7 +59,7 @@ interface UseOnboardingChecklistOptions {
 }
 
 interface UseOnboardingChecklistResult {
-  checklist: OnboardingChecklistState
+  checklist: OnboardingChecklistState | null
   startTour: () => void
   markSetupGuideCompleted: () => void
 }
@@ -115,6 +117,7 @@ function areStatesEqual(
 export function useOnboardingChecklist({
   projectCount,
   hasCreatedTask,
+  enabled = true,
   leaderboardAvailable,
   onCheckLeaderboard,
   onJoinCommunity,
@@ -126,12 +129,13 @@ export function useOnboardingChecklist({
 
   const persistState = useCallback(
     async (state: PersistedChecklistStateV1): Promise<void> => {
+      if (!enabled) return
       await trpcClient.settings.set.mutate({
         key: CHECKLIST_SETTINGS_KEY,
         value: JSON.stringify(state)
       })
     },
-    [trpcClient]
+    [enabled, trpcClient]
   )
 
   const loadLegacyState = useCallback(async (): Promise<PersistedChecklistStateV1> => {
@@ -173,6 +177,7 @@ export function useOnboardingChecklist({
   }, [trpcClient])
 
   useEffect(() => {
+    if (!enabled) return
     let isCancelled = false
 
     const loadState = async (): Promise<void> => {
@@ -193,7 +198,7 @@ export function useOnboardingChecklist({
     return () => {
       isCancelled = true
     }
-  }, [loadLegacyState, persistState, trpcClient])
+  }, [enabled, loadLegacyState, persistState, trpcClient])
 
   const updatePersistedState = useCallback(
     (updater: (previous: PersistedChecklistStateV1) => PersistedChecklistStateV1): void => {
@@ -362,7 +367,7 @@ export function useOnboardingChecklist({
   )
 
   return {
-    checklist,
+    checklist: enabled ? checklist : null,
     startTour,
     markSetupGuideCompleted
   }

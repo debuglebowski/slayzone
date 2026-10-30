@@ -343,3 +343,59 @@ test.describe('web shell — real login-required hub, real browser', () => {
     expect(refused).toEqual([])
   })
 })
+
+// The web shell has no onboarding. A fresh hub (`onboarding_completed` unset) opens the
+// first-run dialog on desktop; here none opens, and the sidebar has no Getting Started
+// checklist. Its own hub: the board needs a project to render past its empty state,
+// which the tests above must not see.
+test.describe('web shell — no onboarding', () => {
+  let hub: LoginHub
+  let browser: Browser
+  let projectDir: string
+
+  test.beforeAll(async () => {
+    hub = await spawnLoginHub()
+    browser = await chromium.launch()
+    // Outside the hub root: the owner gate refuses a project path in the hub's state dir.
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-web-shell-project-'))
+    const res = await fetch(`http://127.0.0.1:${hub.port}/api/projects`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${hub.owner.token}`
+      },
+      body: JSON.stringify({ name: 'Web Project', path: projectDir })
+    })
+    if (!res.ok) throw new Error(`/api/projects: ${res.status} ${await res.text()}`)
+  })
+
+  test.afterAll(async () => {
+    await browser.close()
+    await hub.stop()
+    fs.rmSync(hub.root, { recursive: true, force: true })
+    fs.rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  test('a fresh hub opens no onboarding dialog and shows no Getting Started checklist', async () => {
+    const context = await browser.newContext()
+    try {
+      const page = await context.newPage()
+      await page.goto(`http://127.0.0.1:${hub.port}/`)
+      await page.getByTestId('web-login-email').fill(hub.owner.email)
+      await page.getByTestId('web-login-password').fill(hub.owner.password)
+      await Promise.all([
+        page.waitForEvent('framenavigated'),
+        page.getByTestId('web-login-submit').click()
+      ])
+
+      // The board rendered past its empty state (sidebar footer up), so AppDialogs is mounted.
+      await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout: 30_000 })
+      // Past the `onboarding_completed` read that would auto-open the dialog.
+      await page.waitForTimeout(1_500)
+      await expect(page.getByText('Welcome to SlayZone', { exact: true })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Getting Started' })).toHaveCount(0)
+    } finally {
+      await context.close()
+    }
+  })
+})
