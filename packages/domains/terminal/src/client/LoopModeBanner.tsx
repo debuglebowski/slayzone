@@ -33,12 +33,12 @@ const STATUS_LABELS: Record<LoopStatus, string> = {
 
 const STATUS_DOT_COLORS: Record<LoopStatus, string> = {
   idle: 'bg-muted-foreground',
-  running: 'bg-yellow-500',
-  paused: 'bg-blue-500',
-  passed: 'bg-green-500',
+  running: 'bg-warning',
+  paused: 'bg-info',
+  passed: 'bg-success',
   stopped: 'bg-muted-foreground',
-  error: 'bg-red-500',
-  'max-reached': 'bg-orange-500'
+  error: 'bg-destructive',
+  'max-reached': 'bg-warning-emphasis'
 }
 
 const CRITERIA_LABELS = {
@@ -68,7 +68,7 @@ export function LoopModeBanner({
 
   return (
     <div
-      className={`${floating ? 'absolute top-6 right-6 z-10 ' : ''}w-72 rounded-xl border-2 ${active ? 'border-orange-500/60' : 'border-border'} bg-surface-1 backdrop-blur-md text-xs overflow-hidden transition-all duration-300`}
+      className={`${floating ? 'absolute top-6 right-6 z-10 ' : ''}w-72 rounded-xl border-2 ${active ? 'border-warning/60' : 'border-border'} bg-surface-1 backdrop-blur-md text-xs overflow-hidden transition-all duration-300`}
       style={{
         boxShadow: active
           ? '0 0 20px 0 rgba(249,115,22,0.4), 0 0 60px 0 rgba(249,115,22,0.15)'
@@ -78,7 +78,7 @@ export function LoopModeBanner({
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between px-3 py-2 border-b ${active ? 'border-orange-500/20 bg-orange-500/5' : 'border-border'}`}
+        className={`flex items-center justify-between px-3 py-2 border-b ${active ? 'border-warning/20 bg-warning/5' : 'border-border'}`}
       >
         <span className="font-bold text-foreground tracking-wide">LOOP COMMAND</span>
         <div className="flex items-center gap-0.5">
@@ -161,13 +161,13 @@ export function LoopModeBanner({
       </div>
 
       {/* Prompt */}
-      <div className={`px-3 py-2.5 border-b ${active ? 'border-orange-500/20' : 'border-border'}`}>
+      <div className={`px-3 py-2.5 border-b ${active ? 'border-warning/20' : 'border-border'}`}>
         <div className="text-muted-foreground mb-0.5">Prompt</div>
         <div className="text-foreground leading-snug">{truncate(config.prompt, 100)}</div>
       </div>
 
       {/* Criteria */}
-      <div className={`px-3 py-2.5 border-b ${active ? 'border-orange-500/20' : 'border-border'}`}>
+      <div className={`px-3 py-2.5 border-b ${active ? 'border-warning/20' : 'border-border'}`}>
         <div className="text-muted-foreground mb-0.5">Criteria</div>
         <div className="text-foreground">
           {CRITERIA_LABELS[config.criteriaType]} &ldquo;{truncate(config.criteriaPattern, 40)}
@@ -192,7 +192,7 @@ export function LoopModeBanner({
         </div>
         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${active ? 'bg-orange-500' : 'bg-foreground/30'}`}
+            className={`h-full rounded-full transition-all duration-500 ${active ? 'bg-warning' : 'bg-foreground/30'}`}
             style={{ width: `${progress}%` }}
           />
         </div>

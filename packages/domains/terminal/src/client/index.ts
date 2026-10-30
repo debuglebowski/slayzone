@@ -69,6 +69,7 @@ export {
   selectFoldedIndexes,
   selectConversationAttachmentBytes
 } from './chat-timeline'
+export { FILE_TOOL_NAMES, fileChangeOf, type TurnFileChange } from './turn-file-changes'
 export { LiveBlockStore, LiveBlockStoreContext, useLiveBlock } from './live-blocks'
 export { parsePartialJson } from './partial-json'
 export {

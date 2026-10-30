@@ -3,6 +3,7 @@ import type { AgentMode } from '@slayzone/ui'
 import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import type { ConversationActionsView } from './useConversationActions'
+import type { DiffLineComment } from './diff-comments/format'
 
 export interface ChatViewState {
   /**
@@ -98,6 +99,10 @@ export interface ChatViewState {
   conversation?: ConversationActionsView
   /** Folds of `conversation-branch` items: open (shown) or not. */
   branches?: { isOpen: (id: string) => boolean; toggle: (id: string) => void }
+  /** The files-changed panel (absent: the provider has none); `path` = the file to show. */
+  filesPanel?: { open: (path?: string) => void }
+  /** A comment on a diff line goes into the composer (absent: the provider takes none). */
+  addDiffComment?: (comment: DiffLineComment) => void
 }
 
 export const ChatViewContext = createContext<ChatViewState>({

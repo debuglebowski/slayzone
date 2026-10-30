@@ -24,7 +24,8 @@ import {
   testExecutionContext,
   setPtyCreateCapture,
   takePtyCreateOpts,
-  takePtyKillCalls
+  takePtyKillCalls,
+  type PtyCreateResult
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty-data-ops'
@@ -299,7 +300,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptyCreate = async (
     opts: PtyCreateOpts,
     win?: PtySessionWindow | null
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<PtyCreateResult> => {
     const host = getPtyHostBridge()
     const targetWin = win ?? host.getFocusedWindow() ?? host.getAllWindows()[0]
     if (!targetWin) return { success: false, error: 'No window found' }

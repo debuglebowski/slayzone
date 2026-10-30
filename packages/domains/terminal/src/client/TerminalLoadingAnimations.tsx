@@ -27,7 +27,7 @@ function TypingCursor() {
   return (
     <div className="flex items-center justify-center h-full">
       <div className="font-mono text-sm text-muted-foreground">
-        <span className="text-green-500">$</span> {displayed}
+        <span className="text-success">$</span> {displayed}
         <span
           className={`inline-block w-[8px] h-[14px] bg-muted-foreground align-middle ml-[1px] translate-y-[1px] ${showCursor ? 'opacity-100' : 'opacity-0'}`}
         />
@@ -100,7 +100,7 @@ function MatrixCascade() {
     <div className="relative h-full w-full">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-green-500/60 text-sm font-mono tracking-widest">LOADING</span>
+        <span className="text-success/60 text-sm font-mono tracking-widest">LOADING</span>
       </div>
     </div>
   )
@@ -166,7 +166,7 @@ function Scanline() {
       <div className="font-mono text-xs space-y-1">
         {lines.map((line, i) => (
           <div key={i} className="flex gap-2" style={{ animation: 'fade-in 0.3s ease-out' }}>
-            <span className={`${line.includes('..') ? 'text-yellow-500' : 'text-green-500'}`}>
+            <span className={`${line.includes('..') ? 'text-warning' : 'text-success'}`}>
               {line.slice(0, 8)}
             </span>
             <span className="text-muted-foreground">{line.slice(8)}</span>

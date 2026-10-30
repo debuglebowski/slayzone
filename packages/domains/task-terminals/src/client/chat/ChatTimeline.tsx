@@ -275,10 +275,12 @@ const TimelineRows = memo(function TimelineRows({
         const index = start + i
         const rendered = renderTimelineItem(item, index)
         if (rendered === null) return null
+        const key = itemKey(item, index)
         return (
           <div
-            key={itemKey(item, index)}
+            key={key}
             data-index={index}
+            data-item-key={key}
             data-anchor-key={stableAnchorKey(item) ?? undefined}
           >
             {rendered}

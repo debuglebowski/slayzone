@@ -44,20 +44,20 @@ export function SlayNudgeBanner({
 
   return (
     <>
-      <div className="shrink-0 bg-amber-50 dark:bg-amber-500/5 border-b border-amber-200 dark:border-amber-500/10 px-4 py-2 flex items-center gap-2">
-        <Info className="h-3.5 w-3.5 text-amber-700 dark:text-amber-500 shrink-0" />
-        <span className="text-xs text-amber-700 dark:text-amber-500">
+      <div className="shrink-0 bg-warning/10 border-b border-warning/30 px-4 py-2 flex items-center gap-2">
+        <Info className="h-3.5 w-3.5 text-warning-foreground shrink-0" />
+        <span className="text-xs text-warning-foreground">
           Set up the <code className="px-1 rounded font-mono">slay</code> CLI so AI agents can
           interact with your tasks
         </span>
         <button
-          className="text-xs text-amber-700 dark:text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 underline shrink-0"
+          className="text-xs text-warning-foreground hover:text-warning-emphasis underline shrink-0"
           onClick={() => setInfoOpen(true)}
         >
           More information
         </button>
         <button
-          className="ml-auto text-amber-700 dark:text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 shrink-0"
+          className="ml-auto text-warning-foreground hover:text-warning-emphasis shrink-0"
           onClick={onDismiss}
           aria-label="Dismiss"
         >
@@ -110,7 +110,7 @@ export function SlayNudgeBanner({
 
 function RunButton({ state, onClick }: { state: RunState; onClick: () => void }) {
   if (state === 'running') return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-  if (state === 'done') return <Check className="h-4 w-4 text-green-500" />
+  if (state === 'done') return <Check className="h-4 w-4 text-success" />
   return (
     <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onClick}>
       Run

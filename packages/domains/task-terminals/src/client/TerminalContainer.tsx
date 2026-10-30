@@ -205,6 +205,11 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     const sessions = useFamilySessions(taskId, mainMode ?? '', sessionsEnabled)
     const canShowSessions = sessionsEnabled && sessions.length > 1
     const [sessionsOpen, toggleSessions] = useSessionsSidebarOpen(taskId)
+    // The chat palette's "Sessions…": opens the sidebar (never closes it).
+    const openSessions = useCallback(() => {
+      if (!sessionsOpen) toggleSessions()
+    }, [sessionsOpen, toggleSessions])
+    const showSessions = canShowSessions ? openSessions : null
 
     // Notify parent when main tab active state changes
     useEffect(() => {
@@ -469,7 +474,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             : null,
           onRename: tab.isMain ? null : () => startTabRename(tab.id),
           onResetSession: tab.isMain && onMainReset ? onMainReset : null,
-          onHandoff: tab.isMain && onMainHandoff ? onMainHandoff : null
+          onHandoff: tab.isMain && onMainHandoff ? onMainHandoff : null,
+          onShowSessions: showSessions
         }
       })
     }, [
@@ -495,7 +501,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onMainReset,
       onMainHandoff,
       claimFocus,
-      startTabRename
+      startTabRename,
+      showSessions
     ])
 
     return (

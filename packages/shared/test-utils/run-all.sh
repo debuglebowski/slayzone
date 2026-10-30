@@ -787,6 +787,9 @@ run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
@@ -802,6 +805,7 @@ run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
+run_harness packages/domains/terminal/src/client/turn-file-changes.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/client/chat-timeline-streaming.test.ts
 # A streaming tool input as far as it arrived; per-row live block notifications (chat plan 3.2).
@@ -929,6 +933,10 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/app-shell/useAppShortcuts.home-panels.test.tsx \
   packages/apps/app/src/renderer/src/hooks/useTabLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatPanelKeyboard.test.tsx \
+  packages/domains/task-terminals/src/client/chat/files-changed/files-changed.test.tsx \
+  packages/shared/diff-view/src/DiffView.line-action.test.tsx \
+  packages/domains/task-terminals/src/client/chat/diff-comments/diff-comments.test.tsx \
+  packages/domains/task-terminals/src/client/chat/RewindPicker.test.tsx \
   packages/domains/worktrees/src/client/ConflictFileView.test.tsx \
   packages/shared/layout/src/SplitDivider.test.tsx \
   packages/domains/file-editor/src/client/SearchableCodeView.test.tsx \
@@ -993,6 +1001,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tasks/src/client/KanbanListView.test.tsx \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
   packages/domains/terminal/src/client/TerminalDeadOverlay.test.tsx \
+  packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/terminal/src/client/useTerminalModes.test.tsx \

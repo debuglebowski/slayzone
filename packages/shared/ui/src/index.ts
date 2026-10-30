@@ -59,6 +59,7 @@ export { useStableCallback } from './use-stable-callback'
 export {
   usePaletteCommandStore,
   usePublishPaletteCommands,
+  usePaletteContribution,
   flattenPaletteCommands,
   type FlatPaletteCommand,
   type PaletteCommand,

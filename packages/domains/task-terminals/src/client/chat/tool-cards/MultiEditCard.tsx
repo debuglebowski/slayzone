@@ -1,5 +1,5 @@
 import { Pencil } from 'lucide-react'
-import { DiffView } from '@slayzone/diff-view'
+import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
 import { claudeEditResultToFileDiff } from '../claude-patch-to-filediff'
 import { ToolShell, shortenPath, type ToolProps } from './card-shell'
@@ -35,7 +35,7 @@ export function MultiEditCard({ invocation, timestamp }: ToolProps) {
           )}
           {fileDiff ? (
             <div className="p-1">
-              <DiffView diff={fileDiff} />
+              <ChatDiffView diff={fileDiff} />
             </div>
           ) : edits.length > 0 ? (
             <div className="p-3 text-xs font-mono grid gap-2">

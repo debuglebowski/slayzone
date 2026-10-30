@@ -4,7 +4,13 @@ import { useChatView } from '../ChatViewContext'
 import { useTRPCClient } from '../../trpc'
 
 /** File path a card names — click opens it in the editor (falls back to the OS). */
-export function FileLink({ path }: { path: string }) {
+export function FileLink({
+  path,
+  label
+}: {
+  path: string /** Shown instead of the path. */
+  label?: string
+}) {
   const { onOpenFile } = useChatView()
   const trpcClient = useTRPCClient()
   const open = (): void => {
@@ -22,7 +28,7 @@ export function FileLink({ path }: { path: string }) {
       <FileText className="size-3 shrink-0" />
       {/* Truncate from the start so the file name stays visible. */}
       <span className="truncate [direction:rtl]">
-        <bdi>{path}</bdi>
+        <bdi>{label ?? path}</bdi>
       </span>
     </button>
   )

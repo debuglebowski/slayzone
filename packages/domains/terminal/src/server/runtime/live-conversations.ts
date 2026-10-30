@@ -52,5 +52,5 @@ export async function releaseConversation(
 export function conversationInUseMessage(runningIn: ConversationSide): string {
   return runningIn === 'terminal'
     ? 'This conversation is running in the terminal. Continue it here (the terminal stops first), or stop it there.'
-    : 'This conversation is running in the chat. Use "Continue in terminal" there (the chat stops first), or stop it there.'
+    : 'This conversation is running in the chat. Continue it here (the chat stops first), or stop it there.'
 }

@@ -118,6 +118,8 @@ export interface TerminalInitContext {
   executionContextRef: RefObject<TerminalProps['executionContext']>
   setIsInitializing: Dispatch<SetStateAction<boolean>>
   setInitError: Dispatch<SetStateAction<string | null>>
+  /** Why the start was refused, when the server names it (e.g. `conversation-in-use`). */
+  setInitErrorCode: Dispatch<SetStateAction<string | null>>
   setPtyState: Dispatch<SetStateAction<TerminalState>>
   setIsResuming: Dispatch<SetStateAction<boolean>>
   /** Mirrors `searchAddonRef` into state so the search bar renders from it. */
@@ -173,6 +175,7 @@ export async function initTerminalSession(
     executionContextRef,
     setIsInitializing,
     setInitError,
+    setInitErrorCode,
     setPtyState,
     setIsResuming,
     setSearchAddon
@@ -188,6 +191,7 @@ export async function initTerminalSession(
   if (!containerRef.current || initializedRef.current) return
   setIsInitializing(true)
   setInitError(null)
+  setInitErrorCode(null)
   let didInit = false
   // Releases this init's turn in the hidden-terminal queue (idempotent).
   let releaseSlot: () => void = () => {
@@ -790,6 +794,7 @@ export async function initTerminalSession(
         const message = result.error || 'Failed to create terminal process'
         terminal.writeln(`\x1b[31mError: ${message}\x1b[0m`)
         setInitError(message)
+        setInitErrorCode(result.code ?? null)
         setPtyState('error')
         inputGate.drop()
         return

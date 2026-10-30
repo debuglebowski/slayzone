@@ -10,6 +10,7 @@ import {
   useLayoutEffect,
   useRef,
   useCallback,
+  useMemo,
   useState,
   forwardRef,
   useImperativeHandle
@@ -69,11 +70,13 @@ import type { TerminalState } from '@slayzone/terminal-contracts'
 import { startingWatchdogVerdict, STARTING_WATCHDOG_INTERVAL_MS } from './starting-watchdog'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import {
+  chatModeForTerminal,
   stripUnderlineCodes,
   KITTY_SHIFT_ENTER,
   DETECTION_ENGINES
 } from '@slayzone/terminal-contracts'
 import { useTrack } from '@slayzone/telemetry/client'
+import { TerminalStartError } from './TerminalStartError'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
 
@@ -165,6 +168,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [])
   const [initError, setInitError] = useState<string | null>(null)
+  const [initErrorCode, setInitErrorCode] = useState<string | null>(null)
   const [deadExitCode, setDeadExitCode] = useState<number | null>(null)
   const [deadCrashOutput, setDeadCrashOutput] = useState<string | null>(null)
   // Structured error code from the CLI at exit (e.g. SESSION_NOT_FOUND), carried
@@ -485,6 +489,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           executionContextRef,
           setIsInitializing,
           setInitError,
+          setInitErrorCode,
           setPtyState,
           setIsResuming,
           setSearchAddon
@@ -1237,6 +1242,27 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     terminalRef.current?.focus()
   }, [])
 
+  // "Continue here" on a start refused because a chat of the task runs the
+  // conversation (chat E): the chat's hand-off (A's `continueInTerminal`) stops
+  // it and points this mode at the conversation, then the main tab restarts.
+  const handoffChatMode = chatModeForTerminal(mode)
+  const continueHere = useMemo(
+    () =>
+      handoffChatMode && onRetry
+        ? async () => {
+            const taskId = taskIdFromSessionId(sessionId)
+            await trpcClient.chat.continueInTerminal.mutate({
+              tabId: taskId,
+              taskId,
+              mode: handoffChatMode,
+              cwd
+            })
+            onRetry()
+          }
+        : undefined,
+    [handoffChatMode, onRetry, sessionId, trpcClient, cwd]
+  )
+
   const handleRetry = useCallback(() => {
     setDeadExitCode(null)
     setDeadCrashOutput(null)
@@ -1292,7 +1318,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       <div
         tabIndex={0}
         className={`h-full w-full rounded-lg outline-none overflow-hidden transition-colors ${
-          isDragOver ? 'ring-2 ring-blue-500/50 ring-inset' : ''
+          isDragOver ? 'ring-2 ring-info/50 ring-inset' : ''
         }`}
         style={{ padding: '8px', backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a' }}
         onClick={() => terminalRef.current?.focus()}
@@ -1319,11 +1345,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           </div>
         )}
         {initError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background dark:bg-surface-0 z-10 p-4">
-            <div className="text-red-400 text-sm text-center">
-              Failed to start terminal: {initError}
-            </div>
-          </div>
+          <TerminalStartError
+            message={initError}
+            code={initErrorCode}
+            {...(continueHere ? { onContinueHere: continueHere } : {})}
+          />
         )}
         {showDeadOverlay && (
           <TerminalDeadOverlay

@@ -1,5 +1,5 @@
 import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2 } from 'lucide-react'
+import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2, FileDiff } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import {
@@ -101,6 +101,8 @@ export interface ChatComposerProps {
   chatFastMode: FastModeApi['chatFastMode']
   handleFastModeChange: FastModeApi['handleFastModeChange']
   fastModeChanging: FastModeApi['fastModeChanging']
+  /** The files-changed panel's button (absent: the provider has none). */
+  filesChanged?: { count: number; open: boolean; toggle: () => void }
 }
 
 /**
@@ -151,7 +153,8 @@ export function ChatComposer({
   collaborationChanging,
   chatFastMode,
   handleFastModeChange,
-  fastModeChanging
+  fastModeChanging,
+  filesChanged
 }: ChatComposerProps) {
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
@@ -378,6 +381,24 @@ export function ChatComposer({
             </>
           )}
           <div className="flex-1" />
+          {filesChanged && filesChanged.count > 0 && (
+            <button
+              type="button"
+              data-testid="chat-files-changed-button"
+              aria-pressed={filesChanged.open}
+              onClick={filesChanged.toggle}
+              className={cn(
+                'flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors',
+                filesChanged.open
+                  ? 'bg-primary/15 text-foreground'
+                  : 'hover:bg-muted/60 hover:text-foreground'
+              )}
+              title="Files changed in this conversation"
+            >
+              <FileDiff className="size-3" />
+              {filesChanged.count} file{filesChanged.count === 1 ? '' : 's'}
+            </button>
+          )}
           <ContextMeter summary={usage} />
           <Popover>
             <PopoverTrigger asChild>

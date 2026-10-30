@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import { cn } from '@slayzone/ui'
 import type { DiffLine as DiffLineType, InlineHighlight } from './parse-diff'
 import type { HlSpan } from './highlight'
@@ -97,19 +97,43 @@ export function renderContent(
   return <>{parts}</>
 }
 
+/** The +/- column; a line action (if any) sits over it, shown on hover / focus. */
+function PrefixCell({
+  prefix,
+  line,
+  renderLineAction
+}: {
+  prefix: string
+  line: DiffLineType
+  renderLineAction?: (line: DiffLineType) => ReactNode
+}) {
+  return (
+    <span className="relative w-5 shrink-0 text-center select-none text-muted-foreground/60">
+      {prefix}
+      {renderLineAction && (
+        <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/line:opacity-100 focus-within:opacity-100">
+          {renderLineAction(line)}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export const UnifiedLine = memo(function UnifiedLine({
   item,
-  wrap
+  wrap,
+  renderLineAction
 }: {
   item: FlatLine
   wrap: boolean
+  renderLineAction?: (line: DiffLineType) => ReactNode
 }) {
   const { line, spans } = item
   const prefix = line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' '
   return (
     <div
       className={cn(
-        'flex w-full border-l-[3px] border-l-transparent',
+        'group/line flex w-full border-l-[3px] border-l-transparent',
         line.type === 'add' && 'bg-diff-added/10 border-l-diff-added',
         line.type === 'delete' && 'bg-diff-removed/10 border-l-diff-removed'
       )}
@@ -120,9 +144,7 @@ export const UnifiedLine = memo(function UnifiedLine({
       <span className="w-10 shrink-0 text-right pr-1.5 text-muted-foreground/50 select-none border-r border-border/30 tabular-nums">
         {line.newLineNo ?? ''}
       </span>
-      <span className="w-5 shrink-0 text-center select-none text-muted-foreground/60">
-        {prefix}
-      </span>
+      <PrefixCell prefix={prefix} line={line} renderLineAction={renderLineAction} />
       <span
         className={cn(
           wrap ? 'min-w-0 flex-1' : 'shrink-0',
@@ -139,11 +161,13 @@ export const UnifiedLine = memo(function UnifiedLine({
 export const SbsHalf = memo(function SbsHalf({
   item,
   side,
-  wrap
+  wrap,
+  renderLineAction
 }: {
   item: FlatLine | null
   side: 'left' | 'right'
   wrap: boolean
+  renderLineAction?: (line: DiffLineType) => ReactNode
 }) {
   if (!item) {
     return (
@@ -162,7 +186,7 @@ export const SbsHalf = memo(function SbsHalf({
   return (
     <div
       className={cn(
-        'flex w-full border-l-[3px] border-l-transparent',
+        'group/line flex w-full border-l-[3px] border-l-transparent',
         isAdd && 'bg-diff-added/10 border-l-diff-added',
         isDel && 'bg-diff-removed/10 border-l-diff-removed'
       )}
@@ -170,9 +194,7 @@ export const SbsHalf = memo(function SbsHalf({
       <span className="w-10 shrink-0 text-right pr-1.5 text-muted-foreground/50 select-none border-r border-border/30 tabular-nums">
         {lineNo ?? ''}
       </span>
-      <span className="w-5 shrink-0 text-center select-none text-muted-foreground/60">
-        {prefix}
-      </span>
+      <PrefixCell prefix={prefix} line={line} renderLineAction={renderLineAction} />
       <span
         className={cn(
           wrap ? 'min-w-0 flex-1' : 'shrink-0',

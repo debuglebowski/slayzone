@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { FilePlus } from 'lucide-react'
-import { DiffView } from '@slayzone/diff-view'
+import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
 import { claudeEditResultToFileDiff } from '../claude-patch-to-filediff'
 import { ToolShell, shortenPath, type ToolProps } from './card-shell'
@@ -59,11 +59,11 @@ export function WriteCard({ invocation, timestamp }: ToolProps) {
           )}
           {patchDiff ? (
             <div className="p-1">
-              <DiffView diff={patchDiff} />
+              <ChatDiffView diff={patchDiff} />
             </div>
           ) : content ? (
             <div className="p-1">
-              <DiffView diff={codeDiff!} contextLines="all" />
+              <ChatDiffView diff={codeDiff!} contextLines="all" />
               {truncated && (
                 <button
                   type="button"

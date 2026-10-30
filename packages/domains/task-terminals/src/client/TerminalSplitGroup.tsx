@@ -61,6 +61,8 @@ interface PaneProps {
   onResetSession?: (() => void) | null
   /** The main agent's hand-off ("Continue in chat" / "Continue in terminal"). */
   onHandoff?: (() => void) | null
+  /** Open the task's sessions sidebar (absent: nothing to pick from). */
+  onShowSessions?: (() => void) | null
 }
 
 export interface TerminalSplitGroupHandle {
@@ -179,6 +181,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
               isMain={pane.tab.isMain}
               isTemporary={pane.isTemporary}
               {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
+              {...(pane.onShowSessions ? { onShowSessions: pane.onShowSessions } : {})}
             />
           </Suspense>
         )

@@ -445,3 +445,95 @@ describe('plan approval', () => {
     expect(sendMessage).toHaveBeenCalledWith('add tests')
   })
 })
+
+describe('keys, as in the TUI', () => {
+  const focused = () =>
+    Array.from(document.querySelectorAll('[data-key-focus="true"]')).map((el) =>
+      (el.textContent ?? '').trim()
+    )
+
+  it('question: a number picks the option; one question answered → Enter submits', async () => {
+    const { respondPermission } = setup([ask([COLOR])])
+    expect(press('2')).toBe(true)
+    expect(focused()).toEqual(['Submit'])
+    await act(async () => {
+      press('Enter')
+    })
+    expect(respondPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optionId: 'answer',
+        decision: expect.objectContaining({
+          updatedInput: expect.objectContaining({
+            answers: { 'Which color do you prefer?': 'Blue' }
+          })
+        })
+      })
+    )
+  })
+
+  it('question: ↑/↓ move, Enter picks; a multi-select toggles; Tab moves on to Submit', async () => {
+    const { respondPermission } = setup([ask([COLOR, FRUITS])])
+    expect(focused()).toEqual([expect.stringContaining('Red')])
+    press('ArrowDown')
+    expect(focused()).toEqual([expect.stringContaining('Blue')])
+    press('ArrowUp')
+    press('Enter') // Red, then on to the fruits
+    expect(focused()).toEqual([expect.stringContaining('Apple')])
+    press('1') // Apple
+    press('ArrowDown')
+    press('Enter') // Pear
+    expect(focused()).toEqual([expect.stringContaining('Pear')])
+    press('Tab')
+    expect(focused()).toEqual(['Submit'])
+    press('Tab', { shiftKey: true })
+    expect(focused()).toEqual([expect.stringContaining('Apple')])
+    press('Tab')
+    await act(async () => {
+      press('Enter')
+    })
+    expect(respondPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: expect.objectContaining({
+          updatedInput: expect.objectContaining({
+            answers: { 'Which color do you prefer?': 'Red', 'Which fruits?': 'Apple, Pear' }
+          })
+        })
+      })
+    )
+  })
+
+  it('question: the last number is "Type something"; typing there is not keys', () => {
+    setup([ask([COLOR])])
+    press('3')
+    const field = screen.getByPlaceholderText('Type something…')
+    expect(document.activeElement).toBe(field)
+    expect(press('1')).toBe(false)
+  })
+
+  it('plan: a number answers its row; ↓ Enter opens the feedback; Esc rejects and stops', async () => {
+    const first = setup([PLAN])
+    await act(async () => {
+      press('1')
+    })
+    expect(first.respondPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ optionId: 'plan-accept-edits' })
+    )
+    cleanup()
+    setup([PLAN])
+    press('ArrowDown')
+    press('ArrowDown')
+    press('Enter')
+    expect(screen.getByRole('textbox', { name: /Tell Claude what to change/ })).toBeTruthy()
+    cleanup()
+    const third = setup([PLAN])
+    await act(async () => {
+      press('Escape')
+    })
+    expect(third.respondPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optionId: 'plan-reject',
+        decision: expect.objectContaining({ behavior: 'deny', interrupt: true })
+      })
+    )
+  })
+})

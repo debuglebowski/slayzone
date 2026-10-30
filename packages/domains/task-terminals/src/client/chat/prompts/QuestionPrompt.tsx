@@ -8,7 +8,7 @@ import {
   questionAnswerDecision,
   type QuestionAnnotations
 } from './prompt-options'
-import { isPlainKey, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
+import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
 import type { PromptAnswer } from './PermissionPrompt'
 
 export interface AskOption {
@@ -51,6 +51,11 @@ interface QuestionPromptProps {
  * free answer), previews with notes, then Submit — or "Chat about this" (hand
  * the questions back to Claude), or Cancel (decline just this question; the
  * turn and the queue are untouched).
+ *
+ * Keys, as in the TUI: 1–9 pick an option of the current question (the last
+ * number is "Type something"), ↑/↓ move, Enter picks (then the next question;
+ * on Submit it submits), Tab / → and Shift+Tab / ← switch question, Esc
+ * declines. Typing in a field is never taken for keys (Esc still declines).
  */
 export function QuestionPrompt({ prompt, submitting, answer, keysRef }: QuestionPromptProps) {
   const questions = questionsOf(prompt.input)
@@ -60,6 +65,8 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
   /** Option whose preview is shown, per question (the last one picked or hovered). */
   const [focused, setFocused] = useState<Map<number, string>>(() => new Map())
   const [notes, setNotes] = useState<Map<number, string>>(() => new Map())
+  /** The keyboard's place: question `q`, option `o` (`o` = options.length: "Type something"); `q` = questions.length: Submit. */
+  const [cursor, setCursor] = useState<{ q: number; o: number }>({ q: 0, o: 0 })
 
   const setIn = <V,>(map: Map<number, V>, qi: number, value: V): Map<number, V> => {
     const next = new Map(map)
@@ -140,10 +147,59 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
     void answer('decline', declineQuestionDecision())
   }
 
+  /** Move the keyboard's place; a question with previews shows the option there. */
+  const moveTo = (q: number, o: number): void => {
+    setCursor({ q, o })
+    const label = questions[q]?.options[o]?.label
+    if (label && hasPreviews(questions[q])) setFocused((prev) => setIn(prev, q, label))
+  }
+
+  /** Pick option `oi` of question `qi` by key: a single answer moves on to the next question. */
+  const pickByKey = (qi: number, oi: number): void => {
+    const q = questions[qi]
+    if (oi === q.options.length) {
+      setCursor({ q: qi, o: oi })
+      pickOther(qi)
+      return
+    }
+    pickOption(qi, q.options[oi].label, q.multiSelect === true)
+    if (q.multiSelect) setCursor({ q: qi, o: oi })
+    else moveTo(qi + 1, 0)
+  }
+
   usePromptKeys(keysRef, (e) => {
     if (e.defaultPrevented) return false
     if (e.key === 'Escape' && isPlainKey(e) && !e.shiftKey) {
       decline()
+      return true
+    }
+    if (isTypingTarget(document.activeElement) || !isPlainKey(e) || submitting) return false
+    const onSubmit = cursor.q >= questions.length
+    const rows = onSubmit ? 0 : questions[cursor.q].options.length + 1
+    if (/^[1-9]$/.test(e.key) && !e.shiftKey) {
+      const oi = Number(e.key) - 1
+      if (onSubmit || oi >= rows) return false
+      pickByKey(cursor.q, oi)
+      return true
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (onSubmit) {
+        if (e.key === 'ArrowUp' && questions.length > 0) moveTo(questions.length - 1, 0)
+        return true
+      }
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      moveTo(cursor.q, (cursor.o + step + rows) % rows)
+      return true
+    }
+    const next = (e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowRight'
+    const prev = (e.key === 'Tab' && e.shiftKey) || e.key === 'ArrowLeft'
+    if (next || prev) {
+      moveTo(Math.max(0, Math.min(questions.length, cursor.q + (next ? 1 : -1))), 0)
+      return true
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      if (onSubmit) submit()
+      else pickByKey(cursor.q, cursor.o)
       return true
     }
     return false
@@ -171,12 +227,14 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
             <div className="text-sm font-medium text-foreground">{q.question}</div>
             <div className={cn(showPreview && 'grid grid-cols-2 gap-2')}>
               <div className="grid gap-1.5 content-start">
-                {q.options.map((opt) => {
+                {q.options.map((opt, oi) => {
                   const active = sel.includes(opt.label)
+                  const keyFocus = cursor.q === qi && cursor.o === oi
                   return (
                     <button
                       key={opt.label}
                       type="button"
+                      data-key-focus={keyFocus ? 'true' : undefined}
                       disabled={submitting}
                       onClick={() => pickOption(qi, opt.label, q.multiSelect === true)}
                       onMouseEnter={() => {
@@ -187,6 +245,7 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
                         active
                           ? 'border-info bg-info/15 text-foreground'
                           : 'border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40',
+                        keyFocus && 'ring-1 ring-info',
                         submitting && 'opacity-60 cursor-not-allowed'
                       )}
                     >
@@ -216,12 +275,16 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
                 <button
                   type="button"
                   disabled={submitting}
+                  data-key-focus={
+                    cursor.q === qi && cursor.o === q.options.length ? 'true' : undefined
+                  }
                   onClick={() => pickOther(qi)}
                   className={cn(
                     'text-left rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors',
                     isOther
                       ? 'border-info bg-info/15 text-foreground'
-                      : 'border-dashed border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40'
+                      : 'border-dashed border-border/60 bg-background/60 hover:bg-info/5 hover:border-info/40',
+                    cursor.q === qi && cursor.o === q.options.length && 'ring-1 ring-info'
                   )}
                 >
                   Type something
@@ -295,12 +358,14 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
         <button
           type="button"
           disabled={!canSubmit || submitting}
+          data-key-focus={cursor.q >= questions.length ? 'true' : undefined}
           onClick={submit}
           className={cn(
             'shrink-0 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
             canSubmit && !submitting
               ? 'border-info/40 bg-info/20 hover:bg-info/30 text-info-foreground'
-              : 'border-border/40 bg-muted/30 text-muted-foreground cursor-not-allowed'
+              : 'border-border/40 bg-muted/30 text-muted-foreground cursor-not-allowed',
+            cursor.q >= questions.length && 'ring-1 ring-info'
           )}
         >
           Submit

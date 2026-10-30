@@ -146,6 +146,11 @@ export function nextAgentMode(
   return list[(i + 1) % list.length]
 }
 
+/** A mode's name as the picker shows it (the id when unknown). */
+export function agentModeLabel(mode: AgentMode): string {
+  return MODE_META[mode]?.label ?? mode
+}
+
 export interface AgentModePillProps {
   mode: AgentMode
   onChange: (next: AgentMode) => void

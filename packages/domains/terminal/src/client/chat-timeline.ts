@@ -26,6 +26,7 @@ import {
   expirePrompt,
   type ChatPrompt
 } from './chat-prompts'
+import { withTurnFilesChanged, type TurnFileChange } from './turn-file-changes'
 import {
   extractBgShellSpawn,
   extractShellIdFromSpawnResult,
@@ -248,6 +249,17 @@ export type TimelineItem =
       parentToolUseId?: string
     }
   | { kind: 'unknown'; reason: string; timestamp: number; parentToolUseId?: string }
+  | {
+      /** End of a turn: the files the agent's file tools changed in it (`withTurnFilesChanged`). */
+      kind: 'files-changed'
+      /** `files:<id of the turn's last file tool call>` — the row's key. */
+      id: string
+      files: TurnFileChange[]
+      /** Shell commands the turn ran: files they changed can't be seen from the stream. */
+      shellCommands: number
+      timestamp: number
+      parentToolUseId?: string
+    }
 
 /**
  * Where a streamed text/thinking row is:
@@ -1344,6 +1356,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           invocation: { ...target.invocation, status: 'denied', denied: true }
         }
       }
+      nextTimeline = withTurnFilesChanged(nextTimeline)
       return {
         ...state,
         timeline: nextTimeline,

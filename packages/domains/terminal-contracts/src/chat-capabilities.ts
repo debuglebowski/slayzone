@@ -50,6 +50,15 @@ export interface ChatCapabilities {
   restoreComposerState: boolean
   /** Queued messages can be edited (held while editing) and reordered. */
   editableQueue: boolean
+  /**
+   * Which files the agent's own file tools changed: a summary row at the end of
+   * each turn and a files-changed panel with one combined diff per file.
+   */
+  filesChanged: boolean
+  /** A line of a diff can be commented on; the comment goes into the next message. */
+  diffComments: boolean
+  /** The chat's actions are in the app's Cmd+K palette while the tab is active. */
+  commandPalette: boolean
 }
 
 const NONE: ChatCapabilities = {
@@ -64,7 +73,10 @@ const NONE: ChatCapabilities = {
   handoff: false,
   attachments: 'paths',
   restoreComposerState: false,
-  editableQueue: false
+  editableQueue: false,
+  filesChanged: false,
+  diffComments: false,
+  commandPalette: false
 }
 
 const CAPABILITIES: Record<string, ChatCapabilities> = {
@@ -80,7 +92,10 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     handoff: true,
     attachments: 'blocks',
     restoreComposerState: true,
-    editableQueue: true
+    editableQueue: true,
+    filesChanged: true,
+    diffComments: true,
+    commandPalette: true
   },
   'codex-chat': NONE
 }

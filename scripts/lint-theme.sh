@@ -78,6 +78,14 @@ STRICT_PATHS=(
   packages/domains/task-terminals/src/client/chat
   packages/domains/terminal/src/client/BackgroundJobsBanner.tsx
   packages/shared/diff-view/src
+  # Terminal-mode banners and overlays (what the terminal shows around the agent).
+  packages/domains/terminal/src/client/SlayNudgeBanner.tsx
+  packages/domains/terminal/src/client/LoopModeBanner.tsx
+  packages/domains/terminal/src/client/TerminalDeadOverlay.tsx
+  packages/domains/terminal/src/client/TerminalSearchBar.tsx
+  packages/domains/terminal/src/client/TerminalLoadingAnimations.tsx
+  packages/domains/terminal/src/client/Terminal.tsx
+  packages/domains/task-terminals/src/client/TerminalStarter.tsx
 )
 
 ROOT=packages

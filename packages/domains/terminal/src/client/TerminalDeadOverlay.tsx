@@ -103,13 +103,13 @@ export function TerminalDeadOverlay({
           {doctorResults.map((r) => (
             <div
               key={r.check}
-              className={`rounded-lg border p-3 space-y-1.5 ${r.ok ? 'border-green-500/20 bg-green-50/40 dark:bg-green-950/20' : 'border-red-500/20 bg-red-50/40 dark:bg-red-950/20'}`}
+              className={`rounded-lg border p-3 space-y-1.5 ${r.ok ? 'border-success/20 bg-success/5' : 'border-destructive/20 bg-destructive/5'}`}
             >
               <div className="flex items-start gap-2">
                 {r.ok ? (
-                  <CheckCircle2 className="size-3.5 text-green-600 dark:text-green-400 shrink-0 mt-px" />
+                  <CheckCircle2 className="size-3.5 text-success-foreground shrink-0 mt-px" />
                 ) : (
-                  <XCircle className="size-3.5 text-red-500 dark:text-red-400 shrink-0 mt-px" />
+                  <XCircle className="size-3.5 text-destructive shrink-0 mt-px" />
                 )}
                 <div className="min-w-0 space-y-0.5">
                   <p className="text-xs font-medium leading-none">{r.check}</p>

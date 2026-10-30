@@ -23,7 +23,8 @@ export const DiffView = memo(function DiffView({
   diff,
   sideBySide = false,
   wrap = false,
-  contextLines = '3'
+  contextLines = '3',
+  renderLineAction
 }: DiffViewProps) {
   // Lazy inline-highlight pass: parseUnifiedDiff no longer runs this per-file.
   // Calling here means offscreen files in a large virtualized patch never pay
@@ -94,11 +95,20 @@ export const DiffView = memo(function DiffView({
   if (sideBySide) {
     const renderLeft = (row: SbsRow) => {
       if (row.kind === 'gap') return <GapDivider count={row.count} />
-      return <SbsHalf item={row.row.left} side="left" wrap={wrap} />
+      return (
+        <SbsHalf item={row.row.left} side="left" wrap={wrap} renderLineAction={renderLineAction} />
+      )
     }
     const renderRight = (row: SbsRow) => {
       if (row.kind === 'gap') return <GapDivider count={row.count} />
-      return <SbsHalf item={row.row.right} side="right" wrap={wrap} />
+      return (
+        <SbsHalf
+          item={row.row.right}
+          side="right"
+          wrap={wrap}
+          renderLineAction={renderLineAction}
+        />
+      )
     }
     // Small diffs: skip virtualizer overhead entirely.
     if (sbsRows.length < VIRTUALIZE_THRESHOLD) {
@@ -167,7 +177,7 @@ export const DiffView = memo(function DiffView({
 
   const renderUnifiedRow = (row: UnifiedRow) => {
     if (row.kind === 'gap') return <GapDivider count={row.count} />
-    return <UnifiedLine item={row.item} wrap={wrap} />
+    return <UnifiedLine item={row.item} wrap={wrap} renderLineAction={renderLineAction} />
   }
 
   // Small diffs: skip virtualizer overhead entirely.

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { FileDiff, DiffLine as DiffLineType } from './parse-diff'
 import type { HlSpan } from './highlight'
 
@@ -8,6 +9,12 @@ export interface DiffViewProps {
   sideBySide?: boolean
   wrap?: boolean
   contextLines?: ContextLines
+  /**
+   * An action on a line (e.g. "comment on this line"), shown over the line's
+   * +/- column while the line is hovered or the action has focus. Pass a stable
+   * function: the rows are memoized on it.
+   */
+  renderLineAction?: (line: DiffLineType) => ReactNode
 }
 
 export interface FlatLine {

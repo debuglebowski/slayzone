@@ -94,3 +94,111 @@ describe('useChatPanelKeyboard with a pending prompt', () => {
     expect(handleStop).toHaveBeenCalled()
   })
 })
+
+describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
+  function setup(
+    over: Partial<UseChatPanelKeyboardOpts> & { focus?: 'composer' | 'other-input' } = {}
+  ) {
+    const root = document.createElement('div')
+    const composer = document.createElement('textarea')
+    const other = document.createElement('input')
+    root.append(composer, other)
+    document.body.appendChild(root)
+    ;(over.focus === 'other-input' ? other : composer).focus()
+    const onDoubleEscape = vi.fn()
+    const handleStop = vi.fn()
+    renderHook(() =>
+      useChatPanelKeyboard({
+        panelRef: { current: root },
+        scrollRef: Object.assign(() => {}, { current: null }) as never,
+        search: { requestOpen: () => {} },
+        inFlight: false,
+        chatMode: 'auto-accept',
+        handleModeChange: () => Promise.resolve(),
+        autoCapability: { optedIn: false } as never,
+        autocomplete: { show: false },
+        handleStop,
+        mode: 'claude-chat',
+        composerRef: { current: composer },
+        draftEmpty: true,
+        onDoubleEscape,
+        ...over
+      })
+    )
+    return { onDoubleEscape, handleStop }
+  }
+  const esc = () => {
+    const e = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    window.dispatchEvent(e)
+    return e
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('two Escs within 800 ms, idle, empty composer: opens rewind once', () => {
+    vi.useFakeTimers()
+    const { onDoubleEscape, handleStop } = setup()
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(300)
+    expect(esc().defaultPrevented).toBe(true)
+    expect(onDoubleEscape).toHaveBeenCalledTimes(1)
+    // A third Esc starts a new pair.
+    esc()
+    expect(onDoubleEscape).toHaveBeenCalledTimes(1)
+    expect(handleStop).not.toHaveBeenCalled()
+  })
+
+  it('too slow, or another key in between: no rewind', () => {
+    vi.useFakeTimers()
+    const { onDoubleEscape } = setup()
+    esc()
+    vi.advanceTimersByTime(900)
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(900)
+    esc()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('text in the composer: Esc Esc does nothing (typed text is never lost)', () => {
+    const { onDoubleEscape, handleStop } = setup({ draftEmpty: false })
+    esc()
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+    expect(handleStop).not.toHaveBeenCalled()
+  })
+
+  it('a turn running: Esc stops it, never rewinds', () => {
+    const { onDoubleEscape, handleStop } = setup({ inFlight: true })
+    esc()
+    esc()
+    expect(handleStop).toHaveBeenCalledTimes(2)
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('from another field (search, a queue edit): no rewind', () => {
+    const { onDoubleEscape } = setup({ focus: 'other-input' })
+    esc()
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('a pending prompt takes Esc: no rewind', () => {
+    const { onDoubleEscape } = setup({ promptKeysRef: { current: (e) => e.key === 'Escape' } })
+    esc()
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('autocomplete open: its Esc, no rewind', () => {
+    const { onDoubleEscape } = setup({ autocomplete: { show: true } })
+    esc()
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+})

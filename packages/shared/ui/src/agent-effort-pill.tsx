@@ -67,6 +67,11 @@ const FAST_MODE_META: Record<'normal' | 'fast', FastModeMeta> = {
   }
 }
 
+/** The effort levels in order, with the picker's names. */
+export function agentEffortOptions(): Array<{ id: AgentEffort; label: string }> {
+  return EFFORT_ORDER.map((id) => ({ id, label: EFFORT_META[id].label }))
+}
+
 export interface AgentEffortPillProps {
   effort: AgentEffort
   onChange: (next: AgentEffort) => void

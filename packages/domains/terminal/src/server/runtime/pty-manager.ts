@@ -92,6 +92,14 @@ import {
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
 export { filterBufferData }
 
+/** What `createPty` answers; `code` names a refusal the UI can act on. */
+export interface PtyCreateResult {
+  success: boolean
+  error?: string
+  /** `conversation-in-use`: a chat of the task runs this conversation (offer "Continue here"). */
+  code?: 'conversation-in-use'
+}
+
 /** A start refused: another side runs this conversation. */
 class ConversationInUseError extends Error {
   readonly code = 'conversation-in-use'
@@ -1305,9 +1313,7 @@ export function takePtyKillCalls(): string[] {
   return ptyKillCapturedSessionIds
 }
 
-export async function createPty(
-  opts: CreatePtyOptions
-): Promise<{ success: boolean; error?: string }> {
+export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult> {
   if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn) {
     ptyCreateCapturedOpts.push({
       sessionId: opts.sessionId,
@@ -2910,7 +2916,7 @@ export async function createPty(
         sessionId,
         taskId: taskIdFromSessionId(sessionId)
       })
-      return { success: false, error: err.message }
+      return { success: false, error: err.message, code: err.code }
     }
     recordDiagnosticEvent({
       level: 'error',

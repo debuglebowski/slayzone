@@ -152,7 +152,7 @@ export function TerminalSearchBar({ searchAddon, onClose, focusToken }: Terminal
       <button
         onClick={() => setCaseSensitive(!caseSensitive)}
         title="Case Sensitive"
-        className={`p-0.5 rounded ${caseSensitive ? 'bg-accent text-amber-600 dark:bg-accent dark:text-amber-400' : 'hover:bg-accent text-muted-foreground dark:hover:bg-accent dark:text-muted-foreground'}`}
+        className={`p-0.5 rounded ${caseSensitive ? 'bg-accent text-search-match-active' : 'hover:bg-accent text-muted-foreground dark:hover:bg-accent dark:text-muted-foreground'}`}
       >
         <ALargeSmall className="size-4" />
       </button>

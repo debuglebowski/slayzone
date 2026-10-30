@@ -4,6 +4,7 @@ import { cn, useDepsChanged } from '@slayzone/ui'
 import type { ToolInvocation } from '@slayzone/terminal/client'
 import { useChatView } from '../ChatViewContext'
 import { LinkifiedText } from '../LinkifiedText'
+import { useToolFocusRequest } from './tool-focus'
 
 // Shared chat card primitives (moved verbatim from renderers.tsx), so tool cards
 // in their own files can use them without importing renderers.tsx.
@@ -82,6 +83,9 @@ function ToolShell({
   // render), so the default above holds on mount.
   const collapseBumped = useDepsChanged([collapseSignal])
   if (collapseBumped) setOpen(false)
+  // "Show this card" (files-changed row) opens it, also when it mounts after the request.
+  const focusRequested = useToolFocusRequest(invocation.id)
+  if (focusRequested && !open) setOpen(true)
   // Body fallback chain: per-tool rich children > rawContent text > pending placeholder.
   // Keeps any tool card non-blank when structured data is missing or absent.
   const rawText = useMemo(() => extractRawText(invocation.result?.rawContent), [invocation.result])

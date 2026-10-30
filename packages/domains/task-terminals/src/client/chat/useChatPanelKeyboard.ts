@@ -2,7 +2,10 @@ import { useEffect, type RefObject } from 'react'
 import { nextAgentMode, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
 import { chatModesForMode } from '@slayzone/terminal-contracts'
 import type { CallbackRef } from './useFollowBottom'
-import type { PromptKeyHandler } from './prompts/prompt-keys'
+import { isTypingTarget, type PromptKeyHandler } from './prompts/prompt-keys'
+
+/** The TUI's double-press window (Claude Code 2.1.314: 800 ms). */
+export const DOUBLE_ESC_MS = 800
 
 export interface UseChatPanelKeyboardOpts {
   panelRef: RefObject<HTMLDivElement | null>
@@ -21,6 +24,15 @@ export interface UseChatPanelKeyboardOpts {
    * answers the prompt instead of stopping the turn).
    */
   promptKeysRef?: RefObject<PromptKeyHandler | null>
+  /** The composer's textarea: Esc Esc counts from it, or from no field at all. */
+  composerRef?: RefObject<HTMLTextAreaElement | null>
+  /** The composer holds nothing (no text, no files). */
+  draftEmpty?: boolean
+  /**
+   * Esc Esc with no turn running and an empty composer — the TUI's double-Esc,
+   * which opens rewind. Absent: Esc Esc means nothing (no rewind).
+   */
+  onDoubleEscape?: () => void
 }
 
 /**
@@ -31,6 +43,9 @@ export interface UseChatPanelKeyboardOpts {
  *   - Shift+Tab → cycle agent permission mode (terminal-mode parity; skipped
  *     while in flight or while autocomplete owns Tab)
  *   - Esc → stop the in-flight turn (defers to autocomplete's own Esc)
+ *   - Esc Esc (within 800 ms, no turn running, empty composer, from the composer
+ *     or no field) → rewind (`onDoubleEscape`), like the TUI. With text in the
+ *     composer it does nothing: typed text is never lost.
  *   - a pending prompt's keys (1/2/3, ↑/↓, Enter, Esc, Tab) go to the prompt
  *     dock first
  *
@@ -51,9 +66,14 @@ export function useChatPanelKeyboard({
   autocomplete,
   handleStop,
   mode,
-  promptKeysRef
+  promptKeysRef,
+  composerRef,
+  draftEmpty = false,
+  onDoubleEscape
 }: UseChatPanelKeyboardOpts): void {
   useEffect(() => {
+    // When the last Esc that could start a double-Esc was pressed (0: none).
+    let armedAt = 0
     const isFocusedHere = (): boolean => {
       const root = panelRef.current
       if (!root) return false
@@ -80,6 +100,7 @@ export function useChatPanelKeyboard({
     }
     const handler = (e: KeyboardEvent): void => {
       if (!isFocusedHere()) return
+      if (e.key !== 'Escape') armedAt = 0
       // A key a field already handled (the prompt's feedback Enter / Esc) is
       // not the prompt's.
       if (!e.defaultPrevented && !autocomplete.show && promptKeysRef?.current?.(e)) {
@@ -120,9 +141,26 @@ export function useChatPanelKeyboard({
       // (which uses Esc to close itself). No-op when nothing is in flight.
       if (e.key === 'Escape' && !mod && !e.altKey && !e.shiftKey) {
         if (autocomplete.show) return
-        if (!inFlight) return
-        e.preventDefault()
-        void handleStop()
+        if (inFlight) {
+          armedAt = 0
+          e.preventDefault()
+          void handleStop()
+          return
+        }
+        const active = document.activeElement
+        const fromComposer = active === composerRef?.current || !isTypingTarget(active)
+        if (!onDoubleEscape || e.defaultPrevented || !draftEmpty || !fromComposer) {
+          armedAt = 0
+          return
+        }
+        const now = Date.now()
+        if (armedAt > 0 && now - armedAt <= DOUBLE_ESC_MS) {
+          armedAt = 0
+          e.preventDefault()
+          onDoubleEscape()
+        } else {
+          armedAt = now
+        }
       }
     }
     window.addEventListener('keydown', handler)
@@ -138,6 +176,9 @@ export function useChatPanelKeyboard({
     autocomplete.show,
     handleStop,
     mode,
-    promptKeysRef
+    promptKeysRef,
+    composerRef,
+    draftEmpty,
+    onDoubleEscape
   ])
 }

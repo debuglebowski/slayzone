@@ -114,6 +114,9 @@ test('a terminal agent does not resume a conversation a chat of the same task ru
   const res = await startTerminal('guardA:guardA', fake)
   expect(res.success).toBe(false)
   expect(res.error).toMatch(/running in the chat/)
+  // A refusal the terminal can offer "Continue here" for (chat E): by its code.
+  expect(res.code).toBe('conversation-in-use')
+  expect(res.error).toMatch(/Continue it here \(the chat stops first\)/)
   expect(fake.written.join('')).toBe('')
 
   // Another task's chat is not in the way.

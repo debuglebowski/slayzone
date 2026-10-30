@@ -36,6 +36,8 @@ export function stableAnchorKey(item: TimelineItem): string | null {
       return item.hookId ? `hook:${item.hookId}` : null
     case 'notice':
       return item.id ? `notice:${item.id}` : null
+    case 'files-changed':
+      return item.id
     default:
       return null
   }
@@ -147,6 +149,8 @@ export function useChatDisplay({
         item.kind === 'conversation-branch' ||
         item.kind === 'compaction' ||
         item.kind === 'command-output' ||
+        // What the turn changed is part of its outcome.
+        item.kind === 'files-changed' ||
         // Failures and notices stay visible in every view.
         item.kind === 'notice' ||
         item.kind === 'agent-problem' ||
@@ -200,6 +204,7 @@ export function useChatDisplay({
     if (item.kind === 'result') return `result:${item.timestamp}:${index}`
     if (item.kind === 'hook' && item.hookId) return `hook:${item.hookId}`
     if (item.kind === 'notice' && item.id) return `notice:${item.id}`
+    if (item.kind === 'files-changed') return item.id
     return `${item.kind}:${index}`
   }, [])
 

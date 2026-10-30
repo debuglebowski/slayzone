@@ -1,5 +1,5 @@
 import { NotebookPen } from 'lucide-react'
-import { DiffView } from '@slayzone/diff-view'
+import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
 import { ToolShell, extractRawText, shortenPath, type ToolProps } from './card-shell'
 import { FileLink } from './links'
@@ -50,11 +50,11 @@ export function NotebookEditCard({ invocation, timestamp }: ToolProps) {
             </pre>
           ) : diff ? (
             <div className="p-1">
-              <DiffView diff={diff} />
+              <ChatDiffView diff={diff} />
             </div>
           ) : newSource ? (
             <div className="p-1">
-              <DiffView diff={codeViewDiff(`${path}#new.txt`, newSource)} contextLines="all" />
+              <ChatDiffView diff={codeViewDiff(`${path}#new.txt`, newSource)} contextLines="all" />
             </div>
           ) : null}
         </div>

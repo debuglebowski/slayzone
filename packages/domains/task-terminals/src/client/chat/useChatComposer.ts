@@ -556,6 +556,19 @@ export function useChatComposer({
     ]
   )
 
+  // A command run from elsewhere (the palette's Compact): sent — or queued behind
+  // a running turn — without touching the draft the user is writing.
+  const sendCommand = useStableCallback(async (text: string): Promise<void> => {
+    if (sessionEnded) return
+    void scrollToBottom()
+    if (inFlight || queuedMessages.length > 0) {
+      await pushQueue(text, text)
+      return
+    }
+    lastSentRef.current = { text, attachments: [] }
+    await sendMessage(text)
+  })
+
   // Editing a queued message: its files first, its text last (as a send).
   const saveQueued = useStableCallback(
     (id: string, text: string, files: ChatAttachment[]): Promise<boolean> =>
@@ -614,6 +627,7 @@ export function useChatComposer({
     autocomplete,
     handleSend,
     handleStop,
+    sendCommand,
     onKeyDown,
     textareaRef,
     argumentHint,

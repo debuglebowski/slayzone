@@ -21,7 +21,7 @@ import {
   Bot
 } from 'lucide-react'
 import { cn, safeClipboardWriteText, useDepsChanged, useNow } from '@slayzone/ui'
-import { DiffView } from '@slayzone/diff-view'
+import { ChatDiffView } from './diff-comments/ChatDiffView'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import {
   parsePartialJson,
@@ -31,6 +31,7 @@ import {
   type ToolInvocation
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
+import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import {
   CHAT_CARD_INDENT,
   formatTime,
@@ -521,7 +522,7 @@ export function ToolCallEdit({ invocation, timestamp }: ToolProps) {
     >
       {fileDiff ? (
         <div className="p-1">
-          <DiffView diff={fileDiff} />
+          <ChatDiffView diff={fileDiff} />
         </div>
       ) : input ? (
         <div className="p-3 text-xs font-mono grid gap-1">
@@ -992,5 +993,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <NoticeRow key={key} item={item} />
     case 'unknown':
       return <UnknownBlock key={key} item={item} />
+    case 'files-changed':
+      return <FilesChangedRow key={key} item={item} />
   }
 }

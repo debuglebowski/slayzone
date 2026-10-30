@@ -350,7 +350,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         <div className="relative h-full w-full">
           <Terminal {...terminalProps} sessionId={sessionId} mode={mode} ref={innerRef} />
           {countdown !== null && (
-            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 whitespace-nowrap rounded-xl bg-orange-500/25 px-5 py-3 text-white shadow-lg ring-1 ring-orange-400/30 backdrop-blur-md">
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 whitespace-nowrap rounded-xl bg-warning-emphasis/25 px-5 py-3 text-white shadow-lg ring-1 ring-warning/30 backdrop-blur-md">
               <Moon className="size-6 shrink-0 animate-pulse" />
               <span className="text-sm">
                 Closing idle {label} in{' '}
@@ -359,7 +359,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
               <button
                 type="button"
                 onClick={handleCancelCountdown}
-                className="ml-1 rounded-lg bg-white px-3.5 py-1.5 text-sm font-semibold text-black hover:bg-orange-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                className="ml-1 rounded-lg bg-white px-3.5 py-1.5 text-sm font-semibold text-black hover:bg-warning/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 Keep open
               </button>

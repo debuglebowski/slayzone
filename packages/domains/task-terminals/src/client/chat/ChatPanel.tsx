@@ -7,7 +7,14 @@ import {
   useRef,
   useState
 } from 'react'
-import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
+import {
+  toast,
+  useAppearance,
+  safeClipboardWriteText,
+  useStableCallback,
+  usePaletteContribution,
+  type AgentEffort
+} from '@slayzone/ui'
 import {
   hasPendingPrompt,
   isAwaitingUserQuestion,
@@ -17,7 +24,7 @@ import {
   selectUsageSummary,
   useChatSession
 } from '@slayzone/terminal/client'
-import { chatCapabilitiesForMode } from '@slayzone/terminal-contracts'
+import { chatCapabilitiesForMode, modelSupportsEffortForMode } from '@slayzone/terminal-contracts'
 import type { AgentState } from '@slayzone/terminal-contracts'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { useChatAttachments } from './attachments/useChatAttachments'
@@ -41,6 +48,12 @@ import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 import { CommandTaskContext } from './tool-cards'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
+import { RewindPicker, type RewindPickerKind } from './RewindPicker'
+import { chatPaletteCommands } from './palette/chat-palette-commands'
+import { ToolFocusContext, ToolFocusStore } from './tool-cards/tool-focus'
+import { FilesChangedPanel } from './files-changed/FilesChangedPanel'
+import { countSessionFiles } from './files-changed/session-file-changes'
+import { appendToDraft, formatDiffComment, type DiffLineComment } from './diff-comments/format'
 
 export interface ChatPanelHandle {
   focus: () => void
@@ -71,6 +84,8 @@ export interface ChatPanelProps {
   isTemporary?: boolean
   /** "Continue in terminal": hand the conversation to the terminal agent (main tab). */
   onHandoff?: () => void
+  /** Open the task's sessions sidebar (the palette's "Sessions…"). */
+  onShowSessions?: () => void
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -88,7 +103,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       agentState,
       isMain,
       isTemporary,
-      onHandoff
+      onHandoff,
+      onShowSessions
     } = props
     const {
       state,
@@ -216,6 +232,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const display = useChatDisplay({ timeline, finalOnly, showLastMessageTools, scrollRef })
     const { search } = display
 
+    // Files changed (chat E, plan 4.3): the panel beside the chat, opened at a file
+    // or at the top; `seq` re-scrolls when the same file is asked for again.
+    const filesCapable = chatCapabilitiesForMode(mode).filesChanged
+    const [filesPanel, setFilesPanel] = useState<{ path?: string; seq: number } | null>(null)
+    const openFilesPanel = useStableCallback((path?: string): void => {
+      setFilesPanel((prev) => ({ ...(path ? { path } : {}), seq: (prev?.seq ?? 0) + 1 }))
+    })
+    const filesCount = useMemo(
+      () => (filesCapable ? countSessionFiles(timeline) : 0),
+      [filesCapable, timeline]
+    )
+    // Cards asked to show themselves (a files-changed row's file).
+    const [toolFocus] = useState(() => new ToolFocusStore())
+
+    // A comment on a diff line (chat E, plan 4.4) goes to the end of the draft
+    // as text; the composer takes focus with the caret after it.
+    const diffComments = chatCapabilitiesForMode(mode).diffComments
+    const addDiffComment = useStableCallback((comment: DiffLineComment): void => {
+      composer.setDraft((prev) => appendToDraft(prev, formatDiffComment(comment, cwd)))
+      requestAnimationFrame(() => {
+        const el = composer.textareaRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(el.value.length, el.value.length)
+        composer.setCursorPos(el.value.length)
+      })
+    })
+
     // Edit & resend / rewind / fork on past messages; edit puts the text back
     // into the composer (the same draft Stop restores).
     const conversation = useConversationActions({
@@ -270,6 +314,22 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         clearQueue: composer.clearQueue
       })
 
+    // Esc Esc / the palette's "Rewind…": the TUI's message list (chat E, plan 4.6).
+    // Edit & resend puts the message back into the composer, so it waits for an
+    // empty one — typed text is never replaced.
+    const [pickerKind, setPickerKind] = useState<RewindPickerKind | null>(null)
+    const openRewind = useStableCallback((kind: RewindPickerKind): void => {
+      if (kind === 'edit' && composer.draft.trim() !== '') {
+        toast('Rewinding puts the message back into the message box: empty it first.')
+        return
+      }
+      if (conversation.view.activeIds.size === 0) {
+        toast('Nothing to rewind yet.')
+        return
+      }
+      setPickerKind(kind)
+    })
+
     useChatPanelKeyboard({
       panelRef,
       scrollRef,
@@ -281,8 +341,65 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       autocomplete: composer.autocomplete,
       handleStop: composer.handleStop,
       mode,
-      promptKeysRef
+      promptKeysRef,
+      composerRef: composer.textareaRef,
+      draftEmpty: composer.draft.trim() === '' && composer.attachments.length === 0,
+      ...(conversation.view.canRewind ? { onDoubleEscape: () => openRewind('edit') } : {})
     })
+
+    // The chat's page in the app's Cmd+K palette while this tab is the active one
+    // (the focused tab wins when a split shows two).
+    // Compiler-memoized: identity changes only when an input does.
+    const paletteCommands = chatPaletteCommands({
+      mode,
+      inFlight,
+      canRewind: conversation.view.canRewind,
+      canFork: conversation.view.canFork,
+      openRewind,
+      ...(chatCapabilitiesForMode(mode).nativeSlashCommands
+        ? { compact: () => void composer.sendCommand('/compact') }
+        : {}),
+      ...(onShowSessions ? { showSessions: onShowSessions } : {}),
+      ...(chatModel && !inFlight && !modelChanging
+        ? { model: { current: chatModel, change: (id) => void handleModelChange(id) } }
+        : {}),
+      ...(!inFlight
+        ? {
+            permissionMode: {
+              current: chatMode,
+              change: (next) => {
+                handleModeChange(next).catch(() => {
+                  /* toast already shown by hook */
+                })
+              },
+              autoAvailable: autoCapability.optedIn
+            }
+          }
+        : {}),
+      ...(chatModel && modelSupportsEffortForMode(mode, chatModel) && !inFlight && !effortChanging
+        ? {
+            effort: {
+              current: chatEffort,
+              change: (next) => void handleEffortChange(next as AgentEffort)
+            }
+          }
+        : {}),
+      ...(onHandoff && state.sessionId ? { handoff: onHandoff } : {}),
+      ...(filesCapable
+        ? { filesChanged: { count: filesCount, open: () => openFilesPanel() } }
+        : {}),
+      find: search.requestOpen,
+      collapseAll: () => setCollapseSignal((n) => n + 1),
+      copyLastResponse: display.copyLastResponse,
+      copyConversation: display.copyAllMessages,
+      ...(inFlight ? { stop: () => void composer.handleStop() } : {}),
+      reset: () => void handleReset()
+    })
+    const palette = usePaletteContribution(
+      taskId,
+      paletteCommands,
+      chatCapabilitiesForMode(mode).commandPalette && isActive
+    )
 
     // Adapt the `(path, { position })` signature used by host wiring to the flat
     // `(path, line, col)` shape LinkifiedText expects.
@@ -327,7 +444,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         onOpenUrl,
         onOpenFile: handleOpenFile,
         conversation: conversation.view,
-        branches: display.branches
+        branches: display.branches,
+        ...(filesCapable ? { filesPanel: { open: openFilesPanel } } : {}),
+        ...(diffComments ? { addDiffComment } : {})
       }),
       [
         collapseSignal,
@@ -353,7 +472,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         onOpenUrl,
         handleOpenFile,
         conversation.view,
-        display.branches
+        display.branches,
+        filesCapable,
+        openFilesPanel,
+        diffComments,
+        addDiffComment
       ]
     )
 
@@ -374,136 +497,175 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       <ChatViewContext.Provider value={chatView}>
         <LiveBlockStoreContext.Provider value={liveStore}>
           <CommandTaskContext.Provider value={commandTaskScope}>
-            <div
-              ref={panelRef}
-              data-chat-panel
-              className="relative flex flex-col h-full bg-background"
-              style={{ fontSize: `${appearance.terminalFontSize}px` }}
-              onDragEnter={attachmentsApi.onDragEnter}
-              onDragOver={attachmentsApi.onDragOver}
-              onDragLeave={attachmentsApi.onDragLeave}
-              onDrop={attachmentsApi.onDrop}
-              onMouseUp={(e) => {
-                // Click on panel background → focus composer. Skip if user clicked an
-                // interactive element (button/link/input) or completed a text selection.
-                const target = e.target as HTMLElement | null
-                if (!target) return
-                if (
-                  target.closest(
-                    'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
-                  )
-                )
-                  return
-                const sel = window.getSelection()
-                if (sel && !sel.isCollapsed) return
-                composer.textareaRef.current?.focus()
-              }}
-              onClickCapture={(e) => {
-                // Event-delegated link interception for markdown-rendered anchors only.
-                // Skip LinkifiedText anchors — they own their click semantics via
-                // `data-linkified` and would otherwise double-fire (capture-phase parent
-                // before child onClick).
-                // Mirrors terminal modifier semantics:
-                //   ⌘+Click       → in-app slay browser (onOpenUrl)
-                //   ⌘+Shift+Click → external
-                //   bare click    → external (markdown anchors are click affordances;
-                //                  doing nothing on bare click would feel broken).
-                const target = e.target as HTMLElement | null
-                const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
-                if (!anchor) return
-                if (anchor.dataset.linkified === 'true') return
-                const href = anchor.getAttribute('href') ?? ''
-                if (!/^https?:\/\//i.test(href)) return
-                e.preventDefault()
-                const mod = e.metaKey || e.ctrlKey
-                if (mod && e.shiftKey) navigate.openExternal(href)
-                else if (mod && onOpenUrl) onOpenUrl(href)
-                else navigate.openExternal(href)
-              }}
-            >
-              {/* Panel-wide drop overlay */}
-              {attachmentsApi.isDragging && (
-                <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
-                  {takesAnyFile ? 'Drop files to attach (images, PDFs, text)' : 'Drop image…'}
+            <ToolFocusContext.Provider value={toolFocus}>
+              {/* The files-changed panel sits beside the chat; in a narrow pane it covers it. */}
+              <div className="@container relative flex h-full">
+                <div
+                  ref={panelRef}
+                  data-chat-panel
+                  className="relative flex flex-col h-full min-w-0 flex-1 bg-background"
+                  style={{ fontSize: `${appearance.terminalFontSize}px` }}
+                  onFocus={palette.claim}
+                  onDragEnter={attachmentsApi.onDragEnter}
+                  onDragOver={attachmentsApi.onDragOver}
+                  onDragLeave={attachmentsApi.onDragLeave}
+                  onDrop={attachmentsApi.onDrop}
+                  onMouseUp={(e) => {
+                    // Click on panel background → focus composer. Skip if user clicked an
+                    // interactive element (button/link/input) or completed a text selection.
+                    const target = e.target as HTMLElement | null
+                    if (!target) return
+                    if (
+                      target.closest(
+                        'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
+                      )
+                    )
+                      return
+                    const sel = window.getSelection()
+                    if (sel && !sel.isCollapsed) return
+                    composer.textareaRef.current?.focus()
+                  }}
+                  onClickCapture={(e) => {
+                    // Event-delegated link interception for markdown-rendered anchors only.
+                    // Skip LinkifiedText anchors — they own their click semantics via
+                    // `data-linkified` and would otherwise double-fire (capture-phase parent
+                    // before child onClick).
+                    // Mirrors terminal modifier semantics:
+                    //   ⌘+Click       → in-app slay browser (onOpenUrl)
+                    //   ⌘+Shift+Click → external
+                    //   bare click    → external (markdown anchors are click affordances;
+                    //                  doing nothing on bare click would feel broken).
+                    const target = e.target as HTMLElement | null
+                    const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
+                    if (!anchor) return
+                    if (anchor.dataset.linkified === 'true') return
+                    const href = anchor.getAttribute('href') ?? ''
+                    if (!/^https?:\/\//i.test(href)) return
+                    e.preventDefault()
+                    const mod = e.metaKey || e.ctrlKey
+                    if (mod && e.shiftKey) navigate.openExternal(href)
+                    else if (mod && onOpenUrl) onOpenUrl(href)
+                    else navigate.openExternal(href)
+                  }}
+                >
+                  {/* Panel-wide drop overlay */}
+                  {attachmentsApi.isDragging && (
+                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
+                      {takesAnyFile ? 'Drop files to attach (images, PDFs, text)' : 'Drop image…'}
+                    </div>
+                  )}
+
+                  <ChatTimeline
+                    overrideNotice={overrideNotice}
+                    search={search}
+                    state={state}
+                    hydrating={hydrating}
+                    isEmpty={isEmpty}
+                    inFlight={inFlight}
+                    awaitingUser={
+                      promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
+                    }
+                    appearance={appearance}
+                    hiddenCount={display.hiddenCount}
+                    PAGE_SIZE={display.PAGE_SIZE}
+                    setVisibleCount={display.setVisibleCount}
+                    visibleItems={display.visibleItems}
+                    visibleStart={display.visibleStart}
+                    itemKey={display.itemKey}
+                    scrollRef={scrollRef}
+                    contentRef={contentRef}
+                    isAtBottom={isAtBottom}
+                    scrollToBottom={scrollToBottom}
+                    sendMessage={sendMessage}
+                    copyLastResponse={display.copyLastResponse}
+                    copyAllMessages={display.copyAllMessages}
+                    copySessionId={copySessionId}
+                    setCollapseSignal={setCollapseSignal}
+                    handleReset={handleReset}
+                    resetting={resetting}
+                    {...(onHandoff && state.sessionId ? { onHandoff } : {})}
+                  />
+
+                  <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
+                  <RewindDialog dialog={conversation.dialog} />
+                  <RewindPicker
+                    kind={pickerKind}
+                    timeline={timeline}
+                    view={conversation.view}
+                    onClose={() => setPickerKind(null)}
+                  />
+
+                  <ChatComposer
+                    appearance={appearance}
+                    finalOnly={finalOnly}
+                    inFlight={inFlight}
+                    mode={mode}
+                    queuedMessages={composer.queuedMessages}
+                    removeQueue={composer.removeQueue}
+                    queueApi={composer.queueApi}
+                    attachments={composer.attachments}
+                    setAttachments={composer.setAttachments}
+                    attachmentsApi={attachmentsApi}
+                    autocomplete={composer.autocomplete}
+                    textareaRef={composer.textareaRef}
+                    draft={composer.draft}
+                    setDraft={composer.setDraft}
+                    argumentHint={composer.argumentHint}
+                    setCursorPos={composer.setCursorPos}
+                    onKeyDown={composer.onKeyDown}
+                    handleSend={composer.handleSend}
+                    handleStop={composer.handleStop}
+                    historySearch={composer.historySearch}
+                    usage={selectUsageSummary(state)}
+                    displaySessionEnded={displaySessionEnded}
+                    handleRestart={handleRestart}
+                    restarting={restarting}
+                    handleReset={handleReset}
+                    resetting={resetting}
+                    chatMode={chatMode}
+                    handleModeChange={handleModeChange}
+                    autoCapability={autoCapability}
+                    chatModel={chatModel}
+                    handleModelChange={handleModelChange}
+                    modelChanging={modelChanging}
+                    chatEffort={chatEffort}
+                    handleEffortChange={handleEffortChange}
+                    effortChanging={effortChanging}
+                    chatCollaboration={chatCollaboration}
+                    handleCollaborationChange={handleCollaborationChange}
+                    collaborationChanging={collaborationChanging}
+                    chatFastMode={chatFastMode}
+                    handleFastModeChange={handleFastModeChange}
+                    fastModeChanging={fastModeChanging}
+                    {...(filesCapable
+                      ? {
+                          filesChanged: {
+                            count: filesCount,
+                            open: filesPanel !== null,
+                            toggle: () => {
+                              if (filesPanel) setFilesPanel(null)
+                              else openFilesPanel()
+                            }
+                          }
+                        }
+                      : {})}
+                  />
                 </div>
-              )}
-
-              <ChatTimeline
-                overrideNotice={overrideNotice}
-                search={search}
-                state={state}
-                hydrating={hydrating}
-                isEmpty={isEmpty}
-                inFlight={inFlight}
-                awaitingUser={promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)}
-                appearance={appearance}
-                hiddenCount={display.hiddenCount}
-                PAGE_SIZE={display.PAGE_SIZE}
-                setVisibleCount={display.setVisibleCount}
-                visibleItems={display.visibleItems}
-                visibleStart={display.visibleStart}
-                itemKey={display.itemKey}
-                scrollRef={scrollRef}
-                contentRef={contentRef}
-                isAtBottom={isAtBottom}
-                scrollToBottom={scrollToBottom}
-                sendMessage={sendMessage}
-                copyLastResponse={display.copyLastResponse}
-                copyAllMessages={display.copyAllMessages}
-                copySessionId={copySessionId}
-                setCollapseSignal={setCollapseSignal}
-                handleReset={handleReset}
-                resetting={resetting}
-                {...(onHandoff && state.sessionId ? { onHandoff } : {})}
-              />
-
-              <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
-              <RewindDialog dialog={conversation.dialog} />
-
-              <ChatComposer
-                appearance={appearance}
-                finalOnly={finalOnly}
-                inFlight={inFlight}
-                mode={mode}
-                queuedMessages={composer.queuedMessages}
-                removeQueue={composer.removeQueue}
-                queueApi={composer.queueApi}
-                attachments={composer.attachments}
-                setAttachments={composer.setAttachments}
-                attachmentsApi={attachmentsApi}
-                autocomplete={composer.autocomplete}
-                textareaRef={composer.textareaRef}
-                draft={composer.draft}
-                setDraft={composer.setDraft}
-                argumentHint={composer.argumentHint}
-                setCursorPos={composer.setCursorPos}
-                onKeyDown={composer.onKeyDown}
-                handleSend={composer.handleSend}
-                handleStop={composer.handleStop}
-                historySearch={composer.historySearch}
-                usage={selectUsageSummary(state)}
-                displaySessionEnded={displaySessionEnded}
-                handleRestart={handleRestart}
-                restarting={restarting}
-                handleReset={handleReset}
-                resetting={resetting}
-                chatMode={chatMode}
-                handleModeChange={handleModeChange}
-                autoCapability={autoCapability}
-                chatModel={chatModel}
-                handleModelChange={handleModelChange}
-                modelChanging={modelChanging}
-                chatEffort={chatEffort}
-                handleEffortChange={handleEffortChange}
-                effortChanging={effortChanging}
-                chatCollaboration={chatCollaboration}
-                handleCollaborationChange={handleCollaborationChange}
-                collaborationChanging={collaborationChanging}
-                chatFastMode={chatFastMode}
-                handleFastModeChange={handleFastModeChange}
-                fastModeChanging={fastModeChanging}
-              />
-            </div>
+                {filesPanel && (
+                  <FilesChangedPanel
+                    timeline={timeline}
+                    cwd={cwd}
+                    {...(filesPanel.path ? { focusPath: filesPanel.path } : {})}
+                    focusSeq={filesPanel.seq}
+                    onClose={() => {
+                      setFilesPanel(null)
+                      composer.textareaRef.current?.focus()
+                    }}
+                    className="absolute inset-0 z-30 @min-[56rem]:static @min-[56rem]:w-[45%] @min-[56rem]:max-w-[720px] @min-[56rem]:shrink-0 @min-[56rem]:border-l @min-[56rem]:border-border"
+                  />
+                )}
+              </div>
+            </ToolFocusContext.Provider>
           </CommandTaskContext.Provider>
         </LiveBlockStoreContext.Provider>
       </ChatViewContext.Provider>
