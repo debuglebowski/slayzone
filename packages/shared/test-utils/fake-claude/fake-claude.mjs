@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { Aborted, claimSpawn, EXIT_UNSCRIPTED, readLines, sleep } from '../fake-cli/runtime.mjs'
 import { createTaskSim } from './fake-claude-tasks.mjs'
 
 /** What `--version` reports: the real CLI the transcripts were recorded with. */
@@ -28,12 +29,10 @@ const REQUIRED_FLAGS = [
 ]
 
 const EXIT_ARGV_DRIFT = 2
-const EXIT_UNSCRIPTED = 3
 
 const INTERRUPTED_TOOL_TEXT =
   "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
 
-const t0 = Date.now()
 const argv = process.argv.slice(2)
 
 if (argv.includes('--version') || argv.includes('-v')) {
@@ -41,25 +40,12 @@ if (argv.includes('--version') || argv.includes('-v')) {
   process.exit(0)
 }
 
-const stateDir = process.env.FAKE_CLAUDE_STATE_DIR
-if (!stateDir) {
-  process.stderr.write(
-    'fake-claude: FAKE_CLAUDE_STATE_DIR is not set (run it through its wrapper)\n'
-  )
-  process.exit(EXIT_UNSCRIPTED)
-}
-
 // --- claim this spawn's script ------------------------------------------------
 
-const epoch = readCurrentEpoch()
-const epochDir = epoch ? path.join(stateDir, 'epochs', epoch) : null
-const scenario = epochDir
-  ? JSON.parse(fs.readFileSync(path.join(epochDir, 'scenario.json'), 'utf8'))
-  : null
-const index = epochDir ? claimIndex(epochDir) : -1
-const logFile = epochDir
-  ? path.join(epochDir, 'procs', String(index), 'log.jsonl')
-  : path.join(stateDir, 'unscripted.jsonl')
+const { epoch, index, script, log, peersAlive } = claimSpawn({
+  stateEnvVar: 'FAKE_CLAUDE_STATE_DIR',
+  label: 'fake-claude'
+})
 
 /** Env the app is expected to set for the CLI, recorded so a test can check it. */
 const LOGGED_ENV = ['CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING', 'CLAUDE_CONFIG_DIR']
@@ -87,10 +73,6 @@ function logStart(extra = {}) {
     ...extra
   })
 }
-
-const script =
-  scenario?.processes?.[index] ??
-  (scenario?.repeatLast && scenario.processes?.length ? scenario.processes.at(-1) : undefined)
 
 if (script?.tui) await runTui()
 
@@ -355,19 +337,7 @@ let turnRunning = false
 /** tool_use ids emitted without a matching tool_result — an interrupt rejects them. */
 const openToolUses = new Set()
 
-let stdinBuf = ''
-process.stdin.setEncoding('utf8')
-process.stdin.on('data', (chunk) => {
-  stdinBuf += chunk
-  let nl = stdinBuf.indexOf('\n')
-  while (nl >= 0) {
-    const line = stdinBuf.slice(0, nl)
-    stdinBuf = stdinBuf.slice(nl + 1)
-    if (line.trim()) onStdinLine(line)
-    nl = stdinBuf.indexOf('\n')
-  }
-})
-process.stdin.on('end', () => {
+readLines(process.stdin, onStdinLine, () => {
   stdinEnded = true
   log('stdin-end', {})
   if (userWaiter) {
@@ -572,8 +542,6 @@ logStart()
 
 // --- step interpreter ---------------------------------------------------------
 
-class Aborted extends Error {}
-
 /** Command tasks (`task` step + task control requests): fake-claude-tasks.mjs. */
 const taskSim = createTaskSim({ emit, writeLine, sleep, log, runSteps, Aborted })
 
@@ -653,16 +621,6 @@ async function emitSplit(raw, gapMs) {
   await sleep(gapMs ?? 80, null)
   await write(bytes.subarray(cut))
   log('stdout', { line, splitAtByte: cut })
-}
-
-function sleep(ms, signal) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(new Aborted())
-    })
-  })
 }
 
 /**
@@ -1015,35 +973,6 @@ main().catch((err) => {
 
 // --- helpers ------------------------------------------------------------------
 
-function log(kind, data) {
-  try {
-    fs.appendFileSync(logFile, `${JSON.stringify({ t: Date.now() - t0, kind, ...data })}\n`)
-  } catch {
-    // The state dir is gone (test torn down) — nothing left to record into.
-  }
-}
-
-function readCurrentEpoch() {
-  try {
-    return fs.readFileSync(path.join(stateDir, 'current'), 'utf8').trim() || null
-  } catch {
-    return null
-  }
-}
-
-/** The lowest unclaimed spawn index of this epoch. mkdir is atomic: one winner each. */
-function claimIndex(dir) {
-  fs.mkdirSync(path.join(dir, 'procs'), { recursive: true })
-  for (let i = 0; ; i++) {
-    try {
-      fs.mkdirSync(path.join(dir, 'procs', String(i)))
-      return i
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err
-    }
-  }
-}
-
 function hasFlag(flag) {
   const at = argv.indexOf(flag[0])
   if (at < 0) return false
@@ -1058,32 +987,6 @@ function flagValue(name) {
 /** Are the acks of this process's `index`-th user message held back (`ackDelayMs`)? */
 function ackDelayed(index) {
   return Boolean(script.ackDelayMs) && index >= (script.ackDelayFrom ?? 0)
-}
-
-/** Earlier spawns of this epoch whose process is still alive (by their logged pid). */
-function peersAlive() {
-  if (!epochDir) return []
-  const alive = []
-  for (let i = 0; i < index; i++) {
-    let pid
-    try {
-      const first = fs
-        .readFileSync(path.join(epochDir, 'procs', String(i), 'log.jsonl'), 'utf8')
-        .split('\n')
-        .find((l) => l.includes('"kind":"start"'))
-      pid = first ? JSON.parse(first).pid : undefined
-    } catch {
-      continue
-    }
-    if (typeof pid !== 'number') continue
-    try {
-      process.kill(pid, 0)
-      alive.push(i)
-    } catch {
-      // gone
-    }
-  }
-  return alive
 }
 
 /**

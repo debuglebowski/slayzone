@@ -1,0 +1,1230 @@
+{
+  "cliVersion": "0.159.2",
+  "generatedBy": "packages/domains/terminal/src/server/agents/codex/codex-protocol-surface.gen.ts (codex app-server generate-json-schema --experimental)",
+  "serverNotifications": {
+    "account/gatewayOAuth/changed": "GatewayOAuthChangedNotification",
+    "account/login/completed": "AccountLoginCompletedNotification",
+    "account/rateLimits/updated": "AccountRateLimitsUpdatedNotification",
+    "account/updated": "AccountUpdatedNotification",
+    "app/list/updated": "AppListUpdatedNotification",
+    "autoApprovalReview/strictReviewRequired": "StrictReviewRequiredNotification",
+    "command/exec/outputDelta": "CommandExecOutputDeltaNotification",
+    "configWarning": "ConfigWarningNotification",
+    "deprecationNotice": "DeprecationNoticeNotification",
+    "error": "ErrorNotification",
+    "externalAgentConfig/import/completed": "ExternalAgentConfigImportCompletedNotification",
+    "externalAgentConfig/import/progress": "ExternalAgentConfigImportProgressNotification",
+    "fs/changed": "FsChangedNotification",
+    "fuzzyFileSearch/sessionCompleted": "FuzzyFileSearchSessionCompletedNotification",
+    "fuzzyFileSearch/sessionUpdated": "FuzzyFileSearchSessionUpdatedNotification",
+    "guardianWarning": "GuardianWarningNotification",
+    "hook/completed": "HookCompletedNotification",
+    "hook/started": "HookStartedNotification",
+    "item/agentMessage/delta": "AgentMessageDeltaNotification",
+    "item/autoApprovalReview/completed": "ItemGuardianApprovalReviewCompletedNotification",
+    "item/autoApprovalReview/started": "ItemGuardianApprovalReviewStartedNotification",
+    "item/commandExecution/outputDelta": "CommandExecutionOutputDeltaNotification",
+    "item/commandExecution/terminalInteraction": "TerminalInteractionNotification",
+    "item/completed": "ItemCompletedNotification",
+    "item/fileChange/outputDelta": "FileChangeOutputDeltaNotification",
+    "item/fileChange/patchUpdated": "FileChangePatchUpdatedNotification",
+    "item/mcpToolCall/progress": "McpToolCallProgressNotification",
+    "item/plan/delta": "PlanDeltaNotification",
+    "item/reasoning/summaryPartAdded": "ReasoningSummaryPartAddedNotification",
+    "item/reasoning/summaryTextDelta": "ReasoningSummaryTextDeltaNotification",
+    "item/reasoning/textDelta": "ReasoningTextDeltaNotification",
+    "item/started": "ItemStartedNotification",
+    "mcpServer/event/stream/notification": "McpServerEventStreamNotification",
+    "mcpServer/oauthLogin/completed": "McpServerOauthLoginCompletedNotification",
+    "mcpServer/startupStatus/updated": "McpServerStatusUpdatedNotification",
+    "model/rerouted": "ModelReroutedNotification",
+    "model/safetyBuffering/updated": "ModelSafetyBufferingUpdatedNotification",
+    "model/verification": "ModelVerificationNotification",
+    "modelProvider/authRecoveryCompleted": "AuthRecoveryNotification",
+    "modelProvider/authRecoveryStarted": "AuthRecoveryNotification",
+    "process/exited": "ProcessExitedNotification",
+    "process/outputDelta": "ProcessOutputDeltaNotification",
+    "project/changed": "ProjectChangedNotification",
+    "remoteControl/status/changed": "RemoteControlStatusChangedNotification",
+    "serverRequest/resolved": "ServerRequestResolvedNotification",
+    "skills/changed": "SkillsChangedNotification",
+    "thread/archived": "ThreadArchivedNotification",
+    "thread/attachment/updated": "ThreadAttachmentUpdatedNotification",
+    "thread/closed": "ThreadClosedNotification",
+    "thread/compacted": "ContextCompactedNotification",
+    "thread/deleted": "ThreadDeletedNotification",
+    "thread/environment/connected": "EnvironmentConnectionNotification",
+    "thread/environment/disconnected": "EnvironmentConnectionNotification",
+    "thread/goal/cleared": "ThreadGoalClearedNotification",
+    "thread/goal/updated": "ThreadGoalUpdatedNotification",
+    "thread/name/updated": "ThreadNameUpdatedNotification",
+    "thread/project/updated": "ThreadProjectUpdatedNotification",
+    "thread/queue/changed": "ThreadQueueChangedNotification",
+    "thread/realtime/closed": "ThreadRealtimeClosedNotification",
+    "thread/realtime/error": "ThreadRealtimeErrorNotification",
+    "thread/realtime/item/completed": "ThreadRealtimeItemCompletedNotification",
+    "thread/realtime/item/started": "ThreadRealtimeItemStartedNotification",
+    "thread/realtime/item/transcript/delta": "ThreadRealtimeItemTranscriptDeltaNotification",
+    "thread/realtime/itemAdded": "ThreadRealtimeItemAddedNotification",
+    "thread/realtime/outputAudio/delta": "ThreadRealtimeOutputAudioDeltaNotification",
+    "thread/realtime/sdp": "ThreadRealtimeSdpNotification",
+    "thread/realtime/started": "ThreadRealtimeStartedNotification",
+    "thread/realtime/transcript/delta": "ThreadRealtimeTranscriptDeltaNotification",
+    "thread/realtime/transcript/done": "ThreadRealtimeTranscriptDoneNotification",
+    "thread/reverted": "ThreadRevertedNotification",
+    "thread/settings/updated": "ThreadSettingsUpdatedNotification",
+    "thread/started": "ThreadStartedNotification",
+    "thread/status/changed": "ThreadStatusChangedNotification",
+    "thread/tokenUsage/updated": "ThreadTokenUsageUpdatedNotification",
+    "thread/unarchived": "ThreadUnarchivedNotification",
+    "turn/completed": "TurnCompletedNotification",
+    "turn/diff/updated": "TurnDiffUpdatedNotification",
+    "turn/moderationMetadata": "TurnModerationMetadataNotification",
+    "turn/plan/updated": "TurnPlanUpdatedNotification",
+    "turn/started": "TurnStartedNotification",
+    "warning": "WarningNotification",
+    "windows/worldWritableWarning": "WindowsWorldWritableWarningNotification",
+    "windowsSandbox/setupCompleted": "WindowsSandboxSetupCompletedNotification"
+  },
+  "serverRequests": {
+    "account/chatgptAuthTokens/refresh": {
+      "params": "ChatgptAuthTokensRefreshParams",
+      "decisions": []
+    },
+    "applyPatchApproval": {
+      "params": "ApplyPatchApprovalParams",
+      "decisions": [
+        "abort",
+        "approved",
+        "approved_for_session",
+        "approved_mcp_policy_amendment",
+        "timed_out",
+        "{approved_execpolicy_amendment}",
+        "{denied}",
+        "{network_policy_amendment}"
+      ]
+    },
+    "attestation/generate": {
+      "params": "AttestationGenerateParams",
+      "decisions": []
+    },
+    "currentTime/read": {
+      "params": "CurrentTimeReadParams",
+      "decisions": []
+    },
+    "execCommandApproval": {
+      "params": "ExecCommandApprovalParams",
+      "decisions": [
+        "abort",
+        "approved",
+        "approved_for_session",
+        "approved_mcp_policy_amendment",
+        "timed_out",
+        "{approved_execpolicy_amendment}",
+        "{denied}",
+        "{network_policy_amendment}"
+      ]
+    },
+    "item/commandExecution/requestApproval": {
+      "params": "CommandExecutionRequestApprovalParams",
+      "decisions": [
+        "accept",
+        "acceptForSession",
+        "cancel",
+        "decline",
+        "{acceptWithExecpolicyAmendment}",
+        "{applyNetworkPolicyAmendment}"
+      ]
+    },
+    "item/fileChange/requestApproval": {
+      "params": "FileChangeRequestApprovalParams",
+      "decisions": ["accept", "acceptForSession", "cancel", "decline"]
+    },
+    "item/permissions/requestApproval": {
+      "params": "PermissionsRequestApprovalParams",
+      "decisions": []
+    },
+    "item/tool/call": {
+      "params": "DynamicToolCallParams",
+      "decisions": []
+    },
+    "item/tool/requestUserInput": {
+      "params": "ToolRequestUserInputParams",
+      "decisions": []
+    },
+    "mcpServer/elicitation/request": {
+      "params": "McpServerElicitationRequestParams",
+      "decisions": []
+    }
+  },
+  "clientRequests": {
+    "account/bedrock/discover": {
+      "params": "BedrockDiscoverParams",
+      "required": [],
+      "properties": []
+    },
+    "account/bedrock/setup": {
+      "params": "BedrockSetupParams",
+      "required": [],
+      "properties": []
+    },
+    "account/gatewayOAuth/cancel": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "account/gatewayOAuth/login": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "account/gatewayOAuth/read": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "account/login/cancel": {
+      "params": "CancelLoginAccountParams",
+      "required": ["loginId"],
+      "properties": ["loginId"]
+    },
+    "account/login/start": {
+      "params": "LoginAccountParams",
+      "required": [],
+      "properties": []
+    },
+    "account/logout": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "account/rateLimitResetCredit/consume": {
+      "params": "ConsumeAccountRateLimitResetCreditParams",
+      "required": ["idempotencyKey"],
+      "properties": ["creditId", "idempotencyKey"]
+    },
+    "account/rateLimits/read": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "account/read": {
+      "params": "GetAccountParams",
+      "required": [],
+      "properties": ["refreshToken"]
+    },
+    "account/sendAddCreditsNudgeEmail": {
+      "params": "SendAddCreditsNudgeEmailParams",
+      "required": ["creditType"],
+      "properties": ["creditType"]
+    },
+    "account/usage/read": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "account/workspaceMessages/read": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "app/installed": {
+      "params": "AppsInstalledParams",
+      "required": [],
+      "properties": ["forceRefresh", "threadId"]
+    },
+    "app/list": {
+      "params": "AppsListParams",
+      "required": [],
+      "properties": ["cursor", "forceRefetch", "limit", "threadId"]
+    },
+    "app/read": {
+      "params": "AppsReadParams",
+      "required": ["appIds"],
+      "properties": ["appIds", "includeTools", "threadId"]
+    },
+    "collaborationMode/list": {
+      "params": "CollaborationModeListParams",
+      "required": [],
+      "properties": []
+    },
+    "command/exec": {
+      "params": "CommandExecParams",
+      "required": ["command"],
+      "properties": [
+        "command",
+        "cwd",
+        "disableOutputCap",
+        "disableTimeout",
+        "env",
+        "outputBytesCap",
+        "permissionProfile",
+        "processId",
+        "sandboxPolicy",
+        "size",
+        "streamStdin",
+        "streamStdoutStderr",
+        "timeoutMs",
+        "tty"
+      ]
+    },
+    "command/exec/resize": {
+      "params": "CommandExecResizeParams",
+      "required": ["processId", "size"],
+      "properties": ["processId", "size"]
+    },
+    "command/exec/terminate": {
+      "params": "CommandExecTerminateParams",
+      "required": ["processId"],
+      "properties": ["processId"]
+    },
+    "command/exec/write": {
+      "params": "CommandExecWriteParams",
+      "required": ["processId"],
+      "properties": ["closeStdin", "deltaBase64", "processId"]
+    },
+    "config/batchWrite": {
+      "params": "ConfigBatchWriteParams",
+      "required": ["edits"],
+      "properties": ["edits", "expectedVersion", "filePath", "reloadUserConfig"]
+    },
+    "config/mcpServer/reload": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "config/read": {
+      "params": "ConfigReadParams",
+      "required": [],
+      "properties": ["cwd", "includeLayers"]
+    },
+    "config/value/write": {
+      "params": "ConfigValueWriteParams",
+      "required": ["keyPath", "mergeStrategy", "value"],
+      "properties": ["expectedVersion", "filePath", "keyPath", "mergeStrategy", "value"]
+    },
+    "configRequirements/read": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "environment/add": {
+      "params": "EnvironmentAddParams",
+      "required": ["environmentId", "execServerUrl"],
+      "properties": ["authBearerToken", "connectTimeoutMs", "environmentId", "execServerUrl"]
+    },
+    "environment/info": {
+      "params": "EnvironmentInfoParams",
+      "required": ["environmentId"],
+      "properties": ["environmentId"]
+    },
+    "environment/status": {
+      "params": "EnvironmentStatusParams",
+      "required": ["environmentId"],
+      "properties": ["environmentId"]
+    },
+    "experimentalFeature/enablement/set": {
+      "params": "ExperimentalFeatureEnablementSetParams",
+      "required": ["enablement"],
+      "properties": ["enablement"]
+    },
+    "experimentalFeature/list": {
+      "params": "ExperimentalFeatureListParams",
+      "required": [],
+      "properties": ["cursor", "limit", "threadId"]
+    },
+    "externalAgentConfig/detect": {
+      "params": "ExternalAgentConfigDetectParams",
+      "required": [],
+      "properties": [
+        "cwds",
+        "includeHome",
+        "maxSessionAgeDays",
+        "maxSessions",
+        "migrationSource",
+        "source"
+      ]
+    },
+    "externalAgentConfig/import": {
+      "params": "ExternalAgentConfigImportParams",
+      "required": ["migrationItems"],
+      "properties": ["migrationItems", "migrationSource", "providerId", "source"]
+    },
+    "externalAgentConfig/import/readHistories": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "externalAgentConfig/import/recordHistory": {
+      "params": "ExternalAgentConfigImportHistoryRecordParams",
+      "required": ["itemTypeResults", "providerId"],
+      "properties": ["itemTypeResults", "providerId"]
+    },
+    "feedback/upload": {
+      "params": "FeedbackUploadParams",
+      "required": ["classification"],
+      "properties": ["classification", "extraLogFiles", "includeLogs", "reason", "tags", "threadId"]
+    },
+    "fs/copy": {
+      "params": "FsCopyParams",
+      "required": ["destinationPath", "sourcePath"],
+      "properties": ["destinationPath", "recursive", "sourcePath"]
+    },
+    "fs/createDirectory": {
+      "params": "FsCreateDirectoryParams",
+      "required": ["path"],
+      "properties": ["path", "recursive"]
+    },
+    "fs/getMetadata": {
+      "params": "FsGetMetadataParams",
+      "required": ["path"],
+      "properties": ["path"]
+    },
+    "fs/readDirectory": {
+      "params": "FsReadDirectoryParams",
+      "required": ["path"],
+      "properties": ["path"]
+    },
+    "fs/readFile": {
+      "params": "FsReadFileParams",
+      "required": ["path"],
+      "properties": ["path"]
+    },
+    "fs/remove": {
+      "params": "FsRemoveParams",
+      "required": ["path"],
+      "properties": ["force", "path", "recursive"]
+    },
+    "fs/unwatch": {
+      "params": "FsUnwatchParams",
+      "required": ["watchId"],
+      "properties": ["watchId"]
+    },
+    "fs/watch": {
+      "params": "FsWatchParams",
+      "required": ["path", "watchId"],
+      "properties": ["path", "watchId"]
+    },
+    "fs/writeFile": {
+      "params": "FsWriteFileParams",
+      "required": ["dataBase64", "path"],
+      "properties": ["dataBase64", "path"]
+    },
+    "fuzzyFileSearch": {
+      "params": "FuzzyFileSearchParams",
+      "required": ["query", "roots"],
+      "properties": ["cancellationToken", "query", "roots"]
+    },
+    "fuzzyFileSearch/sessionStart": {
+      "params": "FuzzyFileSearchSessionStartParams",
+      "required": ["roots", "sessionId"],
+      "properties": ["roots", "sessionId"]
+    },
+    "fuzzyFileSearch/sessionStop": {
+      "params": "FuzzyFileSearchSessionStopParams",
+      "required": ["sessionId"],
+      "properties": ["sessionId"]
+    },
+    "fuzzyFileSearch/sessionUpdate": {
+      "params": "FuzzyFileSearchSessionUpdateParams",
+      "required": ["query", "sessionId"],
+      "properties": ["query", "sessionId"]
+    },
+    "hooks/list": {
+      "params": "HooksListParams",
+      "required": [],
+      "properties": ["cwds"]
+    },
+    "initialize": {
+      "params": "InitializeParams",
+      "required": ["clientInfo"],
+      "properties": ["capabilities", "clientInfo"]
+    },
+    "marketplace/add": {
+      "params": "MarketplaceAddParams",
+      "required": ["source"],
+      "properties": ["refName", "source", "sparsePaths"]
+    },
+    "marketplace/remove": {
+      "params": "MarketplaceRemoveParams",
+      "required": ["marketplaceName"],
+      "properties": ["marketplaceName"]
+    },
+    "marketplace/upgrade": {
+      "params": "MarketplaceUpgradeParams",
+      "required": [],
+      "properties": ["marketplaceName"]
+    },
+    "mcpServer/event/stream/start": {
+      "params": "McpServerEventStreamStartParams",
+      "required": ["arguments", "name", "server", "subscriptionId", "threadId"],
+      "properties": ["_meta", "arguments", "name", "server", "subscriptionId", "threadId"]
+    },
+    "mcpServer/event/stream/stop": {
+      "params": "McpServerEventStreamStopParams",
+      "required": ["subscriptionId"],
+      "properties": ["subscriptionId"]
+    },
+    "mcpServer/oauth/login": {
+      "params": "McpServerOauthLoginParams",
+      "required": ["name"],
+      "properties": ["clientRegistration", "name", "scopes", "threadId", "timeoutSecs"]
+    },
+    "mcpServer/resource/read": {
+      "params": "McpResourceReadParams",
+      "required": ["server", "uri"],
+      "properties": ["connectorId", "originCallId", "server", "target", "threadId", "uri"]
+    },
+    "mcpServer/tool/call": {
+      "params": "McpServerToolCallParams",
+      "required": ["server", "threadId", "tool"],
+      "properties": ["_meta", "arguments", "server", "threadId", "tool"]
+    },
+    "mcpServerStatus/list": {
+      "params": "ListMcpServerStatusParams",
+      "required": [],
+      "properties": ["cursor", "detail", "limit", "serverName", "threadId"]
+    },
+    "memory/reset": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "memory/status": {
+      "params": "MemoryStatusParams",
+      "required": [],
+      "properties": ["minConsolidatedThreads"]
+    },
+    "mock/experimentalMethod": {
+      "params": "MockExperimentalMethodParams",
+      "required": [],
+      "properties": ["value"]
+    },
+    "model/list": {
+      "params": "ModelListParams",
+      "required": [],
+      "properties": ["cursor", "includeHidden", "limit"]
+    },
+    "modelProvider/capabilities/read": {
+      "params": "ModelProviderCapabilitiesReadParams",
+      "required": [],
+      "properties": []
+    },
+    "permissionProfile/list": {
+      "params": "PermissionProfileListParams",
+      "required": [],
+      "properties": ["cursor", "cwd", "limit"]
+    },
+    "plugin/install": {
+      "params": "PluginInstallParams",
+      "required": ["pluginName"],
+      "properties": ["installAttemptId", "marketplacePath", "pluginName", "remoteMarketplaceName"]
+    },
+    "plugin/installed": {
+      "params": "PluginInstalledParams",
+      "required": [],
+      "properties": ["cwds", "installSuggestionPluginNames"]
+    },
+    "plugin/list": {
+      "params": "PluginListParams",
+      "required": [],
+      "properties": ["cwds", "forceRefetch", "marketplaceKinds"]
+    },
+    "plugin/read": {
+      "params": "PluginReadParams",
+      "required": ["pluginName"],
+      "properties": ["marketplacePath", "pluginName", "remoteMarketplaceName"]
+    },
+    "plugin/reconcile": {
+      "params": "PluginReconcileParams",
+      "required": [],
+      "properties": ["reason"]
+    },
+    "plugin/search": {
+      "params": "PluginSearchParams",
+      "required": ["searchTerm"],
+      "properties": ["cursor", "cwds", "limit", "scope", "searchTerm"]
+    },
+    "plugin/share/checkout": {
+      "params": "PluginShareCheckoutParams",
+      "required": ["remotePluginId"],
+      "properties": ["remotePluginId"]
+    },
+    "plugin/share/delete": {
+      "params": "PluginShareDeleteParams",
+      "required": ["remotePluginId"],
+      "properties": ["remotePluginId"]
+    },
+    "plugin/share/list": {
+      "params": "PluginShareListParams",
+      "required": [],
+      "properties": []
+    },
+    "plugin/share/save": {
+      "params": "PluginShareSaveParams",
+      "required": ["pluginPath"],
+      "properties": ["discoverability", "pluginPath", "remotePluginId", "shareTargets"]
+    },
+    "plugin/share/updateTargets": {
+      "params": "PluginShareUpdateTargetsParams",
+      "required": ["discoverability", "remotePluginId", "shareTargets"],
+      "properties": ["discoverability", "remotePluginId", "shareTargets"]
+    },
+    "plugin/skill/read": {
+      "params": "PluginSkillReadParams",
+      "required": ["remoteMarketplaceName", "remotePluginId", "skillName"],
+      "properties": ["remoteMarketplaceName", "remotePluginId", "skillName"]
+    },
+    "plugin/uninstall": {
+      "params": "PluginUninstallParams",
+      "required": ["pluginId"],
+      "properties": ["pluginId"]
+    },
+    "process/kill": {
+      "params": "ProcessKillParams",
+      "required": ["processHandle"],
+      "properties": ["processHandle"]
+    },
+    "process/resizePty": {
+      "params": "ProcessResizePtyParams",
+      "required": ["processHandle", "size"],
+      "properties": ["processHandle", "size"]
+    },
+    "process/spawn": {
+      "params": "ProcessSpawnParams",
+      "required": ["command", "cwd", "processHandle"],
+      "properties": [
+        "command",
+        "cwd",
+        "env",
+        "outputBytesCap",
+        "processHandle",
+        "size",
+        "streamStdin",
+        "streamStdoutStderr",
+        "timeoutMs",
+        "tty"
+      ]
+    },
+    "process/writeStdin": {
+      "params": "ProcessWriteStdinParams",
+      "required": ["processHandle"],
+      "properties": ["closeStdin", "deltaBase64", "processHandle"]
+    },
+    "project/create": {
+      "params": "ProjectCreateParams",
+      "required": ["idempotencyKey", "name", "roots"],
+      "properties": ["idempotencyKey", "metadata", "name", "roots"]
+    },
+    "project/delete": {
+      "params": "ProjectDeleteParams",
+      "required": ["projectId"],
+      "properties": ["projectId"]
+    },
+    "project/import": {
+      "params": "ProjectImportParams",
+      "required": ["idempotencyKey", "name", "roots"],
+      "properties": ["idempotencyKey", "metadata", "name", "roots", "threads"]
+    },
+    "project/list": {
+      "params": "ProjectListParams",
+      "required": [],
+      "properties": ["cursor", "limit", "sortDirection", "sortKey"]
+    },
+    "project/move": {
+      "params": "ProjectMoveParams",
+      "required": ["projectId"],
+      "properties": ["beforeProjectId", "projectId"]
+    },
+    "project/read": {
+      "params": "ProjectReadParams",
+      "required": ["projectId"],
+      "properties": ["projectId"]
+    },
+    "project/update": {
+      "params": "ProjectUpdateParams",
+      "required": ["projectId"],
+      "properties": ["metadata", "name", "projectId", "roots"]
+    },
+    "remoteControl/client/list": {
+      "params": "RemoteControlClientsListParams",
+      "required": ["environmentId"],
+      "properties": ["cursor", "environmentId", "limit", "order"]
+    },
+    "remoteControl/client/revoke": {
+      "params": "RemoteControlClientsRevokeParams",
+      "required": ["clientId", "environmentId"],
+      "properties": ["clientId", "environmentId"]
+    },
+    "remoteControl/disable": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "remoteControl/enable": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "remoteControl/pairing/start": {
+      "params": "RemoteControlPairingStartParams",
+      "required": [],
+      "properties": ["manualCode"]
+    },
+    "remoteControl/pairing/status": {
+      "params": "RemoteControlPairingStatusParams",
+      "required": [],
+      "properties": ["manualPairingCode", "pairingCode"]
+    },
+    "remoteControl/status/read": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "review/start": {
+      "params": "ReviewStartParams",
+      "required": ["target", "threadId"],
+      "properties": ["delivery", "target", "threadId"]
+    },
+    "rollout/compress": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "server/diagnostics": {
+      "params": "ServerDiagnosticsParams",
+      "required": [],
+      "properties": []
+    },
+    "skills/config/write": {
+      "params": "SkillsConfigWriteParams",
+      "required": ["enabled"],
+      "properties": ["enabled", "name", "path"]
+    },
+    "skills/extraRoots/set": {
+      "params": "SkillsExtraRootsSetParams",
+      "required": ["extraRoots"],
+      "properties": ["extraRoots"]
+    },
+    "skills/list": {
+      "params": "SkillsListParams",
+      "required": [],
+      "properties": ["cwds", "forceReload"]
+    },
+    "thread/approveGuardianDeniedAction": {
+      "params": "ThreadApproveGuardianDeniedActionParams",
+      "required": ["event", "threadId"],
+      "properties": ["event", "threadId"]
+    },
+    "thread/archive": {
+      "params": "ThreadArchiveParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/attachment/add": {
+      "params": "ThreadAttachmentAddParams",
+      "required": ["attachmentType", "identityKey", "payload", "threadId"],
+      "properties": ["attachmentType", "identityKey", "payload", "threadId"]
+    },
+    "thread/attachment/list": {
+      "params": "ThreadAttachmentListParams",
+      "required": ["threadId"],
+      "properties": ["cursor", "limit", "threadId"]
+    },
+    "thread/attachment/remove": {
+      "params": "ThreadAttachmentRemoveParams",
+      "required": ["attachmentType", "identityKey", "threadId"],
+      "properties": ["attachmentType", "identityKey", "threadId"]
+    },
+    "thread/backgroundTerminals/clean": {
+      "params": "ThreadBackgroundTerminalsCleanParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/backgroundTerminals/list": {
+      "params": "ThreadBackgroundTerminalsListParams",
+      "required": ["threadId"],
+      "properties": ["cursor", "limit", "threadId"]
+    },
+    "thread/backgroundTerminals/terminate": {
+      "params": "ThreadBackgroundTerminalsTerminateParams",
+      "required": ["processId", "threadId"],
+      "properties": ["processId", "threadId"]
+    },
+    "thread/compact/start": {
+      "params": "ThreadCompactStartParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/decrement_elicitation": {
+      "params": "ThreadDecrementElicitationParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/delete": {
+      "params": "ThreadDeleteParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/fork": {
+      "params": "ThreadForkParams",
+      "required": ["threadId"],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "beforeTurnId",
+        "config",
+        "cwd",
+        "deferGoalContinuation",
+        "developerInstructions",
+        "ephemeral",
+        "excludeTurns",
+        "lastTurnId",
+        "model",
+        "modelProvider",
+        "path",
+        "permissions",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "serviceTier",
+        "threadId",
+        "threadSource"
+      ]
+    },
+    "thread/goal/clear": {
+      "params": "ThreadGoalClearParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/goal/get": {
+      "params": "ThreadGoalGetParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/goal/set": {
+      "params": "ThreadGoalSetParams",
+      "required": ["threadId"],
+      "properties": ["objective", "status", "threadId", "tokenBudget"]
+    },
+    "thread/increment_elicitation": {
+      "params": "ThreadIncrementElicitationParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/inject_items": {
+      "params": "ThreadInjectItemsParams",
+      "required": ["items", "threadId"],
+      "properties": ["items", "threadId"]
+    },
+    "thread/items/list": {
+      "params": "ThreadItemsListParams",
+      "required": ["threadId"],
+      "properties": ["cursor", "limit", "sortDirection", "threadId", "turnId"]
+    },
+    "thread/list": {
+      "params": "ThreadListParams",
+      "required": [],
+      "properties": [
+        "ancestorThreadId",
+        "archived",
+        "cursor",
+        "cwd",
+        "limit",
+        "modelProviders",
+        "originators",
+        "parentThreadId",
+        "projectId",
+        "searchTerm",
+        "sectionId",
+        "sortDirection",
+        "sortKey",
+        "sourceKinds",
+        "useStateDbOnly"
+      ]
+    },
+    "thread/loaded/list": {
+      "params": "ThreadLoadedListParams",
+      "required": [],
+      "properties": ["cursor", "limit"]
+    },
+    "thread/memoryMode/set": {
+      "params": "ThreadMemoryModeSetParams",
+      "required": ["mode", "threadId"],
+      "properties": ["mode", "threadId"]
+    },
+    "thread/metadata/update": {
+      "params": "ThreadMetadataUpdateParams",
+      "required": ["threadId"],
+      "properties": ["daybreakEnabled", "gitInfo", "projectId", "threadId"]
+    },
+    "thread/name/set": {
+      "params": "ThreadSetNameParams",
+      "required": ["name", "threadId"],
+      "properties": ["name", "threadId"]
+    },
+    "thread/queue/add": {
+      "params": "ThreadQueueAddParams",
+      "required": ["clientUserMessageId", "input", "threadId"],
+      "properties": ["clientUserMessageId", "input", "threadId"]
+    },
+    "thread/queue/delete": {
+      "params": "ThreadQueueDeleteParams",
+      "required": ["queuedSubmissionId", "threadId"],
+      "properties": ["queuedSubmissionId", "threadId"]
+    },
+    "thread/queue/list": {
+      "params": "ThreadQueueListParams",
+      "required": ["threadId"],
+      "properties": ["cursor", "limit", "threadId"]
+    },
+    "thread/queue/reorder": {
+      "params": "ThreadQueueReorderParams",
+      "required": ["queuedSubmissionIds", "threadId"],
+      "properties": ["queuedSubmissionIds", "threadId"]
+    },
+    "thread/queue/start": {
+      "params": "ThreadQueueStartParams",
+      "required": ["threadId"],
+      "properties": ["queuedSubmissionId", "threadId"]
+    },
+    "thread/queue/update": {
+      "params": "ThreadQueueUpdateParams",
+      "required": ["input", "queuedSubmissionId", "threadId"],
+      "properties": ["input", "queuedSubmissionId", "threadId"]
+    },
+    "thread/read": {
+      "params": "ThreadReadParams",
+      "required": ["threadId"],
+      "properties": ["includeTurns", "threadId"]
+    },
+    "thread/realtime/appendAudio": {
+      "params": "ThreadRealtimeAppendAudioParams",
+      "required": ["audio", "threadId"],
+      "properties": ["audio", "threadId"]
+    },
+    "thread/realtime/appendSpeech": {
+      "params": "ThreadRealtimeAppendSpeechParams",
+      "required": ["text", "threadId"],
+      "properties": ["text", "threadId"]
+    },
+    "thread/realtime/appendText": {
+      "params": "ThreadRealtimeAppendTextParams",
+      "required": ["text", "threadId"],
+      "properties": ["role", "text", "threadId"]
+    },
+    "thread/realtime/listVoices": {
+      "params": "ThreadRealtimeListVoicesParams",
+      "required": [],
+      "properties": []
+    },
+    "thread/realtime/start": {
+      "params": "ThreadRealtimeStartParams",
+      "required": ["outputModality", "threadId"],
+      "properties": [
+        "backendReasoningStatus",
+        "clientManagedHandoffs",
+        "codexResponseHandoffChannelPrefixes",
+        "codexResponseHandoffMode",
+        "codexResponseItemPrefix",
+        "codexResponsesAsItems",
+        "delegationAckFiller",
+        "flushTranscriptTailOnSessionEnd",
+        "includeStartupContext",
+        "initialItems",
+        "model",
+        "outputModality",
+        "prompt",
+        "realtimeEndInstructions",
+        "realtimeSessionId",
+        "realtimeStartInstructions",
+        "threadId",
+        "transport",
+        "version",
+        "voice"
+      ]
+    },
+    "thread/realtime/stop": {
+      "params": "ThreadRealtimeStopParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/resume": {
+      "params": "ThreadResumeParams",
+      "required": ["threadId"],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "excludeTurns",
+        "history",
+        "initialTurnsPage",
+        "model",
+        "modelProvider",
+        "path",
+        "permissions",
+        "personality",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "serviceTier",
+        "threadId"
+      ]
+    },
+    "thread/revert": {
+      "params": "ThreadRevertParams",
+      "required": ["beforeTurnId", "threadId"],
+      "properties": ["beforeTurnId", "threadId"]
+    },
+    "thread/search": {
+      "params": "ThreadSearchParams",
+      "required": ["searchTerm"],
+      "properties": [
+        "archived",
+        "cursor",
+        "limit",
+        "searchTerm",
+        "sortDirection",
+        "sortKey",
+        "sourceKinds"
+      ]
+    },
+    "thread/searchOccurrences": {
+      "params": "ThreadSearchOccurrencesParams",
+      "required": ["searchTerm", "threadId"],
+      "properties": ["cursor", "limit", "searchTerm", "threadId"]
+    },
+    "thread/section/move": {
+      "params": "ThreadSectionMoveParams",
+      "required": ["sectionId", "threadId"],
+      "properties": ["beforeThreadId", "sectionId", "threadId"]
+    },
+    "thread/settings/update": {
+      "params": "ThreadSettingsUpdateParams",
+      "required": ["threadId"],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "collaborationMode",
+        "cwd",
+        "disabledPluginIds",
+        "effort",
+        "model",
+        "multiAgentMode",
+        "permissions",
+        "personality",
+        "sandboxPolicy",
+        "serviceTier",
+        "summary",
+        "threadId"
+      ]
+    },
+    "thread/shellCommand": {
+      "params": "ThreadShellCommandParams",
+      "required": ["command", "threadId"],
+      "properties": ["command", "threadId", "timeoutMs"]
+    },
+    "thread/start": {
+      "params": "ThreadStartParams",
+      "required": [],
+      "properties": [
+        "allowProviderModelFallback",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "daybreakEnabled",
+        "developerInstructions",
+        "dynamicTools",
+        "environments",
+        "ephemeral",
+        "experimentalRawEvents",
+        "historyMode",
+        "mockExperimentalField",
+        "model",
+        "modelProvider",
+        "multiAgentMode",
+        "permissions",
+        "personality",
+        "projectId",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "selectedCapabilityRoots",
+        "serviceName",
+        "serviceTier",
+        "sessionStartSource",
+        "threadSource"
+      ]
+    },
+    "thread/timeline/list": {
+      "params": "ThreadTimelineListParams",
+      "required": ["threadId"],
+      "properties": ["cursor", "limit", "threadId"]
+    },
+    "thread/turns/list": {
+      "params": "ThreadTurnsListParams",
+      "required": ["threadId"],
+      "properties": ["cursor", "itemsView", "limit", "sortDirection", "threadId"]
+    },
+    "thread/unarchive": {
+      "params": "ThreadUnarchiveParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "thread/unsubscribe": {
+      "params": "ThreadUnsubscribeParams",
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "threadSection/create": {
+      "params": "ThreadSectionCreateParams",
+      "required": ["name"],
+      "properties": ["appearance", "name"]
+    },
+    "threadSection/delete": {
+      "params": "ThreadSectionDeleteParams",
+      "required": ["sectionId"],
+      "properties": ["sectionId"]
+    },
+    "threadSection/list": {
+      "params": "ThreadSectionListParams",
+      "required": [],
+      "properties": ["cursor", "limit"]
+    },
+    "threadSection/update": {
+      "params": "ThreadSectionUpdateParams",
+      "required": ["name", "sectionId"],
+      "properties": ["appearance", "name", "sectionId"]
+    },
+    "turn/interrupt": {
+      "params": "TurnInterruptParams",
+      "required": ["threadId", "turnId"],
+      "properties": ["threadId", "turnId"]
+    },
+    "turn/settings/update": {
+      "params": "TurnSettingsUpdateParams",
+      "required": ["threadId", "turnId"],
+      "properties": [
+        "approvalsReviewer",
+        "effort",
+        "model",
+        "serviceTier",
+        "summary",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "turn/start": {
+      "params": "TurnStartParams",
+      "required": ["input", "threadId"],
+      "properties": [
+        "additionalContext",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "clientUserMessageId",
+        "collaborationMode",
+        "cwd",
+        "cyberAccessProgram",
+        "disabledPluginIds",
+        "effort",
+        "environments",
+        "input",
+        "model",
+        "multiAgentMode",
+        "outputSchema",
+        "permissions",
+        "personality",
+        "responsesapiClientMetadata",
+        "runtimeWorkspaceRoots",
+        "sandboxPolicy",
+        "serviceTier",
+        "serviceTierForTurn",
+        "summary",
+        "threadId",
+        "toolOutput",
+        "turnTrigger"
+      ]
+    },
+    "turn/steer": {
+      "params": "TurnSteerParams",
+      "required": ["expectedTurnId", "input", "threadId"],
+      "properties": [
+        "additionalContext",
+        "clientUserMessageId",
+        "expectedTurnId",
+        "input",
+        "responsesapiClientMetadata",
+        "threadId"
+      ]
+    },
+    "userVerification/cancel": {
+      "params": "UserVerificationCancelParams",
+      "required": ["requestId"],
+      "properties": ["requestId"]
+    },
+    "userVerification/delete": {
+      "params": "UserVerificationDeleteParams",
+      "required": [],
+      "properties": []
+    },
+    "userVerification/enroll": {
+      "params": "UserVerificationEnrollParams",
+      "required": [],
+      "properties": []
+    },
+    "userVerification/status": {
+      "params": "UserVerificationStatusParams",
+      "required": [],
+      "properties": []
+    },
+    "userVerification/verify": {
+      "params": "UserVerificationVerifyParams",
+      "required": ["challenge", "description", "title"],
+      "properties": ["challenge", "description", "title"]
+    },
+    "windowsSandbox/readiness": {
+      "params": null,
+      "required": [],
+      "properties": []
+    },
+    "windowsSandbox/setupStart": {
+      "params": "WindowsSandboxSetupStartParams",
+      "required": ["mode"],
+      "properties": ["cwd", "mode"]
+    }
+  },
+  "threadItemTypes": [
+    "agentMessage",
+    "collabAgentToolCall",
+    "commandExecution",
+    "contextCompaction",
+    "dynamicToolCall",
+    "enteredReviewMode",
+    "exitedReviewMode",
+    "fileChange",
+    "functionCallOutput",
+    "hookPrompt",
+    "imageGeneration",
+    "imageView",
+    "mcpToolCall",
+    "plan",
+    "reasoning",
+    "sleep",
+    "subAgentActivity",
+    "userMessage",
+    "webSearch"
+  ],
+  "enums": {
+    "TurnStatus": ["completed", "failed", "inProgress", "interrupted"],
+    "CommandExecutionStatus": ["completed", "declined", "failed", "inProgress"],
+    "PatchApplyStatus": ["completed", "declined", "failed", "inProgress"],
+    "McpToolCallStatus": ["completed", "failed", "inProgress"],
+    "DynamicToolCallStatus": ["completed", "failed", "inProgress"],
+    "AskForApproval": ["never", "on-request", "untrusted", "{granular}"],
+    "SandboxMode": ["danger-full-access", "read-only", "workspace-write"],
+    "ModeKind": ["default", "plan"]
+  }
+}

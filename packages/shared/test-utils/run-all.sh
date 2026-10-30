@@ -270,6 +270,10 @@ run_harness packages/shared/test-utils/fake-claude/transcripts.test.ts
 run_harness packages/shared/test-utils/fake-claude/fake-claude-streams.test.ts
 # expectKnownBug: marks one assertion as a known open bug without masking setup failures.
 run_harness packages/shared/test-utils/known-bug.test.ts
+# Fake `codex app-server` (Codex chat e2e + driver tests): JSON-RPC defaults as recorded, scripts, replay.
+run_harness packages/shared/test-utils/fake-codex/fake-codex.test.ts
+# Recorded real codex app-server transcripts: shape, pinned version, no personal data.
+run_harness packages/shared/test-utils/fake-codex/transcripts.test.ts
 # `slay hub` end-to-end: boots two REAL hubs in temp roots, then drives ls /
 # --hub targeting / stop through the built CLI bundle, and asserts the
 # supervised-hub refusal. Spawns hubs directly (never `hub start`), so no
@@ -605,6 +609,10 @@ run_harness packages/domains/terminal/src/server/adapters/hook-driven-modes.test
 # Terminal — Codex Chat (codex-chat mode) driver + transport + adapter
 run_harness packages/domains/terminal/src/server/agents/codex/codex-app-server-client.test.ts
 run_harness packages/domains/terminal/src/server/agents/codex/codex-chat-session.test.ts
+# The Codex driver against the fake app-server as a child process + its open bugs (expectKnownBug).
+run_harness packages/domains/terminal/src/server/agents/codex/codex-chat-session.fake.test.ts
+# Codex protocol drift check: driver vs the pinned CLI's protocol surface + recorded runs.
+run_harness packages/domains/terminal/src/server/agents/codex/codex-protocol-drift.test.ts
 run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)

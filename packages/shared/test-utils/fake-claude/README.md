@@ -13,6 +13,7 @@ no account, no build step (plain ESM, Node builtins only).
 | `transcript.ts` | Format of the recorded real-CLI runs, plus readers for it. |
 | `transcripts/*.jsonl` | Real `claude` 2.1.312 runs (`--model haiku`), redacted. |
 | `fake-claude.test.ts`, `transcripts.test.ts` | The fake's own tests and the fixture hygiene check. |
+| `../fake-cli/` | Core shared with `../fake-codex`: the wrapper, scenario epochs, spawn logs, the transcript format. |
 
 Users of the fake:
 

@@ -1,0 +1,9 @@
+{"kind":"header","recipe":"resume-missing","cliVersion":"0.159.2","model":"gpt-6-luna","recordedAt":"2026-10-30","note":"thread/resume of a thread id that does not exist."}
+{"kind":"process","index":0,"argv":["app-server"]}
+{"kind":"stdin","t":1,"line":"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"slayzone\",\"title\":\"SlayZone\",\"version\":\"1.0\"},\"capabilities\":{\"experimentalApi\":true,\"requestAttestation\":false}}}"}
+{"kind":"stdout","t":92,"line":"{\"id\":1,\"result\":{\"userAgent\":\"slayzone/0.159.2 (Mac OS 26.5.2; arm64) iTerm.app/3.7.6 (slayzone; 1.0)\",\"codexHome\":\"/Users/user/.codex\",\"platformFamily\":\"unix\",\"platformOs\":\"macos\"}}"}
+{"kind":"stdin","t":92,"line":"{\"jsonrpc\":\"2.0\",\"method\":\"initialized\"}"}
+{"kind":"stdin","t":93,"line":"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"thread/resume\",\"params\":{\"threadId\":\"{{threadId}}\",\"cwd\":\"{{cwd}}\",\"approvalPolicy\":\"on-request\",\"sandbox\":\"workspace-write\"}}"}
+{"kind":"stdout","t":93,"line":"{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"host.local\",\"installationId\":\"00000000-0000-4000-8000-000000000000\",\"environmentId\":null},\"emittedAtMs\":1793377432491}"}
+{"kind":"stdout","t":124,"line":"{\"error\":{\"code\":-32600,\"message\":\"no rollout found for thread id {{threadId}}\"},\"id\":2}"}
+{"kind":"exit","t":130,"code":0,"signal":null}
