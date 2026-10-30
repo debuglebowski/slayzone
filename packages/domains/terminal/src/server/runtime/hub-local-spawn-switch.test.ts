@@ -71,7 +71,8 @@ function fakeChild(): ChildProcess {
   return Object.assign(new EventEmitter(), {
     stdout: new PassThrough(),
     stderr: new PassThrough(),
-    stdin: { write: () => true },
+    // A real stream: the chat driver waits for its first write to be flushed.
+    stdin: new PassThrough(),
     pid: 99999,
     kill: () => true
   }) as unknown as ChildProcess

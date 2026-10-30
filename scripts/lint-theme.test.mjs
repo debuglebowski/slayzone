@@ -8,7 +8,7 @@
  */
 import { afterEach, expect, test } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,12 +17,17 @@ const GUARD = join(dirname(fileURLToPath(import.meta.url)), 'lint-theme.sh')
 const MOBILE = 'packages/apps/mobile/src'
 const THEME_MODULE = `const PALETTE = { background: '#282c34', border: 'rgba(255, 255, 255, 0.15)' }\n`
 // The strict (no chromatic palette) paths: the guard fails closed when one is missing.
-const CHAT = 'packages/domains/task-terminals/src/client/chat'
-const STRICT_FILES = {
-  [`${CHAT}/index.ts`]: 'export {}\n',
-  'packages/domains/terminal/src/client/BackgroundJobsBanner.tsx': 'export {}\n',
-  'packages/shared/diff-view/src/index.ts': 'export {}\n'
-}
+// Read from the guard itself, so a path added there needs no edit here: a file
+// entry gets a stub of its own, a folder entry an index.ts inside it.
+const STRICT_PATHS = readFileSync(GUARD, 'utf8')
+  .match(/^STRICT_PATHS=\(\n([\s\S]*?)^\)/m)[1]
+  .split('\n')
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith('#'))
+const STRICT_FILES = Object.fromEntries(
+  STRICT_PATHS.map((p) => [/\.tsx?$/.test(p) ? p : `${p}/index.ts`, 'export {}\n'])
+)
+const CHAT = STRICT_PATHS.find((p) => p.endsWith('/client/chat'))
 
 const roots = []
 afterEach(() => {
