@@ -12,7 +12,8 @@
  *     delivered and the next result as the answer.
  *
  * Writes are serial per tab (FIFO), and happen in the SAME tick as `accept` when
- * the process is ready — the agent sees messages in the order they were sent. A
+ * the process is ready — the agent sees messages in the order they were sent
+ * (a message whose files are still being read holds the ones behind it). A
  * write the link could not deliver is retried with the same id (the computer
  * writes a repeated id once) until {@link OutboxDeps.retryWindowMs}, then failed.
  *
@@ -43,8 +44,14 @@ export interface OutboxProcess {
   readonly ready: boolean
   /** The agent acks messages itself (lifecycle / replay), so a write alone is not delivery. */
   readonly confirmsDelivery: boolean
-  /** Write the message. Rejects with a `ChatWriteError` when it did not reach the process. */
-  send(message: OutgoingUserMessage): Promise<void>
+  /**
+   * Build what a message with attached files is written as (reads the files).
+   * Runs BEFORE the message counts as sending: a failure fails the message with
+   * its reason and never starts a turn. Not called for text-only messages.
+   */
+  prepare?(message: OutgoingUserMessage): Promise<unknown>
+  /** Write the message (as `prepared`). Rejects with a `ChatWriteError` when it did not reach the process. */
+  send(message: OutgoingUserMessage, prepared?: unknown): Promise<void>
 }
 
 export interface OutboxStateChange {
@@ -346,6 +353,39 @@ export class ChatOutbox {
     }
     this.queue.shift()
     this.writing = id
+    // Text needs nothing read: it is written in this tick, as it always was.
+    if (!proc.prepare || entry.message.content.every((b) => b.type === 'text')) {
+      this.send(proc, entry, id, undefined)
+      return
+    }
+    let prepared: Promise<unknown>
+    try {
+      prepared = proc.prepare(entry.message)
+    } catch (err) {
+      prepared = Promise.reject(err)
+    }
+    prepared.then(
+      (payload) => {
+        // Withdrawn (Stop) while its files were read.
+        if (entry.state !== 'queued') return this.finishWrite(id)
+        if (!proc.ready || this.deps.current() !== proc) {
+          // The process went away meanwhile: the next one sends it, in order.
+          if (this.writing === id) this.writing = null
+          this.queue.unshift(id)
+          this.pump()
+          return
+        }
+        this.send(proc, entry, id, payload)
+      },
+      (err: unknown) => {
+        // Nothing was written and no turn started: the message fails with why.
+        if (entry.state === 'queued') this.set(entry, 'failed', message(err))
+        this.finishWrite(id)
+      }
+    )
+  }
+
+  private send(proc: OutboxProcess, entry: Entry, id: string, prepared: unknown): void {
     entry.gen = proc.gen
     entry.written = false
     entry.cli = 'none'
@@ -353,7 +393,7 @@ export class ChatOutbox {
     this.deps.onWriting(id)
     let sent: Promise<void>
     try {
-      sent = proc.send(entry.message)
+      sent = proc.send(entry.message, prepared)
     } catch (err) {
       sent = Promise.reject(err)
     }

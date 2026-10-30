@@ -33,6 +33,7 @@
     "@slayzone/computers": "workspace:*",
     "@slayzone/settings-core": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-artifacts": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/telemetry": "workspace:*",

@@ -17,10 +17,12 @@
  */
 import type { AgentEvent, OutgoingUserMessage } from '@slayzone/terminal-contracts'
 import { userMessageText } from '@slayzone/terminal-contracts'
-import type { ChatDriverContext, ChatSessionDriver } from '../agents/types'
+import type { ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from '../agents/types'
 import { createLineSplitter, type ChatProcHandle } from './chat-proc-handle'
 import type { OpenToolBound } from './chat-watchdog'
 import type { OutboxProcess } from './chat-outbox'
+
+const NO_ATTACHMENTS = "This agent can't take attached files. Send the message without them."
 
 const STDERR_FLUSH_INTERVAL_MS = 100
 /** Largest stderr event; the rest of a burst is summarized. */
@@ -202,9 +204,20 @@ export class ChatProcess implements OutboxProcess {
     return this.driver.confirmsDelivery === true
   }
 
-  send(message: OutgoingUserMessage): Promise<void> {
+  /** Reads a message's attached files (the driver builds the line). Agents without it take text only. */
+  prepare(message: OutgoingUserMessage): Promise<unknown> {
+    if (this.driver.prepareUserTurn) return this.driver.prepareUserTurn(message)
+    return Promise.reject(new Error(NO_ATTACHMENTS))
+  }
+
+  send(message: OutgoingUserMessage, prepared?: unknown): Promise<void> {
     if (!this.ready) return Promise.reject(new Error('the agent process is not running'))
-    if (this.driver.sendUserTurn) return this.driver.sendUserTurn(message)
+    if (this.driver.sendUserTurn) {
+      return this.driver.sendUserTurn(message, prepared as PreparedUserTurn | undefined)
+    }
+    // A text-only driver (Codex): attached files would silently vanish — refuse.
+    if (message.content.some((b) => b.type !== 'text'))
+      return Promise.reject(new Error(NO_ATTACHMENTS))
     return Promise.resolve(this.driver.sendUserMessage(userMessageText(message.content)))
   }
 

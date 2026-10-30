@@ -228,3 +228,12 @@ test('input_json deltas never become a saved block of their own', () => {
   ])
   expect(saved).toEqual([{ kind: 'interrupted' }])
 })
+
+test('cli-command-details describes the CLI, not the conversation: live only, never saved', () => {
+  const s = new ChatEventSplitter()
+  const event = {
+    kind: 'cli-command-details' as const,
+    commands: [{ name: 'compact', description: 'Free up context', argumentHint: '' }]
+  }
+  expect(s.route(event)).toEqual({ live: [event], saved: [] })
+})

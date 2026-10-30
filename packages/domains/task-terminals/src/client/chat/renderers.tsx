@@ -67,6 +67,7 @@ import {
 import { UserMessageStatus } from './UserMessageStatus'
 import { UserMessageActions } from './UserMessageActions'
 import { ConversationBranchRow } from './ConversationBranchRow'
+import { UserMessageAttachments } from './UserMessageAttachments'
 import { AgentProblemCard } from './AgentProblemCard'
 
 // --- Helpers ---
@@ -92,7 +93,8 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
         {formatTime(item.timestamp)}
       </span>
       <div className="max-w-[85%] min-w-0 rounded-lg border border-primary/25 bg-primary/5 shadow-sm px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
-        <HighlightedText text={item.text} />
+        <UserMessageAttachments attachments={item.attachments} />
+        {item.text && <HighlightedText text={item.text} />}
       </div>
     </div>
   )

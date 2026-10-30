@@ -51,7 +51,13 @@ import {
 const DAY = 24 * 60 * 60 * 1000
 const HOUR = 60 * 60 * 1000
 const ON = { SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90' }
-const SWEPT = new Set(['chat_events', 'agent_prompts', 'chat_queue', 'agent_turns'])
+const SWEPT = new Set([
+  'chat_events',
+  'agent_prompts',
+  'chat_queue',
+  'agent_turns',
+  'chat_tab_state'
+])
 
 /** `datetime('now')` shape, for the TEXT clocks. */
 const sqlTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
@@ -129,6 +135,18 @@ function seed(raw: Database.Database, now: number, oldAge: number, newAge: numbe
   )
   queue.run('q-old', 'GONE-queue-send', 'GONE-queue-original', 0, sqlTime(old))
   queue.run('q-new', 'KEEP-queue-send', 'KEEP-queue-original', 1, sqlTime(recent))
+
+  // An unsent draft is session content too (one row per tab: a second tab for the old one).
+  raw
+    .prepare(
+      `INSERT INTO terminal_tabs (id, task_id, mode, is_main, created_at) VALUES ('tab2', 't1', 'claude-chat', 0, ?)`
+    )
+    .run(sqlTime(old))
+  const draft = raw.prepare(
+    `INSERT INTO chat_tab_state (tab_id, draft_text, updated_at) VALUES (?, ?, ?)`
+  )
+  draft.run('tab2', 'GONE-draft', old)
+  draft.run('tab1', 'KEEP-draft', recent)
 
   const turn = raw.prepare(
     `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at)
@@ -252,6 +270,9 @@ test('91 days old is swept and 89 days old is kept, per table', async () => {
   expect(raw.prepare('SELECT id FROM chat_queue ORDER BY id').all(), 'chat_queue').toEqual([
     { id: 'q-new' }
   ])
+  expect(raw.prepare('SELECT tab_id FROM chat_tab_state').all(), 'chat_tab_state').toEqual([
+    { tab_id: 'tab1' }
+  ])
   expect(
     raw.prepare('SELECT id, snapshot_sha, prompt_preview FROM agent_turns ORDER BY id').all(),
     'agent_turns: both rows (and their snapshot) stay, the old preview is blanked'
@@ -263,7 +284,7 @@ test('91 days old is swept and 89 days old is kept, per table', async () => {
     { deleted: report.deleted, redacted: report.redacted, failed: report.failed },
     'report counts'
   ).toEqual({
-    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1 },
+    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1, chat_tab_state: 1 },
     redacted: { agent_turns: 1 },
     failed: []
   })
@@ -278,7 +299,7 @@ test('the boundary is the period itself: 90 days plus an hour goes, minus an hou
     { deleted: report.deleted, redacted: report.redacted },
     'only the rows past the cutoff, on the TEXT and the ms clocks alike'
   ).toEqual({
-    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1 },
+    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1, chat_tab_state: 1 },
     redacted: { agent_turns: 1 }
   })
 })
@@ -540,7 +561,8 @@ test('one audit line per sweep: counts, cutoff and duration, no content', async 
   expect(line.detail.deleted, 'per-table counts, agent_prompts included').toEqual([
     { table: 'chat_events', rows: 3 },
     { table: 'agent_prompts', rows: 1 },
-    { table: 'chat_queue', rows: 1 }
+    { table: 'chat_queue', rows: 1 },
+    { table: 'chat_tab_state', rows: 1 }
   ])
   expect(line.detail.redacted, 'redaction count').toEqual([
     { table: 'agent_turns', column: 'prompt_preview', rows: 1 }

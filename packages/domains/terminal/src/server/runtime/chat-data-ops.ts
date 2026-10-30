@@ -20,8 +20,21 @@ import {
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { ChatEffort } from '@slayzone/terminal-contracts'
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
-import type { CliCommandList } from '@slayzone/terminal-contracts'
-import { getChatCliSnapshot, saveChatCliSnapshot } from '../chat-cli-snapshot-store'
+import type { CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
+import {
+  getChatCliCommandDetails,
+  getChatCliSnapshot,
+  saveChatCliCommandDetails,
+  saveChatCliSnapshot
+} from '../chat-cli-snapshot-store'
+import {
+  userMessageAttachments,
+  type ChatAttachment,
+  type UserContentBlock
+} from '@slayzone/terminal-contracts'
+import type { AttachmentLookup } from './chat-attachment-guard'
+import { getChatTabState, saveChatDraft, saveChatScroll } from '../chat-tab-state-store'
+import type { ChatDraft, ChatScrollAnchor, ChatTabState } from '@slayzone/terminal-contracts'
 
 export interface ProviderConfigEntry {
   conversationId?: string | null
@@ -112,8 +125,66 @@ export interface ChatDataOps {
   getAutocompleteUsage(): Promise<UsageMap>
   /** Store the slash commands a chat CLI advertised, for the task's project + mode. */
   saveCliSnapshot(taskId: string, mode: string, list: CliCommandList): Promise<void>
+  /** Store the CLI's command descriptions + argument hints, for the task's project + mode. */
+  saveCliCommandDetails(taskId: string, mode: string, details: CliCommandDetails): Promise<void>
   /** Last stored slash-command list for the task's project + mode, or null. */
   getCliSnapshot(taskId: string, mode: string): Promise<CliCommandList | null>
+  /** Stored command descriptions + argument hints for the task's project + mode, or null. */
+  getCliCommandDetails(taskId: string, mode: string): Promise<CliCommandDetails | null>
+  /** A chat tab's saved draft + scroll anchor, or null. */
+  getTabState(tabId: string): Promise<ChatTabState | null>
+  /** Save the draft; the new revision, or null when the tab is gone. */
+  saveTabDraft(tabId: string, draft: ChatDraft): Promise<{ rev: number } | null>
+  saveTabScroll(tabId: string, anchor: ChatScrollAnchor): Promise<void>
+  /** What the attachment gate reads (`chat-attachment-guard.ts`). */
+  attachments: AttachmentLookup
+}
+
+/** The attachment gate's reads, over the local DB. */
+export function createDbAttachmentLookup(db: SlayzoneDb): AttachmentLookup {
+  return {
+    tab: async (tabId) => {
+      const row = await db.get<{ task_id: string; mode: string }>(
+        `SELECT task_id, mode FROM terminal_tabs WHERE id = ?`,
+        [tabId]
+      )
+      return row ? { taskId: row.task_id, mode: row.mode } : null
+    },
+    artifacts: async (ids) => {
+      if (ids.length === 0) return new Map()
+      const rows = await db.all<{ id: string; task_id: string; content_hash: string | null }>(
+        `SELECT a.id, a.task_id, v.content_hash
+           FROM task_artifacts a
+           LEFT JOIN artifact_versions v ON v.id = a.current_version_id
+          WHERE a.id IN (${ids.map(() => '?').join(',')})`,
+        ids
+      )
+      return new Map(rows.map((r) => [r.id, { taskId: r.task_id, contentHash: r.content_hash }]))
+    },
+    queued: async (tabId, exceptId) => {
+      const rows = await db.all<{ id: string; content: string | null }>(
+        `SELECT id, content FROM chat_queue WHERE tab_id = ? AND content IS NOT NULL`,
+        [tabId]
+      )
+      const out: ChatAttachment[] = []
+      for (const row of rows) {
+        if (row.id === exceptId || !row.content) continue
+        try {
+          const content = JSON.parse(row.content) as unknown
+          if (Array.isArray(content))
+            out.push(...userMessageAttachments(content as UserContentBlock[]))
+        } catch {
+          /* corrupt row: nothing attached */
+        }
+      }
+      return out
+    },
+    hasVersion: async (artifactId, contentHash) =>
+      !!(await db.get(
+        `SELECT 1 FROM artifact_versions WHERE artifact_id = ? AND content_hash = ? LIMIT 1`,
+        [artifactId, contentHash]
+      ))
+  }
 }
 
 /**
@@ -298,6 +369,17 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
 
     saveCliSnapshot: (taskId, mode, list) => saveChatCliSnapshot(db, taskId, mode, list),
 
-    getCliSnapshot: (taskId, mode) => getChatCliSnapshot(db, taskId, mode)
+    saveCliCommandDetails: (taskId, mode, details) =>
+      saveChatCliCommandDetails(db, taskId, mode, details),
+
+    getCliSnapshot: (taskId, mode) => getChatCliSnapshot(db, taskId, mode),
+
+    getCliCommandDetails: (taskId, mode) => getChatCliCommandDetails(db, taskId, mode),
+
+    getTabState: (tabId) => getChatTabState(db, tabId),
+    saveTabDraft: (tabId, draft) => saveChatDraft(db, tabId, draft),
+    saveTabScroll: (tabId, anchor) => saveChatScroll(db, tabId, anchor),
+
+    attachments: createDbAttachmentLookup(db)
   }
 }

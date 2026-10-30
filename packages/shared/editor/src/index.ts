@@ -3,6 +3,7 @@ export { MarkdownSettingsPopover } from './markdown-settings-popover'
 export {
   useImagePasteDrop,
   extractImageFilesFromDataTransfer,
+  extractFilesFromDataTransfer,
   type UseImagePasteDropOpts,
   type UseImagePasteDropReturn
 } from './use-image-paste-drop'

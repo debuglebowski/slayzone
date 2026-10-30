@@ -375,3 +375,140 @@ test('heldByCli lists messages the CLI holds queued, not the one running', async
   h.outbox.onLifecycle(1, 'u2', 'started')
   expect(h.outbox.heldByCli(1)).toEqual([])
 })
+
+// ---- prepare (attachments are read before the message counts as sending) ----
+
+/** A message with an attached file (only those are prepared). */
+const fileMsg = (id: string): OutgoingUserMessage => ({
+  id,
+  content: [
+    {
+      type: 'attachment',
+      attachment: {
+        artifactId: `f-${id}`,
+        name: 'red.png',
+        kind: 'image',
+        mediaType: 'image/png',
+        size: 9
+      }
+    },
+    { type: 'text', text: id }
+  ]
+})
+
+function preparing(
+  gen: number,
+  prepare: (m: OutgoingUserMessage) => Promise<unknown>
+): FakeProc & { preparedWith: unknown[] } {
+  const base = proc(gen)
+  const p = Object.assign(base, {
+    preparedWith: [] as unknown[],
+    prepare,
+    send(message: OutgoingUserMessage, prepared?: unknown) {
+      p.preparedWith.push(prepared)
+      p.sent.push(message.id)
+      return Promise.resolve()
+    }
+  })
+  return p
+}
+
+test('prepare runs BEFORE sending: its result is what gets sent', async () => {
+  const p = preparing(1, async (m) => `wire:${m.id}`)
+  const h = harness(p)
+  h.outbox.accept(fileMsg('a'))
+  await flush()
+  expect(p.sent).toEqual(['a'])
+  expect(p.preparedWith).toEqual(['wire:a'])
+  expect(h.writing).toEqual(['a'])
+  expect(h.states('a')).toEqual(['sending'])
+})
+
+test('a prepare failure fails the message with its reason and never starts a turn', async () => {
+  const p = preparing(1, async () => {
+    throw new Error('red.png is no longer available')
+  })
+  const h = harness(p)
+  h.outbox.accept(fileMsg('a'))
+  await flush()
+  expect(p.sent).toEqual([])
+  expect(h.writing).toEqual([])
+  expect(h.changes).toEqual([{ id: 'a', state: 'failed', error: 'red.png is no longer available' }])
+  // The next message is not blocked behind it.
+  ;(p as { prepare: (m: OutgoingUserMessage) => Promise<unknown> }).prepare = async (m) => m.id
+  h.outbox.accept(fileMsg('b'))
+  await flush()
+  expect(p.sent).toEqual(['b'])
+})
+
+test('order is kept while a slow prepare runs', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  const p = preparing(1, async (m) => {
+    if (m.id === 'a') await gate
+    return m.id
+  })
+  const h = harness(p)
+  h.outbox.accept(fileMsg('a'))
+  h.outbox.accept(fileMsg('b'))
+  await flush()
+  expect(p.sent).toEqual([])
+  release()
+  await flush()
+  await flush()
+  expect(p.sent).toEqual(['a', 'b'])
+})
+
+test('a message cancelled while it is prepared is not sent', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  const p = preparing(1, async () => {
+    await gate
+    return 'x'
+  })
+  const h = harness(p)
+  h.outbox.accept(fileMsg('a'))
+  await flush()
+  h.outbox.cancel('a')
+  release()
+  await flush()
+  expect(p.sent).toEqual([])
+  expect(h.states('a')).toEqual(['cancelled'])
+})
+
+test('the process ending while a message is prepared: it waits for the next process', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  const p1 = preparing(1, async () => {
+    await gate
+    return 'x'
+  })
+  const h = harness(p1)
+  h.outbox.accept(fileMsg('a'))
+  await flush()
+  p1.ready = false
+  release()
+  await flush()
+  expect(p1.sent).toEqual([])
+  const p2 = preparing(2, async (m) => `p2:${m.id}`)
+  p2.ready = false
+  h.becomeReady(p2)
+  await flush()
+  await flush()
+  expect(p2.sent).toEqual(['a'])
+  expect(p2.preparedWith).toEqual(['p2:a'])
+})
+
+test('text-only messages are not prepared: written in the same tick, as before', () => {
+  let prepared = 0
+  const p = preparing(1, async () => {
+    prepared++
+    return 'x'
+  })
+  const h = harness(p)
+  h.outbox.accept(msg('a'))
+  expect(p.sent).toEqual(['a'])
+  expect(prepared).toBe(0)
+  expect(p.preparedWith).toEqual([undefined])
+  expect(h.states('a')).toEqual(['sending'])
+})

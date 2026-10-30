@@ -4,11 +4,14 @@ import { TypedEmitter } from '@slayzone/platform/events'
 import {
   dispatchUserMessage,
   ensureSpawned,
+  getEventBufferSince,
   getSessionTerminalState,
   isReadyForQueuedMessage,
   registerChatQueueDrainer
 } from './chat-transport-manager'
 import { createDbChatQueueData, type ChatQueueData } from './chat-queue-data'
+import { admitAttachments, type AttachmentLookup } from './chat-attachment-guard'
+import { createDbAttachmentLookup } from './chat-data-ops'
 import { getPtyHostBridge } from '../pty-host'
 import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 
@@ -51,6 +54,51 @@ export function notifyChatQueueChanged(tabId: string): void {
 
 /** One drain at a time per tab: concurrent triggers queue up behind it. */
 const draining = new Map<string, Promise<void>>()
+
+/**
+ * How long an edit holds a queued message. The editor renews it while open, so
+ * an editor that went away (window closed, renderer reloaded) cannot block the
+ * queue for longer than this.
+ */
+export const HOLD_MS = 30_000
+
+/**
+ * Queued messages being edited, per tab → their expiry timers. While its head
+ * is held, a tab's queue does not drain (FIFO: nothing jumps ahead of it). In
+ * memory: holds end with the hub process, like the editors that made them.
+ */
+const holds = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
+
+function heldIds(tabId: string): string[] {
+  return [...(holds.get(tabId)?.keys() ?? [])]
+}
+
+function dropHold(tabId: string, id: string): void {
+  const tabHolds = holds.get(tabId)
+  const timer = tabHolds?.get(id)
+  if (timer) clearTimeout(timer)
+  tabHolds?.delete(id)
+  if (tabHolds?.size === 0) holds.delete(tabId)
+}
+
+function dropHolds(tabId: string): void {
+  for (const id of heldIds(tabId)) dropHold(tabId, id)
+}
+
+/** Run `step` on the tab's drain chain (after any drain in progress). */
+function onTabChain<T>(tabId: string, step: () => Promise<T>): Promise<T> {
+  const previous = draining.get(tabId) ?? Promise.resolve()
+  const run = previous.then(step)
+  const settled = run.then(
+    () => undefined,
+    () => undefined
+  )
+  draining.set(tabId, settled)
+  void settled.then(() => {
+    if (draining.get(tabId) === settled) draining.delete(tabId)
+  })
+  return run
+}
 
 /**
  * Drain head of queue if the session is ready for it. Called by the transport
@@ -101,7 +149,8 @@ async function drainOnce(tabId: string, data: ChatQueueData): Promise<void> {
   }
   if (!isReadyForQueuedMessage(tabId)) return
 
-  const head = await data.pop(tabId)
+  // A head being edited stays put (and everything behind it waits).
+  const head = await data.pop(tabId, heldIds(tabId))
   if (!head) return
   // Re-check: a direct send (or a turn the agent started itself) may have
   // claimed the tab while the pop was in flight.
@@ -141,7 +190,8 @@ async function drainOnce(tabId: string, data: ChatQueueData): Promise<void> {
  */
 export function createChatQueueOps(
   db: SlayzoneDb,
-  data: ChatQueueData = createDbChatQueueData(db)
+  data: ChatQueueData = createDbChatQueueData(db),
+  lookup: AttachmentLookup = createDbAttachmentLookup(db)
 ) {
   // Wire drain into the transport so state transitions can pull from queue.
   // drainChatQueue is async; the drainer slot is fire-and-forget (invoked via
@@ -149,6 +199,20 @@ export function createChatQueueOps(
   registerChatQueueDrainer((tabId) => {
     void drainChatQueue(db, tabId, data)
   })
+
+  /** Files in a queued message pass the same gate as a direct send (checked + sealed). */
+  const admit = (
+    tabId: string,
+    content: UserContentBlock[],
+    exceptQueuedId?: string
+  ): Promise<UserContentBlock[]> =>
+    admitAttachments({
+      tabId,
+      content,
+      lookup,
+      events: getEventBufferSince(tabId, -1).map((e) => e.event),
+      ...(exceptQueuedId ? { exceptQueuedId } : {})
+    })
 
   return {
     list: (tabId: string): Promise<QueuedChatMessage[]> => data.list(tabId),
@@ -159,7 +223,11 @@ export function createChatQueueOps(
       original: string,
       opts?: { id?: string; content?: UserContentBlock[] }
     ): Promise<QueuedChatMessage> => {
-      const msg = await data.push(tabId, send, original, opts)
+      const content = opts?.content ? await admit(tabId, opts.content) : undefined
+      const msg = await data.push(tabId, send, original, {
+        ...(opts?.id ? { id: opts.id } : {}),
+        ...(content ? { content } : {})
+      })
       broadcast('chat:queue-changed', tabId)
       // Belt-and-suspenders drain: if the session is already idle when push
       // lands (renderer's inFlight mirror lags the transport), no fresh
@@ -169,9 +237,73 @@ export function createChatQueueOps(
       return msg
     },
 
+    /**
+     * Rewrite a queued message (an edit). False when it was already sent or
+     * removed — the editor then keeps the text for the composer.
+     */
+    update: async (
+      id: string,
+      next: { send: string; original: string; content: UserContentBlock[] }
+    ): Promise<boolean> => {
+      const tabId = await data.getTabIdForItem(id)
+      if (tabId === null) return false
+      const content = await admit(tabId, next.content, id)
+      const updated = await data.update(id, { ...next, content })
+      if (updated) broadcast('chat:queue-changed', tabId)
+      return updated
+    },
+
+    /** Move a queued message to `toIndex` in its tab's order. */
+    move: async (id: string, toIndex: number): Promise<boolean> => {
+      const tabId = await data.getTabIdForItem(id)
+      if (tabId === null) return false
+      const moved = await data.move(id, toIndex)
+      if (moved) {
+        broadcast('chat:queue-changed', tabId)
+        await drainChatQueue(db, tabId, data)
+      }
+      return moved
+    },
+
+    /**
+     * Hold a queued message while it is edited (or renew the hold): the drain
+     * won't send it, nor anything behind it. Runs on the tab's drain chain, so
+     * a hold never races a pop. False when it was already sent or removed.
+     */
+    hold: async (id: string): Promise<boolean> => {
+      const tabId = await data.getTabIdForItem(id)
+      if (tabId === null) return false
+      return onTabChain(tabId, async () => {
+        if ((await data.getTabIdForItem(id)) === null) return false
+        const tabHolds = holds.get(tabId) ?? new Map<string, ReturnType<typeof setTimeout>>()
+        holds.set(tabId, tabHolds)
+        const previous = tabHolds.get(id)
+        if (previous) clearTimeout(previous)
+        const timer = setTimeout(() => {
+          // Lapsed (the editor went away): the queue moves on.
+          dropHold(tabId, id)
+          void drainChatQueue(db, tabId, data)
+        }, HOLD_MS)
+        timer.unref?.()
+        tabHolds.set(id, timer)
+        return true
+      })
+    },
+
+    /** End an edit's hold; the queue drains if the agent is free. */
+    release: async (id: string): Promise<void> => {
+      for (const [tabId, tabHolds] of holds) {
+        if (!tabHolds.has(id)) continue
+        dropHold(tabId, id)
+        await drainChatQueue(db, tabId, data)
+        return
+      }
+    },
+
     remove: async (id: string): Promise<boolean> => {
       const tabId = await data.getTabIdForItem(id)
       const removed = await data.remove(id)
+      if (tabId !== null) dropHold(tabId, id)
       // Gate on row existence (null check), not string truthiness — exact
       // parity with the pre-seam `removed && row` condition.
       if (removed && tabId !== null) broadcast('chat:queue-changed', tabId)
@@ -179,6 +311,7 @@ export function createChatQueueOps(
     },
 
     clear: async (tabId: string): Promise<number> => {
+      dropHolds(tabId)
       const cleared = await data.clear(tabId)
       if (cleared > 0) broadcast('chat:queue-changed', tabId)
       return cleared

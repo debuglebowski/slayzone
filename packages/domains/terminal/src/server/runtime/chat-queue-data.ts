@@ -1,5 +1,10 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../chat-queue-store'
+import {
+  listChatQueue,
+  removeChatQueueItem,
+  clearChatQueue,
+  updateChatQueueItem
+} from '../chat-queue-store'
 import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../chat-queue-txns'
@@ -22,8 +27,15 @@ export interface ChatQueueData {
     original: string,
     opts?: { id?: string; content?: UserContentBlock[] }
   ): Promise<QueuedChatMessage>
-  /** Atomic pop of the queue head (select+delete in one txn); null when empty. */
-  pop(tabId: string): Promise<QueuedChatMessage | null>
+  /** Atomic pop of the queue head (select+delete in one txn); null when empty or the head is held. */
+  pop(tabId: string, heldIds?: string[]): Promise<QueuedChatMessage | null>
+  /** Rewrite an item (an edit); false when it is gone. */
+  update(
+    id: string,
+    next: { send: string; original: string; content: UserContentBlock[] }
+  ): Promise<boolean>
+  /** Move an item to `toIndex` in its tab's order; false when it is gone. */
+  move(id: string, toIndex: number): Promise<boolean>
   /** Re-insert a popped message at head (send failed; next drain retries). */
   requeue(msg: QueuedChatMessage): Promise<void>
   /** Delete one item by id; true when a row was removed. */
@@ -42,7 +54,12 @@ export function createDbChatQueueData(db: SlayzoneDb): ChatQueueData {
     push: (tabId, send, original, opts) =>
       db.namedTxn('chat-queue:push', { tabId, send, original, ...opts }),
 
-    pop: (tabId) => db.namedTxn('chat-queue:pop', { tabId }),
+    pop: (tabId, heldIds) =>
+      db.namedTxn('chat-queue:pop', heldIds && heldIds.length > 0 ? { tabId, heldIds } : { tabId }),
+
+    update: (id, next) => updateChatQueueItem(db, id, next),
+
+    move: (id, toIndex) => db.namedTxn('chat-queue:move', { id, toIndex }),
 
     requeue: async (msg) => {
       await db.namedTxn('chat-queue:requeue', { msg })

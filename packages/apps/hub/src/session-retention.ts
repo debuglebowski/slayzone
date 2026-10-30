@@ -4,13 +4,15 @@
  * once a day. `0` — the default, the desktop app's hub — creates no timer at all.
  *
  * SESSION CONTENT is the text that passed between a user and an agent, as the hub
- * stores it. Each row ages from `created_at`, the time it was written (a row is never
- * edited afterwards; `chat_events` re-stamps it on its INSERT OR REPLACE):
+ * stores it. Each row ages from the time it was last written (`chat_events` re-stamps
+ * on its INSERT OR REPLACE; an edited queued message re-stamps `created_at`):
  *
- *   chat_events    chat-mode agent events: messages, tool calls, output   (TEXT, UTC)
- *   agent_prompts  prompts captured from the agent's prompt hook           (INTEGER, ms)
- *   chat_queue     chat messages queued but not sent yet                   (TEXT, UTC)
- *   agent_turns    `prompt_preview` only (first 200 chars of the prompt)   (INTEGER, ms)
+ *   chat_events     chat-mode agent events: messages, tool calls, output   (TEXT, UTC)
+ *   agent_prompts   prompts captured from the agent's prompt hook           (INTEGER, ms)
+ *   chat_queue      chat messages queued but not sent yet                   (TEXT, UTC)
+ *   agent_turns     `prompt_preview` only (first 200 chars of the prompt)   (INTEGER, ms)
+ *   chat_tab_state  a chat tab's unsent draft (and its scroll position), by
+ *                   `updated_at`                                            (INTEGER, ms)
  *
  * Terminal output is RAM only (`terminal_sessions` was dropped in v12), so there is no
  * terminal table to sweep.
@@ -81,7 +83,7 @@ export const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 
 interface Rule {
-  table: 'chat_events' | 'agent_prompts' | 'chat_queue' | 'agent_turns'
+  table: 'chat_events' | 'agent_prompts' | 'chat_queue' | 'agent_turns' | 'chat_tab_state'
   /** Over the table's own row; the one `?` is the cutoff. */
   expired: string
   /** `ms` = epoch milliseconds; `datetime` = SQLite `YYYY-MM-DD HH:MM:SS` UTC. */
@@ -96,6 +98,7 @@ const RULES: readonly Rule[] = [
   { table: 'chat_events', expired: 'datetime(created_at) < ?', clock: 'datetime' },
   { table: 'agent_prompts', expired: 'created_at < ?', clock: 'ms' },
   { table: 'chat_queue', expired: 'datetime(created_at) < ?', clock: 'datetime' },
+  { table: 'chat_tab_state', expired: 'updated_at < ?', clock: 'ms' },
   {
     table: 'agent_turns',
     expired: "created_at < ? AND prompt_preview <> ''",

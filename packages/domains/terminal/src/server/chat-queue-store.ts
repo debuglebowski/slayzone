@@ -78,17 +78,67 @@ export async function clearChatQueue(db: SlayzoneDb, tabId: string): Promise<num
 }
 
 /**
+ * Rewrite a queued message (edited while it waited). Re-stamps `created_at`:
+ * session retention ages a row from when its content was written. False when
+ * it is gone (sent, removed, cleared).
+ */
+export async function updateChatQueueItem(
+  db: SlayzoneDb,
+  id: string,
+  next: { send: string; original: string; content: UserContentBlock[] }
+): Promise<boolean> {
+  const info = await db
+    .prepare(
+      `UPDATE chat_queue SET send = ?, original = ?, content = ?, created_at = datetime('now') WHERE id = ?`
+    )
+    .run(next.send, next.original, JSON.stringify(next.content), id)
+  return info.changes > 0
+}
+
+/**
+ * Move a queued message to `toIndex` (clamped) in its tab's order, renumbering
+ * the tab's positions 0…n-1 in one transaction. False when it is gone.
+ */
+export function moveChatQueueItem(db: Database, id: string, toIndex: number): boolean {
+  const tx = db.transaction(() => {
+    const row = db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id) as
+      | { tab_id: string }
+      | undefined
+    if (!row) return false
+    const ids = (
+      db
+        .prepare('SELECT id FROM chat_queue WHERE tab_id = ? ORDER BY position ASC')
+        .all(row.tab_id) as {
+        id: string
+      }[]
+    ).map((r) => r.id)
+    ids.splice(ids.indexOf(id), 1)
+    ids.splice(Math.max(0, Math.min(toIndex, ids.length)), 0, id)
+    const setPos = db.prepare('UPDATE chat_queue SET position = ? WHERE id = ?')
+    ids.forEach((itemId, position) => setPos.run(position, itemId))
+    return true
+  })
+  return tx()
+}
+
+/**
  * Atomic pop. Selects the head row + deletes it inside a single tx so two
  * concurrent drain triggers can't double-send. Caller must call
  * `sendUserMessage` AFTER this returns; if the send fails the caller is
- * responsible for re-inserting via `requeueAtHead`.
+ * responsible for re-inserting via `requeueAtHead`. A head in `heldIds` (being
+ * edited) stays: nothing is popped, the queue waits for it (FIFO).
  */
-export function popChatQueueHead(db: Database, tabId: string): QueuedChatMessage | null {
+export function popChatQueueHead(
+  db: Database,
+  tabId: string,
+  heldIds: ReadonlyArray<string> = []
+): QueuedChatMessage | null {
   const tx = db.transaction(() => {
     const row = db
       .prepare('SELECT * FROM chat_queue WHERE tab_id = ? ORDER BY position ASC LIMIT 1')
       .get(tabId) as Row | undefined
     if (!row) return null
+    if (heldIds.includes(row.id)) return null
     db.prepare('DELETE FROM chat_queue WHERE id = ?').run(row.id)
     return rowToMessage(row)
   })

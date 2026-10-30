@@ -45,6 +45,21 @@ function makeFakeChild(): FakeChild {
   return fake as unknown as FakeChild
 }
 
+/**
+ * What the host wrote to stdin after the driver's own `initialize` request
+ * (claude-chat writes it first on every spawn), joined like the raw capture.
+ */
+function hostStdin(fake: FakeChild): string {
+  return fake._stdinRef.value
+    .split('\n')
+    .filter((l) => {
+      if (!l.trim()) return false
+      const m = JSON.parse(l) as { type?: string; request?: { subtype?: string } }
+      return !(m.type === 'control_request' && m.request?.subtype === 'initialize')
+    })
+    .join('\n')
+}
+
 function fixtureDir(): string {
   return resolve(__dirname, '../../../test/fixtures/claude-stream')
 }
@@ -236,7 +251,7 @@ test('sendUserMessage: writes NDJSON line to stdin', async () => {
   })
   const ok = mgr.sendUserMessage('tab-msg', 'hello')
   expect(ok).toBe(true)
-  const line = fake._stdinRef.value.trim()
+  const line = hostStdin(fake).trim()
   const parsed = JSON.parse(line)
   expect(parsed.type).toBe('user')
   expect(parsed.message.content).toBe('hello')
@@ -264,7 +279,7 @@ test('sendToolResult: writes NDJSON tool_result envelope keyed by tool_use_id', 
     content: '{"answers":{"Pick":"A"}}'
   })
   expect(ok).toBe(true)
-  const line = fake._stdinRef.value.trim()
+  const line = hostStdin(fake).trim()
   const parsed = JSON.parse(line)
   expect(parsed.type).toBe('user')
   expect(parsed.message.role).toBe('user')
@@ -305,7 +320,7 @@ test('sendControlRequest: writes envelope + resolves on matching control_respons
 
   // Stdin must contain the envelope. Pull the line, scrape its request_id,
   // then push a matching success response onto stdout.
-  const line = fake._stdinRef.value.trim()
+  const line = hostStdin(fake).trim()
   const parsed = JSON.parse(line)
   expect(parsed.type).toBe('control_request')
   const requestId: string = parsed.request_id
@@ -345,7 +360,7 @@ test('sendControlRequest: rejects on error subtype', async () => {
     subtype: 'set_permission_mode',
     mode: 'plan'
   })
-  const parsed = JSON.parse(fake._stdinRef.value.trim())
+  const parsed = JSON.parse(hostStdin(fake).trim())
   fake._stdout.write(
     JSON.stringify({
       type: 'control_response',
@@ -407,7 +422,7 @@ test('respondToPermissionRequest: writes control_response success on stdin', asy
     decision: { behavior: 'allow', updatedInput: { answers: { Q: 'A' } } }
   })
   expect(ok).toBe(true)
-  const line = fake._stdinRef.value.trim()
+  const line = hostStdin(fake).trim()
   const parsed = JSON.parse(line)
   expect(parsed.type).toBe('control_response')
   expect(parsed.response.subtype).toBe('success')

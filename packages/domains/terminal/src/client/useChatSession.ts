@@ -507,7 +507,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // roundtrip. Main still emits the canonical `user-message` event and the
       // reducer confirms it in place by id — single source of truth for replay.
       // `user-sent` is renderer-only; never persisted.
-      dispatch({ type: 'user-sent', id, text: userMessageText(content) })
+      dispatch({ type: 'user-sent', id, text: userMessageText(content), content })
       try {
         await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
       } catch (err) {
@@ -528,12 +528,17 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     const item = state.timeline.find((it) => it.kind === 'user-text' && it.id === id)
     if (!item || item.kind !== 'user-text') return
     dispatch({ type: 'user-retry', id })
+    // The whole message, files included (attachments first, as it was sent).
+    const content: UserContentBlock[] = [
+      ...(item.attachments ?? []).map((attachment) => ({
+        type: 'attachment' as const,
+        attachment
+      })),
+      ...(item.text ? [{ type: 'text' as const, text: item.text }] : [])
+    ]
     try {
       // Same id: the server retries it (or takes it, if it never got it).
-      await trpcClient.chat.send.mutate({
-        tabId: opts.tabId,
-        message: { id, content: [{ type: 'text', text: item.text }] }
-      })
+      await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
     } catch (err) {
       dispatch({
         type: 'user-send-failed',

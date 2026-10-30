@@ -34,6 +34,7 @@ import {
   type RestApiDeps,
   type FloatingAgentState
 } from '@slayzone/api'
+import { createChatAttachmentReader } from './chat-attachment-reader'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
 import { getDesktopBridgeCapUrl, getDesktopBridgeToken } from './desktop-bridge-address.js'
 import { getServerBuildInfo } from './build-info.js'
@@ -107,6 +108,7 @@ import {
   setAgentLifecycleEvents,
   setPtyDeps,
   setChatDeps,
+  setChatAttachmentReader,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
@@ -779,6 +781,9 @@ export function composeServer(opts: {
     // agent is never booted on a machine no task will land on.
     resolveComputerId: (projectId) => resolveComputerForProject(projectId)
   })
+  // Files attached to chat messages are task artifacts; the agent gets their
+  // bytes at write time through this reader (terminal can't import the store).
+  setChatAttachmentReader(createChatAttachmentReader(db, dataRoot))
   setChatDeps({
     // Override ONLY the computer resolution over the db defaults, so a chat spawn
     // resolves the same computer the exec backend will route it to. If chat resolved

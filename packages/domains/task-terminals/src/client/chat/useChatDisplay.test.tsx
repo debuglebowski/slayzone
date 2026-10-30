@@ -162,3 +162,30 @@ describe('useChatDisplay final-only view', () => {
     expect(display.itemKey(hook('blocked', 'h7'), 0)).toBe('hook:h7')
   })
 })
+
+describe('useChatDisplay scroll anchors', () => {
+  it('stable anchor keys: rows the same after a reload; none for rows keyed by position', async () => {
+    const { stableAnchorKey } = await import('./useChatDisplay')
+    expect(
+      stableAnchorKey({ kind: 'user-text', id: 'm1', text: 'x', timestamp: 1 } as TimelineItem)
+    ).toBe('user:m1')
+    expect(stableAnchorKey(text('a', 7))).toBe('text:m7')
+    // A streamed block: its own key (two text blocks of one message never share one).
+    expect(stableAnchorKey({ ...text('a', 7), blockOrdinal: 1 } as TimelineItem)).toBe('text:m7:1')
+    expect(
+      stableAnchorKey({ kind: 'user-text', text: 'x', timestamp: 1 } as TimelineItem)
+    ).toBeNull()
+    expect(stableAnchorKey({ kind: 'result', timestamp: 1 } as unknown as TimelineItem)).toBeNull()
+  })
+
+  it('revealKey widens the render window to include a row above it', () => {
+    const scrollRef = makeScrollRef()
+    render(<Harness items={timeline(250, -1)} scrollRef={scrollRef} />)
+    expect(display.visibleStart).toBe(150)
+    act(() => display.revealKey('text:m20'))
+    expect(display.visibleStart).toBe(20)
+    // A key not in the timeline changes nothing.
+    act(() => display.revealKey('text:nope'))
+    expect(display.visibleStart).toBe(20)
+  })
+})

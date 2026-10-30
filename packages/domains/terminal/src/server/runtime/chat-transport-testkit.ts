@@ -27,7 +27,11 @@ export interface FakeChild {
   kills: string[]
   /** Answer the host's control requests of `subtype` (default: success `{}`). */
   answer(subtype: string, fn: (request: Record<string, unknown>) => ControlAnswer): void
-  /** Subtypes of the host's control requests, in order. */
+  /**
+   * Subtypes of the host's control requests, in order — without the
+   * `initialize` the Claude driver writes at every spawn (session setup, not
+   * something the conversation did; `controlRequests('initialize')` has it).
+   */
   controlSubtypes(): string[]
   controlRequests(subtype: string): Array<Record<string, unknown>>
   exit(code: number | null, signal?: string | null): void
@@ -94,7 +98,10 @@ export function fakeChild(opts: { exitOnKill?: boolean } = {}): FakeChild {
     stdin,
     kills,
     answer: (subtype, fn) => answers.set(subtype, fn),
-    controlSubtypes: () => controls().map((r) => String(r.subtype)),
+    controlSubtypes: () =>
+      controls()
+        .map((r) => String(r.subtype))
+        .filter((t) => t !== 'initialize'),
     controlRequests: (subtype) => controls().filter((r) => r.subtype === subtype),
     exit: (code, signal = null) => emitter.emit('exit', code, signal)
   }

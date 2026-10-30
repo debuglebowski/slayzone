@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ChatScrollAnchor } from '@slayzone/terminal-contracts'
 
 const THRESHOLD_PX = 70
 
@@ -17,12 +18,22 @@ export interface FollowBottomApi {
   contentRef: CallbackRef<HTMLElement>
   isAtBottom: boolean
   scrollToBottom: () => void
+  /**
+   * Where the timeline is: following the bottom, or the first row with a
+   * stable key (`data-anchor-key`) showing at the top and how far into it.
+   * Null while the scroller is hidden (no height) or no keyed row shows.
+   */
+  captureAnchor: () => ChatScrollAnchor | null
+  /** Put an anchor back. False when its row is not rendered (yet). */
+  restoreAnchor: (anchor: ChatScrollAnchor) => boolean
 }
 
 interface FollowBottomController {
   scrollRef: CallbackRef<HTMLElement>
   contentRef: CallbackRef<HTMLElement>
   scrollToBottom: () => void
+  captureAnchor: () => ChatScrollAnchor | null
+  restoreAnchor: (anchor: ChatScrollAnchor) => boolean
   dispose: () => void
 }
 
@@ -142,7 +153,45 @@ function createFollowBottomController(
     resizeObserverRef.current = null
   }
 
-  return { scrollRef, contentRef, scrollToBottom, dispose }
+  const captureAnchor = (): ChatScrollAnchor | null => {
+    const el = scrollRef.current
+    if (!el || el.clientHeight === 0) return null
+    if (stuckRef.current) return { atBottom: true }
+    const top = el.getBoundingClientRect().top
+    for (const row of el.querySelectorAll<HTMLElement>('[data-anchor-key]')) {
+      const box = row.getBoundingClientRect()
+      if (box.bottom > top) {
+        return {
+          atBottom: false,
+          key: row.dataset.anchorKey ?? '',
+          offsetPx: Math.round(top - box.top)
+        }
+      }
+    }
+    return null
+  }
+
+  const restoreAnchor = (anchor: ChatScrollAnchor): boolean => {
+    if (anchor.atBottom) {
+      scrollToBottom()
+      return true
+    }
+    const el = scrollRef.current
+    if (!el) return false
+    const row = Array.from(el.querySelectorAll<HTMLElement>('[data-anchor-key]')).find(
+      (r) => r.dataset.anchorKey === anchor.key
+    )
+    if (!row) return false
+    // Stop following first: growth must not pull the restored position down.
+    stuckRef.current = false
+    el.scrollTop +=
+      row.getBoundingClientRect().top - el.getBoundingClientRect().top + anchor.offsetPx
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    setIsAtBottom(dist <= THRESHOLD_PX)
+    return true
+  }
+
+  return { scrollRef, contentRef, scrollToBottom, captureAnchor, restoreAnchor, dispose }
 }
 
 /**
@@ -166,6 +215,8 @@ export function useFollowBottom(): FollowBottomApi {
     scrollRef: controller.scrollRef,
     contentRef: controller.contentRef,
     isAtBottom,
-    scrollToBottom: controller.scrollToBottom
+    scrollToBottom: controller.scrollToBottom,
+    captureAnchor: controller.captureAnchor,
+    restoreAnchor: controller.restoreAnchor
   }
 }

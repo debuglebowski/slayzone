@@ -119,4 +119,66 @@ describe('chat-queue data seam', () => {
       h.cleanup()
     }
   })
+
+  test('update rewrites text, original and content (and re-stamps it); false once it is gone', async () => {
+    const h = await createTestHarness()
+    try {
+      seedTabs(h, 'tab-1')
+      const data = createDbChatQueueData(h.slayDb)
+      const msg = await data.push('tab-1', 'old', 'old', {
+        content: [{ type: 'text', text: 'old' }]
+      })
+      h.db
+        .prepare("UPDATE chat_queue SET created_at = '2000-01-01 00:00:00' WHERE id = ?")
+        .run(msg.id)
+      const content = [{ type: 'text' as const, text: 'new' }]
+      expect(await data.update(msg.id, { send: 'new', original: 'new', content })).toBe(true)
+      const [row] = await data.list('tab-1')
+      expect(row).toMatchObject({ id: msg.id, send: 'new', original: 'new', content, position: 0 })
+      expect(row.createdAt).not.toBe('2000-01-01 00:00:00')
+      await data.pop('tab-1')
+      expect(await data.update(msg.id, { send: 'x', original: 'x', content })).toBe(false)
+    } finally {
+      h.cleanup()
+    }
+  })
+
+  test('move puts an item at a new index, others keep their order', async () => {
+    const h = await createTestHarness()
+    try {
+      seedTabs(h, 'tab-1')
+      const data = createDbChatQueueData(h.slayDb)
+      const a = await data.push('tab-1', 'a', 'a')
+      await data.push('tab-1', 'b', 'b')
+      const c = await data.push('tab-1', 'c', 'c')
+      expect(await data.move(c.id, 0)).toBe(true)
+      expect((await data.list('tab-1')).map((m) => [m.send, m.position])).toEqual([
+        ['c', 0],
+        ['a', 1],
+        ['b', 2]
+      ])
+      expect(await data.move(c.id, 99)).toBe(true)
+      expect((await data.list('tab-1')).map((m) => m.send)).toEqual(['a', 'b', 'c'])
+      expect(await data.move(a.id, 1)).toBe(true)
+      expect((await data.list('tab-1')).map((m) => m.send)).toEqual(['b', 'a', 'c'])
+      expect(await data.move('nope', 0)).toBe(false)
+    } finally {
+      h.cleanup()
+    }
+  })
+
+  test('pop leaves a held head in place (an edit in progress); the rest waits behind it', async () => {
+    const h = await createTestHarness()
+    try {
+      seedTabs(h, 'tab-1')
+      const data = createDbChatQueueData(h.slayDb)
+      const a = await data.push('tab-1', 'a', 'a')
+      await data.push('tab-1', 'b', 'b')
+      expect(await data.pop('tab-1', [a.id])).toBeNull()
+      expect(await data.list('tab-1')).toHaveLength(2)
+      expect((await data.pop('tab-1', ['other']))?.send).toBe('a')
+    } finally {
+      h.cleanup()
+    }
+  })
 })

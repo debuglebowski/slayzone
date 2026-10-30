@@ -1103,3 +1103,65 @@ describe('fake-claude — conversation control (chat A, as CLI 2.1.312)', () => 
     expect(await p.waitFor(isResult)).toMatchObject({ result: 'both' })
   })
 })
+
+describe('fake-claude — composer (initialize, attachments, commands)', () => {
+  it('initialize is answered like the CLI: commands[] (empty by default, or scripted)', async () => {
+    const commands = [
+      { name: 'x', description: 'Spike x (project)', argumentHint: '<fruit> <count>' }
+    ]
+    fake.setScenario({
+      processes: [{ controlPayloads: { initialize: { commands } }, defaultTurn: echoTurn() }]
+    })
+    const p = start()
+    p.send({ type: 'control_request', request_id: 'i1', request: { subtype: 'initialize' } })
+    expect(await p.waitFor((e) => e.type === 'control_response')).toMatchObject({
+      response: { subtype: 'success', request_id: 'i1', response: { commands } }
+    })
+    fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const q = start()
+    q.send({ type: 'control_request', request_id: 'i2', request: { subtype: 'initialize' } })
+    expect(await q.waitFor((e) => e.type === 'control_response')).toMatchObject({
+      response: { response: { commands: [] } }
+    })
+  })
+
+  it('controlRequests() leaves out the spawn-time initialize (session setup); by subtype it is there', async () => {
+    const epoch = fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    const p = start()
+    p.send({ type: 'control_request', request_id: 'i1', request: { subtype: 'initialize' } })
+    await p.waitFor((e) => e.type === 'control_response')
+    p.send({
+      type: 'control_request',
+      request_id: 'm1',
+      request: { subtype: 'set_model', model: 'x' }
+    })
+    await p.waitFor((e) => e.type === 'control_response' && JSON.stringify(e).includes('"m1"'))
+    const run = await epoch.waitForRun(0, (r) => r.stdin().length === 2)
+    expect(run.controlRequests()).toEqual([{ subtype: 'set_model', model: 'x' }])
+    expect(run.controlRequests('initialize')).toEqual([{ subtype: 'initialize' }])
+  })
+
+  it('{{command}} follows the CLI rule: a /command only when the LAST block is its text', async () => {
+    const epoch = fake.setScenario({
+      processes: [{ defaultTurn: [step.emit(ev.result({ text: 'cmd={{command}}' }))] }]
+    })
+    const p = start()
+    const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }
+    p.send({
+      type: 'user',
+      message: { role: 'user', content: [img, { type: 'text', text: '/x MANGO' }] }
+    })
+    expect(await p.waitFor((e) => e.type === 'result')).toMatchObject({ result: 'cmd=x' })
+    p.send({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: '/x MANGO' }, img] }
+    })
+    expect(
+      await p.waitFor((e) => e.type === 'result' && e !== p.lines.find((l) => l.type === 'result'))
+    ).toMatchObject({
+      result: 'cmd='
+    })
+    const run = await epoch.waitForRun(0, (r) => r.userContents().length === 2)
+    expect(run.userContents()[0]).toEqual([img, { type: 'text', text: '/x MANGO' }])
+  })
+})

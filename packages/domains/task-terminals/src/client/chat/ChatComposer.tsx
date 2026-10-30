@@ -1,5 +1,5 @@
-import { type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { ArrowUp, Square, X as XIcon, RotateCcw, Filter } from 'lucide-react'
+import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import {
@@ -15,15 +15,18 @@ import {
   type AppearanceSettings
 } from '@slayzone/ui'
 import {
+  chatCapabilitiesForMode,
   chatModesForMode,
   modelsForMode,
   modelSupportsEffortForMode,
   modeSupportsCollaboration,
   modeSupportsFastMode
 } from '@slayzone/terminal-contracts'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contracts'
 import type { UsageSummary } from '@slayzone/terminal/client'
-import { type ArtifactRef, type UseImagePasteDropReturn } from '@slayzone/editor/hooks'
+import type { UseChatAttachmentsResult } from './attachments/useChatAttachments'
+import { AttachmentChip } from './attachments/AttachmentChip'
+import { ChatQueueList, type ChatQueueListProps } from './ChatQueueList'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
 import { ContextMeter } from './ContextMeter'
 import { PromptHistorySearch } from './PromptHistorySearch'
@@ -49,13 +52,18 @@ export interface ChatComposerProps {
   // Composer state + actions
   queuedMessages: QueuedChatMessage[]
   removeQueue: (id: string) => Promise<void>
-  attachments: ArtifactRef[]
-  setAttachments: Dispatch<SetStateAction<ArtifactRef[]>>
-  imagePasteDrop: UseImagePasteDropReturn
+  /** Edit / reorder / send-now for queued messages (see `ChatQueueList`). */
+  queueApi: Omit<ChatQueueListProps, 'items' | 'onRemove'>
+  attachments: ChatAttachment[]
+  setAttachments: Dispatch<SetStateAction<ChatAttachment[]>>
+  /** Picking, pasting and dropping files (see `useChatAttachments`). */
+  attachmentsApi: UseChatAttachmentsResult
   autocomplete: ReturnType<typeof useAutocomplete>
   textareaRef: RefObject<HTMLTextAreaElement | null>
   draft: string
   setDraft: Dispatch<SetStateAction<string>>
+  /** Ghost text after a parked `/name ` (the command's argument hint); null = none. */
+  argumentHint?: string | null
   setCursorPos: Dispatch<SetStateAction<number>>
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   handleSend: () => void | Promise<void>
@@ -109,13 +117,15 @@ export function ChatComposer({
   mode,
   queuedMessages,
   removeQueue,
+  queueApi,
   attachments,
   setAttachments,
-  imagePasteDrop,
+  attachmentsApi,
   autocomplete,
   textareaRef,
   draft,
   setDraft,
+  argumentHint = null,
   setCursorPos,
   onKeyDown,
   handleSend,
@@ -146,59 +156,32 @@ export function ChatComposer({
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const composerWidthClass = appearance.chatWidth === 'wide' ? 'max-w-4xl' : 'max-w-2xl'
+  // Only providers that take files as content blocks get a picker (Codex: paste/drop images).
+  const canPickFiles = chatCapabilitiesForMode(mode).attachments === 'blocks'
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const attaching = attachmentsApi.pending.length > 0
   return (
     <div className="bg-background px-4 pt-6 pb-1">
       <div className={cn('mx-auto w-full', composerWidthClass)}>
-        {queuedMessages.length > 0 && (
-          <div className="mb-2">
-            <div className="px-1 mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-              Up next · {queuedMessages.length}
-            </div>
-            <ul className="divide-y divide-border/40 rounded-md border border-border/40 overflow-hidden">
-              {queuedMessages.map((msg, i) => (
-                <li
-                  key={msg.id}
-                  className="group flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30"
-                >
-                  <span className="shrink-0 text-muted-foreground/50 font-mono text-[10px] tabular-nums">
-                    {i + 1}.
-                  </span>
-                  <span className="flex-1 min-w-0 truncate">{msg.send}</span>
-                  <button
-                    onClick={() => void removeQueue(msg.id)}
-                    className="shrink-0 rounded p-0.5 opacity-50 hover:opacity-100 hover:bg-destructive/15 hover:text-destructive transition-colors"
-                    aria-label="Cancel queued message"
-                    title="Cancel"
-                  >
-                    <XIcon className="size-3" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {attachments.length > 0 && (
+        <ChatQueueList items={queuedMessages} onRemove={removeQueue} {...queueApi} />
+        {(attachments.length > 0 || attaching) && (
           <div className="flex flex-wrap gap-1.5 mb-1.5 px-1">
             {attachments.map((a, i) => (
+              <AttachmentChip
+                key={`${a.artifactId}-${i}`}
+                attachment={a}
+                onRemove={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+              />
+            ))}
+            {attachmentsApi.pending.map((p) => (
               <span
-                key={`${a.id}-${i}`}
-                className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                title={a.title}
+                key={p.key}
+                className="inline-flex items-center gap-1 rounded-md border border-dashed border-border/60 px-1.5 py-0.5 text-[11px] text-muted-foreground/70"
               >
-                <span className="max-w-[160px] truncate">{a.title}</span>
-                <button
-                  type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="rounded p-0.5 hover:bg-destructive/15 hover:text-destructive transition-colors"
-                  aria-label="Remove attachment"
-                >
-                  <XIcon className="size-2.5" />
-                </button>
+                <Loader2 className="size-3 animate-spin" />
+                Attaching {p.name}…
               </span>
             ))}
-            {imagePasteDrop.isUploading && (
-              <span className="text-[11px] text-muted-foreground/60">uploading…</span>
-            )}
           </div>
         )}
         <div
@@ -206,12 +189,7 @@ export function ChatComposer({
             'relative flex items-center gap-2 rounded-2xl bg-muted/40 ring-1 ring-border/60 px-3 py-1.5 transition-shadow',
             displaySessionEnded && 'opacity-50 pointer-events-none'
           )}
-          onPaste={(e) => {
-            const files = imagePasteDrop.extractImageFiles(e.clipboardData)
-            if (files.length === 0) return
-            e.preventDefault()
-            void imagePasteDrop.handleFiles(files)
-          }}
+          onPaste={attachmentsApi.onPaste}
         >
           {historySearch.open && (
             <PromptHistorySearch
@@ -231,27 +209,66 @@ export function ChatComposer({
               onHover={autocomplete.setSelectedIndex}
             />
           )}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              setCursorPos(e.target.selectionStart ?? e.target.value.length)
-            }}
-            onSelect={(e) => {
-              const el = e.currentTarget
-              setCursorPos(el.selectionStart ?? el.value.length)
-            }}
-            onKeyUp={(e) => {
-              const el = e.currentTarget
-              setCursorPos(el.selectionStart ?? el.value.length)
-            }}
-            onKeyDown={onKeyDown}
-            placeholder={displaySessionEnded ? 'Session ended' : 'Ask Claude anything…'}
-            disabled={displaySessionEnded}
-            rows={1}
-            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 max-h-[240px] py-0.5 leading-normal"
-          />
+          {canPickFiles && (
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={displaySessionEnded}
+                className="shrink-0 -ml-1 rounded-full p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors disabled:opacity-50"
+                title="Attach files (images, PDFs, text)"
+                aria-label="Attach files"
+              >
+                <Paperclip className="size-4" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                data-testid="chat-attach-input"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? [])
+                  // Same file again later must fire `change` again.
+                  e.target.value = ''
+                  if (files.length > 0) void attachmentsApi.addFiles(files)
+                }}
+              />
+            </>
+          )}
+          <div className="relative flex-1 min-w-0 flex">
+            {argumentHint && (
+              <div
+                aria-hidden
+                data-testid="chat-argument-hint"
+                className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre text-sm py-0.5 leading-normal"
+              >
+                <span className="invisible">{draft}</span>
+                <span className="text-muted-foreground/50">{argumentHint}</span>
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                setCursorPos(e.target.selectionStart ?? e.target.value.length)
+              }}
+              onSelect={(e) => {
+                const el = e.currentTarget
+                setCursorPos(el.selectionStart ?? el.value.length)
+              }}
+              onKeyUp={(e) => {
+                const el = e.currentTarget
+                setCursorPos(el.selectionStart ?? el.value.length)
+              }}
+              onKeyDown={onKeyDown}
+              placeholder={displaySessionEnded ? 'Session ended' : 'Ask Claude anything…'}
+              disabled={displaySessionEnded}
+              rows={1}
+              className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 max-h-[240px] py-0.5 leading-normal"
+            />
+          </div>
           {inFlight ? (
             <button
               onClick={() => {
@@ -270,15 +287,11 @@ export function ChatComposer({
                 void handleSend()
               }}
               disabled={
-                (!draft.trim() && attachments.length === 0) ||
-                displaySessionEnded ||
-                imagePasteDrop.isUploading
+                (!draft.trim() && attachments.length === 0) || displaySessionEnded || attaching
               }
               className={cn(
                 'shrink-0 size-8 rounded-full flex items-center justify-center transition-colors',
-                (draft.trim() || attachments.length > 0) &&
-                  !displaySessionEnded &&
-                  !imagePasteDrop.isUploading
+                (draft.trim() || attachments.length > 0) && !displaySessionEnded && !attaching
                   ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                   : 'bg-muted text-muted-foreground cursor-not-allowed'
               )}

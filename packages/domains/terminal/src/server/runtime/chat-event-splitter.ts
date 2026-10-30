@@ -129,6 +129,9 @@ export class ChatEventSplitter {
         }
         return { live: [], saved: [event] }
       }
+      case 'cli-command-details':
+        // Describes the CLI, not the conversation (stored per project instead).
+        return { live: [event], saved: [] }
       default: {
         if (endsTurn(event.kind)) return { live: [], saved: [...this.closeOpen(), event] }
         return { live: [], saved: [event] }

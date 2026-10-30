@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { CliCommandList } from '@slayzone/terminal-contracts'
+import type { CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
 
 /**
  * Last slash-command list a chat CLI advertised, per project + chat mode
@@ -71,6 +71,58 @@ function parseStringList(json: string): string[] | null {
   try {
     const v = JSON.parse(json) as unknown
     return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Upsert the CLI's command descriptions + argument hints for the project of
+ * `taskId` (`chat_cli_command_details`, migration v177). No-op for an unknown task.
+ */
+export async function saveChatCliCommandDetails(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  details: CliCommandDetails,
+  now: number = Date.now()
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO chat_cli_command_details (project_id, mode, details, observed_at)
+       SELECT project_id, ?, ?, ? FROM tasks WHERE id = ? AND project_id IS NOT NULL
+       ON CONFLICT (project_id, mode) DO UPDATE SET
+         details = excluded.details,
+         observed_at = excluded.observed_at`
+    )
+    .run(mode, JSON.stringify(details), now, taskId)
+}
+
+/** Stored details for the project of `taskId`, or null (none yet / corrupt row). */
+export async function getChatCliCommandDetails(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string
+): Promise<CliCommandDetails | null> {
+  const row = (await db
+    .prepare(
+      `SELECT d.details FROM chat_cli_command_details d
+         JOIN tasks t ON t.project_id = d.project_id
+        WHERE t.id = ? AND d.mode = ?`
+    )
+    .get(taskId, mode)) as { details: string } | undefined
+  if (!row) return null
+  try {
+    const v = JSON.parse(row.details) as unknown
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+    const out: Record<string, { description: string; argumentHint: string }> = {}
+    for (const [name, d] of Object.entries(v as Record<string, unknown>)) {
+      const e = d as { description?: unknown; argumentHint?: unknown } | null
+      if (e && typeof e.description === 'string' && typeof e.argumentHint === 'string') {
+        out[name] = { description: e.description, argumentHint: e.argumentHint }
+      }
+    }
+    return out
   } catch {
     return null
   }

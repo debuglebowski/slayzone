@@ -6,6 +6,8 @@
  * See packages/domains/terminal/test/fixtures/claude-stream/SPIKE.md.
  */
 
+import type { ChatAttachment } from './chat-attachments'
+
 export type AgentEvent =
   | TurnInitEvent
   | UserMessageEvent
@@ -49,6 +51,7 @@ export type AgentEvent =
   | CommandTaskEvent
   | CommandTaskOutputEvent
   | ConversationBranchEvent
+  | CliCommandDetailsEvent
 
 /**
  * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
@@ -116,10 +119,12 @@ export interface StreamMessageStopEvent {
 }
 
 /**
- * One block of a user message. Text today; images and documents (plan item 3.5)
- * join this union without changing how a message travels.
+ * One block of a user message: typed text, or a file attached to it (plan item
+ * 3.5) as a REFERENCE — the bytes are read and sent to the agent at write time.
  */
-export type UserContentBlock = { type: 'text'; text: string }
+export type UserContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'attachment'; attachment: ChatAttachment }
 
 /** A user message as the outbox carries it: a client-minted id + its content. */
 export interface OutgoingUserMessage {
@@ -129,11 +134,18 @@ export interface OutgoingUserMessage {
 }
 
 /** The message's plain text — what replay, search, copy and pop compare. */
-export function userMessageText(content: UserContentBlock[]): string {
+export function userMessageText(content: ReadonlyArray<UserContentBlock>): string {
   return content
-    .filter((b) => b.type === 'text')
+    .filter((b): b is Extract<UserContentBlock, { type: 'text' }> => b.type === 'text')
     .map((b) => b.text)
     .join('\n\n')
+}
+
+/** The files attached to a message, in order. */
+export function userMessageAttachments(content: ReadonlyArray<UserContentBlock>): ChatAttachment[] {
+  return content
+    .filter((b): b is Extract<UserContentBlock, { type: 'attachment' }> => b.type === 'attachment')
+    .map((b) => b.attachment)
 }
 
 /** Synthetic event emitted by the main process when the user sends a message. Buffered so it survives replay. */
@@ -223,6 +235,16 @@ export interface CommandLifecycleEvent {
 export interface UserReplayEvent {
   kind: 'user-replay'
   uuid: string
+}
+
+/**
+ * The CLI's slash commands with their description and argument hint, from its
+ * `initialize` reply (Claude Code). Live only: it describes the CLI, not the
+ * conversation, so it is never part of a tab's saved history.
+ */
+export interface CliCommandDetailsEvent {
+  kind: 'cli-command-details'
+  commands: Array<{ name: string; description: string; argumentHint: string }>
 }
 
 export interface TurnInitEvent {

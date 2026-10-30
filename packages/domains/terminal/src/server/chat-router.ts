@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { randomUUID } from 'node:crypto'
 import { router, publicProcedure } from '@slayzone/trpc-server'
+import { CHAT_IMAGE_MEDIA_TYPES } from '@slayzone/terminal-contracts'
 import { getChatDeps } from './chat-router-deps'
 
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
@@ -50,8 +51,37 @@ const watchdogTimings = z.object({
   spawnReplyBoundMs: z.number().int().positive().optional()
 })
 
-/** One block of a user message (text today; attachments join in plan item 3.5). */
-const userContentBlock = z.object({ type: z.literal('text'), text: z.string() })
+/**
+ * An attached file: a reference to an artifact of the tab's task (the server
+ * checks it is one, and reads the bytes itself — see `chat-attachment-guard.ts`).
+ */
+const chatAttachment = z
+  .object({
+    artifactId: z.string().min(1).max(200),
+    contentHash: z.string().min(1).max(128).optional(),
+    name: z.string().min(1).max(512),
+    kind: z.enum(['image', 'pdf', 'text']),
+    mediaType: z.enum([...CHAT_IMAGE_MEDIA_TYPES, 'application/pdf', 'text/plain']),
+    size: z.number().int().nonnegative()
+  })
+  .strict()
+/** A chat tab's draft: text + attached files (references). */
+const chatDraft = z.object({
+  text: z.string().max(1_000_000),
+  attachments: z.array(chatAttachment).max(100)
+})
+const scrollAnchor = z.union([
+  z.object({ atBottom: z.literal(true) }).strict(),
+  z
+    .object({ atBottom: z.literal(false), key: z.string().min(1).max(500), offsetPx: z.number() })
+    .strict()
+])
+
+/** One block of a user message: text, or an attached file. */
+const userContentBlock = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string() }),
+  z.object({ type: z.literal('attachment'), attachment: chatAttachment })
+])
 /**
  * A user message: the client mints the id (the outbox and the CLI's `uuid` key
  * on it), so a retry of the same id is the same message. Legacy `{text}` (no
@@ -225,6 +255,23 @@ export const chatRouter = router({
   getCliSnapshot: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getCliSnapshot(input.taskId, input.mode)),
+  /** The CLI's command descriptions + argument hints in the task's project (null = none yet). */
+  getCliCommandDetails: publicProcedure
+    .input(z.object({ taskId: z.string(), mode: z.string() }))
+    .query(({ input }) => ops().getCliCommandDetails(input.taskId, input.mode)),
+
+  // A tab's composer state: draft + scroll anchor, restored after a remount / reload.
+  tabState: router({
+    get: publicProcedure
+      .input(z.object({ tabId: z.string() }))
+      .query(({ input }) => ops().getTabState(input.tabId)),
+    saveDraft: publicProcedure
+      .input(z.object({ tabId: z.string(), draft: chatDraft }))
+      .mutation(({ input }) => ops().saveTabDraft(input.tabId, input.draft)),
+    saveScroll: publicProcedure
+      .input(z.object({ tabId: z.string(), anchor: scrollAnchor }))
+      .mutation(({ input }) => ops().saveTabScroll(input.tabId, input.anchor))
+  }),
 
   // Queue (mirrors the `chat:queue:*` IPC channels)
   queue: router({
@@ -248,6 +295,33 @@ export const chatRouter = router({
           ...(input.content ? { content: input.content } : {})
         })
       ),
+    /** Rewrite a queued message (an edit); false when it was already sent. */
+    update: publicProcedure
+      .input(
+        z.object({
+          id: z.string(),
+          send: z.string(),
+          original: z.string(),
+          content: z.array(userContentBlock).min(1)
+        })
+      )
+      .mutation(({ input }) =>
+        queueOps().update(input.id, {
+          send: input.send,
+          original: input.original,
+          content: input.content
+        })
+      ),
+    move: publicProcedure
+      .input(z.object({ id: z.string(), toIndex: z.number().int().nonnegative() }))
+      .mutation(({ input }) => queueOps().move(input.id, input.toIndex)),
+    /** Hold a message while it is edited (renew while the editor is open); false when already sent. */
+    hold: publicProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => queueOps().hold(input.id)),
+    release: publicProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => queueOps().release(input.id)),
     remove: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input }) => queueOps().remove(input.id)),

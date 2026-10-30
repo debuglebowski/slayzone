@@ -355,3 +355,64 @@ describe('useFollowBottom refs', () => {
     expect(observers[0].disconnect).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('useFollowBottom scroll anchor', () => {
+  /** Rows of 100px each, keyed `r0…`, laid out under the scroller's top (at y=0). */
+  function rows(el: HTMLElement, dims: Dims, count: number) {
+    for (let i = 0; i < count; i++) {
+      const row = document.createElement('div')
+      row.dataset.anchorKey = `r${i}`
+      row.getBoundingClientRect = () =>
+        ({ top: i * 100 - dims.scrollTop, bottom: (i + 1) * 100 - dims.scrollTop }) as DOMRect
+      el.appendChild(row)
+    }
+    el.getBoundingClientRect = () => ({ top: 0, bottom: dims.clientHeight }) as DOMRect
+  }
+
+  it('at the bottom (stuck): the anchor says so', () => {
+    const { result, el, dims } = setup()
+    rows(el, dims, 10)
+    expect(result.current.captureAnchor()).toEqual({ atBottom: true })
+  })
+
+  it('scrolled up: the first row showing at the top, and how far into it', () => {
+    const { result, el, dims } = setup()
+    rows(el, dims, 10)
+    fireEvent.wheel(el, { deltaY: -50 })
+    scrollTo(el, dims, 230)
+    expect(result.current.captureAnchor()).toEqual({ atBottom: false, key: 'r2', offsetPx: 30 })
+  })
+
+  it('a hidden scroller (no height) gives no anchor', () => {
+    const { result, el, dims } = setup()
+    rows(el, dims, 10)
+    fireEvent.wheel(el, { deltaY: -50 })
+    dims.clientHeight = 0
+    expect(result.current.captureAnchor()).toBeNull()
+  })
+
+  it('restoring puts that row back at the top and stops following the bottom', () => {
+    const { result, el, dims } = setup()
+    rows(el, dims, 10)
+    let ok = false
+    act(() => {
+      ok = result.current.restoreAnchor({ atBottom: false, key: 'r3', offsetPx: 40 })
+    })
+    expect(ok).toBe(true)
+    expect(dims.scrollTop).toBe(340)
+    expect(result.current.isAtBottom).toBe(false)
+    // Content growth no longer pulls it down.
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(340)
+  })
+
+  it('a row that is not rendered: not restored (the caller retries or gives up)', () => {
+    const { result, el, dims } = setup()
+    rows(el, dims, 3)
+    let ok = true
+    act(() => {
+      ok = result.current.restoreAnchor({ atBottom: false, key: 'r9', offsetPx: 0 })
+    })
+    expect(ok).toBe(false)
+  })
+})

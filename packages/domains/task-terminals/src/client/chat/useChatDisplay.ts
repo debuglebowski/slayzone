@@ -16,6 +16,32 @@ export interface UseChatDisplayOpts {
 const PAGE_SIZE = 100
 
 /**
+ * A row's key that is the same after a reload (from ids the events carry), for
+ * scroll anchors (`data-anchor-key`). Null for rows only known by position.
+ */
+export function stableAnchorKey(item: TimelineItem): string | null {
+  switch (item.kind) {
+    case 'user-text':
+      return item.id ? `user:${item.id}` : null
+    case 'text':
+    case 'thinking':
+    case 'tool':
+      // The streaming key (`text:<messageId>:<n>`, `tool:<id>`) is the same live
+      // and on replay; rows from before streaming have no block ordinal.
+      return (
+        streamKeyOf(item) ??
+        `${item.kind}:${item.kind === 'tool' ? item.invocation.id : item.messageId}`
+      )
+    case 'hook':
+      return item.hookId ? `hook:${item.hookId}` : null
+    case 'notice':
+      return item.id ? `notice:${item.id}` : null
+    default:
+      return null
+  }
+}
+
+/**
  * Owns the chat timeline's *display* concerns — everything that turns the raw
  * `timeline` into what the user actually sees:
  *
@@ -143,6 +169,15 @@ export function useChatDisplay({
   const visibleStart = displayedTimeline.length - Math.min(visibleCount, displayedTimeline.length)
   const visibleItems = displayedTimeline.slice(visibleStart)
 
+  // A scroll anchor's row above the window (restoring a position): widen the
+  // window to include it, during render like the search match below.
+  const [revealRequest, setRevealRequest] = useState<string | null>(null)
+  if (revealRequest !== null) {
+    setRevealRequest(null)
+    const at = displayedTimeline.findIndex((it) => stableAnchorKey(it) === revealRequest)
+    if (at >= 0 && at < visibleStart) setVisibleCount(displayedTimeline.length - at)
+  }
+
   // Auto-expand window if a search match lands above it — adjusted during
   // render, so the match's row is already in the DOM on the commit the scroll
   // effect below runs. (As an effect it landed one commit late: the scroll
@@ -181,8 +216,13 @@ export function useChatDisplay({
     const text = displayedTimeline
       .map((it) => {
         switch (it.kind) {
-          case 'user-text':
-            return `> ${it.text}`
+          case 'user-text': {
+            const files = (it.attachments ?? []).map((a) => `[${a.kind}: ${a.name}]`)
+            return [...files, it.text]
+              .filter(Boolean)
+              .map((l) => `> ${l}`)
+              .join('\n')
+          }
           case 'text':
             return it.text
           case 'thinking':
@@ -218,6 +258,7 @@ export function useChatDisplay({
     hiddenCount,
     PAGE_SIZE,
     setVisibleCount,
+    revealKey: setRevealRequest,
     itemKey,
     search,
     copyAllMessages,

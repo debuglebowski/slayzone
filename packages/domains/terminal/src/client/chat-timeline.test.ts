@@ -15,6 +15,7 @@ import {
   selectActiveUserIds,
   selectFoldedIndexes,
   selectUsageSummary,
+  selectConversationAttachmentBytes,
   type ChatTimelineState
 } from './chat-timeline'
 import { selectPendingPrompts, selectPromptForTool, hasPendingPrompt } from './chat-prompts'
@@ -2518,4 +2519,105 @@ test('selectActiveUserIds: messages still in the conversation (folds and history
     event: { kind: 'user-message', text: 'h', id: 'h1', history: true }
   })
   expect([...selectActiveUserIds(s.timeline)]).toEqual(['h1'])
+})
+
+describe('composer: attachments + CLI command details', () => {
+  const file = {
+    artifactId: 'a1',
+    name: 'red.png',
+    kind: 'image' as const,
+    mediaType: 'image/png' as const,
+    size: 9
+  }
+
+  test('a user message carries its attachments into the bubble (replay)', () => {
+    const s = reducer(initialState(), {
+      type: 'event',
+      event: {
+        kind: 'user-message',
+        id: 'm1',
+        text: 'what colour?',
+        content: [
+          { type: 'attachment', attachment: file },
+          { type: 'text', text: 'what colour?' }
+        ]
+      }
+    })
+    expect(s.timeline[0]).toMatchObject({
+      kind: 'user-text',
+      text: 'what colour?',
+      attachments: [file]
+    })
+  })
+
+  test('the optimistic bubble shows them at once, and keeps them when confirmed', () => {
+    const content = [{ type: 'attachment' as const, attachment: file }]
+    let s = reducer(initialState(), { type: 'user-sent', id: 'm1', text: '', content })
+    expect(s.timeline[0]).toMatchObject({ kind: 'user-text', text: '', attachments: [file] })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', id: 'm1', text: '', content } })
+    expect(s.timeline).toHaveLength(1)
+    expect(s.timeline[0]).toMatchObject({ attachments: [file], optimistic: false })
+  })
+
+  test('a text-only message has no attachments field', () => {
+    const s = reducer(initialState(), {
+      type: 'event',
+      event: { kind: 'user-message', id: 'm1', text: 'hi', content: [{ type: 'text', text: 'hi' }] }
+    })
+    expect(s.timeline[0]).not.toHaveProperty('attachments')
+  })
+
+  test('cli-command-details: kept by name, and survives a new conversation (restart)', () => {
+    let s = reducer(initialState(), { type: 'event', event: ev.turnInit('s1') })
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'cli-command-details',
+        commands: [
+          { name: 'compact', description: 'Free up context', argumentHint: '<instructions>' }
+        ]
+      }
+    })
+    expect(s.cliCommandDetails).toEqual({
+      compact: { description: 'Free up context', argumentHint: '<instructions>' }
+    })
+    s = reducer(s, { type: 'process-exit', sessionId: 's1', code: 0, signal: null })
+    s = reducer(s, { type: 'event', event: ev.turnInit('s2') })
+    expect(s.sessionId).toBe('s2')
+    expect(s.cliCommandDetails).toEqual({
+      compact: { description: 'Free up context', argumentHint: '<instructions>' }
+    })
+  })
+})
+
+describe('selectConversationAttachmentBytes', () => {
+  const pdf = (artifactId: string, size: number) => ({
+    artifactId,
+    name: `${artifactId}.pdf`,
+    kind: 'pdf' as const,
+    mediaType: 'application/pdf' as const,
+    size
+  })
+  const msg = (id: string, size: number): AgentEvent => ({
+    kind: 'user-message',
+    id,
+    text: '',
+    content: [{ type: 'attachment', attachment: pdf(id, size) }]
+  })
+
+  test('sums the files of the conversation since its last compaction (encoded size)', () => {
+    let s = reducer(initialState(), { type: 'event', event: msg('m0', 300) })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'compact-boundary', trigger: 'manual', preTokens: 1 } as AgentEvent
+    })
+    s = reducer(s, { type: 'event', event: msg('m1', 6) })
+    s = reducer(s, {
+      type: 'user-sent',
+      id: 'm2',
+      text: '',
+      content: [{ type: 'attachment', attachment: pdf('m2', 3) }]
+    })
+    expect(selectConversationAttachmentBytes(s)).toBe(8 + 4)
+  })
 })

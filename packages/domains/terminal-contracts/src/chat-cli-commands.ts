@@ -14,6 +14,42 @@ export interface CliCommandList {
   /** Skills subset. */
   skills: string[]
   cliVersion: string | null
+  /**
+   * Description + argument hint per command name, from the CLI's `initialize`
+   * reply. Absent when unknown (older CLI, reply not seen yet).
+   */
+  details?: CliCommandDetails
+}
+
+export interface CliCommandDetail {
+  description: string
+  /** E.g. `<fruit> <count>`; empty when the command takes none. */
+  argumentHint: string
+}
+
+export type CliCommandDetails = Readonly<Record<string, CliCommandDetail>>
+
+/** Details keyed by name, from an `initialize` reply's `commands[]` (malformed entries skipped). */
+export function cliCommandDetailsFromList(
+  commands: ReadonlyArray<{ name: string; description: string; argumentHint: string }>
+): CliCommandDetails {
+  const out: Record<string, CliCommandDetail> = {}
+  for (const c of commands)
+    out[c.name] = { description: c.description, argumentHint: c.argumentHint }
+  return out
+}
+
+export function sameCliCommandDetails(
+  a: CliCommandDetails | null | undefined,
+  b: CliCommandDetails | null | undefined
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  const ka = Object.keys(a)
+  if (ka.length !== Object.keys(b).length) return false
+  return ka.every(
+    (k) => b[k] && b[k].description === a[k].description && b[k].argumentHint === a[k].argumentHint
+  )
 }
 
 /** The list a `turn-init` advertises, or null when it carries none (Codex, older CLIs). */

@@ -257,13 +257,44 @@ describe('CLI commands source', () => {
 
   test('Enter sends `/name` plus anything after the token; Tab parks `/name ` for args', () => {
     const src = createCliCommandsSource(cliList())
-    const item: CliCommandItem = { name: 'compact', kind: 'command', description: '' }
+    const item: CliCommandItem = {
+      name: 'compact',
+      kind: 'command',
+      description: '',
+      argumentHint: ''
+    }
     expect(src.submitText?.(item, ctxFor('/comp keep the API notes', 5))).toBe(
       '/compact keep the API notes'
     )
     let draft = ''
     void src.accept(item, { ...ctxFor('/comp'), setDraft: (v) => (draft = v) })
     expect(draft).toBe('/compact ')
+  })
+
+  test("the CLI's own description and argument hint win (from its initialize reply); the static map is the fallback", async () => {
+    const src = createCliCommandsSource(
+      cliList({
+        details: {
+          compact: {
+            description: 'Free up context by summarizing',
+            argumentHint: '<optional instructions>'
+          },
+          simplify: { description: 'Simplify the diff (project)', argumentHint: '' }
+        }
+      })
+    )
+    const byName = new Map((await src.fetch({ cwd: '/r' })).map((i) => [i.name, i]))
+    expect(byName.get('compact')).toMatchObject({
+      description: 'Free up context by summarizing',
+      argumentHint: '<optional instructions>'
+    })
+    expect(byName.get('simplify')).toMatchObject({
+      description: 'Simplify the diff (project)',
+      argumentHint: ''
+    })
+    // Not in the reply: the static description, no hint.
+    expect(byName.get('context')?.description).toMatch(/context/i)
+    expect(byName.get('context')?.argumentHint).toBe('')
   })
 
   test('is a command trigger shadowed by the richer local sources', () => {

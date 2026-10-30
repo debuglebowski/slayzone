@@ -69,6 +69,8 @@ run_harness packages/domains/task-terminals/src/server/task-terminals-router.tes
 run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-queue-handlers.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-attachment-guard.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_harness packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_harness packages/domains/task/src/server/ops/exec-boundary.test.ts
@@ -365,6 +367,7 @@ run_harness packages/shared/db-migrations/src/v171-agent-startup-migration.test.
 run_harness packages/shared/db-migrations/src/v172-chat-cli-snapshots-migration.test.ts
 run_harness packages/shared/db-migrations/src/v173-claude-chat-mode-migration.test.ts
 run_harness packages/shared/db-migrations/src/v175-conversation-handoff-fork-origins-migration.test.ts
+run_harness packages/shared/db-migrations/src/v177-chat-composer-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -603,6 +606,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustne
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-command-tasks.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-chaos.test.ts
 run_harness packages/domains/terminal/src/server/chat-events-store.test.ts
+run_harness packages/domains/terminal/src/server/chat-tab-state-store.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
@@ -778,6 +782,7 @@ run_harness packages/domains/task-browser/src/client/scale.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/autocomplete.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/cli-custom-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/ranking.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/attachments/prepare-attachment.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
@@ -813,6 +818,7 @@ run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test
 run_harness packages/domains/terminal/src/server/agents/claude-command-tasks.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-import.test.ts
+run_harness packages/domains/terminal/src/server/agents/claude-content.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.
 run_harness packages/domains/terminal/src/server/agents/claude-stream-drift.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-hook-output.test.ts
@@ -830,6 +836,7 @@ run_harness packages/domains/terminal-contracts/src/chat-effort.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
@@ -954,7 +961,12 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/attachments/useChatAttachments.test.tsx \
+  packages/domains/task-terminals/src/client/chat/UserMessageAttachments.test.tsx \
+  packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.test.tsx \
+  packages/domains/task-terminals/src/client/chat/composer-state/useChatScrollMemory.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/BashCard.test.tsx \

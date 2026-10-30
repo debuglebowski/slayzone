@@ -35,6 +35,7 @@ import {
   killAll,
   shutdownAll,
   configureTransport,
+  chatEvents,
   type TransportDeps,
   type ChatSessionInfo,
   type ShutdownOptions,
@@ -43,6 +44,7 @@ import {
 import { resolveAgentFolder } from './spawn-target'
 import type { ChatDataOps, ProviderConfigEntry } from './chat-data-ops'
 import { releaseConversation } from './live-conversations'
+import { admitAttachments } from './chat-attachment-guard'
 import {
   registerChatQueueHandlers,
   createChatQueueOps,
@@ -99,9 +101,15 @@ import type {
   StopResult
 } from '@slayzone/terminal-contracts'
 import {
+  cliCommandDetailsFromList,
   cliCommandListFromTurnInit,
+  sameCliCommandDetails,
   sameCliCommandList,
-  type CliCommandList
+  type CliCommandDetails,
+  type CliCommandList,
+  type ChatDraft,
+  type ChatScrollAnchor,
+  type ChatTabState
 } from '@slayzone/terminal-contracts'
 
 /** Who a persisted chat event belongs to (null when the tab has no live session). */
@@ -595,6 +603,9 @@ function assertCapability(
  * (injected via `setChatDeps`). Wires SQLite persistence + live-sync into the
  * transport once on creation; the IPC and tRPC layers are thin delegators.
  */
+/** The live listener of the latest `createChatOps` (replaced, never stacked). */
+let cliDetailsListener: ((tabId: string, event: AgentEvent) => void) | null = null
+
 export function createChatOps(opts: ChatHandlerOpts) {
   // Data seam: all tasks/chat_events/autocomplete access goes through this.
   // The local-DB impl (same SQL as before the hub/computer split) is built by
@@ -603,6 +614,25 @@ export function createChatOps(opts: ChatHandlerOpts) {
   // Last CLI command list stored per task + mode — `turn-init` repeats it every
   // turn, so only a changed list is written.
   const storedCliLists = new Map<string, CliCommandList>()
+  // The CLI's command descriptions + argument hints (its `initialize` reply) are
+  // live-only events: stored per project + mode here, so the `/` menu shows them
+  // before the next session starts. Each spawn repeats them; only a change is written.
+  const storedCliDetails = new Map<string, CliCommandDetails>()
+  if (cliDetailsListener) chatEvents.off('event', cliDetailsListener)
+  cliDetailsListener = (tabId, event) => {
+    if (event.kind !== 'cli-command-details') return
+    const info = getSessionInfo(tabId)
+    if (!info) return
+    const key = `${info.taskId}\u0000${info.mode}`
+    const details = cliCommandDetailsFromList(event.commands)
+    if (sameCliCommandDetails(storedCliDetails.get(key), details)) return
+    storedCliDetails.set(key, details)
+    data.saveCliCommandDetails(info.taskId, info.mode, details).catch((err: unknown) => {
+      storedCliDetails.delete(key)
+      console.error('[chat-handlers] saveCliCommandDetails failed:', err)
+    })
+  }
+  chatEvents.on('event', cliDetailsListener)
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
   configureTransport({
@@ -768,8 +798,20 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * Returns the message's delivery state (`failed` included — never a silent
      * `false`).
      */
-    send: (tabId: string, message: OutgoingUserMessage): { id: string; state: string } =>
-      dispatchUserMessage(tabId, message),
+    send: (
+      tabId: string,
+      message: OutgoingUserMessage
+    ): { id: string; state: string } | Promise<{ id: string; state: string }> => {
+      // Text is taken at once, as always; attached files are checked and sealed first.
+      if (message.content.every((b) => b.type === 'text'))
+        return dispatchUserMessage(tabId, message)
+      return admitAttachments({
+        tabId,
+        content: message.content,
+        lookup: data.attachments,
+        events: getEventBufferSince(tabId, -1).map((e) => e.event)
+      }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
+    },
 
     // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
     // tool_use_id with a tool_result content block so the SDK's turn machinery
@@ -1430,6 +1472,27 @@ export function createChatOps(opts: ChatHandlerOpts) {
         return await data.getCliSnapshot(taskId, mode)
       } catch (err) {
         console.error('[chat-handlers] getCliSnapshot failed:', err)
+        return null
+      }
+    },
+
+    /** A chat tab's saved draft + scroll anchor (null = nothing saved). */
+    getTabState: (tabId: string): Promise<ChatTabState | null> => data.getTabState(tabId),
+    /** Save a chat tab's draft (text + attached files); resolves its new revision. */
+    saveTabDraft: (tabId: string, draft: ChatDraft): Promise<{ rev: number } | null> =>
+      data.saveTabDraft(tabId, draft),
+    saveTabScroll: (tabId: string, anchor: ChatScrollAnchor): Promise<void> =>
+      data.saveTabScroll(tabId, anchor),
+
+    /** The CLI's stored command descriptions + argument hints for the task's project (null = none). */
+    getCliCommandDetails: async (
+      taskId: string,
+      mode: string
+    ): Promise<CliCommandDetails | null> => {
+      try {
+        return await data.getCliCommandDetails(taskId, mode)
+      } catch (err) {
+        console.error('[chat-handlers] getCliCommandDetails failed:', err)
         return null
       }
     }

@@ -1,15 +1,27 @@
-import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useInsertionEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SetStateAction
+} from 'react'
 import { toast, useStableCallback, type AgentEffort, type AgentModel } from '@slayzone/ui'
 import {
+  attachmentEncodedBytes,
   chatCapabilitiesForMode,
+  conversationBudgetError,
   isValidModelForMode,
   modelLabelForMode,
   modelsForMode,
+  userMessageAttachments,
+  type ChatAttachment,
   type CliCommandList,
-  type StopResult
+  type StopResult,
+  type UserContentBlock
 } from '@slayzone/terminal-contracts'
 import { useTRPCClient } from '../trpc'
-import type { ArtifactRef } from '@slayzone/editor/hooks'
 import { useChatQueue } from './useChatQueue'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
 import { createSkillsSource } from './autocomplete/sources/skills'
@@ -20,6 +32,7 @@ import { createBuiltinsSource } from './autocomplete/sources/builtins'
 import { createFilesSource } from './autocomplete/sources/files'
 import { cliCommandItems, createCliCommandsSource } from './autocomplete/sources/cli-commands'
 import { usePromptHistory } from './usePromptHistory'
+import { useChatDraftPersistence } from './composer-state/useChatDraftPersistence'
 import { HISTORY_IDLE, historyStep, isBrowsingHistory, type HistoryNav } from './prompt-history'
 import type {
   AutocompleteSource,
@@ -35,7 +48,8 @@ export interface UseChatComposerOpts {
   cwd: string
   providerFlagsOverride?: string | null
   isActive: boolean
-  sendMessage: (text: string) => Promise<void>
+  /** Text alone as a string; files (and text) as content blocks. */
+  sendMessage: (input: string | UserContentBlock[]) => Promise<void>
   inFlight: boolean
   sessionEnded: boolean
   /** Stop; a popped message comes back whole (`id`, `content`, `text`). */
@@ -48,6 +62,13 @@ export interface UseChatComposerOpts {
   handleModelChange: (next: AgentModel) => Promise<void>
   /** The chat CLI's slash commands (live or last known); null when unknown / not offered. */
   cliCommands: CliCommandList | null
+  /** Encoded bytes of the files the conversation already carries (its attachment budget). */
+  attachmentsUsedBytes?: number
+  /**
+   * Stop the running turn WITHOUT dropping the queue (so the next queued
+   * message goes next). Provided → queued messages get "Send now".
+   */
+  interruptTurn?: () => Promise<void>
 }
 
 /**
@@ -82,12 +103,21 @@ export function useChatComposer({
   scrollToBottom,
   handleEffortChange,
   handleModelChange,
-  cliCommands
+  cliCommands,
+  attachmentsUsedBytes = 0,
+  interruptTurn
 }: UseChatComposerOpts) {
   const trpcClient = useTRPCClient()
   const capabilities = chatCapabilitiesForMode(mode)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraftState] = useState('')
   const [cursorPos, setCursorPos] = useState(0)
+  // Anything (typing, Stop's restore, Reset, a history pick, a send) set the
+  // draft: a saved draft that arrives later must not overwrite it.
+  const [touched, setTouched] = useState(false)
+  const setDraft = useStableCallback((next: SetStateAction<string>) => {
+    setTouched(true)
+    setDraftState(next)
+  })
   // Prompt history (↑/↓ recall, Ctrl+R search) — modes with `promptHistory` only.
   const { entries: historyEntries, record: recordHistory } = usePromptHistory({
     taskId,
@@ -121,21 +151,53 @@ export function useChatComposer({
     items: queuedMessages,
     push: pushQueue,
     remove: removeQueue,
-    clear: clearQueue
+    clear: clearQueue,
+    update: updateQueue,
+    move: moveQueue,
+    hold: holdQueue,
+    release: releaseQueue
   } = useChatQueue(
     tabId,
     useStableCallback((original: string) => {
       void bumpUsageRef.current(original)
     })
   )
-  const [attachments, setAttachments] = useState<ArtifactRef[]>([])
+  const [attachments, setAttachmentsState] = useState<ChatAttachment[]>([])
+  const setAttachments = useStableCallback((next: SetStateAction<ChatAttachment[]>) => {
+    setTouched(true)
+    setAttachmentsState(next)
+  })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // The tab's draft survives remounts and reloads (`restoreComposerState`).
+  const persistence = useChatDraftPersistence({
+    tabId,
+    enabled: capabilities.restoreComposerState,
+    text: draft,
+    attachments,
+    paused: browsingHistory
+  })
+  // Restore once, as soon as the saved draft is known — adjusted during render,
+  // so the first painted frame already shows it.
+  const [restore, setRestore] = useState<{ done: boolean; text: string | null }>({
+    done: false,
+    text: null
+  })
+  if (!restore.done && persistence.loaded) {
+    const saved = capabilities.restoreComposerState && !touched ? persistence.saved : null
+    setRestore({ done: true, text: saved?.text ?? null })
+    if (saved) {
+      setDraftState(saved.text)
+      setAttachmentsState(saved.attachments)
+      setCursorPos(saved.text.length)
+    }
+  }
   // Snapshot of the in-flight turn's raw input + attachments. Used by Stop/Esc
   // to restore the chips + clean text (without inline image markdown) when the
   // main side pops the turn. Updated only on user submits that go straight to
   // the wire — queued submits don't overwrite it, so the snapshot stays aligned
   // with the in-flight turn even when a queue exists.
-  const lastSentRef = useRef<{ text: string; attachments: ArtifactRef[] } | null>(null)
+  const lastSentRef = useRef<{ text: string; attachments: ChatAttachment[] } | null>(null)
 
   // Auto-focus composer when this task tab becomes active (mount-while-active
   // or inactive→active transition). Tab content stays mounted with display:none
@@ -170,6 +232,13 @@ export function useChatComposer({
 
   // The CLI's own commands — only where the provider runs slash commands itself.
   const cliList = capabilities.nativeSlashCommands ? cliCommands : null
+  // TUI parity: right after a parked `/name ` the command's argument hint shows
+  // as ghost text (from the CLI's `initialize` reply).
+  const parked = /^\/(\S+) $/.exec(draft)
+  const argumentHint =
+    parked && cursorPos === draft.length
+      ? cliList?.details?.[parked[1]]?.argumentHint || null
+      : null
   const sources = useMemo(
     () => [
       createFilesSource(listApi),
@@ -220,14 +289,15 @@ export function useChatComposer({
   // Snap timeline to bottom when user starts composing — empty→non-empty edge.
   // Stick-to-bottom only auto-sticks when already at bottom; this forces re-stick
   // so the latest history is visible while typing.
+  // A restored draft is not "starting to compose": the timeline keeps its place.
   const wasDraftEmptyRef = useRef(true)
   useEffect(() => {
     const empty = draft.length === 0
-    if (wasDraftEmptyRef.current && !empty) {
+    if (wasDraftEmptyRef.current && !empty && draft !== restore.text) {
       void scrollToBottom()
     }
     wasDraftEmptyRef.current = empty
-  }, [draft, scrollToBottom])
+  }, [draft, scrollToBottom, restore.text])
 
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
   const handleSend = useCallback(
@@ -279,11 +349,47 @@ export function useChatComposer({
       const transform = autocomplete.transformSubmit(text)
       let toSend = transform?.send ?? text
 
+      if (capabilities.attachments === 'blocks') {
+        // Files travel as references (the server reads them at write time). The
+        // typed text goes LAST: Claude Code reads the last text block as the
+        // input, so a `/command` there still runs with the files attached.
+        const files = attachments
+        if (files.length > 0) {
+          let used = attachmentsUsedBytes
+          for (const q of queuedMessages) {
+            for (const a of userMessageAttachments(q.content ?? []))
+              used += attachmentEncodedBytes(a)
+          }
+          const overBudget = conversationBudgetError(used, files)
+          if (overBudget) {
+            toast(overBudget)
+            return
+          }
+        }
+        const content: UserContentBlock[] = [
+          ...files.map((attachment) => ({ type: 'attachment' as const, attachment })),
+          ...(toSend ? [{ type: 'text' as const, text: toSend }] : [])
+        ]
+        // Clear BEFORE anything is awaited: the draft is saved per tab, and a
+        // save in between would bring the sent text back.
+        setDraft('')
+        setAttachments([])
+        void scrollToBottom()
+        if (inFlight || queuedMessages.length > 0) {
+          await (files.length > 0 ? pushQueue(toSend, text, content) : pushQueue(toSend, text))
+          return
+        }
+        lastSentRef.current = { text, attachments: [...files] }
+        await sendMessage(files.length > 0 ? content : toSend)
+        void bumpUsageRef.current(text)
+        return
+      }
+
       // Materialize image attachments to abs filesystem paths and prepend to message.
       if (attachments.length > 0) {
         const resolved = await Promise.all(
           attachments.map(async (a) => {
-            const p = await getArtifactFilePath(a.id)
+            const p = await getArtifactFilePath(a.artifactId)
             return { ref: a, path: p }
           })
         )
@@ -294,8 +400,8 @@ export function useChatComposer({
           )
         }
         const imageRefs = resolved
-          .filter((r): r is { ref: ArtifactRef; path: string } => r.path !== null)
-          .map((r) => `![${r.ref.title}](${r.path})`)
+          .filter((r): r is { ref: ChatAttachment; path: string } => r.path !== null)
+          .map((r) => `![${r.ref.name}](${r.path})`)
           .join('\n')
         // Join only what is there: no attachment left means just the text (it
         // used to start with a blank line).
@@ -332,7 +438,6 @@ export function useChatComposer({
       attachments,
       getArtifactFilePath,
       inFlight,
-      queuedMessages.length,
       pushQueue,
       sessionEnded,
       sendMessage,
@@ -341,8 +446,13 @@ export function useChatComposer({
       handleEffortChange,
       handleModelChange,
       capabilities.nativeSlashCommands,
+      capabilities.attachments,
+      attachmentsUsedBytes,
+      queuedMessages,
       mode,
-      recordHistory
+      recordHistory,
+      setDraft,
+      setAttachments
     ]
   )
 
@@ -378,12 +488,16 @@ export function useChatComposer({
     if (snap) {
       setDraft(snap.text)
       setAttachments(snap.attachments)
-    } else if (result.text) {
-      setDraft(result.text)
+    } else {
+      // Remounted since it was sent (no local snapshot): the popped message's
+      // own content brings its files back too.
+      const files = userMessageAttachments(result.content ?? [])
+      if (result.text) setDraft(result.text)
+      if (files.length > 0) setAttachments(files)
     }
     lastSentRef.current = null
     textareaRef.current?.focus()
-  }, [abortAndPop, draft, clearQueue])
+  }, [abortAndPop, draft, clearQueue, setDraft, setAttachments])
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -431,17 +545,57 @@ export function useChatComposer({
         void handleSend()
       }
     },
-    [handleSend, autocomplete, capabilities.promptHistory, historyNav, draft, historyEntries]
+    [
+      handleSend,
+      autocomplete,
+      capabilities.promptHistory,
+      historyNav,
+      draft,
+      historyEntries,
+      setDraft
+    ]
   )
 
+  // Editing a queued message: its files first, its text last (as a send).
+  const saveQueued = useStableCallback(
+    (id: string, text: string, files: ChatAttachment[]): Promise<boolean> =>
+      updateQueue(id, text, text, [
+        ...files.map((attachment) => ({ type: 'attachment' as const, attachment })),
+        ...(text ? [{ type: 'text' as const, text }] : [])
+      ])
+  )
+  // An edit whose message went out meanwhile: into the composer, never lost.
+  const restoreQueuedEdit = useStableCallback((text: string, files: ChatAttachment[]) => {
+    setDraft((prev) => (prev.trim() ? `${prev}\n\n${text}` : text))
+    if (files.length > 0) setAttachments((prev) => [...prev, ...files])
+  })
+  // "Send now" = this one first, then stop the turn: the queue drains it next.
+  const sendQueuedNow = useStableCallback(async (id: string): Promise<void> => {
+    if (!interruptTurn) return
+    await moveQueue(id, 0)
+    await interruptTurn()
+  })
+  const queueApi = {
+    editable: capabilities.editableQueue,
+    onMove: moveQueue,
+    onHold: holdQueue,
+    onRelease: releaseQueue,
+    onSave: saveQueued,
+    onSaveGone: restoreQueuedEdit,
+    ...(interruptTurn ? { onSendNow: (id: string) => void sendQueuedNow(id) } : {})
+  }
+
   // Ctrl+R search → the picked prompt goes into the composer for editing (not sent).
-  const pickHistoryPrompt = useCallback((text: string) => {
-    setHistorySearchOpen(false)
-    setHistoryNav(HISTORY_IDLE)
-    setDraft(text)
-    setCursorPos(text.length)
-    textareaRef.current?.focus()
-  }, [])
+  const pickHistoryPrompt = useCallback(
+    (text: string) => {
+      setHistorySearchOpen(false)
+      setHistoryNav(HISTORY_IDLE)
+      setDraft(text)
+      setCursorPos(text.length)
+      textareaRef.current?.focus()
+    },
+    [setDraft]
+  )
   const closeHistorySearch = useCallback(() => {
     setHistorySearchOpen(false)
     textareaRef.current?.focus()
@@ -456,11 +610,13 @@ export function useChatComposer({
     queuedMessages,
     removeQueue,
     clearQueue,
+    queueApi,
     autocomplete,
     handleSend,
     handleStop,
     onKeyDown,
     textareaRef,
+    argumentHint,
     historySearch: {
       open: historySearchOpen,
       entries: historyEntries,

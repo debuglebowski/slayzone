@@ -111,12 +111,31 @@ export class FakeRun {
       .map((m) => (m.message as { content?: unknown } | undefined)?.content)
       .filter((c): c is string => typeof c === 'string')
   }
-  /** The app's control requests (`interrupt`, `set_model`, …), in order; one subtype when given. */
+  /**
+   * The content of every user message the app sent (not tool results), as
+   * written: a string, or the block array (attachments, `/command` + files).
+   */
+  userContents(): Array<string | Array<Record<string, unknown>>> {
+    return this.stdin()
+      .filter((m) => m.type === 'user')
+      .map((m) => (m.message as { content?: unknown } | undefined)?.content)
+      .filter(
+        (c): c is string | Array<Record<string, unknown>> =>
+          typeof c === 'string' ||
+          (Array.isArray(c) && (c[0] as { type?: string } | undefined)?.type !== 'tool_result')
+      )
+  }
+  /**
+   * The app's control requests (`interrupt`, `set_model`, …), in order; one
+   * subtype when given. Without one, the `initialize` the Claude driver writes
+   * at every spawn is left out (session setup, not something the conversation
+   * did); `controlRequests('initialize')` has it.
+   */
   controlRequests(subtype?: string): Array<Record<string, unknown>> {
     return this.stdin()
       .filter((m) => m.type === 'control_request')
       .map((m) => m.request as Record<string, unknown>)
-      .filter((r) => subtype === undefined || r.subtype === subtype)
+      .filter((r) => (subtype === undefined ? r.subtype !== 'initialize' : r.subtype === subtype))
   }
   /** The app's decisions on `can_use_tool` requests the fake made. */
   decisions(): Array<{ requestId: string; toolName: string; behavior: string; reply: unknown }> {

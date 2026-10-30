@@ -1,10 +1,4 @@
-import type {
-  AgentEvent,
-  OutgoingUserMessage,
-  ResultEvent,
-  ModelUsage,
-  TokenUsage
-} from '@slayzone/terminal-contracts'
+import type { AgentEvent, ResultEvent, ModelUsage, TokenUsage } from '@slayzone/terminal-contracts'
 import type { AgentAdapter, AgentSpawnOpts, SpawnArgs } from './types'
 import { classifyClaudeHookResponse } from './claude-hook-output'
 import { isCliVersionAtLeast } from '../runtime/cli-version'
@@ -15,6 +9,9 @@ import { isCliVersionAtLeast } from '../runtime/cli-version'
  * is only passed when the spawn's CLI version is known to reach this.
  */
 export const SUMMARIZED_THINKING_MIN_CLI_VERSION = '2.1.312'
+
+/** How much of a line that is not JSON an `unknown` event keeps. */
+const RAW_PREVIEW_CHARS = 2000
 
 /**
  * Claude Code stream-json transport.
@@ -94,7 +91,12 @@ export const claudeCodeAdapter: AgentAdapter = {
     try {
       obj = JSON.parse(trimmed)
     } catch {
-      return { kind: 'unknown', reason: 'parse-error', raw: trimmed }
+      // Keep a prefix only: a broken line can be MiBs (an echoed attachment).
+      const raw =
+        trimmed.length > RAW_PREVIEW_CHARS
+          ? `${trimmed.slice(0, RAW_PREVIEW_CHARS)}… (${trimmed.length} chars)`
+          : trimmed
+      return { kind: 'unknown', reason: 'parse-error', raw }
     }
     if (typeof obj !== 'object' || obj === null) {
       return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
@@ -139,9 +141,9 @@ export const claudeCodeAdapter: AgentAdapter = {
     })
   },
 
-  serializeUserTurn(message: OutgoingUserMessage): string {
+  serializeUserTurn(message): string {
     // One text block travels as a plain string, exactly like `serializeUserMessage`;
-    // anything richer (3.5 attachments) as the block array the CLI accepts.
+    // anything richer (attachments, plan item 3.5) as the block array the CLI accepts.
     const only = message.content.length === 1 ? message.content[0] : null
     return JSON.stringify({
       type: 'user',
@@ -591,7 +593,9 @@ function parseUser(obj: Record<string, unknown>, parent: string | undefined): Ag
     // SDK echoes the user's prompt back as a `user`/text record; we already
     // emit a synthetic `user-message` for that send, so the echo is a dup.
     // Drop it here instead of letting it become an "unsupported event" row.
-    if (block?.type === 'text') return null
+    // Same for a message of ours that starts with an attached file: never an
+    // "unsupported event" row (it would carry the file's base64).
+    if (block?.type === 'text' || block?.type === 'image' || block?.type === 'document') return null
     return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
   }
   const rawContent = block.content

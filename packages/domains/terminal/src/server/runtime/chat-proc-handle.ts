@@ -183,17 +183,23 @@ export interface ChatBackend {
  * line can exceed one chunk, so dropping the tail would corrupt the protocol.
  */
 export function createLineSplitter(onLine: (line: string) => void): (chunk: string) => void {
-  let buffer = ''
+  // The unterminated tail, as the chunks it arrived in: only each NEW chunk is
+  // searched for '\n', so a line of tens of MB (an echoed attachment) costs
+  // its length once, not its length per chunk.
+  let pending: string[] = []
   return (chunk: string) => {
-    buffer += chunk
-    let index = buffer.indexOf('\n')
+    let start = 0
+    let index = chunk.indexOf('\n')
     while (index !== -1) {
-      let line = buffer.slice(0, index)
+      pending.push(chunk.slice(start, index))
+      let line = pending.length === 1 ? pending[0] : pending.join('')
+      pending = []
       if (line.endsWith('\r')) line = line.slice(0, -1)
-      buffer = buffer.slice(index + 1)
       onLine(line)
-      index = buffer.indexOf('\n')
+      start = index + 1
+      index = chunk.indexOf('\n', start)
     }
+    if (start < chunk.length) pending.push(start === 0 ? chunk : chunk.slice(start))
   }
 }
 

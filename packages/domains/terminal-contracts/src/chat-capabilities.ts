@@ -40,6 +40,16 @@ export interface ChatCapabilities {
   sessions: boolean
   /** The conversation can move between this chat and the provider's terminal UI. */
   handoff: boolean
+  /**
+   * How attached files reach the agent: `blocks` — images, PDFs and text files
+   * as content blocks built from artifact references at write time; `paths` —
+   * images only, as `![name](/abs/path)` lines in the text (the agent reads them).
+   */
+  attachments: 'blocks' | 'paths'
+  /** The composer's draft (text + attachments) and the timeline's scroll position survive remounts and reloads, per tab. */
+  restoreComposerState: boolean
+  /** Queued messages can be edited (held while editing) and reordered. */
+  editableQueue: boolean
 }
 
 const NONE: ChatCapabilities = {
@@ -51,7 +61,10 @@ const NONE: ChatCapabilities = {
   rewind: false,
   fork: false,
   sessions: false,
-  handoff: false
+  handoff: false,
+  attachments: 'paths',
+  restoreComposerState: false,
+  editableQueue: false
 }
 
 const CAPABILITIES: Record<string, ChatCapabilities> = {
@@ -64,7 +77,10 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     rewind: true,
     fork: true,
     sessions: true,
-    handoff: true
+    handoff: true,
+    attachments: 'blocks',
+    restoreComposerState: true,
+    editableQueue: true
   },
   'codex-chat': NONE
 }

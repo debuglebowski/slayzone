@@ -1,15 +1,25 @@
 import type {
   AgentEvent,
   AgentPlanStep,
+  ChatAttachment,
+  CliCommandDetails,
   CliCommandList,
   CommandTaskStatus,
+  UserContentBlock,
   HookEffect,
   ModelUsage,
   TokenUsage,
   ToolCallEvent,
   ToolResultEvent
 } from '@slayzone/terminal-contracts'
-import { cliCommandListFromTurnInit, sameCliCommandList } from '@slayzone/terminal-contracts'
+import {
+  cliCommandDetailsFromList,
+  cliCommandListFromTurnInit,
+  conversationAttachmentBytes,
+  sameCliCommandList,
+  userMessageAttachments,
+  type BudgetEntry
+} from '@slayzone/terminal-contracts'
 import {
   applyPromptEvent,
   expirePendingPrompts,
@@ -53,6 +63,8 @@ export type TimelineItem =
       delivery?: UserDeliveryState
       /** Why it failed (`delivery: 'failed'`). */
       deliveryError?: string
+      /** Files attached to the message (absent when none). */
+      attachments?: ChatAttachment[]
     }
   /** A turn that failed without a reply: the CLI's own error text (auth, API, …). */
   | { kind: 'turn-error'; text: string; timestamp: number; parentToolUseId?: string }
@@ -444,6 +456,12 @@ export interface ChatTimelineState {
    * memoize on it.
    */
   cliCommands: CliCommandList | null
+  /**
+   * Description + argument hint per CLI command, from the CLI's `initialize`
+   * reply (live only — a reload gets them from the stored snapshot). Describes
+   * the CLI, not the conversation, so a new conversation keeps them.
+   */
+  cliCommandDetails: CliCommandDetails | null
   /** True between a compaction start and its outcome (or the turn's end). */
   compacting: boolean
   usage: SessionUsage
@@ -484,6 +502,7 @@ export function initialState(): ChatTimelineState {
     currentSpawnId: null,
     notStarted: true,
     cliCommands: null,
+    cliCommandDetails: null,
     compacting: false,
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
     prompts: [],
@@ -495,7 +514,7 @@ export type Action =
   | { type: 'event'; event: AgentEvent }
   /** Several events in order — one dispatch for a frame's worth of stream deltas. */
   | { type: 'events'; events: AgentEvent[] }
-  | { type: 'user-sent'; text: string; id?: string }
+  | { type: 'user-sent'; text: string; id?: string; content?: UserContentBlock[] }
   | { type: 'user-send-failed'; id?: string; error?: string }
   /** Send a failed message again (same id). */
   | { type: 'user-retry'; id: string }
@@ -603,7 +622,8 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
         text: action.text,
         timestamp: Date.now(),
         optimistic: true,
-        ...(action.id ? { id: action.id, delivery: 'queued' as const } : {})
+        ...(action.id ? { id: action.id, delivery: 'queued' as const } : {}),
+        ...attachmentsOf(action.content)
       }
       return {
         ...healed,
@@ -749,6 +769,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           next[at] = {
             ...it,
             text: event.text,
+            ...attachmentsOf(event.content),
             timestamp: ts,
             optimistic: false,
             delivery: revived || !it.delivery ? 'queued' : it.delivery,
@@ -784,7 +805,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         kind: 'user-text',
         text: event.text,
         timestamp: ts,
-        ...(event.id ? { id: event.id, delivery: 'queued' as const } : {})
+        ...(event.id ? { id: event.id, delivery: 'queued' as const } : {}),
+        ...attachmentsOf(event.content)
       }
       return {
         ...healed,
@@ -947,7 +969,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           sessionId: event.sessionId,
           model: event.model,
           permissionMode: event.permissionMode ?? null,
-          cliCommands: nextCliCommands(null, event)
+          cliCommands: nextCliCommands(null, event),
+          cliCommandDetails: state.cliCommandDetails
         }
       }
       if (state.sessionStarted) {
@@ -1613,6 +1636,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         }
       })
     }
+    case 'cli-command-details':
+      return { ...state, cliCommandDetails: cliCommandDetailsFromList(event.commands) }
     case 'user-message-delivery':
       return applyTransportEvent(state, event, ts)
     case 'session-spawn':
@@ -1826,6 +1851,14 @@ function endRunningCommandTasks(state: ChatTimelineState): ChatTimelineState {
   return next
 }
 
+/** `{attachments}` for a message's content when it has any (spread into its item). */
+function attachmentsOf(content: UserContentBlock[] | undefined): {
+  attachments?: ChatAttachment[]
+} {
+  const files = content ? userMessageAttachments(content) : []
+  return files.length > 0 ? { attachments: files } : {}
+}
+
 /** Next `cliCommands` for a turn-init: unchanged content keeps the old reference; no list keeps what was known. */
 function nextCliCommands(
   prev: CliCommandList | null,
@@ -1930,6 +1963,31 @@ export interface UsageSummary {
   contextTokens: number | null
   contextWindow: number | null
   sessionCostUsd: number | null
+}
+
+/**
+ * Encoded bytes of the files this conversation carries since its last
+ * compaction (or fresh start) — the composer's view of the attachment budget
+ * (the server checks it again).
+ */
+export function selectConversationAttachmentBytes(state: ChatTimelineState): number {
+  const entries: BudgetEntry[] = []
+  for (const it of state.timeline) {
+    if (it.kind === 'user-text') {
+      if (it.attachments)
+        entries.push({
+          type: 'message',
+          ...(it.id ? { id: it.id } : {}),
+          attachments: it.attachments
+        })
+    } else if (
+      (it.kind === 'compaction' && it.outcome === 'compacted') ||
+      (it.kind === 'notice' && it.code === 'resume-failed-fresh-start')
+    ) {
+      entries.push({ type: 'boundary' })
+    }
+  }
+  return conversationAttachmentBytes(entries)
 }
 
 export function selectUsageSummary(state: ChatTimelineState): UsageSummary | null {

@@ -28,6 +28,7 @@ import {
 import { ChatSearchBar } from './ChatSearchBar'
 import { renderTimelineItem } from './renderers'
 import { useCommandTaskActions } from './tool-cards/command-task-hooks'
+import { stableAnchorKey } from './useChatDisplay'
 import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
 
@@ -156,7 +157,11 @@ export function ChatTimeline({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className="relative flex-1 min-h-0">
-            <div ref={scrollRef} className="h-full overflow-y-auto">
+            <div
+              ref={scrollRef}
+              className="h-full overflow-y-auto"
+              data-testid="chat-timeline-scroller"
+            >
               <div ref={contentRef} className="min-h-full">
                 {!hydrating && !(isEmpty && !inFlight) && (
                   <div className={cn('mx-auto w-full pt-4', widthClass)}>
@@ -271,7 +276,11 @@ const TimelineRows = memo(function TimelineRows({
         const rendered = renderTimelineItem(item, index)
         if (rendered === null) return null
         return (
-          <div key={itemKey(item, index)} data-index={index}>
+          <div
+            key={itemKey(item, index)}
+            data-index={index}
+            data-anchor-key={stableAnchorKey(item) ?? undefined}
+          >
             {rendered}
           </div>
         )

@@ -130,6 +130,12 @@ export interface ProcessScript {
   onSigterm?: Step[]
   /** How to answer the app's control requests. Default: `success` for all. */
   controlResponses?: Partial<Record<string, ControlReply>>
+  /**
+   * Extra fields of a successful control reply, per subtype — e.g.
+   * `{ initialize: { commands: [{ name, description, argumentHint }] } }`.
+   * Default `initialize` reply: `{ commands: [] }`.
+   */
+  controlPayloads?: Partial<Record<string, Record<string, unknown>>>
   /** Exit code once stdin closes. Default 0. */
   exitCodeOnStdinEnd?: number
   /**

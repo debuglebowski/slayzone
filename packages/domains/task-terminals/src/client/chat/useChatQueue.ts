@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 
 /**
  * Subscribe to the backend-persisted chat queue for one tab. The queue is
@@ -21,9 +21,21 @@ import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
  */
 export interface UseChatQueueResult {
   items: QueuedChatMessage[]
-  push: (send: string, original: string) => Promise<void>
+  /** `content` defaults to `send` as one text block. */
+  push: (send: string, original: string, content?: UserContentBlock[]) => Promise<void>
   remove: (id: string) => Promise<void>
   clear: () => Promise<void>
+  /** Rewrite a queued message; false when it was already sent. */
+  update: (
+    id: string,
+    send: string,
+    original: string,
+    content: UserContentBlock[]
+  ) => Promise<boolean>
+  move: (id: string, toIndex: number) => Promise<void>
+  /** Hold it while edited (renew while the editor is open); false when already sent. */
+  hold: (id: string) => Promise<boolean>
+  release: (id: string) => Promise<void>
 }
 
 export function useChatQueue(
@@ -64,7 +76,7 @@ export function useChatQueue(
   // returns a new object each render; wrapping it in these callbacks made them
   // unstable, and a consumer effect keyed on `clear` looped infinitely.)
   const push = useCallback(
-    async (send: string, original: string) => {
+    async (send: string, original: string, content?: UserContentBlock[]) => {
       // The id it gets here is the id it is sent with: the outbox tracks the
       // drained message under it. Content travels as blocks, like a direct send.
       await trpcClient.chat.queue.push.mutate({
@@ -72,7 +84,7 @@ export function useChatQueue(
         send,
         original,
         id: safeRandomUUID(),
-        content: [{ type: 'text', text: send }]
+        content: content ?? [{ type: 'text', text: send }]
       })
       // No optimistic update — onQueueChanged fires post-insert and triggers refetch.
     },
@@ -90,5 +102,24 @@ export function useChatQueue(
     await trpcClient.chat.queue.clear.mutate({ tabId })
   }, [trpcClient, tabId])
 
-  return { items: listQuery.data ?? [], push, remove, clear }
+  const update = useCallback(
+    (id: string, send: string, original: string, content: UserContentBlock[]) =>
+      trpcClient.chat.queue.update.mutate({ id, send, original, content }),
+    [trpcClient]
+  )
+  const move = useCallback(
+    async (id: string, toIndex: number) => {
+      await trpcClient.chat.queue.move.mutate({ id, toIndex })
+    },
+    [trpcClient]
+  )
+  const hold = useCallback((id: string) => trpcClient.chat.queue.hold.mutate({ id }), [trpcClient])
+  const release = useCallback(
+    async (id: string) => {
+      await trpcClient.chat.queue.release.mutate({ id })
+    },
+    [trpcClient]
+  )
+
+  return { items: listQuery.data ?? [], push, remove, clear, update, move, hold, release }
 }

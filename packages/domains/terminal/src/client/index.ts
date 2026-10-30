@@ -66,7 +66,8 @@ export {
   liveBlockOf,
   streamKeyOf,
   selectActiveUserIds,
-  selectFoldedIndexes
+  selectFoldedIndexes,
+  selectConversationAttachmentBytes
 } from './chat-timeline'
 export { LiveBlockStore, LiveBlockStoreContext, useLiveBlock } from './live-blocks'
 export { parsePartialJson } from './partial-json'

@@ -4186,6 +4186,39 @@ export const migrations: Migration[] = [
                            AND c.status IN ('pending', 'ready'))`
       ).run(LOCAL, LOCAL)
     }
+  },
+  {
+    version: 177,
+    up: (db) => {
+      // Chat composer (plan items 3.1 + 4.2).
+      //
+      // `chat_cli_command_details`: description + argument hint per slash command
+      // of a chat CLI (Claude Code's `initialize` reply), per project + chat mode
+      // like `chat_cli_snapshots`, so the `/` menu shows them before a session
+      // starts. `details` is a JSON object `{name: {description, argumentHint}}`.
+      //
+      // `chat_tab_state`: a chat tab's draft (text + attached files as JSON
+      // artifact references) and timeline scroll anchor (JSON; NULL = bottom), so
+      // neither is lost to a remount or reload. `rev` counts saves (the composer's
+      // local journal compares it). Gone with its tab.
+      db.exec(`
+        CREATE TABLE chat_cli_command_details (
+          project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          mode        TEXT NOT NULL,
+          details     TEXT NOT NULL,
+          observed_at INTEGER NOT NULL,
+          PRIMARY KEY (project_id, mode)
+        );
+        CREATE TABLE chat_tab_state (
+          tab_id            TEXT PRIMARY KEY REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          draft_text        TEXT NOT NULL DEFAULT '',
+          draft_attachments TEXT,
+          scroll_anchor     TEXT,
+          rev               INTEGER NOT NULL DEFAULT 0,
+          updated_at        INTEGER NOT NULL
+        );
+      `)
+    }
   }
 ]
 

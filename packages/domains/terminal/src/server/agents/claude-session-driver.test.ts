@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
-import { claudeChatBackend } from './claude-session-driver'
+import { ClaudeSessionDriver, claudeChatBackend } from './claude-session-driver'
 import type { ChatSessionDriver } from './types'
 
 const BASH_INPUT = { command: 'npm run build', description: 'Build the project' }
@@ -20,12 +20,28 @@ const BASH_SUGGESTIONS = [
   }
 ]
 
-function setup(): { driver: ChatSessionDriver; written: unknown[]; emitted: AgentEvent[] } {
+/** The `initialize` request every driver writes first (see the initialize tests). */
+function isInitialize(msg: unknown): boolean {
+  const m = msg as { type?: string; request?: { subtype?: string } }
+  return m.type === 'control_request' && m.request?.subtype === 'initialize'
+}
+
+function setup(): {
+  driver: ChatSessionDriver
+  written: unknown[]
+  emitted: AgentEvent[]
+  initRequests: Array<{ request_id: string }>
+} {
   const written: unknown[] = []
   const emitted: AgentEvent[] = []
+  const initRequests: Array<{ request_id: string }> = []
   const driver = claudeChatBackend.createDriver()
   void driver.start({
-    write: (line) => written.push(JSON.parse(line)),
+    write: (line) => {
+      const msg = JSON.parse(line) as { request_id: string }
+      if (isInitialize(msg)) initRequests.push(msg)
+      else written.push(msg)
+    },
     emit: (ev) => emitted.push(ev),
     cwd: '/repo',
     sessionId: 's1',
@@ -37,7 +53,7 @@ function setup(): { driver: ChatSessionDriver; written: unknown[]; emitted: Agen
     chatCollaboration: null,
     chatFastMode: false
   })
-  return { driver, written, emitted }
+  return { driver, written, emitted, initRequests }
 }
 
 function canUseTool(requestId: string, request: Record<string, unknown>): string {
@@ -465,5 +481,198 @@ describe('ClaudeSessionDriver — command tasks (plan 3.9)', () => {
     )
     driver.dispose()
     expect(await driver.commandTaskOutput!('tb')).toEqual({ state: 'gone' })
+  })
+})
+
+describe('ClaudeSessionDriver — initialize (command descriptions + argument hints)', () => {
+  function initReply(requestId: string, response: Record<string, unknown>): string {
+    return JSON.stringify(controlResponse(requestId, response))
+  }
+
+  test('start writes ONE initialize request before anything else and resolves once it is written', async () => {
+    const lines: string[] = []
+    const driver = claudeChatBackend.createDriver()
+    const started = driver.start({
+      write: (line) => lines.push(line),
+      emit: () => undefined,
+      cwd: '/repo',
+      sessionId: 's1',
+      resume: false,
+      providerFlags: [],
+      chatModel: null,
+      chatEffort: null,
+      chatMode: null,
+      chatCollaboration: null,
+      chatFastMode: false
+    })
+    await expect(Promise.resolve(started)).resolves.toBeUndefined()
+    expect(lines.map((l) => JSON.parse(l))).toMatchObject([
+      { type: 'control_request', request: { subtype: 'initialize' } }
+    ])
+  })
+
+  test('the reply commands become a live cli-command-details event', async () => {
+    const { driver, emitted, initRequests } = setup()
+    driver.handleLine(
+      initReply(initRequests[0].request_id, {
+        commands: [
+          {
+            name: 'compact',
+            description: 'Free up context',
+            argumentHint: '<instructions>',
+            builtin: true
+          },
+          { name: 'x', description: 'Spike x (project)', argumentHint: '<fruit> <count>' },
+          { name: 42 },
+          'junk'
+        ],
+        models: []
+      })
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    expect(emitted).toEqual([
+      {
+        kind: 'cli-command-details',
+        commands: [
+          { name: 'compact', description: 'Free up context', argumentHint: '<instructions>' },
+          { name: 'x', description: 'Spike x (project)', argumentHint: '<fruit> <count>' }
+        ]
+      }
+    ])
+  })
+
+  test('no commands, an error reply, or the session ending: nothing emitted, nothing thrown', async () => {
+    const a = setup()
+    a.driver.handleLine(initReply(a.initRequests[0].request_id, {}))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(a.emitted).toEqual([])
+    const b = setup()
+    b.driver.handleLine(
+      JSON.stringify({
+        type: 'control_response',
+        response: { subtype: 'error', request_id: b.initRequests[0].request_id, error: 'nope' }
+      })
+    )
+    expect(b.emitted).toEqual([])
+    const c = setup()
+    c.driver.dispose?.()
+    // A rejection nobody handles would fail the run (vitest reports unhandled rejections).
+    await new Promise((r) => setTimeout(r, 10))
+    expect(c.emitted).toEqual([])
+  })
+
+  test('a failing initialize write does not fail start', async () => {
+    const driver = claudeChatBackend.createDriver()
+    const started = driver.start({
+      write: () => {
+        throw new Error('EPIPE')
+      },
+      emit: () => undefined,
+      cwd: '/repo',
+      sessionId: 's1',
+      resume: false,
+      providerFlags: [],
+      chatModel: null,
+      chatEffort: null,
+      chatMode: null,
+      chatCollaboration: null,
+      chatFastMode: false
+    })
+    await expect(Promise.resolve(started)).resolves.toBeUndefined()
+  })
+})
+
+describe('ClaudeSessionDriver — user turns with attachments', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9])
+
+  function setupWithReader(files: Record<string, Uint8Array>): {
+    driver: ChatSessionDriver
+    lines: Array<{ line: string; writeId?: string }>
+  } {
+    const lines: Array<{ line: string; writeId?: string }> = []
+    const driver = new ClaudeSessionDriver({
+      readAttachment: {
+        read: async ({ artifactId }) => {
+          const b = files[artifactId]
+          if (!b) throw new Error('missing')
+          return b
+        }
+      }
+    })
+    void driver.start({
+      write: () => undefined,
+      send: async (line, opts) => {
+        lines.push({ line, writeId: opts?.writeId })
+      },
+      emit: () => undefined,
+      cwd: '/repo',
+      sessionId: 's1',
+      resume: false,
+      providerFlags: [],
+      chatModel: null,
+      chatEffort: null,
+      chatMode: null,
+      chatCollaboration: null,
+      chatFastMode: false
+    })
+    return { driver, lines }
+  }
+
+  const message = {
+    id: 'm1',
+    content: [
+      { type: 'text' as const, text: '/x MANGO' },
+      {
+        type: 'attachment' as const,
+        attachment: {
+          artifactId: 'a1',
+          name: 'red.png',
+          kind: 'image' as const,
+          mediaType: 'image/png' as const,
+          size: 9
+        }
+      }
+    ]
+  }
+
+  test('prepare reads the files; send writes that line with the message id', async () => {
+    const { driver, lines } = setupWithReader({ a1: PNG })
+    const prepared = await driver.prepareUserTurn!(message)
+    await driver.sendUserTurn!(message, prepared)
+    const sent = lines.filter((l) => l.writeId === 'm1')
+    expect(sent).toHaveLength(1)
+    expect(JSON.parse(sent[0].line)).toEqual({
+      type: 'user',
+      uuid: 'm1',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') }
+          },
+          { type: 'text', text: '/x MANGO' }
+        ]
+      }
+    })
+  })
+
+  test('prepare rejects with the reason when a file is gone', async () => {
+    const { driver } = setupWithReader({})
+    await expect(driver.prepareUserTurn!(message)).rejects.toThrow(
+      /red\.png is no longer available/
+    )
+  })
+
+  test('an attachment that was never prepared is refused, never sent as text', async () => {
+    const { driver, lines } = setupWithReader({ a1: PNG })
+    await expect(driver.sendUserTurn!(message)).rejects.toThrow(/prepared/)
+    expect(lines.filter((l) => l.writeId === 'm1')).toEqual([])
+  })
+
+  test('text-only turns need no prepare (one text block = plain string)', async () => {
+    const { driver, lines } = setupWithReader({})
+    await driver.sendUserTurn!({ id: 'm2', content: [{ type: 'text', text: 'hi' }] })
+    expect(JSON.parse(lines.find((l) => l.writeId === 'm2')!.line).message.content).toBe('hi')
   })
 })

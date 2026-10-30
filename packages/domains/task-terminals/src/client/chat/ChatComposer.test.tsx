@@ -3,8 +3,8 @@ import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { appearanceDefaults } from '@slayzone/ui'
-import type { ArtifactRef } from '@slayzone/editor/hooks'
-import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contracts'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const mutate = vi.fn()
 
@@ -14,6 +14,10 @@ vi.mock('../trpc', () => ({
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useMutation: () => ({ mutate })
+}))
+// Thumbnails resolve the artifact's file path through the app's uploader.
+vi.mock('@slayzone/editor/hooks', () => ({
+  useArtifactUpload: () => ({ uploadFiles: vi.fn(), getFilePath: async () => null })
 }))
 
 import { ChatComposer, type ChatComposerProps } from './ChatComposer'
@@ -33,7 +37,19 @@ globalThis.ResizeObserver = class {
   }
 }
 
-const IMG: ArtifactRef = { id: 'a', title: 'shot.png' }
+const att = (
+  artifactId: string,
+  name: string,
+  over: Partial<ChatAttachment> = {}
+): ChatAttachment => ({
+  artifactId,
+  name,
+  kind: 'image',
+  mediaType: 'image/png',
+  size: 2048,
+  ...over
+})
+const IMG = att('a', 'shot.png')
 const queued = (id: string, send: string): QueuedChatMessage => ({
   id,
   tabId: 'tab-1',
@@ -53,16 +69,25 @@ function makeProps(over: Partial<ChatComposerProps> = {}): ChatComposerProps {
     mode: 'claude-chat',
     queuedMessages: [],
     removeQueue: vi.fn(() => Promise.resolve()),
+    queueApi: {
+      editable: true,
+      onMove: vi.fn(() => Promise.resolve()),
+      onHold: vi.fn(() => Promise.resolve(true)),
+      onRelease: vi.fn(() => Promise.resolve()),
+      onSave: vi.fn(() => Promise.resolve(true)),
+      onSaveGone: vi.fn()
+    },
     attachments: [],
     setAttachments: vi.fn(),
-    imagePasteDrop: {
-      extractImageFiles: vi.fn(() => []),
-      handleFiles: vi.fn(() => Promise.resolve(true)),
-      isUploading: false,
+    attachmentsApi: {
+      pending: [],
       isDragging: false,
+      addFiles: vi.fn(() => Promise.resolve()),
       onDragEnter: vi.fn(),
+      onDragOver: vi.fn(),
       onDragLeave: vi.fn(),
-      resetDrag: vi.fn()
+      onDrop: vi.fn(),
+      onPaste: vi.fn()
     },
     autocomplete: {
       show: false,
@@ -110,7 +135,11 @@ function makeProps(over: Partial<ChatComposerProps> = {}): ChatComposerProps {
 
 function setup(over: Partial<ChatComposerProps> = {}) {
   props = makeProps(over)
-  return render(<ChatComposer {...props} />)
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ChatComposer {...props} />
+    </QueryClientProvider>
+  )
 }
 
 const textarea = () => screen.getByRole('textbox') as HTMLTextAreaElement
@@ -165,39 +194,44 @@ describe('ChatComposer queue', () => {
 })
 
 describe('ChatComposer attachments', () => {
-  it('shows a chip per attachment; removing one drops only that index', () => {
-    const other: ArtifactRef = { id: 'b', title: 'other.png' }
+  it('shows a chip per attachment (name + size); removing one drops only that index', () => {
+    const other = att('b', 'notes.md', { kind: 'text', mediaType: 'text/plain', size: 300 })
     setup({ attachments: [IMG, other] })
     expect(screen.getByText('shot.png')).toBeDefined()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Remove attachment' })[0])
+    expect(screen.getByText('2 KB')).toBeDefined()
+    expect(screen.getByText('notes.md')).toBeDefined()
+    fireEvent.click(screen.getAllByRole('button', { name: /Remove/ })[0])
     const update = vi.mocked(props.setAttachments).mock.lastCall?.[0]
     expect(typeof update).toBe('function')
     if (typeof update !== 'function') return
     expect(update([IMG, other])).toEqual([other])
   })
 
-  it('shows "uploading…" while an upload runs', () => {
+  it('shows each file still being attached', () => {
     setup({
-      attachments: [IMG],
-      imagePasteDrop: { ...makeProps().imagePasteDrop, isUploading: true }
+      attachmentsApi: { ...makeProps().attachmentsApi, pending: [{ key: 'k', name: 'big.pdf' }] }
     })
-    expect(screen.getByText('uploading…')).toBeDefined()
+    expect(screen.getByText(/Attaching big\.pdf/)).toBeDefined()
   })
 
-  it('pasting images hands them to the uploader and suppresses the default paste', () => {
-    const file = new File(['x'], 'p.png', { type: 'image/png' })
-    const base = makeProps().imagePasteDrop
-    setup({ imagePasteDrop: { ...base, extractImageFiles: vi.fn(() => [file]) } })
-    const notPrevented = fireEvent.paste(textarea(), { clipboardData: { files: [file] } })
-    expect(notPrevented).toBe(false)
-    expect(props.imagePasteDrop.handleFiles).toHaveBeenCalledWith([file])
-  })
-
-  it('pasting plain text is left to the textarea', () => {
+  it('pasting goes to the attachments hook (it decides what to take)', () => {
     setup()
-    const notPrevented = fireEvent.paste(textarea(), { clipboardData: { files: [] } })
-    expect(notPrevented).toBe(true)
-    expect(props.imagePasteDrop.handleFiles).not.toHaveBeenCalled()
+    fireEvent.paste(textarea(), { clipboardData: { files: [] } })
+    expect(props.attachmentsApi.onPaste).toHaveBeenCalled()
+  })
+
+  it('Claude: the paperclip picks files for the attachments hook', () => {
+    setup()
+    const input = screen.getByTestId('chat-attach-input') as HTMLInputElement
+    const file = new File(['%PDF-1.7'], 'a.pdf', { type: 'application/pdf' })
+    fireEvent.change(input, { target: { files: [file] } })
+    expect(props.attachmentsApi.addFiles).toHaveBeenCalledWith([file])
+    expect(button('Attach files')).toBeDefined()
+  })
+
+  it('Codex: no file picker (images by paste/drop only, as before)', () => {
+    setup({ mode: 'codex-chat' })
+    expect(queryButton('Attach files')).toBeNull()
   })
 })
 
@@ -265,8 +299,11 @@ describe('ChatComposer send / stop', () => {
     expect(button('Send').disabled).toBe(false)
   })
 
-  it('Send is disabled while an image uploads', () => {
-    setup({ draft: 'hi', imagePasteDrop: { ...makeProps().imagePasteDrop, isUploading: true } })
+  it('Send is disabled while a file is being attached', () => {
+    setup({
+      draft: 'hi',
+      attachmentsApi: { ...makeProps().attachmentsApi, pending: [{ key: 'k', name: 'p.png' }] }
+    })
     expect(button('Send').disabled).toBe(true)
   })
 
@@ -405,5 +442,18 @@ describe('ChatComposer Reset', () => {
   it('is disabled while a reset runs', () => {
     setup({ resetting: true })
     expect(button('Reset').disabled).toBe(true)
+  })
+})
+
+describe('ChatComposer argument hint', () => {
+  it('shows the hint as ghost text after the draft', () => {
+    setup({ draft: '/x ', argumentHint: '<fruit> <count>' })
+    const ghost = screen.getByTestId('chat-argument-hint')
+    expect(ghost.textContent).toContain('<fruit> <count>')
+  })
+
+  it('no hint, no ghost', () => {
+    setup({ draft: '/x ' })
+    expect(screen.queryByTestId('chat-argument-hint')).toBeNull()
   })
 })

@@ -19,6 +19,25 @@ export function extractImageFilesFromDataTransfer(dt: DataTransfer | null | unde
   return out
 }
 
+/**
+ * Every file of a drop / paste (any type), deduplicated across `items` and
+ * `files`. For callers that check the content themselves (chat attachments).
+ */
+export function extractFilesFromDataTransfer(dt: DataTransfer | null | undefined): File[] {
+  if (!dt) return []
+  const out: File[] = []
+  if (dt.items && dt.items.length > 0) {
+    for (const item of Array.from(dt.items)) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f) out.push(f)
+      }
+    }
+  }
+  if (out.length === 0 && dt.files && dt.files.length > 0) out.push(...Array.from(dt.files))
+  return out
+}
+
 export interface UseImagePasteDropOpts<T> {
   onUpload: (files: File[]) => Promise<T[]>
   onInsert: (results: T[]) => void

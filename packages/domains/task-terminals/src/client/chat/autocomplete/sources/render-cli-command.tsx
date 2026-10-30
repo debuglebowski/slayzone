@@ -6,6 +6,11 @@ export function renderCliCommandItem(cmd: CliCommandItem): React.JSX.Element {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs">/{cmd.name}</span>
+          {cmd.argumentHint && (
+            <span className="font-mono text-[11px] text-muted-foreground/70 truncate">
+              {cmd.argumentHint}
+            </span>
+          )}
           <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
             {cmd.kind === 'skill' ? 'skill' : 'claude code'}
           </span>

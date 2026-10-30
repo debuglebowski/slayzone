@@ -50,6 +50,13 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       observed_at INTEGER NOT NULL,
       PRIMARY KEY (project_id, mode)
     );
+    CREATE TABLE chat_cli_command_details (
+      project_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      details TEXT NOT NULL,
+      observed_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, mode)
+    );
   `)
   const runLog: string[] = []
   const db = {
@@ -315,4 +322,36 @@ test('a mode entry that is not an object is replaced by one holding the new key'
   const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   await ops.writeChatModel('t10', 'claude-chat', 'opus')
   expect((await ops.readProviderConfig('t10', 'claude-chat')).chatModel).toBe('opus')
+})
+
+test('CLI command details: stored per project + mode, read on their own (no command list needed)', async () => {
+  const { raw, db } = makeDb()
+  raw
+    .prepare('INSERT INTO tasks (id, project_id) VALUES (?, ?), (?, ?)')
+    .run('t1', 'p1', 't2', 'p1')
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  const details = { compact: { description: 'Free up context', argumentHint: '<instructions>' } }
+
+  expect(await ops.getCliCommandDetails('t1', 'claude-chat')).toBeNull()
+  // The CLI answered `initialize` before any turn: no list, details known.
+  await ops.saveCliCommandDetails('t1', 'claude-chat', details)
+  expect(await ops.getCliCommandDetails('t2', 'claude-chat')).toEqual(details)
+  expect(await ops.getCliSnapshot('t2', 'claude-chat')).toBeNull()
+  const next = { context: { description: 'Show context', argumentHint: '' } }
+  await ops.saveCliCommandDetails('t2', 'claude-chat', next)
+  expect(await ops.getCliCommandDetails('t1', 'claude-chat')).toEqual(next)
+  expect(await ops.getCliCommandDetails('t1', 'codex-chat')).toBeNull()
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_cli_command_details').get()).toEqual({ n: 1 })
+})
+
+test('CLI command details: corrupt JSON reads as no details', async () => {
+  const { raw, db } = makeDb()
+  raw.prepare('INSERT INTO tasks (id, project_id) VALUES (?, ?)').run('t1', 'p1')
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  raw
+    .prepare(
+      `INSERT INTO chat_cli_command_details (project_id, mode, details, observed_at) VALUES ('p1', 'claude-chat', '{nope', 1)`
+    )
+    .run()
+  expect(await ops.getCliCommandDetails('t1', 'claude-chat')).toBeNull()
 })

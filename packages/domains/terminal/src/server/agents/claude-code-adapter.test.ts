@@ -920,6 +920,56 @@ describe('ClaudeCodeAdapter — hook output', () => {
     ).toEqual({ kind: 'notice', id: 'n1', level: 'warning', text: 'PostToolUse:Bash says: hi' })
   })
 
+  test('serializeUserTurn: attachments travel as image / document blocks', () => {
+    const content = [
+      {
+        type: 'image' as const,
+        source: { type: 'base64' as const, media_type: 'image/png', data: 'AAA=' }
+      },
+      {
+        type: 'document' as const,
+        source: { type: 'text' as const, media_type: 'text/plain' as const, data: 'notes' },
+        title: 'notes.txt'
+      },
+      { type: 'text' as const, text: '/x MANGO' }
+    ]
+    expect(
+      JSON.parse(claudeCodeAdapter.serializeUserTurn!({ id: 'm-3', content })).message.content
+    ).toEqual(content)
+  })
+
+  test('a user record that starts with our own image/document is our echo: dropped, never an unknown row', () => {
+    for (const first of [
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(1000) }
+      },
+      {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: 'B' },
+        title: 'a.pdf'
+      }
+    ]) {
+      expect(
+        claudeCodeAdapter.parseLine(
+          JSON.stringify({
+            type: 'user',
+            message: { role: 'user', content: [first, { type: 'text', text: 'hi' }] }
+          })
+        )
+      ).toBeNull()
+    }
+  })
+
+  test('a line that is not JSON keeps at most a short prefix as raw (never MiBs of base64)', () => {
+    const line = `{"type":"user","message":{"content":[{"type":"image","source":{"data":"${'Q'.repeat(200_000)}`
+    const ev = claudeCodeAdapter.parseLine(line)
+    expect(ev).toMatchObject({ kind: 'unknown', reason: 'parse-error' })
+    const raw = (ev as { raw: unknown }).raw
+    expect(typeof raw).toBe('string')
+    expect((raw as string).length).toBeLessThan(5000)
+  })
+
   // ---- chat A: conversation control ----
 
   test('assistant events keep the record uuid (the fork point of --resume-session-at)', () => {

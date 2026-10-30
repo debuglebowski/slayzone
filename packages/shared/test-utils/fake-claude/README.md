@@ -93,6 +93,7 @@ Every string in an emitted event goes through substitution:
 | `{{effort}}` | From `--effort`. |
 | `{{userText}}` | The message that started this turn. |
 | `{{turn}}`, `{{spawn}}` | The turn and spawn indexes. |
+| `{{command}}` | The slash command the real CLI would run for this message, or `''`. Like 2.1.312: only when the message's LAST block is the `/name …` text (`[image, text '/x a']` runs `x`; `[text '/x a', image]` is plain text to the model). |
 
 ### What the fake does without being told
 
@@ -102,6 +103,7 @@ The defaults copy CLI 2.1.312 behaviour as recorded:
   - Acked at once with the real payload: `{still_queued:[]}`, `{model}` or `{mode}`.
   - A mode change is followed by `system/status {permissionMode}`.
   - `controlResponses` can turn any of them into `'error'` or `'ignore'`. The app falls back to kill + respawn after a 30 s timeout.
+- **`initialize`** (the app sends it first on every spawn): answered `{commands: []}`. Script the CLI's command descriptions + argument hints with `controlPayloads: { initialize: { commands: [{ name, description, argumentHint }] } }` (any subtype's success payload can be extended this way).
 - **Interrupt mid-turn**:
   - Every open tool_use gets a rejecting `tool_result`.
   - Then a user text `[Request interrupted by user(for tool use)]`.
@@ -155,7 +157,8 @@ A turn past `turns` with no `defaultTurn` gets an error `result` naming the turn
 ```ts
 const run = await epoch.waitForRun(0, (r) => r.userMessages().length === 2)
 run.argv; run.sessionId; run.resumed; run.flag('--model')
-run.userMessages()       // texts the app sent
+run.userMessages()       // texts the app sent (plain-string messages only)
+run.userContents()       // every user message as written: string or block array (attachments)
 run.controlRequests()    // [{subtype:'interrupt'}, {subtype:'set_model', model}]
 run.decisions()          // answers to the fake's can_use_tool requests
 run.hostReplies()        // replies to hostRequest steps (or 'timeout')

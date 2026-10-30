@@ -28,6 +28,27 @@ export interface AgentSpawnOpts {
   fork?: { fromSessionId: string; atMessageUuid: string }
 }
 
+/**
+ * A content block as it goes to the agent on stdin (Messages API shapes): text,
+ * or an attached file read into an image / document block.
+ */
+export type WireUserContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | {
+      type: 'document'
+      source:
+        | { type: 'base64'; media_type: 'application/pdf'; data: string }
+        | { type: 'text'; media_type: 'text/plain'; data: string }
+      title: string
+    }
+
+/** What `prepareUserTurn` built for one message: the line to write. Opaque to the transport. */
+export interface PreparedUserTurn {
+  readonly id: string
+  readonly line: string
+}
+
 export interface SpawnArgs {
   /** Command-line arguments (no binary prefix). Binary resolved separately via whichBinary. */
   args: string[]
@@ -57,11 +78,12 @@ export interface AgentAdapter {
   serializeUserMessage(text: string, sessionId: string): string
 
   /**
-   * ONE NDJSON line for an outbox message: its content blocks, and its id as the
-   * CLI's message `uuid` (Claude reports delivery against it). Absent: the
-   * transport falls back to `serializeUserMessage` with the plain text.
+   * ONE NDJSON line for an outbox message: its content blocks (attachments
+   * already read — see `prepareUserTurn`), and its id as the CLI's message
+   * `uuid` (Claude reports delivery against it). Absent: the transport falls
+   * back to `serializeUserMessage` with the plain text.
    */
-  serializeUserTurn?(message: OutgoingUserMessage): string
+  serializeUserTurn?(message: { id: string; content: ReadonlyArray<WireUserContentBlock> }): string
 
   /**
    * Produce ONE NDJSON line (no trailing newline) carrying a `tool_result`
@@ -179,11 +201,19 @@ export interface ChatSessionDriver {
   /** Dispatch a user message to the provider (plain text). */
   sendUserMessage(text: string): void
   /**
-   * Dispatch an outbox message (id + content blocks). Resolves once it was
-   * written, rejects when it could not be; throws/rejects — never silently
-   * drops — before `start`. Absent: the transport uses `sendUserMessage`.
+   * Build what an outbox message is written as — reading its attached files.
+   * The transport awaits it BEFORE the message counts as sending, so a file
+   * that can't be read fails the message without starting a turn. Absent: the
+   * driver takes text only.
    */
-  sendUserTurn?(message: OutgoingUserMessage): Promise<void>
+  prepareUserTurn?(message: OutgoingUserMessage): Promise<PreparedUserTurn>
+  /**
+   * Dispatch an outbox message (id + content blocks), as `prepared` when given.
+   * Resolves once it was written, rejects when it could not be; throws/rejects
+   * — never silently drops — before `start`, or for attachments that were not
+   * prepared. Absent: the transport uses `sendUserMessage`.
+   */
+  sendUserTurn?(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void>
   /**
    * The provider confirms each message itself (Claude: `command_lifecycle` /
    * replay for the message `uuid`), so a written message is only `sending`

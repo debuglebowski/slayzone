@@ -18,12 +18,43 @@ import { isDeepStrictEqual } from 'node:util'
 import type {
   AgentEvent,
   CommandTaskOutput,
+  CliCommandDetailsEvent,
   OutgoingUserMessage,
   PermissionDecision
 } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
 import { ClaudeCommandTasks } from './claude-command-tasks'
-import type { AgentBackend, ChatDriverContext, ChatSessionDriver } from './types'
+import {
+  buildClaudeContent,
+  getChatAttachmentReader,
+  type ChatAttachmentReader
+} from './claude-content'
+import type { AgentBackend, ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from './types'
+
+/**
+ * How long the `initialize` reply may take. It only adds command descriptions
+ * and argument hints (the CLI answers in well under a second, before its first
+ * `init`), so a missing reply costs nothing but those.
+ */
+const INITIALIZE_TIMEOUT_MS = 10_000
+
+/** `commands[]` of an `initialize` reply, well-formed entries only. */
+function initializeCommands(data: unknown): CliCommandDetailsEvent['commands'] | null {
+  const body = asRecord(data)
+  const reply = asRecord(body.response ?? body)
+  if (!Array.isArray(reply.commands)) return null
+  const out: CliCommandDetailsEvent['commands'] = []
+  for (const raw of reply.commands) {
+    const c = asRecord(raw)
+    if (typeof c.name !== 'string' || !c.name) continue
+    out.push({
+      name: c.name,
+      description: typeof c.description === 'string' ? c.description : '',
+      argumentHint: typeof c.argumentHint === 'string' ? c.argumentHint : ''
+    })
+  }
+  return out
+}
 
 interface PendingControl {
   resolve: (data: unknown) => void
@@ -98,9 +129,14 @@ function buildWireDecision(
   }
 }
 
-class ClaudeSessionDriver implements ChatSessionDriver {
+export class ClaudeSessionDriver implements ChatSessionDriver {
   /** Claude reports delivery itself: `command_lifecycle` + the replay of the message `uuid`. */
   readonly confirmsDelivery = true
+  private readonly readAttachment: ChatAttachmentReader | undefined
+
+  constructor(opts: { readAttachment?: ChatAttachmentReader } = {}) {
+    this.readAttachment = opts.readAttachment
+  }
   private ctx: ChatDriverContext | null = null
   /** In-flight `control_request` promises, keyed by request_id. */
   private readonly pendingControl = new Map<string, PendingControl>()
@@ -116,8 +152,30 @@ class ClaudeSessionDriver implements ChatSessionDriver {
     now: () => Date.now()
   })
 
-  start(ctx: ChatDriverContext): void {
+  /**
+   * Asks the CLI for its slash commands with descriptions and argument hints
+   * (`initialize`, as the official SDK does; it changes nothing else about the
+   * session — verified on 2.1.312). Written FIRST, and start resolves once it
+   * was written, so it precedes every user message on stdin. The reply arrives
+   * on its own (or never: then the composer keeps names only).
+   */
+  start(ctx: ChatDriverContext): Promise<void> {
     this.ctx = ctx
+    const { written, response } = this.issueControl(
+      { subtype: 'initialize' },
+      INITIALIZE_TIMEOUT_MS
+    )
+    response.then(
+      (data) => {
+        const commands = initializeCommands(data)
+        if (commands && commands.length > 0)
+          this.ctx?.emit({ kind: 'cli-command-details', commands })
+      },
+      () => {
+        /* no reply, an error reply, or the session ended: names only */
+      }
+    )
+    return written.catch(() => undefined)
   }
 
   handleLine(line: string): void {
@@ -189,18 +247,45 @@ class ClaudeSessionDriver implements ChatSessionDriver {
     void this.sendUserTurn({ id: randomUUID(), content: [{ type: 'text', text }] })
   }
 
-  sendUserTurn(message: OutgoingUserMessage): Promise<void> {
+  /** Reads the message's attached files into image / document blocks (see `claude-content.ts`). */
+  async prepareUserTurn(message: OutgoingUserMessage): Promise<PreparedUserTurn> {
+    const content = await buildClaudeContent(message.content, this.readAttachment)
+    return { id: message.id, line: this.serializeTurn(message.id, content) }
+  }
+
+  sendUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
     // Never a silent no-op: a message written before the driver has its IO
     // context is a lost message (it used to return quietly — P0 N1).
     if (!this.ctx) return Promise.reject(new Error('the agent driver has not started'))
-    const line = claudeCodeAdapter.serializeUserTurn
-      ? claudeCodeAdapter.serializeUserTurn(message)
-      : claudeCodeAdapter.serializeUserMessage(
-          message.content.map((b) => b.text).join('\n\n'),
-          this.ctx.sessionId
-        )
+    let line: string
+    if (prepared && prepared.id === message.id) {
+      line = prepared.line
+    } else if (message.content.every((b) => b.type === 'text')) {
+      line = this.serializeTurn(
+        message.id,
+        message.content.map((b) => ({
+          type: 'text' as const,
+          text: b.type === 'text' ? b.text : ''
+        }))
+      )
+    } else {
+      // Attached files are read by `prepareUserTurn`; never send them as nothing.
+      return Promise.reject(new Error('attachments were not prepared for this message'))
+    }
     // The id doubles as the write's idempotency key: a retried write lands once.
     return this.sendLine(line, { writeId: message.id })
+  }
+
+  private serializeTurn(
+    id: string,
+    content: Parameters<NonNullable<typeof claudeCodeAdapter.serializeUserTurn>>[0]['content']
+  ): string {
+    if (claudeCodeAdapter.serializeUserTurn)
+      return claudeCodeAdapter.serializeUserTurn({ id, content })
+    return claudeCodeAdapter.serializeUserMessage(
+      content.map((b) => (b.type === 'text' ? b.text : '')).join('\n\n'),
+      this.ctx?.sessionId ?? ''
+    )
   }
 
   sendToolResult(args: { toolUseId: string; content: string; isError?: boolean }): boolean {
@@ -217,17 +302,30 @@ class ClaudeSessionDriver implements ChatSessionDriver {
   }
 
   applyControl(request: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
-    if (!this.ctx) return Promise.reject(new Error('driver not started'))
-    if (!claudeCodeAdapter.serializeControlRequest) {
-      return Promise.reject(new Error('adapter has no control channel'))
+    return this.issueControl(request, timeoutMs).response
+  }
+
+  /**
+   * Send a control_request: `written` settles with the write, `response` with
+   * the CLI's control_response (or the timeout / the session ending). Callers
+   * that only need one of them must still observe the other's rejection.
+   */
+  private issueControl(
+    request: Record<string, unknown>,
+    timeoutMs: number
+  ): { written: Promise<void>; response: Promise<unknown> } {
+    const refuse = (msg: string): { written: Promise<void>; response: Promise<unknown> } => {
+      const err = Promise.reject(new Error(msg))
+      return { written: err, response: err }
     }
+    if (!this.ctx) return refuse('driver not started')
+    if (!claudeCodeAdapter.serializeControlRequest) return refuse('adapter has no control channel')
     this.controlReqCounter++
     const requestId = `req_${this.controlReqCounter}_${Date.now().toString(36)}`
     const line = claudeCodeAdapter.serializeControlRequest({ requestId, request })
-    if (line == null) {
-      return Promise.reject(new Error('adapter refused to serialize control_request'))
-    }
-    return new Promise<unknown>((resolve, reject) => {
+    if (line == null) return refuse('adapter refused to serialize control_request')
+    let written!: Promise<void>
+    const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingControl.delete(requestId)
         reject(new Error(`control_request timeout after ${timeoutMs}ms`))
@@ -241,11 +339,13 @@ class ClaudeSessionDriver implements ChatSessionDriver {
         reject(err instanceof Error ? err : new Error(String(err)))
       }
       try {
-        this.sendLine(line).catch(fail)
+        written = this.sendLine(line)
       } catch (err) {
-        fail(err)
+        written = Promise.reject(err instanceof Error ? err : new Error(String(err)))
       }
+      written.catch(fail)
     })
+    return { written, response }
   }
 
   /** A confirmed write when the transport offers one. */
@@ -339,7 +439,7 @@ export const claudeChatBackend: AgentBackend = {
   // enabled." (spike item 5).
   spawnEnv: { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true' },
   buildSpawnArgs: (opts) => claudeCodeAdapter.buildSpawnArgs(opts),
-  createDriver: () => new ClaudeSessionDriver(),
+  createDriver: () => new ClaudeSessionDriver({ readAttachment: getChatAttachmentReader() }),
   refusedOptionalFlag: (stderr) =>
     /unknown option '--thinking-display'/.test(stderr) ? '--thinking-display' : null
 }

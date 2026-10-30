@@ -16,7 +16,10 @@ test('Claude Code chat: every capability', () => {
     rewind: true,
     fork: true,
     sessions: true,
-    handoff: true
+    handoff: true,
+    attachments: 'blocks',
+    restoreComposerState: true,
+    editableQueue: true
   })
 })
 
@@ -30,7 +33,10 @@ test('Codex chat keeps today’s behavior: no new capabilities', () => {
     rewind: false,
     fork: false,
     sessions: false,
-    handoff: false
+    handoff: false,
+    attachments: 'paths',
+    restoreComposerState: false,
+    editableQueue: false
   })
 })
 
@@ -44,7 +50,10 @@ test('unknown / non-chat modes get nothing', () => {
     rewind: false,
     fork: false,
     sessions: false,
-    handoff: false
+    handoff: false,
+    attachments: 'paths',
+    restoreComposerState: false,
+    editableQueue: false
   })
 })
 

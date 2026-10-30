@@ -13,12 +13,15 @@ import {
   isAwaitingUserQuestion,
   LiveBlockStore,
   LiveBlockStoreContext,
+  selectConversationAttachmentBytes,
   selectUsageSummary,
   useChatSession
 } from '@slayzone/terminal/client'
 import { chatCapabilitiesForMode } from '@slayzone/terminal-contracts'
 import type { AgentState } from '@slayzone/terminal-contracts'
-import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
+import { useArtifactUpload } from '@slayzone/editor/hooks'
+import { useChatAttachments } from './attachments/useChatAttachments'
+import { useChatScrollMemory } from './composer-state/useChatScrollMemory'
 import { ChatViewContext } from './ChatViewContext'
 import { useChatMode } from './useChatMode'
 import { useChatModel } from './useChatModel'
@@ -99,6 +102,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       retryMessage,
       sendToolResult,
       respondPermission,
+      interrupt,
       abortAndPop,
       rewindPreview,
       rewind,
@@ -153,7 +157,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // The prompt dock's key handler, consulted first by the panel's keys.
     const promptKeysRef = useRef<PromptKeyHandler | null>(null)
     const [collapseSignal, setCollapseSignal] = useState(0)
-    const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useFollowBottom()
+    const { scrollRef, contentRef, isAtBottom, scrollToBottom, captureAnchor, restoreAnchor } =
+      useFollowBottom()
     const panelRef = useRef<HTMLDivElement>(null)
 
     const { chatApi, navigate } = useChatActions()
@@ -162,13 +167,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       taskId,
       mode,
       live: state.cliCommands,
+      liveDetails: state.cliCommandDetails,
       enabled: chatCapabilitiesForMode(mode).nativeSlashCommands
     })
 
-    const { uploadFiles: uploadImageFiles, getFilePath: getArtifactFilePath } = useArtifactUpload(
-      taskId,
-      { folderName: 'Uploads' }
-    )
+    const { getFilePath: getArtifactFilePath } = useArtifactUpload(taskId, {
+      folderName: 'Uploads'
+    })
 
     const composer = useChatComposer({
       tabId,
@@ -187,18 +192,22 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       scrollToBottom,
       handleEffortChange,
       handleModelChange,
-      cliCommands
+      cliCommands,
+      attachmentsUsedBytes: selectConversationAttachmentBytes(state),
+      // "Send now" on a queued message: a live interrupt keeps the queue, which
+      // then drains that message next (`chat.interrupt` → stopTurn, no restore).
+      ...(chatCapabilitiesForMode(mode).liveInterrupt ? { interruptTurn: interrupt } : {})
     })
 
-    const imagePasteDrop = useImagePasteDrop<ArtifactRef>({
-      onUpload: uploadImageFiles,
-      onInsert: (results) => {
-        composer.setAttachments((prev) => [...prev, ...results])
+    const attachmentsApi = useChatAttachments({
+      taskId,
+      mode,
+      onAdded: (added) => {
+        composer.setAttachments((prev) => [...prev, ...added])
         composer.textareaRef.current?.focus()
-      },
-      onError: (err) =>
-        toast(`Image upload failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
     })
+    const takesAnyFile = chatCapabilitiesForMode(mode).attachments === 'blocks'
 
     useImperativeHandle(ref, () => ({
       focus: () => composer.textareaRef.current?.focus()
@@ -219,6 +228,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         composer.setDraft(text)
         composer.textareaRef.current?.focus()
       }
+    })
+
+    // Where the timeline was scrolled survives remounts and reloads (per tab).
+    useChatScrollMemory({
+      tabId,
+      enabled: chatCapabilitiesForMode(mode).restoreComposerState,
+      ready: !hydrating,
+      scrollRef,
+      captureAnchor,
+      restoreAnchor,
+      revealKey: display.revealKey
     })
 
     const copySessionId = useCallback(() => {
@@ -242,7 +262,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         hydrating,
         state,
         resetTimeline,
-        setDraft: composer.setDraft,
+        // Reset clears the composer: its text and its attached files.
+        setDraft: (value: string) => {
+          composer.setDraft(value)
+          composer.setAttachments([])
+        },
         clearQueue: composer.clearQueue
       })
 
@@ -355,23 +379,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               data-chat-panel
               className="relative flex flex-col h-full bg-background"
               style={{ fontSize: `${appearance.terminalFontSize}px` }}
-              onDragEnter={(e) => {
-                if (e.dataTransfer?.types.includes('Files')) {
-                  e.preventDefault()
-                  imagePasteDrop.onDragEnter()
-                }
-              }}
-              onDragOver={(e) => {
-                if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
-              }}
-              onDragLeave={() => imagePasteDrop.onDragLeave()}
-              onDrop={(e) => {
-                const files = imagePasteDrop.extractImageFiles(e.dataTransfer)
-                imagePasteDrop.resetDrag()
-                if (files.length === 0) return
-                e.preventDefault()
-                void imagePasteDrop.handleFiles(files)
-              }}
+              onDragEnter={attachmentsApi.onDragEnter}
+              onDragOver={attachmentsApi.onDragOver}
+              onDragLeave={attachmentsApi.onDragLeave}
+              onDrop={attachmentsApi.onDrop}
               onMouseUp={(e) => {
                 // Click on panel background → focus composer. Skip if user clicked an
                 // interactive element (button/link/input) or completed a text selection.
@@ -411,9 +422,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               }}
             >
               {/* Panel-wide drop overlay */}
-              {imagePasteDrop.isDragging && (
+              {attachmentsApi.isDragging && (
                 <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
-                  Drop image…
+                  {takesAnyFile ? 'Drop files to attach (images, PDFs, text)' : 'Drop image…'}
                 </div>
               )}
 
@@ -456,13 +467,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 mode={mode}
                 queuedMessages={composer.queuedMessages}
                 removeQueue={composer.removeQueue}
+                queueApi={composer.queueApi}
                 attachments={composer.attachments}
                 setAttachments={composer.setAttachments}
-                imagePasteDrop={imagePasteDrop}
+                attachmentsApi={attachmentsApi}
                 autocomplete={composer.autocomplete}
                 textareaRef={composer.textareaRef}
                 draft={composer.draft}
                 setDraft={composer.setDraft}
+                argumentHint={composer.argumentHint}
                 setCursorPos={composer.setCursorPos}
                 onKeyDown={composer.onKeyDown}
                 handleSend={composer.handleSend}

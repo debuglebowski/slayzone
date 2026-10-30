@@ -132,6 +132,8 @@ const ctx = {
     : (flagValue('--permission-mode') ?? 'default'),
   effort: flagValue('--effort') ?? '',
   userText: '',
+  /** The slash command the real CLI would run for the current message ('' = none). */
+  command: '',
   turn: 0,
   spawn: index
 }
@@ -429,6 +431,18 @@ function onStdinLine(line) {
   }
 }
 
+/**
+ * The command Claude Code runs for a user message: its typed input is the LAST
+ * block (verified on 2.1.312: `[image, text '/x a']` runs /x; `[text '/x a',
+ * image]` goes to the model as plain text).
+ */
+function slashCommandOf(content) {
+  const last = Array.isArray(content) ? content[content.length - 1] : null
+  const typed = typeof content === 'string' ? content : last?.type === 'text' ? last.text : ''
+  const m = /^\/(\S+)/.exec(String(typed ?? '').trim())
+  return m ? m[1] : ''
+}
+
 function lifecycle(uuid, state) {
   return writeLine({
     type: 'command_lifecycle',
@@ -504,6 +518,10 @@ async function onControlRequest(msg) {
       turnAbort.abort()
     }
   }
+  // The reply always carries commands[] (each with description + argumentHint).
+  if (subtype === 'initialize') payload = { commands: [] }
+  const scripted = script.controlPayloads?.[subtype]
+  if (scripted) payload = { ...payload, ...scripted }
   if (typeof mode === 'object' && 'success' in mode) payload = mode.success
   await writeLine({
     type: 'control_response',
@@ -935,6 +953,7 @@ async function main() {
     const { text, uuid, content } = message
     ctx.userText = text
     recordUserMessage(message)
+    ctx.command = slashCommandOf(content)
     const acks = Boolean(uuid) && acksDelivery()
     if (acks && ackDelayed(userMessageCount - 1)) {
       // The CLI has the message (it is in the conversation) but says so late.
