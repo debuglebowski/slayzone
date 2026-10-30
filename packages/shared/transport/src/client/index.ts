@@ -24,6 +24,12 @@ export {
   type FederatedRootProps
 } from './FederationProvider'
 export { HubScope, useHubId, type HubScopeProps } from './HubScope'
+export {
+  toHubConnection,
+  useConnectionState,
+  useHubConnection,
+  type HubConnection
+} from './hubConnection'
 export { electronBootstrap } from './electron-bootstrap'
 export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'

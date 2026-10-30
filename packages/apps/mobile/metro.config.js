@@ -16,7 +16,8 @@ const projectRoot = __dirname
 const config = getDefaultConfig(projectRoot)
 
 const SINGLETONS = ['react', 'react-native']
-const fromApp = path.join(projectRoot, 'index.ts')
+// Resolve as if requested by a file of this app (any one: only its directory counts).
+const fromApp = path.join(projectRoot, 'package.json')
 const isSingleton = (name) => SINGLETONS.some((s) => name === s || name.startsWith(`${s}/`))
 const baseResolve = config.resolver.resolveRequest
 

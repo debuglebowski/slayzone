@@ -845,6 +845,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/connectPacing.test.ts \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
+  packages/shared/transport/src/client/hubConnection.test.tsx \
   packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
   packages/domains/search/src/SearchDialog.algorithm.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
@@ -1089,6 +1090,10 @@ run_package_tests packages/shared/ui @slayzone/ui
 # Theme presets + the colour converter the mobile app paints with: every preset colour
 # must convert (themes.test.ts), and the choice resolution desktop and mobile share.
 run_package_tests packages/shared/theme-tokens @slayzone/theme-tokens
+# The mobile app's React Native components (jest-expo's iOS preset + Testing Library), in
+# Node, no simulator. The app's platform-free logic shared with desktop runs in its own
+# package's vitest suites.
+run_jest_package_tests packages/apps/mobile @slayzone/mobile
 
 # Security headers on every hub response (T-25): the header logic, and the built hub
 # through each handler (shell, assets, better-auth, REST, 404, /trpc, /health).

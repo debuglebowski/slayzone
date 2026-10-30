@@ -17,6 +17,6 @@
         }
       }
     },
-    "plugins": ["expo-secure-store"]
+    "plugins": ["expo-router", "expo-secure-store"]
   }
 }

@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./client": "./src/client/index.ts",
+    "./board": "./src/client/board.ts",
     "./hooks": "./src/client/hooks.ts"
   },
   "scripts": {
@@ -36,7 +37,8 @@
     "motion": "^12.43.0",
     "lucide-react": "^1.48.0",
     "react-hotkeys-hook": "^5.3.3",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "@slayzone/workflow": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.3.1"

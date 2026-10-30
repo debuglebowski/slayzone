@@ -48,6 +48,9 @@ PTY (node-pty)
 ### `/main`
 - `registerTerminalTabsHandlers` - IPC handlers for tab CRUD
 
+### `/prompt-options`
+- What a chat prompt card offers (rows + wire answers), pure: shared by the desktop prompt dock and the mobile app
+
 ### `/shared`
 - `TerminalTab` - Tab data type
 - `CreateTerminalTabInput` / `UpdateTerminalTabInput` - Input types

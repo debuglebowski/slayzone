@@ -86,6 +86,17 @@ run_package_tests() {
   PACKAGE_NAMES+=("$2")
 }
 
+# A package whose `test` script runs jest (React Native components under jest-expo: the
+# mobile app). Same contract as run_package_tests: its run is one suite, and exactly the
+# files its jest run collects are registered (jest_package_test_files).
+# Usage: run_jest_package_tests <dir> <workspace-name>
+JEST_PACKAGE_DIRS=()
+JEST_PACKAGE_NAMES=()
+run_jest_package_tests() {
+  JEST_PACKAGE_DIRS+=("$1")
+  JEST_PACKAGE_NAMES+=("$2")
+}
+
 # Live third-party API suites (run-all.sh gates them on their token): real modules,
 # none of the harness mocks. Usage: run_test_no_loader <file>
 INTEGRATION_FILES=()
@@ -119,6 +130,16 @@ package_test_files() {
     node -e 'let s = ""
       process.stdin.on("data", (d) => (s += d)).on("end", () => {
         for (const { file } of JSON.parse(s || "[]")) console.log(require("path").relative(process.argv[1], file))
+      })' "$ROOT_DIR"
+}
+
+# The same for a jest package: the files `jest --listTests` collects (absolute paths),
+# repo-relative. Usage: jest_package_test_files <workspace-name>
+jest_package_test_files() {
+  pnpm --filter "$1" exec jest --listTests --json 2>/dev/null |
+    node -e 'let s = ""
+      process.stdin.on("data", (d) => (s += d)).on("end", () => {
+        for (const file of JSON.parse(s || "[]")) console.log(require("path").relative(process.argv[1], file))
       })' "$ROOT_DIR"
 }
 
@@ -223,6 +244,9 @@ lane_app_and_packages() {
   for i in "${!PACKAGE_NAMES[@]}"; do
     command_suite "${PACKAGE_DIRS[$i]} (own vitest config)" package_test "${PACKAGE_NAMES[$i]}"
   done
+  for i in "${!JEST_PACKAGE_NAMES[@]}"; do
+    command_suite "${JEST_PACKAGE_DIRS[$i]} (jest)" package_test "${JEST_PACKAGE_NAMES[$i]}"
+  done
   for file in ${INTEGRATION_FILES[@]+"${INTEGRATION_FILES[@]}"}; do
     command_suite "$file (integration)" integration_test "$file"
   done
@@ -261,16 +285,23 @@ selected_lanes() {
 # test counts and durations). Usage: run_suites
 run_suites() {
   local i j lane status verdict label file selected started=$SECONDS
-  local list_pids=() lane_pids=() lanes=()
+  local list_pids=() list_files=() lane_pids=() lanes=()
   selected=$(selected_lanes) || exit 2
   while IFS= read -r lane; do lanes+=("$lane"); done <<<"$selected"
   WORK=$(mktemp -d "${TMPDIR:-/tmp}/slz-unit.XXXXXX")
   HARNESS_JSON="${SLZ_UNIT_JSON:-$WORK/harness.json}"
 
-  # Each package's file list (one `vitest list` each, ~2s apiece) resolves in the
-  # background, alongside the lanes; RAN needs them only for require_registered.
+  # Each package's file list (one `vitest list` or `jest --listTests` each, ~2s apiece)
+  # resolves in the background, alongside the lanes; RAN needs them only for
+  # require_registered.
   for i in "${!PACKAGE_NAMES[@]}"; do
+    list_files+=("$WORK/package.$i.files")
     package_test_files "${PACKAGE_NAMES[$i]}" >"$WORK/package.$i.files" &
+    list_pids+=($!)
+  done
+  for i in "${!JEST_PACKAGE_NAMES[@]}"; do
+    list_files+=("$WORK/package.jest.$i.files")
+    jest_package_test_files "${JEST_PACKAGE_NAMES[$i]}" >"$WORK/package.jest.$i.files" &
     list_pids+=($!)
   done
 
@@ -321,7 +352,7 @@ run_suites() {
 
   for j in "${!list_pids[@]}"; do
     wait "${list_pids[$j]}" || true
-    while IFS= read -r file; do RAN+=("$file"); done <"$WORK/package.$j.files"
+    while IFS= read -r file; do RAN+=("$file"); done <"${list_files[$j]}"
   done
   rm -rf "$WORK"
 }

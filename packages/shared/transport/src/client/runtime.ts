@@ -220,6 +220,22 @@ export function getHubClient(id: string): RuntimeHubWsClient | null {
   return hubClients.get(id) ?? null
 }
 
+/**
+ * Close a hub's socket and forget it — the hub left the federation (signed out). Its
+ * socket would otherwise keep reconnecting with a bearer the user just gave up, and a
+ * later sign-in must open a fresh one. True when a socket was closed.
+ *
+ * Never the default hub: its client is the boot singleton every module-scope
+ * `getTrpcClient()` caller holds (same rule as `getOrCreateHubClient`).
+ */
+export function closeHubClient(id: string): boolean {
+  const entry = hubClients.get(id)
+  if (!entry || entry.wsClient === wsClientSingleton) return false
+  hubClients.delete(id)
+  void entry.wsClient.close()
+  return true
+}
+
 /** Every hub client created so far (default + any federated remotes). Used by
  *  cross-hub fan-out (e.g. the terminal-state reconcile unions all hubs' live
  *  session lists). Order is insertion order (default hub first). */

@@ -23,6 +23,7 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "lucide-react": "^1.48.0",
+    "react-is": "^18.3.1",
     "recharts": "^3.10.1",
     "zod": "^4.3.5",
     "@slayzone/settings-core": "workspace:*",

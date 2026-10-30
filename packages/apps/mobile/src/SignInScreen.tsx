@@ -26,7 +26,22 @@ const DEV_PREFILL = __DEV__
   : { hub: '', email: '', password: '' }
 const DEV_AUTO_SUBMIT = Boolean(DEV_PREFILL.hub && DEV_PREFILL.email && DEV_PREFILL.password)
 
-export function SignInScreen({ onSignedIn }: { onSignedIn: (session: HubSession) => void }) {
+/**
+ * Sign in to a hub: the first one (`/sign-in`) or another (`/add-hub`, with Cancel).
+ * `signIn` keeps the session in the keychain before `onSignedIn` runs.
+ */
+export function SignInScreen({
+  title,
+  onSignedIn,
+  onCancel,
+  devAutoSubmit = false
+}: {
+  title: string
+  onSignedIn: (session: HubSession) => void
+  onCancel?: () => void
+  /** Dev bundles only: submit the `EXPO_PUBLIC_SPIKE_*` prefill once (first sign-in). */
+  devAutoSubmit?: boolean
+}) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const [hub, setHub] = useState(DEV_PREFILL.hub)
@@ -48,12 +63,12 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (session: HubSession)
   }
 
   useEffect(() => {
-    if (!DEV_AUTO_SUBMIT) return
+    if (!DEV_AUTO_SUBMIT || !devAutoSubmit) return
     void signIn(DEV_PREFILL.hub, DEV_PREFILL.email, DEV_PREFILL.password).then((result) => {
       if (result.ok) onSignedIn(result.session)
       else setError(result.error)
     })
-  }, [onSignedIn])
+  }, [onSignedIn, devAutoSubmit])
 
   const canSubmit = !busy && hub.trim() !== '' && email.trim() !== '' && password !== ''
 
@@ -63,7 +78,7 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (session: HubSession)
       style={styles.screen}
     >
       <View style={styles.card}>
-        <Text style={styles.title}>Sign in to a hub</Text>
+        <Text style={styles.title}>{title}</Text>
         <Text style={styles.label}>Hub address</Text>
         <TextInput
           style={styles.input}
@@ -108,6 +123,11 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (session: HubSession)
             <Text style={styles.buttonText}>Sign in</Text>
           )}
         </Pressable>
+        {onCancel ? (
+          <Pressable style={styles.cancel} onPress={onCancel} accessibilityRole="button">
+            <Text style={styles.cancelText}>Cancel</Text>
+          </Pressable>
+        ) : null}
       </View>
     </KeyboardAvoidingView>
   )
@@ -146,5 +166,7 @@ const makeStyles = (t: ChromeColors) =>
       backgroundColor: t.primary
     },
     buttonDisabled: { opacity: 0.5 },
-    buttonText: { color: t.primaryForeground, fontSize: 16, fontWeight: '600' }
+    buttonText: { color: t.primaryForeground, fontSize: 16, fontWeight: '600' },
+    cancel: { marginTop: 12, paddingVertical: 8, alignItems: 'center' },
+    cancelText: { color: t.mutedForeground, fontSize: 15 }
   })

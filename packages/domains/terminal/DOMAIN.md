@@ -90,6 +90,12 @@ within `idleTimeoutMs`, the session transitions to `'idle'`.
 - `terminal-cache` - Instance caching for fast tab switches
 - `TerminalStatusPopover` - Session state indicator
 
+DOM-free subpaths (the mobile app bundles them into React Native; `packages/apps/mobile/src/shared-logic.test.ts` imports them there):
+- `./reducer` - chat timeline reducer (`chat-timeline.ts`)
+- `./chat-prompts` - prompt model of the timeline (`chat-prompts.ts`)
+- `./terminal-themes` - terminal colour themes
+- `./suppress-device-status` - xterm parser hooks that stop device-status / XTVERSION replies
+
 ## Safety Patterns
 
 ### IPC Send Safety
@@ -226,3 +232,8 @@ const handleTerminalReady = useCallback((api) => {
 2. Added asymmetric debounce: immediate for 'running', 100ms delay for 'attention'
 
 **Why asymmetric:** When work resumes (spinner detected), show it immediately. When work might be done (no spinner), wait 100ms to confirm it's not just an output gap.
+
+### 2026-10 DOM-free subpaths for the mobile app
+
+`./chat-prompts`, `./terminal-themes` and `./suppress-device-status` export the pure client modules as they are (no move): desktop keeps importing them through `./client` and relative paths, unchanged. The mobile app reaches them without the `./client` barrel, which loads xterm and React components.
+

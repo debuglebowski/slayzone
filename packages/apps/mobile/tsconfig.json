@@ -4,5 +4,10 @@
     "strict": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["index.ts", "src/**/*"]
+  // First: see the file's comment (global declaration order).
+  "files": ["src/react-native-globals.d.ts"],
+  "include": ["src/**/*"],
+  // The jest suites and their helpers: tsconfig.test.json (jest's globals stay out of
+  // the app's sources).
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/testing.tsx"]
 }

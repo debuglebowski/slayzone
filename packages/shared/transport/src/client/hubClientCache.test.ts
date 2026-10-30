@@ -36,7 +36,9 @@ vi.mock('@trpc/tanstack-react-query', () => ({
 vi.mock('superjson', () => ({ default: {} }))
 vi.mock('./connectDeadlineLink', () => ({ connectDeadlineLink: vi.fn(() => ({})) }))
 
-const { getOrCreateHubClient, _resetHubClients } = await import('./runtime')
+const { getOrCreateHubClient, closeHubClient, getHubClient, _resetHubClients } = await import(
+  './runtime'
+)
 
 const URL_A = 'ws://127.0.0.1:9001/trpc'
 
@@ -94,5 +96,30 @@ describe('getOrCreateHubClient', () => {
     getOrCreateHubClient({ id: 'remote-b', url: URL_A })
     getOrCreateHubClient({ id: 'remote-b', url: URL_A, token: 'new' })
     expect(getOrCreateHubClient({ id: 'remote-c', url: URL_A, token: 'keep' })).toBe(other)
+  })
+})
+
+describe('closeHubClient', () => {
+  // A signed-out hub: its socket must stop (it would keep reconnecting with a bearer
+  // the user just gave up), and a later sign-in must open a fresh one.
+  it('closes the socket and forgets the hub', () => {
+    const first = getOrCreateHubClient({ id: 'remote-b', url: URL_A, token: 't1' })
+    expect(closeHubClient('remote-b')).toBe(true)
+    expect(closed).toHaveLength(1)
+    expect(getHubClient('remote-b')).toBeNull()
+    expect(getOrCreateHubClient({ id: 'remote-b', url: URL_A, token: 't1' })).not.toBe(first)
+  })
+
+  it('is a no-op for a hub it never opened', () => {
+    expect(closeHubClient('ghost')).toBe(false)
+    expect(closed).toHaveLength(0)
+  })
+
+  it('never closes the DEFAULT hub', () => {
+    // Same reason as above: it is the boot singleton module-scope callers hold.
+    const local = getOrCreateHubClient({ id: 'local', url: URL_A, isDefault: true })
+    expect(closeHubClient('local')).toBe(false)
+    expect(closed).toHaveLength(0)
+    expect(getHubClient('local')).toBe(local)
   })
 })

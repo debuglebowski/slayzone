@@ -2,30 +2,47 @@
   "name": "@slayzone/mobile",
   "version": "0.36.2",
   "private": true,
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "scripts": {
     "start": "expo start --dev-client",
     "ios": "expo run:ios",
-    "typecheck": "tsgo --noEmit"
+    "test": "jest",
+    "typecheck": "tsgo --noEmit -p tsconfig.json && tsgo --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~58.0.15",
     "@slayzone/hub-auth": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/tasks": "workspace:*",
     "@slayzone/theme-tokens": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "expo": "~58.0.21",
+    "expo-constants": "~58.0.14",
     "expo-file-system": "~58.0.13",
+    "expo-linking": "~58.0.15",
+    "expo-router": "~58.0.28",
     "expo-secure-store": "~58.0.2",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.1",
     "react-native": "0.88.1",
-    "react-native-safe-area-context": "~5.10.1"
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0"
   },
   "devDependencies": {
+    "@react-native/jest-preset": "0.88.1",
     "@slayzone/api": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
+    "@slayzone/task-terminals": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
+    "@testing-library/react-native": "^14.0.1",
     "@trpc/server": "^11.19.0",
-    "@types/react": "^19.3.0"
+    "@types/jest": "^30.0.0",
+    "@types/react": "^19.3.0",
+    "jest": "^30.5.2",
+    "jest-expo": "~58.0.13",
+    "test-renderer": "1.3.0"
   },
   "expo": {
     "install": {

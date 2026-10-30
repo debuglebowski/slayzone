@@ -1,7 +1,9 @@
 import type { Task } from '@slayzone/task-contracts'
 import type { CreateTaskDraft } from '@slayzone/task-contracts'
-import type { ColumnConfig } from '@slayzone/projects-contracts'
-import { isTerminalStatus, resolveColumns } from '@slayzone/projects-contracts'
+// From their origin, not the `@slayzone/projects-contracts` barrel (which re-exports
+// them): that barrel also loads `@slayzone/ui/secure-context`, and this module is
+// behind the DOM-free `@slayzone/tasks/board` entry.
+import { type ColumnConfig, isTerminalStatus, resolveColumns } from '@slayzone/workflow'
 import {
   type FilterState,
   type ViewConfig,

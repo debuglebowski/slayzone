@@ -3,6 +3,17 @@
 The tRPC client: links, the boot singleton, multi-hub federation (`FederationProvider`,
 `HubScope`), connect pacing/deadline, and the typed views domain code calls through.
 
+## Hub connections
+
+- `useHubConnection(hubId)` — a hub's socket state as the UI reads it (`idle` /
+  `connecting`, with the error that ended the last attempt / `open`), from
+  @trpc/client's own `connectionState`, not from pending queries
+  (`src/client/hubConnection.ts`). The mobile app's "can't reach <hub>" banner reads it.
+- A hub that leaves `FederationProvider`'s `hubs` (signed out) gets its socket closed
+  (`closeHubClient`) and its QueryClient dropped, so a later sign-in starts fresh. Never
+  the default hub. Desktop never shrinks `hubs` while running (adding a hub reloads the
+  window, removing one relaunches), so this only fires in the mobile app.
+
 ## Typed views
 
 There is ONE client runtime (`src/client/runtime.ts`): one `createTRPCContext`, one boot

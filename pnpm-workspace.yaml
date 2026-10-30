@@ -112,6 +112,17 @@ minimumReleaseAgeExclude:
   - noxcturnal@0.1.11
   - react-native@0.88.1
   - xcode@4.0.0
+  # Mobile phase 0 (2026-10-29): Expo Router and the jest-expo test setup, the versions
+  # SDK 58 pins (bundledNativeModules.json of expo 58.0.21) and their own dependencies.
+  # Each entry's clear date follows it.
+  - '@expo/metro-runtime@58.0.15' # 2026-11-20
+  - '@react-native/jest-preset@0.88.1' # 2026-11-26
+  - expo-glass-effect@58.0.5 # 2026-11-22
+  - expo-linking@58.0.15 # 2026-11-27
+  - expo-router@58.0.28 # 2026-11-27
+  - jest-expo@58.0.13 # 2026-11-27
+  - react-native-drawer-layout@4.2.12 # 2026-11-12
+  - react-native-screens@4.30.0 # 2026-11-12
 
 # Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
 nodeLinker: hoisted
@@ -121,16 +132,21 @@ publicHoistPattern:
 # Only `true` entries may run install scripts; one not listed fails the install
 # (strictDepBuilds). The `false` ones never ran them before pnpm 11 either:
 # bufferutil is rebuilt for Electron by scripts/postinstall.js, the rest need none.
+# @parcel/watcher and unrs-resolver (jest 30, the mobile app's tests) load their
+# prebuilt per-platform optional package; their scripts only build from source or
+# fetch one when it is missing.
 allowBuilds:
   better-sqlite3: true
   esbuild: true
   node-pty: true
   posix: true
+  '@parcel/watcher': false
   '@swc/core': false
   bufferutil: false
   core-js: false
   electron-winstaller: false
   sharp: false
+  unrs-resolver: false
   utf-8-validate: false
 
 overrides:
@@ -141,6 +157,21 @@ overrides:
   'electron-chrome-web-store>adm-zip': '^0.6.1'
   'prosemirror-view': '^1.42.3'
   'prosemirror-model': '^1.25.12'
+
+# expo-router depends on react-native-drawer-layout for `expo-router/drawer` only, which
+# the mobile app does not use. Its required peers (react-native-reanimated,
+# react-native-gesture-handler) would otherwise be auto-installed at whatever mature
+# version resolves, not the ones Expo SDK 58 pins, and autolinked into the iOS build as
+# native modules nothing calls (reanimated also pulls react-native-worklets, whose
+# required @react-native/metro-config peer resolves to 0.87.1 against React Native
+# 0.88.1). Optional here; a phase that uses gestures adds them at the SDK's versions.
+packageExtensions:
+  react-native-drawer-layout:
+    peerDependenciesMeta:
+      react-native-gesture-handler:
+        optional: true
+      react-native-reanimated:
+        optional: true
 
 patchedDependencies:
   '@convex-dev/auth@0.0.95': patches/@convex-dev__auth@0.0.95.patch

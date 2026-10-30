@@ -48,6 +48,8 @@ function fakeClientFor(id: string): unknown {
 // test can assert the token/isDefault routing contract (the security-relevant
 // branch: the default hub must get NO token, each remote must get ONLY its own).
 const clientOpts: Record<string, { url: string; isDefault?: boolean; token?: string }> = {}
+/** Hub ids whose socket `closeHubClient` was asked to close, in order. */
+const closedHubs: string[] = []
 
 vi.mock('./runtime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./runtime')>()
@@ -67,6 +69,10 @@ vi.mock('./runtime', async (importOriginal) => {
         clients.set(opts.id, e)
       }
       return e
+    },
+    closeHubClient: (id: string) => {
+      closedHubs.push(id)
+      return clients.delete(id)
     }
   }
 })
@@ -204,5 +210,58 @@ describe('federation: per-hub bearer-token routing (no cross-hub token leak)', (
     )
     await waitFor(() => expect(clientOpts['remote-b']).toBeDefined())
     expect(clientOpts['remote-b'].token).toBeUndefined()
+  })
+})
+
+describe('federation: a hub removed from the list', () => {
+  afterEach(() => {
+    cleanup()
+    closedHubs.length = 0
+  })
+
+  const A = { id: 'remote-a', kind: 'remote' as const, label: 'A', url: 'wss://a.example/trpc' }
+  const LOCAL = {
+    id: 'local',
+    kind: 'local' as const,
+    label: 'Local',
+    url: 'ws://127.0.0.1:1/trpc'
+  }
+
+  function Tree({ hubs }: { hubs: Array<typeof A | typeof LOCAL> }) {
+    return (
+      <FederationProvider hubs={hubs} defaultHubId="local" tokens={{ 'remote-a': 'tok-A' }}>
+        {hubs.map((h) => (
+          <div key={h.id} data-testid={h.id}>
+            <HubScope hubId={h.id}>
+              <HubLabel />
+            </HubScope>
+          </div>
+        ))}
+      </FederationProvider>
+    )
+  }
+
+  it('closes its socket and drops its cache: a later re-add starts fresh', async () => {
+    const { rerender } = render(<Tree hubs={[LOCAL, A]} />)
+    await waitFor(() => expect(screen.getByTestId('remote-a').textContent).toBe('hub:remote-a'))
+    const fetchesBefore = describeCalls['remote-a']
+
+    // Signed out of A: its socket must stop, its cached rows must go.
+    rerender(<Tree hubs={[LOCAL]} />)
+    await waitFor(() => expect(closedHubs).toEqual(['remote-a']))
+
+    // Signed in again: a fresh QueryClient fetches again instead of serving the old
+    // session's cached answer.
+    rerender(<Tree hubs={[LOCAL, A]} />)
+    await waitFor(() => expect(describeCalls['remote-a']).toBe(fetchesBefore + 1))
+  })
+
+  it('never closes the default hub', async () => {
+    const { rerender } = render(<Tree hubs={[LOCAL, A]} />)
+    await waitFor(() => expect(screen.getByTestId('local').textContent).toBe('hub:local'))
+    rerender(<Tree hubs={[A]} />)
+    // A render pass for the effect to run in.
+    await waitFor(() => expect(screen.getByTestId('remote-a').textContent).toBe('hub:remote-a'))
+    expect(closedHubs).toEqual([])
   })
 })

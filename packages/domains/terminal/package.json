@@ -18,7 +18,10 @@
     "./client/LazyTerminal": "./src/client/LazyTerminal.tsx",
     "./client/terminal-mru": "./src/client/terminal-mru.ts",
     "./agents": "./src/server/agents/index.ts",
-    "./reducer": "./src/client/chat-timeline.ts"
+    "./reducer": "./src/client/chat-timeline.ts",
+    "./chat-prompts": "./src/client/chat-prompts.ts",
+    "./terminal-themes": "./src/client/terminal-themes.ts",
+    "./suppress-device-status": "./src/client/suppress-device-status.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

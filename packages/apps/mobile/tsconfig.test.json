@@ -1,0 +1,9 @@
+{
+  // The jest suites (and the app sources they import), with jest's globals.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest"]
+  },
+  "include": ["src/**/*"],
+  "exclude": []
+}

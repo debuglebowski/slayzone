@@ -12,7 +12,8 @@
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
     "./client/TaskSessionsSource": "./src/client/agent-sessions/TaskSessionsSource.ts",
-    "./hibernated-sessions": "./src/client/hibernated-sessions.ts"
+    "./hibernated-sessions": "./src/client/hibernated-sessions.ts",
+    "./prompt-options": "./src/client/chat/prompts/prompt-options.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

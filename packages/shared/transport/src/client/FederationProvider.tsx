@@ -1,7 +1,7 @@
-import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { QueryClient } from '@tanstack/react-query'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
-import { getOrCreateHubClient, type RuntimeHubWsClient } from './runtime'
+import { closeHubClient, getOrCreateHubClient, type RuntimeHubWsClient } from './runtime'
 import { makeQueryClient } from './provider'
 import { useHubRegistryStore } from './hubRegistryStore'
 
@@ -84,6 +84,22 @@ export function FederationProvider({
     return { hubs, defaultHubId, resolve }
     // decorateUrl is a stable host closure; hubs/defaultHubId/tokens drive re-resolution.
   }, [hubs, defaultHubId, decorateUrl, tokens])
+
+  // A hub that left `hubs` (signed out) takes its socket and its cache with it: the
+  // socket would keep reconnecting with a bearer the user gave up, and a later sign-in
+  // must not be served the old session's cached rows. Desktop never shrinks `hubs`
+  // while running (adding a hub reloads the window, removing one relaunches the app),
+  // so there this never fires; the mobile app signs out of one hub of several in place.
+  // The default hub is never touched (`closeHubClient` refuses its boot singleton too).
+  useEffect(() => {
+    const listed = new Set(hubs.map((h) => h.id))
+    for (const [hubId, queryClient] of queryClients.current) {
+      if (listed.has(hubId) || hubId === defaultHubId) continue
+      queryClients.current.delete(hubId)
+      queryClient.clear()
+      closeHubClient(hubId)
+    }
+  }, [hubs, defaultHubId])
 
   return <FederationContext.Provider value={value}>{children}</FederationContext.Provider>
 }
