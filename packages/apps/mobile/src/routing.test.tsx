@@ -69,6 +69,8 @@ jest.mock('@slayzone/transport/client', () => ({
 // A hub card's account and computers talk to that hub (tRPC); here only which screen a
 // route opens matters.
 jest.mock('./hubs/HubDetails', () => ({ HubDetails: () => null }))
+// The board's moves write to its hub (tRPC; `board/*.test.tsx` test them).
+jest.mock('./board/use-board-moves', () => ({ useBoardMoves: () => async () => undefined }))
 
 const { hubEntryOf } = jest.requireActual('./hub-session') as typeof import('./hub-session')
 const home: HubSession = { entry: hubEntryOf('home.example'), token: 't' }
@@ -82,7 +84,12 @@ const board = {
       priority: 2,
       project_id: 'p',
       parent_id: null,
-      description: 'Spec notes'
+      description: 'Spec notes',
+      order: 0,
+      archived_at: null,
+      snoozed_until: null,
+      is_temporary: false,
+      due_date: null
     }
   ],
   projects: [{ id: 'p', name: 'Home', color: null }],

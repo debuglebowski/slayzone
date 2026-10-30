@@ -1,4 +1,4 @@
-import { ArtifactSearchRoute } from '../../../../artifacts/ArtifactRoutes'
+import { SearchRoute } from '../../../../board/SearchRoute'
 
-/** `/artifacts` (the Search tab): search the artifacts of every signed-in hub. */
-export default ArtifactSearchRoute
+/** `/artifacts` (the Search tab): search the tasks and artifacts of every signed-in hub. */
+export default SearchRoute

@@ -6,7 +6,7 @@
  * folds away. A hub that fails says why below the others' results. Tapping a result opens
  * that artifact on its own hub.
  */
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -28,11 +28,18 @@ import { extensionBadge } from './viewer-kind'
 export function ArtifactSearchScreen({
   sessions,
   feeds,
-  onOpen
+  onOpen,
+  title = 'Search artifacts',
+  placeholder = 'Search titles and contents',
+  before
 }: {
   sessions: readonly HubSession[]
   feeds: readonly HubFeed[]
   onOpen: (result: HubArtifactSearchResult) => void
+  title?: string
+  placeholder?: string
+  /** Other results for the same query, shown above the artifacts' (the Search tab's tasks). */
+  before?: (q: string) => ReactNode
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -60,14 +67,14 @@ export function ArtifactSearchScreen({
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Search artifacts" />
+      <ScreenHeader title={title} />
       <View style={styles.bar}>
         <TextInput
           testID="artifact-search-input"
           style={styles.input}
           value={q}
           onChangeText={setQ}
-          placeholder="Search titles and contents"
+          placeholder={placeholder}
           placeholderTextColor={theme.mutedForeground}
           autoCapitalize="none"
           autoCorrect={false}
@@ -88,13 +95,14 @@ export function ArtifactSearchScreen({
           onPress={() => setRegex((v) => !v)}
         />
       </View>
-      {!q.trim() ? null : searching ? (
+      {!q.trim() ? null : searching && !before ? (
         <View style={styles.center}>
           <ActivityIndicator testID="artifact-search-searching" />
         </View>
       ) : (
         <FlatList
-          data={outcome?.results ?? []}
+          data={searching ? [] : (outcome?.results ?? [])}
+          ListHeaderComponent={before ? <>{before(q)}</> : undefined}
           keyExtractor={(r) => r.key}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
@@ -107,7 +115,15 @@ export function ArtifactSearchScreen({
               onOpen={() => onOpen(item)}
             />
           )}
-          ListEmptyComponent={<Text style={styles.note}>No results</Text>}
+          ListEmptyComponent={
+            searching ? (
+              <View style={styles.center}>
+                <ActivityIndicator testID="artifact-search-searching" />
+              </View>
+            ) : (
+              <Text style={styles.note}>{before ? 'No artifacts found' : 'No results'}</Text>
+            )
+          }
           ListFooterComponent={
             <View style={styles.footer}>
               {failures.map((h) =>

@@ -23,6 +23,13 @@ export {
   type GroupOpts
 } from './kanban'
 export * from './FilterState'
+// A project's columns (its status config), the way the desktop board resolves them.
+export {
+  isTerminalStatus,
+  resolveColumns,
+  type ColumnConfig,
+  type WorkflowCategory
+} from '@slayzone/workflow'
 export {
   MAX_PATCH_ROWS,
   mergeRow,

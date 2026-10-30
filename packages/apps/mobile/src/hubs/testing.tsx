@@ -47,6 +47,13 @@ export function taskOf(id: string, fields: Partial<BoardTask> = {}): BoardTask {
     parent_id: null,
     computer_id: null,
     description: null,
+    // What the board filters read (a hub's row always carries them).
+    order: 0,
+    archived_at: null,
+    snoozed_until: null,
+    is_temporary: false,
+    due_date: null,
+    created_at: '2026-10-01T00:00:00Z',
     ...fields
   } as BoardTask
 }
