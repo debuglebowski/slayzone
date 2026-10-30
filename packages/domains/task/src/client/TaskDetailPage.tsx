@@ -2845,7 +2845,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             setDetectedDevUrl(null)
             if (task?.id) {
               devUrlToastDismissedRef.current = true
-              void updateTaskAsync({ id: task.id, devUrlToastDismissed: true })
+              void updateTaskAsync({ id: task.id, devUrlToastDismissed: true }).then((updated) => {
+                if (updated) onTaskUpdated(updated)
+              })
             }
           }}
         />

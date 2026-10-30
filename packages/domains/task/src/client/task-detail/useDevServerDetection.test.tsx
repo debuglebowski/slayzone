@@ -84,4 +84,33 @@ describe('useDevServerDetection', () => {
     const { result } = await setup(false)
     expect(result.current.detectedDevUrl).toBe('http://localhost:5173')
   })
+
+  it('keeps dismissal on its task and permits toasts on another task', async () => {
+    const { result, rerender } = renderHook(
+      (p: { task: Task }) =>
+        useDevServerDetection({
+          task: p.task,
+          browserVisible: false,
+          settingsRevision: 0,
+          subscribeDevServer,
+          getMainSessionId
+        }),
+      { initialProps: { task } }
+    )
+    await act(async () => {})
+    emitUrl('http://localhost:3000')
+    act(() => {
+      result.current.devUrlToastDismissedRef.current = true
+      result.current.setDetectedDevUrl(null)
+    })
+
+    rerender({ task: { id: 't2', dev_url_toast_dismissed: false } as Task })
+    emitUrl('http://localhost:3000')
+    expect(result.current.detectedDevUrl).toBe('http://localhost:3000')
+
+    rerender({ task: { id: 't1', dev_url_toast_dismissed: true } as Task })
+    expect(result.current.detectedDevUrl).toBe(null)
+    emitUrl('http://localhost:4000')
+    expect(result.current.detectedDevUrl).toBe(null)
+  })
 })

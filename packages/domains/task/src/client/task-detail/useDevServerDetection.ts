@@ -42,9 +42,14 @@ export function useDevServerDetection({
   const devServerAutoOpenRef = useRef(false)
   const devServerAutoOpenCallbackRef = useRef<((url: string) => void) | null>(null)
   const devUrlToastDismissedRef = useRef<boolean>(!!task?.dev_url_toast_dismissed)
+  const taskId = task?.id
   useEffect(() => {
     devUrlToastDismissedRef.current = !!task?.dev_url_toast_dismissed
-  }, [task?.dev_url_toast_dismissed])
+  }, [taskId, task?.dev_url_toast_dismissed])
+  useEffect(() => {
+    devUrlDismissedRef.current.clear()
+    setDetectedDevUrl(null)
+  }, [taskId])
   const browserOpenRef = useRef(browserVisible)
   useEffect(() => {
     browserOpenRef.current = browserVisible
@@ -66,7 +71,6 @@ export function useDevServerDetection({
     })
   }, [settingsRevision, trpcClient])
 
-  const taskId = task?.id
   useEffect(() => {
     if (!taskId) return
     const sid = getMainSessionId(taskId)
