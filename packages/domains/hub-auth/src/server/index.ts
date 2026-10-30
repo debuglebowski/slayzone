@@ -88,6 +88,18 @@ export {
 export { AUTH_RATE_LIMIT_DEFAULT, AUTH_RATE_LIMIT_RULES } from './rate-limit'
 export { cookieOnlyHeaders } from './sso-page'
 export {
+  APP_CODE_TTL_MS,
+  APP_FLOW_COOKIE,
+  APP_FLOW_TTL_MS,
+  APP_REDIRECT_URIS,
+  APP_SIGN_IN_CONFIRM_PATH,
+  APP_SIGN_IN_PATH,
+  APP_SIGN_IN_TOKEN_PATH,
+  createAppSignIn,
+  MAX_PENDING_APP_CODES,
+  type AppSignInOptions
+} from './app-sign-in'
+export {
   createWebSignIn,
   WEB_SIGN_IN_FRESH_MS,
   WEB_SIGN_IN_PATH,

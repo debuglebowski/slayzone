@@ -1,7 +1,8 @@
 /**
  * Signing in to hubs, the way desktop and the CLI do: a hub address plus email +
  * password for a bearer (`@slayzone/hub-auth/client`), kept in the platform's secure
- * storage. The app can be signed in to several hubs at once.
+ * storage. The app can be signed in to several hubs at once. "Sign in with Microsoft"
+ * (`auth/microsoft-sign-in.ts`) keeps its bearer here the same way.
  *
  * In the keychain (iOS keychain / Android keystore, `expo-secure-store`):
  * - `hub-token.<hub id>`: each hub's bearer (`HubTokenStore`, the same key as before
@@ -13,7 +14,9 @@
  */
 import {
   createFetchHubTransport,
+  type HubHealthProbe,
   type HubTokenStore,
+  type HubTransport,
   probeHubHealth,
   signInWithPassword
 } from '@slayzone/hub-auth/client'
@@ -158,10 +161,49 @@ const secureStorage: SessionStorage = {
 /** The app's sessions, in the keychain. */
 export const hubSessions: HubSessionStore = createHubSessionStore(secureStorage)
 
-/** React Native's `fetch` — no cookies, no Fetch Metadata headers, so no browser CSRF path. */
-const transport = createFetchHubTransport(fetch)
+/**
+ * React Native's `fetch` — no cookies, no Fetch Metadata headers, so no browser CSRF path.
+ * Read at each request, not captured at import, so a test can stand in for the hub.
+ */
+export const hubTransport: HubTransport = createFetchHubTransport((url, init) => fetch(url, init))
 
 export type SignInResult = { ok: true; session: HubSession } | { ok: false; error: string }
+
+/** How a hub lets this app sign in. */
+export interface HubSignInOffer {
+  /** "Sign in with Microsoft" (the hub's app sign-in, `/health` `appSignIn`). */
+  microsoft: boolean
+  /** Email + password; a hub too old to say is taken to offer it. */
+  password: boolean
+}
+
+/** The offer a hub's `/health` answer makes. Pure. */
+export function signInOfferOf(probe: Extract<HubHealthProbe, { ok: true }>): HubSignInOffer {
+  return {
+    microsoft: probe.appSignIn?.microsoft === true,
+    password: probe.signIn?.password !== false
+  }
+}
+
+export type SignInOfferResult =
+  | { ok: true; baseUrl: string; offer: HubSignInOffer }
+  /** `address`: not `host[:port]`. `hub`: no usable `/health` answer. */
+  | { ok: false; reason: 'address' | 'hub'; error: string }
+
+/** Ask a hub (`host[:port]`) how this app may sign in to it. */
+export async function probeSignInOffer(
+  address: string,
+  transport: HubTransport = hubTransport
+): Promise<SignInOfferResult> {
+  const addr = address.trim()
+  if (!isBareAuthority(addr)) {
+    return { ok: false, reason: 'address', error: 'Enter the hub as host or host:port' }
+  }
+  const baseUrl = hubUrlFromAddr(addr, 'http')
+  const health = await probeHubHealth(transport, baseUrl)
+  if (!health.ok) return { ok: false, reason: 'hub', error: health.error }
+  return { ok: true, baseUrl, offer: signInOfferOf(health) }
+}
 
 /** Probe the hub, sign in with a password, keep the bearer (`hubSessions`). */
 export async function signIn(
@@ -172,12 +214,15 @@ export async function signIn(
   const addr = address.trim()
   if (!isBareAuthority(addr)) return { ok: false, error: 'Enter the hub as host or host:port' }
   const baseUrl = hubUrlFromAddr(addr, 'http')
-  const health = await probeHubHealth(transport, baseUrl)
+  const health = await probeHubHealth(hubTransport, baseUrl)
   if (!health.ok) return { ok: false, error: health.error }
   if (health.signIn && !health.signIn.password) {
     return { ok: false, error: 'This hub does not offer password sign-in' }
   }
-  const result = await signInWithPassword(transport, baseUrl, { email: email.trim(), password })
+  const result = await signInWithPassword(hubTransport, baseUrl, {
+    email: email.trim(),
+    password
+  })
   if (!result.ok) return { ok: false, error: result.hubError ?? result.error }
   const session: HubSession = { entry: hubEntryOf(addr), token: result.token }
   await hubSessions.save(session)

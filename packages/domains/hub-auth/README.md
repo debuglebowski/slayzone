@@ -66,6 +66,29 @@ package. `bearer`, `jwt`, and `organization` still come from
   enables it as `admin`, `closeBreakGlassAccounts` disables it (and any v1
   account) and revokes what it holds. The hub's break-glass (apps/hub
   `break-glass.ts`) decides when; `users.ts` never changes or counts it.
+- App sign-in through Microsoft (`src/server/app-sign-in.ts`, Entra hubs only) —
+  `createAppSignIn(auth, { secureCookie })`, the route handler for a NATIVE app (the iOS
+  app): OAuth for native apps (RFC 8252) with PKCE (S256 only), the hub as the
+  authorization server and Entra behind it, so every Entra check is better-auth's callback,
+  unchanged, and the Entra app registration needs no new redirect URI.
+  - `GET /api/auth/app-sso?redirect_uri&code_challenge&code_challenge_method=S256&state`:
+    strict parameters, the redirect EXACTLY one of `APP_REDIRECT_URIS`
+    (`slayzone://auth/callback`) — anything else is a 400 page, never a redirect. The flow
+    goes into a signed HttpOnly cookie (`slayzone_app_sso`, 10 min) and the browser always
+    through Entra.
+  - `?return=1`: only in the browser that started, only with an Entra session made after
+    the start → a confirm page (hub, account; Continue / Cancel). The confirm exists
+    because a custom scheme can be claimed by any app (RFC 8252 §8.6).
+  - `POST /api/auth/app-sso/confirm` (trusted `Origin`): a single-use code (60 s, bound to
+    account, challenge and redirect), the browser's better-auth session ended, 302
+    `slayzone://auth/callback?code&state`; Cancel → `error=access_denied`.
+  - `POST /api/auth/app-sso/token` `{code, code_verifier, redirect_uri}` → `{token}`: an
+    ordinary 7-day session (`signInMethod: 'app'`), so the hourly re-check and disabling
+    the account end it. A code is burned at its first presentation; a replay revokes the
+    session it minted. Codes live in memory (a hub is one node).
+  - Audit: `auth.app_sso.code`, `auth.signin` method `app`, `auth.app_sso.replay`, no
+    secrets. The hub adds flood limits, the bearer gate's openings and `/health`
+    `appSignIn.microsoft`.
 - `createAuthExpressApp(auth)` → express app serving `/api/auth/*` via
   `toNodeHandler`. Standalone or mountable at a host app's root. No body
   parser on purpose (better-auth consumes the raw body).
@@ -89,7 +112,7 @@ package. `bearer`, `jwt`, and `organization` still come from
 
 The hub sign-in client every SlayZone client shares — desktop main
 (`apps/app/src/main/boot-config.ts`), the CLI (`apps/cli/src/hub-sign-in.ts`), the web
-shell's pure parts, and a future React Native app. One implementation of the protocol
+shell's pure parts, and the iOS app (`apps/mobile`). One implementation of the protocol
 the server half above serves.
 
 - `./client` (`src/client/`) is PLATFORM-NEUTRAL: no `node:*`, no Electron, no DOM
@@ -105,6 +128,13 @@ the server half above serves.
     `slow_down` +5s, retries over network errors until expiry, `signal` cancels),
     `isHubOwnPage`. Client ids `HUB_DEVICE_CLIENT_IDS` must equal the server's
     `DEVICE_CLIENTS` (pinned by `device.test.ts`).
+  - App sign-in through Microsoft (native apps, `app-sign-in.ts`): `startAppSignIn`
+    (PKCE pair + state + the hub's start URL), `readAppSignInCallback` (the code only for
+    our state and redirect; errors as fixed messages), `exchangeAppSignInCode`,
+    `appSignInOf` (`/health` → `appSignIn.microsoft`; `healthProbeOf` carries it as
+    `appSignIn` when the hub reports it). Randomness and SHA-256 are injected
+    (`PkceCrypto`: WebCrypto, or expo-crypto on Hermes). `APP_SIGN_IN_PATHS` /
+    `APP_SIGN_IN_REDIRECT_URI` must match the server (pinned by `app-sign-in.test.ts`).
   - `fetchSessionEmail`, `signInErrorFrom` / `signInErrorMessage` (browser sign-in
     errors), `HubTokenStore` (per-hub bearer storage; each platform implements it).
   - Results are structured: a machine `reason` plus a default `error` text, so each
@@ -168,5 +198,9 @@ network, no app. Covers migrations, sign-up/sign-in via in-process
 organization create + member add. `entra.test.ts` drives the Entra flow end to
 end against a local fake issuer (own JWKS, signed tokens, an assertion-checking
 token endpoint). `password.test.ts` covers the password switch, `break-glass.test.ts` the break-glass account.
+`app-sign-in.test.ts` drives the native app's Microsoft sign-in over HTTP with that fake
+(replay, wrong verifier, expiry, wrong redirect, no open redirect, forged return leg,
+stale session, Origin, cancel, disabled account, cap, audit without secrets); the real
+built hub's half is `apps/hub/src/hub-app-sign-in.test.ts`.
 `src/client/*.test.ts` drive the sign-in client against a fake transport;
 `src/client-node/index.test.ts` drives `nodeHubTransport` against a real local HTTP server.

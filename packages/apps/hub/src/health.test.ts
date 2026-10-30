@@ -36,6 +36,7 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
     enableTelemetry: true
   },
   reachable: false,
+  appSignIn: { microsoft: false },
   computersConnected: () => 2
 }
 
@@ -290,6 +291,26 @@ test('every switch is reported, to loopback and non-loopback callers alike', asy
     ).toBe(JSON.stringify(switches))
   } finally {
     await wide.close()
+  }
+})
+
+// What a native app may sign in with (hub-auth `app-sign-in.ts`): public like the
+// switches — the app shows "Sign in with Microsoft" only where the hub serves it, which
+// the SSO switches alone cannot tell (an older hub has them but not the app routes).
+test('appSignIn is public: reported as the hub serves it', async () => {
+  const on = await startHealthServer({ authRequired: true, appSignIn: { microsoft: true } })
+  try {
+    expect((await getHealth(on.port)).body.appSignIn, 'served → true').toEqual({ microsoft: true })
+  } finally {
+    await on.close()
+  }
+  const off = await startHealthServer()
+  try {
+    expect((await getHealth(off.port)).body.appSignIn, 'not served → false').toEqual({
+      microsoft: false
+    })
+  } finally {
+    await off.close()
   }
 })
 

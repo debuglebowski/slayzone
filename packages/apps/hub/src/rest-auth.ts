@@ -28,6 +28,9 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import {
+  APP_SIGN_IN_CONFIRM_PATH,
+  APP_SIGN_IN_PATH,
+  APP_SIGN_IN_TOKEN_PATH,
   ENTRA_PROVIDER_ID,
   PASSWORD_AUTH_ENDPOINTS,
   verifySession,
@@ -197,13 +200,24 @@ export function passwordRouteRefusal(
  * The web shell's sign-in (T-13, hub-auth `web-sign-in.ts`):
  *   - `web-sso` — where "Sign in with Microsoft" goes: sends the browser through Entra
  *                 and, back from it, mints the browser's scoped web session.
+ *
+ * The native app's sign-in (hub-auth `app-sign-in.ts`), for an app with no token yet:
+ *   - `app-sso`         — the start and return legs in the app's auth session: through
+ *                         Entra, then the confirm page. Checks its own parameters.
+ *   - `app-sso/confirm` — the confirm page's form: the browser's flow cookie, a fresh
+ *                         Entra session and a trusted Origin, or nothing.
+ *   - `app-sso/token`   — the app trades a single-use code + its PKCE verifier for a
+ *                         session token.
  */
 const SSO_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-in/social',
   `/api/auth/callback/${ENTRA_PROVIDER_ID}`,
   '/api/auth/device/code',
   '/api/auth/device/token',
-  WEB_SIGN_IN_PATH
+  WEB_SIGN_IN_PATH,
+  APP_SIGN_IN_PATH,
+  APP_SIGN_IN_CONFIRM_PATH,
+  APP_SIGN_IN_TOKEN_PATH
 ])
 
 /**

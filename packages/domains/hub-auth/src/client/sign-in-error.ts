@@ -42,7 +42,10 @@ const MESSAGES: Readonly<Record<string, string>> = {
   state_mismatch: 'The sign-in took too long or was started in another tab. Try again.',
   please_restart_the_process: 'The sign-in took too long or was started in another tab. Try again.',
   invalid_callback_request: 'The sign-in took too long or was started in another tab. Try again.',
-  no_session: `Microsoft sign-in did not complete. Try again. ${ASK_ADMIN}`
+  no_session: `Microsoft sign-in did not complete. Try again. ${ASK_ADMIN}`,
+  // App sign-in (`src/server/app-sign-in.ts`).
+  flow_expired: 'The sign-in took too long or its browser window was closed. Try again.',
+  temporarily_unavailable: 'Too many sign-ins are waiting on this hub. Try again in a few minutes.'
 }
 
 /** The message for a code; anything unknown gets the general one. */

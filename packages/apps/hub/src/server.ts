@@ -17,6 +17,7 @@ import {
   teardownAllWarm
 } from '@slayzone/terminal/server'
 import {
+  createAppSignIn,
   createAuthExpressApp,
   createDevicePage,
   createWebSignIn,
@@ -337,6 +338,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     switches,
     // B13 — gates the host-describing fields behind "no proxy in the path".
     reachable: boot.reachable,
+    // The native app's Microsoft sign-in is served exactly where `appSignIn` below is.
+    appSignIn: { microsoft: hubAuth !== null && boot.ssoActive },
     // `listUsableComputers`, NOT `listComputers` — its own docstring names itself the
     // single authority for "can this computer do work right now?" and warns that the
     // raw map means only "socket is open", including a computer that has stopped
@@ -424,6 +427,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           ]
         })
       : null
+  // The native app's sign-in through Entra (hub-auth `app-sign-in.ts`): Entra hubs only,
+  // like the web sign-in (and advertised on /health as `appSignIn.microsoft`). The app's
+  // auth session ends on a `slayzone://` redirect carrying a single-use, PKCE-bound code
+  // the app trades at `/api/auth/app-sso/token` for a session token.
+  const appSignIn = hubAuth && boot.ssoActive ? createAppSignIn(hubAuth, { secureCookie }) : null
 
   // Single muxed server: /health (pre-express, stays alive even if the express
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
@@ -471,10 +479,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       handleBreakGlassRequest(composition.breakGlass, req, res)
       return
     }
-    // The web shell's session routes and Entra sign-in are OURS too (T-13). Null on a
-    // hub without them, so their paths fall through unchanged.
+    // The web shell's session routes and Entra sign-in are OURS too (T-13), and so is the
+    // native app's sign-in. Null on a hub without them, so their paths fall through
+    // unchanged. The app's code exchange reads a small JSON body itself (capped at 4 KiB).
     if (webSessionRoutes?.(req, res)) return
     if (webSignIn?.(req, res)) return
+    if (appSignIn?.(req, res)) return
     if (authApp && authPath.startsWith('/api/auth/') && authPath !== '/api/auth/web-login') {
       // The apiKey plugin's CLIENT routes are never served. `mintComputerApiKey`
       // calls `auth.api.createApiKey` in-process (the server branch), so nothing

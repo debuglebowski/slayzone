@@ -10,6 +10,7 @@
  *   - {@link signInMethodsOf} — "how do I sign in?" (CLI `slay hub login`): any body.
  *   - {@link hubBrowserSignInOf} — the web shell's pre-boot question, FAILS CLOSED.
  */
+import { appSignInOf, type HubAppSignIn } from './app-sign-in'
 import { HEALTH_MAX_CHARS, HUB_AUTH_PATHS, parseJson } from './protocol'
 import { type HubTransport, isHubTransportTimeout, transportErrorText } from './transport'
 
@@ -81,6 +82,8 @@ export type HubHealthProbe =
       authRequired?: boolean
       /** Undefined when the hub is too old to report its switches (treat as password-only). */
       signIn?: HubSignInMethods
+      /** What the hub offers a native app (`app-sign-in.ts`); absent when it does not say. */
+      appSignIn?: HubAppSignIn
     }
   | { ok: false; error: string; authRequired?: boolean }
 
@@ -95,7 +98,15 @@ export function healthProbeOf(status: number, json: unknown): HubHealthProbe {
   // that matters, since an off-box hub is the one that gates. Absent on older hubs → left
   // undefined rather than coerced to false.
   const authRequired = typeof body.authRequired === 'boolean' ? body.authRequired : undefined
-  if (body.ok === true) return { ok: true, authRequired, signIn: signInMethodsOf(json) }
+  if (body.ok === true) {
+    const reportsApp = typeof (json as { appSignIn?: unknown }).appSignIn === 'object'
+    return {
+      ok: true,
+      authRequired,
+      signIn: signInMethodsOf(json),
+      ...(reportsApp ? { appSignIn: appSignInOf(json) } : {})
+    }
+  }
   return { ok: false, error: 'Server is not ready', authRequired }
 }
 

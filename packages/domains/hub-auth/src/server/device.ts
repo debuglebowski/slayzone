@@ -25,7 +25,8 @@
  *     session (break-glass, no MFA) could mint a token. Only the hub's approval page
  *     calls them, in process, after its own checks (`device-page.ts`);
  *   - every session records how it was made (`session.signInMethod`: `sso` for an Entra
- *     callback that passed the checks, `device` for a device token, null otherwise), so
+ *     callback that passed the checks, `device` for a device token, `app` for a native
+ *     app's token (./app-sign-in.ts), null otherwise), so
  *     the page can demand an Entra sign-in made AFTER the code was issued;
  *   - expired codes are swept on every new request and at most
  *     {@link MAX_PENDING_DEVICE_CODES} may be outstanding, so the open endpoint cannot
@@ -63,8 +64,11 @@ export const DEVICE_PAGE_PATH = '/device'
 /** Outstanding (unexpired) device codes allowed at once on one hub. */
 export const MAX_PENDING_DEVICE_CODES = 100
 
-/** `session.signInMethod` values. Null on every other session (password, older rows). */
-export const SIGN_IN_METHOD = { sso: 'sso', device: 'device' } as const
+/**
+ * `session.signInMethod` values. Null on every other session (password, older rows).
+ * `app`: a native app's token from the app sign-in (./app-sign-in.ts), set there.
+ */
+export const SIGN_IN_METHOD = { sso: 'sso', device: 'device', app: 'app' } as const
 
 /** Id of the plugin that guards and audits better-auth's `device-authorization`. */
 export const DEVICE_PLUGIN_ID = 'slayzone-device-sign-in'

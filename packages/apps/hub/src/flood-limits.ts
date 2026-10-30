@@ -30,6 +30,14 @@
  *     web-sso's budget: 20 a minute. Covers every leg, query or not (open, return, retry).
  *   - `POST /device/approve`, `POST /device/deny` — its cookie-authenticated forms. They
  *     never start Entra; one shared budget like the session posts, 300 a minute (T-110).
+ *   - `GET /api/auth/app-sso` — the native app's Microsoft sign-in (hub-auth
+ *     `app-sign-in.ts`): starts Entra in process like web-sso, start and return leg on one
+ *     path, so web-sso's budget: 20 a minute.
+ *   - `POST /api/auth/app-sso/confirm` — its confirm page's form; never starts Entra, so
+ *     the device forms' budget: 300 a minute.
+ *   - `POST /api/auth/app-sso/token` — the app's code exchange, one per sign-in: 10 a
+ *     minute, better-auth's `/sign-in/*` size. Its codes are 256-bit and single-use, so
+ *     the limit bounds work, not guessing.
  *
  * Deliberately NOT limited here (see the PR for T-26):
  *   - `/health`: answered from memory, and the front end's health probe polls it — a
@@ -55,7 +63,13 @@ import {
   createRateLimitAudit,
   type RateRule
 } from '@slayzone/platform/rate-limit'
-import { DEVICE_PAGE_PATH, WEB_SIGN_IN_PATH } from '@slayzone/hub-auth/server'
+import {
+  APP_SIGN_IN_CONFIRM_PATH,
+  APP_SIGN_IN_PATH,
+  APP_SIGN_IN_TOKEN_PATH,
+  DEVICE_PAGE_PATH,
+  WEB_SIGN_IN_PATH
+} from '@slayzone/hub-auth/server'
 import { BREAK_GLASS_PATH } from './break-glass'
 import { WEB_LOGOUT_PATH, WEB_SESSION_STATUS_PATH } from './web-sessions'
 
@@ -70,7 +84,11 @@ export const HUB_FLOOD_RULES = {
   webLogout: { max: 300, windowMs: 60_000 },
   // T-110: the device sign-in page (start leg) and its approve/deny forms.
   deviceStart: { max: 20, windowMs: 60_000 },
-  deviceDecide: { max: 300, windowMs: 60_000 }
+  deviceDecide: { max: 300, windowMs: 60_000 },
+  // The native app's Microsoft sign-in: start + return legs, confirm form, code exchange.
+  appSsoStart: { max: 20, windowMs: 60_000 },
+  appSsoConfirm: { max: 300, windowMs: 60_000 },
+  appSsoToken: { max: 10, windowMs: 60_000 }
 } as const satisfies Record<string, RateRule>
 
 /** Open `/trpc` sockets one client address may hold. */
@@ -98,6 +116,15 @@ const HTTP_RULES = new Map<string, { limit: string; rule: RateRule }>([
   [
     `POST ${DEVICE_PAGE_PATH}/deny`,
     { limit: 'http.device_decide', rule: HUB_FLOOD_RULES.deviceDecide }
+  ],
+  [`GET ${APP_SIGN_IN_PATH}`, { limit: 'http.app_sso_start', rule: HUB_FLOOD_RULES.appSsoStart }],
+  [
+    `POST ${APP_SIGN_IN_CONFIRM_PATH}`,
+    { limit: 'http.app_sso_confirm', rule: HUB_FLOOD_RULES.appSsoConfirm }
+  ],
+  [
+    `POST ${APP_SIGN_IN_TOKEN_PATH}`,
+    { limit: 'http.app_sso_token', rule: HUB_FLOOD_RULES.appSsoToken }
   ]
 ])
 

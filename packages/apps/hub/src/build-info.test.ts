@@ -65,6 +65,7 @@ function healthState(overrides: Partial<HealthState>): HealthState {
       enableTelemetry: true
     },
     reachable: false,
+    appSignIn: { microsoft: false },
     computersConnected: () => 0,
     ...overrides
   }

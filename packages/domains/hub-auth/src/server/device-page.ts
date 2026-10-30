@@ -35,7 +35,15 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { isAPIError } from 'better-auth/api'
 import type { HubAuth } from './auth'
 import { DEVICE_CLIENTS, DEVICE_CODE_TTL_MS, DEVICE_PAGE_PATH, deviceRequestRef } from './device'
-import { cookieOnlyHeaders, redirectToEntraSignIn, ssoSessionFromCookie } from './sso-page'
+import {
+  cookieOnlyHeaders,
+  escapeHtml as esc,
+  formOriginRefusal,
+  readUrlEncodedForm,
+  redirectToEntraSignIn,
+  sendHubPage,
+  ssoSessionFromCookie
+} from './sso-page'
 
 /** Codes matching nothing, per account, before the page locks that account out. */
 export const WRONG_CODE_LIMIT = 5
@@ -72,12 +80,6 @@ export interface DevicePageOptions {
   now?: () => number
 }
 
-const esc = (s: string): string =>
-  s.replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c
-  )
-
 /** What a person types or pastes (`abcd-efgh`, `ABCD EFGH`) → the stored form. */
 export function normalizeUserCode(raw: unknown): string {
   return typeof raw === 'string' ? raw.toUpperCase().replace(/[\s-]/g, '') : ''
@@ -87,21 +89,6 @@ const displayCode = (code: string): string => `${code.slice(0, 4)}-${code.slice(
 
 const toMs = (v: unknown): number =>
   v instanceof Date ? v.getTime() : new Date(String(v ?? '')).getTime()
-
-async function readForm(req: IncomingMessage): Promise<URLSearchParams | null> {
-  const type = String(req.headers['content-type'] ?? '')
-    .split(';')[0]
-    ?.trim()
-  if (type !== 'application/x-www-form-urlencoded') return null
-  let size = 0
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length
-    if (size > MAX_FORM_BYTES) return null
-    chunks.push(chunk as Buffer)
-  }
-  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'))
-}
 
 /**
  * The page handler. Returns true when it took the request (`/device` and below), so
@@ -115,34 +102,8 @@ export function createDevicePage(
   const now = opts.now ?? Date.now
   const misses = new Map<string, { count: number; since: number }>()
 
-  const csp = [
-    "default-src 'none'",
-    "style-src 'unsafe-inline'",
-    `form-action 'self' ${opts.signInOrigin}`,
-    "base-uri 'none'",
-    "frame-ancestors 'none'"
-  ].join('; ')
-
-  const send = (res: ServerResponse, status: number, title: string, body: string): void => {
-    if (res.headersSent) return
-    res.writeHead(status, {
-      'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'no-store',
-      'content-security-policy': csp,
-      'x-frame-options': 'DENY',
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'same-origin'
-    })
-    res.end(
-      `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-        `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-        `<title>${esc(title)}</title><style>` +
-        'body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem}' +
-        'code{font-size:1.4em;letter-spacing:.1em}form{display:inline-block;margin:0 .5rem 0 0}' +
-        'button{font:inherit;padding:.4rem 1.2rem}.warn{border-left:3px solid;padding-left:.8rem}' +
-        `</style></head><body><h1>${esc(title)}</h1>${body}</body></html>`
-    )
-  }
+  const send = (res: ServerResponse, status: number, title: string, body: string): void =>
+    sendHubPage(res, { status, title, body, formAction: `'self' ${opts.signInOrigin}` })
 
   const codeForm = (value = ''): string =>
     `<form method="get" action="${DEVICE_PAGE_PATH}"><p><label>Code ` +
@@ -342,24 +303,18 @@ export function createDevicePage(
     res: ServerResponse,
     step: 'approve' | 'deny'
   ): Promise<void> => {
-    const ctx = await auth.$context
-    const origin = req.headers.origin
-    if (
-      typeof origin !== 'string' ||
-      !origin ||
-      origin === 'null' ||
-      !ctx.isTrustedOrigin(origin)
-    ) {
+    const refused = await formOriginRefusal(auth, req)
+    if (refused) {
       securityEvent({
         event: 'authz.denied',
         outcome: 'denied',
         actor: null,
-        detail: { reason: origin ? 'untrusted_origin' : 'missing_origin', status: 403 }
+        detail: { reason: refused, status: 403 }
       })
       send(res, 403, 'Refused', '<p>This form must be sent from the hub’s own page.</p>')
       return
     }
-    const form = await readForm(req)
+    const form = await readUrlEncodedForm(req, MAX_FORM_BYTES)
     const code = normalizeUserCode(form?.get('user_code'))
     if (!form || !USER_CODE.test(code)) {
       send(res, 400, 'Not a sign-in code', codeForm())

@@ -295,6 +295,52 @@ test('the device sign-in page (T-110): start leg 20/min, approve+deny share 300/
   setSecurityLogSink(silent)
 })
 
+test('the app sign-in (Microsoft, native apps): start 20/min, confirm 300/min, token 10/min', () => {
+  const lines = captureAudit()
+  const clock = withClock()
+  const guard = createHubFloodGuard({ enabled: true, now: clock.now })
+  expect(HUB_FLOOD_RULES.appSsoStart.max, 'same budget as web-sso').toBe(HUB_FLOOD_RULES.webSso.max)
+  expect(HUB_FLOOD_RULES.appSsoConfirm.max, 'same budget as the device forms').toBe(
+    HUB_FLOOD_RULES.deviceDecide.max
+  )
+  expect(HUB_FLOOD_RULES.appSsoToken.max, 'one exchange per sign-in, 10 a minute').toBe(10)
+  const cases: Array<[string, string, number]> = [
+    ['GET', '/api/auth/app-sso', HUB_FLOOD_RULES.appSsoStart.max],
+    ['POST', '/api/auth/app-sso/confirm', HUB_FLOOD_RULES.appSsoConfirm.max],
+    ['POST', '/api/auth/app-sso/token', HUB_FLOOD_RULES.appSsoToken.max]
+  ]
+  for (const [method, path, max] of cases) {
+    for (let i = 0; i < max; i++) {
+      // The start and return legs share one path (and so one budget).
+      const url = i % 2 === 0 ? path : `${path}?return=1`
+      expect(
+        guard.refuseRequest(request(method, url, '203.0.113.70'), response().res),
+        `${path} ${i + 1} passes`
+      ).toBeFalsy()
+    }
+    const r = response()
+    expect(
+      guard.refuseRequest(request(method, path, '203.0.113.70'), r.res),
+      `${path} over`
+    ).toBeTruthy()
+    expect(r.out.status, `${path} 429`).toBe(429)
+    expect(
+      guard.refuseRequest(request(method, path, '203.0.113.71'), response().res),
+      `${path}: another address passes`
+    ).toBeFalsy()
+  }
+  const limits = rateLines(lines).map((l) => (l.detail as { limit?: string }).limit)
+  expect(limits.join(','), `one line per flood, got ${limits.join(',')}`).toBe(
+    'http.app_sso_start,http.app_sso_confirm,http.app_sso_token'
+  )
+  clock.advance(60_000)
+  expect(
+    guard.refuseRequest(request('POST', '/api/auth/app-sso/token', '203.0.113.70'), response().res),
+    'next window'
+  ).toBeFalsy()
+  setSecurityLogSink(silent)
+})
+
 test('off (the desktop app’s hub): nothing refused, nothing counted, nothing audited', () => {
   const lines = captureAudit()
   const guard = createHubFloodGuard({ enabled: false })

@@ -228,6 +228,24 @@ test('the web shell session routes (T-13) are open; web-sso only with SSO on', (
   ).toBe('allow')
 })
 
+test('the app sign-in routes are open only with SSO on, by exact path', () => {
+  for (const url of ['/api/auth/app-sso', '/api/auth/app-sso/confirm', '/api/auth/app-sso/token']) {
+    expect(remoteWan(url), `SSO off: ${url} gated`).toBe('verify')
+    expect(
+      restAuthAction({ hubAuthRequired: true, ssoActive: true, url: `${url}?return=1` }),
+      `SSO on: ${url} open`
+    ).toBe('allow')
+    expect(
+      restAuthAction({ hubAuthRequired: true, ssoActive: true, passwordEnabled: false, url }),
+      `SSO on, password off: ${url} open`
+    ).toBe('allow')
+    expect(
+      restAuthAction({ hubAuthRequired: true, ssoActive: true, url: `${url}/extra` }),
+      `${url}/extra is not exempt`
+    ).toBe('verify')
+  }
+})
+
 /**
  * The exemption is an EXACT ALLOWLIST, not the `/api/auth/` prefix it used to be.
  *

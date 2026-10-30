@@ -45,6 +45,23 @@ export {
   type HubDeviceCodeResult,
   type HubDeviceTokenResult
 } from './device'
+export {
+  APP_SIGN_IN_PATHS,
+  APP_SIGN_IN_REDIRECT_URI,
+  appSignInOf,
+  base64UrlEncode,
+  createPkcePair,
+  exchangeAppSignInCode,
+  pkceS256Challenge,
+  randomUrlToken,
+  readAppSignInCallback,
+  startAppSignIn,
+  type AppSignInCallback,
+  type AppSignInTokenResult,
+  type HubAppSignIn,
+  type PendingAppSignIn,
+  type PkceCrypto
+} from './app-sign-in'
 export { fetchSessionEmail } from './session'
 export type { HubTokenStore } from './token-store'
 export {

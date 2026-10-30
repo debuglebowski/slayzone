@@ -126,6 +126,14 @@ export const SECURITY_EVENTS = [
   'auth.device.deny',
   /** A request expired before a token was issued (seen at poll, on the page, or swept). */
   'auth.device.expire',
+  // App sign-in through Microsoft (hub-auth `app-sign-in.ts`): a native app's code flow
+  // with PKCE. The token itself is an `auth.signin` line with `detail.method: 'app'`.
+  // `detail.requestRef` correlates one code's lines; no code, verifier or token is written.
+  /** A code issued to the app after the person confirmed (`success`), or not (`denied`,
+   *  `detail.reason`: cancelled on the confirm page, too_many_pending). */
+  'auth.app_sso.code',
+  /** A used code presented again (`denied`): the session it minted is revoked. */
+  'auth.app_sso.replay',
   // Break-glass v2 (added): emergency admin access while sign-in is down (hub
   // `break-glass.ts`, O-9/O-23). `detail.grantRef` correlates one grant's lines.
   /** An operator on the hub machine opened a grant over the local socket (`success`,

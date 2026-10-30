@@ -31,6 +31,10 @@ export type HealthState = {
    *  request from a loopback socket, so on such a hub "the peer is loopback" no
    *  longer means "the caller is on this machine" — see {@link handleHealth}. */
   reachable: boolean
+  /** What a native app may sign in with, public like the switches: `microsoft` exactly
+   *  when this hub serves the app sign-in (hub-auth `app-sign-in.ts`; Entra hubs). The
+   *  switches cannot tell — an older hub has SSO on but not the app routes. */
+  appSignIn: { microsoft: boolean }
   /** Live count of connected computers. A GETTER, not a number — the value must
    *  reflect the gateway at request time, not a boot-time snapshot. */
   computersConnected: () => number
@@ -109,8 +113,8 @@ function mayReadHostFields(state: HealthState, req: IncomingMessage): boolean {
  * a hub may bind wider than loopback — so the response is split:
  *
  *   - PUBLIC (any caller): liveness + the running build + `authRequired` + the
- *     switches. Enough to answer "is this up, which code is it running, must I
- *     sign in first, and how". `authRequired` is deliberately public: a client has
+ *     switches + `appSignIn`. Enough to answer "is this up, which code is it running,
+ *     must I sign in first, and how". `authRequired` is deliberately public: a client has
  *     to learn it needs a token BEFORE it has one, the open `hub.describe` already
  *     advertises the same bit (and the switches) to any /trpc caller, and an
  *     unauthenticated request learns it anyway from the 401. The switches are
@@ -143,7 +147,8 @@ export function handleHealth(
     builtAt: build.builtAt,
     buildId: build.buildId,
     authRequired: state.authRequired,
-    switches: state.switches
+    switches: state.switches,
+    appSignIn: state.appSignIn
   }
   if (mayReadHostFields(state, req)) {
     payload.name = state.name
