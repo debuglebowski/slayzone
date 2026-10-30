@@ -1,5 +1,7 @@
-import { useDeferredValue, useState, useMemo } from 'react'
+import { useContext, useDeferredValue, useEffect, useState, useMemo } from 'react'
 import { useChatView } from './ChatViewContext'
+import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
+import { useToolFocusRequest } from './tool-cards/tool-focus'
 import {
   ChevronDown,
   ChevronRight,
@@ -167,19 +169,12 @@ export function _UserAvatar() {
  * thinking text arrives late, in one burst); expanded, the text so far.
  */
 export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 'thinking' }> }) {
-  const [open, setOpen] = useState(false)
+  // Kept while scrolled away; "Collapse all" closes it.
+  const [open, setOpen] = useRowUiState('thinking', false, false)
   const streaming = item.stream === 'open'
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
   const text = live?.text || item.text
   const now = useNow(1000, { enabled: streaming })
-  const { collapseSignal } = useChatView()
-  // "Collapse all": adjusted during render — same trigger as a
-  // `[collapseSignal]` effect (whose mount run was a no-op: starts closed).
-  const [seenCollapseSignal, setSeenCollapseSignal] = useState(collapseSignal)
-  if (!Object.is(seenCollapseSignal, collapseSignal)) {
-    setSeenCollapseSignal(collapseSignal)
-    setOpen(false)
-  }
   if (!streaming && !text) return null
   return (
     <div
@@ -220,15 +215,9 @@ export function SystemInit({ item }: { item: Extract<TimelineItem, { kind: 'sess
 }
 
 export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 'result' }> }) {
-  const [expanded, setExpanded] = useState(false)
-  const { collapseSignal, showMessageMeta } = useChatView()
-  // "Collapse all": adjusted during render — same trigger as a
-  // `[collapseSignal]` effect (whose mount run was a no-op: starts collapsed).
-  const [seenCollapseSignal, setSeenCollapseSignal] = useState(collapseSignal)
-  if (!Object.is(seenCollapseSignal, collapseSignal)) {
-    setSeenCollapseSignal(collapseSignal)
-    setExpanded(false)
-  }
+  // Kept while scrolled away; "Collapse all" closes it.
+  const [expanded, setExpanded] = useRowUiState('meta', false, false)
+  const { showMessageMeta } = useChatView()
   const { copied, copy } = useCopy(item.copyText ?? '')
   if (!showMessageMeta) return null
   return (
@@ -366,7 +355,8 @@ export function UnknownBlock({ item }: { item: Extract<TimelineItem, { kind: 'un
 }
 
 export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub-agent' }> }) {
-  const { collapseSignal, timeline, childIndex } = useChatView()
+  const { timeline, childIndex } = useChatView()
+  const rowKey = useContext(TimelineRowKeyContext)
   const inFlight = item.phase === 'in-flight'
   const errored = item.phase === 'failed' || item.status === 'failed' || item.status === 'error'
   const seconds = item.durationMs != null ? (item.durationMs / 1000).toFixed(1) : null
@@ -387,12 +377,13 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
   )
   const hasChildren = childIndices.length > 0 || launcherTool != null
   // Mirror ToolShell convention: errored items default open so the user sees what failed;
-  // everything else stays collapsed. A collapseSignal bump ("collapse all") forces
-  // all back to closed — adjusted during render on a CHANGE only, so mounting
-  // (incl. under an already-bumped signal) keeps the default.
-  const [open, setOpen] = useState(errored)
-  const collapseBumped = useDepsChanged([collapseSignal])
-  if (collapseBumped) setOpen(false)
+  // everything else stays collapsed. Kept while scrolled away; "Collapse all" closes it.
+  const [open, setOpen] = useRowUiState('sub-agent', errored, false)
+  // "Show this edit" (files-changed row) opens it, down to the card inside.
+  const focusRequested = useToolFocusRequest(item.toolUseId)
+  useEffect(() => {
+    if (focusRequested && !open) setOpen(true)
+  }, [focusRequested, open, setOpen])
 
   return (
     <>
@@ -403,7 +394,7 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
         <div className="w-fit max-w-full rounded-md border border-border/50 bg-muted/20 overflow-hidden">
           <button
             type="button"
-            onClick={() => hasChildren && setOpen((v) => !v)}
+            onClick={() => hasChildren && setOpen(!open)}
             disabled={!hasChildren}
             className={cn(
               'flex items-center gap-2 px-3 py-1.5 text-xs text-left max-w-full',
@@ -468,18 +459,41 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
       {open && hasChildren && (
         <div className="pl-4" data-testid="sub-agent-children">
           {launcherTool && launcherTool.kind === 'tool' && (
-            <div key={`${item.toolUseId}:launcher`}>
-              {renderTool(launcherTool.invocation, launcherTool.timestamp)}
-            </div>
+            <NestedRow key={`${item.toolUseId}:launcher`} parent={rowKey} name="launcher">
+              <div>{renderTool(launcherTool.invocation, launcherTool.timestamp)}</div>
+            </NestedRow>
           )}
           {childIndices.map((idx) => {
             const child = timeline[idx]
             if (!child) return null
-            return renderTimelineItem(child, `${item.toolUseId}:${idx}`)
+            const key = `${item.toolUseId}:${idx}`
+            return (
+              <NestedRow key={key} parent={rowKey} name={key}>
+                {renderTimelineItem(child, key)}
+              </NestedRow>
+            )
           })}
         </div>
       )}
     </>
+  )
+}
+
+/** A row rendered inside another (a sub-agent's): its UI state keys under the parent row. */
+function NestedRow({
+  parent,
+  name,
+  children
+}: {
+  parent: string | null
+  name: string
+  children: React.ReactNode
+}) {
+  if (parent === null) return <>{children}</>
+  return (
+    <TimelineRowKeyContext.Provider value={nestedRowKey(parent, name)}>
+      {children}
+    </TimelineRowKeyContext.Provider>
   )
 }
 
@@ -679,7 +693,7 @@ export function ToolCallTodoWrite({ invocation, timestamp }: ToolProps) {
  */
 export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
   const questions = questionsOf(invocation.input)
-  const { timeline, collapseSignal } = useChatView()
+  const { timeline } = useChatView()
   const prompt = usePromptFor(invocation.id)
   const answers = answersOf(prompt, invocation)
   // Latest AskUserQuestion in the timeline stays expanded; older ones auto-collapse
@@ -693,20 +707,12 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
     }
     return false
   }, [timeline, invocation.id])
-  const [collapsed, setCollapsed] = useState(!isLatestAsk)
+  // Kept while scrolled away; "Collapse all" collapses it (`useRowUiState`).
   // Skip mount: initial state already honors latest-ask. Afterwards follow
-  // latest-ask changes, then user-triggered "Collapse all" bumps (the signal
-  // only ever increments, so "changed" = "differs from its mount value").
-  // Adjusted during render, in that order — same triggers as an `[isLatestAsk]`
-  // effect followed by a `[collapseSignal]` effect.
-  const [collapseInputs, setCollapseInputs] = useState({ isLatestAsk, collapseSignal })
-  const latestAskChanged = !Object.is(collapseInputs.isLatestAsk, isLatestAsk)
-  const collapseSignalChanged = !Object.is(collapseInputs.collapseSignal, collapseSignal)
-  if (latestAskChanged || collapseSignalChanged) {
-    setCollapseInputs({ isLatestAsk, collapseSignal })
-    if (latestAskChanged) setCollapsed(!isLatestAsk)
-    if (collapseSignalChanged) setCollapsed(true)
-  }
+  // latest-ask changes (adjusted during render — an `[isLatestAsk]` effect's trigger).
+  const [collapsed, setCollapsed] = useRowUiState('ask', !isLatestAsk, true)
+  const latestAskChanged = useDepsChanged([isLatestAsk])
+  if (latestAskChanged) setCollapsed(!isLatestAsk)
   const firstAnswer = answers ? Object.values(answers)[0] : undefined
 
   return (
@@ -718,7 +724,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
         <div className="min-w-0 flex-1 rounded-lg border border-info/40 bg-info/5 shadow-sm overflow-hidden">
           <button
             type="button"
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={() => setCollapsed(!collapsed)}
             className={cn(
               'w-full flex items-center gap-2 bg-info/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-info-foreground hover:bg-info/15 transition-colors',
               !collapsed && 'border-b border-info/20'
@@ -828,7 +834,8 @@ export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
 }
 
 export function ToolCallGeneric({ invocation, timestamp }: ToolProps) {
-  const result = invocation.result?.rawContent
+  // A blocked call's "result" is the hook's reason: the block line shows it.
+  const result = invocation.blockedBy ? null : invocation.result?.rawContent
   const resultText =
     typeof result === 'string' ? result : result != null ? JSON.stringify(result, null, 2) : ''
   const inputPreview = JSON.stringify(invocation.input).slice(0, 80)

@@ -105,7 +105,7 @@ function harness(): Harness {
       h.broadcasts.push({ event, ...(live !== undefined ? { live } : {}) }),
     broadcastExit: () => {},
     broadcastStateChange: () => {},
-    eventStore: { load: async () => [], insert: async () => 'inserted' }
+    eventStore: { load: async () => [], insert: async () => 'inserted', readRange: async () => [] }
   })
   return h
 }

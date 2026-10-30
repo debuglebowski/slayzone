@@ -4,6 +4,7 @@ import type { RecordConversationInput, TaskSessionStore } from './task-session-s
 import {
   persistChatEvent,
   loadChatEvents,
+  loadChatEventsRange,
   getNextSeqForTab,
   clearChatEventsForTab,
   type BufferedEvent
@@ -98,6 +99,8 @@ export interface ChatDataOps {
   /** Insert-only; `'clash'` when a row already exists at that seq (never overwritten). */
   persistChatEvent(tabId: string, seq: number, event: AgentEvent): Promise<'inserted' | 'clash'>
   loadChatEvents(tabId: string): Promise<BufferedEvent[]>
+  /** Saved events with `afterSeq < seq < beforeSeq` (history older than the in-memory cache). */
+  loadChatEventsRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
   getNextSeqForTab(tabId: string): Promise<number>
   clearChatEventsForTab(tabId: string): Promise<void>
   /** Drop all queued messages for a tab. Returns the number removed. */
@@ -319,6 +322,8 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     persistChatEvent: (tabId, seq, event) => persistChatEvent(db, tabId, seq, event),
 
     loadChatEvents: (tabId) => loadChatEvents(db, tabId),
+    loadChatEventsRange: (tabId, afterSeq, beforeSeq) =>
+      loadChatEventsRange(db, tabId, afterSeq, beforeSeq),
 
     getNextSeqForTab: (tabId) => getNextSeqForTab(db, tabId),
 

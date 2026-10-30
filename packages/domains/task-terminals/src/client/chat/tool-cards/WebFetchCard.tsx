@@ -1,6 +1,6 @@
 import { Globe } from 'lucide-react'
 import { GhMarkdown } from '@slayzone/markdown/client'
-import { LinkText, ToolShell, extractRawText, type ToolProps } from './card-shell'
+import { LinkText, ToolShell, resultTextOf, type ToolProps } from './card-shell'
 import { ExternalLink } from './links'
 import { webFetchView } from './web-results'
 
@@ -22,7 +22,7 @@ export function WebFetchCard({ invocation, timestamp }: ToolProps) {
     invocation.result?.structured,
     invocation.result?.rawContent
   )
-  const error = invocation.result?.isError ? extractRawText(invocation.result.rawContent) : ''
+  const error = invocation.result?.isError ? resultTextOf(invocation) : ''
   return (
     <ToolShell
       icon={<Globe className="size-3" />}

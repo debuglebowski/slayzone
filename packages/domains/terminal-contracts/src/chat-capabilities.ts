@@ -59,6 +59,13 @@ export interface ChatCapabilities {
   diffComments: boolean
   /** The chat's actions are in the app's Cmd+K palette while the tab is active. */
   commandPalette: boolean
+  /**
+   * The provider starts turns by itself (Claude Code answers a finished
+   * background task or a hook with init, output and a result — no user
+   * message): the chat reads as working through such a turn. Codex never
+   * does; its handshake's synthetic turn-init must not read as work.
+   */
+  agentStartedTurns: boolean
 }
 
 const NONE: ChatCapabilities = {
@@ -76,7 +83,8 @@ const NONE: ChatCapabilities = {
   editableQueue: false,
   filesChanged: false,
   diffComments: false,
-  commandPalette: false
+  commandPalette: false,
+  agentStartedTurns: false
 }
 
 const CAPABILITIES: Record<string, ChatCapabilities> = {
@@ -95,7 +103,8 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     editableQueue: true,
     filesChanged: true,
     diffComments: true,
-    commandPalette: true
+    commandPalette: true,
+    agentStartedTurns: true
   },
   'codex-chat': NONE
 }

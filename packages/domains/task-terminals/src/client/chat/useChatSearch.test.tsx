@@ -101,3 +101,31 @@ describe('useChatSearch — hook output and notices', () => {
     expect(result.current.matchCount).toBe(2)
   })
 })
+
+describe('useChatSearch — a block folded into its tool card', () => {
+  it("finds the hook's name and reason on the card", () => {
+    const items = [
+      {
+        kind: 'tool',
+        invocation: {
+          id: 't1',
+          name: 'Bash',
+          input: { command: 'echo forbidden' },
+          status: 'denied',
+          blockedBy: {
+            hookId: 'h1',
+            hookName: 'PreToolUse:Bash',
+            text: 'Blocked by policy',
+            audience: 'agent'
+          }
+        },
+        timestamp: 0
+      }
+    ] as TimelineItem[]
+    const { result } = renderHook(() => useChatSearch(items))
+    act(() => result.current.setQuery('policy'))
+    expect(result.current.matchCount).toBe(1)
+    act(() => result.current.setQuery('PreToolUse'))
+    expect(result.current.matchCount).toBe(1)
+  })
+})

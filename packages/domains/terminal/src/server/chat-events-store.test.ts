@@ -6,9 +6,10 @@ import { expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { ChatEventLog, type ChatEventPersistence } from './chat-events-store'
 
-function memoryStore(opts: { delayMs?: number } = {}) {
+function memoryStore(opts: { delayMs?: number; readDelayMs?: number } = {}) {
   const rows = new Map<string, { seq: number; event: AgentEvent }>()
   const order: number[] = []
+  const reads: Array<[number, number]> = []
   const persistence: ChatEventPersistence = {
     insert: async (tabId, seq, event) => {
       if (opts.delayMs) await new Promise((r) => setTimeout(r, Math.random() * opts.delayMs!))
@@ -17,10 +18,22 @@ function memoryStore(opts: { delayMs?: number } = {}) {
       rows.set(key, { seq, event })
       order.push(seq)
       return 'inserted'
+    },
+    readRange: async (tabId, afterSeq, beforeSeq) => {
+      reads.push([afterSeq, beforeSeq])
+      if (opts.readDelayMs) await new Promise((r) => setTimeout(r, opts.readDelayMs))
+      return [...rows.entries()]
+        .filter(([k, r]) => k.startsWith(`${tabId}:`) && r.seq > afterSeq && r.seq < beforeSeq)
+        .map(([, r]) => r)
+        .sort((a, b) => a.seq - b.seq)
     }
   }
-  return { rows, order, persistence }
+  return { rows, order, reads, persistence }
 }
+
+const seqs = (events: ReadonlyArray<{ seq: number }>) => events.map((e) => e.seq)
+const range = (from: number, to: number) =>
+  Array.from({ length: to - from + 1 }, (_, i) => from + i)
 
 const text = (t: string): AgentEvent => ({ kind: 'stderr', text: t })
 
@@ -75,7 +88,8 @@ test('a failed write is reported and does not stop later writes', async () => {
         }
         written.push(seq)
         return 'inserted'
-      }
+      },
+      readRange: async () => []
     },
     { events: [], nextSeq: 0 },
     { onWriteError: (seq) => errors.push(seq) }
@@ -87,7 +101,7 @@ test('a failed write is reported and does not stop later writes', async () => {
   expect(written).toEqual([1])
 })
 
-test('keeps at most `cap` events in memory, newest last', () => {
+test('keeps at most `cap` events in memory (a cache), newest last', () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 3 })
   for (let i = 0; i < 5; i++) log.append(text(String(i)))
@@ -95,7 +109,7 @@ test('keeps at most `cap` events in memory, newest last', () => {
   expect(log.since(3).map((e) => e.seq)).toEqual([4])
 })
 
-test('a seed longer than the cap keeps its newest events', () => {
+test('a seed longer than the cap keeps its newest events in memory', () => {
   const store = memoryStore()
   const events = Array.from({ length: 5 }, (_, seq) => ({ seq, event: text(String(seq)) }))
   const log = new ChatEventLog('tab', store.persistence, { events, nextSeq: 5 }, { cap: 2 })
@@ -110,4 +124,50 @@ test('flush waits for every write appended before it', async () => {
   log.append(text('b'))
   await log.flush()
   expect(store.rows.size).toBe(2)
+})
+
+// --- History beyond the in-memory cache (plan 4.1: history is never lost) ----
+
+test('readSince returns the WHOLE history: what left the cache is read back from the store', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 3 })
+  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  expect(seqs(log.since(-1))).toEqual([7, 8, 9])
+  expect(seqs(await log.readSince(-1))).toEqual(range(0, 9))
+  expect(seqs(await log.readSince(4))).toEqual(range(5, 9))
+  const readsBefore = store.reads.length
+  // Inside the cache: no store read at all.
+  expect(seqs(await log.readSince(7))).toEqual([8, 9])
+  expect(store.reads.length).toBe(readsBefore)
+})
+
+test('a seed longer than the cache: its older events are still read back', async () => {
+  const store = memoryStore()
+  const events = Array.from({ length: 6 }, (_, seq) => ({ seq, event: text(String(seq)) }))
+  for (const e of events) store.rows.set(`tab:${e.seq}`, e)
+  const log = new ChatEventLog('tab', store.persistence, { events, nextSeq: 6 }, { cap: 2 })
+  expect(seqs(log.since(-1))).toEqual([4, 5])
+  log.append(text('new'))
+  expect(seqs(await log.readSince(-1))).toEqual(range(0, 6))
+})
+
+test('a whole history in memory is served from memory', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 50 })
+  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  expect(seqs(await log.readSince(-1))).toEqual(range(0, 9))
+  expect(store.reads).toEqual([])
+})
+
+test('events appended while the store is read are neither lost nor doubled', async () => {
+  const store = memoryStore({ readDelayMs: 20, delayMs: 3 })
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 4 })
+  for (let i = 0; i < 20; i++) log.append(text(String(i)))
+  const reading = log.readSince(-1)
+  // More arrive during the read: the cache moves on past what was read.
+  for (let i = 20; i < 40; i++) log.append(text(String(i)))
+  const got = seqs(await reading)
+  expect(got[0]).toBe(0)
+  expect(got).toEqual(range(0, got.at(-1)!))
+  expect(got.at(-1)).toBeGreaterThanOrEqual(19)
 })

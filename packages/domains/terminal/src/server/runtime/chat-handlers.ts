@@ -30,6 +30,7 @@ import {
   releaseChatConversation,
   switchTabConversation,
   getEventBufferSince,
+  readEventsSince,
   getSessionInfo,
   getSessionTerminalState,
   killAll,
@@ -649,7 +650,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // instance of the tab finished writing) and writes it insert-only, in order.
     eventStore: {
       load: (tabId) => data.loadChatEvents(tabId),
-      insert: (tabId, seq, event) => data.persistChatEvent(tabId, seq, event)
+      insert: (tabId, seq, event) => data.persistChatEvent(tabId, seq, event),
+      readRange: (tabId, afterSeq, beforeSeq) =>
+        data.loadChatEventsRange(tabId, afterSeq, beforeSeq)
     },
     // Side effects of a SAVED event (the row itself is the event store's). The
     // transport invokes this without awaiting; the returned Promise floats.
@@ -1130,7 +1133,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
       return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
     },
 
-    getBufferSince: (tabId: string, afterSeq: number) => getEventBufferSince(tabId, afterSeq),
+    // The whole saved history after `afterSeq` (not just the in-memory cache).
+    getBufferSince: (tabId: string, afterSeq: number) => readEventsSince(tabId, afterSeq),
 
     getInfo: (tabId: string) => getSessionInfo(tabId),
 

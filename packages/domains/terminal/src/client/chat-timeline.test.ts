@@ -10,13 +10,15 @@ import {
   initialState,
   reducer,
   isInFlight,
+  isTurnOpen,
   isAwaitingUserQuestion,
   deriveLoadingLabel,
   selectActiveUserIds,
   selectFoldedIndexes,
   selectUsageSummary,
   selectConversationAttachmentBytes,
-  type ChatTimelineState
+  type ChatTimelineState,
+  type TimelineItem
 } from './chat-timeline'
 import { selectPendingPrompts, selectPromptForTool, hasPendingPrompt } from './chat-prompts'
 
@@ -1967,6 +1969,97 @@ describe('hook output + notices', () => {
       'hook:Stop:cancelled'
     ])
   })
+
+  // A blocking PreToolUse hook's reason reaches the tool call's result too
+  // ("<hook> hook error: [cmd]: <reason>"): the card shows the block, the hook
+  // row is folded into it (chat D, cards report 212478ab).
+  test('recorded hook session: the block folds into the blocked call', () => {
+    const raw = readFileSync(
+      fileURLToPath(
+        new URL('../../test/fixtures/claude-stream/chatui-hooks.ndjson', import.meta.url)
+      ),
+      'utf8'
+    )
+    const events = raw
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => claudeCodeAdapter.parseLine(l))
+      .filter((e): e is AgentEvent => e !== null)
+    const s = run(events)
+    const blocked = s.timeline.find(
+      (i) => i.kind === 'tool' && i.invocation.status === 'denied'
+    ) as Extract<TimelineItem, { kind: 'tool' }>
+    expect(blocked.invocation.blockedBy).toMatchObject({
+      hookName: 'PreToolUse:Bash',
+      audience: 'agent'
+    })
+    expect(blocked.invocation.blockedBy?.text).toContain('Blocked by policy')
+    const hook = s.timeline.find((i) => i.kind === 'hook' && i.effect === 'blocked')
+    expect(hook).toMatchObject({ foldedInto: blocked.invocation.id })
+    // Other hook rows are untouched.
+    for (const i of s.timeline) {
+      if (i.kind === 'hook' && i.effect !== 'blocked') expect(i.foldedInto).toBeUndefined()
+    }
+  })
+
+  const blockedHook = (hookId: string, text: string): AgentEvent => ({
+    kind: 'hook-output',
+    hookId,
+    hookName: 'PreToolUse:Bash',
+    hookEvent: 'PreToolUse',
+    effect: 'blocked',
+    audience: 'agent',
+    text,
+    exitCode: 2
+  })
+  const hookError = (toolUseId: string, reason: string): AgentEvent => ({
+    kind: 'tool-result',
+    toolUseId,
+    isError: true,
+    rawContent: `PreToolUse:Bash hook error: [bash "$CLAUDE_PROJECT_DIR/.claude/hooks/pre.sh"]: ${reason}\n`,
+    structured: null
+  })
+  const toolOf = (s: ChatTimelineState, id: string) =>
+    s.timeline.find((i) => i.kind === 'tool' && i.invocation.id === id) as Extract<
+      TimelineItem,
+      { kind: 'tool' }
+    >
+  const hookOf = (s: ChatTimelineState, id: string) =>
+    s.timeline.find((i) => i.kind === 'hook' && i.hookId === id) as Extract<
+      TimelineItem,
+      { kind: 'hook' }
+    >
+
+  test('two parallel calls blocked for different reasons: each card gets its own hook', () => {
+    const s = run([
+      ev.call('t-a', 'Bash'),
+      ev.call('t-b', 'Bash'),
+      blockedHook('h-a', 'no rm allowed\n'),
+      blockedHook('h-b', 'no curl allowed\n'),
+      hookError('t-b', 'no curl allowed'),
+      hookError('t-a', 'no rm allowed')
+    ])
+    expect(toolOf(s, 't-a').invocation.blockedBy?.hookId).toBe('h-a')
+    expect(toolOf(s, 't-b').invocation.blockedBy?.hookId).toBe('h-b')
+    expect(hookOf(s, 'h-a').foldedInto).toBe('t-a')
+    expect(hookOf(s, 'h-b').foldedInto).toBe('t-b')
+  })
+
+  test("an error that is not that hook's block folds nothing", () => {
+    const s = run([
+      ev.call('t-c', 'Bash'),
+      blockedHook('h-c', 'no rm allowed\n'),
+      {
+        kind: 'tool-result',
+        toolUseId: 't-c',
+        isError: true,
+        rawContent: 'Exit code 1',
+        structured: null
+      }
+    ])
+    expect(toolOf(s, 't-c').invocation.blockedBy).toBeUndefined()
+    expect(hookOf(s, 'h-c').foldedInto).toBeUndefined()
+  })
 })
 
 // ---- Prompt model (permission requests, questions, plan approval) ----------
@@ -2619,5 +2712,183 @@ describe('selectConversationAttachmentBytes', () => {
       content: [{ type: 'attachment', attachment: pdf('m2', 3) }]
     })
     expect(selectConversationAttachmentBytes(s)).toBe(8 + 4)
+  })
+})
+
+// ---- chat D: a turn the agent starts by itself (no user message) ----------
+// Claude Code answers a finished background task (or a hook) with a new turn:
+// turn-init, output, result — nothing the user sent opens it. The chat must read
+// it as working (indicator, Stop, queueing) until its result. Codex never does
+// this; its handshake sends a synthetic turn-init with no message.
+
+describe('agent-started turn', () => {
+  const claude = () => initialState({ agentStartedTurns: true })
+  const firstTurnDone = (s: ChatTimelineState): ChatTimelineState => {
+    let n = reducer(s, { type: 'event', event: ev.turnInit() })
+    n = reducer(n, { type: 'user-sent', id: 'u1', text: 'run it in the background' })
+    n = reducer(n, { type: 'event', event: userMsg('run it in the background', 'u1') })
+    n = reducer(n, { type: 'event', event: ev.call('t-bg', 'Bash') })
+    n = reducer(n, { type: 'event', event: ev.result('t-bg') })
+    n = reducer(n, { type: 'event', event: ev.text('m-1', 'started') })
+    n = reducer(n, { type: 'event', event: ev.turnResult() })
+    expect(isTurnOpen(n)).toBe(false)
+    return n
+  }
+
+  test('output no message opened opens a turn; its result closes it', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    expect(isTurnOpen(s)).toBe(false) // an init alone is not work
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'the loop finished') })
+    expect(isTurnOpen(s)).toBe(true)
+    expect(isInFlight(s)).toBe(false) // no USER turn: the counters are untouched
+    const counted = s.resultCount
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    expect(isTurnOpen(s)).toBe(false)
+    expect(s.resultCount).toBe(counted)
+  })
+
+  test('a live stream start opens it too (before any saved row)', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm-live' } })
+    expect(isTurnOpen(s)).toBe(true)
+  })
+
+  test('Codex (capability off) never opens one: the default state, handshake init included', () => {
+    let s = initialState()
+    s = reducer(s, { type: 'event', event: ev.turnInit('thread') })
+    expect(isTurnOpen(s)).toBe(false)
+    s = firstTurnDone(s)
+    s = reducer(s, { type: 'event', event: ev.text('m-late', 'late item') })
+    expect(isTurnOpen(s)).toBe(false)
+    expect(s.agentTurnOpen).toBe(false)
+  })
+
+  test("a background sub-agent's output does not open a main turn", () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'assistant-text',
+        messageId: 'm-sub',
+        text: 'sub',
+        parentToolUseId: 'toolu_bg'
+      }
+    })
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'tool-call',
+        id: 't-sub',
+        name: 'Read',
+        input: {},
+        parentToolUseId: 'toolu_bg'
+      }
+    })
+    expect(isTurnOpen(s)).toBe(false)
+  })
+
+  test('output while a prompt waits does not open a turn', () => {
+    let s = claude()
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    // A prompt waits (e.g. replayed mid-prompt) and no turn is open.
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'permission-request',
+        requestId: 'r1',
+        toolName: 'Bash',
+        toolUseId: 't-p',
+        input: { command: 'ls' },
+        permissionSuggestions: [],
+        description: 'List'
+      } as AgentEvent
+    })
+    expect(hasPendingPrompt(s)).toBe(true)
+    expect(s.agentTurnOpen).toBe(false)
+    s = reducer(s, { type: 'event', event: ev.text('m-x', 'while waiting') })
+    expect(s.agentTurnOpen).toBe(false)
+  })
+
+  test('imported history (a switched / handed-over conversation) never opens a turn', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'conversation-branch',
+        reason: 'switched',
+        conversationId: 'sid-9',
+        source: 'terminal'
+      }
+    } as never)
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'user-message', text: 'from the TUI', id: 'h1', history: true }
+    })
+    s = reducer(s, { type: 'event', event: ev.text('h-a', 'tui answer') })
+    s = reducer(s, { type: 'event', event: ev.call('h-t', 'Read') })
+    expect(isTurnOpen(s)).toBe(false)
+    // The live session starts: its own agent-started output counts again.
+    s = reducer(s, { type: 'event', event: ev.turnInit('sid-9') })
+    s = reducer(s, { type: 'event', event: ev.text('m-live', 'background done') })
+    expect(isTurnOpen(s)).toBe(true)
+  })
+
+  test('a message sent during an agent turn waits for its own result', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
+    s = reducer(s, { type: 'user-sent', id: 'u2', text: 'next' })
+    expect(isTurnOpen(s)).toBe(true)
+    // The agent turn's result first (the CLI runs turns one after another).
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    expect(isTurnOpen(s)).toBe(true)
+    expect(isInFlight(s)).toBe(true)
+    s = reducer(s, { type: 'event', event: userMsg('next', 'u2') })
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'answer to next') })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    expect(isTurnOpen(s)).toBe(false)
+  })
+
+  test('Stop during an agent turn: the interrupt closes it and marks where it was cut', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    expect(isTurnOpen(s)).toBe(false)
+    expect(s.timeline.at(-1)?.kind).toBe('interrupted')
+    // Its aborted result does not finish the NEXT turn early.
+    s = reducer(s, { type: 'event', event: abortedResult() })
+    s = reducer(s, { type: 'user-sent', id: 'u3', text: 'again' })
+    expect(isTurnOpen(s)).toBe(true)
+  })
+
+  test('the process ending closes it', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
+    s = reducer(s, { type: 'process-exit', sessionId: 'sid-1', code: 1, signal: null })
+    expect(isTurnOpen(s)).toBe(false)
+  })
+
+  test("reset keeps the provider's capability", () => {
+    let s = reducer(claude(), { type: 'reset' })
+    expect(s.agentStartedTurns).toBe(true)
+    s = reducer(s, { type: 'configure', agentStartedTurns: false })
+    expect(s.agentStartedTurns).toBe(false)
+  })
+
+  test('the working label reads the agent turn, not the turn before it', () => {
+    let s = claude()
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'user-sent', id: 'u1', text: 'read it' })
+    s = reducer(s, { type: 'event', event: userMsg('read it', 'u1') })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'tool-call', id: 't-r', name: 'Read', input: { file_path: '/repo/a.ts' } }
+    })
+    s = reducer(s, { type: 'event', event: ev.result('t-r') })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    // The agent's own turn starts streaming; nothing of it is a row yet.
+    s = reducer(s, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm-live' } })
+    expect(isTurnOpen(s)).toBe(true)
+    expect(deriveLoadingLabel(s)).toBeNull()
   })
 })

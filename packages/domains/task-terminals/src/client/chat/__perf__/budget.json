@@ -1,0 +1,16 @@
+{
+  "_doc": "Absolute budgets for a 10,000-event Claude Code chat session (plan 4.1). `longSession` is checked by baseline.test.ts (pnpm test:chat:perf); `render` by e2e/perf/chat-long-session.spec.ts in real Chromium. Quiet-machine numbers: run alone.",
+  "longSession": {
+    "events": 10000,
+    "replayTotalMs": 150,
+    "hydrateBatchMs": 150,
+    "longestEventMs": 5
+  },
+  "render": {
+    "openMs": 1500,
+    "scrollSettleMs": 500,
+    "frameP95Ms": 34,
+    "frameMaxMs": 120,
+    "mountedRowsMax": 80
+  }
+}

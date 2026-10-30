@@ -202,3 +202,90 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
     expect(onDoubleEscape).not.toHaveBeenCalled()
   })
 })
+
+describe('useChatPanelKeyboard: jump between turns', () => {
+  function setup() {
+    const root = document.createElement('div')
+    const composer = document.createElement('textarea')
+    root.appendChild(composer)
+    document.body.appendChild(root)
+    composer.focus()
+    const jumpTurn = vi.fn()
+    const scrollTo = vi.fn()
+    renderHook(() =>
+      useChatPanelKeyboard({
+        panelRef: { current: root },
+        scrollRef: Object.assign(() => {}, { current: { scrollTo } }) as never,
+        search: { requestOpen: () => {} },
+        inFlight: false,
+        chatMode: 'auto-accept',
+        handleModeChange: () => Promise.resolve(),
+        autoCapability: { optedIn: false } as never,
+        autocomplete: { show: false },
+        handleStop: () => {},
+        mode: 'claude-chat',
+        jumpTurn
+      })
+    )
+    return { jumpTurn, scrollTo, composer }
+  }
+  const press = (init: KeyboardEventInit) => {
+    const e = new KeyboardEvent('keydown', { cancelable: true, ...init })
+    window.dispatchEvent(e)
+    return e
+  }
+
+  it('Cmd+Alt+↑ / ↓ (mac) or Alt+PgUp / PgDn: previous / next turn, not top / bottom', () => {
+    const { jumpTurn, scrollTo } = setup()
+    expect(press({ key: 'ArrowUp', metaKey: true, altKey: true }).defaultPrevented).toBe(true)
+    expect(jumpTurn).toHaveBeenLastCalledWith(-1)
+    press({ key: 'ArrowDown', metaKey: true, altKey: true })
+    expect(jumpTurn).toHaveBeenLastCalledWith(1)
+    press({ key: 'PageUp', altKey: true })
+    expect(jumpTurn).toHaveBeenLastCalledWith(-1)
+    press({ key: 'PageDown', altKey: true })
+    expect(jumpTurn).toHaveBeenLastCalledWith(1)
+    expect(scrollTo).not.toHaveBeenCalled()
+    // Cmd+↑ alone is still the top of the timeline.
+    press({ key: 'ArrowUp', metaKey: true })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
+    expect(jumpTurn).toHaveBeenCalledTimes(4)
+  })
+
+  it('Alt+↑ alone (queue reorder, caret moves) is not a turn jump', () => {
+    const { jumpTurn } = setup()
+    press({ key: 'ArrowUp', altKey: true })
+    press({ key: 'PageUp' })
+    expect(jumpTurn).not.toHaveBeenCalled()
+  })
+})
+
+describe('useChatPanelKeyboard: Cmd+↓', () => {
+  it('goes to the end through the follow lock (it follows again)', () => {
+    const root = document.createElement('div')
+    const composer = document.createElement('textarea')
+    root.appendChild(composer)
+    document.body.appendChild(root)
+    composer.focus()
+    const scrollToBottom = vi.fn()
+    const scrollTo = vi.fn()
+    renderHook(() =>
+      useChatPanelKeyboard({
+        panelRef: { current: root },
+        scrollRef: Object.assign(() => {}, { current: { scrollTo } }) as never,
+        search: { requestOpen: () => {} },
+        inFlight: false,
+        chatMode: 'auto-accept',
+        handleModeChange: () => Promise.resolve(),
+        autoCapability: { optedIn: false } as never,
+        autocomplete: { show: false },
+        handleStop: () => {},
+        mode: 'claude-chat',
+        scrollToBottom
+      })
+    )
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', metaKey: true }))
+    expect(scrollToBottom).toHaveBeenCalledTimes(1)
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+})

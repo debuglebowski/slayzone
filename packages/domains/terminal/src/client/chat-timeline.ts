@@ -1,3 +1,4 @@
+import { PersistentIndex } from './persistent-index'
 import type {
   AgentEvent,
   AgentPlanStep,
@@ -24,6 +25,7 @@ import {
   applyPromptEvent,
   expirePendingPrompts,
   expirePrompt,
+  hasPendingPrompt,
   type ChatPrompt
 } from './chat-prompts'
 import { withTurnFilesChanged, type TurnFileChange } from './turn-file-changes'
@@ -171,6 +173,11 @@ export type TimelineItem =
       exitCode?: number
       timestamp: number
       parentToolUseId?: string
+      /**
+       * The tool call (id) this block stopped, when its card shows the block
+       * (`ToolInvocation.blockedBy`): the row is then not shown on its own.
+       */
+      foldedInto?: string
     }
   | {
       /**
@@ -320,6 +327,11 @@ export interface ToolInvocation {
    * errors: denial means the tool never ran.
    */
   denied?: boolean
+  /**
+   * A PreToolUse hook blocked the call: its reason, shown on the card. (The
+   * CLI puts it in the call's error result too; the hook's own row is folded.)
+   */
+  blockedBy?: { hookId: string; hookName: string; text: string; audience: 'agent' | 'user' }
 }
 
 export interface OpenBlock {
@@ -386,7 +398,8 @@ export interface BgShell {
 export interface ChatTimelineState {
   timeline: TimelineItem[]
   /** tool_use_id → index into `timeline` for paired mutation. */
-  toolIndex: Map<string, number>
+  /** Tool call id → its row. Persistent: a new version per call, no full copy. */
+  toolIndex: PersistentIndex<number>
   /** Sub-agent tool_use_id → timeline index. Lets `notification` merge into the row started by `task_started`. */
   subAgentIndex: Map<string, number>
   /**
@@ -484,14 +497,29 @@ export interface ChatTimelineState {
    * BELOW the existing history (a divider), instead of replacing it.
    */
   freshStartPending: boolean
+  /**
+   * The provider starts turns by itself (Claude Code answering a finished
+   * background task or a hook: init, output, result — no user message). Codex
+   * never does; its handshake's synthetic turn-init must not read as work.
+   * Set from the mode's `agentStartedTurns` capability; kept across `reset`.
+   */
+  agentStartedTurns: boolean
+  /** Such a turn is running now: the chat reads as working until its result. */
+  agentTurnOpen: boolean
+  /**
+   * Replaying a conversation's imported history (a switched / handed-over
+   * session): its output is the past, never a turn now. Ends at the live
+   * session's turn-init.
+   */
+  importingHistory: boolean
 }
 
 const EMPTY_LIVE: LiveBlocks = Object.freeze([])
 
-export function initialState(): ChatTimelineState {
+export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTimelineState {
   return {
     timeline: [],
-    toolIndex: new Map(),
+    toolIndex: PersistentIndex.empty(),
     subAgentIndex: new Map(),
     childIndex: new Map(),
     sessionStarted: false,
@@ -518,7 +546,10 @@ export function initialState(): ChatTimelineState {
     compacting: false,
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
     prompts: [],
-    freshStartPending: false
+    freshStartPending: false,
+    agentStartedTurns: opts.agentStartedTurns ?? false,
+    agentTurnOpen: false,
+    importingHistory: false
   }
 }
 
@@ -538,6 +569,8 @@ export type Action =
    */
   | { type: 'prompt-refused'; requestId: string }
   | { type: 'reset' }
+  /** The tab's mode changed: whether its provider starts turns by itself. */
+  | { type: 'configure'; agentStartedTurns: boolean }
 
 export function reducer(state: ChatTimelineState, action: Action): ChatTimelineState {
   if (action.type === 'events') return reduceEvents(state, action.events)
@@ -554,8 +587,11 @@ export function reducer(state: ChatTimelineState, action: Action): ChatTimelineS
   // subscription. We post-process AgentEvents here so the timeline pass stays
   // focused on rendering and bg-shell logic stays in one place.
   if (action.type === 'event') {
-    return applyPromptEvent(
-      applyBgShellEvent(applyContextUsage(next, action.event), action.event),
+    return applyAgentTurn(
+      applyPromptEvent(
+        applyBgShellEvent(applyContextUsage(next, action.event), action.event),
+        action.event
+      ),
       action.event
     )
   }
@@ -605,19 +641,25 @@ function registerChild(
 function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimelineState {
   switch (action.type) {
     case 'reset':
-      return initialState()
+      return initialState({ agentStartedTurns: state.agentStartedTurns })
+    case 'configure':
+      return state.agentStartedTurns === action.agentStartedTurns
+        ? state
+        : { ...state, agentStartedTurns: action.agentStartedTurns, agentTurnOpen: false }
     case 'turn-interrupted': {
       // User clicked Stop. The transport kills the subprocess + respawns with
       // --resume; the dying child's process-exit broadcast is swallowed by the
       // identity guard, so `sessionEnded` stays false. Locally we balance
       // resultCount against userMessagesSent so `isInFlight` drops, and append
       // a marker item so the timeline shows where the turn was cut.
-      if (!isInFlight(state)) return state
+      if (!isTurnOpen(state)) return state
       const item: TimelineItem = { kind: 'interrupted', timestamp: Date.now() }
       return {
         ...state,
         timeline: [...state.timeline, item],
-        resultCount: state.resultCount + 1,
+        // An agent-started turn is closed instead; no user turn's count moves.
+        resultCount: state.agentTurnOpen ? state.resultCount : state.resultCount + 1,
+        agentTurnOpen: false,
         compacting: false
       }
     }
@@ -677,7 +719,7 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       }
       // Process death mid-turn → balance counters + clear stream state so the
       // typing indicator can't be stuck on. Mirrors the agent-event branch.
-      const healed = healOrphanedTurn(state, Date.now())
+      const healed = healOrphanedTurn(endAgentTurn(state, Date.now()), Date.now())
       return {
         ...healed,
         sessionEnded: true,
@@ -832,7 +874,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // userMessagesSent so isInFlight drops, and append a marker so the
       // timeline shows where the turn was cut. Persisted into the buffer so
       // replay reconstructs the boundary even if the renderer was offline.
-      if (!isInFlight(state)) return state
+      if (!isTurnOpen(state)) return state
       const item: TimelineItem = {
         kind: 'interrupted',
         timestamp: ts,
@@ -842,7 +884,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       return {
         ...failed,
         timeline: [...failed.timeline, item],
-        resultCount: state.resultCount + 1,
+        // An agent-started turn is closed instead; no user turn's count moves.
+        resultCount: state.agentTurnOpen ? state.resultCount : state.resultCount + 1,
+        agentTurnOpen: false,
         // Defensive: clear any straggling stream state so the typing indicator
         // can't read "Writing…" off a half-open block once the turn is gone.
         openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
@@ -1098,8 +1142,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         timestamp: ts,
         parentToolUseId: event.parentToolUseId
       }
-      const newIndex = new Map(state.toolIndex)
-      newIndex.set(event.id, state.timeline.length)
+      const newIndex = state.toolIndex.with(event.id, state.timeline.length)
       const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
       return {
         ...state,
@@ -1146,11 +1189,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           messageId,
           liveKey
         })
-        let nextToolIndex = state.toolIndex
-        if (event.toolUseId) {
-          nextToolIndex = new Map(state.toolIndex)
-          nextToolIndex.set(event.toolUseId, timelineIndex)
-        }
+        const nextToolIndex = event.toolUseId
+          ? state.toolIndex.with(event.toolUseId, timelineIndex)
+          : state.toolIndex
         const childIndex = registerChild(state, timelineIndex, event.parentToolUseId)
         return {
           ...state,
@@ -1277,8 +1318,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           timestamp: ts,
           parentToolUseId: event.parentToolUseId
         }
-        const newIndex = new Map(baseState.toolIndex)
-        newIndex.set(event.toolUseId, baseState.timeline.length)
+        const newIndex = baseState.toolIndex.with(event.toolUseId, baseState.timeline.length)
         const childIndex = registerChild(
           baseState,
           baseState.timeline.length,
@@ -1303,6 +1343,20 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         }
       }
       const nextTimeline = baseState.timeline.slice()
+      // A PreToolUse hook blocked it: the card shows the block, the hook's row folds in.
+      const hookAt = event.isError
+        ? blockingHookIndex(baseState.timeline, idx, event.rawContent)
+        : -1
+      const hook = hookAt >= 0 ? baseState.timeline[hookAt] : undefined
+      if (hook?.kind === 'hook') {
+        nextInvocation.blockedBy = {
+          hookId: hook.hookId,
+          hookName: hook.hookName,
+          text: hook.text.trim(),
+          audience: hook.audience
+        }
+        nextTimeline[hookAt] = { ...hook, foldedInto: target.invocation.id }
+      }
       nextTimeline[idx] = { ...target, invocation: nextInvocation }
       return { ...baseState, timeline: nextTimeline }
     }
@@ -1364,7 +1418,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         // Capped: after Stop (or a prompt's "No") the persisted `interrupted`
         // already closed the turn, and the CLI still sends the aborted turn's
         // result — counting it would mark the NEXT turn finished at its start.
-        resultCount: Math.min(state.resultCount + 1, state.userMessagesSent),
+        // An agent-started turn's result closes that turn, never a user's: a
+        // message sent meanwhile is answered after it.
+        resultCount: state.agentTurnOpen
+          ? state.resultCount
+          : Math.min(state.resultCount + 1, state.userMessagesSent),
+        agentTurnOpen: false,
         // Defensive: a result terminates the turn. `stream-message-stop` should
         // already have cleared these, but if the SDK closes a turn without one
         // (rate-limit, error path, network drop after partial stream) the typing
@@ -1573,7 +1632,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // Process exited. If we were mid-turn, heal counters + clear stream state
       // so inFlight drops and the typing indicator clears. Without this, a crash
       // mid-stream leaves "Writing…" stuck forever even after the buffer replay.
-      const healed = endRunningCommandTasks(healOrphanedTurn(state, ts))
+      const healed = endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts))
       return {
         ...healed,
         sessionEnded: true,
@@ -2045,6 +2104,73 @@ export function isInFlight(state: ChatTimelineState): boolean {
 }
 
 /**
+ * The agent is working: a user's turn is in flight, or a turn the agent started
+ * by itself runs. What the chat shows as working (indicator, Stop, Esc) and
+ * what makes a new message queue — TUI parity.
+ */
+export function isTurnOpen(state: ChatTimelineState): boolean {
+  return isInFlight(state) || state.agentTurnOpen
+}
+
+/**
+ * Post-pass of every event: opens an agent-started turn on the first output no
+ * user turn accounts for — not a turn-init (Codex's handshake), not while a
+ * prompt waits (the turn is parked, not over), not a sub-agent's output, not an
+ * imported conversation's past. Mirrors the transport's `opensAgentTurn`; its
+ * `result` (or Stop, or the process ending) closes it.
+ */
+function applyAgentTurn(state: ChatTimelineState, event: AgentEvent): ChatTimelineState {
+  // A provider that never starts turns by itself (Codex) has nothing to track.
+  if (!state.agentStartedTurns) return state
+  switch (event.kind) {
+    case 'conversation-branch':
+      return state.importingHistory ? state : { ...state, importingHistory: true }
+    case 'user-message': {
+      const importing = event.history === true
+      return state.importingHistory === importing
+        ? state
+        : { ...state, importingHistory: importing }
+    }
+    case 'turn-init':
+    case 'result':
+      return state.importingHistory ? { ...state, importingHistory: false } : state
+    case 'assistant-text':
+    case 'assistant-thinking':
+    case 'tool-call':
+    case 'stream-message-start':
+    case 'stream-block-start':
+    case 'stream-block-delta':
+      if (
+        state.agentTurnOpen ||
+        state.importingHistory ||
+        event.parentToolUseId != null ||
+        isInFlight(state) ||
+        hasPendingPrompt(state)
+      ) {
+        return state
+      }
+      return { ...state, agentTurnOpen: true }
+    default:
+      return state
+  }
+}
+
+/** The process ended mid agent-started turn: close it where it was cut. */
+function endAgentTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
+  if (!state.agentTurnOpen) return state
+  const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
+  const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
+  return {
+    ...failed,
+    timeline: [...failed.timeline, item],
+    agentTurnOpen: false,
+    openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
+    currentStreamMessageId: null,
+    compacting: false
+  }
+}
+
+/**
  * AskUserQuestion parks the turn on user input. The card itself surfaces the
  * prompt + answer UI, so a typing indicator below would falsely imply the
  * agent is still working. True while the latest tool in the current turn is
@@ -2071,6 +2197,40 @@ export function isAwaitingUserQuestion(state: ChatTimelineState): boolean {
  * Pure reducer math — idempotent across replays, no persistence needed. Each
  * replay re-derives the same heal points from the buffer's gaps.
  */
+/** A tool result's text (a string, or its text blocks). */
+function resultText(raw: unknown): string {
+  if (typeof raw === 'string') return raw
+  if (!Array.isArray(raw)) return ''
+  return raw
+    .map((b) =>
+      b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string'
+        ? (b as { text: string }).text
+        : ''
+    )
+    .join('\n')
+}
+
+/**
+ * The row of the PreToolUse hook whose block the error result of the call at
+ * `toolAt` carries: a not yet folded `blocked` row after the call whose reason
+ * is in the result, which the CLI writes as `<hook name> hook error: …`. The
+ * newest match wins; -1 when none (any other error).
+ */
+function blockingHookIndex(timeline: TimelineItem[], toolAt: number, raw: unknown): number {
+  const text = resultText(raw)
+  if (!text) return -1
+  for (let i = timeline.length - 1; i > toolAt; i--) {
+    const it = timeline[i]
+    if (it.kind !== 'hook' || it.effect !== 'blocked' || it.hookEvent !== 'PreToolUse') continue
+    if (it.foldedInto !== undefined) continue
+    const reason = it.text.trim()
+    if (text.startsWith(`${it.hookName} hook error`) && (reason === '' || text.includes(reason))) {
+      return i
+    }
+  }
+  return -1
+}
+
 function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
   if (!isInFlight(state)) return state
   const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
@@ -2151,9 +2311,11 @@ function failInFlightSubAgents(state: ChatTimelineState, statusLabel: string): C
  */
 export function deriveLoadingLabel(state: ChatTimelineState): string | null {
   if (state.compacting) return 'Compacting conversation…'
+  // The current turn's rows only: back to its user message — or, for a turn
+  // the agent started by itself, to the previous turn's result.
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
-    if (item.kind === 'user-text') break
+    if (item.kind === 'user-text' || item.kind === 'result') break
     if (item.kind === 'api-retry') {
       const sec = Math.max(1, Math.round(item.delayMs / 1000))
       return `Retrying (${item.attempt}/${item.maxRetries}) in ${sec}s…`
@@ -2182,7 +2344,7 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
 
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
-    if (item.kind === 'user-text') break
+    if (item.kind === 'user-text' || item.kind === 'result') break
     if (item.kind === 'tool') {
       return formatToolLabel(item.invocation.name, item)
     }

@@ -532,3 +532,31 @@ describe('useChatSession — stream fragments, one render per frame (plan 3.2)',
     expect(replies(r)).toEqual([])
   })
 })
+
+describe('useChatSession — a turn the agent starts by itself', () => {
+  const finished = (): Buffered => [
+    { seq: 0, event: userMsg('run it in the background') },
+    { seq: 1, event: { kind: 'assistant-text', messageId: 'm1', text: 'started' } },
+    result(2)
+  ]
+
+  it('claude-chat: reads in flight from its first output to its result', async () => {
+    const { result: r } = setup()
+    await finishLoad(0, saved(finished()))
+    expect(r.current.inFlight).toBe(false)
+    live(3, { kind: 'turn-init', sessionId: 's', model: 'm', cwd: '/repo', tools: [] })
+    expect(r.current.inFlight).toBe(false)
+    live(4, { kind: 'assistant-text', messageId: 'm2', text: 'the loop finished' })
+    expect(r.current.inFlight).toBe(true)
+    live(5, result(5).event)
+    expect(r.current.inFlight).toBe(false)
+  })
+
+  it('codex-chat: unchanged — output after a result never reads in flight', async () => {
+    const { result: r, rerender } = setup()
+    rerender({ cwd: '/repo', mode: 'codex-chat' })
+    await finishLoad(loads.length - 1, saved(finished()))
+    live(3, { kind: 'assistant-text', messageId: 'm2', text: 'late item' })
+    expect(r.current.inFlight).toBe(false)
+  })
+})

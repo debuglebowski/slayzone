@@ -404,3 +404,45 @@ describe('timeline dispatcher', () => {
     expect(screen.getByTestId('chat-notice')).toBeTruthy()
   })
 })
+
+describe('a call a PreToolUse hook blocked', () => {
+  const blockedBy = {
+    hookId: 'h1',
+    hookName: 'PreToolUse:Bash',
+    text: 'Blocked by policy: never echo the word forbidden',
+    audience: 'agent' as const
+  }
+  const raw =
+    'PreToolUse:Bash hook error: [bash "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-block.sh"]: Blocked by policy: never echo the word forbidden\n'
+
+  it('the card shows the block once: the hook, who saw it, the reason', () => {
+    show({
+      ...inv(
+        'Bash',
+        { command: 'echo forbidden' },
+        { rawContent: raw, structured: null, isError: true },
+        'denied'
+      ),
+      blockedBy
+    })
+    const block = screen.getByTestId('chat-tool-blocked')
+    expect(block.textContent).toContain('PreToolUse:Bash hook blocked the tool call')
+    expect(block.textContent).toContain('Sent to Claude')
+    expect(block.textContent).toContain('Blocked by policy: never echo the word forbidden')
+    // The CLI's raw error (the same reason) is not repeated in the card body.
+    expect(document.body.textContent?.match(/never echo the word forbidden/g)).toHaveLength(1)
+  })
+
+  it('cards that never show errors show the block too', () => {
+    show({
+      ...inv(
+        'Edit',
+        { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' },
+        { rawContent: raw, structured: null, isError: true },
+        'denied'
+      ),
+      blockedBy
+    })
+    expect(screen.getByTestId('chat-tool-blocked').textContent).toContain('Blocked by policy')
+  })
+})

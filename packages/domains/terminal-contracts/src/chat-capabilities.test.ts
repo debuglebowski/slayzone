@@ -22,7 +22,8 @@ test('Claude Code chat: every capability', () => {
     editableQueue: true,
     filesChanged: true,
     diffComments: true,
-    commandPalette: true
+    commandPalette: true,
+    agentStartedTurns: true
   })
 })
 
@@ -42,7 +43,8 @@ test('Codex chat keeps today’s behavior: no new capabilities', () => {
     editableQueue: false,
     filesChanged: false,
     diffComments: false,
-    commandPalette: false
+    commandPalette: false,
+    agentStartedTurns: false
   })
 })
 
@@ -62,7 +64,8 @@ test('unknown / non-chat modes get nothing', () => {
     editableQueue: false,
     filesChanged: false,
     diffComments: false,
-    commandPalette: false
+    commandPalette: false,
+    agentStartedTurns: false
   })
 })
 

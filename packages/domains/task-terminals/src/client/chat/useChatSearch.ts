@@ -64,6 +64,8 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
         case 'tool': {
           const inv = item.invocation
           hay = `${inv.name} ${typeof inv.input === 'string' ? inv.input : JSON.stringify(inv.input)}`
+          // A hook's block shown on the card (its row is folded into it).
+          if (inv.blockedBy) hay += ` ${inv.blockedBy.hookName} ${inv.blockedBy.text}`
           break
         }
         default:

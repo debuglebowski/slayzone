@@ -33,6 +33,10 @@ export interface UseChatPanelKeyboardOpts {
    * which opens rewind. Absent: Esc Esc means nothing (no rewind).
    */
   onDoubleEscape?: () => void
+  /** Scroll to the previous (-1) or next (1) user turn (the turn outline's keys). */
+  jumpTurn?: (dir: -1 | 1) => void
+  /** Cmd+↓: to the end AND follow it again (`useFollowBottom.scrollToBottom`). */
+  scrollToBottom?: () => void
 }
 
 /**
@@ -40,6 +44,8 @@ export interface UseChatPanelKeyboardOpts {
  *
  *   - Cmd/Ctrl+F → open in-chat search
  *   - Cmd/Ctrl+↑ / ↓ → jump timeline to top / bottom
+ *   - Cmd+Alt+↑ / ↓ (macOS) or Alt+PgUp / PgDn → previous / next user turn
+ *     (Ctrl+Alt+arrows is the desktop's workspace switch on Windows / Linux)
  *   - Shift+Tab → cycle agent permission mode (terminal-mode parity; skipped
  *     while in flight or while autocomplete owns Tab)
  *   - Esc → stop the in-flight turn (defers to autocomplete's own Esc)
@@ -69,7 +75,9 @@ export function useChatPanelKeyboard({
   promptKeysRef,
   composerRef,
   draftEmpty = false,
-  onDoubleEscape
+  onDoubleEscape,
+  jumpTurn,
+  scrollToBottom
 }: UseChatPanelKeyboardOpts): void {
   useEffect(() => {
     // When the last Esc that could start a double-Esc was pressed (0: none).
@@ -108,6 +116,25 @@ export function useChatPanelKeyboard({
         return
       }
       const mod = e.metaKey || e.ctrlKey
+      const turnDir =
+        e.altKey && !e.shiftKey && !e.ctrlKey
+          ? e.metaKey
+            ? e.key === 'ArrowUp'
+              ? -1
+              : e.key === 'ArrowDown'
+                ? 1
+                : 0
+            : e.key === 'PageUp'
+              ? -1
+              : e.key === 'PageDown'
+                ? 1
+                : 0
+          : 0
+      if (turnDir !== 0 && jumpTurn) {
+        e.preventDefault()
+        jumpTurn(turnDir)
+        return
+      }
       if (mod && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
         search.requestOpen()
@@ -120,6 +147,10 @@ export function useChatPanelKeyboard({
       }
       if (mod && e.key === 'ArrowDown') {
         e.preventDefault()
+        if (scrollToBottom) {
+          scrollToBottom()
+          return
+        }
         const el = scrollRef.current
         if (el) el.scrollTo({ top: el.scrollHeight })
         return
@@ -179,6 +210,8 @@ export function useChatPanelKeyboard({
     promptKeysRef,
     composerRef,
     draftEmpty,
-    onDoubleEscape
+    onDoubleEscape,
+    jumpTurn,
+    scrollToBottom
   ])
 }

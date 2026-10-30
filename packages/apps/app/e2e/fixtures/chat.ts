@@ -136,6 +136,9 @@ type ChatFixtures = { chat: ChatHarness }
 
 let projectSeq = 0
 
+/** Rows per seed INSERT: 3 params each, well under SQLite's variable limit. */
+const SEED_CHUNK = 100
+
 export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
   fakeClaude: [
     async ({}, use) => {
@@ -229,12 +232,18 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
             [opts.conversationId, task.id]
           )
         }
-        for (const [seq, event] of (opts.seedEvents ?? []).entries()) {
-          await db.run('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)', [
-            tabId,
-            seq,
-            JSON.stringify(event)
-          ])
+        // Chunked multi-row inserts: a 10,000-event session in a few round trips.
+        const seedRows = (opts.seedEvents ?? []).map((event, seq) => [
+          tabId,
+          seq,
+          JSON.stringify(event)
+        ])
+        for (let at = 0; at < seedRows.length; at += SEED_CHUNK) {
+          const chunk = seedRows.slice(at, at + SEED_CHUNK)
+          await db.run(
+            `INSERT INTO chat_events (tab_id, seq, event) VALUES ${chunk.map(() => '(?, ?, ?)').join(', ')}`,
+            chunk.flat()
+          )
         }
         await s.refreshData()
         await openTaskById(page, task.id)

@@ -155,7 +155,47 @@ describe('files-changed row', () => {
     expect(request).toHaveBeenCalledWith('e1')
   })
 
-  it("a sub-agent's edit has no card on the timeline: the panel opens at that file", () => {
+  const subAgent = (toolUseId: string, parent?: string) =>
+    ({
+      kind: 'sub-agent',
+      phase: 'completed',
+      toolUseId,
+      description: 'Edit things',
+      timestamp: 1,
+      ...(parent ? { parentToolUseId: parent } : {})
+    }) as unknown as TimelineItem
+
+  it("a sub-agent's edit: its sub-agent row is revealed and opened, and the card in it", () => {
+    const nested = editTool('n1', '/repo/b.ts', 'a\n', 'b\n', true)
+    const r = row([{ path: '/repo/b.ts', ids: ['n1'] }])
+    const { reveal, openPanel, request } = setup([subAgent('task1'), nested], r, {
+      childIndex: new Map([['task1', [1]]])
+    })
+    const summary = screen.getByTestId('chat-files-changed')
+    fireEvent.click(within(summary).getByTestId('chat-files-changed-toggle'))
+    fireEvent.click(within(summary).getByTestId('chat-files-changed-file'))
+    expect(reveal).toHaveBeenCalledWith('sub-agent:task1', { align: 'center' })
+    expect(request.mock.calls).toEqual([['task1'], ['n1']])
+    expect(openPanel).not.toHaveBeenCalled()
+    // The row opened: the edit's card shows inside it.
+    expect(screen.getByTestId('sub-agent-children')).toBeTruthy()
+  })
+
+  it("a nested sub-agent's edit reveals the outermost sub-agent row and opens the way down", () => {
+    const nested = {
+      ...editTool('n2', '/repo/c.ts', 'a\n', 'b\n', true),
+      parentToolUseId: 'task2'
+    } as TimelineItem
+    const r = row([{ path: '/repo/c.ts', ids: ['n2'] }])
+    const { reveal, request } = setup([subAgent('task1'), subAgent('task2', 'task1'), nested], r)
+    const summary = screen.getByTestId('chat-files-changed')
+    fireEvent.click(within(summary).getByTestId('chat-files-changed-toggle'))
+    fireEvent.click(within(summary).getByTestId('chat-files-changed-file'))
+    expect(reveal).toHaveBeenCalledWith('sub-agent:task1', { align: 'center' })
+    expect(request.mock.calls).toEqual([['task1'], ['task2'], ['n2']])
+  })
+
+  it("a sub-agent's edit whose sub-agent row is not in the timeline: the panel opens at that file", () => {
     const nested = editTool('n1', '/repo/b.ts', 'a\n', 'b\n', true)
     const r = row([{ path: '/repo/b.ts', ids: ['n1'] }])
     const { reveal, openPanel } = setup([nested], r)

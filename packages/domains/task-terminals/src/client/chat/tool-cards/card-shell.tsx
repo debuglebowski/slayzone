@@ -1,9 +1,12 @@
-import { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight, CircleCheck, CircleX, Loader2 } from 'lucide-react'
-import { cn, useDepsChanged } from '@slayzone/ui'
+import { useEffect, useMemo } from 'react'
+import { ChevronDown, ChevronRight, CircleCheck, CircleX, Loader2, ShieldAlert } from 'lucide-react'
+import { cn } from '@slayzone/ui'
 import type { ToolInvocation } from '@slayzone/terminal/client'
 import { useChatView } from '../ChatViewContext'
 import { LinkifiedText } from '../LinkifiedText'
+import { useRowUiState } from '../row-ui-state'
+import { HOOK_TONE, hookLabel } from '../hook-labels'
+import { HighlightedText } from '../HighlightedText'
 import { useToolFocusRequest } from './tool-focus'
 
 // Shared chat card primitives (moved verbatim from renderers.tsx), so tool cards
@@ -59,6 +62,45 @@ function extractRawText(raw: unknown): string {
   return ''
 }
 
+/**
+ * The call's result text to show — none for a call a hook blocked: that
+ * "result" is the CLI's copy of the hook's reason, which the card's block line
+ * already shows (`BlockedByHook`).
+ */
+function resultTextOf(invocation: ToolInvocation): string {
+  return invocation.blockedBy ? '' : extractRawText(invocation.result?.rawContent)
+}
+
+/** A PreToolUse hook stopped the call: which hook, who saw its reason, the reason. */
+function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy']> }) {
+  return (
+    <div
+      data-testid="chat-tool-blocked"
+      className={cn('border-t px-3 py-1.5 text-xs', HOOK_TONE.blocked)}
+    >
+      <div className="flex items-center gap-2">
+        <ShieldAlert className="size-3 shrink-0" />
+        <span className="font-medium min-w-0 truncate">
+          {hookLabel({
+            hookName: block.hookName,
+            hookEvent: 'PreToolUse',
+            effect: 'blocked',
+            text: block.text
+          })}
+        </span>
+        <span className="shrink-0 rounded-sm border border-current/30 px-1 text-[10px] uppercase tracking-wide opacity-80">
+          {block.audience === 'agent' ? 'Sent to Claude' : 'Shown only to you'}
+        </span>
+      </div>
+      {block.text && (
+        <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] opacity-90">
+          <HighlightedText text={block.text} />
+        </pre>
+      )}
+    </div>
+  )
+}
+
 function ToolShell({
   invocation,
   icon,
@@ -77,18 +119,17 @@ function ToolShell({
   timestamp?: number
 }) {
   const status = invocation.status
-  const [open, setOpen] = useState(defaultOpen ?? status === 'error')
-  const { collapseSignal } = useChatView()
-  // "Collapse all": closes on a collapseSignal CHANGE only (adjusted during
-  // render), so the default above holds on mount.
-  const collapseBumped = useDepsChanged([collapseSignal])
-  if (collapseBumped) setOpen(false)
-  // "Show this card" (files-changed row) opens it, also when it mounts after the request.
+  // Kept while scrolled away; "Collapse all" closes it (the default holds on mount).
+  const [open, setOpen] = useRowUiState('card', defaultOpen ?? status === 'error', false)
+  // "Show this card" (files-changed row) opens it, also when it mounts after the
+  // request (the timeline scrolled it in first).
   const focusRequested = useToolFocusRequest(invocation.id)
-  if (focusRequested && !open) setOpen(true)
+  useEffect(() => {
+    if (focusRequested && !open) setOpen(true)
+  }, [focusRequested, open, setOpen])
   // Body fallback chain: per-tool rich children > rawContent text > pending placeholder.
   // Keeps any tool card non-blank when structured data is missing or absent.
-  const rawText = useMemo(() => extractRawText(invocation.result?.rawContent), [invocation.result])
+  const rawText = useMemo(() => resultTextOf(invocation), [invocation])
   let body: React.ReactNode = children
   if (!body && rawText) {
     body = (
@@ -127,6 +168,7 @@ function ToolShell({
             </span>
           )}
         </button>
+        {invocation.blockedBy && <BlockedByHook block={invocation.blockedBy} />}
         {open && canOpen && (
           <div className="border-t border-border/40 bg-background/40">{body}</div>
         )}
@@ -156,6 +198,7 @@ export {
   formatTime,
   HoverTimestamp,
   extractRawText,
+  resultTextOf,
   ToolShell,
   StatusIcon,
   shortenPath

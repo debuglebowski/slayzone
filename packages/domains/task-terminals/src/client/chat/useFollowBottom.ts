@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { ChatScrollAnchor } from '@slayzone/terminal-contracts'
 
 const THRESHOLD_PX = 70
+/** Keys that scroll the timeline (the user's hand, like a wheel). */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
 
 /**
  * Callback ref that also exposes `.current` for imperative reads. Mirrors
@@ -26,6 +28,14 @@ export interface FollowBottomApi {
   captureAnchor: () => ChatScrollAnchor | null
   /** Put an anchor back. False when its row is not rendered (yet). */
   restoreAnchor: (anchor: ChatScrollAnchor) => boolean
+  /** Whether growth keeps the view at the bottom (the lock, not the indicator). */
+  isStuck: () => boolean
+  /**
+   * Stop following the bottom: the view is being moved somewhere on purpose
+   * (a reveal). Held until the user scrolls by hand: landing at the bottom by
+   * code does not re-engage it, so a revealed row that grows stays in view.
+   */
+  unstick: () => void
 }
 
 interface FollowBottomController {
@@ -34,6 +44,8 @@ interface FollowBottomController {
   scrollToBottom: () => void
   captureAnchor: () => ChatScrollAnchor | null
   restoreAnchor: (anchor: ChatScrollAnchor) => boolean
+  isStuck: () => boolean
+  unstick: () => void
   dispose: () => void
 }
 
@@ -54,6 +66,8 @@ function createFollowBottomController(
   setIsAtBottom: (atBottom: boolean) => void
 ): FollowBottomController {
   const stuckRef = { current: true }
+  /** `unstick()` was called: reaching the bottom re-engages only after user input. */
+  const heldRef = { current: false }
   const resizeObserverRef: { current: ResizeObserver | null } = { current: null }
 
   const scrollRef = (() => {
@@ -71,7 +85,11 @@ function createFollowBottomController(
       if (!el) return
       const atBottom = measureAtBottom(el)
       setIsAtBottom(atBottom)
-      if (atBottom && !stuckRef.current) stuckRef.current = true
+      if (atBottom && !stuckRef.current && !heldRef.current) stuckRef.current = true
+    }
+    // Any scrolling by hand ends a hold: from then on the bottom re-engages.
+    const userScrolls = () => {
+      heldRef.current = false
     }
     const releaseStick = () => {
       const el = scrollRef.current
@@ -81,12 +99,19 @@ function createFollowBottomController(
       setIsAtBottom(measureAtBottom(el))
     }
     const handleWheel = (e: WheelEvent) => {
+      userScrolls()
       if (e.deltaY < 0) releaseStick()
     }
-    const handleTouchMove = () => releaseStick()
+    const handleTouchMove = () => {
+      userScrolls()
+      releaseStick()
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) userScrolls()
       if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') releaseStick()
     }
+    // A press on the scrollbar (or the content) is the user's hand too.
+    const handlePointerDown = () => userScrolls()
     const ref = ((el: HTMLElement | null) => {
       const prev = ref.current
       if (prev === el) return
@@ -95,6 +120,7 @@ function createFollowBottomController(
         prev.removeEventListener('wheel', handleWheel)
         prev.removeEventListener('touchmove', handleTouchMove)
         prev.removeEventListener('keydown', handleKeyDown)
+        prev.removeEventListener('pointerdown', handlePointerDown)
       }
       ref.current = el
       if (el) {
@@ -102,6 +128,7 @@ function createFollowBottomController(
         el.addEventListener('wheel', handleWheel, { passive: true })
         el.addEventListener('touchmove', handleTouchMove, { passive: true })
         el.addEventListener('keydown', handleKeyDown)
+        el.addEventListener('pointerdown', handlePointerDown, { passive: true })
       }
     }) as CallbackRef<HTMLElement>
     ref.current = null
@@ -115,6 +142,7 @@ function createFollowBottomController(
   }
 
   const scrollToBottom = () => {
+    heldRef.current = false
     stuckRef.current = true
     setIsAtBottom(true)
     scrollNow()
@@ -191,7 +219,23 @@ function createFollowBottomController(
     return true
   }
 
-  return { scrollRef, contentRef, scrollToBottom, captureAnchor, restoreAnchor, dispose }
+  const isStuck = (): boolean => stuckRef.current
+
+  const unstick = (): void => {
+    stuckRef.current = false
+    heldRef.current = true
+  }
+
+  return {
+    scrollRef,
+    contentRef,
+    scrollToBottom,
+    captureAnchor,
+    restoreAnchor,
+    isStuck,
+    unstick,
+    dispose
+  }
 }
 
 /**
@@ -217,6 +261,8 @@ export function useFollowBottom(): FollowBottomApi {
     isAtBottom,
     scrollToBottom: controller.scrollToBottom,
     captureAnchor: controller.captureAnchor,
-    restoreAnchor: controller.restoreAnchor
+    restoreAnchor: controller.restoreAnchor,
+    isStuck: controller.isStuck,
+    unstick: controller.unstick
   }
 }

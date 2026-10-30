@@ -1,7 +1,7 @@
 import { NotebookPen } from 'lucide-react'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
-import { ToolShell, extractRawText, shortenPath, type ToolProps } from './card-shell'
+import { ToolShell, resultTextOf, shortenPath, type ToolProps } from './card-shell'
 import { FileLink } from './links'
 import { codeViewDiff, notebookEditDiff } from './file-diffs'
 
@@ -23,9 +23,7 @@ export function NotebookEditCard({ invocation, timestamp }: ToolProps) {
   const path = result?.notebook_path ?? input?.notebook_path ?? ''
   const cellId = result?.cell_id ?? input?.cell_id
   const mode = result?.edit_mode ?? input?.edit_mode ?? 'replace'
-  const error =
-    result?.error ||
-    (invocation.result?.isError ? extractRawText(invocation.result.rawContent) : '')
+  const error = result?.error || (invocation.result?.isError ? resultTextOf(invocation) : '')
   const diff = error ? null : notebookEditDiff(input, result)
   const newSource = result?.new_source ?? input?.new_source ?? ''
   return (

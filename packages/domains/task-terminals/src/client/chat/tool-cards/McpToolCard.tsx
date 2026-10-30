@@ -71,7 +71,10 @@ export function McpToolCard({ invocation, timestamp }: ToolProps) {
       ? (invocation.input as Record<string, unknown>)
       : {}
   const entries = Object.entries(input)
-  const blocks = mcpResultBlocks(invocation.result?.rawContent ?? invocation.result?.structured)
+  // A blocked call's "result" is the hook's reason: the block line shows it.
+  const blocks = invocation.blockedBy
+    ? []
+    : mcpResultBlocks(invocation.result?.rawContent ?? invocation.result?.structured)
   const isError = invocation.result?.isError === true
   return (
     <ToolShell

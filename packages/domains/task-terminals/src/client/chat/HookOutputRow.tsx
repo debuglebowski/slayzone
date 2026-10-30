@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -8,49 +7,14 @@ import {
   TimerOff,
   Webhook
 } from 'lucide-react'
-import { cn, useDepsChanged } from '@slayzone/ui'
+import { cn } from '@slayzone/ui'
 import type { TimelineItem } from '@slayzone/terminal/client'
-import { useChatView } from './ChatViewContext'
+import { useRowUiState } from './row-ui-state'
 import { HighlightedText } from './HighlightedText'
 import { CHAT_CARD_INDENT, HoverTimestamp } from './tool-cards/card-shell'
+import { HOOK_TONE, hookLabel } from './hook-labels'
 
 type HookItem = Extract<TimelineItem, { kind: 'hook' }>
-
-/** What a hook's block stopped from happening, by hook event. */
-const BLOCKED_WHAT: Record<string, string> = {
-  PreToolUse: 'blocked the tool call',
-  PostToolUse: 'flagged the tool result',
-  UserPromptSubmit: 'blocked your message',
-  Stop: 'kept Claude working',
-  SubagentStop: 'kept the sub-agent working',
-  PermissionRequest: 'denied the permission request'
-}
-
-function hookLabel(item: HookItem): string {
-  const name = `${item.hookName} hook`
-  switch (item.effect) {
-    case 'blocked':
-      return `${name} ${BLOCKED_WHAT[item.hookEvent] ?? 'blocked this'}`
-    case 'failed':
-      return `${name} failed${item.exitCode != null ? ` (exit ${item.exitCode})` : ''}`
-    case 'cancelled':
-      return `${name} timed out or was cancelled`
-    case 'stopped':
-      return `${name} stopped Claude`
-    case 'context': {
-      const lines = item.text.split('\n').length
-      return `${name} added context for Claude · ${lines} line${lines === 1 ? '' : 's'}`
-    }
-  }
-}
-
-const TONE: Record<HookItem['effect'], string> = {
-  blocked: 'border-warning/40 bg-warning/10 text-warning-foreground',
-  stopped: 'border-warning/40 bg-warning/10 text-warning-foreground',
-  cancelled: 'border-warning/30 bg-warning/5 text-warning-foreground',
-  failed: 'border-destructive/40 bg-destructive/5 text-destructive',
-  context: 'border-border/50 bg-muted/20 text-muted-foreground'
-}
 
 function EffectIcon({ effect }: { effect: HookItem['effect'] }) {
   const cls = 'size-3 shrink-0'
@@ -68,21 +32,18 @@ function EffectIcon({ effect }: { effect: HookItem['effect'] }) {
  */
 export function HookOutputRow({ item }: { item: HookItem }) {
   const hasText = item.text.trim().length > 0
-  const [open, setOpen] = useState(hasText && item.effect !== 'context')
-  const { collapseSignal } = useChatView()
-  // "Collapse all": closes on a collapseSignal CHANGE only (adjusted during render).
-  const collapseBumped = useDepsChanged([collapseSignal])
-  if (collapseBumped) setOpen(false)
+  // Kept while scrolled away; "Collapse all" closes it.
+  const [open, setOpen] = useRowUiState('hook', hasText && item.effect !== 'context', false)
   return (
     <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1 group flex items-start gap-2')}>
       <div
         data-testid="chat-hook-output"
         data-effect={item.effect}
-        className={cn('w-fit max-w-full rounded-md border overflow-hidden', TONE[item.effect])}
+        className={cn('w-fit max-w-full rounded-md border overflow-hidden', HOOK_TONE[item.effect])}
       >
         <button
           type="button"
-          onClick={() => hasText && setOpen((v) => !v)}
+          onClick={() => hasText && setOpen(!open)}
           disabled={!hasText}
           className={cn(
             'flex items-center gap-2 px-3 py-1.5 text-xs text-left max-w-full',

@@ -30,6 +30,8 @@ import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { useChatAttachments } from './attachments/useChatAttachments'
 import { useChatScrollMemory } from './composer-state/useChatScrollMemory'
 import { ChatViewContext } from './ChatViewContext'
+import { RowUiStateContext, RowUiStateStore, collapseAllRows } from './row-ui-state'
+import { TimelineRevealContext } from './timeline-reveal'
 import { useChatMode } from './useChatMode'
 import { useChatModel } from './useChatModel'
 import { useChatEffort } from './useChatEffort'
@@ -41,6 +43,8 @@ import { useChatComposer } from './useChatComposer'
 import { useChatDisplay } from './useChatDisplay'
 import { useChatLifecycle } from './useChatLifecycle'
 import { useChatPanelKeyboard } from './useChatPanelKeyboard'
+import { useTurnOutline } from './useTurnOutline'
+import { turnOutlinePaletteCommands } from './turn-outline-palette'
 import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
@@ -173,8 +177,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // The prompt dock's key handler, consulted first by the panel's keys.
     const promptKeysRef = useRef<PromptKeyHandler | null>(null)
     const [collapseSignal, setCollapseSignal] = useState(0)
-    const { scrollRef, contentRef, isAtBottom, scrollToBottom, captureAnchor, restoreAnchor } =
-      useFollowBottom()
+    const follow = useFollowBottom()
+    const { scrollRef, contentRef, isAtBottom, scrollToBottom, captureAnchor } = follow
+    // What rows have expanded, kept while they are scrolled out of view.
+    const [rowUiState] = useState(() => new RowUiStateStore())
     const panelRef = useRef<HTMLDivElement>(null)
 
     const { chatApi, navigate } = useChatActions()
@@ -229,8 +235,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       focus: () => composer.textareaRef.current?.focus()
     }))
 
-    const display = useChatDisplay({ timeline, finalOnly, showLastMessageTools, scrollRef })
+    const display = useChatDisplay({ timeline, finalOnly, showLastMessageTools, follow })
     const { search } = display
+    // The turn outline and its keys (jump to the previous / next user turn).
+    const turnOutline = useTurnOutline({
+      items: display.displayedTimeline,
+      itemKey: display.itemKey,
+      virtual: display.virtual,
+      turnOpen: inFlight
+    })
 
     // Files changed (chat E, plan 4.3): the panel beside the chat, opened at a file
     // or at the top; `seq` re-scrolls when the same file is asked for again.
@@ -281,8 +294,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       ready: !hydrating,
       scrollRef,
       captureAnchor,
-      restoreAnchor,
-      revealKey: display.revealKey
+      restoreAnchor: display.restoreAnchor,
+      revealKey: display.revealAnchor
     })
 
     const copySessionId = useCallback(() => {
@@ -344,7 +357,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       promptKeysRef,
       composerRef: composer.textareaRef,
       draftEmpty: composer.draft.trim() === '' && composer.attachments.length === 0,
-      ...(conversation.view.canRewind ? { onDoubleEscape: () => openRewind('edit') } : {})
+      ...(conversation.view.canRewind ? { onDoubleEscape: () => openRewind('edit') } : {}),
+      jumpTurn: turnOutline.jump,
+      scrollToBottom
     })
 
     // The chat's page in the app's Cmd+K palette while this tab is the active one
@@ -389,11 +404,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         ? { filesChanged: { count: filesCount, open: () => openFilesPanel() } }
         : {}),
       find: search.requestOpen,
-      collapseAll: () => setCollapseSignal((n) => n + 1),
+      collapseAll: () => {
+        // Rows scrolled out of view are closed too, when they come back.
+        collapseAllRows(rowUiState, display.displayedTimeline, display.itemKey)
+        setCollapseSignal((n) => n + 1)
+      },
       copyLastResponse: display.copyLastResponse,
       copyConversation: display.copyAllMessages,
       ...(inFlight ? { stop: () => void composer.handleStop() } : {}),
-      reset: () => void handleReset()
+      reset: () => void handleReset(),
+      // The turn outline: go to a turn, previous / next turn.
+      extra: turnOutlinePaletteCommands({
+        turns: turnOutline.turns,
+        reveal: display.virtual.revealKey,
+        jump: turnOutline.jump
+      })
     })
     const palette = usePaletteContribution(
       taskId,
@@ -495,179 +520,183 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     return (
       <ChatViewContext.Provider value={chatView}>
-        <LiveBlockStoreContext.Provider value={liveStore}>
-          <CommandTaskContext.Provider value={commandTaskScope}>
-            <ToolFocusContext.Provider value={toolFocus}>
-              {/* The files-changed panel sits beside the chat; in a narrow pane it covers it. */}
-              <div className="@container relative flex h-full">
-                <div
-                  ref={panelRef}
-                  data-chat-panel
-                  className="relative flex flex-col h-full min-w-0 flex-1 bg-background"
-                  style={{ fontSize: `${appearance.terminalFontSize}px` }}
-                  onFocus={palette.claim}
-                  onDragEnter={attachmentsApi.onDragEnter}
-                  onDragOver={attachmentsApi.onDragOver}
-                  onDragLeave={attachmentsApi.onDragLeave}
-                  onDrop={attachmentsApi.onDrop}
-                  onMouseUp={(e) => {
-                    // Click on panel background → focus composer. Skip if user clicked an
-                    // interactive element (button/link/input) or completed a text selection.
-                    const target = e.target as HTMLElement | null
-                    if (!target) return
-                    if (
-                      target.closest(
-                        'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
-                      )
-                    )
-                      return
-                    const sel = window.getSelection()
-                    if (sel && !sel.isCollapsed) return
-                    composer.textareaRef.current?.focus()
-                  }}
-                  onClickCapture={(e) => {
-                    // Event-delegated link interception for markdown-rendered anchors only.
-                    // Skip LinkifiedText anchors — they own their click semantics via
-                    // `data-linkified` and would otherwise double-fire (capture-phase parent
-                    // before child onClick).
-                    // Mirrors terminal modifier semantics:
-                    //   ⌘+Click       → in-app slay browser (onOpenUrl)
-                    //   ⌘+Shift+Click → external
-                    //   bare click    → external (markdown anchors are click affordances;
-                    //                  doing nothing on bare click would feel broken).
-                    const target = e.target as HTMLElement | null
-                    const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
-                    if (!anchor) return
-                    if (anchor.dataset.linkified === 'true') return
-                    const href = anchor.getAttribute('href') ?? ''
-                    if (!/^https?:\/\//i.test(href)) return
-                    e.preventDefault()
-                    const mod = e.metaKey || e.ctrlKey
-                    if (mod && e.shiftKey) navigate.openExternal(href)
-                    else if (mod && onOpenUrl) onOpenUrl(href)
-                    else navigate.openExternal(href)
-                  }}
-                >
-                  {/* Panel-wide drop overlay */}
-                  {attachmentsApi.isDragging && (
-                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
-                      {takesAnyFile ? 'Drop files to attach (images, PDFs, text)' : 'Drop image…'}
-                    </div>
-                  )}
+        <TimelineRevealContext.Provider value={display.virtual.revealKey}>
+          <RowUiStateContext.Provider value={rowUiState}>
+            <LiveBlockStoreContext.Provider value={liveStore}>
+              <CommandTaskContext.Provider value={commandTaskScope}>
+                <ToolFocusContext.Provider value={toolFocus}>
+                  {/* The files-changed panel sits beside the chat; in a narrow pane it covers it. */}
+                  <div className="@container relative flex h-full">
+                    <div
+                      ref={panelRef}
+                      data-chat-panel
+                      className="relative flex flex-col h-full min-w-0 flex-1 bg-background"
+                      style={{ fontSize: `${appearance.terminalFontSize}px` }}
+                      onFocus={palette.claim}
+                      onDragEnter={attachmentsApi.onDragEnter}
+                      onDragOver={attachmentsApi.onDragOver}
+                      onDragLeave={attachmentsApi.onDragLeave}
+                      onDrop={attachmentsApi.onDrop}
+                      onMouseUp={(e) => {
+                        // Click on panel background → focus composer. Skip if user clicked an
+                        // interactive element (button/link/input) or completed a text selection.
+                        const target = e.target as HTMLElement | null
+                        if (!target) return
+                        if (
+                          target.closest(
+                            'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
+                          )
+                        )
+                          return
+                        const sel = window.getSelection()
+                        if (sel && !sel.isCollapsed) return
+                        composer.textareaRef.current?.focus()
+                      }}
+                      onClickCapture={(e) => {
+                        // Event-delegated link interception for markdown-rendered anchors only.
+                        // Skip LinkifiedText anchors — they own their click semantics via
+                        // `data-linkified` and would otherwise double-fire (capture-phase parent
+                        // before child onClick).
+                        // Mirrors terminal modifier semantics:
+                        //   ⌘+Click       → in-app slay browser (onOpenUrl)
+                        //   ⌘+Shift+Click → external
+                        //   bare click    → external (markdown anchors are click affordances;
+                        //                  doing nothing on bare click would feel broken).
+                        const target = e.target as HTMLElement | null
+                        const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
+                        if (!anchor) return
+                        if (anchor.dataset.linkified === 'true') return
+                        const href = anchor.getAttribute('href') ?? ''
+                        if (!/^https?:\/\//i.test(href)) return
+                        e.preventDefault()
+                        const mod = e.metaKey || e.ctrlKey
+                        if (mod && e.shiftKey) navigate.openExternal(href)
+                        else if (mod && onOpenUrl) onOpenUrl(href)
+                        else navigate.openExternal(href)
+                      }}
+                    >
+                      {/* Panel-wide drop overlay */}
+                      {attachmentsApi.isDragging && (
+                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
+                          {takesAnyFile
+                            ? 'Drop files to attach (images, PDFs, text)'
+                            : 'Drop image…'}
+                        </div>
+                      )}
 
-                  <ChatTimeline
-                    overrideNotice={overrideNotice}
-                    search={search}
-                    state={state}
-                    hydrating={hydrating}
-                    isEmpty={isEmpty}
-                    inFlight={inFlight}
-                    awaitingUser={
-                      promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
-                    }
-                    appearance={appearance}
-                    hiddenCount={display.hiddenCount}
-                    PAGE_SIZE={display.PAGE_SIZE}
-                    setVisibleCount={display.setVisibleCount}
-                    visibleItems={display.visibleItems}
-                    visibleStart={display.visibleStart}
-                    itemKey={display.itemKey}
-                    scrollRef={scrollRef}
-                    contentRef={contentRef}
-                    isAtBottom={isAtBottom}
-                    scrollToBottom={scrollToBottom}
-                    sendMessage={sendMessage}
-                    copyLastResponse={display.copyLastResponse}
-                    copyAllMessages={display.copyAllMessages}
-                    copySessionId={copySessionId}
-                    setCollapseSignal={setCollapseSignal}
-                    handleReset={handleReset}
-                    resetting={resetting}
-                    {...(onHandoff && state.sessionId ? { onHandoff } : {})}
-                  />
-
-                  <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
-                  <RewindDialog dialog={conversation.dialog} />
-                  <RewindPicker
-                    kind={pickerKind}
-                    timeline={timeline}
-                    view={conversation.view}
-                    onClose={() => setPickerKind(null)}
-                  />
-
-                  <ChatComposer
-                    appearance={appearance}
-                    finalOnly={finalOnly}
-                    inFlight={inFlight}
-                    mode={mode}
-                    queuedMessages={composer.queuedMessages}
-                    removeQueue={composer.removeQueue}
-                    queueApi={composer.queueApi}
-                    attachments={composer.attachments}
-                    setAttachments={composer.setAttachments}
-                    attachmentsApi={attachmentsApi}
-                    autocomplete={composer.autocomplete}
-                    textareaRef={composer.textareaRef}
-                    draft={composer.draft}
-                    setDraft={composer.setDraft}
-                    argumentHint={composer.argumentHint}
-                    setCursorPos={composer.setCursorPos}
-                    onKeyDown={composer.onKeyDown}
-                    handleSend={composer.handleSend}
-                    handleStop={composer.handleStop}
-                    historySearch={composer.historySearch}
-                    usage={selectUsageSummary(state)}
-                    displaySessionEnded={displaySessionEnded}
-                    handleRestart={handleRestart}
-                    restarting={restarting}
-                    handleReset={handleReset}
-                    resetting={resetting}
-                    chatMode={chatMode}
-                    handleModeChange={handleModeChange}
-                    autoCapability={autoCapability}
-                    chatModel={chatModel}
-                    handleModelChange={handleModelChange}
-                    modelChanging={modelChanging}
-                    chatEffort={chatEffort}
-                    handleEffortChange={handleEffortChange}
-                    effortChanging={effortChanging}
-                    chatCollaboration={chatCollaboration}
-                    handleCollaborationChange={handleCollaborationChange}
-                    collaborationChanging={collaborationChanging}
-                    chatFastMode={chatFastMode}
-                    handleFastModeChange={handleFastModeChange}
-                    fastModeChanging={fastModeChanging}
-                    {...(filesCapable
-                      ? {
-                          filesChanged: {
-                            count: filesCount,
-                            open: filesPanel !== null,
-                            toggle: () => {
-                              if (filesPanel) setFilesPanel(null)
-                              else openFilesPanel()
-                            }
-                          }
+                      <ChatTimeline
+                        overrideNotice={overrideNotice}
+                        search={search}
+                        state={state}
+                        hydrating={hydrating}
+                        isEmpty={isEmpty}
+                        inFlight={inFlight}
+                        awaitingUser={
+                          promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
                         }
-                      : {})}
-                  />
-                </div>
-                {filesPanel && (
-                  <FilesChangedPanel
-                    timeline={timeline}
-                    cwd={cwd}
-                    {...(filesPanel.path ? { focusPath: filesPanel.path } : {})}
-                    focusSeq={filesPanel.seq}
-                    onClose={() => {
-                      setFilesPanel(null)
-                      composer.textareaRef.current?.focus()
-                    }}
-                    className="absolute inset-0 z-30 @min-[56rem]:static @min-[56rem]:w-[45%] @min-[56rem]:max-w-[720px] @min-[56rem]:shrink-0 @min-[56rem]:border-l @min-[56rem]:border-border"
-                  />
-                )}
-              </div>
-            </ToolFocusContext.Provider>
-          </CommandTaskContext.Provider>
-        </LiveBlockStoreContext.Provider>
+                        appearance={appearance}
+                        items={display.displayedTimeline}
+                        virtual={display.virtual}
+                        scrollRef={display.virtual.bindScroller}
+                        itemKey={display.itemKey}
+                        turns={turnOutline.turns}
+                        contentRef={contentRef}
+                        isAtBottom={isAtBottom}
+                        scrollToBottom={scrollToBottom}
+                        sendMessage={sendMessage}
+                        copyLastResponse={display.copyLastResponse}
+                        copyAllMessages={display.copyAllMessages}
+                        copySessionId={copySessionId}
+                        setCollapseSignal={setCollapseSignal}
+                        handleReset={handleReset}
+                        resetting={resetting}
+                        {...(onHandoff && state.sessionId ? { onHandoff } : {})}
+                      />
+
+                      <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
+                      <RewindDialog dialog={conversation.dialog} />
+                      <RewindPicker
+                        kind={pickerKind}
+                        timeline={timeline}
+                        view={conversation.view}
+                        onClose={() => setPickerKind(null)}
+                      />
+
+                      <ChatComposer
+                        appearance={appearance}
+                        finalOnly={finalOnly}
+                        inFlight={inFlight}
+                        mode={mode}
+                        queuedMessages={composer.queuedMessages}
+                        removeQueue={composer.removeQueue}
+                        queueApi={composer.queueApi}
+                        attachments={composer.attachments}
+                        setAttachments={composer.setAttachments}
+                        attachmentsApi={attachmentsApi}
+                        autocomplete={composer.autocomplete}
+                        textareaRef={composer.textareaRef}
+                        draft={composer.draft}
+                        setDraft={composer.setDraft}
+                        argumentHint={composer.argumentHint}
+                        setCursorPos={composer.setCursorPos}
+                        onKeyDown={composer.onKeyDown}
+                        handleSend={composer.handleSend}
+                        handleStop={composer.handleStop}
+                        historySearch={composer.historySearch}
+                        usage={selectUsageSummary(state)}
+                        displaySessionEnded={displaySessionEnded}
+                        handleRestart={handleRestart}
+                        restarting={restarting}
+                        handleReset={handleReset}
+                        resetting={resetting}
+                        chatMode={chatMode}
+                        handleModeChange={handleModeChange}
+                        autoCapability={autoCapability}
+                        chatModel={chatModel}
+                        handleModelChange={handleModelChange}
+                        modelChanging={modelChanging}
+                        chatEffort={chatEffort}
+                        handleEffortChange={handleEffortChange}
+                        effortChanging={effortChanging}
+                        chatCollaboration={chatCollaboration}
+                        handleCollaborationChange={handleCollaborationChange}
+                        collaborationChanging={collaborationChanging}
+                        chatFastMode={chatFastMode}
+                        handleFastModeChange={handleFastModeChange}
+                        fastModeChanging={fastModeChanging}
+                        {...(filesCapable
+                          ? {
+                              filesChanged: {
+                                count: filesCount,
+                                open: filesPanel !== null,
+                                toggle: () => {
+                                  if (filesPanel) setFilesPanel(null)
+                                  else openFilesPanel()
+                                }
+                              }
+                            }
+                          : {})}
+                      />
+                    </div>
+                    {filesPanel && (
+                      <FilesChangedPanel
+                        timeline={timeline}
+                        cwd={cwd}
+                        {...(filesPanel.path ? { focusPath: filesPanel.path } : {})}
+                        focusSeq={filesPanel.seq}
+                        onClose={() => {
+                          setFilesPanel(null)
+                          composer.textareaRef.current?.focus()
+                        }}
+                        className="absolute inset-0 z-30 @min-[56rem]:static @min-[56rem]:w-[45%] @min-[56rem]:max-w-[720px] @min-[56rem]:shrink-0 @min-[56rem]:border-l @min-[56rem]:border-border"
+                      />
+                    )}
+                  </div>
+                </ToolFocusContext.Provider>
+              </CommandTaskContext.Provider>
+            </LiveBlockStoreContext.Provider>
+          </RowUiStateContext.Provider>
+        </TimelineRevealContext.Provider>
       </ChatViewContext.Provider>
     )
   }

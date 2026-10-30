@@ -271,6 +271,29 @@ test('CLI command snapshot: unknown task saves nothing; corrupt rows read as nul
   expect(await ops.getCliSnapshot('t1', 'claude-chat')).toBeNull()
 })
 
+test('chat history is never trimmed: every saved event of a tab stays (no per-tab cap)', async () => {
+  const { db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  for (let seq = 0; seq < 2_100; seq++) {
+    await ops.persistChatEvent('tab-1', seq, { kind: 'stderr', text: `e${seq}` } as never)
+  }
+  const events = await ops.loadChatEvents('tab-1')
+  expect(events.length).toBe(2_100)
+  expect(events[0]).toEqual({ seq: 0, event: { kind: 'stderr', text: 'e0' } })
+})
+
+test('loadChatEventsRange reads the rows strictly between two seqs, in order', async () => {
+  const { db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  for (let seq = 0; seq < 10; seq++) {
+    await ops.persistChatEvent('tab-1', seq, { kind: 'stderr', text: `e${seq}` } as never)
+    await ops.persistChatEvent('tab-2', seq, { kind: 'stderr', text: `x${seq}` } as never)
+  }
+  const got = await ops.loadChatEventsRange('tab-1', 2, 6)
+  expect(got.map((e) => e.seq)).toEqual([3, 4, 5])
+  expect(got[0].event).toEqual({ kind: 'stderr', text: 'e3' })
+})
+
 test('persistChatEvent inserts only: a second write at the same seq is a clash, not an overwrite', async () => {
   const { raw, db } = makeDb()
   const ops = createDbChatDataOps(db, createFakeTaskSessionStore())

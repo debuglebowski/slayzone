@@ -279,14 +279,22 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
     await expect(panel.getByText(/UNTRUSTED/)).toHaveCount(0)
   })
 
-  test('hooks that blocked or failed are shown; added context stays collapsed', async ({
+  test('hooks that blocked or failed are shown, a block once; added context stays collapsed', async ({
     mainWindow
   }) => {
     const panel = mainWindow.locator('[data-chat-panel]:visible')
-    const blocked = panel.locator('[data-testid="chat-hook-output"][data-effect="blocked"]')
+    // A blocked call shows the block on its own card; the hook row folds into it.
+    await expect(
+      panel.locator('[data-testid="chat-hook-output"][data-effect="blocked"]')
+    ).toHaveCount(0)
+    const blocked = panel
+      .getByTestId('tool-bash')
+      .filter({ hasText: 'echo forbidden' })
+      .getByTestId('chat-tool-blocked')
     await expect(blocked).toContainText('PreToolUse:Bash hook blocked the tool call')
     await expect(blocked).toContainText('Sent to Claude')
     await expect(blocked).toContainText('Blocked by policy: never echo the word forbidden')
+    await expect(panel.getByText(/never echo the word forbidden/)).toHaveCount(1)
     const failed = panel.locator('[data-testid="chat-hook-output"][data-effect="failed"]')
     await expect(failed).toContainText('PostToolUse:Bash hook failed (exit 1)')
     await expect(failed).toContainText('post hook crashed: lint server unreachable')

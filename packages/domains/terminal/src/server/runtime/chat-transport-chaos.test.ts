@@ -226,7 +226,12 @@ test('chaos × 200: no lost message, none answered twice, no overwritten or stal
         }
         rows.set(seq, event)
         return 'inserted'
-      }
+      },
+      readRange: async (_tab, after, before) =>
+        [...rows.entries()]
+          .filter(([seq]) => seq > after && seq < before)
+          .sort((a, b) => a[0] - b[0])
+          .map(([seq, event]) => ({ seq, event }))
     },
     outboxRetry: { windowMs: 40, baseMs: 2 },
     watchdogTimings: { startingBoundMs: 5_000, runningStallMs: 60_000, killGraceMs: 50 }
@@ -252,7 +257,7 @@ test('chaos × 200: no lost message, none answered twice, no overwritten or stal
       await mgr.respawn(TAB, { ...OPTS, chatModel: random() < 0.5 ? 'opus' : 'sonnet' })
     } else {
       // Reload: a client rebuilds the chat from one replay snapshot.
-      const replay = mgr.getReplay(TAB, -1)
+      const replay = await mgr.getReplay(TAB, -1)
       const seqs = replay.events.map((e) => e.seq)
       expect(seqs).toEqual([...seqs].sort((a, b) => a - b))
       expect(new Set(seqs).size).toBe(seqs.length)

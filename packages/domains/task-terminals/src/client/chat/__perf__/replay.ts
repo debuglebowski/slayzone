@@ -15,6 +15,7 @@ import { performance } from 'node:perf_hooks'
 import { claudeChatBackend } from '@slayzone/terminal/agents'
 import { reducer, initialState, type ChatTimelineState } from '@slayzone/terminal/reducer'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { buildLongSession, LONG_SESSION_EVENTS } from '@slayzone/test-utils/chat-long-session'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -73,14 +74,51 @@ const DEFAULT_OPTS: Required<ReplayOpts> = {
 }
 
 export function replayFixture(name: string, opts: ReplayOpts = {}): ReplayMetrics {
+  return replayEvents(name, loadFixture(name), opts)
+}
+
+/** Name of the generated 10,000-event session in metrics and the baseline. */
+export const LONG_SESSION_FIXTURE = `long-session-${LONG_SESSION_EVENTS / 1000}k (generated)`
+
+/**
+ * The plan's 4.1 budget session: 10,000 events of a long Claude Code
+ * conversation (`@slayzone/test-utils/chat-long-session`, fixed seed) — what a
+ * tab replays when it opens such a session.
+ */
+export function longSessionEvents(): AgentEvent[] {
+  return buildLongSession({ events: LONG_SESSION_EVENTS, seed: 1 })
+}
+
+/**
+ * Time to reduce `events` as ONE batch from an empty state — the shape of
+ * opening a saved session (`useChatSession` replays history in one render).
+ * Best of `runs`, after a warmup.
+ */
+export function hydrateBatchMs(events: AgentEvent[], runs = 5): number {
+  const fresh = () => initialState({ agentStartedTurns: true })
+  reducer(fresh(), { type: 'events', events })
+  let best = Infinity
+  for (let i = 0; i < runs; i++) {
+    const t0 = performance.now()
+    reducer(fresh(), { type: 'events', events })
+    best = Math.min(best, performance.now() - t0)
+  }
+  return best
+}
+
+export function replayEvents(
+  name: string,
+  events: AgentEvent[],
+  opts: ReplayOpts = {}
+): ReplayMetrics {
   const { iterations, trimSlowestPct } = { ...DEFAULT_OPTS, ...opts }
-  const events = loadFixture(name)
   const samples: number[] = []
   let finalTimelineLength = 0
 
   const tStart = performance.now()
   for (let iter = 0; iter < iterations; iter++) {
-    let state: ChatTimelineState = initialState()
+    // As the app runs a Claude Code chat tab (its provider starts turns by itself).
+    let state: ChatTimelineState = initialState({ agentStartedTurns: true })
     for (const event of events) {
       const t0 = performance.now()
       state = reducer(state, { type: 'event', event })

@@ -72,6 +72,8 @@ export interface ChatEventStore {
   load(tabId: string): Promise<BufferedEvent[]>
   /** Insert-only: `'clash'` when a row already exists at that seq. */
   insert(tabId: string, seq: number, event: AgentEvent): Promise<'inserted' | 'clash'>
+  /** Saved events with `afterSeq < seq < beforeSeq` — history older than the log's cache. */
+  readRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
 }
 
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
@@ -210,7 +212,8 @@ function publishChatStateChange(
 
 const noEventStore: ChatEventStore = {
   load: async () => [],
-  insert: async () => 'inserted'
+  insert: async () => 'inserted',
+  readRange: async () => []
 }
 
 const defaultDeps: TransportDeps = {
@@ -2803,10 +2806,18 @@ export function removeSession(tabId: string): Promise<void> {
   return flushed
 }
 
+/** The CACHED saved events after `afterSeq` (the newest ones; in-process checks). */
 export function getEventBufferSince(tabId: string, afterSeq: number): BufferedEvent[] {
   const tab = tabs.get(tabId)
   if (!tab) return []
   return tab.log.since(afterSeq)
+}
+
+/** EVERY saved event after `afterSeq`: what left the cache is read back from the store. */
+export async function readEventsSince(tabId: string, afterSeq: number): Promise<BufferedEvent[]> {
+  const tab = tabs.get(tabId)
+  if (!tab) return []
+  return tab.log.readSince(afterSeq)
 }
 
 /** What a client needs to (re)draw a tab: its saved events, plus what is streaming right now. */
@@ -2822,15 +2833,18 @@ export interface ChatReplay {
 }
 
 /**
- * One consistent snapshot: saved events after `afterSeq`, and the blocks still
- * streaming (live-only, so not in the history) — a reload mid-reply keeps the
- * partial text.
+ * One consistent snapshot: EVERY saved event after `afterSeq` (the history
+ * older than the in-memory cache is read back from the store), and the blocks
+ * still streaming (live-only, so not in the history) — a reload mid-reply keeps
+ * the partial text. The live part is taken in the same tick the saved events
+ * end, so it follows exactly the newest of them.
  */
-export function getReplay(tabId: string, afterSeq: number): ChatReplay {
+export async function getReplay(tabId: string, afterSeq: number): Promise<ChatReplay> {
   const tab = tabs.get(tabId)
   if (!tab) return { events: [], live: { afterSeq: -1, liveSeq: 0, events: [] } }
+  const events = await tab.log.readSince(afterSeq)
   return {
-    events: tab.log.since(afterSeq),
+    events,
     live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
   }
 }

@@ -262,6 +262,7 @@ run_harness packages/shared/platform/src/service-unit.test.ts
 run_harness packages/shared/test-utils/fs-module-cache.test.ts
 # The scripted fake `claude` CLI the chat e2e group and transport tests drive.
 run_harness packages/shared/test-utils/fake-claude/fake-claude.test.ts
+run_harness packages/shared/test-utils/chat-long-session/long-session.test.ts
 # Recorded real-CLI transcripts (fake replay + drift check input): shape + no personal data.
 run_harness packages/shared/test-utils/fake-claude/transcripts.test.ts
 # Fake CLI token streaming + command tasks (chat plan 3.2 / 3.9).
@@ -616,6 +617,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.t
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-agent-turn.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-history.test.ts
 run_harness packages/domains/terminal/src/server/runtime/cli-version.test.ts
 
 # Terminal — warm-process pool (per-project gate + adopt-match). Strict+electron:
@@ -786,10 +788,12 @@ run_harness packages/domains/task-terminals/src/client/chat/attachments/prepare-
 run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/turn-outline-palette.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
@@ -806,6 +810,7 @@ run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/client/turn-file-changes.test.ts
+run_harness packages/domains/terminal/src/client/persistent-index.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/client/chat-timeline-streaming.test.ts
 # A streaming tool input as far as it arrived; per-row live block notifications (chat plan 3.2).
@@ -982,6 +987,11 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/BashCard.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatTimeline.streaming.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatTimeline.codex.test.tsx \
+  packages/domains/task-terminals/src/client/chat/virtual-timeline.test.tsx \
+  packages/domains/task-terminals/src/client/chat/row-ui-state.test.tsx \
+  packages/domains/task-terminals/src/client/chat/timeline-reveal.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatTurnOutline.test.tsx \
   packages/domains/task-terminals/src/client/chat/prompts/PromptDock.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \

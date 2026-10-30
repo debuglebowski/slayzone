@@ -60,6 +60,7 @@ export {
   type LiveBlocks,
   type StreamState,
   isInFlight,
+  isTurnOpen,
   isAwaitingUserQuestion,
   deriveLoadingLabel,
   selectUsageSummary,

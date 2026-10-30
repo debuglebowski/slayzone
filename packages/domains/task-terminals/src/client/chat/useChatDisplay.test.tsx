@@ -13,14 +13,19 @@ vi.mock('@slayzone/markdown/client', () => ({
 }))
 
 import { useChatDisplay } from './useChatDisplay'
-import type { CallbackRef } from './useFollowBottom'
+import { useFollowBottom, type CallbackRef } from './useFollowBottom'
+import { VirtualTimelineRows } from './VirtualTimelineRows'
+import { TimelineScroller } from './__tests__/TimelineScroller'
+import { installTimelineLayout, type TimelineLayout } from './__tests__/timeline-layout'
 
 const text = (t: string, i: number): TimelineItem =>
   ({ kind: 'text', role: 'assistant', text: t, messageId: `m${i}` }) as unknown as TimelineItem
 
-/** `count` items; only `needleAt` contains "needle". */
-const timeline = (count: number, needleAt: number): TimelineItem[] =>
-  Array.from({ length: count }, (_, i) => text(i === needleAt ? `needle ${i}` : `item ${i}`, i))
+/** `count` items; only those at `needlesAt` contain "needle". */
+const timeline = (count: number, ...needlesAt: number[]): TimelineItem[] =>
+  Array.from({ length: count }, (_, i) =>
+    text(needlesAt.includes(i) ? `needle ${i}` : `item ${i}`, i)
+  )
 
 function makeScrollRef(): CallbackRef<HTMLElement> {
   const ref = ((el: HTMLElement | null) => {
@@ -30,76 +35,107 @@ function makeScrollRef(): CallbackRef<HTMLElement> {
   return ref
 }
 
+/** A follow lock for hooks rendered without a timeline. */
+const detachedFollow = () => ({
+  scrollRef: makeScrollRef(),
+  isStuck: () => true,
+  unstick: () => {},
+  restoreAnchor: () => false
+})
+
 type Display = ReturnType<typeof useChatDisplay>
 let display: Display
 
-/** Mirrors ChatTimeline: one `data-index` row per visible item inside the scroll viewport. */
-function Harness({
-  items,
-  scrollRef
-}: {
-  items: TimelineItem[]
-  scrollRef: CallbackRef<HTMLElement>
-}) {
+/** Mirrors ChatPanel + ChatTimeline: the follow lock, the display, the virtual rows. */
+function Harness({ items }: { items: TimelineItem[] }) {
+  const follow = useFollowBottom()
   const d = useChatDisplay({
     timeline: items,
     finalOnly: false,
     showLastMessageTools: false,
-    scrollRef
+    follow
   })
   display = d
   return (
-    <div ref={scrollRef}>
-      {d.visibleItems.map((item, i) => (
-        <div key={d.itemKey(item, d.visibleStart + i)} data-index={d.visibleStart + i} />
-      ))}
-    </div>
+    <TimelineScroller scrollRef={d.virtual.bindScroller} contentRef={follow.contentRef}>
+      <VirtualTimelineRows
+        controller={d.virtual}
+        items={d.displayedTimeline}
+        itemKey={d.itemKey}
+        renderRow={(item) => <p>{(item as { text: string }).text}</p>}
+      />
+    </TimelineScroller>
   )
 }
 
-let scrolled: Array<string | null>
-const originalScrollIntoView = Element.prototype.scrollIntoView
+let layout: TimelineLayout
 
 beforeEach(() => {
-  scrolled = []
-  Element.prototype.scrollIntoView = function (this: Element) {
-    scrolled.push(this.getAttribute('data-index'))
-  }
+  layout = installTimelineLayout({ viewport: 600, rowHeight: () => 50 })
 })
 
 afterEach(() => {
   cleanup()
-  Element.prototype.scrollIntoView = originalScrollIntoView
+  layout.restore()
 })
 
-describe('useChatDisplay search scroll', () => {
-  it('scrolls to a match inside the render window', () => {
-    render(<Harness items={timeline(150, 120)} scrollRef={makeScrollRef()} />)
-    expect(display.visibleStart).toBe(50)
+async function settle(frames = 6): Promise<void> {
+  for (let i = 0; i < frames; i++) {
+    await act(async () => {
+      layout.flushResize()
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+    })
+  }
+}
+
+const rowTop = (index: number): number | null => {
+  const row = document.querySelector<HTMLElement>(`[data-virtual-list] > [data-index="${index}"]`)
+  return row ? row.getBoundingClientRect().top : null
+}
+
+describe('useChatDisplay search over the virtualized timeline', () => {
+  it('counts a match in a row far above the view (not mounted) and reveals it, centred', async () => {
+    render(<Harness items={timeline(10_000, 10)} />)
+    await settle()
+    expect(rowTop(10)).toBeNull()
 
     act(() => display.search.setQuery('needle'))
-    expect(scrolled).toEqual(['120'])
+    expect(display.search.matchCount).toBe(1)
+    await settle()
+    const top = rowTop(10)
+    expect(top).not.toBeNull()
+    expect(Math.abs(top! + 25 - 300)).toBeLessThanOrEqual(2)
   })
 
-  it('scrolls to a match above the render window once the window has expanded to it', () => {
-    render(<Harness items={timeline(150, 10)} scrollRef={makeScrollRef()} />)
-    expect(display.visibleStart).toBe(50)
-
+  it('next / prev reveal each match in turn, wherever it is', async () => {
+    render(<Harness items={timeline(5_000, 100, 4_000)} />)
+    await settle()
     act(() => display.search.setQuery('needle'))
-    expect(display.visibleStart).toBe(10)
-    expect(scrolled).toEqual(['10'])
+    expect(display.search.matchCount).toBe(2)
+    await settle()
+    expect(rowTop(100)).not.toBeNull()
+    act(() => display.search.next())
+    await settle()
+    expect(rowTop(4_000)).not.toBeNull()
+    expect(rowTop(100)).toBeNull()
+    act(() => display.search.prev())
+    await settle()
+    expect(rowTop(100)).not.toBeNull()
   })
 
-  it('does not re-scroll to the same match when the window later moves', () => {
-    const scrollRef = makeScrollRef()
-    const { rerender } = render(<Harness items={timeline(150, 120)} scrollRef={scrollRef} />)
+  it('does not re-reveal the same match when rows are appended', async () => {
+    const { rerender } = render(<Harness items={timeline(3_000, 1_000)} />)
+    await settle()
     act(() => display.search.setQuery('needle'))
-    expect(scrolled).toEqual(['120'])
-
-    // A streamed item shifts the window start; the active match is unchanged.
-    rerender(<Harness items={timeline(151, 120)} scrollRef={scrollRef} />)
-    expect(display.visibleStart).toBe(51)
-    expect(scrolled).toEqual(['120'])
+    await settle()
+    // The user scrolls on; a streamed row arrives; the active match is unchanged.
+    layout.scroller()!.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+    layout.scrollTo(20_000)
+    await settle()
+    const top = layout.scroller()!.scrollTop
+    rerender(<Harness items={timeline(3_001, 1_000)} />)
+    await settle()
+    expect(layout.scroller()!.scrollTop).toBe(top)
   })
 })
 
@@ -123,7 +159,7 @@ describe('useChatDisplay final-only view', () => {
         timeline: items,
         finalOnly: true,
         showLastMessageTools: false,
-        scrollRef: makeScrollRef()
+        follow: detachedFollow()
       })
       shown = d.displayedTimeline
       return null
@@ -157,9 +193,72 @@ describe('useChatDisplay final-only view', () => {
     ])
   })
 
+  it('keys a sub-agent row by its Task call, not its position (reveal + anchors)', async () => {
+    const { stableAnchorKey } = await import('./useChatDisplay')
+    const agent = {
+      kind: 'sub-agent',
+      toolUseId: 'toolu_task1',
+      phase: 'completed',
+      timestamp: 0
+    } as unknown as TimelineItem
+    render(<Harness items={[agent]} />)
+    expect(display.itemKey(agent, 0)).toBe('sub-agent:toolu_task1')
+    expect(display.itemKey(agent, 7)).toBe('sub-agent:toolu_task1')
+    expect(stableAnchorKey(agent)).toBe('sub-agent:toolu_task1')
+  })
+
   it('keys hook and notice rows by their ids', () => {
-    render(<Harness items={[hook('blocked', 'h7')]} scrollRef={makeScrollRef()} />)
+    render(<Harness items={[hook('blocked', 'h7')]} />)
     expect(display.itemKey(hook('blocked', 'h7'), 0)).toBe('hook:h7')
+  })
+})
+
+describe('useChatDisplay — a hook block folded into its card', () => {
+  const tool = {
+    kind: 'tool',
+    invocation: {
+      id: 't1',
+      name: 'Bash',
+      input: {},
+      status: 'denied',
+      blockedBy: { hookId: 'h1', hookName: 'PreToolUse:Bash', text: 'no', audience: 'agent' }
+    },
+    timestamp: 0
+  } as unknown as TimelineItem
+  const folded = {
+    kind: 'hook',
+    hookId: 'h1',
+    hookName: 'PreToolUse:Bash',
+    hookEvent: 'PreToolUse',
+    effect: 'blocked',
+    audience: 'agent',
+    text: 'no',
+    timestamp: 0,
+    foldedInto: 't1'
+  } as unknown as TimelineItem
+  const other = { ...folded, hookId: 'h2', effect: 'failed', foldedInto: undefined } as TimelineItem
+  const shown = (finalOnly: boolean, items: TimelineItem[]) => {
+    let out: TimelineItem[] = []
+    function Probe() {
+      out = useChatDisplay({
+        timeline: items,
+        finalOnly,
+        showLastMessageTools: false,
+        follow: detachedFollow()
+      }).displayedTimeline
+      return null
+    }
+    render(<Probe />)
+    cleanup()
+    return out.map((i) => (i.kind === 'hook' ? `hook:${i.hookId}` : i.kind))
+  }
+
+  it('the card shows the block: its hook row is not shown on its own; other hooks are', () => {
+    expect(shown(false, [tool, folded, other])).toEqual(['tool', 'hook:h2'])
+  })
+
+  it('where the card is not shown (final-only view), the hook row still explains the block', () => {
+    expect(shown(true, [tool, folded, other])).toEqual(['hook:h1', 'hook:h2'])
   })
 })
 
@@ -178,14 +277,17 @@ describe('useChatDisplay scroll anchors', () => {
     expect(stableAnchorKey({ kind: 'result', timestamp: 1 } as unknown as TimelineItem)).toBeNull()
   })
 
-  it('revealKey widens the render window to include a row above it', () => {
-    const scrollRef = makeScrollRef()
-    render(<Harness items={timeline(250, -1)} scrollRef={scrollRef} />)
-    expect(display.visibleStart).toBe(150)
-    act(() => display.revealKey('text:m20'))
-    expect(display.visibleStart).toBe(20)
+  it("revealAnchor scrolls a saved anchor's row into view, mounted or not", async () => {
+    render(<Harness items={timeline(5_000)} />)
+    await settle()
+    expect(rowTop(20)).toBeNull()
+    act(() => display.revealAnchor('text:m20'))
+    await settle()
+    expect(rowTop(20)).toBe(0)
     // A key not in the timeline changes nothing.
-    act(() => display.revealKey('text:nope'))
-    expect(display.visibleStart).toBe(20)
+    const top = layout.scroller()!.scrollTop
+    act(() => display.revealAnchor('text:nope'))
+    await settle()
+    expect(layout.scroller()!.scrollTop).toBe(top)
   })
 })

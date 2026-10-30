@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useReducer,
   useRef,
   useState,
@@ -19,13 +20,13 @@ import type {
   StopResult,
   UserContentBlock
 } from '@slayzone/terminal-contracts'
-import { userMessageText } from '@slayzone/terminal-contracts'
+import { chatCapabilitiesForMode, userMessageText } from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from './chat-prompts'
 import {
   initialState,
   reducer,
   type Action as ChatTimelineAction,
-  isInFlight,
+  isTurnOpen,
   type ChatTimelineState,
   type TimelineItem
 } from './chat-timeline'
@@ -252,7 +253,16 @@ function cancelFrame(id: number): void {
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const [state, dispatch] = useReducer(reducer, undefined, initialState)
+  // Whether the provider starts turns by itself decides what reads as working.
+  const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
+    initialState({ agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns })
+  )
+  useLayoutEffect(() => {
+    dispatch({
+      type: 'configure',
+      agentStartedTurns: chatCapabilitiesForMode(opts.mode).agentStartedTurns
+    })
+  }, [opts.mode])
   const lastSeqRef = useRef<number>(-1)
   // Newest live event applied (live events carry their own counter; see applyLive).
   const lastLiveRef = useRef<number>(0)
@@ -633,7 +643,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   return {
     state,
     timeline: state.timeline,
-    inFlight: isInFlight(state),
+    // A user's turn, or one the agent started by itself (TUI parity).
+    inFlight: isTurnOpen(state),
     hydrating,
     permissionMode: state.permissionMode,
     prompts: state.prompts,

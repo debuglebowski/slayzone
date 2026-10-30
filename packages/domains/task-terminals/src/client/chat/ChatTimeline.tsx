@@ -1,4 +1,4 @@
-import { memo, type Dispatch, type Key, type SetStateAction } from 'react'
+import { useContext, type Dispatch, type Key, type SetStateAction } from 'react'
 import { ArrowDown, Sparkles } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
@@ -26,11 +26,15 @@ import {
   type ChatTimelineState
 } from '@slayzone/terminal/client'
 import { ChatSearchBar } from './ChatSearchBar'
+import { ChatTurnOutline } from './ChatTurnOutline'
 import { renderTimelineItem } from './renderers'
+import { RowUiStateContext, collapseAllRows } from './row-ui-state'
 import { useCommandTaskActions } from './tool-cards/command-task-hooks'
-import { stableAnchorKey } from './useChatDisplay'
 import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
+import { VirtualTimelineRows } from './VirtualTimelineRows'
+import type { VirtualTimelineController } from './virtual-timeline'
+import type { TurnEntry } from './turn-outline'
 
 const SUGGESTED_PROMPTS = [
   'Explain what this codebase does',
@@ -48,13 +52,14 @@ export interface ChatTimelineProps {
   /** The agent is waiting on the user (a prompt) — no "working" indicator then. */
   awaitingUser: boolean
   appearance: AppearanceSettings
-  hiddenCount: number
-  PAGE_SIZE: number
-  setVisibleCount: Dispatch<SetStateAction<number>>
-  visibleItems: TimelineItem[]
-  visibleStart: number
-  itemKey: (item: TimelineItem, index: number) => Key
+  /** Every displayed row; only those in view are mounted (`virtual`). */
+  items: TimelineItem[]
+  virtual: VirtualTimelineController
+  /** `virtual.bindScroller`, as its own prop: what goes to `ref` must not be read off `virtual`. */
   scrollRef: CallbackRef<HTMLElement>
+  itemKey: (item: TimelineItem, index: number) => Key
+  /** The user turns, for the turn outline (`useTurnOutline`). */
+  turns?: readonly TurnEntry[]
   contentRef: CallbackRef<HTMLElement>
   isAtBottom: boolean
   scrollToBottom: () => void
@@ -72,7 +77,7 @@ export interface ChatTimelineProps {
 /**
  * Everything above the composer: the optional override-notice banner, the
  * Cmd+F search bar, the floating background-jobs banner, and the timeline scroll
- * region (paginated item list + typing indicator) wrapped in its right-click
+ * region (virtualized item list + typing indicator) wrapped in its right-click
  * context menu, plus the Hydrating / Empty overlays and jump-to-latest button.
  *
  * Purely presentational — all state + handlers are threaded in from ChatPanel.
@@ -86,13 +91,11 @@ export function ChatTimeline({
   inFlight,
   awaitingUser,
   appearance,
-  hiddenCount,
-  PAGE_SIZE,
-  setVisibleCount,
-  visibleItems,
-  visibleStart,
-  itemKey,
+  items,
+  virtual,
   scrollRef,
+  itemKey,
+  turns,
   contentRef,
   isAtBottom,
   scrollToBottom,
@@ -108,10 +111,11 @@ export function ChatTimeline({
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const commandTasks = useCommandTaskActions()
+  const rowUiState = useContext(RowUiStateContext)
   const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-4xl'
   // A row that streams already says what the agent does ("Thinking… 3s", the
   // reply growing): no second indicator under it.
-  const tail = visibleItems[visibleItems.length - 1]
+  const tail = items[items.length - 1]
   const tailStreaming =
     (tail?.kind === 'text' || tail?.kind === 'thinking') && tail.stream === 'open'
   return (
@@ -159,24 +163,20 @@ export function ChatTimeline({
           <div className="relative flex-1 min-h-0">
             <div
               ref={scrollRef}
-              className="h-full overflow-y-auto"
+              // The virtualizer keeps the view in place as rows above it get
+              // measured; the browser's own scroll anchoring would fight it.
+              className="h-full overflow-y-auto [overflow-anchor:none]"
               data-testid="chat-timeline-scroller"
             >
               <div ref={contentRef} className="min-h-full">
                 {!hydrating && !(isEmpty && !inFlight) && (
-                  <div className={cn('mx-auto w-full pt-4', widthClass)}>
-                    {hiddenCount > 0 && (
-                      <div className="flex justify-center py-2">
-                        <button
-                          onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-                          className="text-xs text-muted-foreground hover:text-foreground rounded-md px-3 py-1 border border-border/50 hover:bg-muted/60 transition-colors"
-                        >
-                          Show {Math.min(PAGE_SIZE, hiddenCount)} earlier
-                          {hiddenCount > PAGE_SIZE ? ` (${hiddenCount} hidden)` : ''}
-                        </button>
-                      </div>
-                    )}
-                    <TimelineRows items={visibleItems} start={visibleStart} itemKey={itemKey} />
+                  <div className={cn('mx-auto w-full', widthClass)}>
+                    <VirtualTimelineRows
+                      controller={virtual}
+                      items={items}
+                      itemKey={itemKey}
+                      renderRow={renderTimelineItem}
+                    />
                     {inFlight && !awaitingUser && !tailStreaming && (
                       <TypingIndicator label={deriveLoadingLabel(state)} />
                     )}
@@ -186,6 +186,7 @@ export function ChatTimeline({
             </div>
 
             {/* Overlays — sibling of the scroll viewport so they own their own layout */}
+            {!hydrating && turns && <ChatTurnOutline turns={turns} virtual={virtual} />}
             {hydrating && <HydratingState />}
             {!hydrating && isEmpty && !inFlight && (
               <EmptyState
@@ -217,7 +218,13 @@ export function ChatTimeline({
           <ContextMenuItem onSelect={search.requestOpen}>
             {withShortcut('Find in chat…', formatKeysForDisplay('mod+f'))}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => setCollapseSignal((n) => n + 1)}>
+          <ContextMenuItem
+            onSelect={() => {
+              // Rows scrolled out of view are closed too, when they come back.
+              collapseAllRows(rowUiState, items, itemKey)
+              setCollapseSignal((n) => n + 1)
+            }}
+          >
             Collapse all expanded blocks
           </ContextMenuItem>
           <ContextMenuSub>
@@ -253,43 +260,6 @@ export function ChatTimeline({
     </>
   )
 }
-
-/**
- * The rows. Its props change only when the rows do — never for a stream delta
- * (deltas live outside `timeline`, see `useLiveBlock`) — so a delta re-renders
- * none of them but the one that streams. `memo` keeps that true with or
- * without the compiler's caching of this element.
- */
-const TimelineRows = memo(function TimelineRows({
-  items,
-  start,
-  itemKey
-}: {
-  items: TimelineItem[]
-  start: number
-  itemKey: (item: TimelineItem, index: number) => Key
-}) {
-  return (
-    <>
-      {items.map((item, i) => {
-        const index = start + i
-        const rendered = renderTimelineItem(item, index)
-        if (rendered === null) return null
-        const key = itemKey(item, index)
-        return (
-          <div
-            key={key}
-            data-index={index}
-            data-item-key={key}
-            data-anchor-key={stableAnchorKey(item) ?? undefined}
-          >
-            {rendered}
-          </div>
-        )
-      })}
-    </>
-  )
-})
 
 function HydratingState() {
   return (
@@ -327,7 +297,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
 
 function TypingIndicator({ label }: { label?: string | null }) {
   return (
-    <div className="px-4 py-2 flex gap-3 items-center">
+    <div data-testid="chat-working-indicator" className="px-4 py-2 flex gap-3 items-center">
       <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
         <Sparkles className="size-3.5 animate-pulse" />
       </div>

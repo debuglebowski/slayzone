@@ -238,7 +238,11 @@ export function transportHarness(
       insert: async (_tab, seq, event) => {
         h.rows.push({ seq, event })
         return 'inserted'
-      }
+      },
+      readRange: async (_tab, after, before) =>
+        [...(opts.history ?? []), ...h.rows]
+          .filter((r) => r.seq > after && r.seq < before)
+          .sort((a, b) => a.seq - b.seq)
     },
     ...(opts.timings ? { watchdogTimings: opts.timings } : {})
   })

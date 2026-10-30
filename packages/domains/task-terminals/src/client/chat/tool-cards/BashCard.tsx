@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import { Terminal as TerminalIcon } from 'lucide-react'
 import { Button, cn, useNow } from '@slayzone/ui'
 import type { CommandTaskView } from '@slayzone/terminal/client'
-import { extractRawText, LinkText, ToolShell, type ToolProps } from './card-shell'
+import { LinkText, ToolShell, resultTextOf, type ToolProps } from './card-shell'
 import { useCommandTaskActions, useCommandTaskOutput } from './command-task-hooks'
 
 /** What the card says about the command's task (`data-task-state`). */
@@ -43,7 +43,7 @@ export function BashCard({ invocation, timestamp }: ToolProps) {
   const now = useNow(1000, { enabled: running })
   const startedAt = task?.startedAt ?? timestamp
 
-  const resultText = extractRawText(invocation.result?.rawContent)
+  const resultText = resultTextOf(invocation)
   // A background command's tool result only says it went to the background:
   // its output is the one read from the CLI when it ended.
   const finalOutput = task?.backgrounded ? (task.finalOutput?.output ?? resultText) : resultText

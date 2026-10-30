@@ -63,10 +63,32 @@ function flashRow(key: string): void {
 }
 
 /**
+ * The sub-agent rows a sub-agent's call sits in, outermost first (its card is
+ * inside the outermost one, a row of the timeline). Null when one is missing.
+ */
+function subAgentsAround(
+  timeline: readonly TimelineItem[],
+  parentToolUseId: string | undefined
+): Array<Extract<TimelineItem, { kind: 'sub-agent' }>> | null {
+  const chain: Array<Extract<TimelineItem, { kind: 'sub-agent' }>> = []
+  for (let parent = parentToolUseId; parent != null; ) {
+    const agent = timeline.find(
+      (it): it is Extract<TimelineItem, { kind: 'sub-agent' }> =>
+        it.kind === 'sub-agent' && it.toolUseId === parent
+    )
+    if (!agent || chain.includes(agent)) return null
+    chain.unshift(agent)
+    parent = agent.parentToolUseId
+  }
+  return chain
+}
+
+/**
  * The end of a turn that changed files: "N files changed", opening to the list.
  * A file shows the card that made its first change in the turn (scrolled to and
- * opened); a sub-agent's change, or one whose card is hidden (final replies
- * only), opens the files-changed panel at that file instead.
+ * opened) — for a sub-agent's change, inside its sub-agent row (revealed and
+ * opened down to the card). One whose card is hidden (final replies only), or
+ * whose sub-agent row is unknown, opens the files-changed panel at that file.
  */
 export function FilesChangedRow({ item }: { item: FilesChangedItem }) {
   const { cwd, timeline, finalOnly, filesPanel, collapseSignal } = useChatView()
@@ -81,11 +103,15 @@ export function FilesChangedRow({ item }: { item: FilesChangedItem }) {
   const show = (file: TurnFileChange): void => {
     const id = file.toolUseIds[0]
     const tool = timeline.find((it) => it.kind === 'tool' && it.invocation.id === id)
-    const key = tool ? stableAnchorKey(tool) : null
-    if (!tool || !key || tool.parentToolUseId != null || finalOnly) {
+    const around = tool && !finalOnly ? subAgentsAround(timeline, tool.parentToolUseId) : null
+    // The timeline row the card is in: its own, or its outermost sub-agent's.
+    const host = around ? (around[0] ?? tool) : undefined
+    const key = host ? stableAnchorKey(host) : null
+    if (!around || !key) {
       filesPanel?.open(file.path)
       return
     }
+    for (const agent of around) focus?.request(agent.toolUseId)
     focus?.request(id)
     reveal(key, { align: 'center' })
     flashRow(key)

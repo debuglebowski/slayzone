@@ -148,7 +148,9 @@ function harness(
         seen.add(seq)
         h.rows.push({ seq, event })
         return 'inserted'
-      }
+      },
+      readRange: async (_tab, after, before) =>
+        h.rows.filter((r) => r.seq > after && r.seq < before).sort((a, b) => a.seq - b.seq)
     },
     ...(opts.alive ? { isProcessAlive: opts.alive } : {}),
     ...(opts.timings ? { watchdogTimings: opts.timings } : {})
@@ -384,7 +386,7 @@ test('streaming fragments are live only; one saved event per block; the replay s
   line(f, se({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'lo' } }))
   await wait(30)
   expect(h.rows.some((r) => r.event.kind.startsWith('stream-'))).toBe(false)
-  const replay = mgr.getReplay(OPTS.tabId, -1)
+  const replay = await mgr.getReplay(OPTS.tabId, -1)
   expect(replay.live.events.at(-1)).toMatchObject({ kind: 'stream-block-delta', text: 'Hello' })
   expect(replay.live.afterSeq).toBe(replay.events.at(-1)!.seq)
   // Claude's consolidated block, then the stop.
@@ -393,7 +395,7 @@ test('streaming fragments are live only; one saved event per block; the replay s
   line(f, se({ type: 'message_stop' }))
   await wait(30)
   expect(h.rows.filter((r) => r.event.kind === 'assistant-text')).toHaveLength(1)
-  expect(mgr.getReplay(OPTS.tabId, -1).live.events).toEqual([])
+  expect((await mgr.getReplay(OPTS.tabId, -1)).live.events).toEqual([])
   const live = h.broadcasts.filter((b) => b.live !== undefined)
   expect(live.every((b, i) => i === 0 || b.live! > live[i - 1].live!)).toBe(true)
 })

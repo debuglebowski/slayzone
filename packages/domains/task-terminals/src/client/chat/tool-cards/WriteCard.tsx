@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { FilePlus } from 'lucide-react'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
+import { useRowUiState } from '../row-ui-state'
 import { claudeEditResultToFileDiff } from '../claude-patch-to-filediff'
 import { ToolShell, shortenPath, type ToolProps } from './card-shell'
 import { CardBadge, FileLink } from './links'
@@ -25,7 +25,7 @@ export function WriteCard({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { file_path?: string; content?: string } | null
   const result = (invocation.result?.structured ?? null) as WriteResult | null
   const { fileEditsOpenByDefault } = useChatView()
-  const [showAll, setShowAll] = useState(false)
+  const [showAll, setShowAll] = useRowUiState('write-all', false)
   const path = result?.filePath ?? input?.file_path ?? ''
   const content = result?.content ?? input?.content ?? ''
   const lines = (content.endsWith('\n') ? content.slice(0, -1) : content).split('\n')

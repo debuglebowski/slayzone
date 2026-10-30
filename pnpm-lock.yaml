@@ -2695,6 +2695,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@tanstack/virtual-core':
+        specifier: 3.17.11
+        version: 3.17.11
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
@@ -3503,6 +3506,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../../domains/terminal-contracts
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3

@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@slayzone/platform": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
@@ -18,6 +19,7 @@
     "./mock-electron": "./mock-electron.ts",
     "./test-ca": "./test-ca.ts",
     "./fake-claude": "./fake-claude/index.ts",
+    "./chat-long-session": "./chat-long-session/index.ts",
     "./known-bug": "./known-bug.ts"
   }
 }

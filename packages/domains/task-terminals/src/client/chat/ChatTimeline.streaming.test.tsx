@@ -108,6 +108,9 @@ const { afterEach, describe, expect, it } = await import('vitest')
 const terminal = await import('@slayzone/terminal/client')
 const { reducer, initialState } = await import('@slayzone/terminal/reducer')
 const { ChatTimeline } = await import('./ChatTimeline')
+const { useFollowBottom } = await import('./useFollowBottom')
+const { useVirtualTimeline } = await import('./useVirtualTimeline')
+const { installTimelineLayout } = await import('./__tests__/timeline-layout')
 const { ChatViewContext } = await import('./ChatViewContext')
 const { CommandTaskContext } = await import('./tool-cards')
 import type { AgentEvent } from '@slayzone/terminal-contracts'
@@ -170,6 +173,8 @@ function Harness({
   )
   const noop = useCallback(() => {}, [])
   const asyncNoop = useCallback(async () => {}, [])
+  const follow = useFollowBottom()
+  const virtual = useVirtualTimeline(follow)
   return (
     <ChatViewContext.Provider value={view}>
       <terminal.LiveBlockStoreContext.Provider value={store}>
@@ -182,14 +187,11 @@ function Harness({
             inFlight
             awaitingUser={false}
             appearance={{ chatWidth: 'narrow' } as never}
-            hiddenCount={0}
-            PAGE_SIZE={500}
-            setVisibleCount={noop}
-            visibleItems={state.timeline}
-            visibleStart={0}
+            items={state.timeline}
+            virtual={virtual}
+            scrollRef={virtual.bindScroller}
             itemKey={itemKey}
-            scrollRef={noop as never}
-            contentRef={noop as never}
+            contentRef={follow.contentRef}
             isAtBottom
             scrollToBottom={noop}
             sendMessage={asyncNoop}
@@ -229,9 +231,14 @@ function longSession(n: number): ChatTimelineState {
   return reducer(initialState(), { type: 'events', events })
 }
 
+// A viewport tall enough for every row of these sessions: the virtualized list
+// mounts them all, as the paginated one did.
+let layout = installTimelineLayout({ viewport: 100_000, rowHeight: () => 40 })
 afterEach(() => {
   cleanup()
   rendered.reset()
+  layout.restore()
+  layout = installTimelineLayout({ viewport: 100_000, rowHeight: () => 40 })
 })
 
 describe('a stream delta re-renders only the row that streams', () => {
@@ -270,7 +277,15 @@ describe('a stream delta re-renders only the row that streams', () => {
     expect(rendered.textRows.get('m-stream')).toBeGreaterThanOrEqual(DELTAS)
     expect(rendered.textRows.get('m-stream')).toBeLessThanOrEqual(2 * DELTAS)
     // The rest of the timeline never ran.
-    for (const name of ['TimelineRows', 'UserMessage', 'ToolRow', 'BashCard', 'ToolShell']) {
+    for (const name of [
+      'VirtualTimelineRows',
+      'TimelineRow',
+      'RowContent',
+      'UserMessage',
+      'ToolRow',
+      'BashCard',
+      'ToolShell'
+    ]) {
       expect(rendered.counts.get(name) ?? 0, name).toBe(0)
     }
     // And the live text is on screen.
