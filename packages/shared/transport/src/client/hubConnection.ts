@@ -37,6 +37,32 @@ export function toHubConnection(state: ConnectionState): HubConnection {
   }
 }
 
+/**
+ * Call `onReopen` each time a socket opens after not being open. `dropped` is
+ * true when it had been open before (what it served may have missed pushes while
+ * down), false on its first open. The state it starts in reports nothing.
+ * Returns the unsubscribe.
+ */
+export function watchReopen(
+  source: ConnectionStateSource,
+  onReopen: (dropped: boolean) => void
+): () => void {
+  let wasOpen = source.get().state === 'pending'
+  let everOpen = wasOpen
+  const subscription = source.subscribe({
+    next: (state) => {
+      const open = state.state === 'pending'
+      if (open && !wasOpen) {
+        const dropped = everOpen
+        everOpen = true
+        onReopen(dropped)
+      }
+      wasOpen = open
+    }
+  })
+  return () => subscription.unsubscribe()
+}
+
 /** Live `toHubConnection` of a socket's state stream. */
 export function useConnectionState(source: ConnectionStateSource): HubConnection {
   const subscribe = useMemo(
@@ -52,7 +78,7 @@ export function useConnectionState(source: ConnectionStateSource): HubConnection
 }
 
 /** A state that never changes, read for a hub the federation does not list. */
-const NO_SOCKET: ConnectionStateSource = behaviorSubject<ConnectionState>({
+export const NO_SOCKET: ConnectionStateSource = behaviorSubject<ConnectionState>({
   type: 'state',
   state: 'idle',
   error: null

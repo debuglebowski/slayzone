@@ -11,6 +11,8 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { FolderPlus } from 'lucide-react'
 import type { Project } from '@slayzone/projects-contracts'
+import { useHubBadge, useHubIdForProject } from '@slayzone/transport/client'
+import { HubDot, HubTooltipSuffix } from './HubDot'
 import { ProjectAvatar } from './ProjectAvatar'
 
 interface ProjectItemProps {
@@ -46,6 +48,7 @@ export function ProjectItem({
     id: sortableId ?? project.id,
     data: dragData
   })
+  const hubBadge = useHubBadge(useHubIdForProject(project.id))
 
   const style = {
     // Stay put while dragging — the DragOverlay renders the moving copy and the
@@ -84,8 +87,10 @@ export function ProjectItem({
             <ContextMenuTrigger asChild>
               <button
                 onClick={onClick}
+                data-hub-unreachable={hubBadge?.unreachable ? '' : undefined}
                 className={cn(
                   'relative w-10 h-10 rounded-lg transition-all',
+                  hubBadge?.unreachable && 'opacity-40 grayscale',
                   // Selected state shown by the Discord-style left pill (above),
                   // not a ring. No ring-offset on merge — offset pushes the ring
                   // outside the narrow rail and gets clipped to "corners".
@@ -97,6 +102,7 @@ export function ProjectItem({
                 {...listeners}
               >
                 <ProjectAvatar project={project} className="w-full h-full rounded-lg" />
+                {hubBadge && <HubDot badge={hubBadge} />}
                 {mergeHighlight && (
                   <>
                     <span className="absolute inset-0 rounded-lg bg-primary/40" />
@@ -120,7 +126,10 @@ export function ProjectItem({
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
-        <TooltipContent side="right">{project.name}</TooltipContent>
+        <TooltipContent side="right">
+          {project.name}
+          {hubBadge && <HubTooltipSuffix badge={hubBadge} />}
+        </TooltipContent>
       </Tooltip>
       {idleCount > 0 && (
         <span

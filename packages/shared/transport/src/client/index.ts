@@ -28,8 +28,15 @@ export {
   toHubConnection,
   useConnectionState,
   useHubConnection,
+  watchReopen,
   type HubConnection
 } from './hubConnection'
+export {
+  hubBadgeColor,
+  useHubBadge,
+  HUB_UNREACHABLE_GRACE_MS,
+  type HubBadge
+} from './hubBadge'
 export { electronBootstrap } from './electron-bootstrap'
 export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'

@@ -122,15 +122,18 @@ async function readOwner(
   throw new Error(`hub owner file not usable within ${timeoutMs}ms: ${file}`)
 }
 
-/** Spawn the sidecar bin as a second, standalone hub on its own port + store. */
-async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
+/**
+ * Spawn the sidecar bin as a second, standalone hub on its own port + store.
+ * `port` restarts a stopped hub where it was: same address, same store, same owner.
+ */
+async function spawnSecondHub(storeDir: string, opts: { port?: number } = {}): Promise<SecondHub> {
   if (!fs.existsSync(HUB_BIN)) throw new Error(`hub bin missing: ${HUB_BIN} (run pnpm build)`)
   // The hub's own state lives in `<storeDir>/hub`, BESIDE the computer's dirs and
   // the project dirs these specs create — never above them: the owner gate refuses
   // any path inside the hub's state directory as a project path or pty cwd.
   const hubRoot = path.join(storeDir, 'hub')
   fs.mkdirSync(hubRoot, { recursive: true })
-  const port = await freePort()
+  const port = opts.port ?? (await freePort())
   const electronPath = require('electron') as unknown as string
   // CRITICAL: strip inherited SLAYZONE_*/ELECTRON_* first. When e2e runs from a
   // supervised SlayZone terminal, the parent leaks SLAYZONE_ROOT (the real dev
@@ -596,6 +599,82 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       if (launched) await launched.close()
       // Computer before hub: it re-dials on disconnect, so killing the hub first
       // leaves it reconnecting against a dead port for the whole teardown.
+      if (hubComputer) await hubComputer.stop()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
+  base('a hub that was down when the app booted shows its projects once it is up', async () => {
+    base.setTimeout(180_000)
+
+    // The app's first load of a remote hub's board fails when the hub does not
+    // answer within the connect deadline (`HUB_CONNECT_DEADLINE_MS`). The hub
+    // coming up later must bring its projects into the rail by itself — not only
+    // once something on that hub changes.
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remoteHubUrl = hub.url
+      const port = hub.port
+      const token = hub.token
+      hubComputer = await attachDefaultComputer(hub, secondStore)
+      await withHubClient(remoteHubUrl, (c) =>
+        c.projects.create.mutate({ name: 'Wakeup-P', color: '#22c55e' })
+      )
+      // Down before the app boots.
+      await hubComputer.stop()
+      hubComputer = null
+      await hub.stop()
+      hub = null
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-late-hub',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify(
+              {
+                server_mode: 'local',
+                multi_hub: true,
+                hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
+                default_hub_id: 'local'
+              },
+              null,
+              2
+            )
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', token)
+
+      // Outlast the connect deadline, so the boot load of the hub's board has failed.
+      await page.waitForTimeout(20_000)
+      await expect(projectBlob(page, 'WA')).toHaveCount(0)
+
+      hub = await spawnSecondHub(secondStore, { port })
+      await waitForHubHealth(hub.port)
+      // Reconnect backoff tops out at 30s.
+      const tile = projectBlob(page, 'WA')
+      await expect(tile).toBeVisible({ timeout: 60_000 })
+
+      // Two hubs: the tile says which hub it lives on, and greys out while that
+      // hub is unreachable.
+      await expect(tile.locator('[data-hub-badge]')).toHaveAttribute('data-hub-badge', 'B')
+      await expect(tile).not.toHaveAttribute('data-hub-unreachable')
+      await hub.stop()
+      hub = null
+      await expect(tile).toHaveAttribute('data-hub-unreachable', '', { timeout: 20_000 })
+    } finally {
+      if (launched) await launched.close()
       if (hubComputer) await hubComputer.stop()
       if (hub) await hub.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })

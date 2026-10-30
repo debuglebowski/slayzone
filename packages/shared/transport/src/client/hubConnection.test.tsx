@@ -16,6 +16,7 @@ import {
   toHubConnection,
   useConnectionState,
   useHubConnection,
+  watchReopen,
   type HubConnection
 } from './hubConnection'
 import { closeHubClient } from './runtime'
@@ -141,5 +142,53 @@ describe('useHubConnection', () => {
       </FederationProvider>
     )
     expect(screen.getByText('no hub')).toBeTruthy()
+  })
+})
+
+describe('watchReopen', () => {
+  const idle: State = { type: 'state', state: 'idle', error: null }
+  const connecting: State = { type: 'state', state: 'connecting', error: null }
+  const failed: State = { type: 'state', state: 'connecting', error: closedError }
+  const open: State = { type: 'state', state: 'pending', error: null }
+
+  function watch(initial: State) {
+    const source = behaviorSubject<State>(initial)
+    const calls: boolean[] = []
+    const stop = watchReopen(source, (dropped) => calls.push(dropped))
+    return { source, calls, stop }
+  }
+
+  it('says nothing about the state it starts in', () => {
+    expect(watch(open).calls).toEqual([])
+  })
+
+  it('reports a first open as not dropped', () => {
+    const { source, calls } = watch(idle)
+    source.next(connecting)
+    source.next(failed)
+    source.next(open)
+    expect(calls).toEqual([false])
+  })
+
+  it('reports an open after the socket was lost as dropped', () => {
+    const { source, calls } = watch(connecting)
+    source.next(open)
+    source.next(failed)
+    source.next(failed)
+    source.next(open)
+    expect(calls).toEqual([false, true])
+  })
+
+  it('ignores repeats of the open state', () => {
+    const { source, calls } = watch(open)
+    source.next(open)
+    expect(calls).toEqual([])
+  })
+
+  it('stops reporting once stopped', () => {
+    const { source, calls, stop } = watch(connecting)
+    stop()
+    source.next(open)
+    expect(calls).toEqual([])
   })
 })

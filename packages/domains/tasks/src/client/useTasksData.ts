@@ -4,7 +4,8 @@ import {
   electronBootstrap,
   useSubscription,
   useFederationOrNull,
-  useHubOwnershipStore
+  useHubOwnershipStore,
+  watchReopen
 } from '@slayzone/transport/client'
 import {
   useTRPC,
@@ -373,6 +374,11 @@ export function useTasksData(): UseTasksDataReturn {
   // client, stash into the extra refs, recompose, and subscribe to its
   // tasks-changed so external writes on that hub surface. No-op with a single
   // hub (extraHubs empty) → single-hub path is byte-identical.
+  //
+  // A load fails when the hub is unreachable past the connect deadline (e.g. down
+  // at boot) or drops mid-request; it is retried when the hub's socket opens
+  // again. After a drop the hub is loaded again regardless: what it pushed while
+  // down never arrives.
   useEffect(() => {
     if (!fed || extraHubs.length === 0) return
     let cancelled = false
@@ -385,7 +391,12 @@ export function useTasksData(): UseTasksDataReturn {
     for (const id of [...extraGroupsRef.current.keys()]) {
       if (!liveHubIds.has(id)) extraGroupsRef.current.delete(id)
     }
+    const failedHubIds = new Set<string>()
     const loadHub = (hubId: string, client: TasksTrpcClient): void => {
+      failedHubIds.delete(hubId)
+      const fail = (): void => {
+        failedHubIds.add(hubId)
+      }
       void client.task.loadBoardData
         .query()
         .then((d) => {
@@ -393,7 +404,7 @@ export function useTasksData(): UseTasksDataReturn {
           extraBoardsRef.current.set(hubId, d as BoardData)
           recomposeBoards()
         })
-        .catch(() => undefined)
+        .catch(fail)
       void client.projectGroups.list
         .query()
         .then((groups) => {
@@ -401,13 +412,20 @@ export function useTasksData(): UseTasksDataReturn {
           extraGroupsRef.current.set(hubId, groups as ProjectGroup[])
           recomposeGroups()
         })
-        .catch(() => undefined)
+        .catch(fail)
     }
     for (const hub of extraHubs) {
       const resolved = fed.resolve(hub.id)
       if (!resolved) continue
       const client = tasksClientOf(resolved.ws)
       loadHub(hub.id, client)
+      unsubs.push(
+        watchReopen(resolved.ws.wsClient.connectionState, (dropped) => {
+          if (!dropped && !failedHubIds.has(hub.id)) return
+          loadHub(hub.id, client)
+          if (dropped) void refreshTaskScopedQueries(resolved.queryClient, null)
+        })
+      )
       try {
         const sub = client.notify.onTasksChanged.subscribe(undefined, {
           onData: (event: TasksChangedEvent | undefined) => {

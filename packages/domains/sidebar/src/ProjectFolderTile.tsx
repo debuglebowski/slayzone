@@ -14,6 +14,8 @@ import {
   TooltipContent
 } from '@slayzone/ui'
 import type { Project, ProjectGroup } from '@slayzone/projects-contracts'
+import { useHubBadge, useHubIdForProject } from '@slayzone/transport/client'
+import { HubDot, HubTooltipSuffix } from './HubDot'
 import { ProjectAvatar } from './ProjectAvatar'
 import { ProjectItem } from './ProjectItem'
 
@@ -97,6 +99,10 @@ export function ProjectFolderTile({
   }
   const label = group.name.trim() || 'Folder'
   const idleTotal = members.reduce((n, m) => n + (idleByProject?.get(m.id) ?? 0), 0)
+  // A folder lives on one hub (folders are per hub), so any member names it. The
+  // open folder leaves it to the member tiles.
+  const memberHubBadge = useHubBadge(useHubIdForProject(members[0]?.id))
+  const hubBadge = collapsed ? memberHubBadge : null
 
   if (isDragging) {
     return (
@@ -114,8 +120,10 @@ export function ProjectFolderTile({
             <button
               onClick={onToggle}
               aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${label}`}
+              data-hub-unreachable={hubBadge?.unreachable ? '' : undefined}
               className={cn(
                 'relative rounded-lg transition-all',
+                hubBadge?.unreachable && 'opacity-40 grayscale',
                 // Collapsed folder is a touch larger than a project tile; the
                 // expanded header keeps the regular 40px footprint.
                 collapsed ? 'w-12 h-12' : 'w-10 h-10',
@@ -125,7 +133,10 @@ export function ProjectFolderTile({
               {...listeners}
             >
               {collapsed ? (
-                <FolderMiniGrid members={members} />
+                <>
+                  <FolderMiniGrid members={members} />
+                  {hubBadge && <HubDot badge={hubBadge} />}
+                </>
               ) : (
                 <div className="flex w-full h-full items-center justify-center rounded-lg text-muted-foreground">
                   <Folder className="size-5" />
@@ -151,7 +162,10 @@ export function ProjectFolderTile({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      <TooltipContent side="right">{label}</TooltipContent>
+      <TooltipContent side="right">
+        {label}
+        {hubBadge && <HubTooltipSuffix badge={hubBadge} />}
+      </TooltipContent>
     </Tooltip>
   )
 
