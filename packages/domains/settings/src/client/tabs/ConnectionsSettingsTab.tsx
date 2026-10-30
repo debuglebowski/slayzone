@@ -1,3 +1,4 @@
+import { FlaskConical } from 'lucide-react'
 import { HubsSettingsTab } from './HubsSettingsTab'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
@@ -20,6 +21,16 @@ export function ConnectionsSettingsTab() {
         title="Connections"
         description="Where SlayZone's backend runs, and which machines execute its work. Each hub owns its own projects and tasks, shown together in one rail — pick a default for new projects. Computers are the machines a hub dials work out to; enroll them on the hub they belong to, then bind a project or task to one to run its work there."
       />
+      <div
+        role="note"
+        className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground"
+      >
+        <FlaskConical className="mt-px size-3.5 shrink-0" />
+        <p>
+          Hubs and computers are experimental. Their configuration and behavior might change in
+          future releases.
+        </p>
+      </div>
       <HubsSettingsTab />
     </div>
   )
