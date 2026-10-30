@@ -510,7 +510,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
  * `updateTaskOp` emits `db:tasks:update:done`, which triggers a GitHub/Linear
  * push — wrong for a machine-written conversation id. `notifyRenderer()` still
  * refreshes the renderer via `tasks:changed`. The per-mode deep-merge inside
- * `updateTask` preserves existing `flags`/`lastPtyKilledAt`. Always overwrites
+ * `updateTask` preserves existing `flags`. Always overwrites
  * `conversationId`: the CLI mints a fresh id on resume, so the latest is right.
  *
  * Best-effort — on any failure the adapter detection fallbacks still capture

@@ -212,7 +212,6 @@ import { createComputerAuthAdapters } from './computer-auth.js'
 import { createComputerPlacement } from './computer-placement.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
-import { wireHostKillStamp } from './host-kill.js'
 import { wireIdleClose } from './idle-close.js'
 import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
@@ -732,10 +731,6 @@ export function composeServer(opts: {
   // `listAutoRestoreTasks` is always empty and a restart lands every task on the
   // Start gate. See ./tab-flag-recorders.ts.
   wireTabFlagRecorders(db)
-  // Host-kill stamp: `onHostKillHandler` fires in whichever process owns the pty
-  // sessions, which is this one. The Electron host used to register it against its
-  // own (empty) session registry, so the stamp was never written in local mode.
-  wireHostKillStamp(db)
   // Pty enricher: decorates PtyInfo with task/tab context for the renderer's
   // session views. Registered on the host before, against a pty runtime it no
   // longer owns — the enricher is consulted where the sessions are, i.e. here.

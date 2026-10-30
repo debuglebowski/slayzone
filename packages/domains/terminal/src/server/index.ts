@@ -163,7 +163,6 @@ export {
   // pty-manager (electron-free) but was exported only from the electron barrel,
   // so only the host could wire it — against a session registry the host no
   // longer owns. The side-car owns the sessions, so it must be able to import it.
-  setOnHostKillHandler,
   // E2E seam: drives a synthetic pty state transition. Must be reachable from the
   // SERVER barrel because the listeners that react to it (attention flag,
   // task auto-move) live in the side-car — firing it in the host reaches nothing.
@@ -191,7 +190,7 @@ export {
   // version-gated notify.sh installer just-in-time, so a hook-driven spawn can't
   // fire through a stale cross-release-channel copy left on disk between boots.
   setReinstallHooks,
-  // The real "task reached terminal status" teardown (host-kill hook + kill
+  // The real "task reached terminal status" teardown (kill
   // PTYs + kill chat transports). Aliased to avoid colliding with the seam
   // `onTaskReachedTerminal` (task-events) exported above; the side-car wires
   // THIS as the seam handler so status→done actually tears down sessions in

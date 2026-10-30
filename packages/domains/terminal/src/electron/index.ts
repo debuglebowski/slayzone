@@ -37,7 +37,6 @@ export {
   subscribeToStateChange,
   onPtyInputSubmit,
   redirectSessionWindow,
-  setOnHostKillHandler,
   setConversationHealer,
   type ConversationHealer,
   type ConversationHealRequest,

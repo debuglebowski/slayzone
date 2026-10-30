@@ -2160,10 +2160,6 @@ app
     setOnTaskReachedTerminalHandler(onTaskReachedTerminal)
     logBoot('task runtime adapters configured')
 
-    // The host-kill timestamp is stamped by the SIDE-CAR (host-kill.ts), which
-    // owns the pty sessions `onHostKillHandler` fires from. The host registered it
-    // against its own empty session registry, so it never ran in local mode.
-
     // Register domain handlers (inject ipcMain and db)
     const notifyTasksChanged = (): void => {
       notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source

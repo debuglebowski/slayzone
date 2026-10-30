@@ -107,7 +107,6 @@ run_harness packages/apps/hub/src/supervised-bootstrap.test.ts
 run_harness packages/apps/hub/src/diagnostics-retention.test.ts
 # Host-kill stamp: fires where the pty sessions are (the side-car), not on the
 # host, whose session registry has been empty since slice 9.
-run_harness packages/apps/hub/src/host-kill.test.ts
 # Chat agents' state changes reach clients on pty.onStateChange (chat session id, same
 # shape, owner-gated) — before, only the hub's own listeners saw them.
 run_harness packages/apps/hub/src/chat-state-push.test.ts
@@ -215,7 +214,6 @@ run_harness packages/apps/hub/src/web-sessions.test.ts
 # Password sign-in off (T-10): every password route 403s with the switch code before the
 # gate; break-glass (O-9) opens/closes with the switch over real hub-auth + app DB.
 run_harness packages/apps/hub/src/password-switch.test.ts
-run_harness packages/domains/task-contracts/src/revive-decision.test.ts
 run_harness packages/domains/task-contracts/src/provider-config-history.test.ts
 run_harness packages/domains/task-contracts/src/conversation-heal.test.ts
 run_harness packages/domains/task/src/client/card-water-fill.test.ts

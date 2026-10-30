@@ -12,19 +12,36 @@ import type { Task } from '@slayzone/task-contracts'
 
 const updateFn = vi.fn<(input: unknown) => Promise<Task>>()
 const sub = { subscriptionOptions: () => ({}) }
+// The respawn subscription hands its onData to useSubscription — capture it so a
+// test can fire a `pty:respawn-suggested` at the hook.
+let respawnSuggested: ((ev: { taskId: string }) => Promise<void>) | null = null
+const respawnSub = {
+  subscriptionOptions: (_: unknown, opts: { onData: typeof respawnSuggested }) => ({
+    respawn: opts.onData
+  })
+}
+const trpcClient = {
+  pty: {
+    exists: { query: vi.fn(async () => false) },
+    kill: { mutate: vi.fn(async () => undefined) }
+  },
+  task: { resetConversation: { mutate: vi.fn(async () => ({}) as Task) } }
+}
 const trpc = {
   task: {
     update: { mutationOptions: () => ({ mutationFn: (input: unknown) => updateFn(input) }) }
   },
   menu: { onSyncSessionId: sub },
-  pty: { onRespawnSuggested: sub, onEnsureAlive: sub }
+  pty: { onRespawnSuggested: respawnSub, onEnsureAlive: sub }
 }
 // The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
 vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => trpc,
-  useTRPCClient: () => ({}),
-  useSubscription: () => undefined
+  useTRPCClient: () => trpcClient,
+  useSubscription: (opts: { respawn?: typeof respawnSuggested }) => {
+    if (opts.respawn) respawnSuggested = opts.respawn
+  }
 }))
 vi.mock('@slayzone/terminal', () => ({ markSkipCache: vi.fn() }))
 vi.mock('@slayzone/task-terminals', () => ({ markForceStart: vi.fn(), requestAgentStart: vi.fn() }))
@@ -49,6 +66,8 @@ const settle = (): Promise<void> => act(() => new Promise<void>((r) => setTimeou
 afterEach(() => {
   cleanup()
   updateFn.mockReset()
+  respawnSuggested = null
+  vi.clearAllMocks()
 })
 
 function setup(initial: Task) {
@@ -131,5 +150,19 @@ describe('useTaskTerminalSession — detected conversation id persist', () => {
     expect(updateFn).toHaveBeenCalledTimes(1)
     await act(async () => resolve(task('sess-1')))
     expect(updateFn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useTaskTerminalSession — revive (task leaves a terminal status)', () => {
+  // A task owns its conversation: a revive restarts the agent on it (`--resume`),
+  // never resets it — however long the task sat done. Starting fresh is only ever
+  // the user's explicit "Start fresh".
+  it('restarts on the current conversation, never resets it', async () => {
+    setup(task('sess-1'))
+    expect(respawnSuggested).not.toBeNull()
+    await act(async () => respawnSuggested?.({ taskId: 't1' }))
+    await settle()
+    expect(trpcClient.pty.kill.mutate).toHaveBeenCalled()
+    expect(trpcClient.task.resetConversation.mutate).not.toHaveBeenCalled()
   })
 })

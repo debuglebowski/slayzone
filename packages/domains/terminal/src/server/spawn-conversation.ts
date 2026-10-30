@@ -1,7 +1,7 @@
 /**
  * Pure fresh-vs-resume decision for a PTY spawn. Extracted from `createPty` so
  * the core invariant is a named, unit-tested function (mirrors the codebase's
- * other pure decisions: `decideReviveMode`, `decideConversationHeal`,
+ * other pure decisions: `decideConversationHeal`,
  * `shouldHonorDetectedError`).
  *
  * THE INVARIANT (the restart-clobber regression guard): if a conversation is

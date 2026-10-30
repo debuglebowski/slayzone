@@ -36,10 +36,6 @@ export interface ProviderConfig {
   [mode: string]: {
     conversationId?: string | null
     flags?: string
-    // Unix-ms timestamp of the last host-initiated PTY kill (e.g. task moved to a
-    // terminal status). Used by the revive path to decide whether to resume the
-    // prior conversation (hot) or start a fresh one (cold — see COLD_RESPAWN_MS).
-    lastPtyKilledAt?: number | null
     // Most-recent-last list of CONFIRMED conversation ids (each was reported by the
     // agent's real SessionStart hook, so it provably existed on disk). Lets a task
     // self-heal to a prior real conversation if its current `conversationId` ever
@@ -78,13 +74,6 @@ export function getProviderFlags(cfg: ProviderConfig | undefined | null, mode: s
   return cfg?.[mode]?.flags ?? ''
 }
 
-export function getProviderLastKilledAt(
-  cfg: ProviderConfig | undefined | null,
-  mode: string
-): number | null {
-  return cfg?.[mode]?.lastPtyKilledAt ?? null
-}
-
 export function setProviderConversationId(
   cfg: ProviderConfig | undefined | null,
   mode: string,
@@ -101,14 +90,6 @@ export function setProviderFlags(
   return { ...cfg, [mode]: { ...cfg?.[mode], flags: val } }
 }
 
-export function setProviderLastKilledAt(
-  cfg: ProviderConfig | undefined | null,
-  mode: string,
-  val: number | null
-): ProviderConfig {
-  return { ...cfg, [mode]: { ...cfg?.[mode], lastPtyKilledAt: val } }
-}
-
 /** Parse a SQLite `datetime('now')` string ('YYYY-MM-DD HH:MM:SS', UTC, no `Z`)
  *  to epoch-ms. `new Date('YYYY-MM-DD HH:MM:SS')` parses as LOCAL time, so a naive
  *  compare against ISO-8601-`Z` transcript timestamps is off by the host's UTC
@@ -119,30 +100,6 @@ export function parseSqliteUtc(s: string | null | undefined): number {
   // SQLite form as UTC by normalizing to 'YYYY-MM-DDTHH:MM:SSZ'.
   const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
   return Date.parse(iso)
-}
-
-/** Threshold past which a revive should start a fresh AI conversation rather than
- *  resume the previous one. Keeps hot-bounces seamless while avoiding stale context
- *  days later. */
-export const COLD_RESPAWN_MS = 30 * 60 * 1000
-
-export type ReviveMode = 'resume' | 'fresh'
-
-/**
- * Decide whether a status-revive (issue #77) should RESUME the existing AI
- * conversation or start a FRESH one.
- *
- * Only go fresh with POSITIVE evidence the task sat past the cold threshold. An
- * unknown kill time (`killedAt == null`) MUST resume, never reset: resume is
- * non-destructive (a genuinely-gone session surfaces the friendly overlay),
- * whereas a fresh start clears the stored conversation id and — if the new
- * session dies before it persists — strands the real transcript as an
- * unreachable phantom. Defaulting unknown→fresh is exactly what silently
- * abandoned live conversations (see plans/conversation-id-robustness.md, RC2).
- */
-export function decideReviveMode(killedAt: number | null, now: number): ReviveMode {
-  if (killedAt == null) return 'resume'
-  return now - killedAt > COLD_RESPAWN_MS ? 'fresh' : 'resume'
 }
 
 /** Returns a partial ProviderConfig that sets conversationId=null for all modes in cfg.

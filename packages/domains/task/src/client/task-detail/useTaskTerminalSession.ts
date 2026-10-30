@@ -3,7 +3,6 @@ import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
-import { getProviderLastKilledAt, decideReviveMode } from '@slayzone/task-contracts'
 
 import {
   chatModeForTerminal,
@@ -357,8 +356,9 @@ export function useTaskTerminalSession({
   // terminal → non-terminal status transition), remount the terminal so the user
   // can keep typing without clicking Retry. See GitHub issue #77.
   // Plain shell mode is skipped — no conversation model, respawning a shell would
-  // surprise the user. Hot bounces resume the existing conversation; cold (>30 min)
-  // bounces start a fresh one.
+  // surprise the user. Always resumes the task's current conversation, however long
+  // it sat in the terminal status: a task owns its conversation, and starting fresh
+  // is the user's call ("Start fresh"), never an implicit side effect of a revive.
   const handleRespawnSuggested = useStableCallback(async ({ taskId }: { taskId: string }) => {
     if (!task) return
     if (taskId !== task.id) return
@@ -371,15 +371,7 @@ export function useTaskTerminalSession({
     } catch {
       return
     }
-    const killedAt = getProviderLastKilledAt(task.provider_config, task.terminal_mode)
-    // Unknown kill time defaults to RESUME (non-destructive). A cold start is
-    // destructive — it clears the conversation id — so it requires positive
-    // evidence the task sat past the threshold. See decideReviveMode / RC2.
-    if (decideReviveMode(killedAt, Date.now()) === 'fresh') {
-      await handleResetTerminal()
-    } else {
-      await handleRestartTerminal()
-    }
+    await handleRestartTerminal()
   })
   useSubscription(
     trpc.pty.onRespawnSuggested.subscriptionOptions(undefined, {

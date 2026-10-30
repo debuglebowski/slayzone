@@ -632,18 +632,6 @@ export interface PtyShutdownResult {
 // Interval reference for idle checker
 let idleCheckerInterval: NodeJS.Timeout | null = null
 
-// Host-level callback invoked when a task reaches a terminal status (the single
-// invariant entry point `onTaskReachedTerminal`). Lets the app persist the kill
-// timestamp into the DB so the revive flow can decide between resuming and
-// starting a fresh AI conversation. Mode is resolved by the handler from the
-// task's current terminal_mode — not passed in — so it covers PTY and chat
-// modes alike and matches what the revive decision reads.
-let onHostKillHandler: ((taskId: string) => void) | null = null
-
-export function setOnHostKillHandler(handler: ((taskId: string) => void) | null): void {
-  onHostKillHandler = handler
-}
-
 /** App-provided self-heal for a stored conversation id whose on-disk transcript
  *  may be gone (a phantom from the old eager commit, or retention pruning).
  *  Invoked just before a resume builds `--resume <id>`; returns the id to actually
@@ -2049,10 +2037,6 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           ...(lastExitDetail ? { detail: lastExitDetail } : {})
         }
       })
-      // Note: the host-kill timestamp (lastPtyKilledAt) is recorded at the
-      // invariant entry point `onTaskReachedTerminal`, NOT here — the -2 sentinel
-      // rarely survives SIGKILL → onExit, and recording on unrelated PTY exits
-      // (mode-switch, tab-close) would pollute the revive hot/cold signal.
       // Delay session cleanup so any trailing onData events (buffered in the PTY fd)
       // can still be processed and forwarded to the renderer before we drop the session.
       setTimeout(() => {
@@ -3572,11 +3556,6 @@ export function requestEnsureAlive(
  *  every status-write path (updateTask via runtimeAdapter, integrations sync/pull,
  *  bulk remap, project automation). Add new side-effects here, not at call sites. */
 export function onTaskReachedTerminal(taskId: string): void {
-  // Record the kill timestamp (lastPtyKilledAt) here, at the single invariant
-  // entry point, so the revive flow (decideReviveMode) can tell a hot bounce
-  // from a cold one — covering both PTY and chat modes regardless of how the
-  // underlying session is torn down. See plans/conversation-id-robustness.md.
-  onHostKillHandler?.(taskId)
   killPtysByTaskId(taskId)
   killChatsByTaskId(taskId)
 }
