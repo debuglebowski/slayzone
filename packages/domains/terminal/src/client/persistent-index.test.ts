@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PersistentIndex } from './persistent-index'
+import { beginReducerCall, endReducerCall } from './replay-batch'
 
 describe('PersistentIndex', () => {
   it('maps keys to values like a Map', () => {
@@ -71,5 +72,26 @@ describe('PersistentIndex', () => {
     const insert = per(() => idx.with('new', 1), 2_000)
     // A Map copy of 50k keys is ~1,000x an insert here; noise cannot close 20x.
     expect(insert * 20).toBeLessThan(copy)
+  })
+
+  it('inside one reducer call: nodes change in place, sizes stay exact, older versions untouched', () => {
+    let before = PersistentIndex.empty<number>()
+    for (let i = 0; i < 200; i++) before = before.with(`k${i}`, i)
+    beginReducerCall()
+    let idx = before
+    try {
+      for (let i = 0; i < 5_000; i++) idx = idx.with(`k${i}`, -i)
+      // Re-setting keys it has (in place) keeps the count.
+      for (let i = 0; i < 5_000; i += 7) idx = idx.with(`k${i}`, i)
+    } finally {
+      endReducerCall()
+    }
+    expect(idx.size).toBe(5_000)
+    expect(idx.get('k7')).toBe(7)
+    expect(idx.get('k8')).toBe(-8)
+    // The version made before the call is as it was.
+    expect(before.size).toBe(200)
+    expect(before.get('k8')).toBe(8)
+    expect(before.get('k4999')).toBeUndefined()
   })
 })

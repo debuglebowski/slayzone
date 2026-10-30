@@ -91,9 +91,19 @@ const addCounts = (a: number | null, b: number | null): number | null =>
  * shows it again.
  */
 export function withTurnFilesChanged(timeline: TimelineItem[]): TimelineItem[] {
+  const row = turnFilesChangedRow(timeline)
+  if (!row) return timeline
+  return [...timeline.slice(0, -1), row, timeline[timeline.length - 1]]
+}
+
+/**
+ * The turn's `files-changed` row (see {@link withTurnFilesChanged}) — what goes
+ * right before the `result` that ends `timeline` — or null when no file changed.
+ */
+export function turnFilesChangedRow(timeline: readonly TimelineItem[]): TimelineItem | null {
   const end = timeline.length - 1
   const result = timeline[end]
-  if (result?.kind !== 'result') return timeline
+  if (result?.kind !== 'result') return null
   const files = new Map<string, TurnFileChange>()
   let lastToolUseId: string | null = null
   let shellCommands = 0
@@ -119,13 +129,12 @@ export function withTurnFilesChanged(timeline: TimelineItem[]): TimelineItem[] {
         : { ...change, toolUseIds: [it.invocation.id] }
     )
   }
-  if (lastToolUseId === null) return timeline
-  const row: TimelineItem = {
+  if (lastToolUseId === null) return null
+  return {
     kind: 'files-changed',
     id: `files:${lastToolUseId}`,
     files: [...files.values()],
     shellCommands,
     timestamp: result.timestamp
   }
-  return [...timeline.slice(0, end), row, result]
 }

@@ -826,6 +826,9 @@ run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
+# Replay guards: batch = one by one (both providers), never changes its input, linear,
+# indexes = scans after every event.
+run_harness packages/domains/terminal/src/client/chat-timeline-replay.test.ts
 run_harness packages/domains/terminal/src/client/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/client/persistent-index.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).

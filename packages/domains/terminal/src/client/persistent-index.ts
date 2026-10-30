@@ -8,7 +8,14 @@
  * replay copying `toolIndex` (plan 4.1 perf budget). Small indexes stay a plain
  * `Map` copied per change — cheaper than the trie's arrays for the few keys
  * most conversations have — and become the trie past {@link SMALL_MAX} keys.
+ *
+ * Inside one reducer call (`replay-batch.ts`) a node the call already copied is
+ * changed in place: a batch of N inserts copies each node once, not N times (a
+ * bucket holds ~size/1024 keys, so copying it per insert grew with the index).
+ * Versions made before the call are never touched.
  */
+import { writable, writableMap } from './replay-batch'
+
 /** Up to this many keys: a plain Map, copied per change. */
 const SMALL_MAX = 64
 /** 5 bits of the hash per level: 32 slots. */
@@ -31,6 +38,8 @@ function hash(key: string): number {
 }
 
 const EMPTY_ROOT: Root<never> = Object.freeze(new Array<undefined>(WIDTH).fill(undefined))
+const EMPTY_BRANCH: Branch<never> = Object.freeze(new Array<undefined>(WIDTH).fill(undefined))
+const EMPTY_BUCKET: Bucket<never> = new Map<string, never>()
 
 export class PersistentIndex<V> {
   private constructor(
@@ -62,7 +71,7 @@ export class PersistentIndex<V> {
       if (this.small.get(key) === value && this.small.has(key)) return this
       const had = this.small.has(key)
       if (had || this.small.size < SMALL_MAX) {
-        const next = new Map(this.small)
+        const next = writableMap(this.small)
         next.set(key, value)
         return new PersistentIndex(next, null, next.size)
       }
@@ -75,27 +84,23 @@ export class PersistentIndex<V> {
     const h = hash(key)
     const bucket = root[h & MASK]?.[(h >>> BITS) & MASK]
     if (bucket?.get(key) === value && bucket.has(key)) return this
-    return new PersistentIndex<V>(
-      null,
-      setIn(root, key, value),
-      bucket?.has(key) ? this.size : this.size + 1
-    )
+    // Read before `setIn`: within a reducer call it may change this bucket in place.
+    const had = bucket?.has(key) ?? false
+    return new PersistentIndex<V>(null, setIn(root, key, value), had ? this.size : this.size + 1)
   }
 }
 
-/** The trie with `key` set: copies only the path to its bucket. */
+/** The trie with `key` set: copies only the path to its bucket (none it owns). */
 function setIn<V>(root: Root<V>, key: string, value: V): Root<V> {
   const h = hash(key)
   const r = h & MASK
   const b = (h >>> BITS) & MASK
   const branch = root[r]
-  const nextBucket = new Map(branch?.[b])
+  const nextBucket = writableMap(branch?.[b] ?? EMPTY_BUCKET)
   nextBucket.set(key, value)
-  const nextBranch = branch
-    ? branch.slice()
-    : new Array<Bucket<V> | undefined>(WIDTH).fill(undefined)
+  const nextBranch = writable(branch ?? EMPTY_BRANCH)
   nextBranch[b] = nextBucket
-  const nextRoot = root.slice()
+  const nextRoot = writable(root)
   nextRoot[r] = nextBranch
   return nextRoot
 }

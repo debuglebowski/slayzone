@@ -6,6 +6,12 @@
     "hydrateBatchMs": 150,
     "longestEventMs": 5
   },
+  "scale": {
+    "_doc": "Opening a saved session reduces its whole history as ONE batch (useChatSession): linear in the events, Claude and Codex alike, with and without a prompt per tool call. Node, best of 3.",
+    "hydrateBatchMs": { "10000": 40, "50000": 200, "100000": 400 },
+    "_ratioDoc": "Linear: 10x the events may cost at most this many times the 10k time (quadratic would be ~100x).",
+    "maxRatio100kTo10k": 15
+  },
   "render": {
     "openMs": 1500,
     "scrollSettleMs": 500,

@@ -94,8 +94,13 @@ export function longSessionEvents(): AgentEvent[] {
  * opening a saved session (`useChatSession` replays history in one render).
  * Best of `runs`, after a warmup.
  */
-export function hydrateBatchMs(events: AgentEvent[], runs = 5): number {
-  const fresh = () => initialState({ agentStartedTurns: true })
+export function hydrateBatchMs(
+  events: AgentEvent[],
+  runs = 5,
+  provider: 'claude' | 'codex' = 'claude'
+): number {
+  // As the app runs each provider's chat tab (only Claude Code starts turns by itself).
+  const fresh = () => initialState({ agentStartedTurns: provider === 'claude' })
   reducer(fresh(), { type: 'events', events })
   let best = Infinity
   for (let i = 0; i < runs; i++) {
@@ -104,6 +109,15 @@ export function hydrateBatchMs(events: AgentEvent[], runs = 5): number {
     best = Math.min(best, performance.now() - t0)
   }
   return best
+}
+
+/** A generated session of `events` events of `provider` (fixed seed), for the scale budget. */
+export function scaleSessionEvents(
+  events: number,
+  provider: 'claude' | 'codex',
+  askEveryTool = false
+): AgentEvent[] {
+  return buildLongSession({ events, seed: 1, provider, askEveryTool })
 }
 
 export function replayEvents(

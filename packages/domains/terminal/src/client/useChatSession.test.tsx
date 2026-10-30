@@ -95,6 +95,19 @@ client.chat.respondPermission.mutate = (input: unknown) => {
   return respondReply.promise
 }
 
+// Every action the reducer is given (by identity: React may reduce one twice).
+const reducerActions = new Set<{ type: string; events?: unknown[] }>()
+vi.mock('./chat-timeline', async (importOriginal) => {
+  const m = await importOriginal<typeof import('./chat-timeline')>()
+  return {
+    ...m,
+    reducer: (state: Parameters<typeof m.reducer>[0], action: Parameters<typeof m.reducer>[1]) => {
+      reducerActions.add(action as { type: string; events?: unknown[] })
+      return m.reducer(state, action)
+    }
+  }
+})
+
 const { useChatSession } = await import('./useChatSession')
 const { liveBlockOf, streamKeyOf } = await import('./chat-timeline')
 
@@ -206,6 +219,7 @@ const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
 
 afterEach(() => {
   cleanup()
+  reducerActions.clear()
   loads = []
   bufferLoad = -1
   respondReply = deferred<boolean>()
@@ -558,5 +572,27 @@ describe('useChatSession — a turn the agent starts by itself', () => {
     await finishLoad(loads.length - 1, saved(finished()))
     live(3, { kind: 'assistant-text', messageId: 'm2', text: 'late item' })
     expect(r.current.inFlight).toBe(false)
+  })
+})
+
+describe('opening a saved session', () => {
+  it('reduces the whole history in ONE batch, not one dispatch per event', async () => {
+    const history: Buffered = Array.from({ length: 300 }, (_, i) => ({
+      seq: i,
+      event: i % 2 === 0 ? userMsg(`m${i}`) : result(i).event
+    }))
+    const { result: r } = setup()
+    reducerActions.clear()
+    await finishLoad(0, history)
+    expect(r.current.hydrating).toBe(false)
+    expect(texts(r)).toHaveLength(150)
+    const historyEvents = new Set(history.map((b) => b.event))
+    const single = [...reducerActions].filter(
+      (a) => a.type === 'event' && historyEvents.has((a as { event?: unknown }).event)
+    )
+    expect(single).toHaveLength(0)
+    const batches = [...reducerActions].filter((a) => a.type === 'events')
+    expect(batches).toHaveLength(1)
+    expect(batches[0].events).toHaveLength(300)
   })
 })

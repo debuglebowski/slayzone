@@ -26,9 +26,19 @@ import {
   expirePendingPrompts,
   expirePrompt,
   hasPendingPrompt,
+  initialPromptState,
+  promptIndexProblems,
   type ChatPrompt
 } from './chat-prompts'
-import { withTurnFilesChanged, type TurnFileChange } from './turn-file-changes'
+import { turnFilesChangedRow, type TurnFileChange } from './turn-file-changes'
+import {
+  appended,
+  beginReducerCall,
+  endReducerCall,
+  owning,
+  writable,
+  writableMap
+} from './replay-batch'
 import {
   extractBgShellSpawn,
   extractShellIdFromSpawnResult,
@@ -492,6 +502,22 @@ export interface ChatTimelineState {
   usage: SessionUsage
   /** The agent's questions to the user, in arrival order (see `chat-prompts.ts`). */
   prompts: ChatPrompt[]
+  /** Request id → position in `prompts`. */
+  promptIndex: PersistentIndex<number>
+  /** Positions in `prompts` of the pending ones, ascending. */
+  pendingPrompts: readonly number[]
+  /**
+   * User message id → its row (the newest row with that id) — what a scan of the
+   * timeline from the end finds, without the scan (`findUserItem`).
+   */
+  userIndex: PersistentIndex<number>
+  /** Rows sent optimistically without an id, not yet confirmed (legacy sends). */
+  idlessOptimistic: number
+  /**
+   * `kind\0messageId` → how many text / thinking rows of that message the
+   * current turn has (rows since the last `result` row): a block's ordinal.
+   */
+  blockOrdinals: ReadonlyMap<string, number>
   /**
    * The previous conversation could not be resumed; the next new session starts
    * BELOW the existing history (a divider), instead of replacing it.
@@ -515,6 +541,8 @@ export interface ChatTimelineState {
 }
 
 const EMPTY_LIVE: LiveBlocks = Object.freeze([])
+/** No blocks counted (shared; written only through `writableMap`, which copies it). */
+const EMPTY_ORDINALS: ReadonlyMap<string, number> = new Map()
 
 export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTimelineState {
   return {
@@ -545,7 +573,10 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     cliCommandDetails: null,
     compacting: false,
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
-    prompts: [],
+    ...initialPromptState(),
+    userIndex: PersistentIndex.empty(),
+    idlessOptimistic: 0,
+    blockOrdinals: EMPTY_ORDINALS,
     freshStartPending: false,
     agentStartedTurns: opts.agentStartedTurns ?? false,
     agentTurnOpen: false,
@@ -572,7 +603,21 @@ export type Action =
   /** The tab's mode changed: whether its provider starts turns by itself. */
   | { type: 'configure'; agentStartedTurns: boolean }
 
+/**
+ * Pure: never changes `state`. One call is one copy-on-write scope
+ * (`replay-batch.ts`): a batch of events copies each container at most once,
+ * so reducing N events costs time linear in N.
+ */
 export function reducer(state: ChatTimelineState, action: Action): ChatTimelineState {
+  beginReducerCall()
+  try {
+    return reduceAction(state, action)
+  } finally {
+    endReducerCall()
+  }
+}
+
+function reduceAction(state: ChatTimelineState, action: Action): ChatTimelineState {
   if (action.type === 'events') return reduceEvents(state, action.events)
   // A turn's end (or its process's) ends every stream it left open: those rows
   // keep the text they got. The splitter saved them first, so this only heals.
@@ -616,7 +661,7 @@ export function reducer(state: ChatTimelineState, action: Action): ChatTimelineS
 /** A frame's worth of events, in order — the same as dispatching them one by one. */
 function reduceEvents(state: ChatTimelineState, events: AgentEvent[]): ChatTimelineState {
   let acc = state
-  for (const event of events) acc = reducer(acc, { type: 'event', event })
+  for (const event of events) acc = reduceAction(acc, { type: 'event', event })
   return acc
 }
 
@@ -632,9 +677,51 @@ function registerChild(
   parentId: string | undefined
 ): Map<string, number[]> {
   if (!parentId) return state.childIndex
-  const next = new Map(state.childIndex)
-  const arr = next.get(parentId) ?? []
-  next.set(parentId, [...arr, newIdx])
+  const next = writableMap(state.childIndex)
+  next.set(parentId, appended(next.get(parentId) ?? [], newIdx))
+  return next
+}
+
+type UserTextItem = Extract<TimelineItem, { kind: 'user-text' }>
+
+/** The timeline with user row `item` appended, and the indexes that follow it. */
+function withUserRow(
+  state: ChatTimelineState,
+  item: UserTextItem
+): Pick<ChatTimelineState, 'timeline' | 'userIndex' | 'idlessOptimistic'> {
+  const at = state.timeline.length
+  return {
+    timeline: appended(state.timeline, item),
+    userIndex: item.id ? state.userIndex.with(item.id, at) : state.userIndex,
+    idlessOptimistic:
+      item.optimistic && !item.id ? state.idlessOptimistic + 1 : state.idlessOptimistic
+  }
+}
+
+/** User rows moved (a row removed, or one added on top): index them again. */
+function reindexUserRows(state: ChatTimelineState): ChatTimelineState {
+  let userIndex = PersistentIndex.empty<number>()
+  let idlessOptimistic = 0
+  state.timeline.forEach((it, i) => {
+    if (it.kind !== 'user-text') return
+    if (it.id) userIndex = userIndex.with(it.id, i)
+    else if (it.optimistic) idlessOptimistic++
+  })
+  return { ...state, userIndex, idlessOptimistic }
+}
+
+const ordinalKey = (kind: 'text' | 'thinking', messageId: string): string =>
+  `${kind}\u0000${messageId}`
+
+/** `blockOrdinals` once a `kind` row of message `messageId` is added. */
+function countBlock(
+  state: ChatTimelineState,
+  kind: 'text' | 'thinking',
+  messageId: string
+): ReadonlyMap<string, number> {
+  const key = ordinalKey(kind, messageId)
+  const next = writableMap(state.blockOrdinals)
+  next.set(key, (next.get(key) ?? 0) + 1)
   return next
 }
 
@@ -656,7 +743,7 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       const item: TimelineItem = { kind: 'interrupted', timestamp: Date.now() }
       return {
         ...state,
-        timeline: [...state.timeline, item],
+        timeline: appended(state.timeline, item),
         // An agent-started turn is closed instead; no user turn's count moves.
         resultCount: state.agentTurnOpen ? state.resultCount : state.resultCount + 1,
         agentTurnOpen: false,
@@ -671,7 +758,7 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       // turn-start while counters still say in-flight means the prior turn was
       // orphaned. Heal so the new optimistic bump doesn't compound prior drift.
       const healed = healOrphanedTurn(state, Date.now())
-      const item: TimelineItem = {
+      const item: UserTextItem = {
         kind: 'user-text',
         text: action.text,
         timestamp: Date.now(),
@@ -681,7 +768,7 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       }
       return {
         ...healed,
-        timeline: [...healed.timeline, item],
+        ...withUserRow(healed, item),
         userMessagesSent: healed.userMessagesSent + 1
       }
     }
@@ -696,13 +783,13 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       for (let i = 0; i < state.timeline.length; i++) {
         const it = state.timeline[i]
         if (it.kind === 'user-text' && it.optimistic) {
-          const next = state.timeline.slice()
+          const next = writable(state.timeline)
           next.splice(i, 1)
-          return {
+          return reindexUserRows({
             ...state,
             timeline: next,
             userMessagesSent: Math.max(0, state.userMessagesSent - 1)
-          }
+          })
         }
       }
       return state
@@ -744,12 +831,9 @@ function agentProblemCode(detail: unknown): string | null {
     : null
 }
 
+/** The newest user row with message id `id`, or -1 (through `userIndex`, no scan). */
 function findUserItem(state: ChatTimelineState, id: string): number {
-  for (let i = state.timeline.length - 1; i >= 0; i--) {
-    const it = state.timeline[i]
-    if (it.kind === 'user-text' && it.id === id) return i
-  }
-  return -1
+  return state.userIndex.get(id) ?? -1
 }
 
 /**
@@ -769,7 +853,7 @@ function setDelivery(
   if (it.delivery === delivery && it.deliveryError === error) return state
   const wasFailed = it.delivery === 'failed'
   const isFailed = delivery === 'failed'
-  const next = state.timeline.slice()
+  const next = writable(state.timeline)
   next[at] = {
     ...it,
     delivery,
@@ -803,20 +887,20 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'user-message': {
       if (event.history) {
         // Imported from the conversation's past: answered long ago, never a turn.
-        const item: TimelineItem = {
+        const item: UserTextItem = {
           kind: 'user-text',
           text: event.text,
           timestamp: ts,
           ...(event.id ? { id: event.id, delivery: 'answered' as const } : {})
         }
-        return { ...state, timeline: [...state.timeline, item] }
+        return { ...state, ...withUserRow(state, item) }
       }
       if (event.id) {
         // Confirm the optimistic bubble with the same id in place.
         const at = findUserItem(state, event.id)
         if (at >= 0) {
           const it = state.timeline[at] as Extract<TimelineItem, { kind: 'user-text' }>
-          const next = state.timeline.slice()
+          const next = writable(state.timeline)
           // A bubble the client had failed (its request errored) but the server
           // did take is back in flight.
           const revived = it.delivery === 'failed'
@@ -840,13 +924,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // sends in order, so the first unconfirmed optimistic item is this one).
       // Only id-less (legacy) bubbles: an id'd bubble is confirmed by its id.
       // Replay path (cold reattach, no prior `user-sent` dispatch) finds none
-      // and falls through to append.
-      for (let i = 0; i < state.timeline.length; i++) {
+      // and falls through to append. Scanned only when such a bubble exists.
+      for (let i = 0; !event.id && state.idlessOptimistic > 0 && i < state.timeline.length; i++) {
         const it = state.timeline[i]
-        if (it.kind === 'user-text' && it.optimistic && !it.id && !event.id) {
-          const next = state.timeline.slice()
+        if (it.kind === 'user-text' && it.optimistic && !it.id) {
+          const next = writable(state.timeline)
           next[i] = { ...it, text: event.text, timestamp: ts, optimistic: false }
-          return { ...state, timeline: next }
+          return { ...state, timeline: next, idlessOptimistic: state.idlessOptimistic - 1 }
         }
       }
       // Drift recovery: a fresh (non-optimistic-confirming) user-message means a new
@@ -855,7 +939,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // Auto-insert synthetic `interrupted` to balance counters + clear stream state.
       // Idempotent across replays — pure reducer math, no persistence needed.
       const healed = healOrphanedTurn(state, ts)
-      const item: TimelineItem = {
+      const item: UserTextItem = {
         kind: 'user-text',
         text: event.text,
         timestamp: ts,
@@ -864,7 +948,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
       return {
         ...healed,
-        timeline: [...healed.timeline, item],
+        ...withUserRow(healed, item),
         userMessagesSent: healed.userMessagesSent + 1
       }
     }
@@ -883,7 +967,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const failed = failInFlightSubAgents(state, 'interrupted')
       return {
         ...failed,
-        timeline: [...failed.timeline, item],
+        timeline: appended(failed.timeline, item),
         // An agent-started turn is closed instead; no user turn's count moves.
         resultCount: state.agentTurnOpen ? state.resultCount : state.resultCount + 1,
         agentTurnOpen: false,
@@ -902,7 +986,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         for (let i = len - 1; i >= 0; i--) {
           const it = state.timeline[i]
           if (it.kind !== 'conversation-branch' || it.reason !== 'forked') continue
-          const timeline = state.timeline.slice()
+          const timeline = writable(state.timeline)
           timeline[i] = { ...it, reason: 'fork-failed', hiddenCount: 0 }
           return { ...state, timeline, freshStartPending: false }
         }
@@ -946,7 +1030,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
       return {
         ...state,
-        timeline: [...state.timeline, item],
+        timeline: appended(state.timeline, item),
         // A fork / switch runs another conversation id: its turn-init must not
         // wipe the timeline (the history above stays, a divider marks the start).
         freshStartPending: event.reason === 'rewound' ? state.freshStartPending : true
@@ -966,13 +1050,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
             ? it.id === event.id
             : it.text === event.text)
         if (matches) {
-          const next = state.timeline.slice()
+          const next = writable(state.timeline)
           next.splice(i, 1)
-          return {
+          return reindexUserRows({
             ...state,
             timeline: next,
             userMessagesSent: Math.max(0, state.userMessagesSent - 1)
-          }
+          })
         }
         return state
       }
@@ -998,7 +1082,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         }
         return {
           ...state,
-          timeline: [...state.timeline, item],
+          timeline: appended(state.timeline, item),
           freshStartPending: false,
           sessionId: event.sessionId,
           model: event.model,
@@ -1050,9 +1134,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // (optimistic user-sent dispatch races the stream). Keep session-start at the top.
       // Also clear any stale end-state: a fresh turn-init means a live process, which may
       // arrive AFTER a late process-exit from a prior (already-replaced) session during reset.
-      return {
+      return reindexUserRows({
         ...state,
-        timeline: [item, ...state.timeline],
+        timeline: owning([item, ...state.timeline]),
         sessionStarted: true,
         sessionId: event.sessionId,
         model: event.model,
@@ -1061,7 +1145,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         exitSignal: null,
         permissionMode: event.permissionMode ?? state.permissionMode,
         cliCommands: nextCliCommands(state.cliCommands, event)
-      }
+      })
     }
     case 'assistant-text': {
       // The saved block of a streamed row finalizes that row in place (same
@@ -1081,7 +1165,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         parentToolUseId: event.parentToolUseId
       }
       const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
-      return { ...state, timeline: [...state.timeline, item], childIndex }
+      return {
+        ...state,
+        timeline: appended(state.timeline, item),
+        childIndex,
+        blockOrdinals: countBlock(state, 'text', event.messageId)
+      }
     }
     case 'assistant-thinking': {
       const at = findStreamingRow(state, 'thinking', event.messageId)
@@ -1104,7 +1193,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         parentToolUseId: event.parentToolUseId
       }
       const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
-      return { ...state, timeline: [...state.timeline, item], childIndex }
+      return {
+        ...state,
+        timeline: appended(state.timeline, item),
+        childIndex,
+        blockOrdinals: countBlock(state, 'thinking', event.messageId)
+      }
     }
     case 'tool-call': {
       // Created by its streamed block already: the saved call carries the real
@@ -1122,7 +1216,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
               input: target.inputStreaming ? event.input : (target.invocation.input ?? event.input)
             }
           }
-          const t = state.timeline.slice()
+          const t = writable(state.timeline)
           t[existingIdx] = next
           return { ...state, timeline: t, live: dropLive(state.live, `tool:${event.id}`) }
         }
@@ -1146,7 +1240,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
       return {
         ...state,
-        timeline: [...state.timeline, item],
+        timeline: appended(state.timeline, item),
         toolIndex: newIndex,
         childIndex
       }
@@ -1195,7 +1289,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const childIndex = registerChild(state, timelineIndex, event.parentToolUseId)
         return {
           ...state,
-          timeline: [...state.timeline, item],
+          timeline: appended(state.timeline, item),
           openBlocks: nextOpen,
           toolIndex: nextToolIndex,
           childIndex,
@@ -1223,9 +1317,10 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const childIndex = registerChild(state, timelineIndex, event.parentToolUseId)
         return {
           ...state,
-          timeline: [...state.timeline, item],
+          timeline: appended(state.timeline, item),
           openBlocks: nextOpen,
           childIndex,
+          blockOrdinals: countBlock(state, 'thinking', messageId),
           live: setLive(state.live, { key: liveKey, text: '', json: '' })
         }
       }
@@ -1259,9 +1354,10 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
         return {
           ...state,
-          timeline: [...state.timeline, item],
+          timeline: appended(state.timeline, item),
           openBlocks: nextOpen,
           childIndex,
+          blockOrdinals: countBlock(state, 'text', messageId),
           live: setLive(state.live, { key: liveKey, text: event.text, json: '' })
         }
       }
@@ -1270,7 +1366,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         // Structural, once per block: the row records that the CLI signed it.
         const target = state.timeline[open.timelineIndex]
         if (target?.kind !== 'thinking' || target.hasSignature) return state
-        const t = state.timeline.slice()
+        const t = writable(state.timeline)
         t[open.timelineIndex] = { ...target, hasSignature: true }
         return { ...state, timeline: t }
       }
@@ -1326,7 +1422,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         )
         return {
           ...baseState,
-          timeline: [...baseState.timeline, item],
+          timeline: appended(baseState.timeline, item),
           toolIndex: newIndex,
           childIndex
         }
@@ -1342,7 +1438,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           isError: event.isError
         }
       }
-      const nextTimeline = baseState.timeline.slice()
+      const nextTimeline = writable(baseState.timeline)
       // A PreToolUse hook blocked it: the card shows the block, the hook's row folds in.
       const hookAt = event.isError
         ? blockingHookIndex(baseState.timeline, idx, event.rawContent)
@@ -1395,7 +1491,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           : []
       // Mark any tools the SDK denied this turn — `result.permissionDenials`
       // is the authoritative source (e.g. `ExitPlanMode` in plan mode).
-      let nextTimeline = [...state.timeline, ...turnError, item]
+      const nextTimeline = appended(state.timeline, ...turnError, item)
       const denials = Array.isArray(event.permissionDenials) ? event.permissionDenials : []
       for (const denial of denials) {
         const id = (denial as { tool_use_id?: string } | null)?.tool_use_id
@@ -1404,16 +1500,19 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         if (idx === undefined) continue
         const target = nextTimeline[idx]
         if (target?.kind !== 'tool' || target.invocation.denied) continue
-        nextTimeline = nextTimeline.slice()
         nextTimeline[idx] = {
           ...target,
           invocation: { ...target.invocation, status: 'denied', denied: true }
         }
       }
-      nextTimeline = withTurnFilesChanged(nextTimeline)
+      // What the turn's file tools changed: its row goes right before the result.
+      const filesChanged = turnFilesChangedRow(nextTimeline)
+      if (filesChanged) nextTimeline.splice(nextTimeline.length - 1, 0, filesChanged)
       return {
         ...state,
         timeline: nextTimeline,
+        // A new turn's blocks count from 0.
+        blockOrdinals: EMPTY_ORDINALS,
         lastResult: item,
         // Capped: after Stop (or a prompt's "No") the persisted `interrupted`
         // already closed the turn, and the CLI still sends the aborted turn's
@@ -1437,17 +1536,14 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'api-retry':
       return {
         ...state,
-        timeline: [
-          ...state.timeline,
-          {
-            kind: 'api-retry',
-            attempt: event.attempt,
-            maxRetries: event.maxRetries,
-            delayMs: event.delayMs,
-            error: event.error,
-            timestamp: ts
-          }
-        ]
+        timeline: appended<TimelineItem>(state.timeline, {
+          kind: 'api-retry',
+          attempt: event.attempt,
+          maxRetries: event.maxRetries,
+          delayMs: event.delayMs,
+          error: event.error,
+          timestamp: ts
+        })
       }
     case 'rate-limit':
       // Suppress 'allowed' / 'allowed_warning' — informational, not actionable. Only surface
@@ -1455,7 +1551,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       if (event.status.startsWith('allowed')) return state
       return {
         ...state,
-        timeline: [...state.timeline, { kind: 'rate-limit', status: event.status, timestamp: ts }]
+        timeline: appended(state.timeline, {
+          kind: 'rate-limit',
+          status: event.status,
+          timestamp: ts
+        })
       }
     case 'sub-agent': {
       // No tool id = no row it could belong to (rows saved before the driver
@@ -1490,7 +1590,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
             toolUses: event.usage?.toolUses ?? target.toolUses,
             totalTokens: event.usage?.totalTokens ?? target.totalTokens
           }
-          const t = state.timeline.slice()
+          const t = writable(state.timeline)
           t[existingIdx] = next
           return { ...state, timeline: t }
         }
@@ -1508,12 +1608,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         timestamp: ts,
         parentToolUseId: event.parentToolUseId
       }
-      const nextIdx = new Map(state.subAgentIndex)
+      const nextIdx = writableMap(state.subAgentIndex)
       if (id) nextIdx.set(id, state.timeline.length)
       const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
       return {
         ...state,
-        timeline: [...state.timeline, item],
+        timeline: appended(state.timeline, item),
         subAgentIndex: nextIdx,
         childIndex
       }
@@ -1536,12 +1636,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           break
         }
         if (it.kind === 'plan') {
-          const next = state.timeline.slice()
+          const next = writable(state.timeline)
           next[i] = { ...item, timestamp: it.timestamp }
           return { ...state, timeline: next }
         }
       }
-      return { ...state, timeline: [...state.timeline, item] }
+      return { ...state, timeline: appended(state.timeline, item) }
     }
     case 'compact-status': {
       if (event.phase === 'started')
@@ -1556,7 +1656,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         error: event.error,
         timestamp: ts
       }
-      return { ...state, timeline: [...state.timeline, item], compacting: false }
+      return { ...state, timeline: appended(state.timeline, item), compacting: false }
     }
     case 'compact-boundary': {
       const item: TimelineItem = {
@@ -1568,7 +1668,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
       return {
         ...state,
-        timeline: [...state.timeline, item],
+        timeline: appended(state.timeline, item),
         compacting: false,
         // The CLI's post-compaction count excludes the system prompt + tools;
         // the next call's usage reports the real new size.
@@ -1590,7 +1690,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         ...(event.isError ? { isError: true } : {}),
         timestamp: ts
       }
-      return { ...state, timeline: [...state.timeline, item] }
+      return { ...state, timeline: appended(state.timeline, item) }
     }
     case 'hook-output': {
       const item: TimelineItem = {
@@ -1604,7 +1704,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
         timestamp: ts
       }
-      return { ...state, timeline: [...state.timeline, item] }
+      return { ...state, timeline: appended(state.timeline, item) }
     }
     case 'notice': {
       const item: TimelineItem = {
@@ -1617,7 +1717,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
       return {
         ...state,
-        timeline: [...state.timeline, item],
+        timeline: appended(state.timeline, item),
         // A failed resume: the next new session starts below the history.
         freshStartPending:
           event.code === 'resume-failed-fresh-start' ? true : state.freshStartPending
@@ -1626,7 +1726,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'stderr':
       return {
         ...state,
-        timeline: [...state.timeline, { kind: 'stderr', text: event.text, timestamp: ts }]
+        timeline: appended(state.timeline, { kind: 'stderr', text: event.text, timestamp: ts })
       }
     case 'process-exit': {
       // Process exited. If we were mid-turn, heal counters + clear stream state
@@ -1647,21 +1747,18 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const binary = (event.detail as { binary?: unknown }).binary
         return {
           ...state,
-          timeline: [
-            ...state.timeline,
-            {
-              kind: 'agent-problem',
-              code,
-              message: event.message,
-              ...(typeof binary === 'string' ? { binary } : {}),
-              timestamp: ts
-            }
-          ]
+          timeline: appended<TimelineItem>(state.timeline, {
+            kind: 'agent-problem',
+            code,
+            message: event.message,
+            ...(typeof binary === 'string' ? { binary } : {}),
+            timestamp: ts
+          })
         }
       }
       return {
         ...state,
-        timeline: [...state.timeline, { kind: 'stderr', text: event.message, timestamp: ts }]
+        timeline: appended(state.timeline, { kind: 'stderr', text: event.message, timestamp: ts })
       }
     }
     case 'unknown':
@@ -1759,13 +1856,8 @@ function nextBlockOrdinal(
   messageId: string
 ): number {
   // A message's blocks all belong to one turn: none sits before its last result.
-  let n = 0
-  for (let i = state.timeline.length - 1; i >= 0; i--) {
-    const it = state.timeline[i]
-    if (it.kind === 'result') break
-    if (it.kind === kind && it.messageId === messageId) n++
-  }
-  return n
+  // Counted as rows are added (`countBlock`), reset by each result row.
+  return state.blockOrdinals.get(ordinalKey(kind, messageId)) ?? 0
 }
 
 /** The newest still-streaming row of `kind` in message `messageId`, or -1. */
@@ -1805,7 +1897,7 @@ function dropLive(live: LiveBlocks, key: string | undefined): LiveBlocks {
 
 /** Replace the row at `at` with its final version; its live block is done. */
 function finalizeRow(state: ChatTimelineState, at: number, row: TimelineItem): ChatTimelineState {
-  const t = state.timeline.slice()
+  const t = writable(state.timeline)
   t[at] = row
   return { ...state, timeline: t, live: dropLive(state.live, streamKeyOf(row)) }
 }
@@ -1837,7 +1929,7 @@ function settleRow(
   if (row.kind === 'text' || row.kind === 'thinking') {
     if (row.stream === undefined) return state
     const text = row.stream === 'open' && live ? live.text : row.text
-    const t = state.timeline.slice()
+    const t = writable(state.timeline)
     if (mode === 'closed') {
       // Its live block stays until the saved event finalizes it: a row that
       // still streams always has one (so an empty `live` means none does).
@@ -1849,7 +1941,7 @@ function settleRow(
   }
   if (row.kind === 'tool' && row.inputStreaming) {
     const input = row.invocation.input ?? parseToolJson(live?.json ?? '')
-    const t = state.timeline.slice()
+    const t = writable(state.timeline)
     t[at] = { ...row, inputStreaming: undefined, invocation: { ...row.invocation, input } }
     return { ...state, timeline: t, live: dropLive(state.live, key) }
   }
@@ -1886,12 +1978,12 @@ function setCommandTask(
   toolUseId: string,
   view: CommandTaskView
 ): ChatTimelineState {
-  const commandTasks = new Map(state.commandTasks)
+  const commandTasks = writableMap(state.commandTasks)
   commandTasks.set(toolUseId, view)
   const at = state.toolIndex.get(toolUseId)
   const row = at === undefined ? undefined : state.timeline[at]
   if (at === undefined || row?.kind !== 'tool') return { ...state, commandTasks }
-  const t = state.timeline.slice()
+  const t = writable(state.timeline)
   t[at] = { ...row, invocation: { ...row.invocation, task: view } }
   return { ...state, timeline: t, commandTasks }
 }
@@ -2099,6 +2191,47 @@ export function selectActiveUserIds(timeline: readonly TimelineItem[]): string[]
   return ids
 }
 
+/**
+ * Where the reducer's lookup indexes disagree with a scan of the rows they
+ * replace — empty when they agree. The replay guard checks it after every
+ * event (`chat-timeline-replay.test.ts`).
+ */
+export function replayIndexProblems(state: ChatTimelineState): string[] {
+  const problems: string[] = []
+  const newest = new Map<string, number>()
+  let idless = 0
+  let lastResult = -1
+  state.timeline.forEach((it, i) => {
+    if (it.kind === 'result') lastResult = i
+    if (it.kind !== 'user-text') return
+    if (it.id) newest.set(it.id, i)
+    else if (it.optimistic) idless++
+  })
+  for (const [id, at] of newest) {
+    const indexed = state.userIndex.get(id)
+    if (indexed !== at) problems.push(`userIndex[${id}] = ${indexed}, scan finds row ${at}`)
+  }
+  if (state.userIndex.size !== newest.size)
+    problems.push(`userIndex has ${state.userIndex.size} ids, the rows ${newest.size}`)
+  if (state.idlessOptimistic !== idless)
+    problems.push(`idlessOptimistic = ${state.idlessOptimistic}, scan counts ${idless}`)
+  const blocks = new Map<string, number>()
+  for (let i = lastResult + 1; i < state.timeline.length; i++) {
+    const it = state.timeline[i]
+    if (it.kind !== 'text' && it.kind !== 'thinking') continue
+    const key = ordinalKey(it.kind, it.messageId)
+    blocks.set(key, (blocks.get(key) ?? 0) + 1)
+  }
+  for (const [key, n] of blocks) {
+    const indexed = state.blockOrdinals.get(key)
+    if (indexed !== n) problems.push(`blockOrdinals[${key}] = ${indexed}, scan counts ${n}`)
+  }
+  if (state.blockOrdinals.size !== blocks.size)
+    problems.push(`blockOrdinals has ${state.blockOrdinals.size} keys, the turn ${blocks.size}`)
+  problems.push(...promptIndexProblems(state))
+  return problems
+}
+
 export function isInFlight(state: ChatTimelineState): boolean {
   return state.userMessagesSent > state.resultCount
 }
@@ -2162,7 +2295,7 @@ function endAgentTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
   const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
   return {
     ...failed,
-    timeline: [...failed.timeline, item],
+    timeline: appended(failed.timeline, item),
     agentTurnOpen: false,
     openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
     currentStreamMessageId: null,
@@ -2237,7 +2370,7 @@ function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineSta
   const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
   return {
     ...failed,
-    timeline: [...failed.timeline, item],
+    timeline: appended(failed.timeline, item),
     resultCount: state.userMessagesSent,
     openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
     currentStreamMessageId: null,
@@ -2263,7 +2396,7 @@ function closeSubAgentForToolResult(
     phase: event.isError ? 'failed' : 'completed',
     status: row.status ?? (event.isError ? 'failed' : 'completed')
   }
-  const t = state.timeline.slice()
+  const t = writable(state.timeline)
   t[idx] = closed
   return { ...state, timeline: t }
 }
@@ -2291,7 +2424,7 @@ function failInFlightSubAgents(state: ChatTimelineState, statusLabel: string): C
     const row = state.timeline[idx]
     if (row?.kind !== 'sub-agent') continue
     if (row.phase !== 'in-flight') continue
-    if (!nextTimeline) nextTimeline = state.timeline.slice()
+    if (!nextTimeline) nextTimeline = writable(state.timeline)
     nextTimeline[idx] = { ...row, phase: 'failed', status: row.status ?? statusLabel }
   }
   return nextTimeline ? { ...state, timeline: nextTimeline } : state

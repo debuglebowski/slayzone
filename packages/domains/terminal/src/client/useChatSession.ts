@@ -149,6 +149,8 @@ interface HydrateChatCtx {
   loadedOnceRef: RefObject<boolean>
   liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number; live?: number }>>
   applyLive: (event: AgentEvent, seq: number, live?: number) => void
+  /** Apply saved events (seq order) as ONE reducer batch. */
+  applySaved: (saved: ReadonlyArray<{ seq: number; event: AgentEvent }>) => void
   /** Apply the stream fragments waiting for the next frame now. */
   flushLive: () => void
   /** Adopt a replay's live snapshot (blocks still streaming) at its live counter. */
@@ -180,6 +182,7 @@ async function hydrateAndReplay({
   loadedOnceRef,
   liveQueueRef,
   applyLive,
+  applySaved,
   flushLive,
   applySnapshot,
   dispatch,
@@ -204,9 +207,10 @@ async function hydrateAndReplay({
     })
     if (gen !== genRef.current) return
     if (loadedOnceRef.current) dispatch({ type: 'reset' })
-    // Replay through applyLive so the seq dedup applies. Prompt state is part
-    // of the reducer, so a pending prompt comes back from the replay.
-    for (const { seq, event } of replay.events) applyLive(event as AgentEvent, seq)
+    // The whole history in ONE reducer batch (one render, linear time), with the
+    // seq dedup every saved event gets. Prompt state is part of the reducer, so
+    // a pending prompt comes back from the replay.
+    applySaved(replay.events as Array<{ seq: number; event: AgentEvent }>)
     // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
     applySnapshot(replay.live.events as AgentEvent[], replay.live.afterSeq, replay.live.liveSeq)
   } catch {
@@ -330,6 +334,23 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       lastSeqRef.current = seq
       flushLive()
       dispatch({ type: 'event', event })
+    },
+    [flushLive]
+  )
+  // Stable: refs + dispatch only. Saved events in seq order as one batch — the
+  // same as applying each through `applyLive` (fragments waiting for a frame
+  // still go first), in one reducer call and one render.
+  const applySaved = useCallback(
+    (saved: ReadonlyArray<{ seq: number; event: AgentEvent }>): void => {
+      const events: AgentEvent[] = []
+      for (const { seq, event } of saved) {
+        if (seq <= lastSeqRef.current) continue
+        lastSeqRef.current = seq
+        events.push(event)
+      }
+      if (events.length === 0) return
+      flushLive()
+      dispatch({ type: 'events', events })
     },
     [flushLive]
   )
@@ -465,6 +486,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       loadedOnceRef,
       liveQueueRef,
       applyLive,
+      applySaved,
       flushLive,
       applySnapshot,
       dispatch,
@@ -483,6 +505,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     opts.cwd,
     opts.providerFlagsOverride,
     applyLive,
+    applySaved,
     flushLive,
     discardPendingLive,
     applySnapshot,

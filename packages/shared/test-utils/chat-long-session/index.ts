@@ -11,6 +11,11 @@
  * parse, the odd failed command, sub-agents (a `Task` call, its `sub-agent`
  * frames and nested output) and a `result` per turn. Typed by `AgentEvent`, so a
  * contract change breaks the build here, not silently in a budget.
+ *
+ * `provider: 'codex'` builds a Codex chat session instead: the events its driver
+ * saves (`codex-chat-session.ts`) — one handshake `turn-init`, delivery states,
+ * plans, `codex/commandExecution` and `codex/fileChange` calls whose results
+ * carry the thread item, and Codex's `result`.
  */
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 
@@ -20,6 +25,35 @@ export interface LongSessionOpts {
   /** Exactly this many events (default 10,000). */
   events?: number
   seed?: number
+  /** Whose session (default Claude Code, unchanged by the Codex mode). */
+  provider?: 'claude' | 'codex'
+  /**
+   * A permission mode that asks for every tool call: each call is followed by
+   * its `permission-request` and (for 9 in 10) the `permission-resolved` — the
+   * rest are resolved by their `tool-result` alone, as older logs are.
+   */
+  askEveryTool?: boolean
+}
+
+/** `events` with a prompt after every tool call (see `askEveryTool`); `asked` counts the session's. */
+function withAsks(events: AgentEvent[], asked: { n: number }): AgentEvent[] {
+  return events.flatMap((e): AgentEvent[] => {
+    if (e.kind !== 'tool-call') return [e]
+    const requestId = `req-${e.id}`
+    const out: AgentEvent[] = [
+      e,
+      { kind: 'permission-request', requestId, toolName: e.name, toolUseId: e.id, input: e.input }
+    ]
+    if (asked.n++ % 10 !== 9) {
+      out.push({
+        kind: 'permission-resolved',
+        requestId,
+        decision: { behavior: 'allow' },
+        optionId: 'yes'
+      })
+    }
+    return out
+  })
 }
 
 /** mulberry32: small, fast, good enough for test data. */
@@ -314,7 +348,119 @@ export function buildLongSession(opts: LongSessionOpts = {}): AgentEvent[] {
     return out
   }
 
-  for (let turn = 0; events.length < target; turn++) events.push(...turnEvents(turn))
+  const codexTurn = (turn: number): AgentEvent[] => {
+    const id = `u${turn}`
+    const out: AgentEvent[] = [
+      { kind: 'user-message', id, text: sentence(int(4, 14)) },
+      { kind: 'user-message-delivery', id, state: 'delivered' }
+    ]
+    if (rand() < 0.3) {
+      out.push({
+        kind: 'agent-plan',
+        ...(rand() < 0.5 ? { explanation: sentence(6) } : {}),
+        steps: Array.from({ length: int(2, 5) }, (_, i) => ({
+          step: sentence(int(3, 7)),
+          status: i === 0 ? ('completed' as const) : ('pending' as const)
+        }))
+      })
+    }
+    let block = 0
+    const steps = int(0, 6)
+    for (let k = 0; k < steps; k++) {
+      if (rand() < 0.4)
+        out.push({ kind: 'assistant-text', messageId: `msg_${turn}_${block++}`, text: paragraph() })
+      const callId = `call_${turn}_${k}`
+      if (rand() < 0.7) {
+        const failed = rand() < 0.08
+        const output = Array.from({ length: int(1, 30) }, (_, i) => `ok ${i} ${pick(WORDS)}`).join(
+          '\n'
+        )
+        const command = `pnpm test -- ${pick(WORDS)}`
+        out.push(
+          {
+            kind: 'tool-call',
+            id: callId,
+            name: 'codex/commandExecution',
+            input: { command, cwd: '/repo' }
+          },
+          {
+            kind: 'tool-result',
+            toolUseId: callId,
+            isError: failed,
+            rawContent: output,
+            structured: {
+              type: 'commandExecution',
+              id: callId,
+              command,
+              cwd: '/repo',
+              status: failed ? 'failed' : 'completed',
+              aggregatedOutput: output,
+              exitCode: failed ? 1 : 0
+            }
+          }
+        )
+      } else {
+        const changes = [
+          {
+            path: `/repo/src/module-${int(1, 80)}.ts`,
+            kind: { type: 'update' },
+            diff: `@@ -1 +1 @@\n-compute(${k}, 'a')\n+compute(${k}, 'b')\n`
+          }
+        ]
+        out.push(
+          { kind: 'tool-call', id: callId, name: 'codex/fileChange', input: { changes } },
+          {
+            kind: 'tool-result',
+            toolUseId: callId,
+            isError: false,
+            rawContent: '',
+            structured: { type: 'fileChange', id: callId, changes, status: 'completed' }
+          }
+        )
+      }
+    }
+    out.push(
+      { kind: 'assistant-text', messageId: `msg_${turn}_${block++}`, text: markdown() },
+      { kind: 'user-message-delivery', id, state: 'answered' },
+      {
+        kind: 'result',
+        subtype: 'completed',
+        isError: false,
+        durationMs: int(800, 60_000),
+        durationApiMs: int(800, 60_000),
+        numTurns: 1,
+        totalCostUsd: 0,
+        stopReason: null,
+        terminalReason: null,
+        text: null,
+        modelUsage: {},
+        usage: USAGE,
+        permissionDenials: []
+      }
+    )
+    return out
+  }
+
+  const asked = { n: 0 }
+  if (opts.provider === 'codex') {
+    // Codex's handshake: one synthetic turn-init per process, not one per turn.
+    events.push({
+      kind: 'turn-init',
+      sessionId: 'codex-thread',
+      model: 'gpt-5.5',
+      cwd: '/repo',
+      tools: []
+    })
+    for (let turn = 0; events.length < target; turn++) {
+      const turnOut = codexTurn(turn)
+      events.push(...(opts.askEveryTool ? withAsks(turnOut, asked) : turnOut))
+    }
+  } else {
+    for (let turn = 0; events.length < target; turn++) {
+      const turnOut = turnEvents(turn)
+      events.push(...(opts.askEveryTool ? withAsks(turnOut, asked) : turnOut))
+    }
+  }
 
   // Exactly `target` events, ending on a whole turn: cut back to the last
   // result that fits, then one last turn (prompt, replies, result) fills the rest.

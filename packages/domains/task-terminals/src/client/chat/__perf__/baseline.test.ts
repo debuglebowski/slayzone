@@ -31,6 +31,7 @@ import {
   longSessionEvents,
   replayAllBestOf,
   replayEvents,
+  scaleSessionEvents,
   type ReplayMetrics
 } from './replay'
 
@@ -127,9 +128,11 @@ function main(): void {
     )
   }
 
-  const budget = (
-    JSON.parse(readFileSync(BUDGET_PATH, 'utf8')) as { longSession: LongSessionBudget }
-  ).longSession
+  const budgets = JSON.parse(readFileSync(BUDGET_PATH, 'utf8')) as {
+    longSession: LongSessionBudget
+    scale: { hydrateBatchMs: Record<string, number>; maxRatio100kTo10k: number }
+  }
+  const budget = budgets.longSession
   console.log(
     `\n  Long session (${longPass.events} events, timeline ${longPass.finalTimelineLength} rows):` +
       `\n    replay ${longPass.totalReducerMs.toFixed(1)}ms (budget ${budget.replayTotalMs}ms)` +
@@ -152,6 +155,30 @@ function main(): void {
     if (value > limit) {
       console.error(`  ✗ long session ${label}: ${value.toFixed(2)}ms > ${limit}ms`)
       overBudget++
+    }
+  }
+
+  // Scale: opening a saved session of 10k–100k events (one batch), both providers.
+  console.log('\n  Scale (one hydrate batch, best of 3):')
+  for (const provider of ['claude', 'codex'] as const) {
+    for (const ask of [false, true]) {
+      const label = `${provider}${ask ? ' asked' : ''}`.padEnd(13)
+      const times: Record<string, number> = {}
+      for (const [n, limit] of Object.entries(budgets.scale.hydrateBatchMs)) {
+        const ms = hydrateBatchMs(scaleSessionEvents(Number(n), provider, ask), 3, provider)
+        times[n] = ms
+        const ok = ms <= limit
+        console.log(
+          `  ${ok ? '✓' : '✗'} ${label} ${n.padStart(6)} events ${ms.toFixed(1)}ms (budget ${limit}ms)`
+        )
+        if (!ok) overBudget++
+      }
+      const ratio = times['100000'] / times['10000']
+      const linear = ratio <= budgets.scale.maxRatio100kTo10k
+      console.log(
+        `  ${linear ? '✓' : '✗'} ${label} 100k / 10k = ${ratio.toFixed(1)}x (max ${budgets.scale.maxRatio100kTo10k}x)`
+      )
+      if (!linear) overBudget++
     }
   }
 
