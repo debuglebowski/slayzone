@@ -17,10 +17,12 @@ import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   AgentEvent,
+  CommandTaskOutput,
   OutgoingUserMessage,
   PermissionDecision
 } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
+import { ClaudeCommandTasks } from './claude-command-tasks'
 import type { AgentBackend, ChatDriverContext, ChatSessionDriver } from './types'
 
 interface PendingControl {
@@ -32,6 +34,7 @@ interface PendingControl {
 /** A `can_use_tool` request the CLI is blocked on. */
 interface PendingPrompt {
   toolName: string
+  toolUseId: string
   input: unknown
   suggestions: unknown[]
 }
@@ -106,6 +109,12 @@ class ClaudeSessionDriver implements ChatSessionDriver {
   private readonly pendingPrompts = new Map<string, PendingPrompt>()
   /** Last permission mode the CLI reported (turn-init or status). */
   private permissionMode: string | null = null
+  /** Commands this process runs as tasks (Bash / Monitor): live output, stop, background. */
+  private readonly tasks = new ClaudeCommandTasks({
+    request: (request, timeoutMs) => this.applyControl(request, timeoutMs),
+    emit: (ev) => this.ctx?.emit(ev),
+    now: () => Date.now()
+  })
 
   start(ctx: ChatDriverContext): void {
     this.ctx = ctx
@@ -142,9 +151,18 @@ class ClaudeSessionDriver implements ChatSessionDriver {
       return
     }
 
+    // A task frame becomes a command task or a sub-agent — or nothing.
+    if (ev.kind === 'cli-task') {
+      const routed = this.tasks.route(ev)
+      if (routed) this.ctx?.emit(routed)
+      return
+    }
+    if (ev.kind === 'tool-call') this.tasks.noteToolCall(ev.id)
+
     if (ev.kind === 'permission-request') {
       this.pendingPrompts.set(ev.requestId, {
         toolName: ev.toolName,
+        toolUseId: ev.toolUseId,
         input: ev.input,
         suggestions: Array.isArray(ev.permissionSuggestions) ? ev.permissionSuggestions : []
       })
@@ -253,6 +271,7 @@ class ClaudeSessionDriver implements ChatSessionDriver {
     })
     if (line == null || !this.writeSafely(line)) return false
     this.pendingPrompts.delete(args.requestId)
+    if (decision.behavior === 'allow') this.tasks.noteToolApproved(prompt.toolUseId)
     this.ctx.emit({
       kind: 'permission-resolved',
       requestId: args.requestId,
@@ -268,7 +287,20 @@ class ClaudeSessionDriver implements ChatSessionDriver {
     return claudeCodeAdapter.extractSessionId(event)
   }
 
+  commandTaskOutput(taskId: string): Promise<CommandTaskOutput> {
+    return this.tasks.output(taskId)
+  }
+
+  stopCommandTask(taskId: string): Promise<void> {
+    return this.tasks.stop(taskId)
+  }
+
+  backgroundCommandTask(toolUseId: string): Promise<boolean> {
+    return this.tasks.background(toolUseId)
+  }
+
   dispose(): void {
+    this.tasks.dispose()
     for (const [id, pending] of this.pendingControl) {
       clearTimeout(pending.timer)
       pending.reject(new Error('session ended before control_response'))
@@ -303,5 +335,7 @@ export const claudeChatBackend: AgentBackend = {
   binaryName: claudeCodeAdapter.binaryName,
   minTestedCliVersion: MIN_TESTED_CLAUDE_CLI_VERSION,
   buildSpawnArgs: (opts) => claudeCodeAdapter.buildSpawnArgs(opts),
-  createDriver: () => new ClaudeSessionDriver()
+  createDriver: () => new ClaudeSessionDriver(),
+  refusedOptionalFlag: (stderr) =>
+    /unknown option '--thinking-display'/.test(stderr) ? '--thinking-display' : null
 }

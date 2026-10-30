@@ -14,8 +14,10 @@
  * is switched on. A block cut short (Stop, crash, a result with the block still
  * open) is saved with the text it got, so nothing that was shown is lost.
  *
- * The reducer already skips a saved block event whose `messageId` it streamed,
- * so a live viewer sees the fragments once and a replay sees the block once.
+ * The reducer finalizes the row it streamed with the saved block event, so a
+ * live viewer sees the fragments once and a replay sees the block once. A tool
+ * call's input streams too (`input_json`): kept here only so a reload mid-input
+ * redraws it — the saved `tool-call` carries the parsed input.
  *
  * @module terminal/server/runtime/chat-event-splitter
  */
@@ -32,6 +34,8 @@ interface OpenBlock {
   index: number
   type: StreamBlockType
   text: string
+  /** tool_use: the input JSON received so far. */
+  json: string
   hasSignature: boolean
   /** The provider sent this block's own saved event — build none. */
   consolidated: boolean
@@ -79,6 +83,7 @@ export class ChatEventSplitter {
           index: event.blockIndex,
           type: event.blockType,
           text: '',
+          json: '',
           hasSignature: false,
           consolidated: false,
           ...(event.toolUseId ? { toolUseId: event.toolUseId } : {}),
@@ -90,9 +95,8 @@ export class ChatEventSplitter {
         const block = this.open?.blocks.get(event.blockIndex)
         if (block) {
           if (event.deltaType === 'signature') block.hasSignature = true
-          else if (event.deltaType === 'text' || event.deltaType === 'thinking') {
-            block.text += event.text
-          }
+          else if (event.deltaType === 'input_json') block.json += event.text
+          else block.text += event.text
         }
         return { live: [event], saved: [] }
       }
@@ -169,6 +173,14 @@ export class ChatEventSplitter {
           blockIndex: block.index,
           deltaType: block.type,
           text: block.text,
+          ...parent
+        })
+      } else if (block.type === 'tool_use' && block.json) {
+        out.push({
+          kind: 'stream-block-delta',
+          blockIndex: block.index,
+          deltaType: 'input_json',
+          text: block.json,
           ...parent
         })
       }

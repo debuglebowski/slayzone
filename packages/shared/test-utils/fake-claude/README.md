@@ -125,7 +125,7 @@ The defaults copy CLI 2.1.312 behaviour as recorded:
 
 | Exit | Meaning | Where it is reported |
 |---|---|---|
-| 2 | The argv is missing one of the flags chat always passes (`-p`, stream-json in/out, `--verbose`, `--permission-prompt-tool stdio`, `--replay-user-messages`). | `epoch.argvDrift()` |
+| 2 | The argv is missing one of the flags chat always passes (`-p`, stream-json in/out, `--verbose`, `--permission-prompt-tool stdio`, `--replay-user-messages`, `--include-partial-messages`). | `epoch.argvDrift()` |
 | 3 | A spawn past the scripted processes. Usually an unexpected respawn. | `epoch.unscripted()` |
 | 3 | A spawn before any scenario was set. | `fake.orphans()` |
 
@@ -192,6 +192,31 @@ npx tsx packages/domains/terminal/src/server/agents/claude-stream-recorder.live.
   - home and temp paths, emails and rate-limit figures are scrubbed;
   - account MCP tools are dropped.
 - Review the diff, then run the drift check and `transcripts.test.ts`.
+
+## Token streaming and command tasks (stream.ts, tasks.ts)
+
+Chat always spawns with `--include-partial-messages`, so the real CLI streams every main-thread message as `stream_event` frames (sub-agents never stream). `streamMessage(messageId, blocks, { gapMs?, open? })` returns the steps that play ONE message in 2.1.312's order (spike item 9): `message_start`; per block `content_block_start` → deltas → the saved `assistant` event for the block (same `messageId`) → `content_block_stop`; then `message_delta` + `message_stop`.
+
+```ts
+...streamMessage('msg_1', [
+  { thinking: ['I should ', 'list files.'] },          // [] = thinking display omitted
+  { toolUse: { id: 'toolu_1', name: 'Bash', input: { command: 'ls' } } },
+], { gapMs: 200 }),
+...streamMessage('msg_2', [{ text: ['Hel', 'lo'] }], { open: true }), // cut short: no saved event, no stops
+```
+
+`streamEv.*` builds single frames. A `task` step (`taskStep(spec)`) runs a command as a CLI task, the way 2.1.312 does (spike item 14; runtime in fake-claude-tasks.mjs). Emit the command's `tool_use` first.
+
+| Spec | Effect |
+|---|---|
+| foreground (default) | `task_started` after `startAfterMs` (default 300; the real CLI waits ~3 s, and a command done by then never becomes a task); output chunks appear at `atMs`; at `endAtMs`: `task_notification completed`, then the tool_result with the whole output. The step blocks until then. |
+| `background: true` | `background_tasks_changed` + `task_started {is_backgrounded:true}` + tool_result "Command running in background with ID: …" at once; the step returns. At `endAtMs`: `task_updated {status:'completed'}` + `task_notification` + `background_tasks_changed`, then `afterBackgroundExit` steps (the CLI's own follow-up turn). |
+
+The fake answers the app's task control requests itself:
+
+- `get_task_output {task_id}` → `{output (last 8 KiB), total_bytes, truncated}`; empty once a foreground command finished; kept (with `[exited with code N]`) for a background one; an unknown id is an error reply. Each poll is logged (`task-poll`); read the requests with `run.controlRequests()`.
+- `background_tasks {tool_use_id}` on a running foreground command → `background_tasks_changed` + `task_updated {patch:{is_backgrounded:true}}`, ack `{backgrounded:true}`, tool_result "Command was manually backgrounded…"; the command runs on in the background.
+- `stop_task {task_id}` on a running command → `task_updated {status:'killed'}` + `task_notification stopped` + `background_tasks_changed`, ack `{}`, output ends with `[killed]`. Not verified on the real CLI for a FOREGROUND command (played as a killed command with an error tool_result).
 
 ## e2e (`packages/apps/app/e2e/fixtures/chat.ts`)
 

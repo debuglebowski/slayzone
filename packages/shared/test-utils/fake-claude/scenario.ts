@@ -6,6 +6,7 @@
  * @module test-utils/fake-claude/scenario
  */
 import { randomUUID } from 'node:crypto'
+import type { CommandTaskSpec } from './tasks'
 
 /** A stream-json event as the CLI writes it to stdout. Strings may use `{{var}}`. */
 export type StreamEvent = Record<string, unknown>
@@ -59,6 +60,8 @@ export type Step =
   | { exit: number | null; signal?: NodeJS.Signals }
   /** Re-emit one turn of a recorded transcript (see transcript.ts). */
   | { replay: { transcript: string; process?: number; turn?: number; speed?: number } }
+  /** Run a command as a CLI task (live output, background, stop): tasks.ts. */
+  | { task: CommandTaskSpec }
 
 /** A `can_use_tool` request body (CLI 2.1.312 field names). */
 export interface CanUseToolRequest {

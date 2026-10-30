@@ -120,6 +120,17 @@ export const chatRouter = router({
   getReplay: publicProcedure
     .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
     .query(({ input }) => ops().getReplay(input.tabId, input.afterSeq)),
+  // A command the agent runs as a task (plan 3.9): its live output (polled by
+  // the command card while it runs and is on screen), stop, move to background.
+  commandTaskOutput: publicProcedure
+    .input(z.object({ tabId: z.string(), taskId: z.string() }))
+    .query(({ input }) => ops().commandTaskOutput(input.tabId, input.taskId)),
+  stopCommandTask: publicProcedure
+    .input(z.object({ tabId: z.string(), taskId: z.string() }))
+    .mutation(({ input }) => ops().stopCommandTask(input.tabId, input.taskId)),
+  backgroundCommandTask: publicProcedure
+    .input(z.object({ tabId: z.string(), toolUseId: z.string() }))
+    .mutation(({ input }) => ops().backgroundCommandTask(input.tabId, input.toolUseId)),
   getInfo: publicProcedure
     .input(z.object({ tabId: z.string() }))
     .query(({ input }) => ops().getInfo(input.tabId)),

@@ -72,7 +72,12 @@ export function extractShellIdFromSpawnResult(result: ToolResultEvent): string |
   }
   const text = rawContentText(result.rawContent)
   if (!text) return null
-  const m = /shell\s*id\s*[:=]\s*([A-Za-z0-9_-]+)/i.exec(text) ?? /\b(bash_\d+)\b/.exec(text)
+  const m =
+    /shell\s*id\s*[:=]\s*([A-Za-z0-9_-]+)/i.exec(text) ??
+    // CLI 2.1.312: "Command running in background with ID: <task id>." / "…manually
+    // backgrounded by user with ID: <task id>."
+    /background(?:ed)?(?: by user)? with ID:\s*([A-Za-z0-9_-]+)/i.exec(text) ??
+    /\b(bash_\d+)\b/.exec(text)
   return m ? m[1] : null
 }
 

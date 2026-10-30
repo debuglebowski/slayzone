@@ -1,8 +1,18 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
 import {
   hasPendingPrompt,
   isAwaitingUserQuestion,
+  LiveBlockStore,
+  LiveBlockStoreContext,
   selectUsageSummary,
   useChatSession
 } from '@slayzone/terminal/client'
@@ -25,6 +35,7 @@ import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
+import { CommandTaskContext } from './tool-cards'
 
 export interface ChatPanelHandle {
   focus: () => void
@@ -292,147 +303,161 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const isEmpty =
       timeline.length === 0 || (timeline.length === 1 && timeline[0].kind === 'session-start')
 
+    // What streams right now reaches only the rows that stream (plan 3.2): the
+    // store's identity never changes, so providing it re-renders nothing, and a
+    // delta notifies just the row subscribed to its key.
+    const [liveStore] = useState(() => new LiveBlockStore())
+    useLayoutEffect(() => {
+      liveStore.publish(state.live)
+    }, [liveStore, state.live])
+    // Command cards poll their live output only while this tab is on screen.
+    const commandTaskScope = useMemo(() => ({ tabId, active: isActive }), [tabId, isActive])
+
     return (
       <ChatViewContext.Provider value={chatView}>
-        <div
-          ref={panelRef}
-          data-chat-panel
-          className="relative flex flex-col h-full bg-background"
-          style={{ fontSize: `${appearance.terminalFontSize}px` }}
-          onDragEnter={(e) => {
-            if (e.dataTransfer?.types.includes('Files')) {
-              e.preventDefault()
-              imagePasteDrop.onDragEnter()
-            }
-          }}
-          onDragOver={(e) => {
-            if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
-          }}
-          onDragLeave={() => imagePasteDrop.onDragLeave()}
-          onDrop={(e) => {
-            const files = imagePasteDrop.extractImageFiles(e.dataTransfer)
-            imagePasteDrop.resetDrag()
-            if (files.length === 0) return
-            e.preventDefault()
-            void imagePasteDrop.handleFiles(files)
-          }}
-          onMouseUp={(e) => {
-            // Click on panel background → focus composer. Skip if user clicked an
-            // interactive element (button/link/input) or completed a text selection.
-            const target = e.target as HTMLElement | null
-            if (!target) return
-            if (
-              target.closest(
-                'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
-              )
-            )
-              return
-            const sel = window.getSelection()
-            if (sel && !sel.isCollapsed) return
-            composer.textareaRef.current?.focus()
-          }}
-          onClickCapture={(e) => {
-            // Event-delegated link interception for markdown-rendered anchors only.
-            // Skip LinkifiedText anchors — they own their click semantics via
-            // `data-linkified` and would otherwise double-fire (capture-phase parent
-            // before child onClick).
-            // Mirrors terminal modifier semantics:
-            //   ⌘+Click       → in-app slay browser (onOpenUrl)
-            //   ⌘+Shift+Click → external
-            //   bare click    → external (markdown anchors are click affordances;
-            //                  doing nothing on bare click would feel broken).
-            const target = e.target as HTMLElement | null
-            const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
-            if (!anchor) return
-            if (anchor.dataset.linkified === 'true') return
-            const href = anchor.getAttribute('href') ?? ''
-            if (!/^https?:\/\//i.test(href)) return
-            e.preventDefault()
-            const mod = e.metaKey || e.ctrlKey
-            if (mod && e.shiftKey) navigate.openExternal(href)
-            else if (mod && onOpenUrl) onOpenUrl(href)
-            else navigate.openExternal(href)
-          }}
-        >
-          {/* Panel-wide drop overlay */}
-          {imagePasteDrop.isDragging && (
-            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
-              Drop image…
+        <LiveBlockStoreContext.Provider value={liveStore}>
+          <CommandTaskContext.Provider value={commandTaskScope}>
+            <div
+              ref={panelRef}
+              data-chat-panel
+              className="relative flex flex-col h-full bg-background"
+              style={{ fontSize: `${appearance.terminalFontSize}px` }}
+              onDragEnter={(e) => {
+                if (e.dataTransfer?.types.includes('Files')) {
+                  e.preventDefault()
+                  imagePasteDrop.onDragEnter()
+                }
+              }}
+              onDragOver={(e) => {
+                if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
+              }}
+              onDragLeave={() => imagePasteDrop.onDragLeave()}
+              onDrop={(e) => {
+                const files = imagePasteDrop.extractImageFiles(e.dataTransfer)
+                imagePasteDrop.resetDrag()
+                if (files.length === 0) return
+                e.preventDefault()
+                void imagePasteDrop.handleFiles(files)
+              }}
+              onMouseUp={(e) => {
+                // Click on panel background → focus composer. Skip if user clicked an
+                // interactive element (button/link/input) or completed a text selection.
+                const target = e.target as HTMLElement | null
+                if (!target) return
+                if (
+                  target.closest(
+                    'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
+                  )
+                )
+                  return
+                const sel = window.getSelection()
+                if (sel && !sel.isCollapsed) return
+                composer.textareaRef.current?.focus()
+              }}
+              onClickCapture={(e) => {
+                // Event-delegated link interception for markdown-rendered anchors only.
+                // Skip LinkifiedText anchors — they own their click semantics via
+                // `data-linkified` and would otherwise double-fire (capture-phase parent
+                // before child onClick).
+                // Mirrors terminal modifier semantics:
+                //   ⌘+Click       → in-app slay browser (onOpenUrl)
+                //   ⌘+Shift+Click → external
+                //   bare click    → external (markdown anchors are click affordances;
+                //                  doing nothing on bare click would feel broken).
+                const target = e.target as HTMLElement | null
+                const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
+                if (!anchor) return
+                if (anchor.dataset.linkified === 'true') return
+                const href = anchor.getAttribute('href') ?? ''
+                if (!/^https?:\/\//i.test(href)) return
+                e.preventDefault()
+                const mod = e.metaKey || e.ctrlKey
+                if (mod && e.shiftKey) navigate.openExternal(href)
+                else if (mod && onOpenUrl) onOpenUrl(href)
+                else navigate.openExternal(href)
+              }}
+            >
+              {/* Panel-wide drop overlay */}
+              {imagePasteDrop.isDragging && (
+                <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
+                  Drop image…
+                </div>
+              )}
+
+              <ChatTimeline
+                overrideNotice={overrideNotice}
+                search={search}
+                state={state}
+                hydrating={hydrating}
+                isEmpty={isEmpty}
+                inFlight={inFlight}
+                awaitingUser={promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)}
+                appearance={appearance}
+                hiddenCount={display.hiddenCount}
+                PAGE_SIZE={display.PAGE_SIZE}
+                setVisibleCount={display.setVisibleCount}
+                visibleItems={display.visibleItems}
+                visibleStart={display.visibleStart}
+                itemKey={display.itemKey}
+                scrollRef={scrollRef}
+                contentRef={contentRef}
+                isAtBottom={isAtBottom}
+                scrollToBottom={scrollToBottom}
+                sendMessage={sendMessage}
+                copyLastResponse={display.copyLastResponse}
+                copyAllMessages={display.copyAllMessages}
+                copySessionId={copySessionId}
+                setCollapseSignal={setCollapseSignal}
+                handleReset={handleReset}
+                resetting={resetting}
+              />
+
+              <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
+
+              <ChatComposer
+                appearance={appearance}
+                finalOnly={finalOnly}
+                inFlight={inFlight}
+                mode={mode}
+                queuedMessages={composer.queuedMessages}
+                removeQueue={composer.removeQueue}
+                attachments={composer.attachments}
+                setAttachments={composer.setAttachments}
+                imagePasteDrop={imagePasteDrop}
+                autocomplete={composer.autocomplete}
+                textareaRef={composer.textareaRef}
+                draft={composer.draft}
+                setDraft={composer.setDraft}
+                setCursorPos={composer.setCursorPos}
+                onKeyDown={composer.onKeyDown}
+                handleSend={composer.handleSend}
+                handleStop={composer.handleStop}
+                historySearch={composer.historySearch}
+                usage={selectUsageSummary(state)}
+                displaySessionEnded={displaySessionEnded}
+                handleRestart={handleRestart}
+                restarting={restarting}
+                handleReset={handleReset}
+                resetting={resetting}
+                chatMode={chatMode}
+                handleModeChange={handleModeChange}
+                autoCapability={autoCapability}
+                chatModel={chatModel}
+                handleModelChange={handleModelChange}
+                modelChanging={modelChanging}
+                chatEffort={chatEffort}
+                handleEffortChange={handleEffortChange}
+                effortChanging={effortChanging}
+                chatCollaboration={chatCollaboration}
+                handleCollaborationChange={handleCollaborationChange}
+                collaborationChanging={collaborationChanging}
+                chatFastMode={chatFastMode}
+                handleFastModeChange={handleFastModeChange}
+                fastModeChanging={fastModeChanging}
+              />
             </div>
-          )}
-
-          <ChatTimeline
-            overrideNotice={overrideNotice}
-            search={search}
-            state={state}
-            hydrating={hydrating}
-            isEmpty={isEmpty}
-            inFlight={inFlight}
-            awaitingUser={promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)}
-            appearance={appearance}
-            hiddenCount={display.hiddenCount}
-            PAGE_SIZE={display.PAGE_SIZE}
-            setVisibleCount={display.setVisibleCount}
-            visibleItems={display.visibleItems}
-            visibleStart={display.visibleStart}
-            itemKey={display.itemKey}
-            scrollRef={scrollRef}
-            contentRef={contentRef}
-            isAtBottom={isAtBottom}
-            scrollToBottom={scrollToBottom}
-            sendMessage={sendMessage}
-            copyLastResponse={display.copyLastResponse}
-            copyAllMessages={display.copyAllMessages}
-            copySessionId={copySessionId}
-            setCollapseSignal={setCollapseSignal}
-            handleReset={handleReset}
-            resetting={resetting}
-          />
-
-          <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
-
-          <ChatComposer
-            appearance={appearance}
-            finalOnly={finalOnly}
-            inFlight={inFlight}
-            mode={mode}
-            queuedMessages={composer.queuedMessages}
-            removeQueue={composer.removeQueue}
-            attachments={composer.attachments}
-            setAttachments={composer.setAttachments}
-            imagePasteDrop={imagePasteDrop}
-            autocomplete={composer.autocomplete}
-            textareaRef={composer.textareaRef}
-            draft={composer.draft}
-            setDraft={composer.setDraft}
-            setCursorPos={composer.setCursorPos}
-            onKeyDown={composer.onKeyDown}
-            handleSend={composer.handleSend}
-            handleStop={composer.handleStop}
-            historySearch={composer.historySearch}
-            usage={selectUsageSummary(state)}
-            displaySessionEnded={displaySessionEnded}
-            handleRestart={handleRestart}
-            restarting={restarting}
-            handleReset={handleReset}
-            resetting={resetting}
-            chatMode={chatMode}
-            handleModeChange={handleModeChange}
-            autoCapability={autoCapability}
-            chatModel={chatModel}
-            handleModelChange={handleModelChange}
-            modelChanging={modelChanging}
-            chatEffort={chatEffort}
-            handleEffortChange={handleEffortChange}
-            effortChanging={effortChanging}
-            chatCollaboration={chatCollaboration}
-            handleCollaborationChange={handleCollaborationChange}
-            collaborationChanging={collaborationChanging}
-            chatFastMode={chatFastMode}
-            handleFastModeChange={handleFastModeChange}
-            fastModeChanging={fastModeChanging}
-          />
-        </div>
+          </CommandTaskContext.Provider>
+        </LiveBlockStoreContext.Provider>
       </ChatViewContext.Provider>
     )
   }

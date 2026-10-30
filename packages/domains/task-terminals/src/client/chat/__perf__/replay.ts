@@ -3,14 +3,16 @@
  * through the chat-timeline reducer. Used for perf baseline + regression gate.
  *
  * Fixtures live at packages/domains/terminal/test/fixtures/claude-stream/*.ndjson
- * (raw provider JSON). Adapter parses each line to AgentEvent. We feed those into
- * the reducer one event at a time, the same path useChatSession takes at runtime.
+ * (raw provider JSON). Each line goes through a Claude session driver — the
+ * adapter's parse plus what the per-process driver resolves (task frames →
+ * sub-agents / command tasks) — exactly the events the app receives. We feed
+ * those into the reducer one event at a time, the same path useChatSession takes.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
-import { claudeCodeAdapter } from '@slayzone/terminal/agents'
+import { claudeChatBackend } from '@slayzone/terminal/agents'
 import { reducer, initialState, type ChatTimelineState } from '@slayzone/terminal/reducer'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 
@@ -27,11 +29,24 @@ export function listFixtures(): string[] {
 
 export function loadFixture(name: string): AgentEvent[] {
   const raw = readFileSync(join(FIXTURES_DIR, name), 'utf8')
-  return raw
-    .split('\n')
-    .filter((l) => l.trim())
-    .map((l) => claudeCodeAdapter.parseLine(l))
-    .filter((e): e is AgentEvent => e != null)
+  const events: AgentEvent[] = []
+  const driver = claudeChatBackend.createDriver()
+  void driver.start({
+    write: () => undefined,
+    emit: (event) => events.push(event),
+    cwd: '/tmp',
+    sessionId: 'perf',
+    resume: false,
+    providerFlags: [],
+    chatModel: null,
+    chatEffort: null,
+    chatMode: null,
+    chatCollaboration: null,
+    chatFastMode: false
+  })
+  for (const line of raw.split('\n')) if (line.trim()) driver.handleLine(line)
+  driver.dispose()
+  return events
 }
 
 export interface ReplayMetrics {

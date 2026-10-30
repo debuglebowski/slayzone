@@ -256,6 +256,8 @@ run_harness packages/shared/test-utils/fs-module-cache.test.ts
 run_harness packages/shared/test-utils/fake-claude/fake-claude.test.ts
 # Recorded real-CLI transcripts (fake replay + drift check input): shape + no personal data.
 run_harness packages/shared/test-utils/fake-claude/transcripts.test.ts
+# Fake CLI token streaming + command tasks (chat plan 3.2 / 3.9).
+run_harness packages/shared/test-utils/fake-claude/fake-claude-streams.test.ts
 # expectKnownBug: marks one assertion as a known open bug without masking setup failures.
 run_harness packages/shared/test-utils/known-bug.test.ts
 # `slay hub` end-to-end: boots two REAL hubs in temp roots, then drives ls /
@@ -590,6 +592,8 @@ run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts
+# Spawn CLI-version hint (summarized thinking) + command tasks through the transport (chat plan 3.2 / 3.9).
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-command-tasks.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-chaos.test.ts
 run_harness packages/domains/terminal/src/server/chat-events-store.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
@@ -779,6 +783,11 @@ run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
+# Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
+run_harness packages/domains/terminal/src/client/chat-timeline-streaming.test.ts
+# A streaming tool input as far as it arrived; per-row live block notifications (chat plan 3.2).
+run_harness packages/domains/terminal/src/client/partial-json.test.ts
+run_harness packages/domains/terminal/src/client/live-blocks.test.ts
 run_harness packages/domains/terminal/src/client/useLoopMode.test.ts
 run_harness packages/domains/terminal/src/client/web-link-provider.test.ts
 run_harness packages/domains/terminal/src/server/adapters/copilot-adapter.test.ts
@@ -786,6 +795,8 @@ run_harness packages/domains/terminal/src/server/adapters/encode-submit.test.ts
 run_harness packages/domains/terminal/src/server/adapters/gemini-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/qwen-adapter.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
+# One Claude process's task_* frames → command tasks (Bash/Monitor) or sub-agents; task control requests.
+run_harness packages/domains/terminal/src/server/agents/claude-command-tasks.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.
 run_harness packages/domains/terminal/src/server/agents/claude-stream-drift.test.ts
@@ -930,6 +941,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
+  packages/domains/task-terminals/src/client/chat/tool-cards/BashCard.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatTimeline.streaming.test.tsx \
   packages/domains/task-terminals/src/client/chat/prompts/PromptDock.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \

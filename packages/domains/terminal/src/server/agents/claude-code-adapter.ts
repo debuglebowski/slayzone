@@ -7,6 +7,14 @@ import type {
 } from '@slayzone/terminal-contracts'
 import type { AgentAdapter, AgentSpawnOpts, SpawnArgs } from './types'
 import { classifyClaudeHookResponse } from './claude-hook-output'
+import { isCliVersionAtLeast } from '../runtime/cli-version'
+
+/**
+ * Oldest CLI `--thinking-display summarized` is verified on. The option is
+ * hidden (not in `--help`) and an older CLI exits with `unknown option`, so it
+ * is only passed when the spawn's CLI version is known to reach this.
+ */
+export const SUMMARIZED_THINKING_MIN_CLI_VERSION = '2.1.312'
 
 /**
  * Claude Code stream-json transport.
@@ -44,8 +52,19 @@ export const claudeCodeAdapter: AgentAdapter = {
       // Echo each user message back with its `uuid`: with `command_lifecycle`,
       // the CLI's own confirmation that it has the message (the outbox's
       // `delivered`). Also what rewind/fork (plan 3.3) keys on.
-      '--replay-user-messages'
+      '--replay-user-messages',
+      // Token streaming: every main-thread message also arrives as `stream_event`
+      // deltas (live only — the splitter saves the CLI's own block event).
+      '--include-partial-messages'
     ]
+    // Thinking text: without it the CLI streams empty thinking deltas and saves
+    // empty thinking blocks.
+    if (
+      opts.cliVersion &&
+      isCliVersionAtLeast(opts.cliVersion, SUMMARIZED_THINKING_MIN_CLI_VERSION)
+    ) {
+      base.push('--thinking-display', 'summarized')
+    }
     if (opts.resume) {
       base.push('--resume', opts.sessionId)
     } else {
@@ -349,33 +368,10 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
     }
   }
   if (subtype === 'task_started' || subtype === 'task_updated' || subtype === 'task_notification') {
-    const usageRaw = (obj.usage ?? null) as Record<string, unknown> | null
-    const usage =
-      usageRaw &&
-      (usageRaw.total_tokens != null || usageRaw.tool_uses != null || usageRaw.duration_ms != null)
-        ? {
-            totalTokens: toNum(usageRaw.total_tokens),
-            toolUses: toNum(usageRaw.tool_uses),
-            durationMs: toNum(usageRaw.duration_ms)
-          }
-        : undefined
-    // All three `task_*` system events map to the same semantic state:
-    // 'in-flight'. The sub-agent row is closed (→ 'completed'/'failed') by the
-    // outer Task tool's `tool-result`, which is contract-guaranteed (every
-    // tool_use → exactly one tool_result). Notification is kept purely as
-    // enrichment for usage stats. See chat-timeline reducer for the close.
-    return {
-      kind: 'sub-agent',
-      phase: 'in-flight',
-      toolUseId: (obj.tool_use_id as string) ?? '',
-      parentToolUseId: parent,
-      description: typeof obj.description === 'string' ? obj.description : undefined,
-      status: typeof obj.status === 'string' ? obj.status : undefined,
-      summary: typeof obj.summary === 'string' ? obj.summary : undefined,
-      usage,
-      raw: obj
-    }
+    return parseCliTask(obj, subtype, parent)
   }
+  // The running background tasks, in full: follows from the task_* frames.
+  if (subtype === 'background_tasks_changed') return null
   if (subtype === 'api_retry') {
     return {
       kind: 'api-retry',
@@ -406,6 +402,66 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
     return null
   }
   return { kind: 'unknown', reason: 'unknown-type', raw: obj }
+}
+
+/**
+ * A `system/task_*` frame → `cli-task`. Stateless: what runs it (a command or a
+ * sub-agent) is only named by `task_started`, so the per-process driver resolves
+ * the rest by `taskId` (claude-command-tasks.ts).
+ */
+function parseCliTask(
+  obj: Record<string, unknown>,
+  subtype: 'task_started' | 'task_updated' | 'task_notification',
+  parent: string | undefined
+): AgentEvent {
+  if (typeof obj.task_id !== 'string' || !obj.task_id) {
+    return { kind: 'unknown', reason: 'shape-mismatch', raw: obj }
+  }
+  const patch = (obj.patch ?? {}) as Record<string, unknown>
+  const usageRaw = (obj.usage ?? null) as Record<string, unknown> | null
+  const usage =
+    usageRaw &&
+    (usageRaw.total_tokens != null || usageRaw.tool_uses != null || usageRaw.duration_ms != null)
+      ? {
+          totalTokens: toNum(usageRaw.total_tokens),
+          toolUses: toNum(usageRaw.tool_uses),
+          durationMs: toNum(usageRaw.duration_ms)
+        }
+      : undefined
+  const backgrounded =
+    typeof obj.is_backgrounded === 'boolean'
+      ? obj.is_backgrounded
+      : typeof patch.is_backgrounded === 'boolean'
+        ? patch.is_backgrounded
+        : undefined
+  const status =
+    typeof obj.status === 'string'
+      ? obj.status
+      : typeof patch.status === 'string'
+        ? patch.status
+        : undefined
+  return {
+    kind: 'cli-task',
+    subtype:
+      subtype === 'task_started'
+        ? 'started'
+        : subtype === 'task_updated'
+          ? 'updated'
+          : 'notification',
+    taskId: obj.task_id,
+    ...(typeof obj.tool_use_id === 'string' && obj.tool_use_id
+      ? { toolUseId: obj.tool_use_id }
+      : {}),
+    ...(typeof obj.task_type === 'string' ? { taskType: obj.task_type } : {}),
+    ...(parent ? { parentToolUseId: parent } : {}),
+    ...(typeof obj.description === 'string' ? { description: obj.description } : {}),
+    ...(backgrounded !== undefined ? { backgrounded } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(typeof patch.end_time === 'number' ? { endTime: patch.end_time } : {}),
+    ...(typeof obj.summary === 'string' ? { summary: obj.summary } : {}),
+    ...(usage ? { usage } : {}),
+    raw: obj
+  }
 }
 
 interface RawContentBlock {

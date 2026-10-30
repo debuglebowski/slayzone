@@ -41,6 +41,13 @@ interface Turn {
   before?: Json[]
   /** Send ONE interrupt when this first matches a stdout event. */
   interruptWhen?: (event: Json) => boolean
+  /**
+   * Poll `get_task_output` this often for every command the CLI reports as a
+   * task (`task_started`, `local_bash`), as the chat's command card does (plan 3.9).
+   */
+  pollTaskOutputMs?: number
+  /** After the turn's result, record on until this matches (a turn the CLI starts itself). */
+  waitAfter?: { until: (event: Json) => boolean; label: string }
 }
 
 interface ProcSpec {
@@ -281,6 +288,42 @@ const RECIPES: Record<string, Recipe> = {
         ]
       }
     ]
+  },
+  // --- token streaming + live command output (plan 3.2 / 3.9) ---
+  'stream-bash-task': {
+    note: 'Streamed thinking (summarized), tool input and text; a foreground Bash that becomes a task, polled with get_task_output until it ends.',
+    processes: [
+      {
+        permissionMode: 'acceptEdits',
+        turns: [
+          {
+            // Summarized thinking needs the CLI's experimental betas: record without
+            // CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS in the environment.
+            before: [{ subtype: 'apply_flag_settings', settings: { effortLevel: 'high' } }],
+            say: 'First think carefully about which of 391, 437 and 667 are prime. Then use the Bash tool to run exactly this command in the foreground (do not background it): for i in 1 2 3 4 5; do echo tick $i; sleep 1.5; done\nThen reply with one short sentence: the primes, and what the command printed.',
+            pollTaskOutputMs: 1_000
+          }
+        ]
+      }
+    ]
+  },
+  'background-task': {
+    note: 'A run_in_background Bash: started at once, polled across the turn end; on exit the CLI starts a turn by itself.',
+    processes: [
+      {
+        permissionMode: 'acceptEdits',
+        turns: [
+          {
+            say: 'Use the Bash tool with run_in_background set to true to run exactly: for i in 1 2 3; do echo tick $i; sleep 1; done\nDo not wait for it and do not check its output; immediately reply STARTED.',
+            pollTaskOutputMs: 1_000,
+            waitAfter: {
+              until: (e) => e.type === 'result',
+              label: 'the turn the CLI starts itself'
+            }
+          }
+        ]
+      }
+    ]
   }
 }
 
@@ -295,12 +338,17 @@ const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 /** macOS per-user temp root (`/var/folders/xx/yyyy/T/`) and its slug in ~/.claude paths. */
 const MAC_TMP = /\/(?:private\/)?var\/folders\/[^/\s"]+\/[^/\s"]+\/T\//g
 const MAC_TMP_SLUG = /-private-var-folders-[A-Za-z0-9_-]+?-T-slz-claude-rec-[A-Za-z0-9]+/g
+/** The CLI's per-user task output root (`/private/tmp/claude-<uid>/`). */
+const CLAUDE_TMP = /\/(?:private\/)?tmp\/claude-\d+\//g
 
 function redactString(s: string, ctx: RedactCtx): string {
   let out = s
   for (const id of ctx.sessionIds) out = out.split(id).join('{{sessionId}}')
   for (const cwd of ctx.cwds) out = out.split(cwd).join('{{cwd}}')
-  out = out.replace(MAC_TMP_SLUG, '-cwd-slug').replace(MAC_TMP, '/tmp/')
+  out = out
+    .replace(MAC_TMP_SLUG, '-cwd-slug')
+    .replace(MAC_TMP, '/tmp/')
+    .replace(CLAUDE_TMP, '/tmp/claude/')
   const home = os.homedir()
   out = out.split(home).join('/Users/user')
   const user = os.userInfo().username
@@ -347,7 +395,8 @@ async function runProcess(
   spec: ProcSpec,
   procIndex: number,
   cwd: string,
-  previousSessionId: string | null
+  previousSessionId: string | null,
+  cliVersion: string
 ): Promise<string> {
   const resume = spec.resume !== undefined
   const sessionId =
@@ -357,7 +406,9 @@ async function runProcess(
     sessionId,
     resume,
     cwd,
-    providerFlags: ['--model', MODEL, '--permission-mode', spec.permissionMode, ...ISOLATION_FLAGS]
+    providerFlags: ['--model', MODEL, '--permission-mode', spec.permissionMode, ...ISOLATION_FLAGS],
+    // Exactly what chat passes for a CLI it knows (version-gated options included).
+    cliVersion
   })
   rec.records.push({
     kind: 'process',
@@ -454,7 +505,30 @@ async function runProcess(
       await reply
     }
     let interrupted = false
+    const polls = new Map<string, NodeJS.Timeout>()
     const onEvent = (event: Json): void => {
+      // A command the CLI runs as a task: poll its output like the command card.
+      if (turn.pollTaskOutputMs && event.type === 'system') {
+        const taskId = typeof event.task_id === 'string' ? event.task_id : null
+        if (taskId && event.subtype === 'task_started' && event.task_type === 'local_bash') {
+          polls.set(
+            taskId,
+            setInterval(() => {
+              if (exited) return
+              controlSeq += 1
+              write({
+                type: 'control_request',
+                request_id: `rec_${controlSeq}`,
+                request: { subtype: 'get_task_output', task_id: taskId }
+              })
+            }, turn.pollTaskOutputMs)
+          )
+        }
+        if (taskId && event.subtype === 'task_notification') {
+          clearInterval(polls.get(taskId))
+          polls.delete(taskId)
+        }
+      }
       const req = event.type === 'control_request' ? (event.request as Json) : null
       if (req?.subtype === 'can_use_tool') {
         const toolName = req.tool_name as string
@@ -484,7 +558,9 @@ async function runProcess(
     const result = waitFor((e) => e.type === 'result', 'result')
     write(JSON.parse(claudeCodeAdapter.serializeUserMessage(turn.say, sessionId)) as Json)
     await result
+    if (turn.waitAfter) await waitFor(turn.waitAfter.until, turn.waitAfter.label)
     listeners.delete(onEvent)
+    for (const timer of polls.values()) clearInterval(timer)
     if (exited) break
   }
   if (!exited) {
@@ -523,7 +599,7 @@ async function record(name: string, recipe: Recipe, cliVersion: string): Promise
   }
   let previous: string | null = null
   for (const [i, spec] of recipe.processes.entries()) {
-    previous = await runProcess(rec, spec, i, cwd, previous)
+    previous = await runProcess(rec, spec, i, cwd, previous, cliVersion)
   }
   fs.rmSync(cwd, { recursive: true, force: true })
   fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true })

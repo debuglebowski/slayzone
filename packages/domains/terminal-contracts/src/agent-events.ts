@@ -45,6 +45,9 @@ export type AgentEvent =
   | HeartbeatEvent
   | CommandLifecycleEvent
   | UserReplayEvent
+  | CliTaskEvent
+  | CommandTaskEvent
+  | CommandTaskOutputEvent
 
 /**
  * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
@@ -171,6 +174,8 @@ export type NoticeCode =
   | 'watchdog-killed'
   /** The agent's CLI version has not been tested with chat. */
   | 'cli-version-untested'
+  /** The agent's CLI refused an optional option; it is left out from now on. */
+  | 'cli-option-refused'
 
 /**
  * TRANSPORT-INTERNAL (never saved or broadcast): the agent is alive and working
@@ -592,3 +597,86 @@ export interface SessionSpawnEvent {
   kind: 'session-spawn'
   spawnId: string
 }
+
+// --- Command tasks (plan 3.9: live output of running commands) ----------------
+
+/**
+ * TRANSPORT-INTERNAL (consumed by the Claude driver, never saved or broadcast):
+ * one CLI `system/task_*` frame, parsed without knowing what runs it. Only
+ * `task_started` names the `task_type`, and `task_updated` carries no
+ * `tool_use_id`, so the per-process driver resolves each frame by `taskId` into
+ * a `command-task` (a command: Bash, Monitor) or the `sub-agent` event — or
+ * drops it.
+ */
+export interface CliTaskEvent {
+  kind: 'cli-task'
+  subtype: 'started' | 'updated' | 'notification'
+  taskId: string
+  /** The tool call the task runs (absent on `task_updated`). */
+  toolUseId?: string
+  /** `local_bash` (Bash, Monitor), `local_agent` (Task/Agent); only on `task_started`. */
+  taskType?: string
+  parentToolUseId?: string
+  description?: string
+  /** `task_started.is_backgrounded` / `task_updated.patch.is_backgrounded`. */
+  backgrounded?: boolean
+  /** `task_updated.patch.status` / `task_notification.status` (CLI vocabulary). */
+  status?: string
+  /** `task_updated.patch.end_time` (CLI clock, ms). */
+  endTime?: number
+  summary?: string
+  usage?: { totalTokens: number; toolUses: number; durationMs: number }
+  raw: unknown
+}
+
+/** Where a command task is. `killed` = stopped (`stop_task`) or killed. */
+export type CommandTaskStatus = 'running' | 'completed' | 'failed' | 'killed'
+
+/**
+ * A command the agent runs as a CLI task (Claude: a Bash or Monitor call with
+ * `task_type: local_bash`). The CLI reports a foreground command a few seconds
+ * in; a `run_in_background` one at once. Every event is the task's FULL current
+ * state (a snapshot keyed by `taskId`), so applying one twice or a stale one
+ * after a newer one is harmless.
+ */
+export interface CommandTaskEvent {
+  kind: 'command-task'
+  taskId: string
+  /** The tool call (Bash / Monitor) running the command. */
+  toolUseId: string
+  status: CommandTaskStatus
+  /** Runs in the background: its tool call already returned. */
+  backgrounded: boolean
+  description?: string
+  /** Host clock (ms): when the command started (its call, or the approval of it). */
+  startedAt?: number
+  /** When it ended (ms; the CLI's `end_time` when it reports one). */
+  endedAt?: number
+}
+
+/**
+ * The final output of a BACKGROUND command task, read from the CLI once it
+ * ended (a foreground command's output is its tool result). The last 8 KiB.
+ */
+export interface CommandTaskOutputEvent {
+  kind: 'command-task-output'
+  taskId: string
+  toolUseId: string
+  output: string
+  /** Size of the whole output (bytes). */
+  totalBytes: number
+  /** `output` is only the tail of it. */
+  truncated: boolean
+}
+
+/**
+ * A poll of a command task's output (`chat.commandTaskOutput`):
+ *   - `running` / `ended` — the output so far (last 8 KiB);
+ *   - `gone` — no live process knows the task (it ended with its process, or
+ *     the process was replaced): stop polling;
+ *   - `unsupported` — the provider reports no task output (Codex).
+ */
+export type CommandTaskOutput =
+  | { state: 'running' | 'ended'; output: string; totalBytes: number; truncated: boolean }
+  | { state: 'gone' }
+  | { state: 'unsupported' }

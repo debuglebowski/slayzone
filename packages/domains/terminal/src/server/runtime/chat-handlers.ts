@@ -8,6 +8,9 @@ import {
   dispatchUserMessage,
   respawn,
   getReplay,
+  getCommandTaskOutput,
+  stopCommandTask,
+  backgroundCommandTask,
   sendToolResult,
   sendControlRequest,
   respondToPermissionRequest,
@@ -391,6 +394,12 @@ async function buildHydrateOpts(
   // computer's own PATH entirely). The computer supplies its own sanitized base env
   // (see computer handlers/proc.ts buildEnv), so remote spawns omit it.
   const enrichedPath = computerId == null ? getEnrichedPath() : null
+  // The CLI version last seen for this project: gates spawn options an older
+  // CLI would refuse (claude `--thinking-display`). Unknown = none of them.
+  const cliVersion = await data
+    .getCliSnapshot(opts.taskId, opts.mode)
+    .then((snap) => snap?.cliVersion ?? null)
+    .catch(() => null)
   const subprocessEnv: Record<string, string> = {
     ...(await data.buildMcpEnv(opts.taskId, opts.mode, computerId)),
     ...(enrichedPath ? { PATH: enrichedPath } : {})
@@ -414,6 +423,7 @@ async function buildHydrateOpts(
     chatEffort: resolvedChatEffort,
     chatCollaboration: resolvedChatCollaboration,
     chatFastMode: resolvedChatFastMode,
+    cliVersion,
     onPersistSessionId: ({ conversationId, origin }) => {
       // Fire-and-forget DB append — the transport invokes this without awaiting
       // (same as before the async-DB lift). The transport already classified
@@ -586,6 +596,14 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * the blocks still streaming right now (live-only, never saved).
      */
     getReplay: (tabId: string, afterSeq: number) => getReplay(tabId, afterSeq),
+
+    /** A command task's output so far (`gone` once its process is). Plan 3.9. */
+    commandTaskOutput: (tabId: string, taskId: string) => getCommandTaskOutput(tabId, taskId),
+    /** Kill a running command task (`stop_task`). */
+    stopCommandTask: (tabId: string, taskId: string) => stopCommandTask(tabId, taskId),
+    /** Move a running foreground command to the background (`background_tasks`). */
+    backgroundCommandTask: (tabId: string, toolUseId: string) =>
+      backgroundCommandTask(tabId, toolUseId),
 
     /**
      * Eager spawn entrypoint. Used by the renderer's "Restart" button after a

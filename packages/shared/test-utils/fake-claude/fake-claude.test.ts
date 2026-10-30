@@ -28,7 +28,8 @@ const CHAT_ARGV = [
   '--verbose',
   '--permission-prompt-tool',
   'stdio',
-  '--replay-user-messages'
+  '--replay-user-messages',
+  '--include-partial-messages'
 ]
 
 interface Proc {

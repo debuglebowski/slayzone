@@ -96,6 +96,7 @@ client.chat.respondPermission.mutate = (input: unknown) => {
 }
 
 const { useChatSession } = await import('./useChatSession')
+const { liveBlockOf, streamKeyOf } = await import('./chat-timeline')
 
 const userMsg = (text: string) => ({ kind: 'user-message', text })
 const permReq = (toolUseId: string) => ({
@@ -160,11 +161,16 @@ function setup() {
   return { ...hook, frames }
 }
 
-/** The assistant replies on screen. */
+/** The assistant replies on screen (a streaming reply shows its live text). */
 const replies = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
-  r.current.timeline.flatMap((it) =>
-    it.kind === 'text' && it.role === 'assistant' ? [it.text] : []
-  )
+  r.current.timeline.flatMap((it) => {
+    if (it.kind !== 'text' || it.role !== 'assistant') return []
+    const key = streamKeyOf(it)
+    return [
+      (it.stream === 'open' && key ? liveBlockOf(r.current.state.live, key)?.text : undefined) ??
+        it.text
+    ]
+  })
 
 const result = (seq: number) => ({
   seq,
@@ -448,5 +454,81 @@ describe('useChatSession — outbox', () => {
     expect(result.current.timeline.find((it) => it.kind === 'user-text')).toMatchObject({
       delivery: 'queued'
     })
+  })
+})
+
+describe('useChatSession — stream fragments, one render per frame (plan 3.2)', () => {
+  /** rAF under test control: queued callbacks run on `frame()`. */
+  function controlFrames() {
+    const queued: FrameRequestCallback[] = []
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      queued.push(cb)
+      return queued.length
+    })
+    vi.stubGlobal('requestAnimationFrame', raf)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    return {
+      raf,
+      frame: () =>
+        act(() => {
+          for (const cb of queued.splice(0)) cb(performance.now())
+        })
+    }
+  }
+  const streamStart = [
+    { kind: 'stream-message-start', messageId: 'm0' },
+    { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' }
+  ]
+  const textDelta = (text: string) => ({
+    kind: 'stream-block-delta',
+    blockIndex: 0,
+    deltaType: 'text',
+    text
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('fragments of one frame are applied together, in one render', async () => {
+    const frames = controlFrames()
+    const { result: r } = setup()
+    await finishLoad(0, [{ seq: 0, event: userMsg('one') }])
+    liveOnly(0, 1, streamStart[0])
+    liveOnly(0, 2, streamStart[1])
+    liveOnly(0, 3, textDelta('Hel'))
+    liveOnly(0, 4, textDelta('lo'))
+    // Nothing yet: one frame is asked for, once.
+    expect(replies(r)).toEqual([])
+    expect(frames.raf).toHaveBeenCalledTimes(1)
+    const before = r.current
+    frames.frame()
+    expect(replies(r)).toEqual(['Hello'])
+    expect(r.current).not.toBe(before)
+  })
+
+  it('a saved event flushes the pending fragments first (order kept)', async () => {
+    controlFrames()
+    const { result: r } = setup()
+    await finishLoad(0, [{ seq: 0, event: userMsg('one') }])
+    liveOnly(0, 1, streamStart[0])
+    liveOnly(0, 2, streamStart[1])
+    liveOnly(0, 3, textDelta('Hello'))
+    live(1, { kind: 'assistant-text', messageId: 'm0', text: 'Hello world' })
+    expect(replies(r)).toEqual(['Hello world'])
+    expect(r.current.timeline.filter((it) => it.kind === 'text')).toHaveLength(1)
+  })
+
+  it('a reload drops the old load’s pending fragments', async () => {
+    const frames = controlFrames()
+    const { result: r, rerender } = setup()
+    await finishLoad(0, [{ seq: 0, event: userMsg('one') }])
+    liveOnly(0, 1, streamStart[0])
+    liveOnly(0, 2, streamStart[1])
+    liveOnly(0, 3, textDelta('stale'))
+    rerender({ cwd: '/elsewhere' })
+    await finishLoad(1, [{ seq: 0, event: userMsg('one') }])
+    frames.frame()
+    expect(replies(r)).toEqual([])
   })
 })

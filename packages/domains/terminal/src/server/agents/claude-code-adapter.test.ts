@@ -202,46 +202,6 @@ describe('ClaudeCodeAdapter tests', () => {
     expect(out).toBe(null)
   })
 
-  test('task_started: sub-agent event carries toolUseId + description', () => {
-    const ev = claudeCodeAdapter.parseLine(
-      JSON.stringify({
-        type: 'system',
-        subtype: 'task_started',
-        tool_use_id: 'tu_42',
-        description: 'Find chat history parsing logic',
-        task_type: 'local_agent',
-        prompt: 'Find …'
-      })
-    )
-    if (!ev || ev.kind !== 'sub-agent') throw new Error('expected sub-agent')
-    // All task_* system events map to 'in-flight' — completion is anchored on the
-    // outer Task tool's tool-result (contract-guaranteed) in the reducer.
-    expect(ev.phase).toBe('in-flight')
-    expect(ev.toolUseId).toBe('tu_42')
-    expect(ev.description).toBe('Find chat history parsing logic')
-  })
-
-  test('task_notification: sub-agent event carries status + usage', () => {
-    const ev = claudeCodeAdapter.parseLine(
-      JSON.stringify({
-        type: 'system',
-        subtype: 'task_notification',
-        tool_use_id: 'tu_42',
-        status: 'completed',
-        summary: 'Find chat history parsing logic',
-        usage: { total_tokens: 63119, tool_uses: 23, duration_ms: 52641 }
-      })
-    )
-    if (!ev || ev.kind !== 'sub-agent') throw new Error('expected sub-agent')
-    // Notification is enrichment only; phase stays in-flight until tool-result.
-    expect(ev.phase).toBe('in-flight')
-    expect(ev.toolUseId).toBe('tu_42')
-    expect(ev.status).toBe('completed')
-    expect(ev.usage?.totalTokens).toBe(63119)
-    expect(ev.usage?.toolUses).toBe(23)
-    expect(ev.usage?.durationMs).toBe(52641)
-  })
-
   test('parent_tool_use_id propagates through assistant tool_use, text, thinking', () => {
     const tool = claudeCodeAdapter.parseLine(
       JSON.stringify({
@@ -958,5 +918,129 @@ describe('ClaudeCodeAdapter — hook output', () => {
         })
       )
     ).toEqual({ kind: 'notice', id: 'n1', level: 'warning', text: 'PostToolUse:Bash says: hi' })
+  })
+})
+
+describe('ClaudeCodeAdapter — token streaming + command tasks (plan 3.2 / 3.9)', () => {
+  const base = { sessionId: 'abc', resume: false, cwd: '/tmp', providerFlags: [] }
+
+  test('buildSpawnArgs always asks for partial messages (token streaming)', () => {
+    expect(claudeCodeAdapter.buildSpawnArgs(base).args).toContain('--include-partial-messages')
+    expect(claudeCodeAdapter.buildSpawnArgs({ ...base, resume: true }).args).toContain(
+      '--include-partial-messages'
+    )
+  })
+
+  test('summarized thinking only for a CLI known to accept the flag', () => {
+    const at = (cliVersion?: string) => {
+      const { args } = claudeCodeAdapter.buildSpawnArgs({ ...base, cliVersion })
+      const i = args.indexOf('--thinking-display')
+      return i < 0 ? null : args[i + 1]
+    }
+    expect(at('2.1.312')).toBe('summarized')
+    expect(at('2.2.0')).toBe('summarized')
+    // Older, unknown or unparseable: an unknown option would kill every spawn.
+    expect(at('2.1.311')).toBe(null)
+    expect(at(undefined)).toBe(null)
+    expect(at('garbage')).toBe(null)
+  })
+
+  test('task_started → cli-task with every field the driver needs', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'b00m4bxr8',
+        run_id: 'r1',
+        tool_use_id: 'toolu_1',
+        description: 'Print eight ticks',
+        is_backgrounded: false,
+        task_type: 'local_bash',
+        parent_tool_use_id: 'toolu_parent',
+        uuid: 'u1',
+        session_id: 's'
+      })
+    )
+    expect(ev).toMatchObject({
+      kind: 'cli-task',
+      subtype: 'started',
+      taskId: 'b00m4bxr8',
+      toolUseId: 'toolu_1',
+      taskType: 'local_bash',
+      description: 'Print eight ticks',
+      backgrounded: false,
+      parentToolUseId: 'toolu_parent'
+    })
+  })
+
+  test('task_updated → cli-task with the patch (no tool_use_id on the wire)', () => {
+    const killed = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'task_updated',
+        task_id: 't1',
+        run_id: 'r1',
+        patch: { status: 'killed', end_time: 1793282446084 }
+      })
+    )
+    expect(killed).toMatchObject({
+      kind: 'cli-task',
+      subtype: 'updated',
+      taskId: 't1',
+      status: 'killed',
+      endTime: 1793282446084
+    })
+    expect(killed && 'toolUseId' in killed ? killed.toolUseId : undefined).toBeUndefined()
+    const moved = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'task_updated',
+        task_id: 't1',
+        patch: { is_backgrounded: true }
+      })
+    )
+    expect(moved).toMatchObject({ kind: 'cli-task', subtype: 'updated', backgrounded: true })
+  })
+
+  test('task_notification → cli-task with status, summary and usage', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'a7',
+        tool_use_id: 'tu_42',
+        status: 'completed',
+        output_file: '',
+        summary: 'Find chat history parsing logic',
+        usage: { total_tokens: 63119, tool_uses: 23, duration_ms: 52641 }
+      })
+    )
+    expect(ev).toMatchObject({
+      kind: 'cli-task',
+      subtype: 'notification',
+      taskId: 'a7',
+      toolUseId: 'tu_42',
+      status: 'completed',
+      summary: 'Find chat history parsing logic',
+      usage: { totalTokens: 63119, toolUses: 23, durationMs: 52641 }
+    })
+  })
+
+  test('a task frame without task_id is a shape mismatch', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({ type: 'system', subtype: 'task_started', tool_use_id: 'x' })
+    )
+    expect(ev).toMatchObject({ kind: 'unknown', reason: 'shape-mismatch' })
+  })
+
+  test('background_tasks_changed → null (the list follows from the task_* frames)', () => {
+    const ev = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 't', run_id: 'r', task_type: 'local_bash', description: 'd' }]
+      })
+    )
+    expect(ev).toBe(null)
   })
 })

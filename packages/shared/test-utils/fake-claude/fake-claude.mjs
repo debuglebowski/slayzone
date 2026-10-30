@@ -10,6 +10,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { createTaskSim } from './fake-claude-tasks.mjs'
 
 /** What `--version` reports: the real CLI the transcripts were recorded with. */
 export const FAKE_CLAUDE_VERSION = '2.1.312'
@@ -21,7 +22,8 @@ const REQUIRED_FLAGS = [
   ['--output-format', 'stream-json'],
   ['--verbose'],
   ['--permission-prompt-tool', 'stdio'],
-  ['--replay-user-messages']
+  ['--replay-user-messages'],
+  ['--include-partial-messages']
 ]
 
 const EXIT_ARGV_DRIFT = 2
@@ -229,6 +231,7 @@ async function onControlRequest(msg) {
     })
     return
   }
+  if (await taskSim.onControl(msg)) return
   // Reply payloads as the real CLI sends them (recorded: control-requests,
   // interrupt-* transcripts).
   let payload = {}
@@ -291,6 +294,9 @@ logStart()
 // --- step interpreter ---------------------------------------------------------
 
 class Aborted extends Error {}
+
+/** Command tasks (`task` step + task control requests): fake-claude-tasks.mjs. */
+const taskSim = createTaskSim({ emit, writeLine, sleep, log, runSteps, Aborted })
 
 function substitute(value) {
   if (typeof value === 'string') {
@@ -492,6 +498,7 @@ async function runSteps(steps, signal) {
       }
       exit(step.exit ?? 0)
     } else if ('replay' in step) await replay(step.replay, signal)
+    else if ('task' in step) await taskSim.run(step.task, signal)
     else throw new Error(`fake-claude: unknown step ${JSON.stringify(step)}`)
   }
 }

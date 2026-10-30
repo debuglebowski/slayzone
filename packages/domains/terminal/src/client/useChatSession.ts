@@ -114,6 +114,8 @@ interface HydrateChatCtx {
   loadedOnceRef: RefObject<boolean>
   liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number; live?: number }>>
   applyLive: (event: AgentEvent, seq: number, live?: number) => void
+  /** Apply the stream fragments waiting for the next frame now. */
+  flushLive: () => void
   /** Adopt a replay's live snapshot (blocks still streaming) at its live counter. */
   applySnapshot: (events: AgentEvent[], afterSeq: number, liveSeq: number) => void
   dispatch: Dispatch<ChatTimelineAction>
@@ -143,6 +145,7 @@ async function hydrateAndReplay({
   loadedOnceRef,
   liveQueueRef,
   applyLive,
+  flushLive,
   applySnapshot,
   dispatch,
   onHydrated
@@ -181,9 +184,22 @@ async function hydrateAndReplay({
       loadedOnceRef.current = true
       for (const { event, seq, live } of liveQueueRef.current) applyLive(event, seq, live)
       liveQueueRef.current = []
+      // The loaded state is complete at once, not a frame later.
+      flushLive()
       onHydrated()
     }
   }
+}
+
+/** The next animation frame (a timer where there is none, e.g. a non-DOM test). */
+function requestFrame(cb: () => void): number {
+  if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(() => cb())
+  return setTimeout(cb, 16) as unknown as number
+}
+
+function cancelFrame(id: number): void {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id)
+  else clearTimeout(id)
 }
 
 /**
@@ -222,23 +238,58 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const loadedOnceRef = useRef(false)
   const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number; live?: number }>>([])
 
+  // Live events (stream fragments) wait for the next animation frame and go to
+  // the reducer together: a burst of deltas is one render, not one per message
+  // (plan 3.2). A saved event first flushes what waits, so order is kept.
+  const pendingLiveRef = useRef<AgentEvent[]>([])
+  const frameRef = useRef<number | null>(null)
+  const flushLive = useCallback((): void => {
+    if (frameRef.current !== null) {
+      cancelFrame(frameRef.current)
+      frameRef.current = null
+    }
+    const events = pendingLiveRef.current
+    if (events.length === 0) return
+    pendingLiveRef.current = []
+    dispatch({ type: 'events', events })
+  }, [])
+  /** A new load (or unmount): fragments of the old one must never apply. */
+  const discardPendingLive = useCallback((): void => {
+    if (frameRef.current !== null) {
+      cancelFrame(frameRef.current)
+      frameRef.current = null
+    }
+    pendingLiveRef.current = []
+  }, [])
+
   // Stable: only reads refs + stable setters. Applies one event to the reducer.
   //
   // A LIVE event (`live` set: a streaming fragment, a `sending` state — never
   // saved) belongs right after saved event `seq`: it applies only if that is
   // still the newest saved event here and it is newer than the last live one.
   // Otherwise it is stale (the saved event it led to is already applied).
-  const applyLive = useCallback((event: AgentEvent, seq: number, live?: number): void => {
-    if (live !== undefined) {
-      if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
-      lastLiveRef.current = live
+  const applyLive = useCallback(
+    (event: AgentEvent, seq: number, live?: number): void => {
+      if (live !== undefined) {
+        if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
+        lastLiveRef.current = live
+        pendingLiveRef.current.push(event)
+        if (frameRef.current === null) {
+          frameRef.current = requestFrame(() => {
+            frameRef.current = null
+            flushLive()
+          })
+        }
+        return
+      }
+      if (seq <= lastSeqRef.current) return
+      lastSeqRef.current = seq
+      flushLive()
       dispatch({ type: 'event', event })
-      return
-    }
-    if (seq <= lastSeqRef.current) return
-    lastSeqRef.current = seq
-    dispatch({ type: 'event', event })
-  }, [])
+    },
+    [flushLive]
+  )
+  useEffect(() => discardPendingLive, [discardPendingLive])
 
   // Subscribe (always-on; mounted on first render, BEFORE the hydrate effect
   // runs) so we don't miss events emitted between session spawn and the
@@ -276,7 +327,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     (events: AgentEvent[], afterSeq: number, liveSeq: number): void => {
       if (afterSeq !== lastSeqRef.current) return
       lastLiveRef.current = Math.max(lastLiveRef.current, liveSeq)
-      for (const event of events) dispatch({ type: 'event', event })
+      if (events.length > 0) dispatch({ type: 'events', events })
     },
     []
   )
@@ -287,13 +338,28 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     })
   )
 
+  // Stable (reads refs: fragments still waiting for their frame go first).
+  const handleExit = useStableCallback(
+    ({
+      tabId,
+      sessionId,
+      code,
+      signal
+    }: {
+      tabId: string
+      sessionId: string
+      code: number | null
+      signal: string | null
+    }) => {
+      if (tabId !== opts.tabId) return
+      flushLive()
+      dispatch({ type: 'process-exit', sessionId, code, signal })
+    }
+  )
   useSubscription(
     trpc.chat.onExit.subscriptionOptions(undefined, {
       enabled: !!opts.tabId,
-      onData: ({ tabId, sessionId, code, signal }) => {
-        if (tabId !== opts.tabId) return
-        dispatch({ type: 'process-exit', sessionId, code, signal })
-      }
+      onData: handleExit
     })
   )
 
@@ -328,6 +394,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     const gen = ++genRef.current
     hydratedRef.current = false
     liveQueueRef.current = []
+    discardPendingLive()
     lastSeqRef.current = -1
     lastLiveRef.current = 0
     const inputs = {
@@ -354,6 +421,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       loadedOnceRef,
       liveQueueRef,
       applyLive,
+      flushLive,
       applySnapshot,
       dispatch,
       onHydrated: () => setLoadedInputs(inputs)
@@ -371,6 +439,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     opts.cwd,
     opts.providerFlagsOverride,
     applyLive,
+    flushLive,
+    discardPendingLive,
     applySnapshot,
     trpcClient
   ])
@@ -496,6 +566,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }
 
   const reset = (): void => {
+    discardPendingLive()
     dispatch({ type: 'reset' })
     lastLiveRef.current = 0
     lastSeqRef.current = -1

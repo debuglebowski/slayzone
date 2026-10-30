@@ -1,6 +1,10 @@
 import { spawn as realSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, OutgoingUserMessage } from '@slayzone/terminal-contracts'
+import type {
+  AgentEvent,
+  CommandTaskOutput,
+  OutgoingUserMessage
+} from '@slayzone/terminal-contracts'
 import { userMessageText } from '@slayzone/terminal-contracts'
 import type { ChatSessionStateEntry } from '@slayzone/terminal-contracts'
 import type { AgentBackend, ChatSessionDriver, PermissionDecision } from '../agents/types'
@@ -385,6 +389,14 @@ interface ChatTab {
   respawning: Promise<void> | null
   /** The untested-CLI notice was shown for this tab. */
   versionNoticed: boolean
+  /**
+   * The CLI version this tab's next spawn most likely runs: the last `turn-init`
+   * of its processes, else the hydrate hint. Gates spawn options an older CLI
+   * would refuse (`AgentSpawnOpts.cliVersion`).
+   */
+  cliVersion: string | null
+  /** A CLI of this tab refused a version-gated option: spawn without them. */
+  optionalFlagsRefused: boolean
   /**
    * A process of this tab reported `sessionId` as its conversation: it exists
    * now (the CLI keeps it), whether or not its id reached the DB yet.
@@ -790,7 +802,10 @@ function commitEvent(tab: ChatTab, event: AgentEvent): void {
     armWatchdog(tab)
   }
 
-  if (event.kind === 'turn-init') checkCliVersion(tab, event.cliVersion)
+  if (event.kind === 'turn-init') {
+    if (event.cliVersion) tab.cliVersion = event.cliVersion
+    checkCliVersion(tab, event.cliVersion)
+  }
 
   // Surface discovered session id for persistence (resume-on-reopen).
   // Provenance gate: the persisted id is only honored on next read when it
@@ -823,6 +838,26 @@ function checkCliVersion(tab: ChatTab, version: string | undefined): void {
     code: 'cli-version-untested',
     text: `Untested Claude Code version ${version}: chat is tested with ${minimum} and newer. Some things may not work; update with \`claude update\`.`,
     detail: { version, minimum }
+  })
+}
+
+/**
+ * The CLI refused a version-gated spawn option (its version was not the one the
+ * tab expected — e.g. another computer's older CLI): spawn this tab without
+ * them from now on, and say so once.
+ */
+function noteRefusedOption(tab: ChatTab, stderr: string): void {
+  if (tab.optionalFlagsRefused) return
+  const flag = tab.backend.refusedOptionalFlag?.(stderr)
+  if (!flag) return
+  tab.optionalFlagsRefused = true
+  routeHostEvent(tab, {
+    kind: 'notice',
+    id: randomUUID(),
+    level: 'warning',
+    code: 'cli-option-refused',
+    text: `This Claude Code does not support \`${flag}\`; chat starts it without that option from now on. Retry to start it again, or update with \`claude update\`.`,
+    detail: { flag }
   })
 }
 
@@ -884,6 +919,7 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
     if (shown?.kind === 'result' || shown?.kind === 'process-exit') return
   }
   if (!shown) return
+  if (shown.kind === 'stderr') noteRefusedOption(tab, shown.text)
 
   trackTools(proc, shown)
   if (isProgressEventKind(shown.kind)) noteProgress(tab)
@@ -1108,6 +1144,11 @@ export interface CreateChatOpts {
   chatCollaboration?: ChatCollaborationMode | null
   /** Whether Codex Fast Mode (`serviceTier: 'fast'`) is enabled for the spawn. */
   chatFastMode?: boolean
+  /**
+   * The CLI version last seen for this task's project + mode (`chat_cli_snapshots`):
+   * the tab's first hint for version-gated spawn options (see `ChatTab.cliVersion`).
+   */
+  cliVersion?: string | null
 }
 
 /** Dedupe for concurrent hydrates of one tab (renderer hydrate racing chat.start). */
@@ -1213,6 +1254,8 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
     liveSeq: 0,
     respawning: null,
     versionNoticed: false,
+    cliVersion: opts.cliVersion ?? null,
+    optionalFlagsRefused: false,
     sessionConfirmed: Boolean(opts.conversationId),
     closed: false
   } as Omit<ChatTab, 'log' | 'outbox'> as ChatTab
@@ -1355,11 +1398,13 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
   const sessionId = tab.sessionId
   const gen = ++tab.gen
   const spawnId = randomUUID()
+  const cliVersion = tab.optionalFlagsRefused ? null : (tab.cliVersion ?? opts.cliVersion ?? null)
   const { args } = backend.buildSpawnArgs({
     sessionId,
     resume,
     cwd: opts.cwd,
-    providerFlags: opts.providerFlags
+    providerFlags: opts.providerFlags,
+    ...(cliVersion ? { cliVersion } : {})
   })
 
   tab.ended = false
@@ -1679,6 +1724,36 @@ export function sendControlRequest(
 }
 
 /**
+ * The output so far of a command the tab's agent runs as a task (plan 3.9),
+ * from its live process: `gone` when there is none (the task died with a
+ * replaced or ended process), `unsupported` when the provider reports no task
+ * output (Codex — whose control channel would "succeed" with nothing).
+ */
+export function getCommandTaskOutput(tabId: string, taskId: string): Promise<CommandTaskOutput> {
+  const proc = liveProcess(tabId)
+  if (!proc) return Promise.resolve({ state: 'gone' })
+  if (!proc.driver.commandTaskOutput) return Promise.resolve({ state: 'unsupported' })
+  return proc.driver.commandTaskOutput(taskId)
+}
+
+/** Kill a running command task of the tab's live process. */
+export function stopCommandTask(tabId: string, taskId: string): Promise<void> {
+  const proc = liveProcess(tabId)
+  if (!proc) return Promise.reject(new ChatTransportError('no live session'))
+  if (!proc.driver.stopCommandTask) {
+    return Promise.reject(new ChatTransportError('this agent cannot stop a command'))
+  }
+  return proc.driver.stopCommandTask(taskId)
+}
+
+/** Move a running foreground command of the tab's live process to the background. */
+export function backgroundCommandTask(tabId: string, toolUseId: string): Promise<boolean> {
+  const proc = liveProcess(tabId)
+  if (!proc || !proc.driver.backgroundCommandTask) return Promise.resolve(false)
+  return proc.driver.backgroundCommandTask(toolUseId)
+}
+
+/**
  * Mutate the in-memory `Session.chatMode`. Called after a successful
  * `set_permission_mode` control_request so `getSessionInfo` reflects the new
  * mode without waiting for a turn-init drift sync.
@@ -1842,6 +1917,7 @@ function isProgressEventKind(kind: AgentEvent['kind']): boolean {
     case 'tool-result':
     case 'result':
     case 'sub-agent':
+    case 'command-task':
     case 'interrupted':
     case 'stderr':
     case 'api-retry':

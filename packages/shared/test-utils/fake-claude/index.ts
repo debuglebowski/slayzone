@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url'
 import type { Scenario } from './scenario'
 
 export * from './scenario'
+export * from './stream'
+export * from './tasks'
 export * from './transcript'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))

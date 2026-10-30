@@ -56,7 +56,11 @@ const KNOWN_IGNORED: Record<string, string> = {
   // Sub-agent progress ticks: `task_started` / `task_notification` carry the signal.
   'system/task_progress': 'sub-agent progress tick',
   // Usage/stop_reason update mid-stream; the final `result` carries both.
-  'stream_event/message_delta': 'superseded by result'
+  'stream_event/message_delta': 'superseded by result',
+  // The running background tasks, in full: follows from the `task_*` frames
+  // (command tasks, plan 3.9 — claude-command-tasks.ts).
+  'system/background_tasks_changed':
+    'derivable from task_started / task_updated / task_notification'
 }
 
 type Json = Record<string, unknown>

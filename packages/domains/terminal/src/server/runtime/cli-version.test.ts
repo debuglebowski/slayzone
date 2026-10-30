@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { isCliVersionBelow } from './cli-version'
+import { isCliVersionAtLeast, isCliVersionBelow } from './cli-version'
 
 test('numeric per part, not lexical', () => {
   expect(isCliVersionBelow('2.1.99', '2.1.312')).toBe(true)
@@ -16,4 +16,15 @@ test('tolerates the CLI’s own suffixes; a pre-release is below its release', (
 
 test('unparseable never counts as old', () => {
   expect(isCliVersionBelow('unknown', '2.1.312')).toBe(false)
+})
+
+test('isCliVersionAtLeast: true only for a version known to reach the minimum', () => {
+  expect(isCliVersionAtLeast('2.1.312', '2.1.312')).toBe(true)
+  expect(isCliVersionAtLeast('2.1.312 (Claude Code)', '2.1.312')).toBe(true)
+  expect(isCliVersionAtLeast('2.2.0', '2.1.312')).toBe(true)
+  expect(isCliVersionAtLeast('2.1.311', '2.1.312')).toBe(false)
+  expect(isCliVersionAtLeast('2.1.312-beta.1', '2.1.312')).toBe(false)
+  // Gates an option an older CLI would reject: unknown is never enough.
+  expect(isCliVersionAtLeast('unknown', '2.1.312')).toBe(false)
+  expect(isCliVersionAtLeast('', '2.1.312')).toBe(false)
 })

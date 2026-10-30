@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AgentPlanStep,
   CliCommandList,
+  CommandTaskStatus,
   HookEffect,
   ModelUsage,
   TokenUsage,
@@ -69,6 +70,10 @@ export type TimelineItem =
       role: 'assistant'
       messageId: string
       text: string
+      /** n-th text block of its message (0-based): with `messageId`, the row's key. */
+      blockOrdinal?: number
+      /** Still streaming (see `StreamState`); undefined once the block is final. */
+      stream?: StreamState
       timestamp: number
       parentToolUseId?: string
     }
@@ -77,10 +82,20 @@ export type TimelineItem =
       messageId: string
       text: string
       hasSignature: boolean
+      /** n-th thinking block of its message (0-based). */
+      blockOrdinal?: number
+      stream?: StreamState
       timestamp: number
       parentToolUseId?: string
     }
-  | { kind: 'tool'; invocation: ToolInvocation; timestamp: number; parentToolUseId?: string }
+  | {
+      kind: 'tool'
+      invocation: ToolInvocation
+      /** The call's input is still streaming (its live block's `json`); undefined once final. */
+      inputStreaming?: true
+      timestamp: number
+      parentToolUseId?: string
+    }
   | {
       kind: 'session-start'
       sessionId: string
@@ -198,12 +213,58 @@ export type TimelineItem =
     }
   | { kind: 'unknown'; reason: string; timestamp: number; parentToolUseId?: string }
 
+/**
+ * Where a streamed text/thinking row is:
+ *   - `open` — deltas still arrive; its text so far is its live block (`liveBlockOf`);
+ *   - `closed` — the block ended (its live text is now `text`) but the provider's
+ *     saved block event has not replaced it yet (Codex sends it after the stop).
+ * The saved block event finalizes the row in place (same index, same key).
+ */
+export type StreamState = 'open' | 'closed'
+
+/** What streams into one row: text/thinking so far, or a tool call's input JSON so far. */
+export interface LiveBlock {
+  /** The row's key (`streamKeyOf`). */
+  key: string
+  text: string
+  json: string
+}
+
+/**
+ * The blocks streaming right now — normally one (a stream's blocks come one
+ * after another). Replaced, never mutated: a delta copies this tiny array.
+ */
+export type LiveBlocks = readonly LiveBlock[]
+
+/** The live block of the row keyed `key`, when that row streams. */
+export function liveBlockOf(live: LiveBlocks, key: string | undefined): LiveBlock | undefined {
+  if (!key) return undefined
+  for (const block of live) if (block.key === key) return block
+  return undefined
+}
+
+/** A command the agent runs as a CLI task (Bash, Monitor), as its card shows it. */
+export interface CommandTaskView {
+  taskId: string
+  status: CommandTaskStatus
+  /** Runs in the background (its tool call already returned). */
+  backgrounded: boolean
+  description?: string
+  /** Host clock (ms). */
+  startedAt?: number
+  endedAt?: number
+  /** A background command's output, read from the CLI once it ended (last 8 KiB). */
+  finalOutput?: { output: string; totalBytes: number; truncated: boolean }
+}
+
 export interface ToolInvocation {
   id: string
   name: string
   input: unknown
   status: 'pending' | 'done' | 'error' | 'denied'
   result?: { rawContent: unknown; structured: unknown; isError: boolean }
+  /** Set once the CLI reports the call's command as a task (plan 3.9). */
+  task?: CommandTaskView
   /**
    * True when the SDK denied the tool call due to permission policy. Sourced
    * from `result.permissionDenials` (authoritative — the closing `result`
@@ -216,18 +277,17 @@ export interface ToolInvocation {
 export interface OpenBlock {
   /**
    * Index into `timeline` where this block's item lives, or -1 if the item hasn't been
-   * materialized yet. Text/thinking blocks defer insertion until first delta to avoid
-   * rendering empty placeholders (which look like gaps).
+   * materialized yet. A text block defers its row to the first non-empty delta (no
+   * empty placeholders); a thinking block shows at once ("Thinking…" + timer).
    */
   timelineIndex: number
   blockType: 'text' | 'thinking' | 'tool_use'
   /** Only for tool_use — remembered so we can link a deferred item to `toolIndex`. */
   toolUseId?: string
   toolName?: string
-  /** Only for tool_use — used to rebuild item when the atomic `tool-call` arrives later. */
   messageId?: string
-  /** Accumulating partial_json for tool_use blocks. Parsed on stream-block-stop. */
-  partialJson?: string
+  /** Key of the row's live block in `state.live`, once the row exists. */
+  liveKey?: string
 }
 
 /** Context size + cost of the session, derived from what the provider reports. */
@@ -305,10 +365,15 @@ export interface ChatTimelineState {
   /** blockIndex → OpenBlock for the currently streaming message. Cleared at message-stop. */
   openBlocks: Map<number, OpenBlock>
   /**
-   * Message ids we've already processed via streaming.
-   * Atomic `assistant-text` / `assistant-thinking` events for these are suppressed as redundant.
+   * What is streaming right now, by row key. A delta changes only this — never
+   * `timeline` — so it re-renders the one row that reads it (see `LiveBlocks`).
    */
-  streamedMessageIds: Set<string>
+  live: LiveBlocks
+  /**
+   * Command tasks by tool_use_id (latest snapshot). Mirrored into the tool row's
+   * `invocation.task`; kept here too for a row that arrives after its task.
+   */
+  commandTasks: Map<string, CommandTaskView>
   /**
    * Live permission mode reported by the running subprocess. Sourced from
    * `turn-init.permissionMode` (one per session start / kill+respawn).
@@ -367,6 +432,8 @@ export interface ChatTimelineState {
   freshStartPending: boolean
 }
 
+const EMPTY_LIVE: LiveBlocks = Object.freeze([])
+
 export function initialState(): ChatTimelineState {
   return {
     timeline: [],
@@ -384,7 +451,8 @@ export function initialState(): ChatTimelineState {
     resultCount: 0,
     currentStreamMessageId: null,
     openBlocks: new Map(),
-    streamedMessageIds: new Set(),
+    live: EMPTY_LIVE,
+    commandTasks: new Map(),
     permissionMode: null,
     bgShells: new Map(),
     bgShellOrder: [],
@@ -401,6 +469,8 @@ export function initialState(): ChatTimelineState {
 
 export type Action =
   | { type: 'event'; event: AgentEvent }
+  /** Several events in order — one dispatch for a frame's worth of stream deltas. */
+  | { type: 'events'; events: AgentEvent[] }
   | { type: 'user-sent'; text: string; id?: string }
   | { type: 'user-send-failed'; id?: string; error?: string }
   /** Send a failed message again (same id). */
@@ -415,7 +485,15 @@ export type Action =
   | { type: 'reset' }
 
 export function reducer(state: ChatTimelineState, action: Action): ChatTimelineState {
-  const next = applyAction(state, action)
+  if (action.type === 'events') return reduceEvents(state, action.events)
+  // A turn's end (or its process's) ends every stream it left open: those rows
+  // keep the text they got. The splitter saved them first, so this only heals.
+  const kind = action.type === 'event' ? action.event.kind : null
+  const base =
+    kind === 'result' || kind === 'interrupted' || kind === 'process-exit'
+      ? settleStreams(state)
+      : state
+  const next = applyAction(base, action)
   // Bg-shell tracking is a pure derived view over the same event stream, kept
   // alongside the timeline so it replays from buffered history without a second
   // subscription. We post-process AgentEvents here so the timeline pass stays
@@ -430,7 +508,9 @@ export function reducer(state: ChatTimelineState, action: Action): ChatTimelineS
     // Live `chat:exit` IPC path. Mirrors the agent-event path so bg shells
     // flip to 'unknown' immediately on subprocess exit even when the
     // persisted `process-exit` event hasn't replayed yet (e.g. live session).
-    if (next.sessionEnded) return expirePendingPrompts(invalidateActiveShells(next))
+    if (next.sessionEnded) {
+      return expirePendingPrompts(invalidateActiveShells(endRunningCommandTasks(next)))
+    }
     return next
   }
   if (action.type === 'turn-interrupted') return expirePendingPrompts(next)
@@ -441,6 +521,15 @@ export function reducer(state: ChatTimelineState, action: Action): ChatTimelineS
   }
   return next
 }
+
+/** A frame's worth of events, in order — the same as dispatching them one by one. */
+function reduceEvents(state: ChatTimelineState, events: AgentEvent[]): ChatTimelineState {
+  let acc = state
+  for (const event of events) acc = reducer(acc, { type: 'event', event })
+  return acc
+}
+
+type SingleAction = Exclude<Action, { type: 'events' }>
 
 /**
  * Append `newIdx` to the children list keyed by `parentId`, returning a new map.
@@ -458,7 +547,7 @@ function registerChild(
   return next
 }
 
-function applyAction(state: ChatTimelineState, action: Action): ChatTimelineState {
+function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimelineState {
   switch (action.type) {
     case 'reset':
       return initialState()
@@ -795,13 +884,19 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
     }
     case 'assistant-text': {
-      // If this messageId was already streamed, the block items exist. Skip atomic to avoid dupes.
-      if (state.streamedMessageIds.has(event.messageId)) return state
+      // The saved block of a streamed row finalizes that row in place (same
+      // index and key: no flicker); otherwise (replay, no stream) it is a row.
+      const at = findStreamingRow(state, 'text', event.messageId)
+      if (at >= 0) {
+        const row = state.timeline[at] as Extract<TimelineItem, { kind: 'text' }>
+        return finalizeRow(state, at, { ...row, text: event.text, stream: undefined })
+      }
       const item: TimelineItem = {
         kind: 'text',
         role: 'assistant',
         messageId: event.messageId,
         text: event.text,
+        blockOrdinal: nextBlockOrdinal(state, 'text', event.messageId),
         timestamp: ts,
         parentToolUseId: event.parentToolUseId
       }
@@ -809,12 +904,22 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       return { ...state, timeline: [...state.timeline, item], childIndex }
     }
     case 'assistant-thinking': {
-      if (state.streamedMessageIds.has(event.messageId)) return state
+      const at = findStreamingRow(state, 'thinking', event.messageId)
+      if (at >= 0) {
+        const row = state.timeline[at] as Extract<TimelineItem, { kind: 'thinking' }>
+        return finalizeRow(state, at, {
+          ...row,
+          text: event.text,
+          stream: undefined,
+          hasSignature: event.hasSignature || row.hasSignature
+        })
+      }
       const item: TimelineItem = {
         kind: 'thinking',
         messageId: event.messageId,
         text: event.text,
         hasSignature: event.hasSignature,
+        blockOrdinal: nextBlockOrdinal(state, 'thinking', event.messageId),
         timestamp: ts,
         parentToolUseId: event.parentToolUseId
       }
@@ -822,23 +927,24 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       return { ...state, timeline: [...state.timeline, item], childIndex }
     }
     case 'tool-call': {
-      // If already created via streaming (block-start), just fill in input (stream path may have
-      // failed to parse partial_json) and leave status pending. Preserve parentToolUseId on target.
+      // Created by its streamed block already: the saved call carries the real
+      // input (the stream only had partial JSON); preserve parentToolUseId.
       const existingIdx = state.toolIndex.get(event.id)
       if (existingIdx !== undefined) {
         const target = state.timeline[existingIdx]
         if (target?.kind === 'tool') {
           const next: TimelineItem = {
             ...target,
+            inputStreaming: undefined,
             invocation: {
               ...target.invocation,
               name: target.invocation.name || event.name,
-              input: target.invocation.input ?? event.input
+              input: target.inputStreaming ? event.input : (target.invocation.input ?? event.input)
             }
           }
           const t = state.timeline.slice()
           t[existingIdx] = next
-          return { ...state, timeline: t }
+          return { ...state, timeline: t, live: dropLive(state.live, `tool:${event.id}`) }
         }
       }
       const invocation: ToolInvocation = {
@@ -847,6 +953,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         input: event.input,
         status: 'pending'
       }
+      // A task reported before its call's row (rare): it applies now.
+      const task = state.commandTasks.size > 0 ? state.commandTasks.get(event.id) : undefined
+      if (task) invocation.task = task
       const item: TimelineItem = {
         kind: 'tool',
         invocation,
@@ -864,9 +973,6 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       }
     }
     case 'stream-message-start': {
-      // Do NOT add to `streamedMessageIds` yet — defer until a text/thinking block actually
-      // materializes. This lets the atomic `assistant-*` fallback fire if stream produced no
-      // content (e.g. tool-only messages, or aborted streams).
       return {
         ...state,
         currentStreamMessageId: event.messageId,
@@ -877,10 +983,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const messageId = state.currentStreamMessageId
       if (!messageId) return state
 
-      // For tool_use we materialize immediately — the tool name/id is user-visible right away.
+      // A tool call shows at once (its name is known); its input streams into live json.
       if (event.blockType === 'tool_use') {
+        const toolUseId = event.toolUseId ?? ''
         const invocation: ToolInvocation = {
-          id: event.toolUseId ?? '',
+          id: toolUseId,
           name: event.toolName ?? '',
           input: null,
           status: 'pending'
@@ -888,10 +995,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const item: TimelineItem = {
           kind: 'tool',
           invocation,
+          inputStreaming: true,
           timestamp: ts,
           parentToolUseId: event.parentToolUseId
         }
         const timelineIndex = state.timeline.length
+        const liveKey = `tool:${toolUseId}`
         const nextOpen = new Map(state.openBlocks)
         nextOpen.set(event.blockIndex, {
           timelineIndex,
@@ -899,7 +1008,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           toolUseId: event.toolUseId,
           toolName: event.toolName,
           messageId,
-          partialJson: ''
+          liveKey
         })
         let nextToolIndex = state.toolIndex
         if (event.toolUseId) {
@@ -912,126 +1021,99 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           timeline: [...state.timeline, item],
           openBlocks: nextOpen,
           toolIndex: nextToolIndex,
-          childIndex
+          childIndex,
+          live: setLive(state.live, { key: liveKey, text: '', json: '' })
         }
       }
 
-      // Text/thinking: defer materialization until first delta to avoid empty placeholders.
+      // Thinking shows at once: summarized thinking text arrives late, in a burst.
+      if (event.blockType === 'thinking') {
+        const blockOrdinal = nextBlockOrdinal(state, 'thinking', messageId)
+        const item: TimelineItem = {
+          kind: 'thinking',
+          messageId,
+          text: '',
+          hasSignature: false,
+          blockOrdinal,
+          stream: 'open',
+          timestamp: ts,
+          parentToolUseId: event.parentToolUseId
+        }
+        const timelineIndex = state.timeline.length
+        const liveKey = `thinking:${messageId}:${blockOrdinal}`
+        const nextOpen = new Map(state.openBlocks)
+        nextOpen.set(event.blockIndex, { timelineIndex, blockType: 'thinking', messageId, liveKey })
+        const childIndex = registerChild(state, timelineIndex, event.parentToolUseId)
+        return {
+          ...state,
+          timeline: [...state.timeline, item],
+          openBlocks: nextOpen,
+          childIndex,
+          live: setLive(state.live, { key: liveKey, text: '', json: '' })
+        }
+      }
+
+      // Text: the row comes with its first non-empty delta (no empty placeholder).
       const nextOpen = new Map(state.openBlocks)
-      nextOpen.set(event.blockIndex, {
-        timelineIndex: -1,
-        blockType: event.blockType,
-        messageId
-      })
+      nextOpen.set(event.blockIndex, { timelineIndex: -1, blockType: 'text', messageId })
       return { ...state, openBlocks: nextOpen }
     }
     case 'stream-block-delta': {
       const open = state.openBlocks.get(event.blockIndex)
       if (!open) return state
 
-      // Deferred text/thinking: materialize on first content delta (ignore signature-only).
       if (open.timelineIndex === -1) {
-        if (event.deltaType === 'signature') return state
+        if (open.blockType !== 'text' || event.deltaType !== 'text' || !event.text) return state
         const messageId = open.messageId ?? state.currentStreamMessageId ?? ''
-        const nextStreamed = new Set(state.streamedMessageIds)
-        if (messageId) nextStreamed.add(messageId)
-        if (open.blockType === 'text' && event.deltaType === 'text') {
-          const item: TimelineItem = {
-            kind: 'text',
-            role: 'assistant',
-            messageId,
-            text: event.text,
-            timestamp: ts,
-            parentToolUseId: event.parentToolUseId
-          }
-          const nextOpen = new Map(state.openBlocks)
-          nextOpen.set(event.blockIndex, { ...open, timelineIndex: state.timeline.length })
-          const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
-          return {
-            ...state,
-            timeline: [...state.timeline, item],
-            openBlocks: nextOpen,
-            streamedMessageIds: nextStreamed,
-            childIndex
-          }
+        const blockOrdinal = nextBlockOrdinal(state, 'text', messageId)
+        const item: TimelineItem = {
+          kind: 'text',
+          role: 'assistant',
+          messageId,
+          text: '',
+          blockOrdinal,
+          stream: 'open',
+          timestamp: ts,
+          parentToolUseId: event.parentToolUseId
         }
-        if (open.blockType === 'thinking' && event.deltaType === 'thinking') {
-          const item: TimelineItem = {
-            kind: 'thinking',
-            messageId,
-            text: event.text,
-            hasSignature: false,
-            timestamp: ts,
-            parentToolUseId: event.parentToolUseId
-          }
-          const nextOpen = new Map(state.openBlocks)
-          nextOpen.set(event.blockIndex, { ...open, timelineIndex: state.timeline.length })
-          const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
-          return {
-            ...state,
-            timeline: [...state.timeline, item],
-            openBlocks: nextOpen,
-            streamedMessageIds: nextStreamed,
-            childIndex
-          }
+        const liveKey = `text:${messageId}:${blockOrdinal}`
+        const nextOpen = new Map(state.openBlocks)
+        nextOpen.set(event.blockIndex, { ...open, timelineIndex: state.timeline.length, liveKey })
+        const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
+        return {
+          ...state,
+          timeline: [...state.timeline, item],
+          openBlocks: nextOpen,
+          childIndex,
+          live: setLive(state.live, { key: liveKey, text: event.text, json: '' })
         }
-        return state
       }
 
-      const target = state.timeline[open.timelineIndex]
-      if (!target) return state
-      if (event.deltaType === 'text' && target.kind === 'text') {
-        const next: TimelineItem = { ...target, text: target.text + event.text }
+      if (event.deltaType === 'signature') {
+        // Structural, once per block: the row records that the CLI signed it.
+        const target = state.timeline[open.timelineIndex]
+        if (target?.kind !== 'thinking' || target.hasSignature) return state
         const t = state.timeline.slice()
-        t[open.timelineIndex] = next
+        t[open.timelineIndex] = { ...target, hasSignature: true }
         return { ...state, timeline: t }
       }
-      if (event.deltaType === 'thinking' && target.kind === 'thinking') {
-        const next: TimelineItem = { ...target, text: target.text + event.text }
-        const t = state.timeline.slice()
-        t[open.timelineIndex] = next
-        return { ...state, timeline: t }
-      }
-      if (event.deltaType === 'signature' && target.kind === 'thinking') {
-        const next: TimelineItem = { ...target, hasSignature: true }
-        const t = state.timeline.slice()
-        t[open.timelineIndex] = next
-        return { ...state, timeline: t }
-      }
-      if (event.deltaType === 'input_json' && target.kind === 'tool') {
-        const nextOpen = new Map(state.openBlocks)
-        nextOpen.set(event.blockIndex, {
-          ...open,
-          partialJson: (open.partialJson ?? '') + event.text
-        })
-        return { ...state, openBlocks: nextOpen }
-      }
-      return state
+      // Everything else streams into the live block only — the timeline is untouched.
+      const key = open.liveKey
+      const live = liveBlockOf(state.live, key)
+      if (!live || !event.text) return state
+      const next: LiveBlock =
+        event.deltaType === 'input_json'
+          ? { ...live, json: live.json + event.text }
+          : { ...live, text: live.text + event.text }
+      return { ...state, live: setLive(state.live, next) }
     }
     case 'stream-block-stop': {
       const open = state.openBlocks.get(event.blockIndex)
       if (!open) return state
       const nextOpen = new Map(state.openBlocks)
       nextOpen.delete(event.blockIndex)
-      if (open.blockType === 'tool_use' && open.partialJson) {
-        const target = state.timeline[open.timelineIndex]
-        if (target?.kind === 'tool') {
-          let parsed: unknown = open.partialJson
-          try {
-            parsed = JSON.parse(open.partialJson)
-          } catch {
-            /* keep raw string as best-effort */
-          }
-          const next: TimelineItem = {
-            ...target,
-            invocation: { ...target.invocation, input: parsed }
-          }
-          const t = state.timeline.slice()
-          t[open.timelineIndex] = next
-          return { ...state, timeline: t, openBlocks: nextOpen }
-        }
-      }
-      return { ...state, openBlocks: nextOpen }
+      const settled = settleRow({ ...state, openBlocks: nextOpen }, open.timelineIndex, 'closed')
+      return settled
     }
     case 'stream-message-stop':
       return { ...state, currentStreamMessageId: null, openBlocks: new Map() }
@@ -1176,6 +1258,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         timeline: [...state.timeline, { kind: 'rate-limit', status: event.status, timestamp: ts }]
       }
     case 'sub-agent': {
+      // No tool id = no row it could belong to (rows saved before the driver
+      // resolved `task_updated` by task id carry an empty one).
+      if (!event.toolUseId) return state
       // Every `task_*` system event is treated as enrichment of an in-flight
       // row. The row is closed (→ 'completed'/'failed') only by the outer Task
       // tool's `tool-result` event — see `case 'tool-result'` below. This
@@ -1347,7 +1432,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // Process exited. If we were mid-turn, heal counters + clear stream state
       // so inFlight drops and the typing indicator clears. Without this, a crash
       // mid-stream leaves "Writing…" stuck forever even after the buffer replay.
-      const healed = healOrphanedTurn(state, ts)
+      const healed = endRunningCommandTasks(healOrphanedTurn(state, ts))
       return {
         ...healed,
         sessionEnded: true,
@@ -1406,8 +1491,23 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'heartbeat':
     case 'command-lifecycle':
     case 'user-replay':
+    case 'cli-task':
       // Transport-internal; never broadcast. Defensive no-op.
       return state
+    case 'command-task':
+      return applyCommandTask(state, event)
+    case 'command-task-output': {
+      const view = state.commandTasks.get(event.toolUseId)
+      if (!view) return state
+      return setCommandTask(state, event.toolUseId, {
+        ...view,
+        finalOutput: {
+          output: event.output,
+          totalBytes: event.totalBytes,
+          truncated: event.truncated
+        }
+      })
+    }
     case 'user-message-delivery':
       return applyTransportEvent(state, event, ts)
     case 'session-spawn':
@@ -1422,8 +1522,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // uses `notStarted` to suppress the "Session ended, click to restart"
       // banner on hydrate-only tabs (where `sessionEnded` is false but no
       // process has started yet).
+      // A new process: the previous one's streams and commands are gone with it.
       return {
-        ...state,
+        ...endRunningCommandTasks(settleStreams(state)),
         currentSpawnId: event.spawnId,
         sessionEnded: false,
         exitCode: null,
@@ -1431,6 +1532,193 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         notStarted: false
       }
   }
+}
+
+// --- token streaming (plan 3.2) ------------------------------------------------
+
+/**
+ * The row's stable key: `text:<messageId>:<n>` / `thinking:<messageId>:<n>` (n-th
+ * block of that kind in its message — the same live and on replay), or
+ * `tool:<id>`. It also names the row's live block in `state.live`.
+ */
+export function streamKeyOf(item: TimelineItem): string | undefined {
+  if (item.kind === 'text' || item.kind === 'thinking') {
+    return item.blockOrdinal === undefined
+      ? undefined
+      : `${item.kind}:${item.messageId}:${item.blockOrdinal}`
+  }
+  if (item.kind === 'tool') return `tool:${item.invocation.id}`
+  return undefined
+}
+
+function nextBlockOrdinal(
+  state: ChatTimelineState,
+  kind: 'text' | 'thinking',
+  messageId: string
+): number {
+  // A message's blocks all belong to one turn: none sits before its last result.
+  let n = 0
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    if (it.kind === 'result') break
+    if (it.kind === kind && it.messageId === messageId) n++
+  }
+  return n
+}
+
+/** The newest still-streaming row of `kind` in message `messageId`, or -1. */
+function findStreamingRow(
+  state: ChatTimelineState,
+  kind: 'text' | 'thinking',
+  messageId: string
+): number {
+  // Every streaming row has a live block: none, no streaming row.
+  if (state.live.length === 0) return -1
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    // Streams end with their turn (settled at its result).
+    if (it.kind === 'result') return -1
+    if (it.kind === kind && it.messageId === messageId && it.stream !== undefined) return i
+  }
+  return -1
+}
+
+function setLive(live: LiveBlocks, block: LiveBlock): LiveBlocks {
+  for (let i = 0; i < live.length; i++) {
+    if (live[i].key !== block.key) continue
+    const next = live.slice()
+    next[i] = block
+    return next
+  }
+  return [...live, block]
+}
+
+function dropLive(live: LiveBlocks, key: string | undefined): LiveBlocks {
+  if (!key) return live
+  const at = live.findIndex((b) => b.key === key)
+  if (at < 0) return live
+  if (live.length === 1) return EMPTY_LIVE
+  return live.filter((_, i) => i !== at)
+}
+
+/** Replace the row at `at` with its final version; its live block is done. */
+function finalizeRow(state: ChatTimelineState, at: number, row: TimelineItem): ChatTimelineState {
+  const t = state.timeline.slice()
+  t[at] = row
+  return { ...state, timeline: t, live: dropLive(state.live, streamKeyOf(row)) }
+}
+
+/** A tool call's streamed input JSON (fallback when no saved call replaced it). */
+function parseToolJson(json: string): unknown {
+  if (!json) return null
+  try {
+    return JSON.parse(json)
+  } catch {
+    return json
+  }
+}
+
+/**
+ * End the stream of the row at `at`, keeping what streamed into it:
+ * `closed` (its block stopped; a saved event may still finalize it) or
+ * `final` (its turn ended; nothing more will come).
+ */
+function settleRow(
+  state: ChatTimelineState,
+  at: number,
+  mode: 'closed' | 'final'
+): ChatTimelineState {
+  const row = at >= 0 ? state.timeline[at] : undefined
+  if (!row) return state
+  const key = streamKeyOf(row)
+  const live = liveBlockOf(state.live, key)
+  if (row.kind === 'text' || row.kind === 'thinking') {
+    if (row.stream === undefined) return state
+    const text = row.stream === 'open' && live ? live.text : row.text
+    const t = state.timeline.slice()
+    if (mode === 'closed') {
+      // Its live block stays until the saved event finalizes it: a row that
+      // still streams always has one (so an empty `live` means none does).
+      t[at] = { ...row, text, stream: 'closed' }
+      return { ...state, timeline: t }
+    }
+    t[at] = { ...row, text, stream: undefined }
+    return { ...state, timeline: t, live: dropLive(state.live, key) }
+  }
+  if (row.kind === 'tool' && row.inputStreaming) {
+    const input = row.invocation.input ?? parseToolJson(live?.json ?? '')
+    const t = state.timeline.slice()
+    t[at] = { ...row, inputStreaming: undefined, invocation: { ...row.invocation, input } }
+    return { ...state, timeline: t, live: dropLive(state.live, key) }
+  }
+  return state
+}
+
+/** End every stream still open (turn end, process end): rows keep what they got. */
+function settleStreams(state: ChatTimelineState): ChatTimelineState {
+  // Nothing streams: no live block (every streaming row has one), no open block.
+  if (state.live.length === 0 && state.openBlocks.size === 0) return state
+  let next = state
+  // Rows of an earlier turn were settled at its end (its `result` row).
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    if (it.kind === 'result') break
+    const streaming =
+      ((it.kind === 'text' || it.kind === 'thinking') && it.stream !== undefined) ||
+      (it.kind === 'tool' && it.inputStreaming)
+    if (streaming) next = settleRow(next, i, 'final')
+  }
+  return {
+    ...next,
+    live: EMPTY_LIVE,
+    openBlocks: next.openBlocks.size > 0 ? new Map() : next.openBlocks,
+    currentStreamMessageId: null
+  }
+}
+
+// --- command tasks (plan 3.9) --------------------------------------------------
+
+/** Record a task's view and mirror it into its tool row. */
+function setCommandTask(
+  state: ChatTimelineState,
+  toolUseId: string,
+  view: CommandTaskView
+): ChatTimelineState {
+  const commandTasks = new Map(state.commandTasks)
+  commandTasks.set(toolUseId, view)
+  const at = state.toolIndex.get(toolUseId)
+  const row = at === undefined ? undefined : state.timeline[at]
+  if (at === undefined || row?.kind !== 'tool') return { ...state, commandTasks }
+  const t = state.timeline.slice()
+  t[at] = { ...row, invocation: { ...row.invocation, task: view } }
+  return { ...state, timeline: t, commandTasks }
+}
+
+function applyCommandTask(
+  state: ChatTimelineState,
+  event: Extract<AgentEvent, { kind: 'command-task' }>
+): ChatTimelineState {
+  const prev = state.commandTasks.get(event.toolUseId)
+  const view: CommandTaskView = {
+    taskId: event.taskId,
+    status: event.status,
+    backgrounded: event.backgrounded,
+    ...(event.description ? { description: event.description } : {}),
+    ...(event.startedAt !== undefined ? { startedAt: event.startedAt } : {}),
+    ...(event.endedAt !== undefined ? { endedAt: event.endedAt } : {}),
+    ...(prev?.finalOutput ? { finalOutput: prev.finalOutput } : {})
+  }
+  return setCommandTask(state, event.toolUseId, view)
+}
+
+/** The process is gone: its running commands went with it. */
+function endRunningCommandTasks(state: ChatTimelineState): ChatTimelineState {
+  let next = state
+  for (const [toolUseId, view] of state.commandTasks) {
+    if (view.status === 'running')
+      next = setCommandTask(next, toolUseId, { ...view, status: 'killed' })
+  }
+  return next
 }
 
 /** Next `cliCommands` for a turn-init: unchanged content keeps the old reference; no list keeps what was known. */
@@ -1580,7 +1868,7 @@ export function isAwaitingUserQuestion(state: ChatTimelineState): boolean {
 function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
   if (!isInFlight(state)) return state
   const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
-  const failed = failInFlightSubAgents(state, 'interrupted')
+  const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
   return {
     ...failed,
     timeline: [...failed.timeline, item],
@@ -1835,6 +2123,12 @@ function setBgShell(state: ChatTimelineState, shell: BgShell): ChatTimelineState
 }
 
 function applyBgShellEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineState {
+  if (event.kind === 'command-task') return applyBgShellCommandTask(state, event)
+  if (event.kind === 'command-task-output') {
+    const shell = state.bgShells.get(event.toolUseId)
+    if (!shell) return state
+    return setBgShell(state, { ...shell, latestStdout: tail(event.output, BG_OUTPUT_KEEP) })
+  }
   if (event.kind === 'tool-call') return applyBgShellToolCall(state, event)
   if (event.kind === 'tool-result') return applyBgShellToolResult(state, event)
   if (event.kind === 'session-spawn') return invalidateForeignSpawnShells(state, event.spawnId)
@@ -1897,6 +2191,38 @@ function dropActiveShells(
     bgShellOrder: nextOrder,
     bgShellPollIndex: nextPollIndex
   }
+}
+
+/**
+ * A background command task (a `run_in_background` call, or one moved there)
+ * is a background job: its task id is the shell id, its status the CLI's.
+ */
+function applyBgShellCommandTask(
+  state: ChatTimelineState,
+  event: Extract<AgentEvent, { kind: 'command-task' }>
+): ChatTimelineState {
+  const existing = state.bgShells.get(event.toolUseId)
+  if (!existing && !event.backgrounded) return state
+  const status: BgShellStatus = event.status
+  if (existing) return setBgShell(state, { ...existing, shellId: event.taskId, status })
+  const at = state.toolIndex.get(event.toolUseId)
+  const row = at === undefined ? undefined : state.timeline[at]
+  const input =
+    row?.kind === 'tool' ? ((row.invocation.input ?? {}) as Record<string, unknown>) : {}
+  return setBgShell(state, {
+    spawnToolUseId: event.toolUseId,
+    shellId: event.taskId,
+    command: typeof input.command === 'string' ? input.command : '',
+    description:
+      event.description ?? (typeof input.description === 'string' ? input.description : undefined),
+    status,
+    exitCode: null,
+    spawnedAt: event.startedAt ?? Date.now(),
+    lastPolledAt: null,
+    latestStdout: '',
+    latestStderr: '',
+    spawnedInSpawnId: state.currentSpawnId
+  })
 }
 
 function applyBgShellToolCall(state: ChatTimelineState, event: ToolCallEvent): ChatTimelineState {

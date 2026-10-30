@@ -188,3 +188,43 @@ test('sub-agent fragments keep their parent', () => {
     { kind: 'assistant-text', messageId: 'm', text: 'x', parentToolUseId: 'task_1' }
   ])
 })
+
+test('snapshot() keeps a tool input still streaming (one input_json delta), not a finished one', () => {
+  const s = new ChatEventSplitter()
+  run(s, [
+    start('m1'),
+    blockStart(0, 'tool_use', { toolUseId: 'toolu_1', toolName: 'Bash' }),
+    delta(0, '{"command": "npm run ', 'input_json'),
+    delta(0, 'build', 'input_json')
+  ])
+  expect(s.snapshot()).toEqual([
+    { kind: 'stream-message-start', messageId: 'm1' },
+    {
+      kind: 'stream-block-start',
+      blockIndex: 0,
+      blockType: 'tool_use',
+      toolUseId: 'toolu_1',
+      toolName: 'Bash'
+    },
+    {
+      kind: 'stream-block-delta',
+      blockIndex: 0,
+      deltaType: 'input_json',
+      text: '{"command": "npm run build'
+    }
+  ])
+  // Claude's consolidated tool-call is saved: the snapshot no longer redraws it.
+  run(s, [{ kind: 'tool-call', id: 'toolu_1', name: 'Bash', input: { command: 'npm run build' } }])
+  expect(s.snapshot()).toEqual([{ kind: 'stream-message-start', messageId: 'm1' }])
+})
+
+test('input_json deltas never become a saved block of their own', () => {
+  const s = new ChatEventSplitter()
+  const { saved } = run(s, [
+    start('m1'),
+    blockStart(0, 'tool_use', { toolUseId: 'toolu_1', toolName: 'Bash' }),
+    delta(0, '{"command": "ls"}', 'input_json'),
+    { kind: 'interrupted' }
+  ])
+  expect(saved).toEqual([{ kind: 'interrupted' }])
+})

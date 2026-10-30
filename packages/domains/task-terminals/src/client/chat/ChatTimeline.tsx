@@ -1,4 +1,4 @@
-import { type Dispatch, type Key, type SetStateAction } from 'react'
+import { memo, type Dispatch, type Key, type SetStateAction } from 'react'
 import { ArrowDown, Sparkles } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
@@ -27,6 +27,7 @@ import {
 } from '@slayzone/terminal/client'
 import { ChatSearchBar } from './ChatSearchBar'
 import { renderTimelineItem } from './renderers'
+import { useCommandTaskActions } from './tool-cards/command-task-hooks'
 import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
 
@@ -102,7 +103,13 @@ export function ChatTimeline({
 }: ChatTimelineProps) {
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
+  const commandTasks = useCommandTaskActions()
   const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-4xl'
+  // A row that streams already says what the agent does ("Thinking… 3s", the
+  // reply growing): no second indicator under it.
+  const tail = visibleItems[visibleItems.length - 1]
+  const tailStreaming =
+    (tail?.kind === 'text' || tail?.kind === 'thinking') && tail.stream === 'open'
   return (
     <>
       {/* Header: mode pill + (override notice if explicitly passed by parent) */}
@@ -134,6 +141,9 @@ export function ChatTimeline({
               floating={false}
               shells={state.bgShells}
               order={state.bgShellOrder}
+              onStop={(shell) => {
+                if (shell.shellId) commandTasks.stop(shell.shellId)
+              }}
             />
           </div>
         </div>
@@ -158,17 +168,8 @@ export function ChatTimeline({
                         </button>
                       </div>
                     )}
-                    {visibleItems.map((item, i) => {
-                      const index = visibleStart + i
-                      const rendered = renderTimelineItem(item, index)
-                      if (rendered === null) return null
-                      return (
-                        <div key={itemKey(item, index)} data-index={index}>
-                          {rendered}
-                        </div>
-                      )
-                    })}
-                    {inFlight && !awaitingUser && (
+                    <TimelineRows items={visibleItems} start={visibleStart} itemKey={itemKey} />
+                    {inFlight && !awaitingUser && !tailStreaming && (
                       <TypingIndicator label={deriveLoadingLabel(state)} />
                     )}
                   </div>
@@ -239,6 +240,37 @@ export function ChatTimeline({
     </>
   )
 }
+
+/**
+ * The rows. Its props change only when the rows do — never for a stream delta
+ * (deltas live outside `timeline`, see `useLiveBlock`) — so a delta re-renders
+ * none of them but the one that streams. `memo` keeps that true with or
+ * without the compiler's caching of this element.
+ */
+const TimelineRows = memo(function TimelineRows({
+  items,
+  start,
+  itemKey
+}: {
+  items: TimelineItem[]
+  start: number
+  itemKey: (item: TimelineItem, index: number) => Key
+}) {
+  return (
+    <>
+      {items.map((item, i) => {
+        const index = start + i
+        const rendered = renderTimelineItem(item, index)
+        if (rendered === null) return null
+        return (
+          <div key={itemKey(item, index)} data-index={index}>
+            {rendered}
+          </div>
+        )
+      })}
+    </>
+  )
+})
 
 function HydratingState() {
   return (

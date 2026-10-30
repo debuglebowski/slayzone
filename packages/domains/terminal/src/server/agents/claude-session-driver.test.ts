@@ -326,3 +326,144 @@ describe('ClaudeSessionDriver — permission mode', () => {
     ])
   })
 })
+
+describe('ClaudeSessionDriver — command tasks (plan 3.9)', () => {
+  const taskLine = (subtype: string, fields: Record<string, unknown>) =>
+    JSON.stringify({ type: 'system', subtype, ...fields, uuid: 'u', session_id: 's1' })
+  const bashUse = (id: string) =>
+    JSON.stringify({
+      type: 'assistant',
+      message: {
+        id: 'm1',
+        content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'ticks' } }]
+      },
+      parent_tool_use_id: null
+    })
+  /** The last control_request the driver wrote, and a line answering it. */
+  function lastRequest(written: unknown[]) {
+    const req = written.filter(
+      (w): w is { request_id: string; request: Record<string, unknown> } =>
+        (w as { type?: string }).type === 'control_request'
+    )
+    const last = req[req.length - 1]
+    return {
+      request: last?.request,
+      answer: (response: Record<string, unknown>) =>
+        JSON.stringify(controlResponse(last.request_id, response))
+    }
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  test('a Bash task is a command-task, a sub-agent stays a sub-agent; cli-task never leaves', () => {
+    const { driver, emitted } = setup()
+    driver.handleLine(bashUse('toolu_b'))
+    driver.handleLine(
+      taskLine('task_started', {
+        task_id: 'tb',
+        tool_use_id: 'toolu_b',
+        description: 'Ticks',
+        is_backgrounded: false,
+        task_type: 'local_bash'
+      })
+    )
+    driver.handleLine(
+      taskLine('task_started', {
+        task_id: 'ta',
+        tool_use_id: 'toolu_a',
+        description: 'Find',
+        task_type: 'local_agent'
+      })
+    )
+    driver.handleLine(taskLine('task_updated', { task_id: 'ta', patch: { status: 'completed' } }))
+    const kinds = emitted.map((e) => e.kind)
+    expect(kinds).toEqual(['tool-call', 'command-task', 'sub-agent'])
+    expect(emitted[1]).toMatchObject({
+      kind: 'command-task',
+      taskId: 'tb',
+      toolUseId: 'toolu_b',
+      status: 'running',
+      backgrounded: false
+    })
+    expect(typeof (emitted[1] as { startedAt?: number }).startedAt).toBe('number')
+    expect(emitted[2]).toMatchObject({
+      kind: 'sub-agent',
+      toolUseId: 'toolu_a',
+      phase: 'in-flight'
+    })
+  })
+
+  test('commandTaskOutput polls get_task_output and normalizes the reply', async () => {
+    const { driver, written } = setup()
+    driver.handleLine(
+      taskLine('task_started', { task_id: 'tb', tool_use_id: 'toolu_b', task_type: 'local_bash' })
+    )
+    const p = driver.commandTaskOutput!('tb')
+    const { request, answer } = lastRequest(written)
+    expect(request).toEqual({ subtype: 'get_task_output', task_id: 'tb' })
+    driver.handleLine(answer({ output: 'tick 1\n', total_bytes: 7, truncated: false }))
+    expect(await p).toEqual({
+      state: 'running',
+      output: 'tick 1\n',
+      totalBytes: 7,
+      truncated: false
+    })
+    expect(await driver.commandTaskOutput!('unknown')).toEqual({ state: 'gone' })
+  })
+
+  test('stop and move to background send the CLI’s requests', async () => {
+    const { driver, written } = setup()
+    driver.handleLine(
+      taskLine('task_started', { task_id: 'tb', tool_use_id: 'toolu_b', task_type: 'local_bash' })
+    )
+    const moved = driver.backgroundCommandTask!('toolu_b')
+    const bg = lastRequest(written)
+    expect(bg.request).toEqual({ subtype: 'background_tasks', tool_use_id: 'toolu_b' })
+    driver.handleLine(bg.answer({ backgrounded: true }))
+    expect(await moved).toBe(true)
+
+    driver.handleLine(taskLine('task_updated', { task_id: 'tb', patch: { is_backgrounded: true } }))
+    const stopped = driver.stopCommandTask!('tb')
+    const stop = lastRequest(written)
+    expect(stop.request).toEqual({ subtype: 'stop_task', task_id: 'tb' })
+    driver.handleLine(stop.answer({}))
+    await stopped
+  })
+
+  test('a finished background command’s output is read and emitted once', async () => {
+    const { driver, written, emitted } = setup()
+    driver.handleLine(
+      taskLine('task_started', {
+        task_id: 'tb',
+        tool_use_id: 'toolu_b',
+        task_type: 'local_bash',
+        is_backgrounded: true
+      })
+    )
+    driver.handleLine(
+      taskLine('task_updated', { task_id: 'tb', patch: { status: 'completed', end_time: 5 } })
+    )
+    const { request, answer } = lastRequest(written)
+    expect(request).toEqual({ subtype: 'get_task_output', task_id: 'tb' })
+    driver.handleLine(answer({ output: 'done\n', total_bytes: 5, truncated: false }))
+    await flush()
+    expect(emitted.filter((e) => e.kind === 'command-task-output')).toEqual([
+      {
+        kind: 'command-task-output',
+        taskId: 'tb',
+        toolUseId: 'toolu_b',
+        output: 'done\n',
+        totalBytes: 5,
+        truncated: false
+      }
+    ])
+  })
+
+  test('after dispose (process gone) every task is gone', async () => {
+    const { driver } = setup()
+    driver.handleLine(
+      taskLine('task_started', { task_id: 'tb', tool_use_id: 'toolu_b', task_type: 'local_bash' })
+    )
+    driver.dispose()
+    expect(await driver.commandTaskOutput!('tb')).toEqual({ state: 'gone' })
+  })
+})

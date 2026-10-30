@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useDeferredValue, useState, useMemo } from 'react'
 import { useChatView } from './ChatViewContext'
 import {
   ChevronDown,
@@ -8,7 +8,6 @@ import {
   CircleX,
   Loader2,
   FileText,
-  Terminal as TerminalIcon,
   Pencil,
   Search,
   CheckSquare,
@@ -21,10 +20,16 @@ import {
   User,
   Bot
 } from 'lucide-react'
-import { cn, safeClipboardWriteText, useDepsChanged } from '@slayzone/ui'
+import { cn, safeClipboardWriteText, useDepsChanged, useNow } from '@slayzone/ui'
 import { DiffView } from '@slayzone/diff-view'
 import { GhMarkdown } from '@slayzone/markdown/client'
-import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
+import {
+  parsePartialJson,
+  streamKeyOf,
+  useLiveBlock,
+  type TimelineItem,
+  type ToolInvocation
+} from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
 import {
   CHAT_CARD_INDENT,
@@ -34,7 +39,6 @@ import {
   ToolShell,
   StatusIcon,
   shortenPath,
-  extractRawText,
   type ToolProps
 } from './tool-cards/card-shell'
 import { questionsOf } from './prompts/QuestionPrompt'
@@ -51,6 +55,7 @@ import { CommandOutputBlock } from './CommandOutputBlock'
 import { HookOutputRow } from './HookOutputRow'
 import { NoticeRow } from './NoticeRow'
 import {
+  BashCard,
   McpToolCard,
   MultiEditCard,
   NotebookEditCard,
@@ -90,15 +95,28 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
   )
 }
 
-/** Assistant message — left-aligned avatar + card. Right edge bounded by outer pr. */
+/**
+ * Assistant message — left-aligned avatar + card. Right edge bounded by outer pr.
+ * While it streams, its text is the live block (only this row re-renders per
+ * delta; the markdown re-parse is deferred, so a long reply never blocks input).
+ * The saved block then finalizes the same row: same element, same text.
+ */
 export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
+  const streaming = item.stream === 'open'
+  const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
+  const text = useDeferredValue(live?.text ?? item.text)
   return (
     <div className="pl-4 pr-[10%] py-2">
       <div className="group flex gap-3 items-start">
         <AssistantAvatar />
         <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 shadow-sm px-3 py-2">
-          <div className="text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]">
-            <GhMarkdown>{item.text}</GhMarkdown>
+          <div
+            data-chat-text
+            data-streaming={streaming ? 'true' : undefined}
+            className="text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]"
+          >
+            <GhMarkdown>{text}</GhMarkdown>
+            {streaming && <StreamCaret />}
           </div>
         </div>
         <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
@@ -106,6 +124,16 @@ export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 't
         </span>
       </div>
     </div>
+  )
+}
+
+/** The "still writing" mark at the end of a streaming reply. */
+function StreamCaret() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block w-1.5 h-3.5 align-text-bottom rounded-sm bg-foreground/50 animate-pulse"
+    />
   )
 }
 
@@ -128,8 +156,16 @@ export function _UserAvatar() {
 
 // --- Ancillary blocks ---
 
+/**
+ * Thinking. While the block streams it shows at once with a timer (summarized
+ * thinking text arrives late, in one burst); expanded, the text so far.
+ */
 export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 'thinking' }> }) {
   const [open, setOpen] = useState(false)
+  const streaming = item.stream === 'open'
+  const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
+  const text = live?.text || item.text
+  const now = useNow(1000, { enabled: streaming })
   const { collapseSignal } = useChatView()
   // "Collapse all": adjusted during render — same trigger as a
   // `[collapseSignal]` effect (whose mount run was a no-op: starts closed).
@@ -138,20 +174,29 @@ export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 't
     setSeenCollapseSignal(collapseSignal)
     setOpen(false)
   }
-  if (!item.text) return null
+  if (!streaming && !text) return null
   return (
-    <div className="px-4 pl-[4.25rem] py-0.5">
+    <div
+      data-chat-thinking
+      data-streaming={streaming ? 'true' : undefined}
+      className="px-4 pl-[4.25rem] py-0.5"
+    >
       <button
         onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 hover:text-foreground rounded px-1.5 py-0.5 hover:bg-muted/60"
       >
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <Brain className="size-3" />
-        <span className="italic">Thinking</span>
+        <Brain className={cn('size-3', streaming && 'animate-pulse')} />
+        <span className="italic">{streaming ? 'Thinking…' : 'Thinking'}</span>
+        {streaming && (
+          <span data-testid="thinking-elapsed" className="tabular-nums">
+            {Math.max(0, Math.floor((now - item.timestamp) / 1000))}s
+          </span>
+        )}
       </button>
-      {open && (
+      {open && text && (
         <pre className="mt-1 text-xs text-muted-foreground/80 whitespace-pre-wrap italic pl-5 border-l border-border/40 ml-1">
-          <HighlightedText text={item.text} />
+          <HighlightedText text={text} />
         </pre>
       )}
     </div>
@@ -498,33 +543,6 @@ export function ToolCallRead({ invocation, timestamp }: ToolProps) {
   )
 }
 
-export function ToolCallBash({ invocation, timestamp }: ToolProps) {
-  const input = invocation.input as { command?: string; description?: string } | null
-  const resultText = extractRawText(invocation.result?.rawContent)
-  return (
-    <ToolShell
-      icon={<TerminalIcon className="size-3" />}
-      title="Bash"
-      invocation={invocation}
-      timestamp={timestamp}
-      summary={input?.description ?? input?.command}
-      defaultOpen
-    >
-      {input?.command && (
-        <div className="px-3 pt-2 text-xs font-mono flex items-start gap-2">
-          <span className="text-primary shrink-0">$</span>
-          <span className="whitespace-pre-wrap break-all">{input.command}</span>
-        </div>
-      )}
-      {resultText && (
-        <pre className="px-3 pb-2 pt-1 text-xs font-mono whitespace-pre-wrap text-muted-foreground max-h-64 overflow-y-auto">
-          <LinkText text={resultText} />
-        </pre>
-      )}
-    </ToolShell>
-  )
-}
-
 export function ToolCallGlob({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { pattern?: string; path?: string } | null
   const structured = invocation.result?.structured as {
@@ -834,7 +852,7 @@ export const toolRenderers: Record<string, React.FC<ToolProps>> = {
   NotebookEdit: NotebookEditCard,
   WebFetch: WebFetchCard,
   WebSearch: WebSearchCard,
-  Bash: ToolCallBash,
+  Bash: BashCard,
   Glob: ToolCallGlob,
   Grep: ToolCallGrep,
   TodoWrite: ToolCallTodoWrite,
@@ -844,6 +862,39 @@ export const toolRenderers: Record<string, React.FC<ToolProps>> = {
 
 /** Tools whose card shows its own prompt status. */
 const OWN_PROMPT_STATUS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
+/**
+ * Cards that draw a partial input as it streams (fields may be missing or cut).
+ * Others show their header until the call is final (prompt cards must never
+ * show a half-written question).
+ */
+const PARTIAL_INPUT_TOOLS = new Set([
+  'Bash',
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+  'Read',
+  'Glob',
+  'Grep',
+  'WebFetch',
+  'WebSearch'
+])
+
+/**
+ * A tool row. While the call's input streams, its card gets the input as far as
+ * it arrived (the live block's JSON, parsed leniently and deferred); the saved
+ * call then sets the real input in the same card.
+ */
+function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
+  const streaming = item.inputStreaming === true && PARTIAL_INPUT_TOOLS.has(item.invocation.name)
+  const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
+  const json = useDeferredValue(live?.json ?? '')
+  const partial = useMemo(() => (json ? parsePartialJson(json) : undefined), [json])
+  const invocation =
+    streaming && partial !== undefined ? { ...item.invocation, input: partial } : item.invocation
+  return <div>{renderTool(invocation, item.timestamp)}</div>
+}
 
 export function renderTool(invocation: ToolInvocation, timestamp?: number): React.JSX.Element {
   const R =
@@ -893,7 +944,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
     case 'thinking':
       return <ThinkingBlock key={key} item={item} />
     case 'tool':
-      return <div key={key}>{renderTool(item.invocation, item.timestamp)}</div>
+      return <ToolRow key={key} item={item} />
     case 'session-start':
       return null
     case 'result':

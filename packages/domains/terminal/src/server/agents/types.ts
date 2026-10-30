@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  CommandTaskOutput,
   OutgoingUserMessage,
   PermissionDecision
 } from '@slayzone/terminal-contracts'
@@ -14,6 +15,11 @@ export interface AgentSpawnOpts {
   cwd: string
   /** Shell-parsed provider flags (e.g. --allow-dangerously-skip-permissions). */
   providerFlags: string[]
+  /**
+   * The CLI version this spawn will most likely run (the last one this tab or
+   * project saw); absent = unknown. Gates options an older CLI would reject.
+   */
+  cliVersion?: string
 }
 
 export interface SpawnArgs {
@@ -202,6 +208,15 @@ export interface ChatSessionDriver {
   }): boolean
   /** Extract a session/conversation id from an event for resume persistence. */
   extractSessionId(event: AgentEvent): string | null
+  /**
+   * The output so far of a command the agent runs as a task (`command-task`).
+   * Absent: the provider reports no task output.
+   */
+  commandTaskOutput?(taskId: string): Promise<CommandTaskOutput>
+  /** Kill a running command task. Rejects when it is not running. */
+  stopCommandTask?(taskId: string): Promise<void>
+  /** Move a running foreground command to the background; false when it is not one. */
+  backgroundCommandTask?(toolUseId: string): Promise<boolean>
   /** Teardown — reject pending promises, clear timers. Called on process exit. */
   dispose(): void
 }
@@ -220,4 +235,10 @@ export interface AgentBackend {
   readonly minTestedCliVersion?: string
   buildSpawnArgs(opts: AgentSpawnOpts): SpawnArgs
   createDriver(): ChatSessionDriver
+  /**
+   * The option a starting CLI refused (its stderr), when it is one the backend
+   * adds only for a CLI version it believes accepts it; else null. The transport
+   * then spawns that tab without version-gated options.
+   */
+  refusedOptionalFlag?(stderr: string): string | null
 }

@@ -19,10 +19,10 @@ import {
   SubAgentRow,
   ThinkingBlock,
   ToolCallAskUserQuestion,
-  ToolCallBash,
   ToolCallEdit,
   ToolCallGeneric
 } from './renderers'
+import { BashCard } from './tool-cards'
 
 /** Context with a controllable collapse signal + timeline; everything else default. */
 function View({
@@ -206,7 +206,7 @@ describe('ToolShell default-open', () => {
   const bash = tool('Bash', 'done', { command: 'ls -la', description: 'List files' })
   const bashUi = (signal: number) => (
     <View signal={signal}>
-      <ToolCallBash invocation={bash} />
+      <BashCard invocation={bash} />
     </View>
   )
   const isBashOpen = () => screen.queryByText('ls -la') !== null

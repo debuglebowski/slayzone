@@ -13,6 +13,8 @@ interface BackgroundJobsBannerProps {
    * Set false when stacking with other banners in a shared column container.
    */
   floating?: boolean
+  /** Stop a running job (shown when set, for a job whose id is known). */
+  onStop?: (shell: BgShell) => void
 }
 
 const STATUS_LABELS: Record<BgShellStatus, string> = {
@@ -61,7 +63,8 @@ export function BackgroundJobsBanner({
   shells,
   order,
   defaultCollapsed = false,
-  floating = true
+  floating = true,
+  onStop
 }: BackgroundJobsBannerProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
 
@@ -84,6 +87,7 @@ export function BackgroundJobsBanner({
 
   return (
     <div
+      data-testid="background-jobs-banner"
       className={`${floating ? 'absolute top-6 right-6 z-10 ' : ''}w-72 rounded-xl border-2 ${
         headerActive ? 'border-warning/60' : 'border-border'
       } bg-surface-1 backdrop-blur-md text-xs overflow-hidden transition-all duration-300`}
@@ -141,8 +145,18 @@ export function BackgroundJobsBanner({
                       )}
                     </span>
                   </div>
-                  <span className="text-muted-foreground font-mono tabular-nums shrink-0">
-                    {age}
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    {onStop && active && shell.shellId && (
+                      <button
+                        type="button"
+                        onClick={() => onStop(shell)}
+                        aria-label={`Stop background job ${shell.shellId}`}
+                        className="rounded px-1.5 py-px text-[10px] text-muted-foreground border border-border hover:bg-muted/60 hover:text-foreground"
+                      >
+                        Stop
+                      </button>
+                    )}
+                    <span className="text-muted-foreground font-mono tabular-nums">{age}</span>
                   </span>
                 </div>
                 <div className="font-mono text-muted-foreground leading-snug truncate">

@@ -24,3 +24,13 @@ export function isCliVersionBelow(version: string, minimum: string): boolean {
   }
   return a.pre && !b.pre
 }
+
+/**
+ * True when `version` is known to be `minimum` or newer. Unparseable → false:
+ * for gating an option an older CLI would reject, an unknown version is never
+ * enough.
+ */
+export function isCliVersionAtLeast(version: string, minimum: string): boolean {
+  if (!parse(version) || !parse(minimum)) return false
+  return !isCliVersionBelow(version, minimum)
+}

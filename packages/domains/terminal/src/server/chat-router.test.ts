@@ -136,3 +136,37 @@ describe('chat router', () => {
     expect(queueEvents.listenerCount('queue-changed')).toEqual(before)
   })
 })
+
+describe('chat router — command tasks (plan 3.9)', () => {
+  test('commandTaskOutput / stopCommandTask / backgroundCommandTask delegate to ops', async () => {
+    const seen: unknown[] = []
+    Object.assign(ops, {
+      commandTaskOutput: (tabId: string, taskId: string) => {
+        seen.push(['output', tabId, taskId])
+        return Promise.resolve({ state: 'running', output: 'x', totalBytes: 1, truncated: false })
+      },
+      stopCommandTask: (tabId: string, taskId: string) => {
+        seen.push(['stop', tabId, taskId])
+        return Promise.resolve()
+      },
+      backgroundCommandTask: (tabId: string, toolUseId: string) => {
+        seen.push(['background', tabId, toolUseId])
+        return Promise.resolve(true)
+      }
+    })
+    const caller = chatRouter.createCaller(ctx)
+    expect(await caller.commandTaskOutput({ tabId: 't1', taskId: 'k1' })).toEqual({
+      state: 'running',
+      output: 'x',
+      totalBytes: 1,
+      truncated: false
+    })
+    await caller.stopCommandTask({ tabId: 't1', taskId: 'k1' })
+    expect(await caller.backgroundCommandTask({ tabId: 't1', toolUseId: 'toolu_1' })).toBe(true)
+    expect(seen).toEqual([
+      ['output', 't1', 'k1'],
+      ['stop', 't1', 'k1'],
+      ['background', 't1', 'toolu_1']
+    ])
+  })
+})

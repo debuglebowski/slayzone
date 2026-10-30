@@ -55,11 +55,19 @@ export {
   type BgShellStatus,
   type SessionUsage,
   type UsageSummary,
+  type CommandTaskView,
+  type LiveBlock,
+  type LiveBlocks,
+  type StreamState,
   isInFlight,
   isAwaitingUserQuestion,
   deriveLoadingLabel,
-  selectUsageSummary
+  selectUsageSummary,
+  liveBlockOf,
+  streamKeyOf
 } from './chat-timeline'
+export { LiveBlockStore, LiveBlockStoreContext, useLiveBlock } from './live-blocks'
+export { parsePartialJson } from './partial-json'
 export {
   type ChatPrompt,
   type ChatPromptStatus,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type Key } from 'react'
 import { toast, safeClipboardWriteText } from '@slayzone/ui'
-import type { TimelineItem } from '@slayzone/terminal/client'
+import { streamKeyOf, type TimelineItem } from '@slayzone/terminal/client'
 import { useChatSearch } from './useChatSearch'
 import { isRenderable } from './renderers'
 import type { CallbackRef } from './useFollowBottom'
@@ -125,9 +125,13 @@ export function useChatDisplay({
   }
 
   // Stable per-item keys so streaming text updates re-render the same DOM node.
+  // A streamed row keeps its key when its saved block finalizes it (plan 3.2):
+  // `text|thinking:<messageId>:<n>` (n-th block of the message — two text blocks
+  // of one message no longer share a key), `tool:<id>`.
   const itemKey = useCallback((item: TimelineItem, index: number): Key => {
+    const streamKey = streamKeyOf(item)
+    if (streamKey) return streamKey
     if (item.kind === 'text' || item.kind === 'thinking') return `${item.kind}:${item.messageId}`
-    if (item.kind === 'tool') return `tool:${item.invocation.id}`
     if (item.kind === 'session-start') return `session:${item.sessionId}`
     if (item.kind === 'result') return `result:${item.timestamp}:${index}`
     if (item.kind === 'hook' && item.hookId) return `hook:${item.hookId}`
