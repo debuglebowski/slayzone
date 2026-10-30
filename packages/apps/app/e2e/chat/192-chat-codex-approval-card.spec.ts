@@ -3,8 +3,9 @@
  * app-server`: rows follow the request's `availableDecisions` exactly as codex
  * 0.159.2 sends them (accept, the exec-policy rule, cancel), keys like Claude's
  * card (1-9, ↑↓ Enter, Esc), a file change shows the item's diff, and the card
- * closes when Codex withdraws the request (Stop while it waits). Captured in
- * light and dark for the report.
+ * closes when Codex withdraws the request (Stop while it waits); each row's
+ * `❯ 1.` marker stays on one line at any chat width while a long label wraps
+ * under its own text. Captured in light and dark for the report.
  * Needs the Codex driver's approvals (X1: promptCards, decision mapping).
  */
 import type { Locator, Page } from '@playwright/test'
@@ -30,6 +31,30 @@ function realCommandRequest(id: string, command: string) {
       'cancel'
     ]
   }
+}
+
+/**
+ * Per row: the lines its `❯ 1.` marker takes, and whether every line of its
+ * label starts in one column right of the marker (the label wraps under itself).
+ */
+function rowLayout(dock: Locator) {
+  return dock.locator('[role="group"] > button').evaluateAll((rows) =>
+    rows.map((row) => {
+      const [marker, label] = Array.from(row.children) as HTMLElement[]
+      const lineHeight = (el: HTMLElement) => parseFloat(getComputedStyle(el).lineHeight)
+      // The label's text, line by line (one rect per line fragment).
+      const range = document.createRange()
+      range.selectNodeContents(label)
+      const labelLines = Array.from(range.getClientRects()).filter((r) => r.width > 0)
+      const labelLefts = new Set(labelLines.map((r) => Math.round(r.left)))
+      const markerBox = marker.getBoundingClientRect()
+      return {
+        markerLines: Math.round(markerBox.height / lineHeight(marker)),
+        labelLines: new Set(labelLines.map((r) => Math.round(r.top))).size,
+        labelInOwnColumn: labelLefts.size === 1 && Math.min(...labelLefts) >= markerBox.right
+      }
+    })
+  )
 }
 
 async function captureBothThemes(page: Page, el: Locator, name: string): Promise<void> {
@@ -94,6 +119,24 @@ test.describe('Codex approval card', () => {
     ).toBeVisible()
     await expect(dock).not.toContainText('requestApproval')
     await captureBothThemes(t.page, dock, 'codex-approval-command')
+
+    // The marker never wraps: at the chat's width, and squeezed to a phone-narrow
+    // dock where the long rule label wraps under its own text.
+    for (const row of await rowLayout(dock)) {
+      expect(row).toMatchObject({ markerLines: 1, labelLines: 1, labelInOwnColumn: true })
+    }
+    await dock.evaluate((el) => {
+      el.style.width = '240px'
+    })
+    const narrow = await rowLayout(dock)
+    for (const row of narrow) {
+      expect(row).toMatchObject({ markerLines: 1, labelInOwnColumn: true })
+    }
+    expect(narrow[1].labelLines).toBeGreaterThan(1)
+    await captureBothThemes(t.page, dock, 'codex-approval-command-narrow')
+    await dock.evaluate((el) => {
+      el.style.width = ''
+    })
 
     await dock.focus()
     await t.page.keyboard.press('2')

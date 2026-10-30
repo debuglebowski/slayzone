@@ -822,7 +822,6 @@ run_harness packages/domains/task-terminals/src/client/chat/history-summary.test
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.codex.test.ts
-run_harness packages/domains/task-terminals/src/client/chat/chat-models.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/compact-entry.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
@@ -884,6 +883,7 @@ run_harness packages/domains/terminal-contracts/src/spawn-conversation-ids.test.
 run_harness packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-effort.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-model-catalog.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts

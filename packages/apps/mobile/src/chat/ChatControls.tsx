@@ -1,8 +1,9 @@
 /**
  * The chat's permission mode, model and effort as three chips (desktop's chat pills);
- * a tap lists the choices in a sheet. Effort shows only for a model that has it.
+ * a tap lists the choices in a sheet. The models are the hub's (`chat.getModels`);
+ * effort shows only for a model that has it, with that model's own levels.
  */
-import { modelSupportsEffortForMode } from '@slayzone/terminal-contracts'
+import type { ChatModelsView } from '@slayzone/terminal-contracts'
 import { useState } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import type { ChromeColors } from '../theme'
@@ -11,23 +12,35 @@ import {
   effortLabel,
   effortOptions,
   modeLabel,
+  modelChipLabel,
   modelOptions,
-  modeOptions
+  modeOptions,
+  unlistedModelsHint
 } from './chat-controls'
 import { useThemedStyles } from './styles'
 import type { ChatSettings } from './useChatSettings'
 
 type Picker = 'mode' | 'model' | 'effort'
 
-export function ChatControls({ mode, settings }: { mode: string; settings: ChatSettings }) {
+export function ChatControls({
+  mode,
+  settings,
+  models
+}: {
+  mode: string
+  settings: ChatSettings
+  models: ChatModelsView
+}) {
   const { s } = useThemedStyles(makeStyles)
   const [picker, setPicker] = useState<Picker | null>(null)
-  const models = modelOptions(mode)
-  const showEffort = settings.model !== null && modelSupportsEffortForMode(mode, settings.model)
+  const showEffort = !!settings.model && models.supportsEffort(settings.model)
+  const effortLevels = settings.model ? models.effortLevels(settings.model) : undefined
 
   const sheet: {
     title: string
     options: ControlOption[]
+    /** Said when there is nothing to pick. */
+    hint?: string
     value: string | null
     pick: (id: string) => void
   } | null =
@@ -41,14 +54,15 @@ export function ChatControls({ mode, settings }: { mode: string; settings: ChatS
       : picker === 'model'
         ? {
             title: 'Model',
-            options: models,
+            options: modelOptions(models),
+            ...(models.unlisted ? { hint: unlistedModelsHint(mode) } : {}),
             value: settings.model,
             pick: (id) => void settings.setModel(id).catch(() => undefined)
           }
         : picker === 'effort'
           ? {
               title: 'Effort',
-              options: effortOptions(),
+              options: effortOptions(effortLevels),
               value: settings.effort,
               pick: (id) => void settings.setEffort(id).catch(() => undefined)
             }
@@ -64,11 +78,7 @@ export function ChatControls({ mode, settings }: { mode: string; settings: ChatS
         s={s}
       />
       <Chip
-        label={
-          settings.model
-            ? (models.find((m) => m.id === settings.model)?.label ?? settings.model)
-            : 'Model'
-        }
+        label={modelChipLabel(models, settings.model)}
         busy={settings.changing.model}
         onPress={() => setPicker('model')}
         a11y="Model"
@@ -76,7 +86,7 @@ export function ChatControls({ mode, settings }: { mode: string; settings: ChatS
       />
       {showEffort && (
         <Chip
-          label={effortLabel(settings.effort)}
+          label={effortLabel(settings.effort, effortLevels)}
           busy={settings.changing.effort}
           onPress={() => setPicker('effort')}
           a11y="Effort"
@@ -93,6 +103,9 @@ export function ChatControls({ mode, settings }: { mode: string; settings: ChatS
         {sheet && (
           <View style={s.sheet}>
             <Text style={s.sheetTitle}>{sheet.title}</Text>
+            {sheet.options.length === 0 && sheet.hint ? (
+              <Text style={s.sheetHint}>{sheet.hint}</Text>
+            ) : null}
             <ScrollView>
               {sheet.options.map((o) => (
                 <Pressable
@@ -174,6 +187,7 @@ function makeStyles(t: ChromeColors) {
       paddingBottom: 28
     },
     sheetTitle: { color: t.popoverForeground, fontSize: 15, fontWeight: '700', marginBottom: 8 },
+    sheetHint: { color: t.mutedForeground, fontSize: 13, paddingHorizontal: 10, paddingBottom: 8 },
     option: { paddingVertical: 10, paddingHorizontal: 10, borderRadius: 8 },
     optionOn: { backgroundColor: t.accent },
     optionLabel: { color: t.popoverForeground, fontSize: 15, fontWeight: '600' },

@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useStableCallback } from '@slayzone/ui'
 import { useTRPC } from '../trpc'
-import { chatModelsView, type ChatModelsView } from './chat-models'
+import { chatModelsView, type ChatModelsView } from '@slayzone/terminal-contracts'
 
 /**
  * The models a chat tab offers (`chat.getModels`). Read again when a new

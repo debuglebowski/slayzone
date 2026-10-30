@@ -4,8 +4,12 @@
  * before Codex ran once) — never a list hardcoded in the UI for Codex.
  */
 import { describe, expect, test } from 'vitest'
-import type { ChatModelInfo } from '@slayzone/terminal-contracts'
-import { chatModelsView } from './chat-models'
+import {
+  type ChatModelInfo,
+  chatModelsView,
+  isValidModelForMode,
+  modelsForMode
+} from './chat-model-catalog'
 
 const CODEX: ChatModelInfo[] = [
   {
@@ -56,5 +60,44 @@ describe('chat models', () => {
     expect(v.supportsEffort('opus')).toBe(true)
     expect(v.supportsEffort('haiku')).toBe(false)
     expect(v.effortLevels('opus')).toBeUndefined()
+  })
+
+  test("/effort on Codex: the model's own levels; a model with none (or none listed) refuses", () => {
+    const v = chatModelsView('codex-chat', CODEX)
+    expect(v.effortCommand('gpt-6-luna', 'ULTRA')).toEqual({ ok: true, level: 'ultra' })
+    expect(v.effortCommand('gpt-6-luna', 'max')).toEqual({
+      ok: false,
+      message: 'Invalid effort level "max". Use: low, medium, ultra'
+    })
+    // Claude's levels are never a fallback for a Codex model.
+    for (const level of ['low', 'high', 'max']) {
+      expect(v.effortCommand('gpt-6.1-sol', level)).toEqual({
+        ok: false,
+        message: 'GPT-6.1 Sol has no effort levels.'
+      })
+    }
+    expect(v.effortCommand('gpt-5.5', 'low')).toEqual({
+      ok: false,
+      message: 'gpt-5.5 has no effort levels.'
+    })
+    expect(chatModelsView('codex-chat', []).effortCommand('', 'low')).toEqual({
+      ok: false,
+      message: 'No effort levels yet: Codex lists its models once it has started.'
+    })
+  })
+
+  test("/effort on Claude: Claude's levels", () => {
+    const v = chatModelsView('claude-chat', undefined)
+    expect(v.effortCommand('opus', 'MAX')).toEqual({ ok: true, level: 'max' })
+    expect(v.effortCommand('opus', 'turbo')).toEqual({
+      ok: false,
+      message: 'Invalid effort level "turbo". Use: low, medium, high, xhigh, max'
+    })
+  })
+
+  test('the app keeps no Codex list: Codex models are only what its CLI lists', () => {
+    expect(modelsForMode('codex-chat')).toEqual([])
+    expect(isValidModelForMode('codex-chat', 'gpt-5.5')).toBe(false)
+    expect(modelsForMode('claude-chat').map((m) => m.id)).toEqual(['opus', 'sonnet', 'haiku'])
   })
 })

@@ -1,14 +1,18 @@
 /**
  * Words for the chat's mode, model and effort pickers. The ids, their order and which
- * apply come from the shared catalogs (`@slayzone/terminal-contracts`); the labels are
- * desktop's pill copy (`packages/shared/ui/src/agent-mode-pill.tsx`,
- * `agent-effort-pill.tsx`), mirrored here because that package is desktop UI.
+ * apply come from the shared catalogs (`@slayzone/terminal-contracts`) and the models
+ * the hub lists (`chat.getModels`, each with its own effort levels where the provider
+ * lists them); the labels are desktop's pill copy (`packages/shared/ui/src/agent-mode-pill.tsx`,
+ * `agent-effort-pill.tsx`, `agent-model-pill.tsx`), mirrored here because that package
+ * is desktop UI.
  */
 import {
   CHAT_EFFORTS,
   type ChatEffort,
+  type ChatModelEffort,
+  type ChatModelsView,
   chatModesForMode,
-  modelsForMode
+  chatProviderForMode
 } from '@slayzone/terminal-contracts'
 
 export interface ControlOption {
@@ -71,14 +75,28 @@ export function modeLabel(id: string): string {
   return MODE_COPY[id]?.label ?? id
 }
 
-export function modelOptions(mode: string): ControlOption[] {
-  return modelsForMode(mode).map((m) => ({ id: m.id, label: m.label, description: '' }))
+export function modelOptions(models: ChatModelsView): ControlOption[] {
+  return models.models.map((m) => ({ id: m.id, label: m.label, description: m.description ?? '' }))
 }
 
-export function effortOptions(): ControlOption[] {
+/** The model chip's words: the model's label; "Default" while the CLI has listed none. */
+export function modelChipLabel(models: ChatModelsView, id: string | null): string {
+  if (id) return models.label(id)
+  return models.unlisted ? 'Default' : 'Model'
+}
+
+/** What the model picker says while the provider has listed no models (desktop's hint). */
+export function unlistedModelsHint(mode: string): string {
+  return `${chatProviderForMode(mode).product} lists its models once it has started.`
+}
+
+/** The model's own effort levels where its provider lists them (Codex), else Claude's. */
+export function effortOptions(levels?: readonly ChatModelEffort[]): ControlOption[] {
+  if (levels)
+    return levels.map((l) => ({ id: l.id, label: l.label, description: l.description ?? '' }))
   return CHAT_EFFORTS.map((id) => ({ id, ...EFFORT_COPY[id] }))
 }
 
-export function effortLabel(id: string): string {
-  return EFFORT_COPY[id as ChatEffort]?.label ?? id
+export function effortLabel(id: string, levels?: readonly ChatModelEffort[]): string {
+  return levels?.find((l) => l.id === id)?.label ?? EFFORT_COPY[id as ChatEffort]?.label ?? id
 }

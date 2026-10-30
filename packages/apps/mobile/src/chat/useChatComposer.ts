@@ -22,6 +22,7 @@ import type {
 import {
   type ChatAttachment,
   type ChatCapabilities,
+  type ChatModelsView,
   userMessageAttachments
 } from '@slayzone/terminal-contracts'
 import { useCallback, useRef, useState } from 'react'
@@ -66,6 +67,7 @@ export function useChatComposer({
   session,
   queue,
   settings,
+  models,
   slash,
   notify,
   sessionEnded
@@ -75,6 +77,8 @@ export function useChatComposer({
   session: ChatSessionApi
   queue: ChatQueue
   settings: ChatSettings
+  /** The models the pickers offer (`chat.getModels`): `/model` and `/effort` check against them. */
+  models: ChatModelsView
   slash: SlashCommands
   notify: (message: string) => void
   /** The agent's process ended: sending waits for a restart (desktop's rule). */
@@ -117,7 +121,7 @@ export function useChatComposer({
     async (raw: string): Promise<void> => {
       if (sessionEnded) return
       const files = attachments
-      const plan = planSend(raw, target.mode, caps, slash.commands)
+      const plan = planSend(raw, { view: models, current: settings.model }, caps, slash.commands)
       switch (plan.type) {
         case 'empty':
           // Files alone are a message too.
@@ -162,7 +166,7 @@ export function useChatComposer({
         }
       }
     },
-    [sessionEnded, attachments, target.mode, caps, slash, notify, settings, submitPrompt]
+    [sessionEnded, attachments, models, caps, slash, notify, settings, submitPrompt]
   )
 
   const chatActions: ChatActions = {

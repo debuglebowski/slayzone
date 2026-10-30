@@ -4,6 +4,7 @@ import type { ChatPrompt } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import type { PromptAnswer } from './PermissionPrompt'
 import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
+import { PromptRowMarker } from './PromptRows'
 
 /** Codex's plan-mode questions (`item/tool/requestUserInput`). */
 export const CODEX_QUESTIONS = 'item/tool/requestUserInput'
@@ -137,12 +138,7 @@ export function CodexQuestionPrompt({
                         : 'hover:bg-muted/60 text-foreground'
                     )}
                   >
-                    <span
-                      aria-hidden
-                      className="shrink-0 w-6 select-none font-mono text-muted-foreground"
-                    >
-                      {selected ? '❯' : ' '} {i + 1}.
-                    </span>
+                    <PromptRowMarker index={i} selected={selected} />
                     <span className="min-w-0">
                       {o.label}
                       {o.description && (

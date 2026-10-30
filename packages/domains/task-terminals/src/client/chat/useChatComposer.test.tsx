@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
-import type {
-  ChatAttachment,
-  QueuedChatMessage,
-  StopResult,
-  UserContentBlock
+import {
+  type ChatAttachment,
+  chatModelsView,
+  type QueuedChatMessage,
+  type StopResult,
+  type UserContentBlock
 } from '@slayzone/terminal-contracts'
 import type { ChatActions, NavigateActions } from './autocomplete/types'
 
@@ -145,6 +146,8 @@ const opts = (over: Partial<UseChatComposerOpts> = {}): UseChatComposerOpts => (
   getArtifactFilePath,
   scrollToBottom,
   handleEffortChange,
+  models: chatModelsView('claude-chat', undefined),
+  chatModel: 'opus',
   handleModelChange,
   cliCommands: null,
   ...over
@@ -234,6 +237,38 @@ describe('useChatComposer /effort builtin', () => {
     expect(handleEffortChange).not.toHaveBeenCalled()
     expect(sendMessage).not.toHaveBeenCalled()
     expect(composer.draft).toBe('/effort turbo')
+  })
+})
+
+describe('useChatComposer /effort on Codex', () => {
+  const codex = chatModelsView('codex-chat', [
+    {
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
+      supportsEffort: true,
+      efforts: [
+        { id: 'low', label: 'Low' },
+        { id: 'ultra', label: 'Ultra' }
+      ]
+    },
+    { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', supportsEffort: false }
+  ])
+
+  it("takes the model's own level", async () => {
+    setup({ mode: 'codex-chat', models: codex, chatModel: 'gpt-6-luna' })
+    type('/effort ultra')
+    await send()
+    expect(handleEffortChange).toHaveBeenCalledWith('ultra')
+  })
+
+  it("refuses on a model that lists no levels — Claude's are not accepted", async () => {
+    setup({ mode: 'codex-chat', models: codex, chatModel: 'gpt-6.1-sol' })
+    type('/effort high')
+    await send()
+    expect(mocks.toast).toHaveBeenCalledWith('GPT-6.1 Sol has no effort levels.')
+    expect(handleEffortChange).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(composer.draft).toBe('/effort high')
   })
 })
 
