@@ -399,3 +399,44 @@ test.describe('web shell — no onboarding', () => {
     }
   })
 })
+
+// A fresh hub has no projects. The web shell still renders its sidebar, so the first
+// project can be created from the browser (it once showed only "No projects in this
+// workspace yet.": no sidebar, no dialogs, a dead end).
+test.describe('web shell — empty workspace', () => {
+  let hub: LoginHub
+  let browser: Browser
+
+  test.beforeAll(async () => {
+    hub = await spawnLoginHub()
+    browser = await chromium.launch()
+  })
+
+  test.afterAll(async () => {
+    await browser.close()
+    await hub.stop()
+    fs.rmSync(hub.root, { recursive: true, force: true })
+  })
+
+  test('a hub with no projects offers creating the first one', async () => {
+    const context = await browser.newContext()
+    try {
+      const page = await context.newPage()
+      await page.goto(`http://127.0.0.1:${hub.port}/`)
+      await page.getByTestId('web-login-email').fill(hub.owner.email)
+      await page.getByTestId('web-login-password').fill(hub.owner.password)
+      await Promise.all([
+        page.waitForEvent('framenavigated'),
+        page.getByTestId('web-login-submit').click()
+      ])
+
+      await expect(page.getByText('Click + in sidebar to create a project')).toBeVisible({
+        timeout: 15_000
+      })
+      await page.getByTitle(/^Add project/).click()
+      await expect(page.getByRole('heading', { name: 'Create Project' })).toBeVisible()
+    } finally {
+      await context.close()
+    }
+  })
+})

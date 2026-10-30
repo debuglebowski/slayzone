@@ -642,9 +642,8 @@ export function HomeView({
       </Centered>
     )
   }
-  if (projects.length === 0) {
-    return <Centered>No projects in this workspace yet.</Centered>
-  }
+  // No projects is NOT an early return: the sidebar's "Add project" must render, and
+  // HomeContainer shows its own empty state.
 
   const currentProjectName = projects.find((p) => p.id === selectedProjectId)?.name
   const currentProjectPath = projects.find((p) => p.id === selectedProjectId)?.path ?? ''
