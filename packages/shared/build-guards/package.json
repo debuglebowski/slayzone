@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/build-guards",
-  "version": "0.36.2",
+  "version": "0.36.3",
   "private": true,
   "description": "Build tooling for the Node bundles (Electron main/preload, hub, computer, CLI): guards they run on their own output, plus the dev rebuild watcher for the esbuild sidecars. Plain .mjs: build.mjs scripts import it under bare Node.",
   "type": "module",

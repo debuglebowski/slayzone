@@ -1,6 +1,80 @@
 # Changelog
 
 
+## v0.36.3
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.2...v0.36.3)
+
+### 🚀 Enhancements
+
+- **mobile:** Expo app spike — hub sign-in + task list on iPhone/iPad ([0651e579d](https://github.com/debuglebowski/slayzone/commit/0651e579d))
+- **chat:** Chat colours follow the theme ([b7dbb643c](https://github.com/debuglebowski/slayzone/commit/b7dbb643c))
+- **chat:** CLI slash commands, /compact, context meter, prompt history ([1f1768691](https://github.com/debuglebowski/slayzone/commit/1f1768691))
+- **mobile:** Expo SDK 58 (RN 0.88.1, workspace React 19.3.1) ([e0a61b2e8](https://github.com/debuglebowski/slayzone/commit/e0a61b2e8))
+- **mobile:** Colours from desktop's theme presets (@slayzone/theme-tokens) ([c61a2d731](https://github.com/debuglebowski/slayzone/commit/c61a2d731))
+- **mobile:** Start in the user's last theme, not the default ([4ba168e95](https://github.com/debuglebowski/slayzone/commit/4ba168e95))
+- **terminal:** Spawn refusals say why; Doctor checks the computer ([be99aecb2](https://github.com/debuglebowski/slayzone/commit/be99aecb2))
+- **terminal:** Doctor checks agent binary + shell on the task's computer ([5c676c8f5](https://github.com/debuglebowski/slayzone/commit/5c676c8f5))
+- **chat:** Custom commands run by the CLI, hook output, tool cards ([aec390b8e](https://github.com/debuglebowski/slayzone/commit/aec390b8e))
+- **chat:** Approval + prompt cards; pill owns the spawn mode ([2f1fc8209](https://github.com/debuglebowski/slayzone/commit/2f1fc8209))
+- **chat:** Never lose a message — process generations, outbox, live/saved events ([c4e83cd9a](https://github.com/debuglebowski/slayzone/commit/c4e83cd9a))
+- **hub:** Live chat state, change signals for every task write, startMainAgent ([964b4e8fd](https://github.com/debuglebowski/slayzone/commit/964b4e8fd))
+- **mobile:** Phase 0 foundation — Expo Router, all hubs in one list, UI tests ([47f45d76b](https://github.com/debuglebowski/slayzone/commit/47f45d76b))
+- **web-shell:** No onboarding ([23bc31ec5](https://github.com/debuglebowski/slayzone/commit/23bc31ec5))
+- **chat:** Token streaming and live command output ([c0254e705](https://github.com/debuglebowski/slayzone/commit/c0254e705))
+- **chat:** Real interrupt, rewind/fork, sessions picker, TUI hand-off ([8803bb992](https://github.com/debuglebowski/slayzone/commit/8803bb992))
+- **settings:** Experimental banner on hubs/computers connections tab ([aa42c7bb4](https://github.com/debuglebowski/slayzone/commit/aa42c7bb4))
+- **projects:** Project folder per computer, no path required ([54b22ab33](https://github.com/debuglebowski/slayzone/commit/54b22ab33))
+- **chat:** Real attachments, CLI command hints, draft + queue editing ([0155dc913](https://github.com/debuglebowski/slayzone/commit/0155dc913))
+- **telemetry:** Hub telemetry switch covers only that hub's data ([d70e348a2](https://github.com/debuglebowski/slayzone/commit/d70e348a2))
+- **chat:** Files changed, diff-line comments, keyboard flow ([03cd5cbdb](https://github.com/debuglebowski/slayzone/commit/03cd5cbdb))
+- **chat:** Virtual timeline, full history, turn outline ([ce2ebc5d2](https://github.com/debuglebowski/slayzone/commit/ce2ebc5d2))
+- **terminal:** Hub keeps pty size, pty.onResize + attach size ([7f004c147](https://github.com/debuglebowski/slayzone/commit/7f004c147))
+- **mobile:** Agents, terminal and chat ([0b6ca121f](https://github.com/debuglebowski/slayzone/commit/0b6ca121f))
+- **mobile:** Microsoft sign-in via hub redirect + PKCE ([b76871c5e](https://github.com/debuglebowski/slayzone/commit/b76871c5e))
+- **mobile:** Artifacts: list, viewers, upload, search ([bdf9d8430](https://github.com/debuglebowski/slayzone/commit/bdf9d8430))
+- **mobile:** Projects, computers and hubs ([1488f9eae](https://github.com/debuglebowski/slayzone/commit/1488f9eae))
+- **mobile:** Tab bar navigation ([ebcb53068](https://github.com/debuglebowski/slayzone/commit/ebcb53068))
+
+### 🩹 Fixes
+
+- **task:** Failed process Kill/Stop/Restart shows an error toast ([809011bc4](https://github.com/debuglebowski/slayzone/commit/809011bc4))
+- **task:** Process Stop/Restart error handling via .catch (biome) ([2e07348ab](https://github.com/debuglebowski/slayzone/commit/2e07348ab))
+- **sidebar:** Align tree empty-state text with project name ([1490062a5](https://github.com/debuglebowski/slayzone/commit/1490062a5))
+- **app:** Remote login hub /trpc — desktop sockets carry no Origin ([77ccd86d7](https://github.com/debuglebowski/slayzone/commit/77ccd86d7))
+- **mobile:** Status bar on dark-only themes; Sign out while hub unreachable ([52199557b](https://github.com/debuglebowski/slayzone/commit/52199557b))
+- **api:** Classify chat.testSetWatchdogTimings in the access policies ([a3680d655](https://github.com/debuglebowski/slayzone/commit/a3680d655))
+- **settings:** Web sessions skip refused settings-changed stream ([86c6f446e](https://github.com/debuglebowski/slayzone/commit/86c6f446e))
+- **renderer-app:** No dead end at zero projects ([dd08a6923](https://github.com/debuglebowski/slayzone/commit/dd08a6923))
+- **projects:** Older hub without placements → use its path ([236d99d92](https://github.com/debuglebowski/slayzone/commit/236d99d92))
+- **computers:** Renderer-safe DEFAULT_LOCAL_COMPUTER_NAME import ([e34b9e888](https://github.com/debuglebowski/slayzone/commit/e34b9e888))
+- **tabs:** Close a task tab only once its own hub has answered ([ac7e065df](https://github.com/debuglebowski/slayzone/commit/ac7e065df))
+- **projects:** Upgrade keeps every folder; gone folder shows old message ([6c7e20d1e](https://github.com/debuglebowski/slayzone/commit/6c7e20d1e))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.36.2 ([9d8e1bb34](https://github.com/debuglebowski/slayzone/commit/9d8e1bb34))
+- **lint:** Eslint ignores gitignored logs/ scratch dirs ([f3438fc3b](https://github.com/debuglebowski/slayzone/commit/f3438fc3b))
+
+### ✅ Tests
+
+- **computer:** Gh.exec test uses a stand-in gh, not the machine's ([fdbaccf31](https://github.com/debuglebowski/slayzone/commit/fdbaccf31))
+- **e2e:** 104 option-as-meta retries instead of failing at 5s ([0e3dd6983](https://github.com/debuglebowski/slayzone/commit/0e3dd6983))
+- **db-migrations:** V51 migration test rewritten and registered ([70cf2990d](https://github.com/debuglebowski/slayzone/commit/70cf2990d))
+- Three load-sensitive unit tests no longer depend on timing luck ([5daa1db3f](https://github.com/debuglebowski/slayzone/commit/5daa1db3f))
+- **chat:** Fake Claude CLI + e2e chat safety net ([7410cd811](https://github.com/debuglebowski/slayzone/commit/7410cd811))
+- **platform:** Spawn-helper paths joined with the host separator ([d83869168](https://github.com/debuglebowski/slayzone/commit/d83869168))
+- **e2e:** Upgrade from 0.36.2 keeps every project folder ([9f50f4f01](https://github.com/debuglebowski/slayzone/commit/9f50f4f01))
+
+### 🎨 Styles
+
+- Biome format two origin tests from 77ccd86d7 ([c04d22a8a](https://github.com/debuglebowski/slayzone/commit/c04d22a8a))
+- Biome format chat transport robustness test ([38afc5f99](https://github.com/debuglebowski/slayzone/commit/38afc5f99))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.36.2
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.1...v0.36.2)

@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.36.3",
+    "date": "2026-10-30",
+    "tagline": "Chat, fully grown",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Live chat",
+        "description": "Chat replies and command output now stream in as they happen."
+      },
+      {
+        "category": "feature",
+        "title": "Chat control",
+        "description": "Stop a reply mid-turn, rewind or fork from any message, reopen past sessions, or switch the chat to the terminal."
+      },
+      {
+        "category": "feature",
+        "title": "Chat commands",
+        "description": "Slash commands (including /compact and your own), a context meter, prompt history, file attachments, and editable queued messages."
+      },
+      {
+        "category": "feature",
+        "title": "Review chat changes",
+        "description": "See every file a chat changed and comment on individual diff lines."
+      },
+      {
+        "category": "improvement",
+        "title": "Chat timeline",
+        "description": "Long chats show their full history, with a turn outline to jump between turns."
+      },
+      {
+        "category": "improvement",
+        "title": "Clearer agent start errors",
+        "description": "When an agent can't start, the terminal now says why."
+      },
+      {
+        "category": "fix",
+        "title": "Process errors",
+        "description": "A failed Kill, Stop or Restart of a process now shows an error instead of failing silently."
+      }
+    ]
+  },
+  {
     "version": "0.36.2",
     "date": "2026-10-29",
     "tagline": "Right where you left it",
