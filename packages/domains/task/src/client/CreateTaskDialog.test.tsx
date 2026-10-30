@@ -65,7 +65,15 @@ vi.mock('@slayzone/projects', () => ({
 }))
 vi.mock('@slayzone/projects-contracts', () => ({ getDefaultStatus: () => 'inbox' }))
 vi.mock('@slayzone/tags/client', () => ({ CreateTagDialog: () => null }))
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 vi.mock('@slayzone/ui', async () => {
   // Pure shortcut helpers the dialog renders with (key hints) — real ones, not stubs.

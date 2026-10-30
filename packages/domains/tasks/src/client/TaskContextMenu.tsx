@@ -52,7 +52,7 @@ import {
   PinOff,
   Bell
 } from 'lucide-react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { format } from 'date-fns'
 import { getSnoozePresets, CustomSnoozeDialog, BlockerDialog } from '@slayzone/task/client'
 
@@ -104,6 +104,7 @@ export function TaskContextMenu({
   canMarkUnread,
   children
 }: TaskContextMenuProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [customSnoozeOpen, setCustomSnoozeOpen] = useState(false)
@@ -114,12 +115,12 @@ export function TaskContextMenu({
   const statusOptions = buildStatusOptions(columns)
 
   const handleStatusChange = (status: string): void => {
-    track('task_status_changed', { from: task.status, to: status })
+    trackTask(task.id, 'task_status_changed', { from: task.status, to: status })
     onUpdateTask(task.id, { status: status as TaskStatus })
   }
 
   const handlePriorityChange = (priority: string): void => {
-    track('task_priority_changed', { priority })
+    trackTask(task.id, 'task_priority_changed', { priority })
     onUpdateTask(task.id, { priority: parseInt(priority, 10) })
   }
 
@@ -131,17 +132,17 @@ export function TaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
-    track('task_moved_to_project')
+    trackTask(task.id, 'task_moved_to_project')
     onUpdateTask(task.id, { project_id: projectId })
   }
 
   const handleSnooze = (date: Date): void => {
-    track('task_snoozed')
+    trackTask(task.id, 'task_snoozed')
     onUpdateTask(task.id, { snoozed_until: date.toISOString() } as Partial<Task>)
   }
 
   const handleUnsnooze = (): void => {
-    track('task_unsnoozed')
+    trackTask(task.id, 'task_unsnoozed')
     onUpdateTask(task.id, { snoozed_until: null } as Partial<Task>)
   }
 
@@ -150,12 +151,12 @@ export function TaskContextMenu({
   const snoozePresets = getSnoozePresets()
 
   const handleCopyTitle = async (): Promise<void> => {
-    track('copy_title')
+    trackTask(task.id, 'copy_title')
     await safeClipboardWriteText(task.title)
   }
 
   const handleCopyLink = async (): Promise<void> => {
-    track('copy_link')
+    trackTask(task.id, 'copy_link')
     await safeClipboardWriteText(`slayzone://task/${task.id}`)
   }
 
@@ -165,7 +166,7 @@ export function TaskContextMenu({
   }
 
   const handleDeleteConfirm = (): void => {
-    track('task_deleted', { was_temporary: Boolean(task.is_temporary) })
+    trackTask(task.id, 'task_deleted', { was_temporary: Boolean(task.is_temporary) })
     onDeleteTask(task.id)
     setDeleteDialogOpen(false)
   }
@@ -173,21 +174,21 @@ export function TaskContextMenu({
   // Blocked handlers
   const handleToggleBlocked = (): void => {
     if (task.is_blocked) {
-      track('task_unblocked')
+      trackTask(task.id, 'task_unblocked')
       onUpdateTask(task.id, { is_blocked: false, blocked_comment: null } as Partial<Task>)
     } else {
-      track('task_blocked', {})
+      trackTask(task.id, 'task_blocked', {})
       onUpdateTask(task.id, { is_blocked: true } as Partial<Task>)
     }
   }
 
   const handleMarkUnread = (): void => {
-    track('task_marked_unread')
+    trackTask(task.id, 'task_marked_unread')
     onUpdateTask(task.id, { needs_attention: true } as Partial<Task>)
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
-    track('task_blocked', { hasComment: 'true' })
+    trackTask(task.id, 'task_blocked', { hasComment: 'true' })
     onUpdateTask(task.id, {
       is_blocked: true,
       blocked_comment: blockedComment.trim() || null
@@ -480,7 +481,7 @@ export function TaskContextMenu({
           open={customSnoozeOpen}
           onOpenChange={setCustomSnoozeOpen}
           onSnooze={(until) => {
-            track('task_snoozed')
+            trackTask(task.id, 'task_snoozed')
             onUpdateTask(task.id, { snoozed_until: until } as Partial<Task>)
           }}
         />

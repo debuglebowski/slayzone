@@ -253,7 +253,7 @@ if (isFloatingGlobalAgentPanel) {
       // call tRPC hooks, so they need the tRPC context. With one hub this is
       // identical to the former single TrpcProvider. TelemetryProvider sits above
       // ConvexAuthBootstrap: Convex starts only when it says third-party services
-      // are allowed (tier not `off`, no hub with telemetry off).
+      // are allowed (tier not `off`, the default hub not with telemetry off).
       <FederatedRoot decorateUrl={decorateUrl}>
         <HubScope hubId={registry.defaultHubId}>
           <TelemetryProvider>

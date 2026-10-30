@@ -10,7 +10,7 @@ import {
 import { useUndo, focusOwnsUndoKey } from '@slayzone/ui'
 import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
-import { track, trackShortcut } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import type { Project } from '@slayzone/projects-contracts'
 import { defaultProjectRoot } from '@slayzone/projects-contracts'
 import { useHomePanel } from '@slayzone/home/client'
@@ -57,6 +57,7 @@ export interface AppShortcutsDeps {
 // home-tab panel keydown listener. Owns key resolution (`getKeys`) and the
 // home file-palette context; everything else is wired in via deps.
 export function useAppShortcuts(deps: AppShortcutsDeps): void {
+  const { track, trackShortcut } = useTrack()
   const {
     projects,
     homePanel,

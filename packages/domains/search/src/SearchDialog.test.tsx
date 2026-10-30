@@ -6,7 +6,15 @@ import { createTrpcTest } from '@slayzone/transport/testing'
 import { usePaletteCommandStore, type PaletteCommand } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/dialogs'
 
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 import { SearchDialog } from './SearchDialog'
 

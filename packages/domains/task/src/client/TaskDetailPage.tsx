@@ -166,7 +166,7 @@ import type { LinkOpenTarget } from '@slayzone/editor'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import {
   usePanelSizes,
   resolvePanels,
@@ -280,6 +280,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   isSecondaryWindow = false,
   onPanelVisibilityChange
 }: TaskDetailPageProps): React.JSX.Element {
+  const { track, trackTask } = useTrack()
   // Prefer live global state; fall back to suspense-cached data for subtask race window
   const task = taskProp ?? initialData?.task ?? null
   const project = projectProp ?? initialData?.project ?? null
@@ -1030,7 +1031,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const escaped = result.path.includes(' ') ? `"${result.path}"` : result.path
       await terminalApiRef.current?.write(escaped)
     },
-    [trpcClient]
+    [trpcClient, track]
   )
 
   const handleInsertElementSnippet = useCallback(
@@ -1164,7 +1165,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setTerminalKey((k) => k + 1)
       track('terminal_mode_switched', { from: oldMode, to: mode })
     },
-    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskAsync]
+    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskAsync, track]
   )
 
   const getMainHistory = useCallback(() => {
@@ -1268,7 +1269,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       resetPanelSize,
       ownership,
       isSecondaryWindow,
-      updateTaskAsync
+      updateTaskAsync,
+      track
     ]
   )
 
@@ -3777,7 +3779,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           open={snoozeDialogOpen}
           onOpenChange={setSnoozeDialogOpen}
           onSnooze={async (until) => {
-            track('task_snoozed')
+            trackTask(task.id, 'task_snoozed')
             handleTaskUpdate(await updateTaskAsync({ id: task.id, snoozedUntil: until }))
           }}
         />

@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { useSensor, useSensors, PointerSensor, type DragEndEvent } from '@dnd-kit/core'
 import type { BrowserTab, BrowserTabsState } from '../shared'
 import { generateTabId } from './BrowserPanel.utils'
@@ -17,6 +17,7 @@ export function useBrowserTabs({
   onRequestHide,
   browserDefaultUrl
 }: UseBrowserTabsParams) {
+  const { track } = useTrack()
   // Tab callbacks
   const newTabUrl = browserDefaultUrl || 'about:blank'
   const createNewTab = useCallback(
@@ -34,7 +35,7 @@ export function useBrowserTabs({
       })
       track('web_panel_tab_added', { predefined_vs_custom: 'custom' })
     },
-    [tabs, onTabsChange, newTabUrl]
+    [tabs, onTabsChange, newTabUrl, track]
   )
 
   const closeTab = useCallback(
@@ -56,7 +57,7 @@ export function useBrowserTabs({
       onTabsChange({ tabs: newTabs, activeTabId: newActiveId })
       track('browser_tab_closed')
     },
-    [tabs, onTabsChange, onRequestHide]
+    [tabs, onTabsChange, onRequestHide, track]
   )
 
   const switchToTab = useCallback(
@@ -88,7 +89,7 @@ export function useBrowserTabs({
       onTabsChange({ ...tabs, tabs: next })
       track('web_panel_tab_reordered')
     },
-    [tabs, onTabsChange]
+    [tabs, onTabsChange, track]
   )
 
   const tabSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 3 } }))

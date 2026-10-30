@@ -28,7 +28,7 @@ import {
   toast
 } from '@slayzone/ui'
 import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 const INTERVAL_OPTIONS = [
@@ -59,6 +59,7 @@ function formatTimestamp(iso: string): string {
 }
 
 export function BackupSettingsTab() {
+  const { track } = useTrack()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const backupsQuery = useQuery(trpc.app.backup.list.queryOptions())

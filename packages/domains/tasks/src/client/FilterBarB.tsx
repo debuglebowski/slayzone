@@ -15,7 +15,7 @@ import { Switch } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { ListFilter, SlidersHorizontal, LayoutList, Kanban } from 'lucide-react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 interface FilterBarBProps {
   filter: FilterState
@@ -65,6 +65,7 @@ export function FilterBarB({
   tags,
   columns
 }: FilterBarBProps): React.JSX.Element {
+  const { track } = useTrack()
   const activeFilterCount =
     (filter.priority !== null ? 1 : 0) +
     (filter.dueDateRange !== 'all' ? 1 : 0) +

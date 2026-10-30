@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { safeClipboardWriteText } from '@slayzone/ui'
 import type { DirEntry } from '../shared'
 import { uniqueName, duplicateName } from '../shared'
@@ -47,6 +47,7 @@ export function useFileTreeClipboard({
   dirContents,
   onFileRenamed
 }: UseFileTreeClipboardArgs) {
+  const { track } = useTrack()
   const trpc = useTRPC()
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
@@ -85,7 +86,7 @@ export function useFileTreeClipboard({
       writeOsClipboard(paths)
       track('file_copied')
     },
-    [writeOsClipboard]
+    [writeOsClipboard, track]
   )
 
   const handleCut = useCallback(
@@ -94,7 +95,7 @@ export function useFileTreeClipboard({
       writeOsClipboard(paths)
       track('file_cut')
     },
-    [writeOsClipboard]
+    [writeOsClipboard, track]
   )
 
   const resolveCollisionPath = useCallback(
@@ -211,7 +212,8 @@ export function useFileTreeClipboard({
       copyIn,
       queryClient,
       trpc,
-      target
+      target,
+      track
     ]
   )
 
@@ -241,7 +243,7 @@ export function useFileTreeClipboard({
       track('file_duplicated')
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, dirContents, loadDir, copyPath, target]
+    [projectPath, dirContents, loadDir, copyPath, target, track]
   )
 
   const handleCopyPath = useCallback(
@@ -250,7 +252,7 @@ export function useFileTreeClipboard({
       void safeClipboardWriteText(text)
       track('path_copied')
     },
-    [projectPath]
+    [projectPath, track]
   )
 
   // Deliberately NOT routed: `showInFinder` resolves against the DESKTOP, which
@@ -264,7 +266,7 @@ export function useFileTreeClipboard({
       void showInFinder({ rootPath: projectPath, targetPath: entry.path })
       track('reveal_in_finder')
     },
-    [projectPath, canRevealInFinder, showInFinder]
+    [projectPath, canRevealInFinder, showInFinder, track]
   )
 
   return {

@@ -10,9 +10,11 @@
  *   SLAYZONE_HUB_ENABLE_SSO           0   Entra OIDC sign-in
  *   SLAYZONE_HUB_ENABLE_PROCESSES     1   hub-local processes / automation commands
  *   SLAYZONE_HUB_ENABLE_INTEGRATIONS  1   Linear / GitHub connect + sync
- *   SLAYZONE_HUB_ENABLE_TELEMETRY     1   third-party telemetry: PostHog analytics and the
- *                                         Convex-backed leaderboard + feedback, in the web
- *                                         UI and in every app connected to this hub
+ *   SLAYZONE_HUB_ENABLE_TELEMETRY     1   third-party telemetry about this hub's data: off,
+ *                                         an app whose OWN data lives here (the web UI, an app
+ *                                         with it as default hub) sends nothing — no PostHog,
+ *                                         no Convex leaderboard / feedback; any other connected
+ *                                         app withholds the events about its tasks + projects
  *
  * Env wins over `<ROOT>/hub.config.json` (`standalone-config.ts` seeds env from the
  * file before anything reads it), so this module only ever reads env. Anything
@@ -25,7 +27,8 @@
  * Telemetry off: the web shell's CSP drops the PostHog origins (hub
  * `security-headers.ts`), the hub never starts a Convex sign-in
  * (`assertHubConvexSignInUrl`), and clients read the switch from `hub.describe` /
- * `/health` and start neither PostHog nor Convex (`@slayzone/telemetry`).
+ * `/health`: for their home hub they start neither PostHog nor Convex, for another hub
+ * they drop the events about its data (`@slayzone/telemetry`, `trackForHub`).
  *
  * Lean leaf (no imports) so the CLI and computer bundles can use it without the
  * platform barrel.

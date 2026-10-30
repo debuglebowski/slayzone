@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import type {
   BrowserTab,
   DeviceEmulation,
@@ -20,6 +20,7 @@ export function useBrowserMultiDevice({
   updateActiveTab,
   browserDeviceDefaults
 }: UseBrowserMultiDeviceParams) {
+  const { track } = useTrack()
   const [reloadTrigger, setReloadTrigger] = useState(0)
   const [forceReloadTrigger, setForceReloadTrigger] = useState(0)
 
@@ -43,7 +44,7 @@ export function useBrowserMultiDevice({
         ? { multiDeviceLayout: 'horizontal' as GridLayout }
         : {})
     })
-  }, [activeTab, multiDeviceMode, updateActiveTab, browserDeviceDefaults])
+  }, [activeTab, multiDeviceMode, updateActiveTab, browserDeviceDefaults, track])
 
   const setMultiDeviceLayout = useCallback(
     (layout: GridLayout) => {

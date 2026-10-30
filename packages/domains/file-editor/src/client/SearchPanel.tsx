@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack, type Tracker } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { FileSearchResult, OpenFileOptions } from '../shared'
 import { FileIcon } from './FileIcon'
@@ -23,7 +23,8 @@ async function runSearch(
     setCollapsed: (collapsed: Set<string>) => void
     setSearching: (searching: boolean) => void
   },
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  track: Tracker['track']
 ): Promise<void> {
   const { setResults, setCollapsed, setSearching } = setters
   try {
@@ -42,6 +43,7 @@ async function runSearch(
 
 export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
   const trpc = useTRPC()
+  const { track } = useTrack()
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
@@ -105,14 +107,15 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
             })
           ),
         { setResults, setCollapsed, setSearching },
-        () => !cancelled
+        () => !cancelled,
+        track
       )
     }, 300)
     return () => {
       cancelled = true
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, matchCase, useRegex, projectPath, target, queryClient, trpc])
+  }, [query, matchCase, useRegex, projectPath, target, queryClient, trpc, track])
 
   const totalMatches = results.reduce((n, r) => n + r.matches.length, 0)
 

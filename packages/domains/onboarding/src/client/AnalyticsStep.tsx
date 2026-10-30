@@ -6,7 +6,7 @@ import { TRACKED_EVENTS, NOT_TRACKED } from './onboardingConstants'
 interface AnalyticsStepProps {
   /** The user's answer; null when a hub decided (`lockedByHub`) and there was no question. */
   onChoose: (tier: 'anonymous' | 'opted_in' | null) => void
-  /** A connected hub turned telemetry off: say so instead of asking. */
+  /** The home hub (this app's own data) turned telemetry off: say so instead of asking. */
   lockedByHub?: boolean
 }
 

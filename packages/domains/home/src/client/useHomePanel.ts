@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
 import type { UnifiedGitPanelHandle, GitTabId } from '@slayzone/worktrees'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { resolvePanels, planPanelStrip } from '@slayzone/task/client/usePanelSizes'
 import type { PanelSizes, PanelConfig } from '@slayzone/task-contracts'
 import { useHomePanelState } from './useHomePanelVisibility'
@@ -34,6 +34,7 @@ export function useHomePanel(
   panelConfig: PanelConfig,
   userOrderedIds?: string[]
 ) {
+  const { track } = useTrack()
   const HOME_PANEL_ORDER: HomePanel[] = useMemo(() => {
     if (!userOrderedIds || userOrderedIds.length === 0) return DEFAULT_HOME_PANEL_ORDER
     const known = new Set<string>(DEFAULT_HOME_PANEL_ORDER as string[])
@@ -60,7 +61,7 @@ export function useHomePanel(
         return { ...s, visibility: next }
       })
     },
-    [setHomePanelState]
+    [setHomePanelState, track]
   )
 
   const homeGitDefaultTab = homePanelState.gitTab as GitTabId

@@ -59,7 +59,7 @@ import {
 import { AppearanceProvider, useSettingsReopenTab } from '@slayzone/settings'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import {
   markSessionUnspawned,
   startEarlyInputCapture,
@@ -153,6 +153,7 @@ testWindow.__slayzone_filterStore ??= useFilterStore
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
   const trpc = useTRPC()
+  const { trackTask, trackProject } = useTrack()
   const trpcClient = useTRPCClient()
   const shouldMount = useLazyMounted()
   // Core data from domain hook
@@ -972,7 +973,7 @@ function App(): React.JSX.Element {
           ? {}
           : { pressToCreatedMs: Math.round(performance.now() - pressedAt) })
       })
-      track('temporary_task_created')
+      trackTask(task.id, 'temporary_task_created')
       setTasks((prev) => [task, ...prev])
       setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
       const lookup = useTabStore.getState()._taskLookup
@@ -987,7 +988,7 @@ function App(): React.JSX.Element {
       if (project) markTerminalFirst(task, project)
       openTask(task.id, project)
     },
-    [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked, trpcClient]
+    [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked, trpcClient, trackTask]
   )
 
   // Expose a programmatic task-opener so domain UI (e.g. Manager sidebar) can open a task as a tab.
@@ -1251,7 +1252,7 @@ function App(): React.JSX.Element {
     }
   }
   const handleSidebarSelectProject = (projectId: string, opts?: { home?: boolean }): void => {
-    track('project_switched')
+    trackProject(projectId, 'project_switched')
     useTabStore.getState().selectProject(projectId, opts)
   }
   const handleOpenSettings = (): void => {

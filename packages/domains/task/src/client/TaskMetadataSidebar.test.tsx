@@ -96,7 +96,15 @@ vi.mock('@slayzone/ui', async (importOriginal) => {
   }
 })
 
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 vi.mock('@slayzone/tags/client', () => ({ TagSelector: () => null }))
 vi.mock('@slayzone/projects', () => ({ ProjectSelect: () => null }))
 vi.mock('./SnoozePicker', () => ({ SnoozePicker: () => null }))

@@ -12,7 +12,7 @@ import {
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import {
   cn,
   isPrimaryModifier,
@@ -66,6 +66,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   ).mutate
   const { browserDefaultUrl, browserDefaultZoom, browserDeviceDefaults } = useAppearance()
   const elementPickerShortcut = useShortcutDisplay('browser-element-picker')
+  const { track } = useTrack()
   const urlInputRef = useRef<HTMLInputElement>(null)
   const [inputUrl, setInputUrl] = useState('')
   const [isFocused, setIsFocused] = useState(false)
@@ -480,7 +481,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
         // DevTools toggle failed silently
       }
     })()
-  }, [multiDeviceMode, webviewReady, activeViewId, trpcClient])
+  }, [multiDeviceMode, webviewReady, activeViewId, trpcClient, track])
 
   const toggleCaptureShortcuts = useCallback(() => {
     setCaptureShortcuts((prev) => !prev)

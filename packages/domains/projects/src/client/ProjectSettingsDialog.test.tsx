@@ -34,7 +34,15 @@ vi.mock('@slayzone/ui', async () => ({
   SettingsLayout: ({ children }: Kids) => <>{children}</>
 }))
 
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 vi.mock('./ColumnsTab', () => ({
   ColumnsTab: ({ lockedByProvider }: { lockedByProvider: string | null }) => {
     useMountLog('tasks/statuses')

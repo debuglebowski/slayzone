@@ -3,7 +3,7 @@ import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 type TaskTab = Extract<Tab, { type: 'task' }>
 
@@ -134,6 +134,7 @@ export function useTabLifecycle({
  * the active index: call it from a component that re-renders on a switch, not App.
  */
 export function useTabPageViews(tabs: Tab[], activeTabIndex: number): void {
+  const { track, trackTask } = useTrack()
   const prevTabIndexRef = useRef(-1)
   useEffect(() => {
     if (activeTabIndex === prevTabIndexRef.current) return
@@ -141,9 +142,14 @@ export function useTabPageViews(tabs: Tab[], activeTabIndex: number): void {
     const tab = tabs[activeTabIndex]
     if (!tab) return
     if (tab.type === 'task') {
-      track('$pageview', { $current_url: `/task/${tab.taskId}`, page: 'task', task_id: tab.taskId })
+      // Names the task: its hub decides (a hub with telemetry off withholds it).
+      trackTask(tab.taskId, '$pageview', {
+        $current_url: `/task/${tab.taskId}`,
+        page: 'task',
+        task_id: tab.taskId
+      })
     } else {
       track('$pageview', { $current_url: `/${tab.type}`, page: tab.type })
     }
-  }, [activeTabIndex, tabs])
+  }, [activeTabIndex, tabs, track, trackTask])
 }

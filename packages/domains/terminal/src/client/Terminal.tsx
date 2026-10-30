@@ -73,7 +73,7 @@ import {
   KITTY_SHIFT_ENTER,
   DETECTION_ENGINES
 } from '@slayzone/terminal-contracts'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
 
@@ -123,6 +123,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
+  const { track } = useTrack()
 
   const fitAddonRef = useRef<FitAddon | null>(null)
   const serializeAddonRef = useRef<SerializeAddon | null>(null)
@@ -437,7 +438,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
       return true
     },
-    [mode, sessionId, clearBufferWithoutRestart, trpcClient]
+    [mode, sessionId, clearBufferWithoutRestart, trpcClient, track]
   )
 
   const initTerminal = useCallback(

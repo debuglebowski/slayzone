@@ -11,6 +11,9 @@
     "./client": "./src/client/index.ts",
     "./server": "./src/server/index.ts"
   },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",

@@ -5,7 +5,7 @@ import type { Project } from '@slayzone/projects-contracts'
 import { isTerminalStatus } from '@slayzone/projects-contracts'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { buildStatusOptions, cn } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { ProjectSelect } from '@slayzone/projects'
 
 interface ProjectStatusCardProps {
@@ -19,14 +19,15 @@ export function ProjectStatusCard({
   onUpdate,
   columnsConfig
 }: ProjectStatusCardProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const updateTask = useMutation(trpc.task.update.mutationOptions())
   const statusOptions = buildStatusOptions(columnsConfig)
 
   const handleStatusChange = async (status: string): Promise<void> => {
-    track('task_status_changed', { from: task.status, to: status })
+    trackTask(task.id, 'task_status_changed', { from: task.status, to: status })
     if (isTerminalStatus(status, columnsConfig)) {
-      track('task_completed', {
+      trackTask(task.id, 'task_completed', {
         provider: task.terminal_mode ?? 'terminal',
         had_worktree: Boolean(task.worktree_path)
       })
@@ -36,7 +37,7 @@ export function ProjectStatusCard({
   }
 
   const handleProjectChange = async (projectId: string): Promise<void> => {
-    track('task_moved_to_project')
+    trackTask(task.id, 'task_moved_to_project')
     const updated = await updateTask.mutateAsync({ id: task.id, projectId })
     onUpdate(updated)
   }

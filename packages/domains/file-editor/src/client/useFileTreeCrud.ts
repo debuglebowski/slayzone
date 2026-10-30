@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
 import { useWorkspaceTarget } from './workspace-target'
 
@@ -36,6 +36,7 @@ export function useFileTreeCrud({
   selectedPaths,
   setSelectedPaths
 }: UseFileTreeCrudArgs) {
+  const { track } = useTrack()
   const trpc = useTRPC()
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
@@ -96,7 +97,7 @@ export function useFileTreeCrud({
       }
       setCreating(null)
     },
-    [creating, projectPath, loadDir, onOpenFile, createFile, createDir, target]
+    [creating, projectPath, loadDir, onOpenFile, createFile, createDir, target, track]
   )
 
   const handleRename = useCallback(
@@ -134,7 +135,7 @@ export function useFileTreeCrud({
       }
       setRenaming(null)
     },
-    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renamePath, target]
+    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renamePath, target, track]
   )
 
   const executeDelete = useCallback(
@@ -152,7 +153,7 @@ export function useFileTreeCrud({
       setSelectedPaths(new Set())
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, loadDir, setSelectedPaths, deletePath, target]
+    [projectPath, loadDir, setSelectedPaths, deletePath, target, track]
   )
 
   const handleDeleteSelected = useCallback(

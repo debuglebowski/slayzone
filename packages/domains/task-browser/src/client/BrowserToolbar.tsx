@@ -18,7 +18,7 @@ import {
   Lock,
   Unlock
 } from 'lucide-react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import {
   IconButton,
   Input,
@@ -132,6 +132,7 @@ export function BrowserToolbar({
   toggleCaptureShortcuts,
   handleToggleExtensionsManager
 }: BrowserToolbarProps) {
+  const { track } = useTrack()
   return (
     <div className="shrink-0 p-2 border-b flex items-center gap-1 relative">
       {activeLocked && !findMode && (

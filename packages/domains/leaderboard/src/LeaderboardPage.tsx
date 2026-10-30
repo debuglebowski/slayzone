@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { CheckCheck, Lock, Sparkles, Trophy } from 'lucide-react'
-import { track } from '@slayzone/telemetry/client'
-import type { LeaderboardAuthState } from './auth'
+import { CheckCheck, Loader2, Sparkles, Trophy } from 'lucide-react'
+import { useTrack } from '@slayzone/telemetry/client'
+import type { LeaderboardAuthState, LeaderboardUnavailable } from './auth'
 import { LeaderboardHeader } from './LeaderboardHeader'
 import { LeaderboardTable } from './LeaderboardTable'
 import { formatTokens } from './LeaderboardPage.utils'
@@ -12,18 +12,20 @@ import { ConvexScope } from './convexAuth'
 // useLeaderboardAuth() (Convex + GitHub OAuth wired); the chromium-shell fork
 // passes LEADERBOARD_AUTH_DISABLED → renders <LeaderboardAuthGate/> below.
 export function LeaderboardPage({ auth }: { auth: LeaderboardAuthState }): React.JSX.Element {
+  const { track } = useTrack()
   const tracked = useRef(false)
   useEffect(() => {
     if (!tracked.current) {
       tracked.current = true
       track('leaderboard_viewed')
     }
-  }, [])
+  }, [track])
   // Gate BEFORE LeaderboardPageInner mounts: its controller calls Convex
   // useQuery/useMutation, which need the ConvexProvider ConvexScope puts above it —
   // there is no client while Convex is off. `configured: false` keeps every Convex
   // hook out of the tree.
-  if (!auth.configured) return <LeaderboardAuthGate />
+  if (!auth.configured)
+    return <LeaderboardAuthGate unavailable={auth.unavailable ?? { kind: 'starting' }} />
   return (
     <ConvexScope>
       <LeaderboardPageInner auth={auth} />
@@ -31,11 +33,25 @@ export function LeaderboardPage({ auth }: { auth: LeaderboardAuthState }): React
   )
 }
 
-// Shown while Convex is off: no deployment configured for this build, or telemetry
-// off (the user's tier, or a hub's `SLAYZONE_HUB_ENABLE_TELEMETRY=0`). The
-// leaderboard is fundamentally a signed-in, cloud-backed view — without a Convex
-// client there is nothing to rank, so this is the honest terminal state.
-function LeaderboardAuthGate(): React.JSX.Element {
+// Shown while Convex is not running. The leaderboard is fundamentally a signed-in,
+// cloud-backed view — without a Convex client there is nothing to rank. Says the ONE
+// reason in force (`auth.unavailable`); while the answers are still coming in it gives
+// no verdict at all.
+function LeaderboardAuthGate({
+  unavailable
+}: {
+  unavailable: LeaderboardUnavailable
+}): React.JSX.Element {
+  if (unavailable.kind === 'starting') {
+    return (
+      <div
+        className="h-full overflow-hidden flex items-center justify-center p-6"
+        data-testid="leaderboard-starting"
+      >
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
   return (
     <div className="h-full overflow-hidden flex items-center justify-center p-6">
       <div className="max-w-sm rounded-xl border bg-surface-1/85 p-6 text-center">
@@ -45,16 +61,50 @@ function LeaderboardAuthGate(): React.JSX.Element {
         <h1 className="text-lg font-semibold">Leaderboard unavailable</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           The leaderboard ranks signed-in users by tokens used and tasks completed. It needs
-          SlayZone&apos;s cloud service (Convex), which is off here: this build has none configured,
-          or telemetry is turned off.
+          SlayZone&apos;s cloud service (Convex).
         </p>
-        <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground/80">
-          <Lock className="size-3.5" />
-          Convex / GitHub sign-in is off in this environment
+        <p
+          className="mt-3 text-sm text-muted-foreground"
+          data-testid="leaderboard-unavailable-reason"
+        >
+          <UnavailableReason unavailable={unavailable} />
         </p>
       </div>
     </div>
   )
+}
+
+function UnavailableReason({
+  unavailable
+}: {
+  unavailable: Exclude<LeaderboardUnavailable, { kind: 'starting' }>
+}): React.JSX.Element {
+  switch (unavailable.kind) {
+    case 'hub-telemetry-off':
+      return (
+        <>
+          {unavailable.hubLabel ? (
+            <>
+              The hub <span className="font-medium text-foreground">{unavailable.hubLabel}</span>,
+              where this app&apos;s data lives,
+            </>
+          ) : (
+            'This hub'
+          )}{' '}
+          has turned telemetry off (<code>SLAYZONE_HUB_ENABLE_TELEMETRY=0</code>), or could not be
+          asked. SlayZone&apos;s cloud service stays off while it does.
+        </>
+      )
+    case 'telemetry-off':
+      return (
+        <>
+          You turned telemetry off in Settings. SlayZone&apos;s cloud service is off with it; turn
+          telemetry back on to use the leaderboard.
+        </>
+      )
+    case 'no-deployment':
+      return <>This build has no SlayZone cloud service configured.</>
+  }
 }
 
 function LeaderboardPageInner({ auth }: { auth: LeaderboardAuthState }): React.JSX.Element {

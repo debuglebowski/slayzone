@@ -5,7 +5,7 @@ import { useTRPC, useClientForTask } from './trpc'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { CreateTaskInput, Task } from '@slayzone/task-contracts'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 export interface UseSubTasksReturn {
   subTasks: Task[]
@@ -23,6 +23,7 @@ export function useSubTasks(
   parentId: string | null | undefined,
   initialSubTasks?: Task[]
 ): UseSubTasksReturn {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
@@ -72,11 +73,11 @@ export function useSubTasks(
           ...(prev ?? []),
           sub
         ])
-        track('subtask_created')
+        trackTask(parentId, 'subtask_created')
       }
       return sub
     },
-    [parentId, parentHubId, createTask, queryClient, trpc]
+    [parentId, parentHubId, createTask, queryClient, trpc, trackTask]
   )
 
   const updateSubTask = useCallback(

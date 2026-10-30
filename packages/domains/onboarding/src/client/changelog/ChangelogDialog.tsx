@@ -10,7 +10,7 @@ import {
   cn
 } from '@slayzone/ui'
 import { Sparkles, Zap, Bug, AlertTriangle, ChevronRight } from 'lucide-react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { CHANGELOG, type ChangelogEntry, type ChangeCategory } from './changelog-data'
 
 interface Props {
@@ -30,9 +30,10 @@ const categoryConfig: Record<
 }
 
 export function ChangelogDialog({ open, onOpenChange, lastSeenVersion }: Props) {
+  const { track } = useTrack()
   useEffect(() => {
     if (open) track('changelog_viewed')
-  }, [open])
+  }, [open, track])
   const entries = CHANGELOG.slice(0, 6)
   const lastSeenIndex = lastSeenVersion
     ? entries.findIndex((e) => e.version === lastSeenVersion)

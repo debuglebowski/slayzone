@@ -7,9 +7,26 @@
 // NOT wired) — the host injects the auth state as a prop instead of the page
 // reaching into an app-only module. The Electron app passes its
 // useLeaderboardAuth() result; the fork passes LEADERBOARD_AUTH_DISABLED.
+/**
+ * Why Convex is not running — the one reason in force, for the leaderboard's gate.
+ *   - `starting`: the tier / hub answers are still coming in, or the session is starting;
+ *   - `no-deployment`: this host has no Convex deployment (a build without
+ *     `VITE_CONVEX_URL`, or a host that wires none);
+ *   - `telemetry-off`: the user's telemetry tier is `off`;
+ *   - `hub-telemetry-off`: the home hub (this app's own data) has
+ *     `SLAYZONE_HUB_ENABLE_TELEMETRY=0`, or could not be asked. `hubLabel` null = unnamed.
+ */
+export type LeaderboardUnavailable =
+  | { kind: 'starting' }
+  | { kind: 'no-deployment' }
+  | { kind: 'telemetry-off' }
+  | { kind: 'hub-telemetry-off'; hubLabel: string | null }
+
 export interface LeaderboardAuthState {
-  /** Convex backend configured for this build (VITE_CONVEX_URL present). */
+  /** Convex runs here: a deployment is configured and third-party services are allowed. */
   configured: boolean
+  /** Why not, while `configured` is false; null while it runs. */
+  unavailable: LeaderboardUnavailable | null
   isLoading: boolean
   isAuthenticated: boolean
   lastError: string | null
@@ -23,6 +40,7 @@ export interface LeaderboardAuthState {
 // its auth-gate before any Convex hook runs, so no ConvexProvider is required.
 export const LEADERBOARD_AUTH_DISABLED: LeaderboardAuthState = {
   configured: false,
+  unavailable: { kind: 'no-deployment' },
   isLoading: false,
   isAuthenticated: false,
   lastError: null,

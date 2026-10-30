@@ -9,7 +9,15 @@ import { cleanup, renderHook } from '@testing-library/react'
 import type { Task } from '@slayzone/task-contracts'
 import type { Tab } from '@slayzone/tabs-state'
 
-vi.mock('@slayzone/telemetry/client', () => ({ track: () => {} }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 const { useTabStore } = await import('@slayzone/tabs-state')
 const { useTabLifecycle } = await import('./useTabLifecycle')

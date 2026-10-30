@@ -7,7 +7,7 @@ import {
   TooltipContent,
   getColumnStatusStyle
 } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import type { IdleTask } from './useIdleTasks'
 
@@ -41,6 +41,7 @@ export function AgentStatusPanel({
   selectedProjectId,
   currentProjectName
 }: AgentStatusPanelProps) {
+  const { trackTask } = useTrack()
   const sortedTasks = [...idleTasks].sort((a, b) => b.lastOutputTime - a.lastOutputTime)
 
   return (
@@ -88,7 +89,7 @@ export function AgentStatusPanel({
                   key={task.id}
                   className="rounded-lg border bg-surface-2 p-3 shadow-sm hover:bg-accent/50 transition-colors cursor-pointer"
                   onClick={() => {
-                    track('notification_clicked')
+                    trackTask(task.id, 'notification_clicked')
                     onNavigate(task.id)
                   }}
                 >

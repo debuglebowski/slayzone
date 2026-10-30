@@ -12,7 +12,7 @@ import {
   type PalettePage
 } from '@slayzone/ui'
 import { ChevronLeft } from 'lucide-react'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { useTRPC } from './client/trpc'
 import { useDialogStore } from '@slayzone/dialogs'
 import type { ActionId, FilterKind, SearchDialogProps, TaskTab } from './SearchDialog.types'
@@ -91,6 +91,7 @@ function SearchPalette({
   onOpenChangelog,
   onOpenSettings
 }: SearchPaletteProps) {
+  const { track } = useTrack()
   const trpc = useTRPC()
   const fileContext = useDialogStore((s) => s.searchFileContext)
   // Fetched once per project and kept for the session (never refetched), keyed by

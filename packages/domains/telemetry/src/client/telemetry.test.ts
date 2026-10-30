@@ -66,8 +66,8 @@ describe('applyTelemetryTier', () => {
   it('off: posthog-js is never loaded, initialized or sent anything', async () => {
     const t = await load()
     await t.applyTelemetryTier('off')
-    t.track('task_created', { source: 'test' } as never)
-    t.trackShortcut('mod+k')
+    t.trackForHub(null, 'task_created', { provider: 'claude-code', from_template: false })
+    t.trackForHub(null, 'keyboard_shortcut_used', { key: 'mod+k' })
     expect(posthog.imported, 'posthog-js chunk never imported').toBe(0)
     expect(networkCalls(), 'no init / capture / identify').toBe(0)
     expect(await t.getPosthogInstance(), 'no instance while off').toBe(null)
@@ -79,7 +79,7 @@ describe('applyTelemetryTier', () => {
     await t.applyTelemetryTier('anonymous')
     expect(posthog.init).toHaveBeenCalledTimes(1)
     expect(posthog.init.mock.calls[0]?.[1]).toMatchObject({ persistence: 'memory' })
-    t.trackShortcut('mod+k')
+    t.trackForHub(null, 'keyboard_shortcut_used', { key: 'mod+k' })
     expect(posthog.capture).toHaveBeenCalledWith('keyboard_shortcut_used', { key: 'mod+k' })
   })
 
@@ -97,8 +97,8 @@ describe('applyTelemetryTier', () => {
     posthog.capture.mockClear()
     await t.applyTelemetryTier('off')
     expect(posthog.opt_out_capturing).toHaveBeenCalledTimes(1)
-    t.trackShortcut('mod+k')
-    t.track('heartbeat', { active_ms: 1, active_minutes: 0 })
+    t.trackForHub(null, 'keyboard_shortcut_used', { key: 'mod+k' })
+    t.trackForHub(null, 'heartbeat', { active_ms: 1, active_minutes: 0 })
     expect(posthog.capture, 'nothing captured once off').not.toHaveBeenCalled()
   })
 
@@ -108,7 +108,7 @@ describe('applyTelemetryTier', () => {
     await t.applyTelemetryTier('off')
     await starting
     expect(posthog.init, 'superseded by off before init').not.toHaveBeenCalled()
-    t.trackShortcut('mod+k')
+    t.trackForHub(null, 'keyboard_shortcut_used', { key: 'mod+k' })
     expect(posthog.capture).not.toHaveBeenCalled()
   })
 
@@ -118,7 +118,7 @@ describe('applyTelemetryTier', () => {
     await t.applyTelemetryTier('off')
     await t.applyTelemetryTier('anonymous')
     expect(posthog.has_opted_out_capturing()).toBe(false)
-    t.trackShortcut('mod+k')
+    t.trackForHub(null, 'keyboard_shortcut_used', { key: 'mod+k' })
     expect(posthog.capture).toHaveBeenCalledWith('keyboard_shortcut_used', { key: 'mod+k' })
     expect(posthog.capture).not.toHaveBeenCalledWith('$opt_in', expect.anything())
   })
@@ -136,5 +136,58 @@ describe('applyTelemetryTier', () => {
     await t.applyTelemetryTier('anonymous')
     await t.applyTelemetryTier('anonymous')
     expect(posthog.init).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * A hub's `SLAYZONE_HUB_ENABLE_TELEMETRY=0` covers that hub's own data: an event about a
+ * task or project on it is never sent, while events about the home hub (the one this
+ * app's own data lives on) and about hubs that permit telemetry still are.
+ */
+describe('trackForHub', () => {
+  async function running(): Promise<TelemetryModule> {
+    const t = await load()
+    await t.applyTelemetryTier('anonymous')
+    t.setHubTelemetryPolicy({
+      homeHubId: 'local',
+      permits: new Map<string, boolean | null>([
+        ['hub:off', false],
+        ['hub:on', true],
+        ['hub:asking', null]
+      ])
+    })
+    posthog.capture.mockClear()
+    return t
+  }
+  const sent = () => posthog.capture.mock.calls.map((c) => (c as unknown[])[0])
+
+  it('drops events about a hub that turned telemetry off', async () => {
+    const t = await running()
+    t.trackForHub('hub:off', 'task_snoozed')
+    expect(posthog.capture).not.toHaveBeenCalled()
+  })
+
+  it('drops events about a hub that has not answered yet, or that it does not know (fail closed)', async () => {
+    const t = await running()
+    t.trackForHub('hub:asking', 'task_snoozed')
+    t.trackForHub('hub:never-heard-of', 'task_snoozed')
+    expect(posthog.capture).not.toHaveBeenCalled()
+  })
+
+  it('sends events about the home hub (by id or null) and about a hub that permits it', async () => {
+    const t = await running()
+    t.trackForHub('local', 'task_unsnoozed')
+    t.trackForHub(null, 'zen_mode_toggled')
+    t.trackForHub('hub:on', 'task_snoozed')
+    expect(sent()).toEqual(['task_unsnoozed', 'zen_mode_toggled', 'task_snoozed'])
+  })
+
+  it('before any policy is known only the home hub is reported on', async () => {
+    const t = await load()
+    await t.applyTelemetryTier('anonymous')
+    posthog.capture.mockClear()
+    t.trackForHub(null, 'zen_mode_toggled')
+    t.trackForHub('hub:on', 'task_snoozed')
+    expect(sent()).toEqual(['zen_mode_toggled'])
   })
 })

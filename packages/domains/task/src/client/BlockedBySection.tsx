@@ -9,7 +9,7 @@ import { SplitButton, SplitButtonItem } from '@slayzone/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
 import { Input, Textarea } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { BlockerStatusIcon } from './BlockerStatusIcon'
 
 interface BlockedBySectionProps {
@@ -39,6 +39,7 @@ export function BlockedBySection({
   addBlockerSearch,
   setAddBlockerSearch
 }: BlockedBySectionProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const updateTask = useMutation(trpc.task.update.mutationOptions())
   const addBlocker = useMutation(trpc.task.addBlocker.mutationOptions())
@@ -59,13 +60,13 @@ export function BlockedBySection({
   }
 
   const handleSetBlocked = async (): Promise<void> => {
-    track('task_blocked', {})
+    trackTask(task.id, 'task_blocked', {})
     const updated = await updateTask.mutateAsync({ id: task.id, isBlocked: true })
     onUpdate(updated)
   }
 
   const handleUnblock = async (): Promise<void> => {
-    track('task_unblocked')
+    trackTask(task.id, 'task_unblocked')
     const updated = await updateTask.mutateAsync({
       id: task.id,
       isBlocked: false,
@@ -75,7 +76,7 @@ export function BlockedBySection({
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
-    track('task_blocked', { hasComment: 'true' })
+    trackTask(task.id, 'task_blocked', { hasComment: 'true' })
     const updated = await updateTask.mutateAsync({
       id: task.id,
       isBlocked: true,

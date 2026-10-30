@@ -13,7 +13,7 @@ import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
 import { getDefaultStatus } from '@slayzone/projects-contracts'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import {
   createTaskSchema,
   type CreateTaskFormData,
@@ -59,6 +59,7 @@ export function CreateTaskDialog({
   onTagCreated,
   projects: projectsProp
 }: CreateTaskDialogProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const [createTagOpen, setCreateTagOpen] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('__none__')
@@ -195,7 +196,7 @@ export function CreateTaskDialog({
     }
 
     if (shouldAutoCreateWorktree && task.worktree_path) {
-      track('worktree_created', { auto_vs_manual: 'auto' })
+      trackTask(task.id, 'worktree_created', { auto_vs_manual: 'auto' })
     }
     toast.success(`Created "${task.title}"`)
     if (opts?.andOpen && onCreatedAndOpen) {

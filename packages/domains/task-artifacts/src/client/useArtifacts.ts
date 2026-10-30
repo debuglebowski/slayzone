@@ -15,7 +15,7 @@ import type {
   DiffResult,
   PruneReport
 } from '@slayzone/task-artifacts/shared'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { toast, useDepsChanged, useStableCallback } from '@slayzone/ui'
 
 // Downloads reach the Electron host over the capability bridge, so they can fail for
@@ -121,6 +121,7 @@ export function useArtifacts(
   taskId: string | null | undefined,
   initialSelectedId?: string | null
 ): UseArtifactsReturn {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([])
@@ -290,11 +291,11 @@ export function useArtifacts(
       if (artifact) {
         setArtifacts((prev) => [...prev, artifact])
         setSelectedId(artifact.id)
-        track('asset_created')
+        trackTask(taskId, 'asset_created')
       }
       return artifact
     },
-    [taskId, createMutate, setSelectedId]
+    [taskId, createMutate, setSelectedId, trackTask]
   )
 
   const updateArtifact = useCallback(
@@ -312,9 +313,9 @@ export function useArtifacts(
       await deleteMutate({ id })
       setArtifacts((prev) => prev.filter((a) => a.id !== id))
       setSelection((s) => (s.id === id ? { ...s, id: null, savedIsNewer: false } : s))
-      track('asset_deleted')
+      trackTask(taskId, 'asset_deleted')
     },
-    [deleteMutate]
+    [deleteMutate, taskId, trackTask]
   )
 
   const renameArtifact = useCallback(
@@ -368,11 +369,11 @@ export function useArtifacts(
       if (artifact) {
         setArtifacts((prev) => [...prev, artifact])
         setSelectedId(artifact.id)
-        track('asset_created')
+        trackTask(taskId, 'asset_created')
       }
       return artifact
     },
-    [taskId, uploadMutate, setSelectedId]
+    [taskId, uploadMutate, setSelectedId, trackTask]
   )
 
   const getFilePath = useCallback(

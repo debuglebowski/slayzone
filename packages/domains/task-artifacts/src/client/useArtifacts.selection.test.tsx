@@ -41,7 +41,15 @@ vi.mock('./trpc', () => {
   const trpc = { artifacts: namespace('artifacts'), app: { clipboard: namespace('app.clipboard') } }
   return { useTRPC: () => trpc }
 })
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 const { useArtifacts } = await import('./useArtifacts')
 const { useArtifactClipboard } = await import('./useArtifactClipboard')

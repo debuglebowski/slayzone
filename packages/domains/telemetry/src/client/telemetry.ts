@@ -1,7 +1,7 @@
 import { hubAllows } from '@slayzone/transport/client'
 import { getTrpcClient, type TelemetryTrpcClient } from './trpc'
 import { safeRandomUUID } from '@slayzone/ui/secure-context'
-import type { TelemetryTier, TelemetryEventName, TelemetryEventProps } from '../shared/types'
+import type { TelemetryTier, TelemetryEventName, TelemetryPropsArgs } from '../shared/types'
 
 declare const __POSTHOG_API_KEY__: string
 declare const __POSTHOG_HOST__: string
@@ -75,7 +75,7 @@ function emitHeartbeatIfNeeded(now = Date.now()): void {
   closeActiveWindow(now)
   if (heartbeatActiveMs <= 0) return
 
-  track('heartbeat', {
+  trackForHub(null, 'heartbeat', {
     active_ms: heartbeatActiveMs,
     active_minutes: toActiveMinutes(heartbeatActiveMs)
   })
@@ -89,7 +89,7 @@ function emitHeartbeatIfNeeded(now = Date.now()): void {
 function emitBackgrounded(reason: 'backgrounded' | 'shutdown'): void {
   if (accumulatedActiveMs <= 0) return
 
-  track('app_backgrounded', {
+  trackForHub(null, 'app_backgrounded', {
     reason,
     active_ms: accumulatedActiveMs,
     active_minutes: toActiveMinutes(accumulatedActiveMs)
@@ -277,20 +277,52 @@ export function stopIpcTelemetryBridge(): void {
   ipcCleanup = null
 }
 
-export function track<E extends TelemetryEventName>(
-  event: E,
-  ...args: TelemetryEventProps[E] extends Record<string, never> ? [] : [TelemetryEventProps[E]]
-): void {
-  if (!initialized || !ph) return
-  ph.capture(event, args[0] as Record<string, unknown> | undefined)
+/**
+ * Whose data may be reported on, from each hub's `hub.describe`
+ * (`SLAYZONE_HUB_ENABLE_TELEMETRY`). A hub with the switch off withholds the events
+ * about its own data; it does not turn telemetry off for the rest of the app.
+ *
+ *   - `homeHubId`: the hub this app's own data lives on — the nearest tRPC client's (the
+ *     desktop's default hub, the web shell's serving hub); null with no hub registry.
+ *     PostHog runs only while it permits telemetry (the provider applies `off`
+ *     otherwise), so its events need no further check.
+ *   - `permits`: every OTHER hub, by id — `true` sends; `false` (switched off, or could
+ *     not be asked) and `null` (not answered yet) withhold.
+ */
+export interface HubTelemetryPolicy {
+  homeHubId: string | null
+  permits: ReadonlyMap<string, boolean | null>
 }
 
-export function trackShortcut(key: string): void {
-  track('keyboard_shortcut_used', { key })
+/** Until the provider has asked the hubs: only the home hub is reported on (fail closed). */
+let hubPolicy: HubTelemetryPolicy = { homeHubId: null, permits: new Map() }
+
+/** The provider's answer from the hubs — the one way {@link trackForHub} learns it. */
+export function setHubTelemetryPolicy(policy: HubTelemetryPolicy): void {
+  hubPolicy = policy
+}
+
+function hubPermitsEvents(hubId: string | null): boolean {
+  if (hubId === null || hubId === hubPolicy.homeHubId) return true
+  return hubPolicy.permits.get(hubId) === true
 }
 
 /**
- * Nothing leaves from here on: `track` checks `initialized`, posthog-js stops capturing
+ * Send `event` about the data of hub `hubId` (null = the home hub), unless that hub
+ * withholds telemetry. UI code goes through `useTrack`, which picks the hub.
+ */
+export function trackForHub<E extends TelemetryEventName>(
+  hubId: string | null,
+  event: E,
+  ...args: TelemetryPropsArgs<E>
+): void {
+  if (!initialized || !ph) return
+  if (!hubPermitsEvents(hubId)) return
+  ph.capture(event, args[0] as Record<string, unknown> | undefined)
+}
+
+/**
+ * Nothing leaves from here on: `trackForHub` checks `initialized`, posthog-js stops capturing
  * (also what it would capture by itself) and the heartbeat + IPC bridge stop. The
  * heartbeat's closing events are dropped, not sent, because `initialized` goes first.
  */

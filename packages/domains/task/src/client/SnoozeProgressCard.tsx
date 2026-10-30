@@ -8,7 +8,7 @@ import { isCompletedStatus } from '@slayzone/projects-contracts'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { TaskProgressPopover } from './TaskProgressPopover'
 import { SnoozePicker } from './SnoozePicker'
 
@@ -23,23 +23,24 @@ export function SnoozeProgressCard({
   onUpdate,
   columnsConfig
 }: SnoozeProgressCardProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const updateTask = useMutation(trpc.task.update.mutationOptions())
 
   const handleSnooze = async (until: string): Promise<void> => {
-    track('task_snoozed')
+    trackTask(task.id, 'task_snoozed')
     const updated = await updateTask.mutateAsync({ id: task.id, snoozedUntil: until })
     onUpdate(updated)
   }
 
   const handleUnsnooze = async (): Promise<void> => {
-    track('task_unsnoozed')
+    trackTask(task.id, 'task_unsnoozed')
     const updated = await updateTask.mutateAsync({ id: task.id, snoozedUntil: null })
     onUpdate(updated)
   }
 
   const handleProgressChange = async (progress: number): Promise<void> => {
-    track('task_progress_changed', { value: String(progress) })
+    trackTask(task.id, 'task_progress_changed', { value: String(progress) })
     const updated = await updateTask.mutateAsync({ id: task.id, progress })
     onUpdate(updated)
   }

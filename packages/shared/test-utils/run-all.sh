@@ -941,7 +941,9 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tags/src/client/CreateTagDialog.test.tsx \
   packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
   packages/domains/telemetry/src/client/telemetry.test.ts \
+  packages/domains/telemetry/src/client/useTrack.test.tsx \
   packages/domains/leaderboard/src/convexAuth.test.tsx \
+  packages/domains/leaderboard/src/LeaderboardPage.test.tsx \
   packages/shared/editor/src/ArtifactPicker.test.tsx \
   packages/shared/editor/src/rich-text-editor.mention.test.tsx \
   packages/shared/editor/src/rich-text-editor.tab-switch.test.tsx \

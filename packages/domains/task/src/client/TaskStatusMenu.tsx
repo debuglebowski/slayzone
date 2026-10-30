@@ -24,7 +24,7 @@ import {
 import { Circle, ShieldAlert, AlarmClock, Check, ListChecks, MessageSquare } from 'lucide-react'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { CustomSnoozeDialog } from './SnoozePicker'
 import { BlockerDialog } from './BlockerDialog'
 
@@ -46,6 +46,7 @@ export function TaskStatusMenu({
   statusOptions,
   onTaskUpdate
 }: TaskStatusMenuProps): React.JSX.Element | null {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const updateTask = useMutation(trpc.task.update.mutationOptions())
   const [blockerOpen, setBlockerOpen] = useState(false)
@@ -66,22 +67,22 @@ export function TaskStatusMenu({
   }
 
   const handleStatusChange = async (value: string): Promise<void> => {
-    track('task_status_changed', { from: task.status, to: value })
+    trackTask(task.id, 'task_status_changed', { from: task.status, to: value })
     await update({ status: value })
   }
 
   const handleToggleBlocked = async (): Promise<void> => {
     if (task.is_blocked) {
-      track('task_unblocked')
+      trackTask(task.id, 'task_unblocked')
       await update({ isBlocked: false, blockedComment: null })
     } else {
-      track('task_blocked', {})
+      trackTask(task.id, 'task_blocked', {})
       await update({ isBlocked: true })
     }
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
-    track('task_blocked', { hasComment: 'true' })
+    trackTask(task.id, 'task_blocked', { hasComment: 'true' })
     await update({ isBlocked: true, blockedComment: blockedComment.trim() || null })
     setCommentOpen(false)
     setBlockedComment('')
@@ -174,7 +175,7 @@ export function TaskStatusMenu({
           open={snoozeOpen}
           onOpenChange={setSnoozeOpen}
           onSnooze={(until) => {
-            track('task_snoozed')
+            trackTask(task.id, 'task_snoozed')
             update({ snoozedUntil: until })
           }}
         />

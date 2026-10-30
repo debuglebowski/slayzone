@@ -11,12 +11,14 @@ import { createTrpcTest } from '@slayzone/transport/testing'
  */
 
 let tracked: Array<[string, unknown]> = []
-vi.mock('@slayzone/telemetry/client', () => ({
-  useTelemetry: () => ({ setTier: () => {} }),
-  track: (event: string, props: unknown) => {
-    tracked.push([event, props])
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: (event: string, props: unknown) => {
+      tracked.push([event, props])
+    }
   }
-}))
+  return { useTelemetry: () => ({ setTier: () => {} }), useTrack: () => tracker }
+})
 
 type Kids = { children?: React.ReactNode }
 vi.mock('@slayzone/ui', async () => ({

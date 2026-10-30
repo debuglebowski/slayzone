@@ -57,7 +57,7 @@ import {
   type StatusOption
 } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/dialogs'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import type { Tag } from '@slayzone/tags/shared'
 import type { TerminalModeInfo } from '@slayzone/terminal-contracts'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
@@ -143,6 +143,7 @@ interface UseTaskPaletteCommandsParams {
  * an existing task-page handler or the same mutation the page's own controls use.
  */
 export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): void {
+  const { trackTask } = useTrack()
   const {
     enabled,
     task,
@@ -234,9 +235,9 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
 
   const setStatus = useStableCallback(async (taskId: string, status: string) => {
     if (!task) return
-    track('task_status_changed', { from: task.status, to: status })
+    trackTask(taskId, 'task_status_changed', { from: task.status, to: status })
     if (isTerminalStatus(status, columnsConfig)) {
-      track('task_completed', {
+      trackTask(taskId, 'task_completed', {
         provider: task.terminal_mode ?? 'terminal',
         had_worktree: Boolean(task.worktree_path)
       })
@@ -248,7 +249,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
   })
   const toggleTag = useStableCallback(async (taskId: string, tagId: string) => {
     const checked = !taskTagIds.includes(tagId)
-    if (checked) track('tag_assigned')
+    if (checked) trackTask(taskId, 'tag_assigned')
     const next = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
     await setTagsForTask({ taskId, tagIds: next })
     onTagsChange(next)
@@ -342,7 +343,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
               checked: p.id === task.project_id,
               run: () => {
                 if (p.id === task.project_id) return
-                track('task_moved_to_project')
+                trackTask(task.id, 'task_moved_to_project')
                 return update({ projectId: p.id })
               }
             }))
@@ -391,7 +392,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
               label: preset.label,
               icon: preset.icon,
               run: () => {
-                track('task_snoozed')
+                trackTask(task.id, 'task_snoozed')
                 return update({ snoozedUntil: preset.getDate().toISOString() })
               }
             })),
@@ -423,7 +424,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
               keywords: 'blocked',
               icon: ShieldCheck,
               run: () => {
-                track('task_unblocked')
+                trackTask(task.id, 'task_unblocked')
                 return update({ isBlocked: false, blockedComment: null })
               }
             }
@@ -433,7 +434,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
               keywords: 'blocked',
               icon: ShieldAlert,
               run: () => {
-                track('task_blocked', {})
+                trackTask(task.id, 'task_blocked', {})
                 return update({ isBlocked: true })
               }
             }
@@ -449,7 +450,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
           placeholder: 'Why is this task blocked? Enter to save',
           initialValue: task.blocked_comment ?? '',
           onSubmit: (comment) => {
-            track('task_blocked', { hasComment: 'true' })
+            trackTask(task.id, 'task_blocked', { hasComment: 'true' })
             return update({ isBlocked: true, blockedComment: comment })
           }
         }
@@ -509,7 +510,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
         icon: CalendarDays,
         checked: task.due_date === format(date, 'yyyy-MM-dd'),
         run: () => {
-          track('due_date_set')
+          trackTask(task.id, 'due_date_set')
           return update({ dueDate: format(date, 'yyyy-MM-dd') })
         }
       })
@@ -537,7 +538,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
                 initialValue: task.due_date ?? '',
                 onSubmit: (value) => {
                   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return
-                  track('due_date_set')
+                  trackTask(task.id, 'due_date_set')
                   return update({ dueDate: value })
                 }
               }
@@ -717,7 +718,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
       keywords: 'clipboard name',
       icon: Clipboard,
       run: () => {
-        track('copy_title')
+        trackTask(task.id, 'copy_title')
         void safeClipboardWriteText(task.title)
       }
     })
@@ -727,7 +728,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
       keywords: 'clipboard url deep link',
       icon: Link,
       run: () => {
-        track('copy_link')
+        trackTask(task.id, 'copy_link')
         void safeClipboardWriteText(`slayzone://task/${task.id}`)
       }
     })

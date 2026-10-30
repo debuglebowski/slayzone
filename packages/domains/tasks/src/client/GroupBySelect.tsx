@@ -9,7 +9,7 @@ import {
   TooltipContent
 } from '@slayzone/ui'
 import type { GroupKey } from './FilterState'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 interface GroupBySelectProps {
   value: GroupKey
@@ -23,6 +23,7 @@ const GROUP_OPTIONS: { value: GroupKey; label: string }[] = [
 ]
 
 export function GroupBySelect({ value, onChange }: GroupBySelectProps): React.JSX.Element {
+  const { track } = useTrack()
   return (
     <Tooltip>
       <TooltipTrigger asChild>

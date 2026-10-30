@@ -1,20 +1,28 @@
 import { Label } from '@slayzone/ui'
 import { Switch } from '@slayzone/ui'
 import type { TelemetryTier } from '../shared/types'
-import { track } from './telemetry'
+import type { TelemetryHubRef } from './TelemetryProvider'
+import { useTrack } from './useTrack'
 
 interface TelemetrySettingsProps {
   tier: TelemetryTier
   onTierChange: (tier: TelemetryTier) => void
-  /** A connected hub turned telemetry off (or could not be asked): say so, change nothing. */
+  /** The home hub turned telemetry off (or could not be asked): say so, change nothing. */
   lockedByHub?: boolean
+  /** The home hub's label, for the locked note; null = unnamed (no hub registry). */
+  homeHubLabel?: string | null
+  /** Other hubs whose own tasks and projects are not reported on. */
+  withheldHubs?: readonly TelemetryHubRef[]
 }
 
 export function TelemetrySettings({
   tier,
   onTierChange,
-  lockedByHub = false
+  lockedByHub = false,
+  homeHubLabel = null,
+  withheldHubs = []
 }: TelemetrySettingsProps) {
+  const { track } = useTrack()
   const isOptedIn = tier === 'opted_in'
   const isOff = tier === 'off'
 
@@ -31,8 +39,20 @@ export function TelemetrySettings({
           className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground"
           data-testid="telemetry-locked-by-hub"
         >
-          Telemetry is off: a hub this app is connected to has turned it off, or could not be asked.
+          Telemetry is off: {homeHubLabel ? <>the hub {homeHubLabel}</> : 'this app’s hub'} has
+          turned it off (<code>SLAYZONE_HUB_ENABLE_TELEMETRY=0</code>), or could not be asked.
           Nothing is sent to PostHog, and the leaderboard and feedback are unavailable.
+        </p>
+      )}
+
+      {!lockedByHub && withheldHubs.length > 0 && (
+        <p
+          className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground"
+          data-testid="telemetry-withheld-hubs"
+        >
+          Nothing about the tasks and projects on {withheldHubs.map((h) => h.label).join(', ')} is
+          sent: {withheldHubs.length === 1 ? 'that hub has' : 'those hubs have'} turned telemetry
+          off, or could not be asked. Everything else here applies as you choose.
         </p>
       )}
 

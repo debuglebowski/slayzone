@@ -28,7 +28,7 @@ import { useKanbanSelection } from './useKanbanSelection'
 import { BlockerDialog } from '@slayzone/task/client'
 import { useAppearance } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/dialogs'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { useStableCallback } from '@slayzone/ui'
 
 interface KanbanBoardProps {
@@ -86,6 +86,7 @@ export function KanbanBoard({
   onShutdownAgent,
   selectionResetKey
 }: KanbanBoardProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const { groupBy, sortBy, showEmptyColumns } = viewConfig
   const disableDrag = groupBy === 'due_date'
 
@@ -244,8 +245,8 @@ export function KanbanBoard({
     // Drop into virtual __blocked__ col → set is_blocked flag (don't move/reorder)
     if (targetColumn.id === '__blocked__') {
       if (currentColumn.id === '__blocked__') return
-      track('kanban_drag_drop')
-      track('task_blocked', {})
+      trackTask(taskId, 'kanban_drag_drop')
+      trackTask(taskId, 'task_blocked', {})
       if (isMulti && onBulkUpdateTasks) {
         onBulkUpdateTasks(dragSet, { is_blocked: true } as Partial<Task>)
       } else {
@@ -258,7 +259,7 @@ export function KanbanBoard({
 
     const isSameColumn = currentColumn.id === targetColumn.id
 
-    track('kanban_drag_drop')
+    trackTask(taskId, 'kanban_drag_drop')
 
     if (isSameColumn) {
       if (sortBy === 'priority') {
@@ -294,7 +295,7 @@ export function KanbanBoard({
           onBulkUpdateTasks(dragSet, { snoozed_until: null } as Partial<Task>)
         }
         if (currentColumn.id === '__blocked__') {
-          track('task_unblocked')
+          trackTask(taskId, 'task_unblocked')
           onBulkUpdateTasks?.(dragSet, {
             is_blocked: false,
             blocked_comment: null
@@ -309,7 +310,7 @@ export function KanbanBoard({
         }
         // Clear blocked flag + dependency blockers when dragging out of blocked column
         if (currentColumn.id === '__blocked__') {
-          track('task_unblocked')
+          trackTask(taskId, 'task_unblocked')
           onUpdateTask?.(taskId, { is_blocked: false, blocked_comment: null } as Partial<Task>)
           onClearBlockers?.(taskId)
         }

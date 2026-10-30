@@ -5,7 +5,7 @@ import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 interface TagsCardProps {
   taskId: string
@@ -24,11 +24,12 @@ export function TagsCard({
   onTagsChange,
   onTagCreated
 }: TagsCardProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const setTagsForTask = useMutation(trpc.tags.setForTask.mutationOptions())
 
   const handleTagToggle = async (tagId: string, checked: boolean): Promise<void> => {
-    if (checked) track('tag_assigned')
+    if (checked) trackTask(taskId, 'tag_assigned')
     const newTagIds = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
     await setTagsForTask.mutateAsync({ taskId, tagIds: newTagIds })
     onTagsChange(newTagIds)

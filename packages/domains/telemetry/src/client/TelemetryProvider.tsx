@@ -1,35 +1,49 @@
 import { createContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { useFederationOrNull } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { parseTelemetryTier, type TelemetryTier } from '../shared/types'
 import {
   applyTelemetryTier,
-  track,
+  trackForHub,
+  setHubTelemetryPolicy,
   stopHeartbeat,
   stopIpcTelemetryBridge,
   getPosthogInstance
 } from './telemetry'
-import { useHubsPermitTelemetry } from './useHubsPermitTelemetry'
+import { useHubTelemetryPermits } from './useHubTelemetryPermits'
 
 const SETTINGS_KEY = 'telemetry_tier'
 
 /**
  * May this renderer use third-party services — PostHog and Convex (leaderboard,
- * feedback)? `pending` until the stored tier and every hub's answer are known; nothing
- * starts before `allowed` (fail closed).
+ * feedback)? `pending` until the stored tier and the home hub's answer are known;
+ * nothing starts before `allowed` (fail closed).
  */
 export type ThirdPartyServices = 'pending' | 'allowed' | 'blocked'
 
+/** A hub as the telemetry UI names it. */
+export interface TelemetryHubRef {
+  id: string
+  label: string
+}
+
 interface TelemetryContextValue {
-  /** The tier in force: `off` when a hub forbids telemetry, else the user's choice. */
+  /** The tier in force: `off` when the home hub forbids telemetry, else the user's choice. */
   tier: TelemetryTier
   setTier: (tier: TelemetryTier) => void
-  track: typeof track
   /**
-   * A connected hub has `SLAYZONE_HUB_ENABLE_TELEMETRY=0`, or could not be asked (fail
-   * closed): `tier` is `off` and the user cannot change it.
+   * The home hub (this app's own data) has `SLAYZONE_HUB_ENABLE_TELEMETRY=0`, or could not
+   * be asked (fail closed): `tier` is `off` and the user cannot change it.
    */
   lockedByHub: boolean
+  /** The home hub's registry label; null with no registry (web shell, fork). */
+  homeHubLabel: string | null
+  /**
+   * Other hubs with `SLAYZONE_HUB_ENABLE_TELEMETRY=0` (or that could not be asked): the
+   * events about their tasks and projects are not sent. Nothing else changes.
+   */
+  withheldHubs: readonly TelemetryHubRef[]
   thirdPartyServices: ThirdPartyServices
 }
 
@@ -40,8 +54,9 @@ export const TelemetryContext = createContext<TelemetryContextValue>({
     // fork's partial shells). There is no persisted tier to write, so dropping
     // the change is correct — the provider supplies the real setter.
   },
-  track,
   lockedByHub: false,
+  homeHubLabel: null,
+  withheldHubs: [],
   // No provider, no answer from any hub: nothing third-party starts (fail closed).
   thirdPartyServices: 'blocked'
 })
@@ -55,7 +70,8 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
 
   const tierSetting = useQuery(trpc.settings.get.queryOptions({ key: SETTINGS_KEY }))
   const { mutate: setTierSetting } = useMutation(trpc.settings.set.mutationOptions())
-  const hubsPermit = useHubsPermitTelemetry()
+  const permits = useHubTelemetryPermits()
+  const federation = useFederationOrNull()
 
   // Version fetched once PostHog has started. Mirrors the original nested
   // getVersion() call that ran after initTelemetry.
@@ -71,10 +87,24 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     setStoredTier(parseTelemetryTier(tierSetting.data))
   }
 
-  const lockedByHub = hubsPermit === false
+  const lockedByHub = permits.home === false
   const tier: TelemetryTier = lockedByHub ? 'off' : storedTier
   // Both answers are in, or one of them already says no.
-  const known = (tierHydrated && hubsPermit !== null) || lockedByHub
+  const known = (tierHydrated && permits.home !== null) || lockedByHub
+  const labelOf = (hubId: string | null): string | null =>
+    federation?.hubs.find((h) => h.id === hubId)?.label ?? null
+  const homeHubLabel = labelOf(permits.homeHubId)
+  const withheldHubs: TelemetryHubRef[] = []
+  for (const [id, permit] of permits.others) {
+    // Only hubs that said no (or could not be asked): one still answering is withheld
+    // too (`trackForHub`), but is not worth a line in Settings.
+    if (permit === false) withheldHubs.push({ id, label: labelOf(id) ?? id })
+  }
+
+  // The events about another hub's data follow that hub's answer (`trackForHub`).
+  useEffect(() => {
+    setHubTelemetryPolicy({ homeHubId: permits.homeHubId, permits: permits.others })
+  }, [permits.homeHubId, permits.others])
   const thirdPartyServices: ThirdPartyServices = !known
     ? tierHydrated && storedTier === 'off'
       ? 'blocked'
@@ -106,7 +136,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
       const ph = await getPosthogInstance()
       if (ph) {
         ph.register({ app_version: version })
-        track('app_opened', { version })
+        trackForHub(null, 'app_opened', { version })
       }
     })()
   }, [initDone, versionQuery.data])
@@ -120,7 +150,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
 
   const changeTier = useCallback(
     (newTier: TelemetryTier) => {
-      // A hub that forbids telemetry decides; the stored choice would not apply anyway.
+      // The home hub forbids telemetry: it decides; the stored choice would not apply anyway.
       if (lockedByHub) return
       setStoredTier(newTier)
       setTierSetting({ key: SETTINGS_KEY, value: newTier })
@@ -130,7 +160,14 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
 
   return (
     <TelemetryContext.Provider
-      value={{ tier, setTier: changeTier, track, lockedByHub, thirdPartyServices }}
+      value={{
+        tier,
+        setTier: changeTier,
+        lockedByHub,
+        homeHubLabel,
+        withheldHubs,
+        thirdPartyServices
+      }}
     >
       {children}
     </TelemetryContext.Provider>

@@ -7,12 +7,21 @@ import type { TelemetryTier } from '../shared/types'
 
 const telemetry = vi.hoisted(() => ({
   applyTelemetryTier: vi.fn(async () => {}),
-  track: vi.fn(),
+  trackForHub: vi.fn(),
+  setHubTelemetryPolicy: vi.fn(),
   stopHeartbeat: vi.fn(),
   stopIpcTelemetryBridge: vi.fn(),
   getPosthogInstance: vi.fn(async () => null)
 }))
 vi.mock('./telemetry', () => telemetry)
+
+// The hub registry (desktop multi-hub). null = no federation: the web shell / fork, where
+// the nearest tRPC client is the only hub.
+const federation = vi.hoisted(() => ({ value: null as unknown }))
+vi.mock('@slayzone/transport/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@slayzone/transport/client')>()
+  return { ...actual, useFederationOrNull: () => federation.value }
+})
 
 import { TelemetryContext, TelemetryProvider } from './TelemetryProvider'
 
@@ -32,6 +41,8 @@ function Probe() {
       <span data-testid="tier">{ctx.tier}</span>
       <span data-testid="services">{ctx.thirdPartyServices}</span>
       <span data-testid="locked">{String(ctx.lockedByHub)}</span>
+      <span data-testid="home-label">{String(ctx.homeHubLabel)}</span>
+      <span data-testid="withheld">{ctx.withheldHubs.map((h) => h.label).join(',')}</span>
     </>
   )
 }
@@ -74,10 +85,18 @@ function setup(stored: string | null, hubTelemetry?: boolean) {
 const tier = () => screen.getByTestId('tier').textContent
 const services = () => screen.getByTestId('services').textContent
 const locked = () => screen.getByTestId('locked').textContent
+const homeLabel = () => screen.getByTestId('home-label').textContent
+const withheld = () => screen.getByTestId('withheld').textContent
+/** The last hub policy handed to the telemetry module. */
+const policy = () =>
+  telemetry.setHubTelemetryPolicy.mock.calls.at(-1)?.[0] as
+    | { homeHubId: string | null; permits: ReadonlyMap<string, boolean | null> }
+    | undefined
 const appliedTiers = () => telemetry.applyTelemetryTier.mock.calls.map((c) => (c as unknown[])[0])
 
 beforeEach(() => {
   for (const fn of Object.values(telemetry)) fn.mockClear()
+  federation.value = null
 })
 
 afterEach(() => {
@@ -207,6 +226,84 @@ describe('TelemetryProvider with a hub that turned telemetry off', () => {
     )
     await flush()
     expect(services()).toBe('blocked')
+    expect(appliedTiers()).toEqual(['off'])
+  })
+})
+
+const NORMAIN = 'hub:wss://slay.normain.com/trpc'
+
+/**
+ * Desktop multi-hub: the home hub ('local', the nearest tRPC client — this app's own data)
+ * plus a remote hub from the registry, whose `hub.describe` answers `remote`.
+ */
+function setupFederated(
+  stored: string | null,
+  home: { telemetry: boolean },
+  remote: { telemetry: boolean } | 'unreachable'
+) {
+  const remoteHub = createTrpcTest({
+    procedures: {
+      'hub.describe': () => {
+        if (remote === 'unreachable') throw new Error('hub down')
+        return { scopes: null, switches: { enableTelemetry: remote.telemetry } }
+      }
+    }
+  })
+  const hubs = [
+    { id: 'local', kind: 'local', label: 'This computer' },
+    { id: NORMAIN, kind: 'remote', label: 'slay.normain.com', url: 'wss://slay.normain.com/trpc' }
+  ]
+  federation.value = {
+    hubs,
+    defaultHubId: 'local',
+    resolve: (id: string) =>
+      id === NORMAIN
+        ? {
+            entry: hubs[1],
+            ws: { client: remoteHub.trpcClient },
+            queryClient: remoteHub.queryClient
+          }
+        : null
+  }
+  setup(stored, home.telemetry)
+}
+
+describe('TelemetryProvider with several hubs', () => {
+  it("a remote hub with telemetry off: only its own events are withheld, the app's telemetry is unchanged", async () => {
+    setupFederated('opted_in', { telemetry: true }, { telemetry: false })
+    await flush()
+    expect(tier(), "the user's tier stands").toBe('opted_in')
+    expect(locked()).toBe('false')
+    expect(services(), 'PostHog + Convex still start').toBe('allowed')
+    expect(appliedTiers()).toEqual(['opted_in'])
+    expect(withheld()).toBe('slay.normain.com')
+    expect(policy()?.homeHubId).toBe('local')
+    expect(policy()?.permits.get(NORMAIN), "the remote hub's events are dropped").toBe(false)
+  })
+
+  it('a remote hub that cannot be asked: its events are withheld (fail closed), nothing else changes', async () => {
+    setupFederated('anonymous', { telemetry: true }, 'unreachable')
+    await flush()
+    expect(locked()).toBe('false')
+    expect(services()).toBe('allowed')
+    expect(withheld()).toBe('slay.normain.com')
+    expect(policy()?.permits.get(NORMAIN)).toBe(false)
+  })
+
+  it('a remote hub that permits telemetry: nothing withheld', async () => {
+    setupFederated('anonymous', { telemetry: true }, { telemetry: true })
+    await flush()
+    expect(withheld()).toBe('')
+    expect(policy()?.permits.get(NORMAIN)).toBe(true)
+  })
+
+  it('the home hub with telemetry off still turns everything off, and names itself', async () => {
+    setupFederated('anonymous', { telemetry: false }, { telemetry: true })
+    await flush()
+    expect(locked()).toBe('true')
+    expect(tier()).toBe('off')
+    expect(services()).toBe('blocked')
+    expect(homeLabel()).toBe('This computer')
     expect(appliedTiers()).toEqual(['off'])
   })
 })

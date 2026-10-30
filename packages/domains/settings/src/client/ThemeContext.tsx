@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { ThemeContext, useStableCallback, type ThemeContextValue } from '@slayzone/ui'
 import {
   APP_THEME_SETTING_KEYS,
@@ -28,6 +28,7 @@ function resolveEffective(source: ThemePreference, serverEffective: Theme): Them
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const { track } = useTrack()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const setThemeMutation = useMutation(trpc.settings.setTheme.mutationOptions())

@@ -13,7 +13,7 @@ import {
   Input,
   Label
 } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 
 interface CreateTagDialogProps {
   open: boolean
@@ -38,6 +38,7 @@ export function CreateTagDialog({
   onCreated,
   onUpdated
 }: CreateTagDialogProps) {
+  const { trackProject } = useTrack()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const createTagMutation = useMutation(trpc.tags.create.mutationOptions())
@@ -91,7 +92,7 @@ export function CreateTagDialog({
         textColor: selected.text,
         projectId
       })
-      track('tag_created')
+      trackProject(projectId, 'tag_created')
       onCreated(created)
       queryClient.invalidateQueries(trpc.tags.list.queryFilter())
       window.dispatchEvent(new CustomEvent('slayzone:tag-created', { detail: created }))

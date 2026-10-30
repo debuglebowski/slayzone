@@ -122,11 +122,15 @@ vi.mock('@slayzone/ui', () => {
   }
 })
 
-vi.mock('@slayzone/telemetry/client', () => ({
-  track: vi.fn(),
-  useTelemetry: () => ({}),
-  TelemetrySettings: () => null
-}))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker, useTelemetry: () => ({}), TelemetrySettings: () => null }
+})
 vi.mock('@slayzone/tags/client', () => ({ CreateTagDialog: () => null }))
 vi.mock('../ThemeContext', () => ({
   useTheme: () => ({

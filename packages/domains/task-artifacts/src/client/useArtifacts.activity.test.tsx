@@ -55,7 +55,15 @@ vi.mock('./trpc', () => {
   const artifacts = new Proxy({}, { get: (_t, proc: string) => procedure(proc) })
   return { useTRPC: () => ({ artifacts }) }
 })
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 const { useArtifacts } = await import('./useArtifacts')
 

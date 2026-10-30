@@ -10,7 +10,7 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack, type Tracker } from '@slayzone/telemetry/client'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import type {
   EditorOpenFilesState,
@@ -59,6 +59,7 @@ interface OpenFileDeps {
   setGoToPosition: (pos: { filePath: string; line: number; col: number }) => void
   setOpenFilesAndRef: (updater: (prev: OpenFile[]) => OpenFile[]) => void
   readFile: (input: { filePath: string }) => Promise<ReadFileResult>
+  track: Tracker['track']
 }
 
 // Plain module function (not compiled by React Compiler): the try/finally that
@@ -76,7 +77,8 @@ async function openFileImpl(
     setFocusToken,
     setGoToPosition,
     setOpenFilesAndRef,
-    readFile
+    readFile,
+    track
   } = deps
   const from = options?.from ?? 'sidebar'
   const activateFile = (path: string) => {
@@ -234,6 +236,7 @@ export function useFileEditor(
   // keys the query cache.
   const target = useWorkspaceTarget()
   const trpcClient = useTRPCClient()
+  const { track } = useTrack()
   const queryClient = useQueryClient()
   // mutateAsync is identity-stable across renders (the mutation object is not).
   const { mutateAsync: writeFile } = useMutation(trpc.fileEditor.writeFile.mutationOptions())
@@ -472,12 +475,13 @@ export function useFileEditor(
           readFile: (input) =>
             queryClient.fetchQuery(
               trpc.fileEditor.readFile.queryOptions({ ...target, rootPath: projectPath, ...input })
-            )
+            ),
+          track
         },
         filePath,
         options
       ),
-    [projectPath, openFiles, queryClient, setOpenFilesAndRef, trpc, target]
+    [projectPath, openFiles, queryClient, setOpenFilesAndRef, trpc, target, track]
   )
 
   const openFileForced = useCallback(

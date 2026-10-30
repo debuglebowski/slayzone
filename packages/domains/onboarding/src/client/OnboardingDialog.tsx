@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Dialog, DialogContent, useDepsChanged } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
-import { useTelemetry, track } from '@slayzone/telemetry/client'
+import { useTelemetry, useTrack } from '@slayzone/telemetry/client'
 import { useTRPC } from './trpc'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { ChevronLeft } from 'lucide-react'
@@ -30,6 +30,7 @@ export function OnboardingDialog({
   const [selectedProvider, setSelectedProvider] = useState('claude-code')
   const [closing, setClosing] = useState(false)
   const { setTier, lockedByHub } = useTelemetry()
+  const { track } = useTrack()
 
   const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
   const onboardingCompletedQuery = useQuery(
@@ -40,7 +41,7 @@ export function OnboardingDialog({
 
   useEffect(() => {
     if (open) track('onboarding_step', { step, step_name: STEP_NAMES[step] })
-  }, [step, open])
+  }, [step, open, track])
 
   // Self-open while onboarding isn't completed — on each new answer for the setting
   // (mount included), adjusted while rendering. The commit this skips only repeated

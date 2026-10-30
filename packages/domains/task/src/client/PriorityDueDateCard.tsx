@@ -7,7 +7,7 @@ import { Calendar } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
 import { cn, PriorityIcon } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 
@@ -20,17 +20,18 @@ export function PriorityDueDateCard({
   task,
   onUpdate
 }: PriorityDueDateCardProps): React.JSX.Element {
+  const { trackTask } = useTrack()
   const trpc = useTRPC()
   const updateTask = useMutation(trpc.task.update.mutationOptions())
 
   const handlePriorityChange = async (priority: number): Promise<void> => {
-    track('task_priority_changed', { priority: String(priority) })
+    trackTask(task.id, 'task_priority_changed', { priority: String(priority) })
     const updated = await updateTask.mutateAsync({ id: task.id, priority })
     onUpdate(updated)
   }
 
   const handleDueDateChange = async (date: Date | undefined): Promise<void> => {
-    track('due_date_set')
+    trackTask(task.id, 'due_date_set')
     const dueDate = date ? format(date, 'yyyy-MM-dd') : null
     const updated = await updateTask.mutateAsync({ id: task.id, dueDate })
     onUpdate(updated)

@@ -1,7 +1,9 @@
 /**
  * What this app sends to PostHog, and whether it uses Convex:
  *   - `off`: nothing to PostHog, and no Convex (leaderboard, feedback). Chosen in
- *     Settings, or forced by a hub with `SLAYZONE_HUB_ENABLE_TELEMETRY=0`.
+ *     Settings, or forced by the HOME hub (the one this app's own data lives on) with
+ *     `SLAYZONE_HUB_ENABLE_TELEMETRY=0`. Another hub with the switch off withholds only
+ *     the events about its own tasks and projects (`useTrack`).
  *   - `anonymous` (the default): app opens + an activity heartbeat, in-memory id.
  *   - `opted_in`: plus a persisted random id and crash reports.
  */
@@ -138,6 +140,62 @@ export type TelemetryEventName =
   | 'changelog_viewed'
   | 'leaderboard_viewed'
   | 'update_installed'
+
+/**
+ * Events about ONE task. A board, palette or menu can act on a task of another hub than
+ * the one whose UI it sits in, so these always name the task (`useTrack().trackTask`) and
+ * belong to the hub that owns it — a hub with `SLAYZONE_HUB_ENABLE_TELEMETRY=0` withholds
+ * them. The ambient `track` refuses them at compile time.
+ */
+export type TaskTelemetryEvent =
+  | 'task_completed'
+  | 'task_deleted'
+  | 'task_duplicated'
+  | 'task_archived'
+  | 'task_status_changed'
+  | 'task_priority_changed'
+  | 'task_progress_changed'
+  | 'task_description_ai_generated'
+  | 'subtask_created'
+  | 'asset_created'
+  | 'asset_deleted'
+  | 'task_dependency_added'
+  | 'task_moved_to_project'
+  | 'task_snoozed'
+  | 'task_unsnoozed'
+  | 'task_blocked'
+  | 'task_unblocked'
+  | 'task_marked_unread'
+  | 'due_date_set'
+  | 'copy_title'
+  | 'copy_link'
+  | 'tag_assigned'
+  | 'kanban_drag_drop'
+  | 'task_synced'
+  | 'temporary_task_created'
+  | 'worktree_created'
+
+/** Events about ONE project: named (`useTrack().trackProject`), same rule as {@link TaskTelemetryEvent}. */
+export type ProjectTelemetryEvent =
+  | 'task_created'
+  | 'project_switched'
+  | 'project_settings_tab_viewed'
+  | 'ai_config_changed'
+  | 'tag_created'
+  | 'issues_imported'
+
+/**
+ * Every other event: it belongs to the hub whose UI it happened in — the nearest
+ * `HubScope` (a task tab's is its task's hub), else the home hub.
+ */
+export type AmbientTelemetryEvent = Exclude<
+  TelemetryEventName,
+  TaskTelemetryEvent | ProjectTelemetryEvent
+>
+
+/** The props argument of an event: none for a bare event, else its payload. */
+export type TelemetryPropsArgs<E extends TelemetryEventName> =
+  TelemetryEventProps[E] extends Record<string, never> ? [] : [TelemetryEventProps[E]]
 
 export interface TelemetryEventProps {
   // App lifecycle

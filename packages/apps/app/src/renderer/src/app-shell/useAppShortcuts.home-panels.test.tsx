@@ -11,7 +11,15 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   // Key strings stand in for chords: an event "matches" when its key IS the chord.
   matchesShortcut: (e: KeyboardEvent, keys: string | null) => keys !== null && e.key === keys
 }))
-vi.mock('@slayzone/telemetry/client', () => ({ track: () => {}, trackShortcut: () => {} }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 const { useTabStore } = await import('@slayzone/tabs-state')
 const { resolveShortcutKeys } = await import('@slayzone/ui')

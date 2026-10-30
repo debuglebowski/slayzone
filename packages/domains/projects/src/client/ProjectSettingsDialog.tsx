@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, useDepsChanged } from
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects-contracts'
 import { defaultProjectRoot } from '@slayzone/projects-contracts'
-import { track } from '@slayzone/telemetry/client'
+import { useTrack } from '@slayzone/telemetry/client'
 import { GeneralTab } from './GeneralTab'
 import { EnvironmentTab } from './EnvironmentTab'
 import { ColumnsTab } from './ColumnsTab'
@@ -59,6 +59,7 @@ export function ProjectSettingsDialog({
   onChanged,
   renderTemplatesTab
 }: ProjectSettingsDialogProps) {
+  const { trackProject } = useTrack()
   const [activeTab, setActiveTab] = useState<
     | 'general'
     | 'environment'
@@ -150,7 +151,7 @@ export function ProjectSettingsDialog({
           activeKey={activeTab}
           onSelect={(key) => {
             const tab = (key === 'tasks' ? 'tasks/general' : key) as typeof activeTab
-            track('project_settings_tab_viewed', { tab })
+            trackProject(project?.id, 'project_settings_tab_viewed', { tab })
             setActiveTab(tab)
           }}
         >

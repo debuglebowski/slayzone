@@ -5,8 +5,11 @@
  * and the real ConvexAuthBootstrap obeying. posthog-js and Convex are mocked: the test
  * counts what would have reached either.
  *
- *   - a hub with telemetry off, or the user's `off` tier: no PostHog init, no Convex
- *     client, no Convex session, leaderboard + feedback reported unavailable;
+ *   - the home hub (this app's own data) with telemetry off, or the user's `off` tier: no
+ *     PostHog init, no Convex client, no Convex session, leaderboard + feedback reported
+ *     unavailable — with the reason;
+ *   - a REMOTE hub with telemetry off withholds only its own data: Convex still runs (the
+ *     leaderboard reads the home hub's stats only);
  *   - otherwise both start, exactly as before;
  *   - turning it off at run time closes the Convex client without remounting the app.
  */
@@ -69,6 +72,13 @@ vi.mock('@convex-dev/auth/react', async () => {
   }
 })
 
+// The hub registry (desktop multi-hub); null = the nearest client is the only hub.
+const federation = vi.hoisted(() => ({ value: null as unknown }))
+vi.mock('@slayzone/transport/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@slayzone/transport/client')>()
+  return { ...actual, useFederationOrNull: () => federation.value }
+})
+
 import { TelemetryProvider, useTelemetry } from '@slayzone/telemetry/client'
 import { ConvexAuthBootstrap, ConvexScope, useLeaderboardAuth } from './convexAuth'
 
@@ -92,6 +102,13 @@ function App() {
   return (
     <>
       <span data-testid="leaderboard">{String(auth.configured)}</span>
+      <span data-testid="unavailable">
+        {auth.unavailable === null
+          ? 'none'
+          : auth.unavailable.kind === 'hub-telemetry-off'
+            ? `hub-telemetry-off:${auth.unavailable.hubLabel}`
+            : auth.unavailable.kind}
+      </span>
       <ConvexScope>
         <span data-testid="feedback">feedback</span>
       </ConvexScope>
@@ -100,7 +117,7 @@ function App() {
 }
 
 /** `hubTelemetry`: the hub's `enableTelemetry` switch as `hub.describe` reports it. */
-function renderApp(stored: string | null, hubTelemetry: boolean) {
+function renderApp(stored: string | null, hubTelemetry: boolean, convexUrl = CONVEX_URL) {
   const trpc = createTrpcTest({
     procedures: {
       'settings.get': () => stored,
@@ -113,13 +130,43 @@ function renderApp(stored: string | null, hubTelemetry: boolean) {
   render(
     <Wrapper>
       <TelemetryProvider>
-        <ConvexAuthBootstrap convexUrl={CONVEX_URL}>
+        <ConvexAuthBootstrap convexUrl={convexUrl}>
           <App />
         </ConvexAuthBootstrap>
       </TelemetryProvider>
     </Wrapper>
   )
 }
+
+const NORMAIN = 'hub:wss://slay.normain.com/trpc'
+
+/** Desktop multi-hub: the home hub ('local', the nearest client) + one remote hub. */
+function renderFederated(homeTelemetry: boolean, remoteTelemetry: boolean) {
+  const remoteHub = createTrpcTest({
+    procedures: {
+      'hub.describe': () => ({ scopes: null, switches: { enableTelemetry: remoteTelemetry } })
+    }
+  })
+  const hubs = [
+    { id: 'local', kind: 'local', label: 'This computer' },
+    { id: NORMAIN, kind: 'remote', label: 'slay.normain.com', url: 'wss://slay.normain.com/trpc' }
+  ]
+  federation.value = {
+    hubs,
+    defaultHubId: 'local',
+    resolve: (id: string) =>
+      id === NORMAIN
+        ? {
+            entry: hubs[1],
+            ws: { client: remoteHub.trpcClient },
+            queryClient: remoteHub.queryClient
+          }
+        : null
+  }
+  renderApp('anonymous', homeTelemetry)
+}
+
+const unavailable = () => screen.getByTestId('unavailable').textContent
 
 const leaderboard = () => screen.getByTestId('leaderboard').textContent
 const feedbackShown = () => screen.queryByTestId('feedback') !== null
@@ -134,6 +181,7 @@ beforeEach(() => {
   convex.closed.length = 0
   convex.sessionMounts = 0
   appMounts = 0
+  federation.value = null
 })
 
 afterEach(() => {
@@ -149,6 +197,38 @@ describe('a hub with SLAYZONE_HUB_ENABLE_TELEMETRY=0', () => {
     expect(convex.sessionMounts, 'no Convex session').toBe(0)
     expect(leaderboard(), 'leaderboard reported unavailable').toBe('false')
     expect(feedbackShown(), 'feedback (a Convex consumer) not rendered').toBe(false)
+    expect(unavailable(), 'the reason: the hub (no registry → no label)').toBe(
+      'hub-telemetry-off:null'
+    )
+  })
+
+  it('the home hub of a multi-hub app: off everywhere, the reason names it', async () => {
+    renderFederated(false, true)
+    await flush()
+    expect(convex.constructed).toEqual([])
+    expect(leaderboard()).toBe('false')
+    expect(unavailable()).toBe('hub-telemetry-off:This computer')
+  })
+
+  it('a remote hub: withholds only its own data — Convex, leaderboard and feedback still run', async () => {
+    renderFederated(true, false)
+    await flush()
+    expect(convex.constructed, 'the Convex client starts').toEqual([CONVEX_URL])
+    expect(convex.sessionMounts).toBe(1)
+    expect(leaderboard()).toBe('true')
+    expect(unavailable()).toBe('none')
+    expect(feedbackShown()).toBe(true)
+    expect(posthog.init, 'PostHog starts').toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a build without a Convex deployment', () => {
+  it('reports no-deployment, whatever telemetry allows', async () => {
+    renderApp('anonymous', true, '')
+    await flush()
+    expect(convex.constructed).toEqual([])
+    expect(leaderboard()).toBe('false')
+    expect(unavailable()).toBe('no-deployment')
   })
 })
 
@@ -160,6 +240,7 @@ describe("the user's off tier", () => {
     expect(convex.constructed).toEqual([])
     expect(convex.sessionMounts).toBe(0)
     expect(leaderboard()).toBe('false')
+    expect(unavailable()).toBe('telemetry-off')
   })
 })
 
@@ -171,6 +252,7 @@ describe('telemetry allowed (unchanged)', () => {
     expect(convex.constructed).toEqual([CONVEX_URL])
     expect(convex.sessionMounts).toBe(1)
     expect(leaderboard()).toBe('true')
+    expect(unavailable()).toBe('none')
     expect(feedbackShown()).toBe(true)
   })
 

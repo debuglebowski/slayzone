@@ -23,14 +23,20 @@ import { ConnectionsSettingsTab } from './tabs/ConnectionsSettingsTab'
 import { SettingsTabIntro } from './tabs/SettingsTabIntro'
 
 function TelemetrySettingsTab() {
-  const { tier, setTier, lockedByHub } = useTelemetry()
+  const { tier, setTier, lockedByHub, homeHubLabel, withheldHubs } = useTelemetry()
   return (
     <div className="space-y-6">
       <SettingsTabIntro
         title="Telemetry"
         description="Choose what product usage data is collected. Telemetry helps improve reliability while honoring your selected privacy tier."
       />
-      <TelemetrySettings tier={tier} onTierChange={setTier} lockedByHub={lockedByHub} />
+      <TelemetrySettings
+        tier={tier}
+        onTierChange={setTier}
+        lockedByHub={lockedByHub}
+        homeHubLabel={homeHubLabel}
+        withheldHubs={withheldHubs}
+      />
     </div>
   )
 }

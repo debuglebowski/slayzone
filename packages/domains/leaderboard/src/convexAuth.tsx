@@ -6,7 +6,11 @@ import { hubAllows } from '@slayzone/transport/client'
 import { useTelemetry } from '@slayzone/telemetry/client'
 import { useTRPCClient } from './trpc'
 import { api } from 'convex/_generated/api'
-import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
+import {
+  LEADERBOARD_AUTH_DISABLED,
+  type LeaderboardAuthState,
+  type LeaderboardUnavailable
+} from './auth'
 
 // Convex + GitHub-OAuth wiring for the leaderboard, shared by BOTH shells:
 //   • Electron renderer — mounts <ConvexAuthBootstrap> (default 'inline').
@@ -35,8 +39,11 @@ import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
 //
 // Whether: Convex is third-party telemetry. It starts only once
 // `useTelemetry().thirdPartyServices` is 'allowed' — the user's tier is not `off` and
-// no connected hub has `SLAYZONE_HUB_ENABLE_TELEMETRY=0` — and is closed again the
-// moment that changes. So the Convex session is a SIBLING of the app tree, not its
+// the HOME hub (the one this app's own data lives on) does not have
+// `SLAYZONE_HUB_ENABLE_TELEMETRY=0` — and is closed again the moment that changes.
+// Another hub with the switch off does not stop it: nothing of that hub's reaches
+// Convex — the leaderboard reads the home hub's stats only (`app.leaderboard.getLocalStats`
+// on the nearest client), and feedback is what the user types. So the Convex session is a SIBLING of the app tree, not its
 // parent: starting or stopping it never remounts the app. The few Convex consumers
 // (leaderboard table, feedback) reach the client through <ConvexScope>.
 
@@ -241,6 +248,7 @@ function ConvexAuthBridge({
   const value = useMemo<LeaderboardAuthState>(
     () => ({
       configured: true,
+      unavailable: null,
       isLoading,
       isAuthenticated,
       lastError,
@@ -341,6 +349,21 @@ function ConvexAuthBridge({
   return null
 }
 
+/** Why Convex is not running (yet) on this host — the one reason in force. */
+function unavailableReason(
+  convexUrl: string,
+  telemetry: ReturnType<typeof useTelemetry>
+): LeaderboardUnavailable {
+  if (!convexUrl) return { kind: 'no-deployment' }
+  if (telemetry.thirdPartyServices === 'blocked') {
+    if (telemetry.lockedByHub)
+      return { kind: 'hub-telemetry-off', hubLabel: telemetry.homeHubLabel }
+    if (telemetry.tier === 'off') return { kind: 'telemetry-off' }
+  }
+  // Answers still coming in, or allowed and the session is starting.
+  return { kind: 'starting' }
+}
+
 /**
  * Convex for this host: the leaderboard auth state for the app tree, and — once
  * third-party services are allowed (`useTelemetry().thirdPartyServices`) and a deployment
@@ -357,13 +380,16 @@ export function ConvexAuthBootstrap({
   oauthDelivery?: OAuthDelivery
   children: React.ReactNode
 }): React.JSX.Element {
-  const allowed = useTelemetry().thirdPartyServices === 'allowed'
+  const telemetry = useTelemetry()
+  const allowed = telemetry.thirdPartyServices === 'allowed'
   const deployment = useConvexDeployment(allowed ? convexUrl : '')
   const [reported, setReported] = useState<ReportedAuth | null>(null)
   // Disabled until this deployment's bridge has reported — never a stale state of a
   // closed one.
   const auth =
-    deployment && reported?.deployment === deployment ? reported.auth : LEADERBOARD_AUTH_DISABLED
+    deployment && reported?.deployment === deployment
+      ? reported.auth
+      : { ...LEADERBOARD_AUTH_DISABLED, unavailable: unavailableReason(convexUrl, telemetry) }
 
   // `children` stays the first child whether or not the session runs, so starting or
   // stopping Convex never remounts the app.

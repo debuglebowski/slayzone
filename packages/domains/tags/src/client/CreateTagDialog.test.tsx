@@ -5,7 +5,15 @@ import { useState, type ReactNode } from 'react'
 import { createTrpcTest } from '@slayzone/transport/testing'
 import { TAG_PRESETS, type Tag } from '@slayzone/tags/shared'
 
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 import { CreateTagDialog } from './CreateTagDialog'
 

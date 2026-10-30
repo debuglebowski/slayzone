@@ -4,7 +4,15 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { createTrpcTest } from '@slayzone/transport/testing'
 
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 
 import { SearchPanel } from './SearchPanel'
 import { WorkspaceTargetProvider, type WorkspaceTarget } from './workspace-target'

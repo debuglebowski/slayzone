@@ -46,7 +46,7 @@ base.describe('Leaderboard auth transport', () => {
         timeout: 5_000
       })
       await expect(
-        mainWindow.getByText('Leaderboard unavailable (Convex not configured)')
+        mainWindow.getByRole('heading', { name: 'Leaderboard unavailable' })
       ).not.toBeVisible()
 
       const clicked = await mainWindow.evaluate(() => {

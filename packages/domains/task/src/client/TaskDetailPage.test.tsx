@@ -173,7 +173,15 @@ vi.mock('@slayzone/task-browser', () => ({
 vi.mock('@slayzone/task-browser/shared', () => ({}))
 vi.mock('@slayzone/file-editor/client', () => ({ FileEditorView: React.forwardRef(() => null) }))
 vi.mock('@slayzone/file-editor/shared', () => ({}))
-vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
+vi.mock('@slayzone/telemetry/client', () => {
+  const tracker = {
+    track: vi.fn(),
+    trackTask: vi.fn(),
+    trackProject: vi.fn(),
+    trackShortcut: vi.fn()
+  }
+  return { useTrack: () => tracker }
+})
 vi.mock('./DescriptionDialog', () => ({ DescriptionDialog: () => null }))
 vi.mock('./DeleteTaskDialog', () => ({ DeleteTaskDialog: () => null }))
 vi.mock('./TaskMetadataSidebar', () => ({
