@@ -462,9 +462,7 @@ test('an untested (older) CLI version gets a notice, once', async () => {
   await wait(30)
   const notices = saved(h).filter((e) => e.kind === 'notice' && e.code === 'cli-version-untested')
   expect(notices).toHaveLength(1)
-  expect((notices[0] as { text: string }).text).toContain(
-    'Untested Claude Code version 2.1.100'
-  )
+  expect((notices[0] as { text: string }).text).toContain('Untested Claude Code version 2.1.100')
 })
 
 test('a respawn resumes the conversation the tab already confirmed, even before the DB has its id', async () => {
