@@ -35,6 +35,13 @@ export type Tab =
       status?: TaskStatus
       isSubTask?: boolean
       isTemporary?: boolean
+      /**
+       * The hub that owns the task, recorded once its task has been seen (and
+       * saved with the tabs). A tab is closed for a missing task only once THIS
+       * hub has answered — another hub answering first proves nothing. Absent
+       * (not seen yet, or saved before it was recorded) = wait for every hub.
+       */
+      hubId?: string
     }
 
 type TaskTab = Extract<Tab, { type: 'task' }>

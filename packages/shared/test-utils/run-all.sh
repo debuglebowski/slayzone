@@ -927,6 +927,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/file-editor/src/client/SearchPanel.test.tsx \
   packages/domains/file-editor/src/client/CodeEditor.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/useAppShortcuts.home-panels.test.tsx \
+  packages/apps/app/src/renderer/src/hooks/useTabLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatPanelKeyboard.test.tsx \
   packages/domains/worktrees/src/client/ConflictFileView.test.tsx \
   packages/shared/layout/src/SplitDivider.test.tsx \

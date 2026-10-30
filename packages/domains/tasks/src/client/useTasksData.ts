@@ -139,6 +139,11 @@ interface UseTasksDataReturn {
   hubIdByProject: Map<string, string>
   // task id → owning hub id — lets App scope each open task tab to its hub.
   hubIdByTask: Map<string, string>
+  // The hubs whose boards this hook loads (default included), and those whose
+  // board has arrived at least once. Each hub answers on its own: a task missing
+  // from `tasks` is only known gone once its own hub is in `loadedHubIds`.
+  registeredHubIds: ReadonlySet<string>
+  loadedHubIds: ReadonlySet<string>
 
   // Board-load lifecycle (the loadBoardData query) so consumers can tell
   // "connecting" / "failed to reach the server" apart from a genuinely empty
@@ -205,6 +210,7 @@ export function useTasksData(): UseTasksDataReturn {
   const [tags, setTags] = useState<Tag[]>([])
   const [taskTags, setTaskTags] = useState<Map<string, string[]>>(new Map())
   const [blockedTaskIds, setBlockedTaskIds] = useState<Set<string>>(new Set())
+  const [loadedHubIds, setLoadedHubIds] = useState<ReadonlySet<string>>(new Set())
 
   // ── Multi-hub federation ──────────────────────────────────────────────────
   // The rail shows a flat union of every connected hub's projects/tasks. This
@@ -218,6 +224,10 @@ export function useTasksData(): UseTasksDataReturn {
   const extraHubs = useMemo(
     () => (fed ? fed.hubs.filter((h) => h.id !== fed.defaultHubId && !!h.url) : []),
     [fed]
+  )
+  const registeredHubIds = useMemo(
+    () => new Set([defaultHubId, ...extraHubs.map((h) => h.id)]),
+    [defaultHubId, extraHubs]
   )
 
   // Origin maps: id → owning hub id. They live in the transport-level ownership
@@ -267,8 +277,15 @@ export function useTasksData(): UseTasksDataReturn {
       for (const [k, v] of Object.entries(d.taskTags)) allTaskTags.set(k, v)
       for (const id of d.blockedTaskIds) allBlocked.add(id)
     }
-    if (boardQ.data) absorb(defaultHubId, boardQ.data as BoardData)
-    for (const [hubId, d] of extraBoardsRef.current) absorb(hubId, d)
+    const loaded = new Set<string>()
+    if (boardQ.data) {
+      absorb(defaultHubId, boardQ.data as BoardData)
+      loaded.add(defaultHubId)
+    }
+    for (const [hubId, d] of extraBoardsRef.current) {
+      absorb(hubId, d)
+      loaded.add(hubId)
+    }
     // Publish ownership before the rows land, so anything re-rendering off the
     // new arrays already resolves the right hub. `setOwnership` re-merges ids
     // noted by an in-flight create whose owning hub has not reloaded yet.
@@ -278,6 +295,10 @@ export function useTasksData(): UseTasksDataReturn {
     setTags(allTags)
     setTaskTags(allTaskTags)
     setBlockedTaskIds(allBlocked)
+    // In the same batch as the tasks, so no render sees one without the other.
+    setLoadedHubIds((prev) =>
+      prev.size === loaded.size && [...loaded].every((id) => prev.has(id)) ? prev : loaded
+    )
   }, [boardQ.data, defaultHubId])
 
   // Rebuild the merged project-groups array + origin map (default + extra hubs).
@@ -1285,6 +1306,8 @@ export function useTasksData(): UseTasksDataReturn {
     blockedTaskIds,
     hubIdByProject,
     hubIdByTask,
+    registeredHubIds,
+    loadedHubIds,
     boardStatus: boardQ.status,
     boardError: boardQ.error,
     setTasks,

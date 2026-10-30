@@ -165,6 +165,8 @@ function App(): React.JSX.Element {
     blockedTaskIds,
     hubIdByProject,
     hubIdByTask,
+    registeredHubIds,
+    loadedHubIds,
     setTasks,
     setProjects,
     setTags,
@@ -396,7 +398,10 @@ function App(): React.JSX.Element {
     tabs,
     setTerminalFocusRequests,
     hubIdByProject,
-    hubIdByTask
+    hubIdByTask,
+    defaultHubId,
+    registeredHubIds,
+    loadedHubIds
   })
 
   // Tab colors (extracted — pure derivation)

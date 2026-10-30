@@ -5,13 +5,33 @@ import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { track } from '@slayzone/telemetry/client'
 
+type TaskTab = Extract<Tab, { type: 'task' }>
+
+/**
+ * Whether a tab's task is gone for good, given it is not in the task list. Only
+ * its own hub can say so: each hub's list arrives on its own, so one hub
+ * answering first proves nothing about another's tasks (that closed every tab of
+ * the slower hub). A hub that never answers (offline) never closes its tabs; a
+ * hub removed from the app does. A tab whose hub is not known yet waits for all.
+ */
+function isGone(
+  tab: TaskTab,
+  hubs: { loaded: ReadonlySet<string>; registered: ReadonlySet<string> }
+): boolean {
+  if (tab.hubId === undefined) return [...hubs.registered].every((id) => hubs.loaded.has(id))
+  return !hubs.registered.has(tab.hubId) || hubs.loaded.has(tab.hubId)
+}
+
 export function useTabLifecycle({
   tasks,
   projects,
   tabs,
   setTerminalFocusRequests,
   hubIdByProject,
-  hubIdByTask
+  hubIdByTask,
+  defaultHubId,
+  registeredHubIds,
+  loadedHubIds
 }: {
   tasks: Task[]
   projects: Project[]
@@ -20,6 +40,12 @@ export function useTabLifecycle({
   /** Multi-hub: project→hub / task→hub origin maps (empty when single-hub). */
   hubIdByProject?: Map<string, string>
   hubIdByTask?: Map<string, string>
+  /** The hub a task with no entry in `hubIdByTask` belongs to. */
+  defaultHubId: string
+  /** Every hub the app is connected to (the registry), default hub included. */
+  registeredHubIds: ReadonlySet<string>
+  /** The hubs whose task list has arrived at least once. */
+  loadedHubIds: ReadonlySet<string>
 }): void {
   // Sync task/project data into tab store for worktree grouping + temp task
   // detection. Multi-hub: annotate each project with its owning hub so the
@@ -45,26 +71,23 @@ export function useTabLifecycle({
     }
   }, [tabs, hubIdByTask])
 
-  // Track whether task data has loaded at least once.
-  const tasksLoadedRef = useRef(false)
-
-  // Sync tab titles/status and remove tabs for deleted tasks.
+  // Sync tab titles/status/hub and remove tabs for deleted tasks.
   useEffect(() => {
-    if (tasks.length > 0) tasksLoadedRef.current = true
-    if (!tasksLoadedRef.current) return
+    if (loadedHubIds.size === 0) return
     const taskIds = new Set(tasks.map((t) => t.id))
+    const hubs = { loaded: loadedHubIds, registered: registeredHubIds }
     const store = useTabStore.getState()
     const prev = store.tabs
     const removedTabs = prev.filter(
-      (tab): tab is Extract<Tab, { type: 'task' }> =>
-        tab.type === 'task' && !taskIds.has(tab.taskId)
+      (tab): tab is TaskTab => tab.type === 'task' && !taskIds.has(tab.taskId) && isGone(tab, hubs)
     )
+    const removed = new Set(removedTabs)
     if (removedTabs.length > 0) {
       const newClosed = [...store.closedTabs, ...removedTabs]
       while (newClosed.length > 20) newClosed.shift()
       useTabStore.setState({ closedTabs: newClosed })
     }
-    const filtered = prev.filter((tab) => tab.type !== 'task' || taskIds.has(tab.taskId))
+    const filtered = prev.filter((tab) => tab.type !== 'task' || !removed.has(tab))
     const newActive =
       filtered.length < prev.length
         ? Math.min(store.activeTabIndex, filtered.length - 1)
@@ -75,19 +98,21 @@ export function useTabLifecycle({
       if (task) {
         const isSubTask = !!task.parent_id
         const isTemporary = !!task.is_temporary
+        const hubId = hubIdByTask?.get(task.id) ?? defaultHubId
         if (
           task.title !== tab.title ||
           task.status !== tab.status ||
           isSubTask !== tab.isSubTask ||
-          isTemporary !== tab.isTemporary
+          isTemporary !== tab.isTemporary ||
+          hubId !== tab.hubId
         ) {
-          return { ...tab, title: task.title, status: task.status, isSubTask, isTemporary }
+          return { ...tab, title: task.title, status: task.status, isSubTask, isTemporary, hubId }
         }
       }
       return tab
     })
     useTabStore.setState({ tabs: updated, activeTabIndex: newActive })
-  }, [tasks])
+  }, [tasks, hubIdByTask, defaultHubId, registeredHubIds, loadedHubIds])
 
   // Drop stale focus requests for tasks that no longer exist.
   useEffect(() => {
