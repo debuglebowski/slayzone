@@ -2,7 +2,7 @@ import React, { useCallback, useImperativeHandle, useMemo, useRef, useState, typ
 import { useTRPCClient } from './trpc'
 import { useUndo } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'
-import { resolveRepoPath, type Project } from '@slayzone/projects-contracts'
+import { defaultProjectRoot, resolveRepoPath, type Project } from '@slayzone/projects-contracts'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import {
   useTasksData,
@@ -186,7 +186,7 @@ function HomeContainerImpl({
 
   // Multi-repo detection for the git panel — same source as the task git panel.
   const { repos: homeViewableRepos } = useProjectRepos(
-    selectedProject?.path ?? null,
+    defaultProjectRoot(selectedProject),
     null,
     selectedProject?.id
   )
@@ -197,11 +197,11 @@ function HomeContainerImpl({
   const homeResolvedRepo = useMemo(
     () =>
       resolveRepoPath(
-        selectedProject?.path ?? null,
+        defaultProjectRoot(selectedProject),
         homeDetectedRepos,
         selectedProject?.selected_repo ?? null
       ),
-    [selectedProject?.path, homeDetectedRepos, selectedProject?.selected_repo]
+    [selectedProject, homeDetectedRepos]
   )
   const handleHomeRepoChange = useCallback(
     (repoName: string) => {

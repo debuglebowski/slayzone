@@ -2,6 +2,7 @@ import React, { Suspense, type ComponentProps, type Dispatch, type SetStateActio
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import type { Project } from '@slayzone/projects-contracts'
+import { defaultProjectRoot } from '@slayzone/projects-contracts'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import {
@@ -106,7 +107,7 @@ export function AppSidePanels({
             <GlobalAgentSidePanel
               width={globalAgentPanelState.panelWidth}
               sessionId={agentSessionId}
-              cwd={projects.find((p) => p.id === selectedProjectId)?.path ?? ''}
+              cwd={defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ?? ''}
               mode={agentMode as TerminalMode}
               isActive={globalAgentPanelState.isOpen}
               isResizing={isSidePanelResizing}

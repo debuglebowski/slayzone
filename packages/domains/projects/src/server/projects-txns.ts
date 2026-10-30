@@ -252,7 +252,10 @@ export interface CreateProjectTxnParams {
   id: string
   name: string
   color: string
+  /** Legacy `projects.path`: written only by a process with no computers. */
   path: string | null
+  /** The project's default computer; null = none chosen. */
+  defaultComputerId: string | null
   columnsConfigJson: string | null
   createdAt: string
   updatedAt: string
@@ -296,14 +299,15 @@ export const projectsTxns = {
         )
         .get() as { sort_order: number }
       const stmt = db.prepare(`
-        INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at, owner_user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (id, name, color, path, default_computer_id, columns_config, sort_order, created_at, updated_at, owner_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       stmt.run(
         p.id,
         p.name,
         p.color,
         p.path,
+        p.defaultComputerId,
         p.columnsConfigJson,
         nextOrder,
         p.createdAt,

@@ -1,11 +1,12 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
-import { parseProject } from '@slayzone/projects/server'
+import type { Project } from '@slayzone/projects-contracts'
+import { attachPlacements, parseProject } from '@slayzone/projects/server'
 import { parseAndColorTasks, TASK_ORDER_BY } from './shared.js'
 
 export interface BoardData {
   tasks: Task[]
-  projects: ReturnType<typeof parseProject>[]
+  projects: Project[]
   tags: unknown[]
   taskTags: Record<string, string[]>
   blockedTaskIds: string[]
@@ -50,7 +51,10 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
 
   return {
     tasks,
-    projects: projectRows.map((row) => parseProject(row)!),
+    projects: await attachPlacements(
+      db,
+      projectRows.map((row) => parseProject(row)!)
+    ),
     tags: tagRows,
     taskTags: taskTagMap,
     blockedTaskIds: blockedRows.map((r) => r.id)

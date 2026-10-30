@@ -12,6 +12,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/computers": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*"
   }

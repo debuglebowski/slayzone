@@ -4153,6 +4153,39 @@ export const migrations: Migration[] = [
       `)
       db.exec(`PRAGMA foreign_keys = ON;`)
     }
+  },
+  {
+    version: 176,
+    up: (db) => {
+      // A project's folder lives on a computer, not on the hub. Every project with
+      // a `projects.path` gets that folder on the LOCAL computer (the desktop app's
+      // own, the only place such a path ever pointed) as `pending`, and the local
+      // computer as its default when it has none. The hub hands each pending folder
+      // to the computer when it connects (computer-project-sync.ts).
+      // Here, not at hub start: it is done before anything reads a project, and
+      // needs no `computers` row (there is no FK), so the folder shows from the
+      // first read — also on a first boot after skipped releases, before the local
+      // computer has ever enrolled. Migrations run in order, so it also runs
+      // before the release that drops the column.
+      // The column is left as is: a build from before still reads its paths.
+      // The local computer's id, frozen: `deterministicLocalComputerId('local-computer')`
+      // (computers/server/store.ts; migration.test.ts asserts they match).
+      const LOCAL = 'f01a216a-4803-4214-98eb-f9e28951e1bb'
+      db.prepare(
+        `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+           SELECT ?, id, path, 'pending', ? FROM projects
+            WHERE path IS NOT NULL AND path <> ''
+              AND NOT EXISTS (SELECT 1 FROM project_placements c
+                               WHERE c.computer_id = ? AND c.project_id = projects.id)`
+      ).run(LOCAL, Date.now(), LOCAL)
+      db.prepare(
+        `UPDATE projects SET default_computer_id = ?
+          WHERE default_computer_id IS NULL
+            AND EXISTS (SELECT 1 FROM project_placements c
+                         WHERE c.computer_id = ? AND c.project_id = projects.id
+                           AND c.status IN ('pending', 'ready'))`
+      ).run(LOCAL, LOCAL)
+    }
   }
 ]
 

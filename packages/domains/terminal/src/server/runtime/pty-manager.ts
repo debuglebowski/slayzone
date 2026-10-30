@@ -1629,8 +1629,15 @@ export async function createPty(
     // `brew shellenv` aborts with "current working directory must be readable
     // to $USER to run brew", which in turn breaks PATH for every CLI launched
     // through the shell (droid, etc.). Fall back to homedir in either case.
-    let effectiveCwd = transport ? transport.cwd : cwd || homedir()
-    if (!transport && effectiveCwd) {
+    //
+    // Only for a spawn on THIS machine. A spawn routed to a computer checks its cwd
+    // there (its jail, its disk): this hub's disk says nothing about it, and the
+    // hub's home folder is not a folder on that computer. An empty cwd travels as
+    // absent, so the computer starts the agent in its own folder for the project or
+    // refuses with `project_not_placed`.
+    const onComputer = computerId != null
+    let effectiveCwd = transport ? transport.cwd : onComputer ? cwd || '' : cwd || homedir()
+    if (!transport && !onComputer && effectiveCwd) {
       const fallback = homedir()
       if (!existsSync(effectiveCwd)) {
         recordDiagnosticEvent({

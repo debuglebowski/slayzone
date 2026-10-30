@@ -20,6 +20,7 @@
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
@@ -90,7 +91,7 @@ async function readFileMap(filePath: string): Promise<Record<string, ProjectMap>
 
 async function writeFileMap(filePath: string, map: Record<string, ProjectMap>): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
-  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`
+  const tmpPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`
   await writeFile(tmpPath, `${JSON.stringify(map, null, 2)}\n`, { mode: 0o600 })
   try {
     await rename(tmpPath, filePath)
@@ -101,13 +102,32 @@ async function writeFileMap(filePath: string, map: Record<string, ProjectMap>): 
 }
 
 /**
+ * Pending writes per file. Every write re-reads the whole file, changes one entry
+ * and replaces it, so two writes in flight at once would each drop the other's
+ * entry. Chaining them per file — across every store sharing it, including stores
+ * for other hubs in this process — makes each one see the previous one's result.
+ */
+const writeQueues = new Map<string, Promise<unknown>>()
+
+function serialized<T>(filePath: string, write: () => Promise<T>): Promise<T> {
+  const previous = writeQueues.get(filePath) ?? Promise.resolve()
+  const next = previous.then(write, write)
+  // The queue only orders; a failed write must not fail the writes queued after it.
+  writeQueues.set(
+    filePath,
+    next.catch(() => undefined)
+  )
+  return next
+}
+
+/**
  * Load the store for one hub.
  *
  * Reads once at construction and serves `get` from memory: resolving a cwd sits
  * directly in the agent-spawn path, and a disk read per spawn would put file I/O
  * between the user pressing start and the pty existing. Writes are write-through,
- * and re-read the whole file first so a concurrent computer for a DIFFERENT hub
- * cannot be clobbered by this one's write.
+ * queued per file, and re-read the whole file first so a concurrent computer for a
+ * DIFFERENT hub cannot be clobbered by this one's write.
  */
 export async function createProjectPathStore(
   hubHost: string,
@@ -124,22 +144,26 @@ export async function createProjectPathStore(
       return cache[projectId] ?? null
     },
 
-    async set(projectId, path) {
-      const entry: ProjectPathEntry = { path, updatedAt: Date.now() }
-      const all = await readFileMap(filePath)
-      all[hubHost] = { ...(all[hubHost] ?? {}), [projectId]: entry }
-      await writeFileMap(filePath, all)
-      cache = all[hubHost]
-      return entry
+    set(projectId, path) {
+      return serialized(filePath, async () => {
+        const entry: ProjectPathEntry = { path, updatedAt: Date.now() }
+        const all = await readFileMap(filePath)
+        all[hubHost] = { ...(all[hubHost] ?? {}), [projectId]: entry }
+        await writeFileMap(filePath, all)
+        cache = all[hubHost]
+        return entry
+      })
     },
 
-    async forget(projectId) {
-      const all = await readFileMap(filePath)
-      const forHub = { ...(all[hubHost] ?? {}) }
-      delete forHub[projectId]
-      all[hubHost] = forHub
-      await writeFileMap(filePath, all)
-      cache = forHub
+    forget(projectId) {
+      return serialized(filePath, async () => {
+        const all = await readFileMap(filePath)
+        const forHub = { ...(all[hubHost] ?? {}) }
+        delete forHub[projectId]
+        all[hubHost] = forHub
+        await writeFileMap(filePath, all)
+        cache = forHub
+      })
     },
 
     list() {

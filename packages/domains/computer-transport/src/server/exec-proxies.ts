@@ -97,7 +97,8 @@ import {
   ptyBackgroundJobsResultSchema,
   ptyDoctorResultSchema,
   ptyWarmSpawnResultSchema,
-  computerSetAllowedRootsResultSchema
+  computerSetAllowedRootsResultSchema,
+  isProjectNotPlacedError
 } from '../shared/frames'
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -1245,7 +1246,15 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
               // through the buffering emitter, so a not-yet-subscribed caller still
               // gets it) AND propagate, so a caller awaiting confirmation sees the
               // failure rather than a promise that never settles.
-              finalize(entry, null, null, 'spawn-failed', errorMessage(err))
+              // A project with no folder on that computer is its own reason: the fix
+              // is picking the folder, not anything about the computer.
+              finalize(
+                entry,
+                null,
+                null,
+                isProjectNotPlacedError(err) ? 'project-not-placed' : 'spawn-failed',
+                errorMessage(err)
+              )
               reject(err)
             }
           )

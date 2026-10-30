@@ -2,7 +2,7 @@ import { createSuspenseCache } from '@slayzone/suspense'
 import { getTrpcClient, getHubClient, type TaskTrpcClient } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
-import type { Project } from '@slayzone/projects-contracts'
+import { placementOn, workComputerId, type Project } from '@slayzone/projects-contracts'
 import type { PanelVisibility, PanelSizes } from '@slayzone/task-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import { normalizeOverrides } from './usePanelSizes'
@@ -123,9 +123,12 @@ async function fetchTaskDetailUncapped(
 
   // Resolve project + path validation
   const project = projects.find((p) => p.id === loadedTask.project_id) ?? null
-  let projectPathMissing = false
-  if (project?.path) {
-    projectPathMissing = await checkProjectPathMissing(trpc, loadedTask.id, project.path)
+  // The folder on the computer this task's work runs on. One that computer already
+  // reported gone is missing without asking again.
+  const folder = placementOn(project, workComputerId(loadedTask, project))
+  let projectPathMissing = folder?.status === 'missing'
+  if (folder && (folder.status === 'ready' || folder.status === 'pending')) {
+    projectPathMissing = await checkProjectPathMissing(trpc, loadedTask.id, folder.path)
   }
 
   // Resolve parent task

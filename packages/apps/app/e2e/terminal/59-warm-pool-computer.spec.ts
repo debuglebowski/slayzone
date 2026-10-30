@@ -95,12 +95,15 @@ test.describe('Warm pool (computer-hosted)', () => {
     mainWindow,
     electronApp
   }) => {
-    const project = (await seed(mainWindow).createProject({
+    const project = await seed(mainWindow).createProject({
       name: 'WarmAdopt',
       color: '#a855f7',
       path: TEST_PROJECT_PATH
-    })) as { id: string; path: string }
+    })
     const projectId = project.id
+    // The folder as the computer recorded it (its real path), which is the folder
+    // the warm agent booted in.
+    const projectFolder = project.placements[0]?.path ?? TEST_PROJECT_PATH
     await mainWindow.evaluate(() =>
       window
         .getTrpcVanillaClient()
@@ -177,7 +180,11 @@ test.describe('Warm pool (computer-hosted)', () => {
           mode: 'claude-code',
           providerFlags: flags
         }),
-      { sId: sessionId, dir: project.path, flags: task.provider_config['claude-code']?.flags ?? '' }
+      {
+        sId: sessionId,
+        dir: projectFolder,
+        flags: task.provider_config['claude-code']?.flags ?? ''
+      }
     )
 
     // The warm agent's own ledger row is now this task's: it booted with this task's

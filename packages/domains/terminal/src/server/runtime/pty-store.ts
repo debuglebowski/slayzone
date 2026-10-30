@@ -31,6 +31,7 @@ import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty
 import type { TaskSessionStore } from './task-session-store'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
+import { resolveSpawnTarget } from './spawn-target'
 import { getPtyBackend } from './pty-backend'
 import { runDoctor } from './runtime-doctor'
 import { getAdapter, type ExecutionContext } from '../adapters'
@@ -326,20 +327,20 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     // to raise "no computer available". The pool now lives on the computer, so a claim
     // needs a computer rather than the absence of one.
     let warmClaim: ReturnType<typeof claimWarmShell> = null
-    const taskId = opts.sessionId.split(':')[0]
-    let computerId: string | null = null
-    // Resolved regardless of whether a warm agent is claimed: it is threaded into
-    // the spawn spec so the COMPUTER can resolve its own cwd when the caller has no
-    // absolute path to give (see PtySpawnSpec.projectId).
-    let projectId: string | null = null
+    // The computer, project and folder, decided here on the hub (spawn-target.ts).
+    // `projectId` also travels in the spawn spec so the computer can use its own
+    // record when the hub knows no folder (see PtySpawnSpec.projectId).
+    const { taskId, projectId, computerId, cwd } = await resolveSpawnTarget(
+      opts.sessionId,
+      opts.cwd,
+      lookups
+    )
     if (taskId) {
-      computerId = await lookups.resolveComputerId(taskId)
-      projectId = await lookups.getTaskProjectId(taskId)
       if (computerId != null) {
         warmClaim = claimWarmShell({
           taskId,
           mode: modeId,
-          cwd: opts.cwd,
+          cwd,
           resuming: !!opts.existingConversationId,
           computerId,
           // The warm agent baked the mode's default flags; only adopt it when
@@ -354,7 +355,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
       sessionId: opts.sessionId,
       computerId,
       projectId,
-      cwd: opts.cwd,
+      cwd,
       conversationId: opts.conversationId,
       existingConversationId: opts.existingConversationId,
       mode: modeId as TerminalMode,

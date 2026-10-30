@@ -651,3 +651,39 @@ describe('createProcHandlers — spawn attempts and tombstones', () => {
     proc.disposeAll()
   })
 })
+
+// A chat agent used to fall back to the first allowed root (usually $HOME) —
+// silently running in the wrong tree. It must be refused like a terminal agent.
+describe('proc.spawn for a project this computer has no folder for', () => {
+  it('is refused with project_not_placed instead of starting in an allowed root', async () => {
+    const { ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx, () => ({ get: () => null }))
+    let err: unknown = null
+    try {
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'p-np',
+        command: 'sh',
+        args: ['-c', 'true'],
+        projectId: 'p-x'
+      })
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.projectNotPlaced)
+    proc.disposeAll()
+  })
+
+  it('a spawn with no project and no folder still starts in the first allowed root', async () => {
+    const { notifies, ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx, () => ({ get: () => null }))
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: 'p-root',
+      command: 'sh',
+      args: ['-c', 'pwd']
+    })
+    await waitFor(() => exitFor(notifies, 'p-root') !== undefined)
+    expect(realpathSync(dataFor(notifies, 'p-root', 'stdout').trim())).toBe(realpathSync(roots[0]))
+    proc.disposeAll()
+  })
+})

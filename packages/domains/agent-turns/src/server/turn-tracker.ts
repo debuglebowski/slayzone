@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { localProjectRoot } from '@slayzone/computers/server'
 import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { snapshotWorktree, deleteTurnRef, diffIsEmptyCached, diffIsEmpty } from './git-snapshot'
@@ -28,8 +29,9 @@ function canonical(p: string): string {
 }
 
 /**
- * Lookup task_id + git repo path for a chat tab. Falls back to project.path
- * when task.worktree_path is empty. Returns null if no usable repo path.
+ * Lookup task_id + git repo path for a chat tab. Falls back to the project's
+ * folder when task.worktree_path is empty — the one on the local computer, since
+ * the git snapshot reads THIS machine's disk. Returns null if no usable repo path.
  */
 async function resolveTabContext(
   db: SlayzoneDb,
@@ -40,14 +42,11 @@ async function resolveTabContext(
     | undefined
   if (!tab) return null
   const row = (await db
-    .prepare(
-      `SELECT t.worktree_path, p.path AS project_path
-       FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
-       WHERE t.id = ?`
-    )
-    .get(tab.task_id)) as { worktree_path: string | null; project_path: string | null } | undefined
+    .prepare(`SELECT worktree_path, project_id FROM tasks WHERE id = ?`)
+    .get(tab.task_id)) as { worktree_path: string | null; project_id: string | null } | undefined
   if (!row) return null
-  const repoPath = row.worktree_path || row.project_path
+  const repoPath =
+    row.worktree_path || (row.project_id ? await localProjectRoot(db, row.project_id) : null)
   if (!repoPath) return null
   return { taskId: tab.task_id, worktreePath: canonical(repoPath) }
 }

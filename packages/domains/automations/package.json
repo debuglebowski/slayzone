@@ -17,9 +17,12 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/computers": "workspace:*",
     "@slayzone/history": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
@@ -27,9 +30,7 @@
     "@trpc/server": "^11.19.0",
     "date-fns": "^4.4.0",
     "lucide-react": "^1.48.0",
-    "zod": "^4.3.5",
-    "@slayzone/platform": "workspace:*",
-    "@slayzone/terminal": "workspace:*"
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "react": "^19.3.1"

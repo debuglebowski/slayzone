@@ -1,4 +1,5 @@
 import type { ColumnConfig } from '@slayzone/workflow'
+import type { ProjectPlacement } from '@slayzone/computers/shared'
 
 export type ExecutionContext =
   | { type: 'host' }
@@ -40,10 +41,20 @@ export interface ProjectLockConfig {
   disable_unlock_early?: boolean
 }
 
-export interface Project {
+/**
+ * A `projects` row as stored. What the hub returns to clients is {@link Project},
+ * which adds where the project's folder is on each computer — a row alone does
+ * not know that, so a bare row must never be handed out as a Project.
+ */
+export interface ProjectRecord {
   id: string
   name: string
   color: string
+  /**
+   * LEGACY: the hub's single folder column from before folders moved to
+   * computers. Read only to carry existing values over to the local computer, and
+   * where no computer exists at all. Dropped in the next release.
+   */
   path: string | null
   auto_create_worktree_on_task_create: number | null
   worktree_source_branch: string | null
@@ -78,8 +89,32 @@ export interface Project {
    * ownership existed until the hub assigns them (`ownership-backfill.ts`).
    */
   owner_user_id: string | null
+  /**
+   * The computer this project's work runs on unless a task names another. Null =
+   * none chosen; the hub then uses its connected default (see
+   * {@link Project.resolved_computer_id}).
+   */
+  default_computer_id: string | null
   created_at: string
   updated_at: string
+}
+
+/**
+ * A project as the hub returns it: the row plus where its folder is on each
+ * computer. Deliberately WITHOUT the row's legacy `path`: a folder belongs to a
+ * computer, so every reader names one (`projectRootOn` / `defaultProjectRoot` /
+ * `taskProjectRoot`) instead of trusting the hub's single column.
+ */
+export interface Project extends Omit<ProjectRecord, 'path'> {
+  /** Every computer's folder for this project, as the hub knows it. */
+  placements: ProjectPlacement[]
+  /**
+   * The computer the hub actually uses for this project's work right now:
+   * `default_computer_id`, else the connected default. Null = no computer at all.
+   * Clients read this instead of re-deriving it, so they never disagree with the
+   * computer an agent really starts on.
+   */
+  resolved_computer_id: string | null
 }
 
 /**
@@ -123,7 +158,10 @@ export interface DetectedRepo {
 export interface CreateProjectInput {
   name: string
   color: string
+  /** The project's folder on its computer. Optional: a project needs none. */
   path?: string
+  /** The project's default computer. Omitted = the caller's default computer. */
+  computerId?: string | null
   columnsConfig?: ColumnConfig[]
 }
 
@@ -131,6 +169,7 @@ export interface UpdateProjectInput {
   id: string
   name?: string
   color?: string
+  /** The project's folder on the computer the hub uses for it; null forgets it. */
   path?: string | null
   autoCreateWorktreeOnTaskCreate?: boolean | null
   worktreeSourceBranch?: string | null

@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { getRuntimeAdapters } from '@slayzone/task/server'
 
 /**
  * GET /api/tasks/:id — single-task detail.
@@ -26,11 +27,12 @@ export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
       const taskId = resolved.row.id
 
       // `project_path` is here for `slay tasks update --worktree-path`: deriving
-      // which repo owns a worktree needs the project's configured path, and the
-      // CLI must not read the hub's DB file to get it (that is exactly what broke
-      // against a hub on another machine).
+      // which repo owns a worktree needs the project's folder, and the CLI must
+      // not read the hub's DB file to get it (that is exactly what broke against a
+      // hub on another machine). It is the folder on the computer this task's work
+      // runs on — where its worktrees are.
       const task = await db.get<Record<string, unknown>>(
-        `SELECT t.*, p.name AS project_name, p.path AS project_path
+        `SELECT t.*, p.name AS project_name
          FROM tasks t JOIN projects p ON t.project_id = p.id
          WHERE t.id = ?`,
         [taskId]
@@ -39,6 +41,11 @@ export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
         res.status(404).json({ ok: false, error: `Task not found: ${req.params.id}` })
         return
       }
+      task.project_path = await getRuntimeAdapters().projectRootForTask(
+        db,
+        taskId,
+        task.project_id as string
+      )
 
       const tags = (
         await db.all<{ name: string }>(

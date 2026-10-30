@@ -9,6 +9,7 @@ import { ColorPicker } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { Project } from '@slayzone/projects-contracts'
+import { placementOn } from '@slayzone/projects-contracts'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/dialogs'
 import { SettingsTabIntro } from './project-settings-shared'
@@ -41,10 +42,13 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const [iconCacheKey, setIconCacheKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [iconBusy, setIconBusy] = useState(false)
-  // Default computer (hub/computer split). `default_computer_id` is a v149 column present
-  // at runtime (parseProject spreads the row) but not yet on the shared Project type
-  // — read via a narrow local cast. null = Local (in-process).
+  // Default computer (hub/computer split). null = none chosen; the hub then uses its
+  // connected default (`resolved_computer_id`).
   const [defaultComputerId, setDefaultComputerId] = useState<string | null>(null)
+  // The folder as recorded on the project's computer when the form was seeded —
+  // any status, so a folder the computer reported missing still shows (and is not
+  // forgotten by a save that did not touch it).
+  const [savedPath, setSavedPath] = useState('')
 
   // Re-seed the form from each new `project` object, first render included.
   // Adjusted during render (same trigger as a `[project]` effect) so no frame
@@ -54,13 +58,13 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setFormSource(project)
     setName(project.name)
     setColor(project.color)
-    setPath(project.path || '')
+    const recorded = placementOn(project, project.resolved_computer_id)?.path ?? ''
+    setPath(recorded)
+    setSavedPath(recorded)
     setIconLetters(project.icon_letters || '')
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
-    setDefaultComputerId(
-      (project as { default_computer_id?: string | null }).default_computer_id ?? null
-    )
+    setDefaultComputerId(project.default_computer_id)
   }
 
   const computers = computersQuery.data ?? []
@@ -125,7 +129,9 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
         id: project.id,
         name: name.trim(),
         color,
-        path: path || null,
+        // Only a changed folder is sent: it is recorded on the project's computer,
+        // and re-sending an unchanged one would be a needless round trip there.
+        ...(path !== savedPath ? { path: path || null } : {}),
         iconLetters: trimmedLetters.length > 0 ? trimmedLetters : null
       })
 

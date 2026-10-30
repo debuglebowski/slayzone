@@ -45,7 +45,8 @@ import {
   ptyWriteParamsSchema,
   RpcError,
   ComputerNotificationMethods,
-  ComputerTransportErrorCodes
+  ComputerTransportErrorCodes,
+  projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
@@ -215,11 +216,7 @@ export function createPtyHandlers(
     if (opts.cwd) return spawnCwd(opts.cwd, ctx.config.allowedRoots)
     if (!opts.projectId) throw new Error('pty.spawn needs either cwd or projectId')
     const entry = getProjectPaths?.()?.get(opts.projectId)
-    if (!entry) {
-      throw new Error(
-        `project ${opts.projectId} is not checked out on this computer — adopt a folder or enable remote git for it`
-      )
-    }
+    if (!entry) throw projectNotPlacedError(opts.projectId)
     return spawnCwd(entry.path, ctx.config.allowedRoots)
   }
 

@@ -18,6 +18,11 @@ const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-projects-')) }
 const caller = projectsRouter.createCaller(ctx)
 
+/** With no computers wired (this harness), a folder can only live in the legacy column. */
+const legacyPath = async (id: string): Promise<string | null> =>
+  (await h.slayDb.get<{ path: string | null }>('SELECT path FROM projects WHERE id = ?', [id]))!
+    .path
+
 const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
   try {
     await fn()
@@ -31,11 +36,11 @@ test('projects router: create defaults / path / columns reindex / sort_order at 
   const alpha = await caller.create({ name: 'Alpha', color: '#ff0000' })
   expect(alpha.name).toBe('Alpha')
   expect(alpha.color).toBe('#ff0000')
-  expect(alpha.path).toBeNull()
+  expect(await legacyPath(alpha.id)).toBeNull()
   expect(alpha.id).toBeTruthy()
 
   const beta = await caller.create({ name: 'Beta', color: '#0000ff', path: '/tmp/beta' })
-  expect(beta.path).toBe('/tmp/beta')
+  expect(await legacyPath(beta.id)).toBe('/tmp/beta')
 
   const cols = await caller.create({
     name: 'Columns Project',
@@ -68,7 +73,8 @@ test('projects router: list ordered by sort_order (non-decreasing)', async () =>
 test('projects router: update name / path / autoCreateWorktree set + null / no-op', async () => {
   const all = await caller.list()
   expect((await caller.update({ id: all[0].id, name: 'Gamma' })).name).toBe('Gamma')
-  expect((await caller.update({ id: all[1].id, path: '/tmp/new' })).path).toBe('/tmp/new')
+  await caller.update({ id: all[1].id, path: '/tmp/new' })
+  expect(await legacyPath(all[1].id)).toBe('/tmp/new')
   expect(
     (await caller.update({ id: all[0].id, autoCreateWorktreeOnTaskCreate: true }))
       .auto_create_worktree_on_task_create

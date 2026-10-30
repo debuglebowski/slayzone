@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { getProjectFolderHost, parseProject, projectFolders } from '@slayzone/projects/server'
 import { SettingsService, settingProjectId } from '@slayzone/settings-core/server'
 import type { AccessScope } from './access'
 import type {
@@ -81,10 +82,23 @@ async function exportAll(db: SlayzoneDb, caller: ExportImportCaller): Promise<Sl
   }
 }
 
+/**
+ * A bundle carries each project's folder as `path` — the one on the computer the
+ * hub uses for it (the hub column is empty for every project made since folders
+ * moved to computers). Import offers it to the importer's computer.
+ */
+async function withFolders(db: SlayzoneDb, projects: Row[]): Promise<Row[]> {
+  const folders = await projectFolders(
+    db,
+    projects.flatMap((p) => parseProject(p) ?? [])
+  )
+  return projects.map((p) => ({ ...p, path: folders.get(p.id as string) ?? null }))
+}
+
 /** Every row of every exported table: a hub without login. */
 async function wholeDatabase(db: SlayzoneDb): Promise<SlayExportData> {
   return {
-    projects: (await db.all('SELECT * FROM projects')) as Row[],
+    projects: await withFolders(db, (await db.all('SELECT * FROM projects')) as Row[]),
     tasks: (await db.all('SELECT * FROM tasks')) as Row[],
     tags: (await db.all('SELECT * FROM tags')) as Row[],
     task_tags: (await db.all('SELECT * FROM task_tags')) as Row[],
@@ -126,7 +140,7 @@ async function ownRows(
         .map(([key, value]) => ({ key, value }))
     : []
   return {
-    projects: await all(`SELECT * FROM projects WHERE id IN ${inProjects}`),
+    projects: await withFolders(db, await all(`SELECT * FROM projects WHERE id IN ${inProjects}`)),
     tasks: await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`),
     tags: await all(`SELECT * FROM tags WHERE project_id IN ${inProjects}`),
     task_tags: await all(
@@ -153,10 +167,9 @@ async function ownRows(
 }
 
 async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExportBundle> {
-  const project = (await db.get('SELECT * FROM projects WHERE id = ?', [projectId])) as
-    | Row
-    | undefined
-  if (!project) throw new Error(`Project ${projectId} not found`)
+  const row = (await db.get('SELECT * FROM projects WHERE id = ?', [projectId])) as Row | undefined
+  if (!row) throw new Error(`Project ${projectId} not found`)
+  const [project] = await withFolders(db, [row])
 
   const tasks = (await db.all('SELECT * FROM tasks WHERE project_id = ?', [projectId])) as Row[]
   const taskIds = tasks.map((t) => t.id as string)
@@ -240,7 +253,35 @@ async function importBundle(
     ownerUserId: caller.userId,
     projectIds: await caller.scope.accessibleProjectIds()
   } satisfies ImportTxnParams)
+  await placeImportedFolders(db, result.importedProjects ?? [])
   return result
+}
+
+/**
+ * A bundle's project `path` is a folder on whatever machine exported it. Offer it
+ * to the importer's default computer now, like a project created with a folder:
+ * kept if it exists there, recorded as missing if not, dropped if the computer
+ * refuses it. Without computers (no host) the imported column already holds it.
+ */
+async function placeImportedFolders(
+  db: SlayzoneDb,
+  imported: ReadonlyArray<{ id: string }>
+): Promise<void> {
+  const host = getProjectFolderHost()
+  if (!host || imported.length === 0) return
+  const computerId = await host.computerForNewProject()
+  if (!computerId) return
+  for (const { id } of imported) {
+    await db.run('UPDATE projects SET default_computer_id = ? WHERE id = ?', [computerId, id])
+    const row = await db.get<{ path: string | null }>('SELECT path FROM projects WHERE id = ?', [
+      id
+    ])
+    if (!row?.path) continue
+    await host.setFolder(computerId, id, row.path).catch(() => undefined)
+    // Offered, and whatever the computer answered, the hub column no longer holds
+    // it: left there it would be carried to the local computer on the next start.
+    await db.run('UPDATE projects SET path = NULL WHERE id = ?', [id])
+  }
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────

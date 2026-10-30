@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'fs'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildBaseEnv, maybeReinstallHooksForSpawn } from './pty-manager'
@@ -162,7 +161,11 @@ interface WarmDeps {
    * work.
    */
   refreshEnabled?: () => Promise<void>
-  getProjectRoot: (projectId: string) => Promise<string | null>
+  /**
+   * The project's folder on that computer, as the hub knows it. Whether it exists
+   * is the computer's to say: this hub's disk says nothing about a remote machine.
+   */
+  getProjectRoot: (projectId: string, computerId: string) => Promise<string | null>
   /**
    * Which computer a task in this project would spawn on. `null` ⇒ no usable
    * computer, so nothing is warmed — warming on a machine no task will resolve to
@@ -471,23 +474,29 @@ async function spawnWarm(projectId: string): Promise<void> {
   spawning.add(projectId)
   const spawnEpoch = epoch
   try {
-    const cwd = await deps.getProjectRoot(projectId)
-    // KNOWN LIMITATION: this probes the HUB's filesystem, but the warm agent now
-    // spawns on the computer's. Correct for a co-located computer (the overwhelmingly
-    // common case, and the only one pre-warm has ever been exercised in); for a
-    // genuinely remote computer it can bail on a path that exists there, or admit one
-    // that does not — in which case the spawn fails computer-side and is caught below
-    // as `warm.spawn_failed`, i.e. it degrades to "no warm agent", never to a wrong
-    // one. Fixing it properly needs a routed existence probe, which belongs with the
-    // broader remote-workspace question (where does a remote task's cwd come from at
-    // all) rather than here.
-    if (!cwd || !existsSync(cwd)) {
-      // Diagnostic (d6efb204): project root missing/nonexistent → silent bail.
+    // Which machine will this project's tasks actually run on? Warming anywhere
+    // else boots an agent (billable, with no task) that nothing can ever adopt.
+    const computerId = await deps.resolveComputerId(projectId)
+    if (computerId == null) {
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'warm.spawn_skip_no_computer',
+        payload: { projectId }
+      })
+      return
+    }
+    // The folder on THAT computer. A folder that is gone there makes the computer
+    // refuse the spawn, caught below as `warm.spawn_failed` — "no warm agent",
+    // never a wrong one.
+    const cwd = await deps.getProjectRoot(projectId, computerId)
+    if (!cwd) {
+      // Diagnostic (d6efb204): no folder known for the project → silent bail.
       recordDiagnosticEvent({
         level: 'warn',
         source: 'pty',
         event: 'warm.spawn_skip_no_cwd',
-        payload: { projectId, cwd: cwd ?? null }
+        payload: { projectId, computerId }
       })
       return
     }
@@ -508,18 +517,6 @@ async function spawnWarm(projectId: string): Promise<void> {
     // no task row to derive it from yet.
     const extraEnv = await buildMcpEnv(deps.db, taskId, WARM_MODE, projectId)
 
-    // Which machine will this project's tasks actually run on? Warming anywhere
-    // else boots an agent (billable, with no task) that nothing can ever adopt.
-    const computerId = await deps.resolveComputerId(projectId)
-    if (computerId == null) {
-      recordDiagnosticEvent({
-        level: 'info',
-        source: 'pty',
-        event: 'warm.spawn_skip_no_computer',
-        payload: { projectId }
-      })
-      return
-    }
     const backend = getPtyBackend()
     if (!backend.warmSpawn) {
       // Local/test backend: no warm pool. Agents run on computers, so there is no

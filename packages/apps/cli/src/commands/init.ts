@@ -96,18 +96,19 @@ function logSkillStats(stats: SkillStats, projectName: string): void {
  * (`resolveProjectRef`), else inferred from $PWD by the hub
  * (`resolveProjectByPath`). Both replace direct reads of the `projects` table.
  *
- * The cwd path is sent to the hub deliberately even though the hub may be another
- * machine: `projects.path` is what the operator configured, and inference only
- * succeeds when it happens to match — which is exactly the local case. A remote
- * hub simply 404s, with the same "No project found for directory" wording, so
- * `--project` is the answer there just as it always was for a pathless project.
+ * Inferred from $PWD, the hub also says which project folder contains it — the
+ * folder on THIS computer, which is where local files belong. (A project's folder
+ * is per computer; the hub's single answer for `--project` is the one on the
+ * computer it uses for the project, which need not be this one.)
  */
-async function resolveTargetProjectRef(explicit?: string): Promise<string> {
-  if (explicit) return explicit
+async function resolveTargetProject(
+  explicit?: string
+): Promise<{ ref: string; localFolder: string | null }> {
+  if (explicit) return { ref: explicit, localFolder: null }
   const { data } = await apiGet<{ ok: true; data: { id: string; name: string; path: string } }>(
     `/api/projects/resolve-by-path?path=${encodeURIComponent(process.cwd())}`
   )
-  return data.id
+  return { ref: data.id, localFolder: data.path }
 }
 
 /**
@@ -126,7 +127,7 @@ async function resolveTargetProjectRef(explicit?: string): Promise<string> {
  *    installed, and they are what the hub reads from anyway.
  */
 async function runInstall(opts: { writeInstructions: boolean; project?: string }): Promise<void> {
-  const projectRef = await resolveTargetProjectRef(opts.project)
+  const { ref: projectRef, localFolder } = await resolveTargetProject(opts.project)
 
   const { data } = await apiPost<{ ok: true; data: InstallSkillsResponse }>(
     `/api/projects/${encodeURIComponent(projectRef)}/skills`,
@@ -134,9 +135,11 @@ async function runInstall(opts: { writeInstructions: boolean; project?: string }
   )
   const { project, providers, stats, skills } = data
 
-  // A path only means something if it exists HERE. A hub on another machine
-  // reports ITS project path, which is not a directory on this box.
-  const localPath = project.path && fs.existsSync(project.path) ? project.path : null
+  // A path only means something if it exists HERE: the folder that contains $PWD
+  // when that is how the project was found, else the hub's answer — which may be a
+  // folder on another computer, and is then skipped.
+  const candidate = localFolder ?? project.path
+  const localPath = candidate && fs.existsSync(candidate) ? candidate : null
 
   if (opts.writeInstructions && localPath) {
     const written = writeInstructionsToDisk(localPath, providers)

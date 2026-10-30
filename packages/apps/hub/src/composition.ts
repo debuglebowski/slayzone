@@ -49,7 +49,13 @@ import {
   setTaskDeps
 } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task-contracts'
-import { handleTerminalStateChange, relocateProjectIcons } from '@slayzone/projects/server'
+import {
+  handleTerminalStateChange,
+  relocateProjectIcons,
+  setProjectComputerResolver,
+  setProjectFolderHost,
+  NoComputerForFolderError
+} from '@slayzone/projects/server'
 import {
   createPtyOps,
   createDbPtySpawnLookups,
@@ -160,9 +166,7 @@ import {
   defaultWorktreePolicyAdapters,
   getCurrentBranch
 } from '@slayzone/worktrees/server'
-import { missingRootsForProjects } from './local-computer-roots'
-import { seedProjectPaths } from './seed-computer-project-paths'
-import { recordComputerProjectPaths } from '@slayzone/computers/server'
+import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
 // unconditionally at boot (a hub always accepts computers).
 import {
@@ -194,7 +198,14 @@ import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
-import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/server'
+import {
+  DEFAULT_LOCAL_COMPUTER_NAME,
+  deterministicLocalComputerId,
+  getComputer,
+  localProjectRoot,
+  recordedProjectRoot,
+  setComputerBindingChangedListener
+} from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
 import { createComputerPlacement } from './computer-placement.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
@@ -493,7 +504,16 @@ export function composeServer(opts: {
     // hooks must run here: status→terminal kills the task's PTYs (→ pty:exit
     // streams to the renderer), status→in_progress suggests a respawn.
     onReachedTerminal: onTaskReachedTerminal,
-    requestPtyRespawn: broadcastRespawnRequest
+    requestPtyRespawn: broadcastRespawnRequest,
+    // A project's folder is per computer: a task's worktrees go next to the folder
+    // on the computer its work runs on. Read at call time (`placement` is built
+    // below, before any request can reach a task op). A computer that cannot be
+    // resolved (none connected; on a hub with login, none of the caller's) means no
+    // folder — never a failed read: REST/board reads go through here too.
+    projectRootForTask: async (_db: SlayzoneDb, taskId: string, projectId: string) => {
+      const computerId = await resolveComputerForTask(taskId).catch(() => null)
+      return computerId ? recordedProjectRoot(db, projectId, computerId) : null
+    }
   }
   configureTaskRuntimeAdapters(baseTaskAdapters)
   // Wire the cross-domain "task reached terminal status" seam to the REAL
@@ -696,7 +716,8 @@ export function composeServer(opts: {
   const dbLookups = createDbPtySpawnLookups(db)
   setPtySpawnLookups({
     ...dbLookups,
-    resolveComputerId: (taskId) => resolveComputerForTask(taskId)
+    resolveComputerId: (taskId) => resolveComputerForTask(taskId),
+    resolveProjectComputerId: (projectId) => resolveComputerForProject(projectId)
   })
   // `taskSessionStore`: task's ledger writes (task_conversations / agent_sessions),
   // injected because terminal must not import task.
@@ -751,12 +772,8 @@ export function composeServer(opts: {
     // above would otherwise stay stale until the next boot — i.e. changing the
     // startup mode in Settings did nothing until restart.
     refreshEnabled: refreshPrewarm,
-    getProjectRoot: async (projectId) => {
-      const row = await db.get<{ path?: string }>('SELECT path FROM projects WHERE id = ?', [
-        projectId
-      ])
-      return row?.path ?? null
-    },
+    // The project's folder on the computer it will warm on (hub copy).
+    getProjectRoot: (projectId, computerId) => recordedProjectRoot(db, projectId, computerId),
     // Warm on the computer this project's tasks will actually resolve to. Reads the
     // project's default binding through the SAME resolver a spawn uses, so a warm
     // agent is never booted on a machine no task will land on.
@@ -850,16 +867,12 @@ export function composeServer(opts: {
   // longer inits it in local mode (would double-spawn auto-restart processes).
   bootBestEffort('process-manager-init', () => initProcessManager(db))
   // Project-scoped processes re-resolve their cwd from the project's CURRENT
-  // path at every spawn/restart (see doSpawn) instead of trusting whatever
+  // folder at every spawn/restart (see doSpawn) instead of trusting whatever
   // was snapshotted into the row at creation — a renamed/moved project
   // folder used to leave every process created before the move permanently
-  // pointed at a stale, possibly-deleted directory.
-  setProjectCwdResolver(async (projectId) => {
-    const row = await db.get<{ path?: string }>('SELECT path FROM projects WHERE id = ?', [
-      projectId
-    ])
-    return row?.path ?? null
-  })
+  // pointed at a stale, possibly-deleted directory. They run on THIS machine, so
+  // the folder is the local computer's; none there = none.
+  setProjectCwdResolver((projectId) => localProjectRoot(db, projectId))
   setProcessesDeps({
     create: createProcess,
     spawn: spawnProcess,
@@ -1507,11 +1520,7 @@ export function composeServer(opts: {
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
-    let widenLocalComputerRoots: (computerId: string, computerName: string) => Promise<void> =
-      async () => undefined
-    let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> =
-      async () => undefined
-    let mirrorComputerProjectPaths: (computerId: string) => Promise<void> = async () => undefined
+    let syncComputerProjects: (computerId: string) => Promise<void> = async () => undefined
     const computerGateway = createHubComputerGateway({
       ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
       // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
@@ -1550,11 +1559,8 @@ export function composeServer(opts: {
     // whatever this hub is no longer tracking.
     computerGateway.events.on('computer-connected', ({ computer }) => {
       void reapOrphanWarms(computer.computerId)
-      // A nameless descriptor (`hello` reconnect before the roster fills) can
-      // never match the local computer's name, so it is correctly skipped.
-      void widenLocalComputerRoots(computer.computerId, computer.name ?? '')
-      void seedLocalProjectPaths(computer.computerId, computer.name ?? '')
-      void mirrorComputerProjectPaths(computer.computerId)
+      // Project folders: one ordered sequence per computer (computer-project-sync.ts).
+      void syncComputerProjects(computer.computerId)
     })
     // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
     // servers, not agents. `doSpawn` is synchronous and also driven by restart
@@ -1656,129 +1662,86 @@ export function composeServer(opts: {
       local: localWorkspaceFs,
       gate: placement.gate
     })
-    // The supervised local computer defaults its jail to `[homedir()]`, but the
-    // desktop app that used to do this work had no jail at all — so routing the
-    // filesystem would have silently broken every project outside $HOME. Widen
-    // to cover what already works. See ./local-computer-roots.ts for why the unit
-    // is the project's PARENT (the default worktree layout is a sibling dir) and
-    // why only the LOCAL computer is touched.
-    widenLocalComputerRoots = async (computerId: string, computerName: string): Promise<void> => {
-      if (computerName !== localComputerName) return
-      try {
-        const { roots } = await workspaceFs.listRoots(computerId)
-        // On the owner's behalf only: a project of anyone else's never widens this
-        // computer's jail (T-19). Every project without login.
-        const rows = await ownProjects(
-          computerId,
-          await db.all<{ id: string; path: string | null }>(
-            'SELECT id, path FROM projects WHERE path IS NOT NULL'
+    // Project folders: where each computer keeps each project, kept in step between
+    // the computer's own record and the hub's copy. The local computer is matched by
+    // its deterministic id (re-enrollment keeps it), never by name.
+    const projectSync = createComputerProjectSync({
+      db,
+      localComputerId: deterministicLocalComputerId(localComputerName),
+      ops: {
+        listRoots: (computerId) => workspaceFs.listRoots(computerId),
+        setAllowedRoots: (computerId, roots) => workspaceFs.setAllowedRoots(computerId, roots),
+        pathExists: (computerId, path) => workspaceFs.pathExists(computerId, path),
+        setProjectPath: (computerId, projectId, path) =>
+          workspaceFs.setProjectPath(computerId, projectId, path),
+        forgetProjectPath: (computerId, projectId) =>
+          workspaceFs.forgetProjectPath(computerId, projectId),
+        listProjectPaths: async (computerId) => {
+          const listed = projectListResultSchema.parse(
+            await computerGateway.request(computerId, HubToComputerMethods.projectList, {})
           )
-        )
-        const additions = missingRootsForProjects([...new Set(rows.map((r) => r.path))], roots)
-        if (additions.length === 0) return
-        const applied = await workspaceFs.setAllowedRoots(computerId, [...roots, ...additions])
-        recordDiagnosticEvent({
-          level: 'info',
-          source: 'server',
-          event: 'computer.roots_widened',
-          message: `local computer jail widened for ${additions.length} project location(s)`,
-          payload: { computerId, additions, applied: applied.roots, rejected: applied.rejected }
-        })
-      } catch (err) {
-        // Best-effort: a computer that refuses this is still usable for everything
-        // inside its existing jail, and the user can widen it by hand.
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'server',
-          event: 'computer.roots_widen_failed',
-          message: err instanceof Error ? err.message : String(err),
-          payload: { computerId }
-        })
-      }
-    }
-    // Hand the legacy hub-side `projects.path` values to the local computer once,
-    // so deleting that column does not blank every project an existing install
-    // has. Local computer only: a remote computer's disk is a different machine, and
-    // seeding it with the hub's paths would record mappings wrong by
-    // construction — the exact assumption this change removes.
-    seedLocalProjectPaths = async (computerId: string, computerName: string): Promise<void> => {
-      if (computerName !== localComputerName) return
-      try {
-        // The owner's projects only, like the roots above: another user's project id
-        // and path never reach this computer (T-19).
-        const rows = await ownProjects(
-          computerId,
-          await db.all<{ id: string; path: string | null }>(
-            'SELECT id, path FROM projects WHERE path IS NOT NULL'
+          return listed.projects.map((p) => ({ projectId: p.projectId, path: p.path }))
+        }
+      },
+      // A computer places only its owner's projects (T-19): a report naming anyone
+      // else's would make paths on it resolve to their project (access.ts `path`).
+      servedProjects: async (computerId, projectIds) =>
+        (
+          await ownProjects(
+            computerId,
+            projectIds.map((id) => ({ id }))
           )
-        )
-        if (rows.length === 0) return
-        const outcome = await seedProjectPaths(rows, {
-          resolve: (projectId) => workspaceFs.resolveProjectPath(computerId, projectId),
-          exists: (path) => workspaceFs.pathExists(computerId, path),
-          adopt: (projectId, path) => workspaceFs.setProjectPath(computerId, projectId, path)
-        })
-        if (outcome.adopted.length === 0) return
-        recordDiagnosticEvent({
-          level: 'info',
-          source: 'server',
-          event: 'computer.project_paths_seeded',
-          message: `local computer adopted ${outcome.adopted.length} project path(s)`,
-          payload: { computerId, ...outcome }
-        })
-      } catch (err) {
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'server',
-          event: 'computer.project_paths_seed_failed',
-          message: err instanceof Error ? err.message : String(err),
-          payload: { computerId }
-        })
-      }
+        ).map((r) => r.id),
+      onChanged: () => notifyTasksChanged(),
+      record: ({ level, event, message, payload }) =>
+        recordDiagnosticEvent({ level, source: 'server', event, message, payload })
+    })
+    syncComputerProjects = (computerId) => projectSync.onConnect(computerId)
+    // Every Project the hub returns names the computer its work really runs on.
+    // Without login a stored default IS the answer (forProject would re-read it);
+    // with login it must still pass the owner check.
+    setProjectComputerResolver((project) =>
+      !opts.requireLogin && project.default_computer_id
+        ? Promise.resolve(project.default_computer_id)
+        : placement.forProject(project.id)
+    )
+    // A changed computer choice changes which folder clients show.
+    setComputerBindingChangedListener(() => notifyTasksChanged())
+    // Every write of a project's folder (create, update, REST, CLI) lands on a
+    // computer through the same per-computer sequence as connect.
+    // Right after the app starts, the local computer is registered but not yet
+    // connected: a folder chosen then is recorded for it as pending and delivered when
+    // it connects, instead of being refused. Only for a caller who may use it.
+    const localComputerId = deterministicLocalComputerId(localComputerName)
+    const registeredLocalComputer = async (): Promise<string | null> => {
+      const local = await getComputer(db, localComputerId)
+      if (!local || local.revoked_at != null) return null
+      return placement.forTarget({ computerId: localComputerId }).catch(() => null)
     }
-    // Pull the computer's own project→path map into the hub's mirror. The computer
-    // authors it; this only records. The mirror serves the one direction a computer
-    // cannot answer alone — `resolve-by-path`, i.e. `slay` asking which project
-    // its working directory belongs to.
-    //
-    // Runs AFTER the seed above, on every connect, so a re-pointed checkout or a
-    // project the computer has since dropped is reflected rather than remembered.
-    mirrorComputerProjectPaths = async (computerId: string): Promise<void> => {
-      try {
-        const listed = await computerGateway.request(
-          computerId,
-          HubToComputerMethods.projectList,
-          {}
-        )
-        const parsed = projectListResultSchema.safeParse(listed)
-        if (!parsed.success) return
-        // A computer places only its owner's projects (T-19): a report naming anyone
-        // else's would make paths on it resolve to their project (access.ts `path`).
-        await recordComputerProjectPaths(
-          db,
-          computerId,
-          (
-            await ownProjects(
-              computerId,
-              parsed.data.projects.map((p) => ({ id: p.projectId, path: p.path }))
-            )
-          ).map((p) => ({ projectId: p.id, path: p.path }))
-        )
-      } catch (err) {
-        // A computer too old to answer `project.list`, or one that dropped
-        // mid-request. The mirror simply keeps whatever it last knew, and
-        // `resolve-by-path` still has the legacy column to fall back on.
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'server',
-          event: 'computer.project_mirror_failed',
-          message: err instanceof Error ? err.message : String(err),
-          payload: { computerId }
-        })
-      }
-    }
+    setProjectFolderHost({
+      computerForNewProject: async () =>
+        (await placement.forCaller()) ?? (await registeredLocalComputer()),
+      computerForProject: async (projectId) =>
+        (await placement.forProject(projectId)) ?? (await registeredLocalComputer()),
+      setFolder: (computerId, projectId, path) =>
+        projectSync.setFolder(computerId, projectId, path),
+      forgetFolder: (computerId, projectId) => projectSync.forgetFolder(computerId, projectId)
+    })
     setWorkspaceDeps({
-      fs: userWorkspaceFs,
+      fs: {
+        ...userWorkspaceFs,
+        // Choosing a folder updates the computer AND the hub's copy at once, under
+        // the computer's lock. No computer = nowhere to record it: refused, rather
+        // than kept in this process's memory and lost on restart.
+        setProjectPath: async (computerId, projectId, path) => {
+          if (computerId == null) throw new NoComputerForFolderError()
+          return projectSync.setFolder(computerId, projectId, path)
+        },
+        forgetProjectPath: async (computerId, projectId) => {
+          if (computerId == null) throw new NoComputerForFolderError()
+          await projectSync.forgetFolder(computerId, projectId)
+        }
+      },
       // An explicit computer (the caller's own, with login), else the task's, else the
       // project's, else the caller's default — see ./computer-placement.ts.
       resolveComputer: (target) => placement.forTarget(target),

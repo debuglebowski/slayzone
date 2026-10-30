@@ -29,3 +29,13 @@ export * from './auto-start'
 export * from './spawn-conversation-ids'
 export type { ConversationOrigin } from './conversation-origin'
 export * from './bg-shell-helpers'
+
+/**
+ * Session ids are `<taskId>:<…>`, except the project-wide agent panel's, which has
+ * no task: `__global-agent-panel:<projectId>:<n>`.
+ */
+export const GLOBAL_AGENT_PANEL_SESSION_OWNER = '__global-agent-panel'
+
+export function globalAgentPanelSessionId(projectId: string, index: number): string {
+  return `${GLOBAL_AGENT_PANEL_SESSION_OWNER}:${projectId}:${index}`
+}

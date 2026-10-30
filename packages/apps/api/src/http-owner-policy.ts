@@ -103,6 +103,7 @@ const session = ref('session', 'exact')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
+const computer = ref('computer', 'exact')
 const automation = ref('automation', 'exact')
 const automationPrefix = ref('automation', 'prefix')
 
@@ -292,7 +293,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'GET /api/projects': listed(dataRows('id', 'project')),
   // A project's path is a registered root (access.ts `path`): pointing one at someone
   // else's directory would make it yours.
-  'POST /api/projects': checked(path('body.path')),
+  'POST /api/projects': checked(path('body.path'), computer('body.computerId')),
   'PATCH /api/projects/:id': checked(projectRef('params.id'), path('body.path')),
   'POST /api/projects/:id/skills': checked(projectRef('params.id')),
   'GET /api/projects/resolve-by-path': then(checked(path('query.path')), dataOne('id', 'project')),

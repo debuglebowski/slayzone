@@ -16,6 +16,7 @@ const createProjectInput = z.object({
   name: z.string().min(1),
   color: z.string(),
   path: z.string().optional(),
+  computerId: z.string().nullable().optional(),
   columnsConfig: z.array(z.unknown()).optional()
 })
 

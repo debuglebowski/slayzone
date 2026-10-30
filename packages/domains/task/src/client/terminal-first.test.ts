@@ -14,7 +14,12 @@ import {
 
 const task = (extra: Partial<Task> = {}): Task =>
   ({ id: 't1', worktree_path: null, base_dir: null, repo_name: null, ...extra }) as unknown as Task
-const project = { id: 'p', path: '/p', selected_repo: null } as unknown as Project
+const project = {
+  id: 'p',
+  placements: [{ computer_id: 'c1', path: '/p', status: 'ready' }],
+  resolved_computer_id: 'c1',
+  selected_repo: null
+} as unknown as Project
 
 afterEach(() => {
   __resetTerminalFirstForTest()

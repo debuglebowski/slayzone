@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { defaultProjectRoot, type Project } from '@slayzone/projects-contracts'
 import { useTRPCClient } from './trpc'
 
-export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: string | null }>): {
+/** Stale-skill counts per project, read from each project's folder on its computer. */
+export function useStaleSkillCounts(
+  projects: ReadonlyArray<Pick<Project, 'id' | 'placements' | 'resolved_computer_id'>>
+): {
   counts: Map<string, number>
   refresh: () => void
 } {
@@ -11,9 +15,10 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
 
   const pairs = useMemo(
     () =>
-      projects
-        .filter((p): p is { id: string; path: string } => !!p.path)
-        .map((p) => ({ projectId: p.id, projectPath: p.path })),
+      projects.flatMap((p) => {
+        const projectPath = defaultProjectRoot(p)
+        return projectPath ? [{ projectId: p.id, projectPath }] : []
+      }),
     [projects]
   )
 

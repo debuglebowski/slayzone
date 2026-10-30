@@ -14,6 +14,7 @@ import { OWNED_AT_SQL, resumableSessionSql } from './agent-sessions.js'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
+import { parseProject, projectFolders } from '@slayzone/projects/server'
 import {
   getColumnById,
   getDefaultStatus,
@@ -198,6 +199,20 @@ export interface TaskRuntimeAdapters {
    *  `defaultWorktreePolicyAdapters` from `worktrees/server`; unconfigured,
    *  each read throws. Overrides must be COMPLETE (shallow merge). */
   worktreePolicy: WorktreePolicyAdapters
+  /**
+   * The project's folder on the computer this task's work runs on — where its
+   * worktrees are made and removed (the hub's copy, `project_placements`).
+   * Unwired (no computers: tests, the fork sidecar): the legacy `projects.path`.
+   */
+  projectRootForTask: (db: SlayzoneDb, taskId: string, projectId: string) => Promise<string | null>
+}
+
+/** Before computers existed the hub held one path per project; with none wired it still does. */
+async function legacyProjectPath(db: SlayzoneDb, projectId: string): Promise<string | null> {
+  const row = await db.get<{ path: string | null }>('SELECT path FROM projects WHERE id = ?', [
+    projectId
+  ])
+  return row?.path ?? null
 }
 
 function notConfigured(what: string): Error {
@@ -279,7 +294,8 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
     )
   },
   worktrees: unconfiguredWorktreeExecAdapters,
-  worktreePolicy: unconfiguredWorktreePolicyAdapters
+  worktreePolicy: unconfiguredWorktreePolicyAdapters,
+  projectRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId)
 }
 
 let runtimeAdapters: TaskRuntimeAdapters = defaultRuntimeAdapters
@@ -363,13 +379,17 @@ export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promi
   }
   if (projectIds.size === 0) return tasks
 
+  // The project-wide folder, all projects at once (one placements query).
   const ids = [...projectIds]
-  const placeholders = ids.map(() => '?').join(',')
-  const rows = (await db.all<{ id: string; path: string }>(
-    `SELECT id, path FROM projects WHERE id IN (${placeholders})`,
+  const rows = await db.all<Record<string, unknown>>(
+    `SELECT * FROM projects WHERE id IN (${ids.map(() => '?').join(',')})`,
     ids
-  )) as { id: string; path: string }[]
-  const projectPaths = new Map(rows.filter((r) => r.path).map((r) => [r.id, r.path]))
+  )
+  const folders = await projectFolders(
+    db,
+    rows.flatMap((r) => parseProject(r) ?? [])
+  )
+  const projectPaths = new Map([...folders].filter((e): e is [string, string] => e[1] !== null))
 
   await Promise.all(
     [...projectPaths.values()].map((p) => runtimeAdapters.worktrees.ensureProjectWorktreeColors(p))
@@ -568,13 +588,12 @@ export async function cleanupTaskFull(
   )
   if ((sharedRow?.n ?? 0) > 0) return
 
-  const project = await db.get<{ path: string }>('SELECT path FROM projects WHERE id = ?', [
-    task.project_id
-  ])
+  // The worktree lives on the task's computer, next to the project's folder there.
+  const projectRoot = await runtimeAdapters.projectRootForTask(db, taskId, task.project_id)
 
-  if (project?.path) {
+  if (projectRoot) {
     try {
-      await runtimeAdapters.worktrees.removeWorktree(taskId, project.path, task.worktree_path)
+      await runtimeAdapters.worktrees.removeWorktree(taskId, projectRoot, task.worktree_path)
     } catch (err) {
       console.error('Failed to remove worktree:', err)
       runtimeAdapters.recordDiagnosticEvent({
@@ -669,11 +688,14 @@ async function createWorktreeForTask(
   taskTitle: string,
   repoName?: string | null
 ): Promise<void> {
-  const projectRow = await db.get<{
-    path: string | null
-    worktree_source_branch: string | null
-  }>('SELECT path, worktree_source_branch FROM projects WHERE id = ?', [projectId])
-  if (!projectRow?.path) {
+  const projectRow = await db.get<{ worktree_source_branch: string | null }>(
+    'SELECT worktree_source_branch FROM projects WHERE id = ?',
+    [projectId]
+  )
+  // The project's folder on the computer this task's work runs on: the worktree is
+  // made there, by that computer.
+  const projectPath = await runtimeAdapters.projectRootForTask(db, taskId, projectId)
+  if (!projectRow || !projectPath) {
     runtimeAdapters.recordDiagnosticEvent({
       level: 'info',
       source: 'task',
@@ -685,12 +707,12 @@ async function createWorktreeForTask(
     return
   }
 
-  // Resolve effective repo path (child repo if multi-repo, otherwise project.path)
-  let repoPath = projectRow.path
+  // Resolve effective repo path (child repo if multi-repo, otherwise the project folder)
+  let repoPath = projectPath
   let isRepo: boolean
   try {
     if (repoName) {
-      const childPath = path.join(projectRow.path, repoName)
+      const childPath = path.join(projectPath, repoName)
       if (await runtimeAdapters.worktrees.isGitRepo(taskId, childPath)) {
         repoPath = childPath
       }
@@ -765,7 +787,7 @@ async function createWorktreeForTask(
         taskId,
         projectId,
         message: err instanceof Error ? err.message : String(err),
-        payload: { projectPath: projectRow.path, worktreePath, branch, parentBranch, sourceBranch }
+        payload: { projectPath: projectPath, worktreePath, branch, parentBranch, sourceBranch }
       })
     } else {
       runtimeAdapters.recordDiagnosticEvent({
@@ -775,7 +797,7 @@ async function createWorktreeForTask(
         taskId,
         projectId,
         message: err instanceof Error ? err.message : String(err),
-        payload: { projectPath: projectRow.path, baseTemplate, basePath, branch, worktreePath }
+        payload: { projectPath: projectPath, baseTemplate, basePath, branch, worktreePath }
       })
     }
     return
@@ -796,7 +818,7 @@ async function createWorktreeForTask(
     event: 'task.auto_worktree_created',
     taskId,
     projectId,
-    payload: { projectPath: projectRow.path, worktreePath, branch, parentBranch, sourceBranch }
+    payload: { projectPath: projectPath, worktreePath, branch, parentBranch, sourceBranch }
   })
 
   // Block B: Post-creation extras (non-critical, won't affect linkage)

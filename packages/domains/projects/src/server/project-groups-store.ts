@@ -7,6 +7,7 @@ import type {
   TopLevelEntryRef
 } from '@slayzone/projects-contracts'
 import { parseProject } from './project-store'
+import { attachPlacements } from './project-placements'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './projects-txns'
 
@@ -27,9 +28,12 @@ type RawSnapshot = {
   groups: (Record<string, unknown> | undefined)[]
 }
 
-function parseSnapshot(snap: RawSnapshot): ProjectGroupsSnapshot {
+async function parseSnapshot(db: SlayzoneDb, snap: RawSnapshot): Promise<ProjectGroupsSnapshot> {
   return {
-    projects: snap.projects.map((row) => parseProject(row)) as Project[],
+    projects: await attachPlacements(
+      db,
+      snap.projects.flatMap((row) => parseProject(row) ?? [])
+    ),
     groups: snap.groups as unknown as ProjectGroup[]
   }
 }
@@ -52,7 +56,7 @@ export async function createProjectGroup(
     createdAt: now,
     updatedAt: now
   })
-  return parseSnapshot(snap)
+  return parseSnapshot(db, snap)
 }
 
 export async function createFolderWithProjects(
@@ -69,7 +73,7 @@ export async function createFolderWithProjects(
     updatedAt: now,
     projectIds
   })
-  return parseSnapshot(snap)
+  return parseSnapshot(db, snap)
 }
 
 export async function updateProjectGroup(
@@ -104,7 +108,7 @@ export async function deleteProjectGroup(
   id: string
 ): Promise<ProjectGroupsSnapshot> {
   const snap = await db.namedTxn('project-groups:delete', { id })
-  return parseSnapshot(snap)
+  return parseSnapshot(db, snap)
 }
 
 export async function moveProjectToGroup(
@@ -118,7 +122,7 @@ export async function moveProjectToGroup(
     groupId: groupId ?? null,
     targetIndex
   })
-  return parseSnapshot(snap)
+  return parseSnapshot(db, snap)
 }
 
 export async function reorderTopLevel(
@@ -127,7 +131,7 @@ export async function reorderTopLevel(
 ): Promise<ProjectGroupsSnapshot> {
   if (!Array.isArray(entries)) throw new Error('reorderTopLevel: entries must be an array')
   const snap = await db.namedTxn('project-groups:reorderTopLevel', { entries })
-  return parseSnapshot(snap)
+  return parseSnapshot(db, snap)
 }
 
 export async function reorderProjectsInGroup(
@@ -137,5 +141,5 @@ export async function reorderProjectsInGroup(
 ): Promise<ProjectGroupsSnapshot> {
   if (!Array.isArray(projectIds)) throw new Error('reorderWithin: projectIds must be an array')
   const snap = await db.namedTxn('project-groups:reorderWithin', { groupId, projectIds })
-  return parseSnapshot(snap)
+  return parseSnapshot(db, snap)
 }

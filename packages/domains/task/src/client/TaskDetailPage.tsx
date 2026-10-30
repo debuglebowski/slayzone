@@ -65,7 +65,8 @@ import {
   getDoneStatus,
   isCompletedStatus,
   isTerminalStatus,
-  resolveRepoPath
+  resolveRepoPath,
+  taskProjectRoot
 } from '@slayzone/projects-contracts'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { isChatSupported } from '@slayzone/terminal-contracts'
@@ -88,6 +89,7 @@ import {
   DropdownMenuTrigger
 } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
+import { toast } from '@slayzone/ui'
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -431,16 +433,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
   const [workspaceUnreachable, setWorkspaceUnreachable] = useState(false)
   const [baseDirPickerOpen, setBaseDirPickerOpen] = useState(false)
+  const [projectFolderPickerOpen, setProjectFolderPickerOpen] = useState(false)
+
+  // The project's folder on the computer this task's work runs on (a project has
+  // one folder per computer; see @slayzone/projects-contracts placements.ts).
+  const projectRoot = taskProjectRoot(task, project)
 
   // Multi-repo detection (drives the *task-bound* axis: terminal cwd, editor root, browser, worktree creation)
-  const detectedRepos = useTaskDetectedRepos(project?.path ?? null, project?.id)
+  const detectedRepos = useTaskDetectedRepos(projectRoot, project?.id)
   // Task-bound repo name: only what the user has explicitly bound to this task or to the project default.
   // Intentionally NO fallback to first-detected — wrapper folder stays wrapper folder for the bound axis,
   // so the terminal/editor don't silently jump into an arbitrary child repo.
   const effectiveRepoName = taskRepoName(task, project)
   const resolvedRepo = useMemo(
-    () => resolveRepoPath(project?.path ?? null, detectedRepos, effectiveRepoName),
-    [project?.path, detectedRepos, effectiveRepoName]
+    () => resolveRepoPath(projectRoot, detectedRepos, effectiveRepoName),
+    [projectRoot, detectedRepos, effectiveRepoName]
   )
   // Effective repo path (worktree > resolved child repo > project path) — drives terminal/editor/browser/worktree.
   // Shared with the hub's `task.startMainAgent` (../shared/main-terminal).
@@ -450,7 +457,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
   const taskBoundRepoForView = task?.worktree_path ?? resolvedRepo.path // worktree if present, else resolved child / project root
   const { repos: viewableRepos } = useTaskProjectRepos(
-    project?.path ?? null,
+    projectRoot,
     taskBoundRepoForView,
     project?.id
   )
@@ -867,7 +874,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     recheck: recheckSlayNudge
   } = useSlayNudge({
     projectId: task?.project_id ?? null,
-    projectPath: effectiveRepoPath ?? project?.path ?? null
+    projectPath: effectiveRepoPath ?? projectRoot
   })
 
   // Dev server URL detection
@@ -942,20 +949,20 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Re-check on window focus — the directory may have moved while we were away.
   useEffect(() => {
-    if (!project?.path) return
-    const handleFocus = (): void => void probeWorkspacePath(project.path!)
+    if (!projectRoot) return
+    const handleFocus = (): void => void probeWorkspacePath(projectRoot!)
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
-  }, [project?.path, probeWorkspacePath])
+  }, [projectRoot, probeWorkspacePath])
 
   useEffect(() => {
-    if (!project?.path) {
+    if (!projectRoot) {
       setProjectPathMissing(false)
       setWorkspaceUnreachable(false)
       return
     }
-    void probeWorkspacePath(project.path)
-  }, [project?.path, probeWorkspacePath])
+    void probeWorkspacePath(projectRoot)
+  }, [projectRoot, probeWorkspacePath])
 
   // Handle terminal ready - memoized to prevent effect cascade
   const handleTerminalReady = useCallback(
@@ -999,7 +1006,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     task,
     // The main agent's cwd, exactly as the terminal container gets it (a chat
     // tab is identified by it).
-    agentCwd: effectiveRepoPath || project?.path || '',
+    agentCwd: effectiveRepoPath || projectRoot || '',
     onTaskUpdated,
     shortcutActive,
     getMainSessionId,
@@ -1325,12 +1332,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Snapshot of the task's file-open context for the unified palette.
   // Captured into the dialog payload at the moment the shortcut fires; cleared on close.
   const buildTaskFileContext = useCallback((): SearchFileContext | undefined => {
-    if (!effectiveRepoPath) return undefined
+    if (!effectiveRepoPath || !task) return undefined
     return {
+      target: { taskId: task.id },
       projectPath: effectiveRepoPath,
       openFile: (filePath: string) => handleQuickOpenFile(filePath)
     }
-  }, [effectiveRepoPath, handleQuickOpenFile])
+  }, [effectiveRepoPath, task, handleQuickOpenFile])
 
   // Git panel shortcuts (Cmd+G general, Cmd+Shift+G changes): open on `tab`, switch
   // to it, or close when already showing it. Shared by the shortcuts and Cmd+K.
@@ -2918,12 +2926,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   />
                 ) : (
                   <>
-                    {projectPathMissing && project?.path && (
+                    {projectPathMissing && projectRoot && (
                       <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
                         <AlertTriangle className="h-4 w-4 text-amber-500" />
                         <span className="text-sm text-amber-500">
                           Project path not found:{' '}
-                          <code className="bg-amber-500/10 px-1 rounded">{project.path}</code>
+                          <code className="bg-amber-500/10 px-1 rounded">{projectRoot}</code>
                         </span>
                       </div>
                     )}
@@ -2996,7 +3004,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     )}
                     {showSlayNudge && (
                       <SlayNudgeBanner
-                        projectPath={effectiveRepoPath ?? project?.path ?? ''}
+                        projectPath={effectiveRepoPath ?? projectRoot ?? ''}
                         projectId={task?.project_id ?? project?.id}
                         onDismiss={dismissSlayNudge}
                         onSetupComplete={recheckSlayNudge}
@@ -3004,7 +3012,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     )}
                     {/* Terminal + mode bar wrapper */}
                     <div className="relative flex-1 min-h-0 overflow-hidden">
-                      {(effectiveRepoPath || project?.path) && !projectPathMissing ? (
+                      {(effectiveRepoPath || projectRoot) && !projectPathMissing ? (
                         <TerminalContainer
                           ref={terminalContainerRef}
                           paused={isResizing}
@@ -3013,7 +3021,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           isTemporary={task.is_temporary}
                           isActive={isActive}
                           hasShortcutFocus={shortcutActive}
-                          cwd={mainTerminalCwdFrom(effectiveRepoPath, project) ?? ''}
+                          cwd={mainTerminalCwdFrom(effectiveRepoPath, projectRoot) ?? ''}
                           // Spawn props shared with the terminal-first pane (one
                           // derivation — see mainTerminalProps). The hydration gate
                           // (`conversationHydrated`) holds the main tab's auto-spawn
@@ -3335,12 +3343,65 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         // a computer that was simply offline.
                         <div className="h-full flex items-center justify-center text-muted-foreground">
                           <div className="text-center p-8">
-                            {!project?.path && !effectiveRepoPath ? (
+                            {!projectRoot && !effectiveRepoPath ? (
+                              // A project needs no folder; its agents do, on the
+                              // computer this task runs on. Picked here, it is
+                              // recorded on that computer (the hub routes by task).
                               <>
-                                <p className="mb-2">No repository path configured</p>
-                                <p className="text-sm">
-                                  Set a repository path in project settings to use the terminal
-                                </p>
+                                {project?.placements?.length ? (
+                                  // It has one, on another computer: only possible
+                                  // with several, so naming computers is no news.
+                                  <>
+                                    <p className="mb-2">
+                                      This project has no folder on this task’s computer
+                                    </p>
+                                    <p className="text-sm">
+                                      Pick the folder its agents should start in.
+                                    </p>
+                                  </>
+                                ) : (
+                                  // No folder anywhere: the desktop app's own words,
+                                  // unchanged — its users need not know of computers.
+                                  <>
+                                    <p className="mb-2">No repository path configured</p>
+                                    <p className="text-sm">
+                                      Set a repository path in project settings to use the terminal
+                                    </p>
+                                  </>
+                                )}
+                                <Button
+                                  size="sm"
+                                  className="mt-3"
+                                  data-testid="pick-project-folder"
+                                  onClick={() => setProjectFolderPickerOpen(true)}
+                                >
+                                  Pick folder
+                                </Button>
+                                {projectFolderPickerOpen && (
+                                  <WorkspaceDirPicker
+                                    open={projectFolderPickerOpen}
+                                    onOpenChange={setProjectFolderPickerOpen}
+                                    onSelect={(picked) => {
+                                      // A refusal (outside that computer's allowed
+                                      // folders) is the user's to see and act on.
+                                      trpcClient.workspace.setProjectPath
+                                        .mutate({
+                                          taskId: task.id,
+                                          projectId: task.project_id,
+                                          path: picked
+                                        })
+                                        .catch((err: unknown) =>
+                                          toast.error("Couldn't use that folder", {
+                                            description:
+                                              err instanceof Error ? err.message : String(err)
+                                          })
+                                        )
+                                    }}
+                                    target={{ taskId: task.id }}
+                                    title="Select project folder"
+                                    allowCreate
+                                  />
+                                )}
                               </>
                             ) : workspaceUnreachable ? (
                               <>
@@ -3354,7 +3415,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <>
                                 <p className="mb-2">Folder not found on this task’s machine</p>
                                 <p className="text-sm font-mono text-xs">
-                                  {effectiveRepoPath ?? project?.path}
+                                  {effectiveRepoPath ?? projectRoot}
                                 </p>
                                 <p className="text-sm mt-2">
                                   It may have moved or been deleted. Pick it again in project
@@ -3672,7 +3733,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     <ProcessesPanel
                       taskId={task.id}
                       projectId={project?.id ?? null}
-                      cwd={effectiveRepoPath || project?.path}
+                      cwd={effectiveRepoPath || projectRoot}
                       terminalSessionId={getMainSessionId(task.id)}
                       onOpenUrl={openDevServerInBrowser}
                     />

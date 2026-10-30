@@ -25,3 +25,7 @@ test('no reason (or an unknown one) keeps the exit code line', () => {
   expect(describeExit(7, null)).toBe('Process exited with code 7')
   expect(describeExit(7, 'something-new')).toBe('Process exited with code 7')
 })
+
+test('a project with no folder on the computer says so, not that the computer failed', () => {
+  expect(describeExit(-1, 'project-not-placed')).toMatch(/no folder on that computer/)
+})

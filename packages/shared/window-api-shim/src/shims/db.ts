@@ -180,17 +180,11 @@ function localId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
 }
 
-function synthProject(entry: {
-  id: string
-  name: string
-  color: string
-  path?: string | null
-}): Project {
+function synthProject(entry: { id: string; name: string; color: string }): Project {
   return {
     id: entry.id,
     name: entry.name,
     color: entry.color || '#6366f1',
-    path: entry.path && entry.path.length > 0 ? entry.path : null,
     auto_create_worktree_on_task_create: null,
     worktree_source_branch: null,
     worktree_copy_behavior: null,
@@ -206,6 +200,10 @@ function synthProject(entry: {
     icon_letters: null,
     icon_image_path: null,
     owner_user_id: null,
+    default_computer_id: null,
+    // A local echo, not a hub read: no computer holds this project.
+    placements: [],
+    resolved_computer_id: null,
     sort_order: 0,
     created_at: nowIso(),
     updated_at: nowIso()
@@ -325,15 +323,13 @@ export const dbShim = {
     synthProject({
       id: localId('project'),
       name: data.name,
-      color: data.color ?? '',
-      path: data.path
+      color: data.color ?? ''
     }),
   updateProject: async (data: UpdateProjectInput): Promise<Project> =>
     synthProject({
       id: data.id,
       name: data.name ?? '',
-      color: data.color ?? '',
-      path: data.path
+      color: data.color ?? ''
     }),
   deleteProject: async (id: string): Promise<boolean> => {
     const remote = await projectsRemote()

@@ -7,7 +7,10 @@ export {
   uploadProjectIcon,
   relocateProjectIcons,
   reorderProjects,
-  parseProject
+  parseProject,
+  projectFolder,
+  projectFolders,
+  projectFolderOf
 } from './project-store'
 export {
   listProjectGroups,
@@ -20,6 +23,18 @@ export {
   reorderProjectsInGroup,
   type ProjectGroupsSnapshot
 } from './project-groups-store'
+export {
+  setProjectFolderHost,
+  getProjectFolderHost,
+  NoComputerForFolderError,
+  type ProjectFolderHost
+} from './project-folders'
+export {
+  attachPlacements,
+  attachPlacement,
+  setProjectComputerResolver,
+  type ProjectComputerResolver
+} from './project-placements'
 export {
   projectGroupsRouter,
   type ProjectGroupsRouter,

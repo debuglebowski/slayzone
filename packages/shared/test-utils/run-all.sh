@@ -39,6 +39,9 @@ run_harness packages/shared/settings-core/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
 run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/domains/projects/src/server/projects-router.test.ts
+# With computers, a project's folder is recorded on a computer (create / update /
+# refusal leaves no half-made project), never in the hub's projects.path column.
+run_harness packages/domains/projects/src/server/project-folders.test.ts
 run_harness packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 run_harness packages/domains/projects/src/server/project-groups-txns.test.ts
@@ -85,10 +88,10 @@ run_harness packages/apps/hub/src/computer-auth.test.ts
 run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
-# `projects.path` is being deleted; this is the one-time hand-off of its values to
-# the local computer. It must never overwrite a mapping the user re-pointed, and
-# must never record a path that is not on that machine.
-run_harness packages/apps/hub/src/seed-computer-project-paths.test.ts
+# Project folders: the ordered sequence each computer goes through on connect
+# (refresh, legacy paths → pending, widen, deliver, default backfill) and user folder
+# changes, serialized per computer so a refresh can never undo a folder just set.
+run_harness packages/apps/hub/src/computer-project-sync.test.ts
 # The hub composes the schema boot (migrations + domain boot steps).
 run_harness packages/apps/hub/src/bootstrap-schema.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
@@ -170,6 +173,9 @@ run_harness packages/apps/api/src/routers/upload-sources.test.ts
 run_harness packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+# The hub decides an agent's computer and folder before the spawn (task sessions and
+# the project-wide agent panel); an explicit folder wins, none known = none guessed.
+run_harness packages/domains/terminal/src/server/runtime/spawn-target.test.ts
 # Doctor asks the task's computer whether node-pty can start terminals there.
 run_harness packages/domains/terminal/src/server/runtime/runtime-doctor.test.ts
 # Idle sweep runs windowless: idle-close countdown/hibernate + silence-timer idle flip.
@@ -765,6 +771,7 @@ run_harness packages/domains/integrations/src/server/sync.test.ts
 run_harness packages/domains/projects/src/client/useProjectLockGuard.test.ts
 run_harness packages/domains/projects-contracts/src/columns.test.ts
 run_harness packages/domains/projects-contracts/src/resolve-repo.test.ts
+run_harness packages/domains/projects-contracts/src/placements.test.ts
 run_harness packages/domains/dialogs/src/useDialogStore.test.ts
 run_harness packages/domains/task-browser/src/client/dom-picker.test.ts
 run_harness packages/domains/task-browser/src/client/scale.test.ts

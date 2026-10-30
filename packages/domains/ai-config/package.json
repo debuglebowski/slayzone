@@ -22,6 +22,8 @@
     "@dagrejs/dagre": "^3.1.1",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
@@ -29,8 +31,7 @@
     "js-yaml": "^5.4.2",
     "lucide-react": "^1.48.0",
     "zod": "^4.3.5",
-    "zustand": "^5.0.15",
-    "@slayzone/settings-core": "workspace:*"
+    "zustand": "^5.0.15"
   },
   "peerDependencies": {
     "react": "^19.3.1",

@@ -3,6 +3,7 @@ import { defaultProviderFromMode, filterConfigurableCliProviders } from '@slayzo
 import type { CliProvider } from '@slayzone/ai-config/shared'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveProjectRef } from '../resolve'
+import { projectFolder } from '@slayzone/projects/server'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '@slayzone/ai-config/db'
 
@@ -85,7 +86,11 @@ export function registerProjectSkillsRoute(app: Express, deps: RestApiDeps): voi
       res.json({
         ok: true,
         data: {
-          project: { id: project.id, name: project.name, path: project.path },
+          project: {
+            id: project.id,
+            name: project.name,
+            path: await projectFolder(deps.db, project.id)
+          },
           providers,
           stats: {
             installed: result.installed,

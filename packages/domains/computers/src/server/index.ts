@@ -39,7 +39,18 @@ export {
 // reads it from one place. Single source of truth for the local computer's name.
 export { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 
-export { recordComputerProjectPaths, resolveProjectByPath } from './project-paths'
+export {
+  setPlacement,
+  recordComputerProjectPaths,
+  listPlacements,
+  getPlacement,
+  recordedProjectRoot,
+  localProjectRoot,
+  deletePlacement,
+  deleteProjectPlacements,
+  resolveProjectByPath,
+  type PlacementRow
+} from './project-paths'
 
 export {
   reconcileMachineForComputer,
@@ -78,6 +89,7 @@ export {
 export {
   setComputersRouterDeps,
   getComputersRouterDeps,
+  setComputerBindingChangedListener,
   type ComputersRouterDeps,
   type ComputerManagerAccess
 } from './computers-router-deps'

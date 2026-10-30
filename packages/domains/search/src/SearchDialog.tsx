@@ -98,7 +98,11 @@ function SearchPalette({
   // `files` is capped at the transport layer; `truncated` says so. Nothing here
   // acts on it yet.
   const { data: filesData } = useQuery({
-    ...trpc.fileEditor.listAllFiles.queryOptions({ rootPath: fileContext?.projectPath ?? '' }),
+    // Listed on the machine that holds the project's folder, not the caller's default.
+    ...trpc.fileEditor.listAllFiles.queryOptions({
+      rootPath: fileContext?.projectPath ?? '',
+      ...fileContext?.target
+    }),
     enabled: fileContext != null,
     staleTime: Infinity,
     gcTime: Infinity

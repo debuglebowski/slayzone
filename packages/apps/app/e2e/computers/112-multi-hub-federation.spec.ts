@@ -402,8 +402,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const { remoteProjectId, remoteTaskId } = await withHubClient(remoteHubUrl, async (c) => {
         const project = (await c.projects.create.mutate({
           name: 'Remote-P',
-          color: '#22c55e',
-          path: '/tmp'
+          color: '#22c55e'
         })) as { id: string }
         const task = (await c.task.create.mutate({
           projectId: project.id,
@@ -447,8 +446,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         const c = window.getTrpcVanillaClient()
         const project = await c.projects.create.mutate({
           name: 'Local-P',
-          color: '#3b82f6',
-          path: '/tmp'
+          color: '#3b82f6'
         })
         await c.task.create.mutate({ projectId: project.id, title: 'local task', status: 'todo' })
         return project.id as string
@@ -571,8 +569,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const remoteTaskId = await withHubClient(remoteHubUrl, async (c) => {
         const project = (await c.projects.create.mutate({
           name: 'Remote-P',
-          color: '#22c55e',
-          path: '/tmp'
+          color: '#22c55e'
         })) as { id: string }
         const task = (await c.task.create.mutate({
           projectId: project.id,
@@ -615,8 +612,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         const c = window.getTrpcVanillaClient()
         const project = await c.projects.create.mutate({
           name: 'Local-P',
-          color: '#3b82f6',
-          path: '/tmp'
+          color: '#3b82f6'
         })
         const task = await c.task.create.mutate({
           projectId: project.id,
@@ -707,8 +703,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const { regularId, temporaryId } = await withHubClient(remoteHubUrl, async (c) => {
         const project = (await c.projects.create.mutate({
           name: 'Remote-P',
-          color: '#22c55e',
-          path: '/tmp'
+          color: '#22c55e'
         })) as { id: string }
         const regular = (await c.task.create.mutate({
           projectId: project.id,
@@ -830,8 +825,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const remoteProjectId = await withHubClient(remoteHubUrl, async (c) => {
         const project = (await c.projects.create.mutate({
           name: 'Remote-P',
-          color: '#22c55e',
-          path: '/tmp'
+          color: '#22c55e'
         })) as { id: string }
         return project.id
       })
@@ -1264,7 +1258,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       // rail picks up pre-existing remote data on first live connect, not just
       // data created after.
       await withHubClient(remoteHubUrl, (c) =>
-        c.projects.create.mutate({ name: 'LiveAdd-P', color: '#f97316', path: '/tmp' })
+        c.projects.create.mutate({ name: 'LiveAdd-P', color: '#f97316' })
       )
 
       launched = await launchIsolatedElectron({

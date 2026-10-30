@@ -85,6 +85,7 @@ import {
   type WorkflowCategory
 } from '@slayzone/workflow'
 import { onTaskReachedTerminal } from '@slayzone/terminal/server'
+import { attachPlacement, parseProject } from '@slayzone/projects/server'
 import { createImportedTaskOp } from '@slayzone/task/server'
 import { getAdapter, getRegisteredProviders, normalizeGithubIssue } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'
@@ -2235,8 +2236,11 @@ export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChan
         )
         .run(mapping.id)
 
-      const project = await db.prepare('SELECT * FROM projects WHERE id = ?').get(input.projectId)
-      return project
+      const row = (await db.prepare('SELECT * FROM projects WHERE id = ?').get(input.projectId)) as
+        | Record<string, unknown>
+        | undefined
+      const record = parseProject(row)
+      return record ? attachPlacement(db, record) : undefined
     },
 
     resyncProviderStatuses: async (input: {

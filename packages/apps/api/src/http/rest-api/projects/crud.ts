@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { createProject, updateProject } from '@slayzone/projects/server'
+import { createProject, projectFolder, updateProject } from '@slayzone/projects/server'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { restPrincipalOf } from '../principal'
@@ -11,12 +11,13 @@ import { isResolveFailure, resolveProjectRef } from '../resolve'
  * (@slayzone/projects/server) — the same create/update ops behind the app's
  * tRPC `projects` router (sort_order allocation, columns remap, etc.).
  *
- * - POST  /api/projects   { name, color?, path?, columnsConfig? }
+ * - POST  /api/projects   { name, color?, path?, computerId?, columnsConfig? }
  * - PATCH /api/projects/:id  { name?, color?, path? }  (id or name substring)
  *
- * The CLI still owns filesystem side effects (mkdir/normalize of `path`) — it
- * resolves the absolute path and creates the directory before calling these,
- * so the routes persist metadata only. `iconsDir` is unused on these two paths
+ * `path` is the project's folder on its computer: `computerId` (create), else the
+ * caller's default computer; on update, the computer the hub uses for the project.
+ * The store records it on that computer (`project-folders.ts`). The CLI still
+ * normalizes `path` and creates the directory before calling these. `iconsDir` is unused on these two paths
  * (icons only mutate on the update fields the CLI never sends), so an empty
  * string is safe here — no icon file is ever touched.
  */
@@ -26,6 +27,7 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
       name?: unknown
       color?: unknown
       path?: unknown
+      computerId?: unknown
       columnsConfig?: unknown
     }
     if (typeof body.name !== 'string' || !body.name.trim()) {
@@ -35,6 +37,7 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
     const input: CreateProjectInput = { name: body.name, color: '#3b82f6' }
     if (typeof body.color === 'string') input.color = body.color
     if (typeof body.path === 'string') input.path = body.path
+    if (typeof body.computerId === 'string') input.computerId = body.computerId
     if (Array.isArray(body.columnsConfig)) {
       input.columnsConfig = body.columnsConfig as CreateProjectInput['columnsConfig']
     }
@@ -42,7 +45,7 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
       // Owner = the signed-in user; null on a hub without login (no principal).
       const project = await createProject(deps.db, input, restPrincipalOf(req)?.userId ?? null)
       deps.notifyRenderer()
-      res.json({ ok: true, data: project })
+      res.json({ ok: true, data: { ...project, path: await projectFolder(deps.db, project.id) } })
     } catch (err) {
       res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
@@ -66,7 +69,7 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
       if (body.path !== undefined) input.path = typeof body.path === 'string' ? body.path : null
       const project = await updateProject(deps.db, input, '')
       deps.notifyRenderer()
-      res.json({ ok: true, data: project })
+      res.json({ ok: true, data: { ...project, path: await projectFolder(deps.db, project.id) } })
     } catch (err) {
       res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

@@ -6,6 +6,7 @@ import type { ComputerConfig } from '../config'
 import { createSpawnAdmission } from '../spawn-admission'
 import { createPtyHandlers } from './pty'
 import type { ComputerDialer } from './types'
+import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
 
 interface Notify {
   method: string
@@ -1128,5 +1129,25 @@ describe('pty.doctor', () => {
       problems: unknown[]
     }
     expect(res.problems).toEqual([])
+  })
+})
+
+// Starting an agent somewhere else (the computer's launch directory, its home)
+// would look like it worked while running in the wrong tree.
+describe('pty.spawn for a project this computer has no folder for', () => {
+  it('is refused with project_not_placed, so the UI can offer to pick one', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, () => ({ get: () => null }))
+    const err = await Promise.resolve()
+      .then(() =>
+        pty.handlers['pty.spawn']({ sessionId: 's-np', command: 'cat', projectId: 'p-x' })
+      )
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.projectNotPlaced)
+    pty.disposeAll()
   })
 })

@@ -40,3 +40,19 @@ export function getComputersRouterDeps(): ComputersRouterDeps {
     )
   return deps
 }
+
+/**
+ * Called after a task's or project's computer changes. The hub reloads clients'
+ * boards: which computer a project uses decides which folder they show, and every
+ * other window must see the change too. Unset (tests, a host without clients):
+ * nothing to tell.
+ */
+let onBindingChanged: () => void = () => undefined
+
+export function setComputerBindingChangedListener(listener: (() => void) | null): void {
+  onBindingChanged = listener ?? (() => undefined)
+}
+
+export function notifyComputerBindingChanged(): void {
+  onBindingChanged()
+}

@@ -6,15 +6,20 @@ import type {
   ColumnConfig,
   CreateProjectInput,
   Project,
+  ProjectRecord,
   UpdateProjectInput
 } from '@slayzone/projects-contracts'
+import { deleteProjectPlacements } from '@slayzone/computers/server'
 import {
+  defaultProjectRoot,
   parseColumnsConfig,
   prepareProjectCreate,
   validateColumns
 } from '@slayzone/projects-contracts'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './projects-txns'
+import { attachPlacement, attachPlacements } from './project-placements'
+import { getProjectFolderHost, NoComputerForFolderError } from './project-folders'
 
 const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 
@@ -39,7 +44,7 @@ function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
   }
 }
 
-export function parseProject(row: Record<string, unknown> | undefined): Project | null {
+export function parseProject(row: Record<string, unknown> | undefined): ProjectRecord | null {
   if (!row) return null
   return {
     ...row,
@@ -73,14 +78,60 @@ export function parseProject(row: Record<string, unknown> | undefined): Project 
         })()
       : null
     // Row shape (Record<string,unknown>) can't be statically proven to satisfy
-    // Project — this is the single Record→Project boundary; callers get a typed
-    // Project|null and use `!` since the row provably exists.
-  } as unknown as Project
+    // ProjectRecord — this is the single Record→ProjectRecord boundary; callers get
+    // a typed ProjectRecord|null and use `!` since the row provably exists. A Project
+    // also needs its folders: `attachPlacements`.
+  } as unknown as ProjectRecord
+}
+
+/**
+ * The Project for a row just read back after a write. The row can be gone — the
+ * project deleted between the client's read and its write — which is a clear
+ * "not found", not a crash further down.
+ */
+async function attachExisting(
+  db: SlayzoneDb,
+  row: Record<string, unknown> | undefined
+): Promise<Project> {
+  const record = parseProject(row)
+  if (!record) throw new Error('Project not found (it may have been deleted)')
+  return attachPlacement(db, record)
+}
+
+/**
+ * The project-wide folder rule, in ONE place: the project's folder on the computer
+ * the hub uses for it, else — until that column is dropped — the legacy hub column
+ * (still the only record on a hub without computers). REST, export and worktree
+ * colours read this; task-scoped work uses the task's own computer instead.
+ */
+export function projectFolderOf(project: Project, legacyPath: string | null): string | null {
+  return defaultProjectRoot(project) ?? (legacyPath || null)
+}
+
+/** {@link projectFolderOf} for many rows at once (one placements query). */
+export async function projectFolders(
+  db: SlayzoneDb,
+  records: readonly ProjectRecord[]
+): Promise<Map<string, string | null>> {
+  const projects = await attachPlacements(db, records)
+  return new Map(projects.map((p, i) => [p.id, projectFolderOf(p, records[i].path)]))
+}
+
+/** {@link projectFolderOf} for one project id; null when there is no such project. */
+export async function projectFolder(db: SlayzoneDb, projectId: string): Promise<string | null> {
+  const record = parseProject(
+    await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [projectId])
+  )
+  if (!record) return null
+  return (await projectFolders(db, [record])).get(record.id) ?? null
 }
 
 export async function listAllProjects(db: SlayzoneDb): Promise<Project[]> {
   const rows = await db.all<Record<string, unknown>>('SELECT * FROM projects ORDER BY sort_order')
-  return rows.map((row) => parseProject(row)!)
+  return attachPlacements(
+    db,
+    rows.map((row) => parseProject(row)!)
+  )
 }
 
 /**
@@ -96,17 +147,37 @@ export async function createProject(
   ownerUserId: string | null
 ): Promise<Project> {
   const prepared = prepareProjectCreate(data)
+  const host = getProjectFolderHost()
+  // Every project gets a default computer when it is made: the one named, else the
+  // caller's default. The folder, if any, is recorded on THAT computer.
+  const computerId = host
+    ? (data.computerId ?? (await host.computerForNewProject()))
+    : (data.computerId ?? null)
+  if (host && prepared.path && !computerId) throw new NoComputerForFolderError()
+
   const row = await db.namedTxn('projects:create', {
     id: prepared.id,
     name: prepared.name,
     color: prepared.color,
-    path: prepared.path,
+    // No computers at all (see project-folders.ts): the hub column is the only place.
+    path: host ? null : prepared.path,
+    defaultComputerId: computerId,
     columnsConfigJson: prepared.columnsConfigJson,
     createdAt: prepared.createdAt,
     updatedAt: prepared.updatedAt,
     ownerUserId
   })
-  return parseProject(row)!
+  if (host && prepared.path && computerId) {
+    try {
+      await host.setFolder(computerId, prepared.id, prepared.path)
+    } catch (err) {
+      // The computer said no (e.g. outside its allowed folders). The user is still
+      // in the dialog and can pick again — leave no half-made project behind.
+      await db.run('DELETE FROM projects WHERE id = ?', [prepared.id])
+      throw err
+    }
+  }
+  return attachExisting(db, row)
 }
 
 /**
@@ -129,6 +200,20 @@ export async function updateProject(
   const fields: string[] = []
   const values: unknown[] = []
   let normalizedColumns: ColumnConfig[] | null | undefined = undefined
+  const host = getProjectFolderHost()
+
+  // The folder lives on the computer the hub uses for this project; with no
+  // computers at all, in the hub column (see project-folders.ts). First, so a
+  // refused folder fails the update before anything else changes.
+  if (data.path !== undefined && host) {
+    const computerId = await host.computerForProject(data.id)
+    const path = data.path?.trim() || null
+    if (path && !computerId) throw new NoComputerForFolderError()
+    if (computerId) {
+      if (path) await host.setFolder(computerId, data.id, path)
+      else await host.forgetFolder(computerId, data.id)
+    }
+  }
 
   if (data.name !== undefined) {
     fields.push('name = ?')
@@ -139,8 +224,11 @@ export async function updateProject(
     values.push(data.color)
   }
   if (data.path !== undefined) {
+    // With computers the folder now lives there (above), so the legacy hub column is
+    // cleared — left as it was, the old folder would be carried back to the local
+    // computer on the next start. Without computers it is still the only place.
     fields.push('path = ?')
-    values.push(data.path)
+    values.push(host ? null : data.path)
   }
   if (data.autoCreateWorktreeOnTaskCreate !== undefined) {
     fields.push('auto_create_worktree_on_task_create = ?')
@@ -213,7 +301,7 @@ export async function updateProject(
     const row = await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [
       data.id
     ])
-    return parseProject(row)!
+    return attachExisting(db, row)
   }
 
   fields.push("updated_at = datetime('now')")
@@ -225,7 +313,7 @@ export async function updateProject(
     params: values,
     normalizedColumns
   })
-  return parseProject(row)!
+  return attachExisting(db, row)
 }
 
 export async function deleteProject(
@@ -234,6 +322,8 @@ export async function deleteProject(
   iconsDir: string
 ): Promise<boolean> {
   const result = await db.run('DELETE FROM projects WHERE id = ?', [id])
+  // No foreign key on `project_placements`: its rows go explicitly.
+  await deleteProjectPlacements(db, id)
   // A per-user key (see `settingScope`): global on a hub without login, one row
   // per user otherwise — clear both.
   await db.run('DELETE FROM settings WHERE key = ?', [`commit_graph:project:${id}`])
@@ -265,7 +355,7 @@ export async function uploadProjectIcon(
   const row = await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [
     projectId
   ])
-  return parseProject(row)!
+  return attachExisting(db, row)
 }
 
 /**

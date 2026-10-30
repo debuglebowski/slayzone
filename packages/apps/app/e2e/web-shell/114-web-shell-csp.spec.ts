@@ -130,7 +130,7 @@ async function spawnHub(requireLogin: boolean): Promise<Hub> {
   }
 }
 
-/** A project with a real (temp) path and a task whose terminal is a plain shell. */
+/** A project and a task whose terminal is a plain shell in a real (temp) folder. */
 async function seed(hub: Hub): Promise<void> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (hub.owner) headers.authorization = `Bearer ${hub.owner.token}`
@@ -147,14 +147,21 @@ async function seed(hub: Hub): Promise<void> {
     sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')",
     method: 'run'
   })
-  // Beside the hub root, never inside it: the owner gate refuses any path in the
-  // hub's own state directory (its DB, its owner token) as a project path.
-  const projectDir = fs.mkdtempSync(path.join(hub.scratch, 'project-'))
-  const project = await post('/api/projects', { name: 'CSP Project', path: projectDir })
-  await post('/api/tasks', {
+  // This hub has no computer, so a project folder has nowhere to live (a folder
+  // belongs to a computer). The terminal only has to render here, so the task gets
+  // its own working folder instead — beside the hub root, never inside it: the
+  // owner gate refuses any path in the hub's own state directory.
+  const workDir = fs.mkdtempSync(path.join(hub.scratch, 'project-'))
+  const project = await post('/api/projects', { name: 'CSP Project' })
+  const task = await post('/api/tasks', {
     projectId: project.data?.id,
     title: 'CSP Task',
     terminalMode: 'terminal'
+  })
+  await post('/api/dev/sql', {
+    sql: 'UPDATE tasks SET base_dir = ? WHERE id = ?',
+    params: [workDir, task.data?.id],
+    method: 'run'
   })
 }
 

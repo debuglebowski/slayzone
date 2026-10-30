@@ -201,7 +201,7 @@ describe('a spawn with no cwd resolves the project’s own checkout', () => {
     // Synchronous throw — the dispatch table awaits handler results, so this
     // still reaches the hub as a rejected request.
     expect(() => pty[M.ptySpawn]({ sessionId: 's2', command: 'pwd', projectId: 'nope' })).toThrow(
-      /not checked out on this computer/
+      /has no folder for project/
     )
   })
 

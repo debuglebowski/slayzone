@@ -19,11 +19,14 @@ import {
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
+import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
 import {
   getDefaultStatus,
   getStatusByCategory,
   isCompletedStatus,
-  resolveRepoPath
+  resolveRepoPath,
+  defaultProjectRoot,
+  placementOn
 } from '@slayzone/projects-contracts'
 // Domains
 import {
@@ -314,7 +317,7 @@ function App(): React.JSX.Element {
   )
   // Same data source as task git panel — flat list of project-root + child repos + recursive submodules.
   const { repos: homeViewableRepos } = useProjectRepos(
-    homeSelectedProject?.path ?? null,
+    defaultProjectRoot(homeSelectedProject),
     null,
     homeSelectedProject?.id
   )
@@ -325,11 +328,11 @@ function App(): React.JSX.Element {
   const homeResolvedRepo = useMemo(
     () =>
       resolveRepoPath(
-        homeSelectedProject?.path ?? null,
+        defaultProjectRoot(homeSelectedProject),
         homeDetectedRepos,
         homeSelectedProject?.selected_repo ?? null
       ),
-    [homeSelectedProject?.path, homeDetectedRepos, homeSelectedProject?.selected_repo]
+    [homeSelectedProject, homeDetectedRepos]
   )
   const homeSelectedProjectId = homeSelectedProject?.id
   const handleHomeRepoChange = useCallback(
@@ -347,6 +350,7 @@ function App(): React.JSX.Element {
   // Project path validation (extracted — validates on select + window focus)
   const {
     projectPathMissing,
+    projectPathRefused,
     selectedProjectPathMissing,
     validateProjectPath,
     handleFixProjectPath,
@@ -640,7 +644,7 @@ function App(): React.JSX.Element {
   // Stale-skill dot on Context Manager tab
   const { count: staleSkillCount, refresh: refreshStaleSkillCount } = useStaleSkillCount(
     selectedProjectId,
-    selectedProject?.path ?? null
+    defaultProjectRoot(selectedProject)
   )
   const prevContextViewRef = useRef(activeView === 'context')
   useEffect(() => {
@@ -794,7 +798,7 @@ function App(): React.JSX.Element {
   const globalAgentPanelShortcut = useShortcutDisplay('global-agent-panel')
   const agentStatusPanelShortcut = useShortcutDisplay('agent-status-panel')
   const agentSessionId = selectedProjectId
-    ? `__global-agent-panel:${selectedProjectId}:${globalAgentPanelState.sessionIndex}`
+    ? globalAgentPanelSessionId(selectedProjectId, globalAgentPanelState.sessionIndex)
     : null
 
   const handleAgentNewSession = useCallback(async () => {
@@ -1285,6 +1289,7 @@ function App(): React.JSX.Element {
       handleProjectNameSave={handleProjectNameSave}
       handleProjectNameKeyDown={handleProjectNameKeyDown}
       projectPathMissing={projectPathMissing}
+      projectPathRefused={projectPathRefused}
       handleFixProjectPath={handleFixProjectPath}
       filter={filter}
       setFilter={setFilter}
@@ -1736,7 +1741,11 @@ function App(): React.JSX.Element {
                           <Suspense fallback={null}>
                             <ContextManagerPage
                               selectedProjectId={selectedProjectId}
-                              projectPath={projects.find((p) => p.id === selectedProjectId)?.path}
+                              projectPath={
+                                defaultProjectRoot(
+                                  projects.find((p) => p.id === selectedProjectId)
+                                ) ?? undefined
+                              }
                               projectName={projects.find((p) => p.id === selectedProjectId)?.name}
                               onBack={() => useTabStore.getState().setActiveView('tabs')}
                             />
@@ -1854,10 +1863,21 @@ function App(): React.JSX.Element {
           <WorkspaceDirPicker
             open={fixPickerOpen}
             onOpenChange={setFixPickerOpen}
-            onSelect={(path) => void applyFixedPath(path)}
+            onSelect={(path) =>
+              applyFixedPath(path).catch((err: unknown) =>
+                toast.error("Couldn't use that folder", {
+                  description: err instanceof Error ? err.message : String(err)
+                })
+              )
+            }
             target={{ projectId: selectedProjectId }}
             title="Select project directory"
-            defaultPath={projects.find((p) => p.id === selectedProjectId)?.path ?? null}
+            defaultPath={
+              placementOn(
+                projects.find((p) => p.id === selectedProjectId),
+                projects.find((p) => p.id === selectedProjectId)?.resolved_computer_id
+              )?.path ?? null
+            }
           />
         </div>
       </SidebarProvider>

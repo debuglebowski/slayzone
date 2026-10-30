@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { recordedProjectRoot } from '@slayzone/computers/server'
 import type {
   TerminalMode,
   TerminalModeInfo,
@@ -86,6 +87,17 @@ export interface PtySpawnLookups {
    * `ptyCreate` can route the spawn (and gate warm-pool adoption to local).
    */
   resolveComputerId(taskId: string): Promise<string | null>
+  /**
+   * The computer a project's work runs on when no task says otherwise (the
+   * project-wide agent panel): its default computer, else — with the hub's
+   * computer-aware impl — the connected default.
+   */
+  resolveProjectComputerId(projectId: string): Promise<string | null>
+  /**
+   * The project's folder on that computer as the hub knows it (confirmed, or
+   * pending delivery), or null when it knows none.
+   */
+  getProjectRoot(projectId: string, computerId: string): Promise<string | null>
 }
 
 /**
@@ -158,6 +170,14 @@ export function createDbPtySpawnLookups(db: SlayzoneDb): PtySpawnLookups {
     },
     // Hub-local by default — no computer assignment exists yet. Wave 2's
     // computer-aware lookups impl overrides this via `setPtySpawnLookups`.
-    resolveComputerId: async () => null
+    resolveComputerId: async () => null,
+    resolveProjectComputerId: async (projectId) => {
+      const row = await db.get<{ d: string | null }>(
+        'SELECT default_computer_id AS d FROM projects WHERE id = ?',
+        [projectId]
+      )
+      return row?.d ?? null
+    },
+    getProjectRoot: (projectId, computerId) => recordedProjectRoot(db, projectId, computerId)
   }
 }

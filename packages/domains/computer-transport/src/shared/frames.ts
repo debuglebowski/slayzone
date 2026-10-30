@@ -37,6 +37,7 @@
  */
 
 import { z } from 'zod'
+import { RpcError } from './rpc'
 
 /**
  * Computer process exit code meaning "the hub no longer recognizes this computer".
@@ -85,8 +86,26 @@ export const ComputerTransportErrorCodes = {
    * transient — retrying the same request is refused again. The hub audits it as
    * `denied` and the message says what to do on the device.
    */
-  refusedByComputer: -32006
+  refusedByComputer: -32006,
+  /**
+   * An agent for a project this computer holds no folder for. Not transient, and
+   * not a policy refusal: the user picks the project's folder on this computer
+   * (or the hub delivers it), then the same spawn works.
+   */
+  projectNotPlaced: -32007
 } as const
+
+/** The error a computer raises when asked to start a project's agent with no folder for it. */
+export function projectNotPlacedError(projectId: string): RpcError {
+  return new RpcError(
+    ComputerTransportErrorCodes.projectNotPlaced,
+    `This computer has no folder for project ${projectId}. Pick the project's folder on this computer, then try again.`
+  )
+}
+
+export function isProjectNotPlacedError(err: unknown): boolean {
+  return err instanceof RpcError && err.code === ComputerTransportErrorCodes.projectNotPlaced
+}
 
 /**
  * Who asked for a hub → computer request (T-27). Carried as the top-level `actor`

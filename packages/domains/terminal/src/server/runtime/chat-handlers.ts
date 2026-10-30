@@ -40,6 +40,7 @@ import {
   type ShutdownOptions,
   type TransportShutdownResult
 } from './chat-transport-manager'
+import { resolveAgentFolder } from './spawn-target'
 import type { ChatDataOps, ProviderConfigEntry } from './chat-data-ops'
 import { releaseConversation } from './live-conversations'
 import {
@@ -425,15 +426,18 @@ async function buildHydrateOpts(
     ...(enrichedPath ? { PATH: enrichedPath } : {})
   }
 
+  // Same folder a terminal agent gets (spawn-target.ts): explicit, else the
+  // project's folder on that computer as the hub knows it. `projectId` also
+  // travels so the computer can use its own record when the hub knows none.
+  const projectId = await data.getTaskProjectId(opts.taskId)
+  const cwd = await resolveAgentFolder(opts.cwd, projectId, computerId, data.getProjectRoot)
+
   return {
     tabId: opts.tabId,
     taskId: opts.taskId,
     mode: opts.mode,
-    cwd: opts.cwd,
-    // Lets the computer resolve its own cwd, exactly as a terminal agent does.
-    // Without it a chat agent depended on the hub-computed path — the one thing
-    // the hub cannot know about another machine.
-    projectId: await data.getTaskProjectId(opts.taskId),
+    cwd,
+    projectId,
     conversationId: fresh ? null : (providerCfg.chatConversationId ?? null),
     providerFlags,
     computerId,

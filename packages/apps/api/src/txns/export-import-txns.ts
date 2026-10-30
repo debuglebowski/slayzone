@@ -185,10 +185,16 @@ function importBundle(
     // the hub it was exported from, or nothing at all from a build before
     // ownership) means nothing here.
     p.owner_user_id = ownerUserId
+    // A computer id from the exporting hub names nothing here. The project gets a
+    // default computer again when one holds its folder (the bundle's `path` is
+    // offered to the local computer on its next connect, and kept only if the
+    // folder exists there).
+    p.default_computer_id = null
   }
 
   // Clean non-portable task fields
   for (const t of data.tasks) {
+    t.computer_id = null
     t.worktree_path = null
     t.worktree_parent_branch = null
     t.merge_state = null

@@ -11,7 +11,7 @@ import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerTransportErrorCodes } from '../shared/frames'
+import { ComputerTransportErrorCodes, projectNotPlacedError } from '../shared/frames'
 import { RpcDisposedError, RpcError } from '../shared/rpc'
 import {
   createRemoteFsAdapters,
@@ -1022,6 +1022,29 @@ describe('createRoutingPtyBackend', () => {
       reason: 'spawn-failed',
       detail: 'project proj-1 is not checked out on this computer'
     })
+  })
+
+  // The fix is choosing the project's folder on that computer, so the session says
+  // that, not "the computer couldn't start the agent".
+  it('a project with no folder on the computer ends with reason project-not-placed', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => {
+      throw projectNotPlacedError('proj-1')
+    })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (s) => s.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+
+    const handle = backend.spawn(ptySpec()) as PtyHandle
+    let exit: PtyExitEvent | null = null
+    handle.onExit((e) => {
+      exit = e
+    })
+
+    await expect(handle.whenSpawned).rejects.toThrow(/no folder for project proj-1/)
+    expect(exit).toMatchObject({ reason: 'project-not-placed' })
   })
 
   it('a session closed while detached is never re-spawned or resumed', async () => {

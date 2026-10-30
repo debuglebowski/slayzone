@@ -548,18 +548,25 @@ describe('useStaleSkillCount: a late result after the project is cleared', () =>
   })
 })
 
+/** A project whose folder on its computer is `path` (null = no folder). */
+const proj = (id: string, path: string | null) => ({
+  id,
+  placements: path ? [{ computer_id: 'c1', path, status: 'ready' as const }] : [],
+  resolved_computer_id: 'c1'
+})
+type ProjectsProp = { projects: Array<ReturnType<typeof proj>> }
+
 describe('useStaleSkillCounts: a late result after the paths are cleared', () => {
   it("keeps the counts empty: the previous projects' result is dropped", async () => {
     const counts = deferredHandler('aiConfig.getProjectsStaleSkillCounts')
     const { result, rerender } = renderHook(
-      ({ projects }: { projects: Array<{ id: string; path: string | null }> }) =>
-        useStaleSkillCounts(projects),
-      { initialProps: { projects: [{ id: 'p1', path: '/a' as string | null }] } }
+      ({ projects }: ProjectsProp) => useStaleSkillCounts(projects),
+      { initialProps: { projects: [proj('p1', '/a')] } }
     )
     await flush()
     expect(counts).toHaveLength(1)
 
-    rerender({ projects: [{ id: 'p1', path: null }] })
+    rerender({ projects: [proj('p1', null)] })
     expect(result.current.counts.size).toBe(0)
     await act(async () => counts[0].resolve({ p1: 2 }))
     await flush()
@@ -571,13 +578,12 @@ describe('useStaleSkillCounts', () => {
   it('fetches per project list, clears when no project has a path', async () => {
     handlers['aiConfig.getProjectsStaleSkillCounts'] = async () => ({ p1: 2 })
     const { result, rerender } = renderHook(
-      ({ projects }: { projects: Array<{ id: string; path: string | null }> }) =>
-        useStaleSkillCounts(projects),
-      { initialProps: { projects: [{ id: 'p1', path: '/a' as string | null }] } }
+      ({ projects }: ProjectsProp) => useStaleSkillCounts(projects),
+      { initialProps: { projects: [proj('p1', '/a')] } }
     )
     await flush()
     expect([...result.current.counts]).toEqual([['p1', 2]])
-    rerender({ projects: [{ id: 'p1', path: null }] })
+    rerender({ projects: [proj('p1', null)] })
     await flush()
     expect(result.current.counts.size).toBe(0)
   })

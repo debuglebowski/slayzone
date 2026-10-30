@@ -9,7 +9,7 @@
 import type { Task } from '@slayzone/task-contracts'
 import { getProviderFlags } from '@slayzone/task-contracts'
 import type { DetectedRepo, Project } from '@slayzone/projects-contracts'
-import { resolveRepoPath } from '@slayzone/projects-contracts'
+import { resolveRepoPath, taskProjectRoot } from '@slayzone/projects-contracts'
 import type { ExecutionContext, TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
 
 /**
@@ -66,7 +66,7 @@ export function mainTerminalProps(
 }
 
 type RepoTask = Pick<Task, 'worktree_path' | 'base_dir' | 'repo_name'>
-type RepoProject = Pick<Project, 'path' | 'selected_repo'>
+type RepoProject = Pick<Project, 'selected_repo'>
 
 /**
  * The child repo a task is bound to: its own pick, else the project default. No
@@ -92,30 +92,32 @@ export function taskRepoPath(
   return task?.worktree_path ?? task?.base_dir ?? resolvedRepoPath
 }
 
-/** The main terminal's cwd from the task-bound directory: it, else the project root. */
+/**
+ * The main terminal's cwd from the task-bound directory: it, else the project's
+ * folder on the task's computer (`taskProjectRoot`).
+ */
 export function mainTerminalCwdFrom(
   repoPath: string | null | undefined,
-  project: Pick<Project, 'path'> | null | undefined
+  projectRoot: string | null | undefined
 ): string | null {
-  return repoPath || project?.path || null
+  return repoPath || projectRoot || null
 }
 
 /**
- * The main terminal's cwd. `detectedRepos` are the project's child repos, discovered
- * on the machine that owns it; they only matter when a child repo is bound
- * (`taskRepoName`) and the task has no worktree or base dir. Null = nowhere to run.
+ * The main terminal's cwd. `projectRoot` is the project's folder on the task's
+ * computer (a project has one folder per computer). `detectedRepos` are the
+ * project's child repos, discovered on that computer; they only matter when a child
+ * repo is bound (`taskRepoName`) and the task has no worktree or base dir. Null =
+ * nowhere to run.
  */
 export function mainTerminalCwd(
   task: RepoTask | null | undefined,
   project: RepoProject | null | undefined,
+  projectRoot: string | null,
   detectedRepos: readonly DetectedRepo[]
 ): string | null {
-  const resolved = resolveRepoPath(
-    project?.path ?? null,
-    [...detectedRepos],
-    taskRepoName(task, project)
-  )
-  return mainTerminalCwdFrom(taskRepoPath(task, resolved.path), project)
+  const resolved = resolveRepoPath(projectRoot, [...detectedRepos], taskRepoName(task, project))
+  return mainTerminalCwdFrom(taskRepoPath(task, resolved.path), projectRoot)
 }
 
 /**
@@ -125,13 +127,11 @@ export function mainTerminalCwd(
  */
 export function mainTerminalCwdNeedsRepos(
   task: RepoTask | null | undefined,
-  project: RepoProject | null | undefined
+  project: RepoProject | null | undefined,
+  projectRoot: string | null
 ): boolean {
   return (
-    !task?.worktree_path &&
-    !task?.base_dir &&
-    !!project?.path &&
-    taskRepoName(task, project) !== null
+    !task?.worktree_path && !task?.base_dir && !!projectRoot && taskRepoName(task, project) !== null
   )
 }
 
@@ -141,10 +141,11 @@ export function mainTerminalCwdNeedsRepos(
  * Null otherwise (the task page resolves those from detected repos).
  */
 export function plainMainTerminalCwd(
-  task: Pick<Task, 'worktree_path' | 'base_dir' | 'repo_name'>,
-  project: Pick<Project, 'path' | 'selected_repo'> | null | undefined
+  task: Pick<Task, 'worktree_path' | 'base_dir' | 'repo_name' | 'computer_id'>,
+  project: Pick<Project, 'placements' | 'resolved_computer_id' | 'selected_repo'> | null | undefined
 ): string | null {
-  if (!project?.path) return null
-  if (task.worktree_path || task.base_dir || task.repo_name || project.selected_repo) return null
-  return project.path
+  const root = taskProjectRoot(task, project)
+  if (!root) return null
+  if (task.worktree_path || task.base_dir || task.repo_name || project?.selected_repo) return null
+  return root
 }

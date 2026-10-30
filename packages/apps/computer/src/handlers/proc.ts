@@ -57,7 +57,8 @@ import {
   type ProcWriteResult,
   procWriteParamsSchema,
   ComputerNotificationMethods,
-  RpcError
+  RpcError,
+  projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
@@ -221,12 +222,16 @@ export function createProcHandlers(
       }
     }
     // An explicit cwd wins (a worktree, or a task.base_dir the user set). Else
-    // resolve the project's checkout here. Neither → the first allowed root, never
-    // the computer's own launch directory (T-27: a hub-started process always
-    // starts inside the jail).
-    const resolved =
-      params.cwd ??
-      (params.projectId ? getProjectPaths?.()?.get(params.projectId)?.path : undefined)
+    // resolve the project's folder here — and a project with none is refused, like
+    // a terminal agent: starting it elsewhere would look like it worked while
+    // running in the wrong tree. No project and no cwd (a plain process) → the first
+    // allowed root, never the computer's own launch directory (T-27: a hub-started
+    // process always starts inside the jail).
+    let resolved = params.cwd || undefined
+    if (!resolved && params.projectId) {
+      resolved = getProjectPaths?.()?.get(params.projectId)?.path
+      if (!resolved) throw projectNotPlacedError(params.projectId)
+    }
     const cwd = spawnCwd(resolved, ctx.config.allowedRoots)
 
     // Replace any pre-existing process with the same sessionId.

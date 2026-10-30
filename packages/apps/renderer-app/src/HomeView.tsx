@@ -49,7 +49,8 @@ import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/cl
 import { useTRPCClient, getClientForHub } from './trpc'
 import { TerminalStatusButton } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
-import { getDefaultStatus } from '@slayzone/projects-contracts'
+import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
+import { getDefaultStatus, defaultProjectRoot } from '@slayzone/projects-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import {
   useGlobalAgentPanelState,
@@ -294,9 +295,11 @@ export function HomeView({
   // the file is visible, then drive the editor through HomeContainer's handle.
   const buildHomeFileContext = useCallback((): SearchFileContext | undefined => {
     const project = projects.find((p) => p.id === selectedProjectId)
-    if (!project?.path) return undefined
+    const projectPath = defaultProjectRoot(project)
+    if (!project || !projectPath) return undefined
     return {
-      projectPath: project.path,
+      target: { projectId: project.id },
+      projectPath,
       openFile: (filePath) => {
         const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home')
         if (hi >= 0) useTabStore.getState().setActiveTabIndex(hi)
@@ -556,7 +559,7 @@ export function HomeView({
   // Global-agent session key — one persistent session per (project, sessionIndex);
   // "clear conversation" / mode-change bump the index to spawn a fresh session.
   const agentSessionId = selectedProjectId
-    ? `__global-agent-panel:${selectedProjectId}:${globalAgentPanelState.sessionIndex}`
+    ? globalAgentPanelSessionId(selectedProjectId, globalAgentPanelState.sessionIndex)
     : null
   // Keep the panel mounted once opened so the terminal session survives toggling.
   const [globalAgentMounted, setGlobalAgentMounted] = useState(globalAgentPanelState.isOpen)
@@ -646,7 +649,8 @@ export function HomeView({
   // HomeContainer shows its own empty state.
 
   const currentProjectName = projects.find((p) => p.id === selectedProjectId)?.name
-  const currentProjectPath = projects.find((p) => p.id === selectedProjectId)?.path ?? ''
+  const currentProjectPath =
+    defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ?? ''
   const globalAgentVisible =
     agentSessionId !== null && globalAgentMounted && globalAgentPanelState.isOpen
 

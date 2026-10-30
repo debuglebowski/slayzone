@@ -139,7 +139,8 @@ vi.mock('@slayzone/projects-contracts', () => ({
   getDoneStatus: () => 'done',
   isTerminalStatus: () => false,
   isCompletedStatus: () => false,
-  resolveRepoPath: () => ({ path: null, detected: false })
+  resolveRepoPath: () => ({ path: null, detected: false }),
+  taskProjectRoot: () => null
 }))
 
 vi.mock('@slayzone/task-contracts', () => ({
@@ -154,7 +155,10 @@ vi.mock('@slayzone/task-contracts', () => ({
   priorityOptions: [{ value: 3, label: 'Medium' }]
 }))
 
-vi.mock('@slayzone/terminal-contracts', () => ({
+// The real module (pure contracts) with a few fixed values: a hand-listed mock
+// broke each time the page imported one more helper from it.
+vi.mock('@slayzone/terminal-contracts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@slayzone/terminal-contracts')>()),
   DEV_SERVER_URL_PATTERN: /localhost/,
   SESSION_ID_COMMANDS: {},
   SESSION_ID_UNAVAILABLE: 'unavailable'

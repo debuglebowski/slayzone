@@ -12,7 +12,8 @@ export interface TemplateContext {
   project?: {
     id: string
     name: string
-    path: string
+    /** The project's folder on the computer sharing the hub's machine; null = none. */
+    path: string | null
   }
   trigger?: {
     old_status?: string

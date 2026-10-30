@@ -63,7 +63,11 @@ async function openPalette(projectPath?: string) {
   await act(async () => {
     useDialogStore
       .getState()
-      .openSearch(projectPath ? { fileContext: { projectPath, openFile: vi.fn() } } : undefined)
+      .openSearch(
+        projectPath
+          ? { fileContext: { target: { projectId: 'p1' }, projectPath, openFile: vi.fn() } }
+          : undefined
+      )
   })
 }
 

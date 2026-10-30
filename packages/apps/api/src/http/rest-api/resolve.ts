@@ -75,7 +75,6 @@ export async function resolveByIdPrefix<T extends { id: string }>(
 export interface ResolvedProject {
   id: string
   name: string
-  path: string | null
 }
 
 /** Resolve a project by exact id or case-insensitive name substring (CLI `resolveProject`). */
@@ -85,7 +84,7 @@ export async function resolveProjectRef(
 ): Promise<Resolved<ResolvedProject>> {
   const owned = await ownedRowsClause('projects')
   const rows = await db.all<ResolvedProject & { id: string }>(
-    `SELECT id, name, path FROM projects WHERE (id = ? OR LOWER(name) LIKE ?)${owned.sql} LIMIT 10`,
+    `SELECT id, name FROM projects WHERE (id = ? OR LOWER(name) LIKE ?)${owned.sql} LIMIT 10`,
     [ref, `%${ref.toLowerCase()}%`, ...owned.params]
   )
   if (rows.length === 0) {

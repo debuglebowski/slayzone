@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { recordedProjectRoot } from '@slayzone/computers/server'
 import type { RecordConversationInput, TaskSessionStore } from './task-session-store'
 import {
   persistChatEvent,
@@ -104,6 +105,9 @@ export interface ChatDataOps {
   /** Project this task belongs to, so the COMPUTER can resolve its own cwd.
    *  Mirrors the pty spawn lookups' `getTaskProjectId`. */
   getTaskProjectId(taskId: string): Promise<string | null>
+  /** The project's folder on that computer as the hub knows it, or null.
+   *  Mirrors the pty spawn lookups' `getProjectRoot`. */
+  getProjectRoot(projectId: string, computerId: string): Promise<string | null>
   bumpAutocompleteUsage(source: string, name: string): Promise<void>
   getAutocompleteUsage(): Promise<UsageMap>
   /** Store the slash commands a chat CLI advertised, for the task's project + mode. */
@@ -285,6 +289,8 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       )
       return row?.project_id ?? null
     },
+
+    getProjectRoot: (projectId, computerId) => recordedProjectRoot(db, projectId, computerId),
 
     bumpAutocompleteUsage: (source, name) => bumpAutocompleteUsage(db, source, name),
 

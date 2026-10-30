@@ -3,6 +3,7 @@ import { electronBootstrap } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, useDepsChanged } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects-contracts'
+import { defaultProjectRoot } from '@slayzone/projects-contracts'
 import { track } from '@slayzone/telemetry/client'
 import { GeneralTab } from './GeneralTab'
 import { EnvironmentTab } from './EnvironmentTab'
@@ -72,7 +73,10 @@ export function ProjectSettingsDialog({
     | 'tests'
   >('general')
   const lookupStatusSyncLock = useStatusSyncLockLookup()
-  const detectedRepos = useProjectDetectedRepos(open ? (project?.path ?? null) : null, project?.id)
+  const detectedRepos = useProjectDetectedRepos(
+    open ? defaultProjectRoot(project) : null,
+    project?.id
+  )
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
   const checkIntegrationLock = useCallback(async () => {

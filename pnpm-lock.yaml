@@ -1251,6 +1251,9 @@ importers:
 
   packages/domains/agent-turns:
     dependencies:
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -1303,6 +1306,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
       '@slayzone/settings-core':
         specifier: workspace:*
         version: link:../../shared/settings-core
@@ -1386,6 +1392,9 @@ importers:
 
   packages/domains/automations:
     dependencies:
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/history':
         specifier: workspace:*
         version: link:../history
@@ -2042,6 +2051,9 @@ importers:
 
   packages/domains/projects-contracts:
     dependencies:
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -2821,6 +2833,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../ai-config
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics

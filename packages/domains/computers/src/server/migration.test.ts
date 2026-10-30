@@ -6,7 +6,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/db-migrations'
-import type Database from 'better-sqlite3'
+import Database from 'better-sqlite3'
+import { DB_PRAGMAS } from '@slayzone/platform'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
+import { deterministicLocalComputerId } from './store'
 import { createMigratedDb } from './test-db'
 
 function tableNames(raw: Database.Database): string[] {
@@ -233,6 +236,104 @@ describe('v163 computer → computer rename', () => {
       expect(idx).not.toContain('idx_runner_checkouts_path')
     } finally {
       t.close()
+    }
+  })
+})
+
+// v176: the desktop hub's `projects.path` column → the project's folder on the
+// local computer. It runs before the hub serves anything, and needs no computer
+// row, so a project shows its folder from the very first read — also on the first
+// boot after skipping releases, before the local computer has ever enrolled.
+describe('v176 legacy project path → folder on the local computer', () => {
+  const LOCAL = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+
+  function migratedTo(version: number): Database.Database {
+    const raw = new Database(':memory:')
+    for (const pragma of DB_PRAGMAS) raw.pragma(pragma)
+    for (const m of migrations) {
+      if (m.version > version) break
+      raw.transaction(() => {
+        m.up(raw)
+        raw.pragma(`user_version = ${m.version}`)
+      })()
+    }
+    return raw
+  }
+
+  function project(raw: Database.Database, id: string, path: string | null, computer?: string) {
+    raw
+      .prepare(
+        `INSERT INTO projects (id, name, color, path, default_computer_id) VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(id, id, '#000', path, computer ?? null)
+  }
+
+  function placements(raw: Database.Database) {
+    return raw
+      .prepare(
+        `SELECT computer_id, project_id, root_path, status FROM project_placements
+          ORDER BY project_id, computer_id`
+      )
+      .all()
+  }
+
+  function defaults(raw: Database.Database) {
+    return Object.fromEntries(
+      (
+        raw.prepare(`SELECT id, default_computer_id FROM projects`).all() as {
+          id: string
+          default_computer_id: string | null
+        }[]
+      ).map((r) => [r.id, r.default_computer_id])
+    )
+  }
+
+  it('gives every project with a path a pending folder on the local computer, as its default', () => {
+    const raw = migratedTo(175)
+    try {
+      project(raw, 'p1', '/Users/me/app')
+      project(raw, 'p2', '/Users/me/remote-default', 'remote-1')
+      project(raw, 'none', null)
+      project(raw, 'empty', '')
+      runMigrations(raw)
+
+      expect(placements(raw)).toEqual([
+        { computer_id: LOCAL, project_id: 'p1', root_path: '/Users/me/app', status: 'pending' },
+        {
+          computer_id: LOCAL,
+          project_id: 'p2',
+          root_path: '/Users/me/remote-default',
+          status: 'pending'
+        }
+      ])
+      // A default someone chose stays; only projects without one get the local computer.
+      expect(defaults(raw)).toEqual({ p1: LOCAL, p2: 'remote-1', none: null, empty: null })
+      // The column stays until it is dropped: an older build reading this DB keeps its paths.
+      expect(raw.prepare(`SELECT path FROM projects WHERE id = 'p1'`).pluck().get()).toBe(
+        '/Users/me/app'
+      )
+    } finally {
+      raw.close()
+    }
+  })
+
+  it('leaves a folder the local computer already reported alone', () => {
+    const raw = migratedTo(175)
+    try {
+      project(raw, 'p1', '/Users/me/old')
+      raw
+        .prepare(
+          `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+           VALUES (?, 'p1', '/Users/me/moved', 'ready', 1)`
+        )
+        .run(LOCAL)
+      runMigrations(raw)
+
+      expect(placements(raw)).toEqual([
+        { computer_id: LOCAL, project_id: 'p1', root_path: '/Users/me/moved', status: 'ready' }
+      ])
+    } finally {
+      raw.close()
     }
   })
 })

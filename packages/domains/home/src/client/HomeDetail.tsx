@@ -21,7 +21,7 @@ import { Button, PanelToggle, cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
-import { resolveRepoPath } from '@slayzone/projects-contracts'
+import { defaultProjectRoot, placementOn, resolveRepoPath } from '@slayzone/projects-contracts'
 import {
   ProjectLockPopover,
   ProjectLockScreen,
@@ -76,6 +76,8 @@ export interface HomeDetailProps {
   handleProjectNameSave: () => void | Promise<void>
   handleProjectNameKeyDown: KeyboardEventHandler<HTMLTextAreaElement>
   projectPathMissing: boolean
+  /** The folder exists but is outside its computer's allowed folders. */
+  projectPathRefused?: boolean
   handleFixProjectPath: () => void
   filter: FilterBarProps['filter']
   setFilter: FilterBarProps['onChange']
@@ -138,6 +140,7 @@ export function HomeDetail({
   handleProjectNameSave,
   handleProjectNameKeyDown,
   projectPathMissing,
+  projectPathRefused = false,
   handleFixProjectPath,
   filter,
   setFilter,
@@ -360,10 +363,19 @@ export function HomeDetail({
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center space-y-4">
                 <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto" />
-                <p className="text-lg font-medium">Project path not found</p>
+                <p className="text-lg font-medium">
+                  {projectPathRefused
+                    ? 'Project folder is outside the folders this computer allows'
+                    : 'Project path not found'}
+                </p>
                 <p className="text-sm text-muted-foreground">
                   <code className="bg-muted px-2 py-1 rounded">
-                    {projects.find((p) => p.id === selectedProjectId)?.path}
+                    {
+                      placementOn(
+                        projects.find((p) => p.id === selectedProjectId),
+                        projects.find((p) => p.id === selectedProjectId)?.resolved_computer_id
+                      )?.path
+                    }
                   </code>
                 </p>
                 <Button onClick={handleFixProjectPath}>Update path</Button>
@@ -374,7 +386,7 @@ export function HomeDetail({
               {homeRenderOrder.map((id, j) => {
                 const projectPath =
                   homeResolvedRepo.path ??
-                  projects.find((p) => p.id === selectedProjectId)?.path ??
+                  defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ??
                   null
                 const sizeKey = HOME_PANEL_SIZE_KEY[id]
                 const w = homeResolvedWidths[sizeKey] ?? 400

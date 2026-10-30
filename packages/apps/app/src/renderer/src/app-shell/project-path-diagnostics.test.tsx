@@ -37,10 +37,10 @@ const client = {
   },
   projects: {
     update: {
-      mutate: async (input: { id: string; path: string }) => ({
-        ...PROJECTS.find((p) => p.id === input.id)!,
-        path: input.path
-      })
+      // The hub records the folder on the project's computer and returns the project
+      // with that folder.
+      mutate: async (input: { id: string; path: string }) =>
+        project(input.id, PROJECTS.find((p) => p.id === input.id)!.name, input.path)
     }
   },
   diagnostics: { recordClientEvent: { mutate: recordClientEvent } },
@@ -64,12 +64,30 @@ const { useProjectPathGuard } = await import('./useProjectPathGuard')
 const { ActiveTabSync } = await import('./ActiveTabSync')
 const { getDiagnosticsContext, updateDiagnosticsContext } = await import('@/lib/diagnosticsClient')
 
+/** A project whose folder on its computer (`c1`) is `path`, with that status. */
+function project(
+  id: string,
+  name: string,
+  path: string | null,
+  status: 'ready' | 'pending' | 'missing' | 'refused' = 'ready'
+): Project {
+  return {
+    id,
+    name,
+    placements: path ? [{ computer_id: 'c1', path, status }] : [],
+    resolved_computer_id: 'c1'
+  } as unknown as Project
+}
+
 const PROJECTS = [
-  { id: 'A', name: 'Alpha', path: '/a' },
-  { id: 'B', name: 'Beta', path: '/b' },
-  { id: 'C', name: 'Gamma', path: '/c' },
-  { id: 'N', name: 'No path', path: null }
-] as unknown as Project[]
+  project('A', 'Alpha', '/a'),
+  project('B', 'Beta', '/b'),
+  project('C', 'Gamma', '/c'),
+  project('N', 'No path', null),
+  project('M', 'Reported missing', '/m', 'missing'),
+  project('R', 'Refused', '/r', 'refused'),
+  project('P', 'Pending', '/p', 'pending')
+]
 
 const MISSING: PathExists = { exists: false, reachable: true }
 const PRESENT: PathExists = { exists: true, reachable: true }
@@ -210,6 +228,31 @@ describe('Home "path missing" UI (unchanged behavior)', () => {
     expect(homeShowsMissing()).toBe(false)
     await answer(1, MISSING)
     expect(homeShowsMissing()).toBe(true)
+  })
+
+  // The computer already said so: shown at once, never re-asked.
+  it('a folder the computer reported missing is missing without a probe', async () => {
+    render(<Shell selectedProjectId="M" />)
+    expect(homeShowsMissing()).toBe(true)
+    expect(guardApi.projectPathRefused).toBe(false)
+    expect(probes).toHaveLength(0)
+  })
+
+  // Was silently inert: a jail refusal read as "could not ask" and showed nothing.
+  it('a folder outside its computer’s allowed folders is blocked, and says so', async () => {
+    render(<Shell selectedProjectId="R" />)
+    expect(homeShowsMissing()).toBe(true)
+    expect(guardApi.projectPathRefused).toBe(true)
+    expect(probes).toHaveLength(0)
+  })
+
+  // Known to the hub, awaiting delivery to its computer: probed like a ready one,
+  // never shown as "pick a folder".
+  it('a pending folder is probed like a confirmed one', async () => {
+    render(<Shell selectedProjectId="P" />)
+    expect(probes[0].input).toEqual({ projectId: 'P', path: '/p' })
+    await answer(0, PRESENT)
+    expect(homeShowsMissing()).toBe(false)
   })
 
   it('re-probes the selected project on window focus', async () => {

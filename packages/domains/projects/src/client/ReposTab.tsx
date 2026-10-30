@@ -3,6 +3,7 @@ import { useTRPC } from './trpc'
 import { FolderGit2, Star } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { Project, DetectedRepo } from '@slayzone/projects-contracts'
+import { defaultProjectRoot } from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './project-settings-shared'
 
 interface ReposTabProps {
@@ -32,7 +33,7 @@ export function ReposTab({ project, repos, onUpdated }: ReposTabProps) {
           description="Detected git repositories in this project folder."
         />
         <p className="text-sm text-muted-foreground">
-          No child git repositories found in {project.path}.
+          No child git repositories found in {defaultProjectRoot(project)}.
         </p>
       </div>
     )

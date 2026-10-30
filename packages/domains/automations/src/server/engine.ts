@@ -16,6 +16,7 @@ import {
 import { taskEvents } from '@slayzone/task/server'
 import { exec } from 'child_process'
 import { assertAutomationActionsAllowed } from './hub-exec-actions'
+import { localProjectRoot } from '@slayzone/computers/server'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './automations-txns'
 
@@ -484,7 +485,9 @@ export class AutomationEngine {
     ctx: TemplateContext
   ): Promise<{ command: string; cwd?: string; timeoutMs: number }> {
     const params = action.params
-    const cwd = params.cwd ? resolveTemplate(params.cwd as string, ctx) : ctx.project?.path
+    const cwd = params.cwd
+      ? resolveTemplate(params.cwd as string, ctx)
+      : (ctx.project?.path ?? undefined)
 
     if (action.type === 'ai') {
       const providerId = typeof params.provider === 'string' ? params.provider.trim() : ''
@@ -650,13 +653,15 @@ export class AutomationEngine {
     }
 
     if (event.projectId) {
-      const project = await this.db.get<{
-        id: string
-        name: string
-        path: string
-      }>('SELECT id, name, path FROM projects WHERE id = ?', [event.projectId])
+      const project = await this.db.get<{ id: string; name: string }>(
+        'SELECT id, name FROM projects WHERE id = ?',
+        [event.projectId]
+      )
       if (project) {
-        ctx.project = { id: project.id, name: project.name, path: project.path }
+        // Automation commands run on the hub, so `{{project.path}}` and the default
+        // cwd are the project's folder on the computer sharing the hub's machine.
+        const path = await localProjectRoot(this.db, project.id)
+        ctx.project = { id: project.id, name: project.name, path }
       }
     }
 

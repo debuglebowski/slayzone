@@ -185,6 +185,18 @@ export async function retireStaleLocalComputers(
       sql: `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
       params: [opts.keepComputerId, ...staleIds]
     },
+    // Folders follow too. `OR IGNORE` keeps the survivor's own row where both hold
+    // the project (it is the current one); the orphan's leftovers then go.
+    {
+      type: 'run',
+      sql: `UPDATE OR IGNORE project_placements SET computer_id = ? WHERE computer_id IN (${placeholders})`,
+      params: [opts.keepComputerId, ...staleIds]
+    },
+    {
+      type: 'run',
+      sql: `DELETE FROM project_placements WHERE computer_id IN (${placeholders})`,
+      params: staleIds
+    },
     {
       type: 'run',
       sql: `DELETE FROM computers WHERE id IN (${placeholders})`,

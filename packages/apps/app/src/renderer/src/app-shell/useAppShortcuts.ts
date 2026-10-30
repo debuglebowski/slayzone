@@ -12,6 +12,7 @@ import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import type { Project } from '@slayzone/projects-contracts'
+import { defaultProjectRoot } from '@slayzone/projects-contracts'
 import { useHomePanel } from '@slayzone/home/client'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
@@ -114,9 +115,11 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   // Captured into the dialog payload at the moment the shortcut fires; cleared on close.
   const buildHomeFileContext = useCallback((): SearchFileContext | undefined => {
     const project = projects.find((p) => p.id === selectedProjectId)
-    if (!project?.path) return undefined
+    const projectPath = defaultProjectRoot(project)
+    if (!project || !projectPath) return undefined
     return {
-      projectPath: project.path,
+      target: { projectId: project.id },
+      projectPath,
       openFile: (filePath) => {
         if (homePanel.homeEditorRef.current) {
           if (!homePanel.homePanelVisibility.editor) {

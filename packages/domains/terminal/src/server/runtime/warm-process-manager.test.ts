@@ -106,6 +106,8 @@ const db = {
 } as unknown as SlayzoneDb
 
 let computerId: string | null = 'computer-1'
+/** The folder the hub knows for the project on each computer; default = PROJECT_ROOT. */
+let projectRootFor: (projectId: string, computerId: string) => string | null = () => PROJECT_ROOT
 
 function init(opts: { reserveTtlMs?: number } = {}): void {
   spawnCalls = []
@@ -117,12 +119,13 @@ function init(opts: { reserveTtlMs?: number } = {}): void {
   failNextSpawn = false
   enabled = true
   computerId = 'computer-1'
+  projectRootFor = () => PROJECT_ROOT
   setPtyBackend(fakeBackend as unknown as PtyBackend)
   initWarmProcessManager({
     db,
     ops: createDbWarmPoolDataOps(db, taskStore),
     isEnabled: () => enabled,
-    getProjectRoot: async () => PROJECT_ROOT,
+    getProjectRoot: async (projectId, onComputer) => projectRootFor(projectId, onComputer),
     resolveComputerId: async () => computerId,
     ...(opts.reserveTtlMs !== undefined ? { reserveTtlMs: opts.reserveTtlMs } : {})
   })
@@ -157,6 +160,29 @@ function claim(
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+// The warm agent runs on the computer: its folder is that computer's folder for
+// the project, and whether it exists is for the computer to say — this hub's own
+// disk says nothing about a remote machine.
+test('warms in the project’s folder on the resolved computer, even one absent from the hub’s disk', async () => {
+  init()
+  computerId = 'computer-9'
+  projectRootFor = (projectId, onComputer) =>
+    onComputer === 'computer-9' ? `/srv/only-on-that-computer/${projectId}` : null
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(spawnCount()).toBe(1)
+  expect(lastSpawn()?.cwd).toBe('/srv/only-on-that-computer/p1')
+  expect(lastSpawn()?.computerId).toBe('computer-9')
+})
+
+test('no folder known on that computer: nothing is warmed', async () => {
+  init()
+  projectRootFor = () => null
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(spawnCount()).toBe(0)
+})
 
 test('gate 0→1 spawns one warm shell', async () => {
   init()

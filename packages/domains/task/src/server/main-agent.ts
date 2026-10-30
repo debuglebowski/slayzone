@@ -23,6 +23,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { parseProject } from '@slayzone/projects/server'
+import { getRuntimeAdapters } from './ops/shared'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { getChatDeps, getPtyDeps } from '@slayzone/terminal/server'
 import {
@@ -105,6 +106,9 @@ async function startOnce(
   const project = parseProject(
     await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
   )
+  // The project's folder on the computer this task's work runs on — where its
+  // worktrees are and where the task's other agents start.
+  const projectRoot = await getRuntimeAdapters().projectRootForTask(db, taskId, task.project_id)
   const pty = getPtyDeps().ops
   const props = mainTerminalProps(task, project, await pty.terminalModesList())
   // The main tab follows the task's mode, as the desktop's `taskTerminals.ensureMain`.
@@ -118,10 +122,10 @@ async function startOnce(
   const live = await liveState(kind, sessionId)
   if (live) return { ...base, cwd: null, state: live, started: false }
 
-  const detected = mainTerminalCwdNeedsRepos(task, project)
-    ? await detectChildRepos(taskId, project!.path!)
+  const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
+    ? await detectChildRepos(taskId, projectRoot!)
     : []
-  const cwd = mainTerminalCwd(task, project, detected)
+  const cwd = mainTerminalCwd(task, project, projectRoot, detected)
   if (!cwd) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',

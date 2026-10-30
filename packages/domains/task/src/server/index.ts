@@ -97,7 +97,12 @@ export {
 } from './ops'
 export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
 export { taskSessionStore } from './task-session-store'
-export { configureTaskRuntimeAdapters, updateTask, InvalidTaskUpdateError } from './ops/shared'
+export {
+  configureTaskRuntimeAdapters,
+  getRuntimeAdapters,
+  updateTask,
+  InvalidTaskUpdateError
+} from './ops/shared'
 // The in-process implementations (`defaultWorktreeExecAdapters`,
 // `defaultWorktreePolicyAdapters`) live in `worktrees/server`.
 export type { WorktreeExecAdapters, WorktreePolicyAdapters } from './ops/shared'

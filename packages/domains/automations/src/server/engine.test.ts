@@ -6,6 +6,11 @@ import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine, cronMatches } from './engine.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
 import { taskEvents } from '@slayzone/task/server'
+import {
+  deterministicLocalComputerId,
+  registerOrReplaceComputer,
+  setPlacement
+} from '@slayzone/computers/server'
 
 const h = await createTestHarness()
 
@@ -17,6 +22,21 @@ const projectPath = h.tmpDir()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
   .run(projectId, 'TestProj', '#000', projectPath)
+// Commands run on the hub, so the folder is the one on the computer sharing its
+// machine: the local computer.
+const localComputerId = deterministicLocalComputerId('local-computer')
+await registerOrReplaceComputer(h.slayDb, {
+  id: localComputerId,
+  name: 'local-computer',
+  platform: 'darwin-arm64',
+  version: '1'
+})
+await setPlacement(h.slayDb, {
+  computerId: localComputerId,
+  projectId,
+  path: projectPath,
+  status: 'ready'
+})
 const taskId = crypto.randomUUID()
 h.db
   .prepare(
@@ -563,6 +583,24 @@ describe('template context building', () => {
     const id = createAutomation({
       actions: [
         { type: 'run_command', params: { command: 'echo "{{task.name}} {{project.name}}"' } }
+      ]
+    })
+    const run = await engine.executeManual(id)
+    expect(run.status).toBe('success')
+  })
+
+  test('{{project.path}} and the default cwd are the project’s folder on the local computer', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    const id = createAutomation({
+      actions: [
+        {
+          type: 'run_command',
+          params: {
+            command:
+              'test -n "{{project.path}}" && test "$(pwd -P)" = "$(cd "{{project.path}}" && pwd -P)"'
+          }
+        }
       ]
     })
     const run = await engine.executeManual(id)

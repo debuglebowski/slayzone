@@ -21,6 +21,13 @@ const task = (extra: Partial<Task> = {}): Task =>
 
 const modes = [{ id: 'claude-code', initialCommand: 'claude --session-id {id} {flags}' }]
 
+/** A project whose folder on its computer (`c1`) is `path` (null = no folder). */
+const folderProject = (path: string | null, selected_repo: string | null = null) => ({
+  placements: path ? [{ computer_id: 'c1', path, status: 'ready' as const }] : [],
+  resolved_computer_id: 'c1',
+  selected_repo
+})
+
 describe('mainTerminalProps', () => {
   it('derives every spawn prop from task + project + modes', () => {
     const p = mainTerminalProps(
@@ -48,7 +55,7 @@ describe('mainTerminalProps', () => {
 })
 
 describe('plainMainTerminalCwd', () => {
-  const project = { path: '/p', selected_repo: null }
+  const project = folderProject('/p')
   it('is the project root for a task with nothing bound', () => {
     expect(plainMainTerminalCwd(task(), project)).toBe('/p')
   })
@@ -56,57 +63,54 @@ describe('plainMainTerminalCwd', () => {
     expect(plainMainTerminalCwd(task({ worktree_path: '/w' }), project)).toBeNull()
     expect(plainMainTerminalCwd(task({ base_dir: '/b' }), project)).toBeNull()
     expect(plainMainTerminalCwd(task({ repo_name: 'r' }), project)).toBeNull()
-    expect(plainMainTerminalCwd(task(), { path: '/p', selected_repo: 'r' })).toBeNull()
-    expect(
-      plainMainTerminalCwd(task(), { path: null as unknown as string, selected_repo: null })
-    ).toBeNull()
+    expect(plainMainTerminalCwd(task(), folderProject('/p', 'r'))).toBeNull()
+    expect(plainMainTerminalCwd(task(), folderProject(null))).toBeNull()
   })
 })
 
 describe('main terminal cwd', () => {
-  const project = { path: '/wrap', selected_repo: null }
+  // The project's folder on the task's computer is passed in (`projectRoot`).
+  const project = { selected_repo: null }
   const repos = [
     { name: 'api', path: '/wrap/api' },
     { name: 'web', path: '/wrap/web' }
   ]
 
   it('the task-bound repo name wins over the project default', () => {
-    expect(taskRepoName(task({ repo_name: 'web' }), { path: '/wrap', selected_repo: 'api' })).toBe(
-      'web'
-    )
-    expect(taskRepoName(task(), { path: '/wrap', selected_repo: 'api' })).toBe('api')
+    expect(taskRepoName(task({ repo_name: 'web' }), { selected_repo: 'api' })).toBe('web')
+    expect(taskRepoName(task(), { selected_repo: 'api' })).toBe('api')
     expect(taskRepoName(null, null)).toBeNull()
   })
 
   it('a worktree wins over everything', () => {
-    expect(mainTerminalCwd(task({ worktree_path: '/wt', base_dir: '/b' }), project, repos)).toBe(
-      '/wt'
-    )
+    expect(
+      mainTerminalCwd(task({ worktree_path: '/wt', base_dir: '/b' }), project, '/wrap', repos)
+    ).toBe('/wt')
   })
 
   it('then the base dir', () => {
-    expect(mainTerminalCwd(task({ base_dir: '/b', repo_name: 'api' }), project, repos)).toBe('/b')
+    expect(
+      mainTerminalCwd(task({ base_dir: '/b', repo_name: 'api' }), project, '/wrap', repos)
+    ).toBe('/b')
   })
 
   it('then the bound child repo of a multi-repo project', () => {
-    expect(mainTerminalCwd(task({ repo_name: 'web' }), project, repos)).toBe('/wrap/web')
-    expect(mainTerminalCwd(task(), { path: '/wrap', selected_repo: 'api' }, repos)).toBe(
-      '/wrap/api'
-    )
+    expect(mainTerminalCwd(task({ repo_name: 'web' }), project, '/wrap', repos)).toBe('/wrap/web')
+    expect(mainTerminalCwd(task(), { selected_repo: 'api' }, '/wrap', repos)).toBe('/wrap/api')
   })
 
   it('a bound repo that no longer exists falls back to the first detected one', () => {
-    expect(mainTerminalCwd(task({ repo_name: 'gone' }), project, repos)).toBe('/wrap/api')
+    expect(mainTerminalCwd(task({ repo_name: 'gone' }), project, '/wrap', repos)).toBe('/wrap/api')
   })
 
   it('no repo bound, or no child repos: the project root (never an arbitrary child)', () => {
-    expect(mainTerminalCwd(task(), project, repos)).toBe('/wrap')
-    expect(mainTerminalCwd(task({ repo_name: 'web' }), project, [])).toBe('/wrap')
+    expect(mainTerminalCwd(task(), project, '/wrap', repos)).toBe('/wrap')
+    expect(mainTerminalCwd(task({ repo_name: 'web' }), project, '/wrap', [])).toBe('/wrap')
   })
 
   it('nothing to run in: null', () => {
-    expect(mainTerminalCwd(task(), { path: null, selected_repo: null }, [])).toBeNull()
-    expect(mainTerminalCwd(task(), null, [])).toBeNull()
+    expect(mainTerminalCwd(task(), project, null, [])).toBeNull()
+    expect(mainTerminalCwd(task(), null, null, [])).toBeNull()
   })
 
   it('taskRepoPath is the task-bound axis the page shows (worktree > base dir > resolved repo)', () => {

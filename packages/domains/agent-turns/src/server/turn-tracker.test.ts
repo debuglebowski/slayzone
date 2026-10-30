@@ -4,6 +4,11 @@
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import {
+  deterministicLocalComputerId,
+  registerOrReplaceComputer,
+  setPlacement
+} from '@slayzone/computers/server'
+import {
   recordTurnBoundary,
   initChatTurnSubscriber,
   initPtyTurnSubscriber
@@ -152,13 +157,26 @@ describe('task deletion sets task_id to NULL but keeps the turn', () => {
 })
 
 describe('worktree path fallback', () => {
-  test('uses project.path when task.worktree_path empty', async () => {
+  // The snapshot reads THIS machine's disk, so the fallback is the project's
+  // folder on the local computer.
+  test('uses the project’s folder on the local computer when task.worktree_path empty', async () => {
     const repo = mkRepo()
     repos.push(repo)
     const altProj = crypto.randomUUID()
-    h.db
-      .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
-      .run(altProj, 'fb', '#0', repo)
+    h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(altProj, 'fb', '#0')
+    const local = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(h.slayDb, {
+      id: local,
+      name: 'local-computer',
+      platform: 'p',
+      version: 'v'
+    })
+    await setPlacement(h.slayDb, {
+      computerId: local,
+      projectId: altProj,
+      path: repo,
+      status: 'ready'
+    })
     const taskId = crypto.randomUUID()
     const tabId = `tab-${taskId.slice(0, 8)}`
     h.db
@@ -172,7 +190,7 @@ describe('worktree path fallback', () => {
     expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(1)
   })
 
-  test('skips when both worktree_path AND project.path empty', async () => {
+  test('skips when there is neither a worktree_path nor a local folder', async () => {
     const noPathProj = crypto.randomUUID()
     h.db
       .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')

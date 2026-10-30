@@ -15,7 +15,11 @@ import {
   type TrpcContext
 } from '@slayzone/trpc-server'
 import { getComputersDeps, getComputersDepsOrNull } from './computers-deps'
-import { getComputersRouterDeps, type ComputerManagerAccess } from './computers-router-deps'
+import {
+  getComputersRouterDeps,
+  notifyComputerBindingChanged,
+  type ComputerManagerAccess
+} from './computers-router-deps'
 import { decideJoinTokenMint } from './join-token-policy'
 import {
   listComputers as storeListComputers,
@@ -247,6 +251,7 @@ export const computersRouter = router({
         throw noSuchComputer()
       }
       await storeSetTaskComputer(ctx.db, input.taskId, input.computerId)
+      notifyComputerBindingChanged()
       return { ok: true as const }
     }),
 
@@ -259,6 +264,7 @@ export const computersRouter = router({
         throw noSuchComputer()
       }
       await storeSetProjectDefaultComputer(ctx.db, input.projectId, input.computerId)
+      notifyComputerBindingChanged()
       return { ok: true as const }
     }),
 

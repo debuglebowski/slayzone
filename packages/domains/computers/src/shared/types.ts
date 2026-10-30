@@ -52,3 +52,28 @@ export interface JoinToken {
   /** User it is for; becomes the redeemed computer's owner. NULL = unowned (login off). */
   owner_user_id?: string | null
 }
+
+/**
+ * What the hub knows about one project's folder on one computer — a row in
+ * `project_placements`. The COMPUTER's own `computer.projects.json` is the
+ * authority; this is the hub's copy, plus the states only the hub can be in.
+ *
+ * - `pending`: the hub holds a folder the computer has not confirmed yet (a path
+ *   from before folders moved to computers, or one set while it was offline).
+ *   Delivered on the computer's next connect.
+ * - `ready`: the computer reported it has this folder recorded.
+ * - `missing`: the folder does not exist on that computer.
+ * - `refused`: the folder is outside that computer's allowed roots.
+ * - `forgotten`: the user cleared the folder while the computer was unreachable;
+ *   it is told on its next connect, then the row goes. Never shown to clients.
+ */
+export type PlacementStatus = 'pending' | 'ready' | 'missing' | 'refused' | 'forgotten'
+
+/** A folder the hub may hand an agent: confirmed, or known and awaiting delivery. */
+export const USABLE_PLACEMENT_STATUSES: readonly PlacementStatus[] = ['pending', 'ready']
+
+export interface ProjectPlacement {
+  computer_id: string
+  path: string
+  status: PlacementStatus
+}

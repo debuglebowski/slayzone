@@ -14,9 +14,6 @@ import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPic
 import type { Project } from '@slayzone/projects-contracts'
 export type ProjectStartMode = 'scratch' | 'github' | 'linear'
 
-/** Sentinel for "no explicit binding" — Select has no null value. */
-const DEFAULT_COMPUTER_VALUE = '__default__'
-
 export interface ProjectCreationContext {
   startMode: ProjectStartMode
 }
@@ -69,12 +66,15 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const federatedHubs = fed && fed.hubs.length > 1 ? fed.hubs : []
   const [targetHubId, setTargetHubId] = useState(fed?.defaultHubId ?? 'local')
 
-  // Which MACHINE the project lives on, distinct from which hub owns its row.
-  // A hub can have several computers; the path is meaningless without saying whose
-  // filesystem it is. Null = the hub's connected default computer.
-  const [targetComputerId, setTargetComputerId] = useState<string | null>(null)
+  // Which computer the project's work runs on and its folder lives on — distinct
+  // from which hub owns its row. Every project gets one when it is made. With one
+  // computer it is that one (the hub picks it); with several the user chooses,
+  // since the folder below is a folder on THAT computer.
+  const [chosenComputerId, setChosenComputerId] = useState<string | null>(null)
   const computersQuery = useQuery(trpc.computers.list.queryOptions())
   const computers = computersQuery.data ?? []
+  const mustChooseComputer = computers.length > 1
+  const targetComputerId = mustChooseComputer ? chosenComputerId : null
   const [browseOpen, setBrowseOpen] = useState(false)
 
   const handlePicked = (picked: string): void => {
@@ -98,24 +98,18 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
         targetHubId && targetHubId !== fed?.defaultHubId
           ? (getHubClient(targetHubId)?.client ?? trpcClient)
           : trpcClient
+      // One call: the hub sets the project's default computer (the chosen one, else
+      // its only/default one) and records the folder on that computer.
       const project = await client.projects.create.mutate({
         name: name.trim(),
         color,
-        path: path || undefined
+        path: path || undefined,
+        ...(targetComputerId ? { computerId: targetComputerId } : {})
       })
-      // Persist the machine choice: the path was browsed on THAT computer, so
-      // leaving the binding unset would let a later default change point the
-      // project's agents at a filesystem where the path does not exist.
-      if (targetComputerId) {
-        await client.computers.setProjectDefaultComputer.mutate({
-          projectId: project.id,
-          computerId: targetComputerId
-        })
-      }
       onCreated(project, { startMode })
       setName('')
       setPath('')
-      setTargetComputerId(null)
+      setChosenComputerId(null)
       setStartMode('scratch')
       setColor(DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)])
     } finally {
@@ -172,20 +166,24 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
               Claude Code terminal will open in this directory
             </p>
           </div>
-          {/* Only when there is a choice to make. With one computer the path is
-              unambiguous, and a select with a single option is noise. */}
-          {computers.length > 1 && (
+          {/* Only when there is a choice to make. With one computer it is that one,
+              and a select with a single option is noise. */}
+          {mustChooseComputer && (
             <div className="space-y-2">
-              <Label htmlFor="computer">Machine</Label>
+              <Label htmlFor="computer">Computer</Label>
               <Select
-                value={targetComputerId ?? DEFAULT_COMPUTER_VALUE}
-                onValueChange={(v) => setTargetComputerId(v === DEFAULT_COMPUTER_VALUE ? null : v)}
+                value={chosenComputerId ?? undefined}
+                onValueChange={(v) => {
+                  // A folder is a folder on one computer: another computer's choice
+                  // makes the one picked above meaningless.
+                  if (v !== chosenComputerId) setPath('')
+                  setChosenComputerId(v)
+                }}
               >
                 <SelectTrigger id="computer" data-testid="create-project-computer">
-                  <SelectValue />
+                  <SelectValue placeholder="Choose a computer" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={DEFAULT_COMPUTER_VALUE}>Default computer</SelectItem>
                   {computers.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}
@@ -195,7 +193,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Whose filesystem the path above refers to, and where this project’s agents run.
+                Where this project’s agents run, and whose folder the path above is.
               </p>
             </div>
           )}
@@ -249,7 +247,10 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || loading}>
+            <Button
+              type="submit"
+              disabled={!name.trim() || loading || (mustChooseComputer && !chosenComputerId)}
+            >
               {startMode === 'scratch' ? 'Create' : 'Create and continue'}
             </Button>
           </div>

@@ -986,7 +986,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
 
   // ── projects + folders ──
   'projects.list': listed(rows('id', 'project')),
-  'projects.create': checked(path('path')),
+  // The default computer is where the project's agents run and its folder lives:
+  // never someone else's computer.
+  'projects.create': checked(path('path'), computer('computerId')),
   'projects.update': checked(project('id'), path('path')),
   'projects.delete': checked(project('id')),
   'projects.uploadIcon': checked(project('projectId'), path('sourcePath')),

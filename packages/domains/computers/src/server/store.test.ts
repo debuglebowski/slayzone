@@ -17,6 +17,7 @@ import {
   deleteComputer
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
+import { listPlacements, setPlacement } from './project-paths'
 import { createMigratedDb, seedProjectAndTask, type TestDb } from './test-db'
 
 let t: TestDb
@@ -259,6 +260,61 @@ describe('local-computer dedup (Wave3.5-D5)', () => {
       ['proj-b']
     )
     expect(proj!.default_computer_id).toBe(keep)
+  })
+
+  // Placements follow the collapse too. Left keyed to a deleted id they are never
+  // delivered, and the survivor has no folder for the project.
+  it('moves placements off the collapsed local ids, keeping the survivor’s own row', async () => {
+    seedProjectAndTask(t.raw, 'proj-d', 'task-d')
+    seedProjectAndTask(t.raw, 'proj-e', 'task-e')
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
+      id: keep,
+      name: 'local-computer',
+      platform: 'p',
+      version: 'v',
+      now: 3
+    })
+    const orphan = await registerComputer(t.db, {
+      name: 'local-computer',
+      platform: 'p',
+      version: 'v',
+      now: 1
+    })
+    await setPlacement(t.db, {
+      computerId: orphan.id,
+      projectId: 'proj-d',
+      path: '/d',
+      status: 'pending'
+    })
+    // Both hold proj-e: the survivor's own row wins over the orphan's.
+    await setPlacement(t.db, {
+      computerId: keep,
+      projectId: 'proj-e',
+      path: '/e-keep',
+      status: 'ready'
+    })
+    await setPlacement(t.db, {
+      computerId: orphan.id,
+      projectId: 'proj-e',
+      path: '/e-old',
+      status: 'ready'
+    })
+
+    await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })
+
+    expect(await listPlacements(t.db)).toEqual([
+      { computer_id: keep, project_id: 'proj-d', path: '/d', status: 'pending' },
+      { computer_id: keep, project_id: 'proj-e', path: '/e-keep', status: 'ready' }
+    ])
+  })
+
+  it('deleteComputer drops that computer’s placements', async () => {
+    seedProjectAndTask(t.raw, 'proj-f', 'task-f')
+    const c = await mkComputer()
+    await setPlacement(t.db, { computerId: c.id, projectId: 'proj-f', path: '/f', status: 'ready' })
+    await deleteComputer(t.db, c.id)
+    expect(await listPlacements(t.db)).toEqual([])
   })
 
   it('leaves bindings to UNRELATED (remote) computers untouched during a local collapse', async () => {

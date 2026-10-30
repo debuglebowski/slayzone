@@ -4,6 +4,11 @@ import type { Task } from '@slayzone/task-contracts'
 import type { Project, ProjectGroup } from '@slayzone/projects-contracts'
 
 export interface SearchFileContext {
+  /**
+   * Whose files: the search runs on the computer that holds them — the task's
+   * computer for a task, the project's for the project view.
+   */
+  target: { taskId: string } | { projectId: string }
   projectPath: string
   openFile: (path: string) => void
 }

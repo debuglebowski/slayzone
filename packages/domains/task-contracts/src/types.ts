@@ -784,6 +784,8 @@ export interface Task {
   panel_visibility: PanelVisibility | null
   // Panel sizes (JSON) — per-task widths for the split-view panels
   panel_sizes: PanelSizes | null
+  // The computer this task's work runs on; null = its project's (v149 column).
+  computer_id?: string | null
   // Worktree
   worktree_path: string | null
   worktree_parent_branch: string | null

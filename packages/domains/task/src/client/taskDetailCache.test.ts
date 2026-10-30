@@ -19,7 +19,15 @@ function makeTask(overrides: Record<string, unknown> = {}) {
 }
 
 function makeProject(overrides: Record<string, unknown> = {}) {
-  return { id: 'proj-1', name: 'Test', path: '/tmp/test', color: '#000', ...overrides }
+  // Its folder on its computer (`c1`), which is the computer the task resolves to.
+  return {
+    id: 'proj-1',
+    name: 'Test',
+    color: '#000',
+    placements: [{ computer_id: 'c1', path: '/tmp/test', status: 'ready' }],
+    resolved_computer_id: 'c1',
+    ...overrides
+  }
 }
 
 function makeTag(overrides: Record<string, unknown> = {}) {
