@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import fs from 'fs'
 import net from 'net'
 import path from 'path'
@@ -40,6 +40,7 @@ const APP_DIR = path.resolve(__dirname, '..', '..')
 const HUB_BIN = path.resolve(APP_DIR, '..', 'hub', 'dist', 'bin.cjs')
 /** Built by `ensureComputerBuilt()` in global-setup, so it exists before any spec. */
 const COMPUTER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
+const SLAY_JS = path.resolve(APP_DIR, '..', 'cli', 'dist', 'slay.js')
 
 /**
  * The renderer test seams these specs drive from inside `page.evaluate`. Types are
@@ -325,9 +326,11 @@ async function attachComputerToHub(opts: {
       async () => {
         const rows = (await withHubClient(opts.hubUrl, (c) => c.computers.list.query())) as Array<{
           id: string
+          name: string
           usable: boolean
         }>
-        computerId = rows.find((r) => r.usable)?.id ?? null
+        // By name: a hub may already have other computers.
+        computerId = rows.find((r) => r.usable && r.name === opts.name)?.id ?? null
         return computerId !== null
       },
       { timeout: 60_000, intervals: [500, 1_000, 2_000] }
@@ -381,6 +384,56 @@ function attachDefaultComputer(hub: SecondHub, storeDir: string): Promise<HubCom
     name: 'e2e-remote-hub-computer',
     forUser: hub.email
   })
+}
+
+interface TwoComputerHub {
+  hub: SecondHub
+  /** remote-a, then remote-b. */
+  computers: HubComputer[]
+  /** remote-a's only allowed root (empty). */
+  rootA: string
+  /** remote-b's only allowed root; holds `repo-b/`. */
+  rootB: string
+  stop: () => Promise<void>
+}
+
+/**
+ * A second hub with two computers, `remote-a` and `remote-b`, each jailed to its own
+ * root under `storeDir` — so whichever computer a folder lands on is observable.
+ */
+async function spawnHubWithTwoComputers(storeDir: string): Promise<TwoComputerHub> {
+  const rootA = path.join(storeDir, 'roots-a')
+  const rootB = path.join(storeDir, 'roots-b')
+  fs.mkdirSync(rootA, { recursive: true })
+  fs.mkdirSync(path.join(rootB, 'repo-b'), { recursive: true })
+  const hub = await spawnSecondHub(storeDir)
+  const computers: HubComputer[] = []
+  const stop = async (): Promise<void> => {
+    for (const c of computers) await c.stop()
+    await hub.stop()
+  }
+  try {
+    await waitForHubHealth(hub.port)
+    for (const [name, roots] of [
+      ['remote-a', rootA],
+      ['remote-b', rootB]
+    ] as const) {
+      computers.push(
+        await attachComputerToHub({
+          hubUrl: hub.url,
+          rootDir: path.join(storeDir, `${name}-root`),
+          credentialsDir: path.join(storeDir, `${name}-creds`),
+          allowedRoots: roots,
+          name,
+          forUser: hub.email
+        })
+      )
+    }
+  } catch (err) {
+    await stop()
+    throw err
+  }
+  return { hub, computers, rootA, rootB, stop }
 }
 
 base.describe('Multi-hub federation (2 hubs)', () => {
@@ -1009,6 +1062,248 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       if (launched) await launched.close()
       if (hubComputer) await hubComputer.stop()
       if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
+  base("create dialog lists the chosen hub's computers and browses their disk", async () => {
+    base.setTimeout(240_000)
+
+    // Computers and folders belong to a hub. Picking a remote hub in the create dialog
+    // must list THAT hub's computers and browse THAT computer's disk, not the local hub's.
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let setup: TwoComputerHub | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      setup = await spawnHubWithTwoComputers(secondStore)
+      const { hub, rootB } = setup
+      const remoteHubUrl = hub.url
+      const computerB = setup.computers[1]!
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-create-placement',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), {
+            recursive: true
+          })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify(
+              {
+                server_mode: 'local',
+                multi_hub: true,
+                hubs: [
+                  {
+                    id: 'remote-b',
+                    kind: 'remote',
+                    label: 'Hub B',
+                    url: remoteHubUrl
+                  }
+                ],
+                default_hub_id: 'local'
+              },
+              null,
+              2
+            )
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
+
+      await page.evaluate(() =>
+        (window as unknown as FederationWindow).__slayzone_dialogStore
+          ?.getState()
+          .openCreateProject()
+      )
+      await page.getByPlaceholder('Project name').fill('Placed-P')
+      await page.locator('[data-testid="create-project-hub"]').click()
+      await page.getByRole('option', { name: /Hub B/ }).click()
+
+      // Hub B's two computers, not the local hub's one.
+      await page.locator('[data-testid="create-project-computer"]').click()
+      await expect(page.getByRole('option', { name: /remote-a/ })).toBeVisible({ timeout: 15_000 })
+      await page.getByRole('option', { name: /remote-b/ }).click()
+
+      // The folder picker browses remote-b's disk.
+      await page.getByRole('button', { name: 'Browse folder' }).click()
+      const picker = page.locator('[data-testid="workspace-dir-picker"]')
+      await expect(picker.locator('[data-testid="workspace-dir-picker-path"]')).toHaveValue(rootB, {
+        timeout: 15_000
+      })
+      await picker
+        .locator('[data-testid="workspace-dir-entry"]')
+        .filter({ hasText: 'repo-b' })
+        .click()
+      await expect(picker.locator('[data-testid="workspace-dir-picker-path"]')).toHaveValue(
+        path.join(rootB, 'repo-b')
+      )
+      await picker.locator('[data-testid="workspace-dir-picker-select"]').click()
+      await page.getByRole('button', { name: 'Create', exact: true }).click()
+
+      // The project lives on Hub B with its folder recorded on remote-b.
+      await expect
+        .poll(
+          () =>
+            withHubClient(remoteHubUrl, async (c) => {
+              const ps = (await c.projects.list.query()) as Array<{
+                name: string
+                default_computer_id?: string | null
+                placements?: Array<{ computer_id: string; path: string }>
+              }>
+              const p = ps.find((x) => x.name === 'Placed-P')
+              if (!p) return null
+              return {
+                computer: p.default_computer_id,
+                path: p.placements?.find((pl) => pl.computer_id === computerB.computerId)?.path
+              }
+            }),
+          { timeout: 20_000, intervals: [500, 1_000] }
+        )
+        .toEqual({
+          computer: computerB.computerId,
+          path: fs.realpathSync(path.join(rootB, 'repo-b'))
+        })
+    } finally {
+      if (launched) await launched.close()
+      if (setup) await setup.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
+  base('slay projects create/update --computer place the folder on that computer', async () => {
+    base.setTimeout(180_000)
+
+    // The CLI talks to the remote hub directly. A folder named with --computer is on
+    // THAT computer: never resolved or created on this machine, recorded there.
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let setup: TwoComputerHub | null = null
+    try {
+      setup = await spawnHubWithTwoComputers(secondStore)
+      const { hub, rootA, rootB } = setup
+      const [computerA, computerB] = setup.computers as [HubComputer, HubComputer]
+      const env: Record<string, string> = {}
+      for (const [k, v] of Object.entries(process.env)) {
+        // No task, app or Electron context leaks in: only the hub named below.
+        if (v === undefined || /^(ELECTRON_|SLAYZONE_)/.test(k)) continue
+        env[k] = v
+      }
+      env.SLAYZONE_HUB_ADDRESS = new URL(hub.url).host
+      env.SLAYZONE_HUB_TOKEN = hub.token
+      const slay = (...args: string[]) =>
+        spawnSync('node', [SLAY_JS, ...args], {
+          env,
+          encoding: 'utf8',
+          cwd: secondStore
+        })
+      const projectOnHub = (name: string) =>
+        withHubClient(hub.url, async (c) => {
+          const ps = (await c.projects.list.query()) as Array<{
+            name: string
+            default_computer_id?: string | null
+            placements?: Array<{
+              computer_id: string
+              path: string
+              status: string
+            }>
+          }>
+          return ps.find((x) => x.name === name) ?? null
+        })
+
+      // create --computer: default computer + folder on it.
+      const repoB = fs.realpathSync(path.join(rootB, 'repo-b'))
+      const created = slay(
+        'projects',
+        'create',
+        'CliPlaced',
+        '--computer',
+        'remote-b',
+        '--path',
+        repoB,
+        '--json'
+      )
+      expect(created.status, created.stderr).toBe(0)
+      expect(JSON.parse(created.stdout)).toMatchObject({
+        computer_id: computerB.computerId,
+        path: repoB
+      })
+      const placed = await projectOnHub('CliPlaced')
+      expect(placed?.default_computer_id).toBe(computerB.computerId)
+      expect(placed?.placements).toContainEqual(
+        expect.objectContaining({
+          computer_id: computerB.computerId,
+          path: repoB,
+          status: 'ready'
+        })
+      )
+
+      // A folder the computer lacks: the project exists, nothing is created here, the CLI says so.
+      const absent = path.join(rootA, 'not-there')
+      const missing = slay(
+        'projects',
+        'create',
+        'CliMissing',
+        '--computer',
+        'remote-a',
+        '--path',
+        absent
+      )
+      expect(missing.status, missing.stderr).toBe(0)
+      expect(missing.stderr).toContain('Folder not found on "remote-a"')
+      expect(fs.existsSync(absent)).toBe(false)
+
+      // A relative path cannot be resolved for another machine.
+      const relative = slay(
+        'projects',
+        'create',
+        'CliRelative',
+        '--computer',
+        'remote-a',
+        '--path',
+        'sub/dir'
+      )
+      expect(relative.status).not.toBe(0)
+      expect(relative.stderr).toContain('--path must be absolute')
+      expect(fs.existsSync(path.join(secondStore, 'sub'))).toBe(false)
+      expect(await projectOnHub('CliRelative')).toBeNull()
+
+      // An unknown computer lists the hub's computers.
+      const unknown = slay('projects', 'create', 'CliUnknown', '--computer', 'nope')
+      expect(unknown.status).not.toBe(0)
+      expect(unknown.stderr).toContain('No computer matching "nope"')
+      expect(unknown.stderr).toContain('remote-a')
+
+      // update --computer: moves the project, --path is its folder there.
+      const realA = fs.realpathSync(rootA)
+      const moved = slay(
+        'projects',
+        'update',
+        'CliPlaced',
+        '--computer',
+        'remote-a',
+        '--path',
+        realA
+      )
+      expect(moved.status, moved.stderr).toBe(0)
+      const after = await projectOnHub('CliPlaced')
+      expect(after?.default_computer_id).toBe(computerA.computerId)
+      expect(after?.placements).toContainEqual(
+        expect.objectContaining({
+          computer_id: computerA.computerId,
+          path: realA,
+          status: 'ready'
+        })
+      )
+
+      // list names the computer.
+      const listed = slay('projects', 'list')
+      expect(listed.status, listed.stderr).toBe(0)
+      expect(listed.stdout.split('\n').find((l) => l.includes('CliPlaced'))).toContain('remote-a')
+    } finally {
+      if (setup) await setup.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
   })

@@ -28,7 +28,6 @@
   "packages/domains/onboarding/src/client/CliInstallStep.tsx": ["CliInstallStep"],
   "packages/domains/onboarding/src/client/tutorial/scenes/SceneProcesses.tsx": ["ProcessesPanel"],
   "packages/domains/projects/src/client/ColumnsTab.tsx": ["ColumnsTab"],
-  "packages/domains/projects/src/client/CreateProjectDialog.tsx": ["CreateProjectDialog"],
   "packages/domains/projects/src/client/EnvironmentTab.tsx": ["EnvironmentTab"],
   "packages/domains/projects/src/client/GeneralTab.tsx": ["GeneralTab"],
   "packages/domains/projects/src/client/TasksGeneralTab.tsx": ["TasksGeneralTab"],

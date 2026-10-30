@@ -13,6 +13,12 @@ const existingId = crypto.randomUUID()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
   .run(existingId, 'Existing', '#000000', '/tmp/existing')
+h.db
+  .prepare(
+    `INSERT INTO computers (id, name, platform, version, capabilities_json, last_seen_at, created_at)
+     VALUES ('cOther', 'other-box', 'linux-x64', '0', '{}', 0, 1)`
+  )
+  .run()
 
 let notifyCount = 0
 const app = express()
@@ -84,6 +90,29 @@ describe('/api/projects CRUD', () => {
     })
     expect(res.status).toBe(200)
     expect(res.body.data.path).toBeNull()
+  })
+
+  test('PATCH: computerId makes that computer the project default', async () => {
+    const res = await rest.request<OneResponse>('PATCH', `/api/projects/${existingId}`, {
+      computerId: 'cOther'
+    })
+    expect(res.status).toBe(200)
+    const row = h.db
+      .prepare('SELECT default_computer_id FROM projects WHERE id = ?')
+      .get(existingId) as { default_computer_id: string | null }
+    expect(row.default_computer_id).toBe('cOther')
+  })
+
+  test('PATCH 400: unknown computerId changes nothing', async () => {
+    const res = await rest.request<OneResponse>('PATCH', `/api/projects/${existingId}`, {
+      computerId: 'no-such-computer',
+      name: 'ShouldNotApply'
+    })
+    expect(res.status).toBe(400)
+    const row = h.db
+      .prepare('SELECT name, default_computer_id FROM projects WHERE id = ?')
+      .get(existingId) as { name: string; default_computer_id: string | null }
+    expect(row).toEqual({ name: 'Renamed', default_computer_id: 'cOther' })
   })
 
   test('PATCH 400: no fields', async () => {

@@ -294,7 +294,11 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   // A project's path is a registered root (access.ts `path`): pointing one at someone
   // else's directory would make it yours.
   'POST /api/projects': checked(path('body.path'), computer('body.computerId')),
-  'PATCH /api/projects/:id': checked(projectRef('params.id'), path('body.path')),
+  'PATCH /api/projects/:id': checked(
+    projectRef('params.id'),
+    path('body.path'),
+    computer('body.computerId')
+  ),
   'POST /api/projects/:id/skills': checked(projectRef('params.id')),
   'GET /api/projects/resolve-by-path': then(checked(path('query.path')), dataOne('id', 'project')),
 

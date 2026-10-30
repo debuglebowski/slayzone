@@ -8,7 +8,8 @@ import type { RestApiDeps } from '../types'
  * includes non-archived, non-deleted, non-temporary tasks.
  *
  * `path` is the project-wide folder (`projectFolderOf`): on the computer the hub uses
- * for the project, else the legacy column until it is dropped.
+ * for the project, else the legacy column until it is dropped. `computer_id` is that
+ * computer (null when there is none).
  */
 export function registerProjectsListRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/projects', async (_req, res) => {
@@ -29,15 +30,16 @@ export function registerProjectsListRoute(app: Express, deps: RestApiDeps): void
       const projects = new Map((await listAllProjects(deps.db)).map((p) => [p.id, p]))
       res.json({
         ok: true,
-        data: rows.map((r) => ({
-          id: r.id,
-          name: r.name,
-          path: (() => {
-            const project = projects.get(r.id)
-            return project ? projectFolderOf(project, r.legacy_path) : r.legacy_path
-          })(),
-          task_count: r.task_count
-        }))
+        data: rows.map((r) => {
+          const project = projects.get(r.id)
+          return {
+            id: r.id,
+            name: r.name,
+            path: project ? projectFolderOf(project, r.legacy_path) : r.legacy_path,
+            computer_id: project?.resolved_computer_id ?? null,
+            task_count: r.task_count
+          }
+        })
       })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
