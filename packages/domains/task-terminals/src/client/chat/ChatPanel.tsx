@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -19,7 +20,6 @@ import {
   isAwaitingUserQuestion,
   LiveBlockStore,
   LiveBlockStoreContext,
-  selectConversationAttachmentBytes,
   selectUsageSummary,
   useChatSession
 } from '@slayzone/terminal/client'
@@ -56,7 +56,12 @@ import { RewindPicker, type RewindPickerKind } from './RewindPicker'
 import { chatPaletteCommands, compactAction } from './palette/chat-palette-commands'
 import { ToolFocusContext, ToolFocusStore } from './tool-cards/tool-focus'
 import { FilesChangedPanel } from './files-changed/FilesChangedPanel'
-import { countSessionFiles } from './files-changed/session-file-changes'
+import {
+  activeUserRows,
+  attachmentBytesOf,
+  historySummary,
+  sessionFileCount
+} from './history-summary'
 import { appendToDraft, formatDiffComment, type DiffLineComment } from './diff-comments/format'
 
 export interface ChatPanelHandle {
@@ -115,6 +120,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       timeline,
       inFlight,
       hydrating,
+      paging,
+      loadPages,
+      unloadPages,
+      searchPages,
       permissionMode,
       prompts,
       submittingPrompts,
@@ -136,6 +145,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       cwd,
       providerFlagsOverride
     })
+    // The whole history's summary: rows here, and for pages not loaded (paged
+    // history) what the hub sent — the outline, rewind, files count and budget.
+    const historyOfSession = useMemo(() => historySummary(timeline, paging), [timeline, paging])
 
     const appearance = useAppearance()
     const finalOnly = !appearance.chatShowTools
@@ -218,7 +230,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       ...(effortLevels ? { effortIds: effortLevels.map((l) => l.id) } : {}),
       handleModelChange,
       cliCommands,
-      attachmentsUsedBytes: selectConversationAttachmentBytes(state),
+      attachmentsUsedBytes: attachmentBytesOf(historyOfSession),
       // "Send now" on a queued message: a live interrupt keeps the queue, which
       // then drains that message next (`chat.interrupt` → stopTurn, no restore).
       ...(chatCapabilitiesForMode(mode).liveInterrupt ? { interruptTurn: interrupt } : {})
@@ -238,14 +250,32 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       focus: () => composer.textareaRef.current?.focus()
     }))
 
-    const display = useChatDisplay({ timeline, finalOnly, showLastMessageTools, follow })
+    const display = useChatDisplay({
+      timeline,
+      finalOnly,
+      showLastMessageTools,
+      follow,
+      paging,
+      loadPages,
+      searchPages,
+      summary: historyOfSession,
+      unloadPages
+    })
+    const activeUsers = useMemo(
+      () => activeUserRows(display.summary, display.conversationFolded),
+      [display.summary, display.conversationFolded]
+    )
     const { search } = display
     // The turn outline and its keys (jump to the previous / next user turn).
     const turnOutline = useTurnOutline({
       items: display.displayedTimeline,
       itemKey: display.itemKey,
       virtual: display.virtual,
-      turnOpen: inFlight
+      turnOpen: inFlight,
+      summary: display.summary,
+      folded: display.folded,
+      rowOf: display.rowOf,
+      reveal: display.revealItem
     })
 
     // Files changed (chat E, plan 4.3): the panel beside the chat, opened at a file
@@ -256,9 +286,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setFilesPanel((prev) => ({ ...(path ? { path } : {}), seq: (prev?.seq ?? 0) + 1 }))
     })
     const filesCount = useMemo(
-      () => (filesCapable ? countSessionFiles(timeline) : 0),
-      [filesCapable, timeline]
+      () => (filesCapable ? sessionFileCount(display.summary, display.conversationFolded) : 0),
+      [filesCapable, display.summary, display.conversationFolded]
     )
+    // Paged history: the panel shows every file change — the pages holding
+    // them load (held while it is open).
+    const filesPanelOpen = filesPanel !== null
+    const { summary: historySummaryNow, conversationFolded, pinPages } = display
+    useEffect(() => {
+      if (!filesPanelOpen || !paging) {
+        pinPages('files', null)
+        return
+      }
+      const pages = new Set<number>()
+      for (const f of historySummaryNow.files) {
+        if (!conversationFolded.has(f.row)) pages.add(Math.floor(f.row / paging.pageRows))
+      }
+      const wanted = [...pages].filter((p) => p < paging.sealed)
+      pinPages('files', wanted)
+      loadPages(wanted)
+    }, [filesPanelOpen, paging, historySummaryNow, conversationFolded, pinPages, loadPages])
     // Cards asked to show themselves (a files-changed row's file).
     const [toolFocus] = useState(() => new ToolFocusStore())
 
@@ -280,7 +327,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // into the composer (the same draft Stop restores).
     const conversation = useConversationActions({
       mode,
-      timeline,
+      activeUsers,
       rewindPreview,
       rewind,
       fork,
@@ -362,7 +409,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       draftEmpty: composer.draft.trim() === '' && composer.attachments.length === 0,
       ...(conversation.view.canRewind ? { onDoubleEscape: () => openRewind('edit') } : {}),
       jumpTurn: turnOutline.jump,
-      scrollToBottom
+      scrollToBottom,
+      unstick: follow.unstick
     })
 
     // The chat's page in the app's Cmd+K palette while this tab is the active one
@@ -417,7 +465,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       find: search.requestOpen,
       collapseAll: () => {
         // Rows scrolled out of view are closed too, when they come back.
-        collapseAllRows(rowUiState, display.displayedTimeline, display.itemKey)
+        collapseAllRows(rowUiState, display.displayedTimeline, display.itemKey, timeline.length)
         setCollapseSignal((n) => n + 1)
       },
       copyLastResponse: display.copyLastResponse,
@@ -427,7 +475,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       // The turn outline: go to a turn, previous / next turn.
       extra: turnOutlinePaletteCommands({
         turns: turnOutline.turns,
-        reveal: display.virtual.revealKey,
+        reveal: display.revealItem,
         jump: turnOutline.jump
       })
     })
@@ -482,6 +530,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         onOpenFile: handleOpenFile,
         conversation: conversation.view,
         branches: display.branches,
+        history: display.history,
+        latestAskId: display.summary.asks.at(-1)?.id ?? null,
         ...(filesCapable ? { filesPanel: { open: openFilesPanel } } : {}),
         ...(diffComments ? { addDiffComment } : {})
       }),
@@ -511,6 +561,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         handleOpenFile,
         conversation.view,
         display.branches,
+        display.history,
+        display.summary,
         filesCapable,
         openFilesPanel,
         diffComments,
@@ -519,7 +571,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     )
 
     const isEmpty =
-      timeline.length === 0 || (timeline.length === 1 && timeline[0].kind === 'session-start')
+      timeline.length === 0 || (timeline.length === 1 && timeline[0]?.kind === 'session-start')
 
     // What streams right now reaches only the rows that stream (plan 3.2): the
     // store's identity never changes, so providing it re-renders nothing, and a
@@ -533,7 +585,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     return (
       <ChatViewContext.Provider value={chatView}>
-        <TimelineRevealContext.Provider value={display.virtual.revealKey}>
+        <TimelineRevealContext.Provider value={display.revealItem}>
           <RowUiStateContext.Provider value={rowUiState}>
             <LiveBlockStoreContext.Provider value={liveStore}>
               <CommandTaskContext.Provider value={commandTaskScope}>
@@ -612,6 +664,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         virtual={display.virtual}
                         scrollRef={display.virtual.bindScroller}
                         itemKey={display.itemKey}
+                        rowOf={display.rowOf}
                         turns={turnOutline.turns}
                         contentRef={contentRef}
                         isAtBottom={isAtBottom}
@@ -630,7 +683,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       <RewindDialog dialog={conversation.dialog} />
                       <RewindPicker
                         kind={pickerKind}
-                        timeline={timeline}
+                        activeUsers={activeUsers}
                         view={conversation.view}
                         onClose={() => setPickerKind(null)}
                       />

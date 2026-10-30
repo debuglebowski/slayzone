@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { MessageCircleQuestion } from 'lucide-react'
 import { toast } from '@slayzone/ui'
-import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
+import type { ChatPrompt, TimelineItem, TimelineRows } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import { useChatProvider, useChatView } from '../ChatViewContext'
 import { PermissionPrompt } from './PermissionPrompt'
@@ -13,13 +13,13 @@ import type { PromptKeyHandler } from './prompt-keys'
 export type { PromptKeyHandler } from './prompt-keys'
 
 /** Subagent type of the Task that ran the prompting tool, when the timeline has it. */
-function agentNameFor(prompt: ChatPrompt, timeline: TimelineItem[]): string | null {
-  const tool = timeline.find((it) => it.kind === 'tool' && it.invocation.id === prompt.toolUseId) as
-    | Extract<TimelineItem, { kind: 'tool' }>
-    | undefined
+function agentNameFor(prompt: ChatPrompt, timeline: Readonly<TimelineRows>): string | null {
+  const tool = timeline.find(
+    (it) => it?.kind === 'tool' && it.invocation.id === prompt.toolUseId
+  ) as Extract<TimelineItem, { kind: 'tool' }> | undefined
   const parentId = tool?.parentToolUseId
   if (!parentId) return null
-  const task = timeline.find((it) => it.kind === 'tool' && it.invocation.id === parentId) as
+  const task = timeline.find((it) => it?.kind === 'tool' && it.invocation.id === parentId) as
     | Extract<TimelineItem, { kind: 'tool' }>
     | undefined
   const type = (task?.invocation.input as { subagent_type?: unknown } | null)?.subagent_type

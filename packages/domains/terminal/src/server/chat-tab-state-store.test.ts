@@ -82,6 +82,27 @@ describe('chat tab state', () => {
     }
   })
 
+  test("a scroll anchor keeps its row (a paged history loads that row's page to restore)", async () => {
+    const h = await createTestHarness()
+    try {
+      seedTab(h)
+      await saveChatScroll(h.slayDb, 'tab-1', {
+        atBottom: false,
+        key: 'tool:t1',
+        offsetPx: 3,
+        row: 1234
+      })
+      expect((await getChatTabState(h.slayDb, 'tab-1'))?.scroll).toEqual({
+        atBottom: false,
+        key: 'tool:t1',
+        offsetPx: 3,
+        row: 1234
+      })
+    } finally {
+      h.cleanup()
+    }
+  })
+
   test('a save for a tab that is gone is ignored (no throw), and the row goes with its tab', async () => {
     const h = await createTestHarness()
     try {

@@ -5,8 +5,11 @@ import { useTRPC, useTRPCClient } from '../../trpc'
 import type { CallbackRef } from '../useFollowBottom'
 
 const SAVE_DELAY_MS = 500
-/** Frames to wait for the anchor's row to render after widening the window. */
-const MAX_RESTORE_FRAMES = 20
+/**
+ * Frames to wait for the anchor's row to render after revealing it (a paged
+ * history may load its page first: ~2 s).
+ */
+const MAX_RESTORE_FRAMES = 120
 
 /**
  * Try to restore `anchor` each frame until its row is rendered (the window was
@@ -74,7 +77,8 @@ export function useChatScrollMemory({
   captureAnchor: () => ChatScrollAnchor | null
   restoreAnchor: (anchor: ChatScrollAnchor) => boolean
   /** Make the anchor's row part of the rendered window. */
-  revealKey: (key: string) => void
+  /** Bring the anchor's row into the list (`row`: its timeline index, to load its page). */
+  revealKey: (key: string, row?: number) => void
 }): void {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
@@ -95,7 +99,7 @@ export function useChatScrollMemory({
     lastSavedRef.current = anchor ? JSON.stringify(anchor) : null
     // At the bottom is where a timeline opens anyway.
     if (!anchor || anchor.atBottom) return
-    revealKey(anchor.key)
+    revealKey(anchor.key, anchor.row)
     cancelRestoreRef.current = restoreWhenRendered(anchor, restoreAnchor)
   }, [enabled, ready, isSuccess, data, restoreAnchor, revealKey])
 

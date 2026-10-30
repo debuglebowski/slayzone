@@ -135,7 +135,7 @@ describe('collectSessionFileChanges', () => {
     const timeline: TimelineItem[] = [
       user('go'),
       tool('Task', { subagent_type: 'x' }, null, { id: 'task1' }),
-      { ...edit('/r/a.ts', 'a\n', 'a', 'b'), parentToolUseId: 'task1' }
+      { ...edit('/r/a.ts', 'a\n', 'a', 'b'), parentToolUseId: 'task1' } as TimelineItem
     ]
     expect(collectSessionFileChanges(timeline).files[0].edits[0].nested).toBe(true)
   })

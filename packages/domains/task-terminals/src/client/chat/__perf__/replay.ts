@@ -14,6 +14,11 @@ import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { claudeChatBackend } from '@slayzone/terminal/agents'
 import { reducer, initialState, type ChatTimelineState } from '@slayzone/terminal/reducer'
+import { decodeTimelineState } from '@slayzone/terminal/timeline-checkpoint'
+import {
+  TimelineProjection,
+  type TimelineProjectionStore
+} from '@slayzone/terminal/timeline-projection'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { buildLongSession, LONG_SESSION_EVENTS } from '@slayzone/test-utils/chat-long-session'
 
@@ -192,4 +197,93 @@ export function replayAllBestOf(runs: number, opts: ReplayOpts = {}): ReplayMetr
     }
   }
   return best ?? []
+}
+
+/** An in-memory projection store (what the hub keeps in SQLite). */
+function memoryTimelineStore(): TimelineProjectionStore {
+  const pages = new Map<number, { rows: string; summary: string; searchText: string }>()
+  let checkpoint: { version: string; seq: number; data: string } | null = null
+  return {
+    loadCheckpoint: async () => checkpoint,
+    loadPages: async (wanted) =>
+      wanted.flatMap((page) => {
+        const p = pages.get(page)
+        return p ? [{ page, rows: p.rows }] : []
+      }),
+    loadSummaries: async () =>
+      [...pages.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([page, p]) => ({ page, summary: p.summary })),
+    save: async (write) => {
+      if (write.dropPagesFrom !== null) {
+        for (const page of [...pages.keys()]) if (page >= write.dropPagesFrom) pages.delete(page)
+      }
+      for (const p of write.pages) pages.set(p.page, p)
+      checkpoint = write.checkpoint
+    },
+    searchPages: async (needle) =>
+      [...pages.entries()].filter(([, p]) => p.searchText.includes(needle)).map(([page]) => page),
+    discard: async () => {
+      pages.clear()
+      checkpoint = null
+    }
+  }
+}
+
+export interface PagedOpenMetrics {
+  /** Hub: no stored projection — every event folded, every page written. */
+  rebuildMs: number
+  /** Hub: a tab loading again from its stored checkpoint. */
+  reopenMs: number
+  /** Hub: the snapshot a client opens from (state as of now, page summaries). */
+  snapshotMs: number
+  /** Client: decoding and restoring that snapshot (what it holds: the tail). */
+  clientOpenMs: number
+  /** Rows the client holds after opening. */
+  clientRows: number
+  /** Most sealed pages the hub held at once while rebuilding. */
+  hubPeakPages: number
+}
+
+/**
+ * Opening a saved session paged (chat F), hub and client side. Best of `runs`
+ * for each step (store in memory: SQLite time is not the reducer's).
+ */
+export async function pagedOpen(
+  events: AgentEvent[],
+  provider: 'claude' | 'codex',
+  runs = 3
+): Promise<PagedOpenMetrics> {
+  const history = events.map((event, seq) => ({ seq, event, at: 1_000 + seq }))
+  const agentStartedTurns = provider === 'claude'
+  const best: PagedOpenMetrics = {
+    rebuildMs: Infinity,
+    reopenMs: Infinity,
+    snapshotMs: Infinity,
+    clientOpenMs: Infinity,
+    clientRows: 0,
+    hubPeakPages: 0
+  }
+  for (let i = 0; i < runs; i++) {
+    const store = memoryTimelineStore()
+    let t0 = performance.now()
+    const built = await TimelineProjection.open({ store, history, agentStartedTurns })
+    best.rebuildMs = Math.min(best.rebuildMs, performance.now() - t0)
+    best.hubPeakPages = Math.max(best.hubPeakPages, built.peakResidentPages)
+    await built.close()
+    t0 = performance.now()
+    const p = await TimelineProjection.open({ store, history, agentStartedTurns })
+    best.reopenMs = Math.min(best.reopenMs, performance.now() - t0)
+    t0 = performance.now()
+    const snapshot = await p.openSnapshot()
+    best.snapshotMs = Math.min(best.snapshotMs, performance.now() - t0)
+    t0 = performance.now()
+    const state = reducer(initialState({ agentStartedTurns }), {
+      type: 'restore',
+      state: decodeTimelineState(snapshot.state)
+    })
+    best.clientOpenMs = Math.min(best.clientOpenMs, performance.now() - t0)
+    best.clientRows = state.timeline.filter((r) => r !== undefined).length
+  }
+  return best
 }

@@ -9,7 +9,7 @@ import {
   fileChangesOf,
   selectFoldedIndexes,
   type CodexFileChange,
-  type TimelineItem,
+  type TimelineRows,
   type ToolInvocation
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from '../claude-patch-to-filediff'
@@ -118,12 +118,12 @@ function codexContentOf(
  * fork or switch folded away is left out, like on the timeline. Files in
  * first-changed order.
  */
-export function collectSessionFileChanges(timeline: readonly TimelineItem[]): SessionFileChanges {
+export function collectSessionFileChanges(timeline: Readonly<TimelineRows>): SessionFileChanges {
   const folded = selectFoldedIndexes(timeline)
   const byPath = new Map<string, SessionFileChange>()
   let shellCommands = 0
   timeline.forEach((it, i) => {
-    if (it.kind !== 'tool' || folded.has(i)) return
+    if (it?.kind !== 'tool' || folded.has(i)) return
     if (SHELL_TOOL_NAMES.has(it.invocation.name)) shellCommands++
     const changes = fileChangesOf(it.invocation)
     if (changes.length === 0) return
@@ -149,11 +149,11 @@ export function collectSessionFileChanges(timeline: readonly TimelineItem[]): Se
 }
 
 /** How many files the conversation changed (the panel button's count), without building them. */
-export function countSessionFiles(timeline: readonly TimelineItem[]): number {
+export function countSessionFiles(timeline: Readonly<TimelineRows>): number {
   const folded = selectFoldedIndexes(timeline)
   const paths = new Set<string>()
   timeline.forEach((it, i) => {
-    if (it.kind !== 'tool' || folded.has(i)) return
+    if (it?.kind !== 'tool' || folded.has(i)) return
     for (const change of fileChangesOf(it.invocation)) paths.add(change.path)
   })
   return paths.size

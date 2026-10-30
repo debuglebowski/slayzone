@@ -107,7 +107,7 @@ function recordInFlightFlip(
           resultCount: state.resultCount,
           sessionEnded: state.sessionEnded,
           timelineLen: state.timeline.length,
-          lastEventKinds: state.timeline.slice(-5).map((it) => it.kind)
+          lastEventKinds: state.timeline.slice(-5).map((it) => it?.kind ?? 'unloaded')
         }
       })
       .catch(() => {

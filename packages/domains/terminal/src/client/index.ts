@@ -43,12 +43,20 @@ export { LoopModeDialog } from './LoopModeDialog'
 export { SlayNudgeBanner } from './SlayNudgeBanner'
 export { useSlayNudge } from './useSlayNudge'
 export {
+  searchableText,
+  summarizeRows,
+  pageSearchText,
+  type TimelinePageSummary
+} from '../shared/timeline-summary'
+export {
   useChatSession,
   type UseChatSessionResult,
+  type ChatPaging,
   type UseChatSessionOpts
 } from './useChatSession'
 export {
   type TimelineItem,
+  type TimelineRows,
   type ToolInvocation,
   type ChatTimelineState,
   type BgShell,
@@ -69,14 +77,14 @@ export {
   selectActiveUserIds,
   selectFoldedIndexes,
   selectConversationAttachmentBytes
-} from './chat-timeline'
+} from '../shared/chat-timeline'
 export {
   FILE_TOOL_NAMES,
   SHELL_TOOL_NAMES,
   fileChangeOf,
   fileChangesOf,
   type TurnFileChange
-} from './turn-file-changes'
+} from '../shared/turn-file-changes'
 export {
   CODEX_FILE_CHANGE_TOOL,
   codexChangeContent,
@@ -87,7 +95,7 @@ export {
   type CodexChangeKind,
   type CodexFileChange,
   type CodexPatchHunk
-} from './codex-file-changes'
+} from '../shared/codex-file-changes'
 export { LiveBlockStore, LiveBlockStoreContext, useLiveBlock } from './live-blocks'
 export { parsePartialJson } from './partial-json'
 export {
@@ -96,5 +104,5 @@ export {
   selectPendingPrompts,
   selectPromptForTool,
   hasPendingPrompt
-} from './chat-prompts'
+} from '../shared/chat-prompts'
 export * from './utils'

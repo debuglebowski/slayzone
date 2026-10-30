@@ -10,6 +10,16 @@ import {
   type BufferedEvent
 } from '../chat-events-store'
 import { clearChatQueue } from '../chat-queue-store'
+import {
+  clearTimeline,
+  loadTimelineCheckpoint,
+  loadTimelinePages,
+  loadTimelineSummaries,
+  saveTimeline,
+  searchTimelinePages,
+  type TimelineCheckpointRow,
+  type TimelineWrite
+} from '../chat-timeline-store'
 import { buildMcpEnv, resolveRemoteMcpEnv } from '../mcp-env'
 import { getRemoteMcpEnvProvider } from './pty-manager'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
@@ -99,12 +109,29 @@ export interface ChatDataOps {
    */
   bumpLastInteraction(taskId: string, now: number): Promise<boolean>
   /** Insert-only; `'clash'` when a row already exists at that seq (never overwritten). */
-  persistChatEvent(tabId: string, seq: number, event: AgentEvent): Promise<'inserted' | 'clash'>
+  persistChatEvent(
+    tabId: string,
+    seq: number,
+    event: AgentEvent,
+    at?: number
+  ): Promise<'inserted' | 'clash'>
   loadChatEvents(tabId: string): Promise<BufferedEvent[]>
   /** Saved events with `afterSeq < seq < beforeSeq` (history older than the in-memory cache). */
   loadChatEventsRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
   getNextSeqForTab(tabId: string): Promise<number>
+  /** The tab's saved events — and the timeline projection derived from them. */
   clearChatEventsForTab(tabId: string): Promise<void>
+  /** The hub's timeline projection (derived; `chat-timeline-store.ts`). */
+  loadTimelineCheckpoint(tabId: string): Promise<TimelineCheckpointRow | null>
+  loadTimelinePages(
+    tabId: string,
+    pages: readonly number[]
+  ): Promise<Array<{ page: number; rows: string }>>
+  loadTimelineSummaries(tabId: string): Promise<Array<{ page: number; summary: string }>>
+  saveTimeline(tabId: string, write: TimelineWrite): Promise<void>
+  searchTimelinePages(tabId: string, needleLower: string): Promise<number[]>
+  /** Throw the projection away (it is rebuilt from the events on the next open). */
+  clearTimeline(tabId: string): Promise<void>
   /** Drop all queued messages for a tab. Returns the number removed. */
   clearChatQueue(tabId: string): Promise<number>
   /** MCP env vars for the chat subprocess (task/project ids, hook URL, …).
@@ -325,7 +352,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       return res.changes > 0
     },
 
-    persistChatEvent: (tabId, seq, event) => persistChatEvent(db, tabId, seq, event),
+    persistChatEvent: (tabId, seq, event, at) => persistChatEvent(db, tabId, seq, event, at),
 
     loadChatEvents: (tabId) => loadChatEvents(db, tabId),
     loadChatEventsRange: (tabId, afterSeq, beforeSeq) =>
@@ -333,7 +360,19 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
 
     getNextSeqForTab: (tabId) => getNextSeqForTab(db, tabId),
 
-    clearChatEventsForTab: (tabId) => clearChatEventsForTab(db, tabId),
+    clearChatEventsForTab: async (tabId) => {
+      await clearChatEventsForTab(db, tabId)
+      // Derived from those events (a leftover would be refused anyway: its seq
+      // is past the events).
+      await clearTimeline(db, tabId)
+    },
+
+    loadTimelineCheckpoint: (tabId) => loadTimelineCheckpoint(db, tabId),
+    loadTimelinePages: (tabId, pages) => loadTimelinePages(db, tabId, pages),
+    loadTimelineSummaries: (tabId) => loadTimelineSummaries(db, tabId),
+    saveTimeline: (tabId, write) => saveTimeline(db, tabId, write),
+    searchTimelinePages: (tabId, needleLower) => searchTimelinePages(db, tabId, needleLower),
+    clearTimeline: (tabId) => clearTimeline(db, tabId),
 
     clearChatQueue: (tabId) => clearChatQueue(db, tabId),
 

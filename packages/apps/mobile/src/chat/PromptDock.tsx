@@ -15,7 +15,7 @@
  */
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from '@slayzone/terminal/chat-prompts'
-import type { TimelineItem } from '@slayzone/terminal/reducer'
+import type { TimelineRows } from '@slayzone/terminal/reducer'
 import {
   buildPermissionView,
   buildPlanOptions,
@@ -48,7 +48,7 @@ export function PromptDock({
   answer: (requestId: string, optionId: string, decision: PermissionDecision) => Promise<boolean>
   autoModeAvailable: boolean
   cwd: string
-  timeline: readonly TimelineItem[]
+  timeline: Readonly<TimelineRows>
   /** Sends feedback after "approve with this feedback". */
   sendMessage: (text: string) => void
 }) {
@@ -109,11 +109,11 @@ export function PromptDock({
 type Styles = ReturnType<typeof makeStyles>
 
 /** Subagent type of the Task that ran the prompting tool, when the timeline has it. */
-function agentNameFor(prompt: ChatPrompt, timeline: readonly TimelineItem[]): string | null {
-  const tool = timeline.find((it) => it.kind === 'tool' && it.invocation.id === prompt.toolUseId)
+function agentNameFor(prompt: ChatPrompt, timeline: Readonly<TimelineRows>): string | null {
+  const tool = timeline.find((it) => it?.kind === 'tool' && it.invocation.id === prompt.toolUseId)
   const parentId = tool?.parentToolUseId
   if (!parentId) return null
-  const task = timeline.find((it) => it.kind === 'tool' && it.invocation.id === parentId)
+  const task = timeline.find((it) => it?.kind === 'tool' && it.invocation.id === parentId)
   const type =
     task?.kind === 'tool'
       ? (task.invocation.input as { subagent_type?: unknown } | null)?.subagent_type

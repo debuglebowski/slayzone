@@ -8,6 +8,9 @@ import {
   dispatchUserMessage,
   respawn,
   getReplay,
+  openTimeline,
+  timelinePages,
+  searchTimeline,
   getCommandTaskOutput,
   stopCommandTask,
   backgroundCommandTask,
@@ -707,10 +710,19 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // instance of the tab finished writing) and writes it insert-only, in order.
     eventStore: {
       load: (tabId) => data.loadChatEvents(tabId),
-      insert: (tabId, seq, event) => data.persistChatEvent(tabId, seq, event),
+      insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
       readRange: (tabId, afterSeq, beforeSeq) =>
         data.loadChatEventsRange(tabId, afterSeq, beforeSeq)
     },
+    // Each tab's timeline projection (paged history), derived from those events.
+    timelineStore: (tabId) => ({
+      loadCheckpoint: () => data.loadTimelineCheckpoint(tabId),
+      loadPages: (pages) => data.loadTimelinePages(tabId, pages),
+      loadSummaries: () => data.loadTimelineSummaries(tabId),
+      save: (write) => data.saveTimeline(tabId, write),
+      searchPages: (needleLower) => data.searchTimelinePages(tabId, needleLower),
+      discard: () => data.clearTimeline(tabId)
+    }),
     // Side effects of a SAVED event (the row itself is the event store's). The
     // transport invokes this without awaiting; the returned Promise floats.
     persistEvent: (tabId, seq, event) => {
@@ -824,6 +836,17 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * the blocks still streaming right now (live-only, never saved).
      */
     getReplay: (tabId: string, afterSeq: number) => getReplay(tabId, afterSeq),
+
+    /**
+     * Open a tab paged (its projection's snapshot: state + newest rows + page
+     * summaries), or `full` when the client must replay every event instead.
+     */
+    openTimeline: (tabId: string, version: string) => openTimeline(tabId, version),
+    /** Rows of sealed pages as of the client's newest event (`expired`: open again). */
+    timelinePages: (tabId: string, pages: number[], asOfSeq: number, epoch: number) =>
+      timelinePages(tabId, pages, asOfSeq, epoch),
+    /** Sealed pages that may hold `query`. */
+    searchTimeline: (tabId: string, query: string) => searchTimeline(tabId, query),
 
     /** A command task's output so far (`gone` once its process is). Plan 3.9. */
     commandTaskOutput: (tabId: string, taskId: string) => getCommandTaskOutput(tabId, taskId),

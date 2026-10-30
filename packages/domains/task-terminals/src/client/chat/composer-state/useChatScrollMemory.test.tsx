@@ -96,7 +96,7 @@ describe('useChatScrollMemory', () => {
     expect(api.restoreAnchor).not.toHaveBeenCalled()
     hook.rerender({ ready: true })
     await vi.waitFor(() => expect(api.restoreAnchor).toHaveBeenCalledWith(anchor))
-    expect(api.revealKey).toHaveBeenCalledWith('user:m3')
+    expect(api.revealKey).toHaveBeenCalledWith('user:m3', undefined)
   })
 
   it('nothing saved / at the bottom: nothing to restore (the timeline follows the bottom)', async () => {

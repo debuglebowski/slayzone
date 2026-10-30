@@ -40,7 +40,7 @@ function harness() {
     frames: () => frames,
     texts: () =>
       state.timeline.flatMap((it) =>
-        it.kind === 'text' || it.kind === 'user-text' ? [it.text] : []
+        it?.kind === 'text' || it?.kind === 'user-text' ? [it.text] : []
       )
   }
 }
@@ -234,8 +234,8 @@ describe('ChatSync', () => {
     ])
     const users = h
       .state()
-      .timeline.filter((it) => it.kind === 'user-text')
-      .map((it) => (it.kind === 'user-text' ? [it.text, it.delivery] : []))
+      .timeline.filter((it) => it?.kind === 'user-text')
+      .map((it) => (it?.kind === 'user-text' ? [it.text, it.delivery] : []))
     expect(users).toEqual([
       ['hi', 'queued'],
       ['lost on the way', 'failed']

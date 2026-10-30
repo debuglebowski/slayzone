@@ -191,8 +191,8 @@ export const sj = {
 export interface TransportHarness {
   fakes: FakeChild[]
   /** Every broadcast: saved (no `live`) and live. */
-  broadcasts: Array<{ kind: string; seq: number; live?: number; event: AgentEvent }>
-  rows: Array<{ seq: number; event: AgentEvent }>
+  broadcasts: Array<{ kind: string; seq: number; live?: number; at?: number; event: AgentEvent }>
+  rows: Array<{ seq: number; event: AgentEvent; at?: number }>
   states: mgr.ChatTerminalState[]
   /** Every SAVED event, in order. */
   saved(): AgentEvent[]
@@ -207,7 +207,7 @@ export function transportHarness(
     onFake?: (f: FakeChild, index: number) => void
     /** See each spawn's argv. */
     onSpawn?: (args: string[]) => void
-    history?: Array<{ seq: number; event: AgentEvent }>
+    history?: Array<{ seq: number; event: AgentEvent; at?: number }>
   } = {}
 ): TransportHarness {
   mgr.__resetForTests()
@@ -229,14 +229,20 @@ export function transportHarness(
       setImmediate(() => f.emitter.emit('spawn'))
       return f.child
     },
-    broadcastEvent: (_tab, event, seq, live) =>
-      h.broadcasts.push({ kind: event.kind, seq, ...(live !== undefined ? { live } : {}), event }),
+    broadcastEvent: (_tab, event, seq, live, at) =>
+      h.broadcasts.push({
+        kind: event.kind,
+        seq,
+        ...(live !== undefined ? { live } : {}),
+        ...(at !== undefined ? { at } : {}),
+        event
+      }),
     broadcastExit: () => undefined,
     broadcastStateChange: (_id, state) => h.states.push(state),
     eventStore: {
       load: async () => opts.history ?? [],
-      insert: async (_tab, seq, event) => {
-        h.rows.push({ seq, event })
+      insert: async (_tab, seq, event, at) => {
+        h.rows.push({ seq, event, at })
         return 'inserted'
       },
       readRange: async (_tab, after, before) =>

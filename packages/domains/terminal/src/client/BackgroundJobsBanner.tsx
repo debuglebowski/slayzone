@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNow } from '@slayzone/ui'
 import { ChevronDown, ChevronRight, Terminal as TerminalIcon } from 'lucide-react'
-import type { BgShell, BgShellStatus } from './chat-timeline'
+import type { BgShell, BgShellStatus } from '../shared/chat-timeline'
 
 interface BackgroundJobsBannerProps {
   shells: Map<string, BgShell>

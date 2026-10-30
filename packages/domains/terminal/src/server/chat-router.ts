@@ -84,7 +84,12 @@ const chatDraft = z.object({
 const scrollAnchor = z.union([
   z.object({ atBottom: z.literal(true) }).strict(),
   z
-    .object({ atBottom: z.literal(false), key: z.string().min(1).max(500), offsetPx: z.number() })
+    .object({
+      atBottom: z.literal(false),
+      key: z.string().min(1).max(500),
+      offsetPx: z.number(),
+      row: z.number().int().nonnegative().optional()
+    })
     .strict()
 ])
 
@@ -193,6 +198,26 @@ export const chatRouter = router({
   getReplay: publicProcedure
     .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
     .query(({ input }) => ops().getReplay(input.tabId, input.afterSeq)),
+  // Paged history: open from the hub's timeline projection (`full`: use getReplay),
+  // rows of older pages as of the client's newest event, pages that may hold a query.
+  openTimeline: publicProcedure
+    .input(z.object({ tabId: z.string(), version: z.string() }))
+    .query(({ input }) => ops().openTimeline(input.tabId, input.version)),
+  timelinePages: publicProcedure
+    .input(
+      z.object({
+        tabId: z.string(),
+        pages: z.array(z.number().int().nonnegative()).max(512),
+        asOfSeq: z.number().int(),
+        epoch: z.number().int()
+      })
+    )
+    .query(({ input }) =>
+      ops().timelinePages(input.tabId, input.pages, input.asOfSeq, input.epoch)
+    ),
+  searchTimeline: publicProcedure
+    .input(z.object({ tabId: z.string(), query: z.string().max(1000) }))
+    .query(({ input }) => ops().searchTimeline(input.tabId, input.query)),
   // A command the agent runs as a task (plan 3.9): its live output (polled by
   // the command card while it runs and is on screen), stop, move to background.
   commandTaskOutput: publicProcedure
@@ -360,19 +385,34 @@ export const chatRouter = router({
     .input(z.object({ tabIds: z.array(z.string()).optional() }).optional())
     .subscription(({ input }) =>
       // `live` is set on live-only events (streaming fragments, `sending`): they
-      // follow saved event `seq` and are never in `getBufferSince`.
-      observable<{ tabId: string; event: unknown; seq: number; live?: number }>((emit) => {
-        const filter = input?.tabIds
-        const handler = (tabId: string, event: unknown, seq: number, live?: number): void => {
-          if (filter && !filter.includes(tabId)) return
-          emit.next(live === undefined ? { tabId, event, seq } : { tabId, event, seq, live })
+      // follow saved event `seq` and are never in `getBufferSince`. `at` is set on
+      // saved events: when they were saved (ms), the time their rows show.
+      observable<{ tabId: string; event: unknown; seq: number; live?: number; at?: number }>(
+        (emit) => {
+          const filter = input?.tabIds
+          const handler = (
+            tabId: string,
+            event: unknown,
+            seq: number,
+            live?: number,
+            at?: number
+          ): void => {
+            if (filter && !filter.includes(tabId)) return
+            emit.next(
+              live !== undefined
+                ? { tabId, event, seq, live }
+                : at !== undefined
+                  ? { tabId, event, seq, at }
+                  : { tabId, event, seq }
+            )
+          }
+          const ev = getChatDeps().events
+          ev.on('event', handler)
+          return () => {
+            ev.off('event', handler)
+          }
         }
-        const ev = getChatDeps().events
-        ev.on('event', handler)
-        return () => {
-          ev.off('event', handler)
-        }
-      })
+      )
     ),
   onExit: publicProcedure.subscription(() =>
     observable<{ tabId: string; sessionId: string; code: number | null; signal: string | null }>(

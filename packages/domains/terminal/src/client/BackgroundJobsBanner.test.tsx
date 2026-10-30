@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { BackgroundJobsBanner } from './BackgroundJobsBanner'
-import type { BgShell } from './chat-timeline'
+import type { BgShell } from '../shared/chat-timeline'
 
 const START = 1_000_000
 

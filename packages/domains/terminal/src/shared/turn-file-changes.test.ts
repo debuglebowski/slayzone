@@ -61,7 +61,8 @@ const editResult = (filePath: string, lines: string[]) => ({
 })
 
 function play(events: AgentEvent[]): TimelineItem[] {
-  return reducer(initialState(), { type: 'events', events }).timeline
+  // Every row is loaded here (no paging).
+  return reducer(initialState(), { type: 'events', events }).timeline as TimelineItem[]
 }
 
 const rows = (timeline: TimelineItem[]) =>

@@ -94,7 +94,7 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 function localMessages(state: ChatTimelineState): LocalMessage[] {
   const out: LocalMessage[] = []
   for (const it of state.timeline) {
-    if (it.kind !== 'user-text' || !it.id) continue
+    if (it?.kind !== 'user-text' || !it.id) continue
     if (it.optimistic || it.delivery === 'failed') {
       out.push({
         id: it.id,
@@ -232,7 +232,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
 
   const retryMessage = useCallback(
     async (id: string): Promise<void> => {
-      const item = stateRef.current.timeline.find((it) => it.kind === 'user-text' && it.id === id)
+      const item = stateRef.current.timeline.find((it) => it?.kind === 'user-text' && it.id === id)
       if (!item || item.kind !== 'user-text') return
       dispatch({ type: 'user-retry', id })
       try {

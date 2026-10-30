@@ -282,16 +282,17 @@ try {
   await send('Say hello and list the files')
   await until(
     'turn 0',
-    () => results() > r0 && state.timeline.some((i) => i.kind === 'text' && i.text === 'Two files.')
+    () =>
+      results() > r0 && state.timeline.some((i) => i?.kind === 'text' && i.text === 'Two files.')
   )
   check(
     state.timeline.some(
-      (i) => i.kind === 'tool' && i.invocation.name === 'Bash' && i.invocation.status === 'done'
+      (i) => i?.kind === 'tool' && i.invocation.name === 'Bash' && i.invocation.status === 'done'
     ),
     'tool card done'
   )
   check(
-    state.timeline.some((i) => i.kind === 'thinking'),
+    state.timeline.some((i) => i?.kind === 'thinking'),
     'thinking row'
   )
 
@@ -347,7 +348,7 @@ try {
     'slow turn streaming',
     () =>
       state.live.length > 0 ||
-      state.timeline.some((i) => i.kind === 'text' && i.messageId === 'msg_slow')
+      state.timeline.some((i) => i?.kind === 'text' && i.messageId === 'msg_slow')
   )
   const queued = {
     tabId,
@@ -365,11 +366,11 @@ try {
   )
   await until('queued message answered', () => results() >= r0 + 2, 30_000)
   check(
-    state.timeline.some((i) => i.kind === 'user-text' && i.text === 'And then this'),
+    state.timeline.some((i) => i?.kind === 'user-text' && i.text === 'And then this'),
     'queued message delivered by the hub'
   )
   check(
-    state.timeline.some((i) => i.kind === 'text' && i.text === 'Answer to the queued message.'),
+    state.timeline.some((i) => i?.kind === 'text' && i.text === 'Answer to the queued message.'),
     'queued message answered'
   )
   check((await client.chat.queue.list.query({ tabId })).length === 0, 'queue drained')
@@ -381,15 +382,15 @@ try {
   await until('long turn streaming', () => state.live.some((b) => b.text.includes('Working')))
   seg = begin('abortAndPop', target)
   seg.output = await client.chat.abortAndPop.mutate(target)
-  await until('interrupted marker', () => state.timeline.some((i) => i.kind === 'interrupted'))
+  await until('interrupted marker', () => state.timeline.some((i) => i?.kind === 'interrupted'))
   // The stopped turn still ends with its own `result` (after the marker): wait for it,
   // or the next message's row would be placed before it here but after it on reload.
   await until('the stopped turn ends', () => {
-    const marker = state.timeline.findLastIndex((i) => i.kind === 'interrupted')
-    return marker >= 0 && state.timeline.slice(marker).some((i) => i.kind === 'result')
+    const marker = state.timeline.findLastIndex((i) => i?.kind === 'interrupted')
+    return marker >= 0 && state.timeline.slice(marker).some((i) => i?.kind === 'result')
   })
   check(
-    state.timeline.some((i) => i.kind === 'interrupted'),
+    state.timeline.some((i) => i?.kind === 'interrupted'),
     `interrupted (abortAndPop → ${JSON.stringify(seg.output)})`
   )
 
@@ -399,7 +400,7 @@ try {
     'turn 6',
     () =>
       state.timeline.some(
-        (i) => i.kind === 'text' && i.text === 'The dev server runs in the background.'
+        (i) => i?.kind === 'text' && i.text === 'The dev server runs in the background.'
       ) && state.bgShells.size > 0,
     30_000
   )
@@ -460,7 +461,7 @@ try {
   )
   await until(
     'popped row gone',
-    () => !state.timeline.some((i) => i.kind === 'user-text' && i.id === popped)
+    () => !state.timeline.some((i) => i?.kind === 'user-text' && i.id === popped)
   )
 
   // 9: answered, then rewound from another client (desktop's edit & resend): the
@@ -478,7 +479,7 @@ try {
   seg = begin('rewind', rewind)
   seg.output = await client.chat.rewind.mutate(rewind)
   const branch = await until('conversation-branch', () =>
-    state.timeline.find((i) => i.kind === 'conversation-branch')
+    state.timeline.find((i) => i?.kind === 'conversation-branch')
   )
   check(
     branch.kind === 'conversation-branch' && branch.reason === 'rewound' && branch.hiddenCount > 0,
@@ -529,7 +530,7 @@ try {
   seg = begin('desktop-send', withFile)
   seg.output = await client.chat.send.mutate(withFile)
   await until('turn 10', () => results() > r0, 30_000)
-  const withFiles = state.timeline.find((i) => i.kind === 'user-text' && i.id === 'desk-1')
+  const withFiles = state.timeline.find((i) => i?.kind === 'user-text' && i.id === 'desk-1')
   check(
     withFiles?.kind === 'user-text' &&
       withFiles.attachments?.[0]?.name === 'notes.txt' &&
@@ -565,7 +566,7 @@ try {
     cancelFrame: () => undefined
   })
   fresh.completeLoad(fresh.beginLoad('full'), finalReplay)
-  const kinds = (s: typeof state): string => s.timeline.map((i) => i.kind).join(',')
+  const kinds = (s: typeof state): string => s.timeline.map((i) => i?.kind).join(',')
   const same = kinds(freshState) === kinds(state)
   check(same, 'a fresh load replays the same timeline as the live client saw')
   if (!same) console.log(`     live:  ${kinds(state)}\n     fresh: ${kinds(freshState)}`)

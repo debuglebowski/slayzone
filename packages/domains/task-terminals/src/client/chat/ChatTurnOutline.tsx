@@ -122,7 +122,7 @@ export function ChatTurnOutline({
                   data-testid="chat-turn-outline-item"
                   data-current={i === current ? 'true' : undefined}
                   title={`${STATUS_LABEL[turn.status]} · ${turn.title}`}
-                  onClick={() => reveal(turn.key, { align: 'start' })}
+                  onClick={() => reveal(turn.key, { align: 'start', row: turn.row })}
                   className={cn(
                     'flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-accent hover:text-accent-foreground',
                     i === current && 'bg-muted'

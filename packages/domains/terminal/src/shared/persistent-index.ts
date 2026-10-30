@@ -65,6 +65,45 @@ export class PersistentIndex<V> {
     return this.root?.[h & MASK]?.[(h >>> BITS) & MASK]?.has(key) ?? false
   }
 
+  /** A new version without `key` (this one when it has none); this one is unchanged. */
+  without(key: string): PersistentIndex<V> {
+    if (!this.has(key)) return this
+    if (this.small) {
+      const next = writableMap(this.small)
+      next.delete(key)
+      return new PersistentIndex(next, null, next.size)
+    }
+    const root = this.root as Root<V>
+    const h = hash(key)
+    const r = h & MASK
+    const b = (h >>> BITS) & MASK
+    const bucket = writableMap(root[r]?.[b] ?? EMPTY_BUCKET)
+    bucket.delete(key)
+    const branch = writable(root[r] ?? EMPTY_BRANCH)
+    branch[b] = bucket
+    const nextRoot = writable(root)
+    nextRoot[r] = branch
+    return new PersistentIndex<V>(null, nextRoot, this.size - 1)
+  }
+
+  /** Every key with its value (any order). */
+  *entries(): IterableIterator<[string, V]> {
+    if (this.small) {
+      yield* this.small.entries()
+      return
+    }
+    for (const branch of this.root ?? []) {
+      for (const bucket of branch ?? []) if (bucket) yield* bucket.entries()
+    }
+  }
+
+  /** An index of these entries. */
+  static fromEntries<V>(entries: Iterable<[string, V]>): PersistentIndex<V> {
+    let idx = PersistentIndex.empty<V>()
+    for (const [k, v] of entries) idx = idx.with(k, v)
+    return idx
+  }
+
   /** A new version with `key` set to `value`; this one is unchanged. */
   with(key: string, value: V): PersistentIndex<V> {
     if (this.small) {

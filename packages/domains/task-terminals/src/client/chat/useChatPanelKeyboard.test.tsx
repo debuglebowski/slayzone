@@ -212,6 +212,7 @@ describe('useChatPanelKeyboard: jump between turns', () => {
     composer.focus()
     const jumpTurn = vi.fn()
     const scrollTo = vi.fn()
+    const unstick = vi.fn()
     renderHook(() =>
       useChatPanelKeyboard({
         panelRef: { current: root },
@@ -224,10 +225,11 @@ describe('useChatPanelKeyboard: jump between turns', () => {
         autocomplete: { show: false },
         handleStop: () => {},
         mode: 'claude-chat',
-        jumpTurn
+        jumpTurn,
+        unstick
       })
     )
-    return { jumpTurn, scrollTo, composer }
+    return { jumpTurn, scrollTo, unstick, composer }
   }
   const press = (init: KeyboardEventInit) => {
     const e = new KeyboardEvent('keydown', { cancelable: true, ...init })
@@ -250,6 +252,13 @@ describe('useChatPanelKeyboard: jump between turns', () => {
     press({ key: 'ArrowUp', metaKey: true })
     expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
     expect(jumpTurn).toHaveBeenCalledTimes(4)
+  })
+
+  it('Cmd+↑ lets go of the end first (rows loading above must not pull the view back down)', () => {
+    const { scrollTo, unstick } = setup()
+    press({ key: 'ArrowUp', metaKey: true })
+    expect(unstick).toHaveBeenCalledTimes(1)
+    expect(unstick.mock.invocationCallOrder[0]).toBeLessThan(scrollTo.mock.invocationCallOrder[0])
   })
 
   it('Alt+↑ alone (queue reorder, caret moves) is not a turn jump', () => {

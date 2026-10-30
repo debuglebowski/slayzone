@@ -7,7 +7,7 @@
  * @module terminal/client/live-blocks
  */
 import { createContext, useCallback, useContext, useSyncExternalStore } from 'react'
-import { liveBlockOf, type LiveBlock, type LiveBlocks } from './chat-timeline'
+import { liveBlockOf, type LiveBlock, type LiveBlocks } from '../shared/chat-timeline'
 
 const EMPTY: LiveBlocks = Object.freeze([])
 

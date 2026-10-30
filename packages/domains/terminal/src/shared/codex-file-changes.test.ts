@@ -65,8 +65,9 @@ function recordedTurnEvents(): AgentEvent[] {
   return events
 }
 
+// A replay from empty holds every row (no page ever unloaded).
 const timelineOf = (events: AgentEvent[]): TimelineItem[] =>
-  reducer(initialState(), { type: 'events', events }).timeline
+  reducer(initialState(), { type: 'events', events }).timeline as TimelineItem[]
 
 describe('Codex file change items', () => {
   test('parses the recorded add and update changes', () => {

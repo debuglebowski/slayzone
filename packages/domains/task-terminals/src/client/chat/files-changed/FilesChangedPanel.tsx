@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon, X } from 'lucide-react'
 import { cn, IconButton } from '@slayzone/ui'
-import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
+import type { TimelineRows, ToolInvocation } from '@slayzone/terminal/client'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { CardBadge, FileLink } from '../tool-cards/links'
 import { LineCounts } from './FilesChangedRow'
@@ -41,7 +41,7 @@ export function FilesChangedPanel({
   onClose,
   className
 }: {
-  timeline: readonly TimelineItem[]
+  timeline: Readonly<TimelineRows>
   cwd: string
   /** The file to open and scroll to. */
   focusPath?: string

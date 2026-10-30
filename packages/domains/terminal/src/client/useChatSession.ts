@@ -21,22 +21,58 @@ import type {
   UserContentBlock
 } from '@slayzone/terminal-contracts'
 import { chatCapabilitiesForMode, userMessageText } from '@slayzone/terminal-contracts'
-import type { ChatPrompt } from './chat-prompts'
+import type { ChatPrompt } from '../shared/chat-prompts'
+import {
+  TIMELINE_PROJECTION_VERSION,
+  decodeTimelineState
+} from '../shared/chat-timeline-checkpoint'
+import { summarizeRows, type TimelinePageSummary } from '../shared/timeline-summary'
 import {
   initialState,
   reducer,
   type Action as ChatTimelineAction,
   isTurnOpen,
   type ChatTimelineState,
-  type TimelineItem
-} from './chat-timeline'
+  type TimelineItem,
+  type TimelineRows
+} from '../shared/chat-timeline'
+
+/**
+ * A tab opened paged (from the hub's timeline projection): rows of pages
+ * `0..sealed-1` load on demand (`loadPages`); the rest — the tail and every
+ * newer row — are always here.
+ */
+export interface ChatPaging {
+  pageRows: number
+  /** Pages the hub had sealed when the tab opened. */
+  sealed: number
+  /** One per sealed page, as the hub had it (a loaded page: summarize its rows). */
+  summaries: TimelinePageSummary[]
+}
+
+/** What `chat.openTimeline` answers (see the transport's `ChatTimelineOpenResult`). */
+interface OpenedPaged {
+  kind: 'paged'
+  snapshot: { seq: number; epoch: number; pageRows: number; state: string; summaries: unknown[] }
+  events: Array<{ seq: number; event: unknown; at?: number }>
+  live: { afterSeq: number; liveSeq: number; events: unknown[] }
+}
 
 export interface UseChatSessionResult {
   state: ChatTimelineState
-  timeline: TimelineItem[]
+  /** The rows; `undefined` = not loaded here (paged history). */
+  timeline: TimelineRows
   inFlight: boolean
   /** True until the initial buffer replay resolves (on mount / tab reopen). */
   hydrating: boolean
+  /** Paged history (null: the whole history was replayed — every row is here). */
+  paging: ChatPaging | null
+  /** Load these pages' rows (as of this state's events); already here or loading: skipped. */
+  loadPages: (pages: readonly number[]) => void
+  /** Drop these pages' rows from memory (any the reducer needs again load again). */
+  unloadPages: (pages: readonly number[]) => void
+  /** Pages that may hold `query` (paged history; load them to search them). */
+  searchPages: (query: string) => Promise<number[]>
   /**
    * Live permission mode reported by the running subprocess (raw CLI value,
    * e.g. 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'default').
@@ -147,14 +183,18 @@ interface HydrateChatCtx {
   hydratedRef: RefObject<boolean>
   /** True once any load of this hook finished — the next one is a reload. */
   loadedOnceRef: RefObject<boolean>
-  liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number; live?: number }>>
-  applyLive: (event: AgentEvent, seq: number, live?: number) => void
+  liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number; live?: number; at?: number }>>
+  applyLive: (event: AgentEvent, seq: number, live?: number, at?: number) => void
   /** Apply saved events (seq order) as ONE reducer batch. */
-  applySaved: (saved: ReadonlyArray<{ seq: number; event: AgentEvent }>) => void
+  applySaved: (saved: ReadonlyArray<{ seq: number; event: AgentEvent; at?: number }>) => void
   /** Apply the stream fragments waiting for the next frame now. */
   flushLive: () => void
   /** Adopt a replay's live snapshot (blocks still streaming) at its live counter. */
   applySnapshot: (events: AgentEvent[], afterSeq: number, liveSeq: number) => void
+  /** Open from the hub's projection snapshot (paged history). */
+  openPaged: (opened: OpenedPaged) => void
+  /** Opening from the full replay (no page table). */
+  openFull: () => void
   dispatch: Dispatch<ChatTimelineAction>
   onHydrated: () => void
 }
@@ -185,6 +225,8 @@ async function hydrateAndReplay({
   applySaved,
   flushLive,
   applySnapshot,
+  openPaged,
+  openFull,
   dispatch,
   onHydrated
 }: HydrateChatCtx): Promise<void> {
@@ -200,17 +242,36 @@ async function hydrateAndReplay({
   }
   if (gen !== genRef.current) return
   try {
+    // Paged: the hub's projection — the state as of now, its newest rows, the
+    // events saved since and what streams. `full`: replay every event (below).
+    let opened: Awaited<ReturnType<typeof trpcClient.chat.openTimeline.query>> = { kind: 'full' }
+    try {
+      opened = await trpcClient.chat.openTimeline.query({
+        tabId: target.tabId,
+        version: TIMELINE_PROJECTION_VERSION
+      })
+    } catch {
+      // A hub without paged history (or none answering): the full replay.
+    }
+    if (gen !== genRef.current) return
+    if (opened.kind === 'paged') {
+      openPaged(opened as OpenedPaged)
+      applySaved(opened.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
+      applySnapshot(opened.live.events as AgentEvent[], opened.live.afterSeq, opened.live.liveSeq)
+      return
+    }
     // Saved history + what is streaming right now, in one snapshot.
     const replay = await trpcClient.chat.getReplay.query({
       tabId: target.tabId,
       afterSeq: -1
     })
     if (gen !== genRef.current) return
+    openFull()
     if (loadedOnceRef.current) dispatch({ type: 'reset' })
     // The whole history in ONE reducer batch (one render, linear time), with the
     // seq dedup every saved event gets. Prompt state is part of the reducer, so
     // a pending prompt comes back from the replay.
-    applySaved(replay.events as Array<{ seq: number; event: AgentEvent }>)
+    applySaved(replay.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
     // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
     applySnapshot(replay.live.events as AgentEvent[], replay.live.afterSeq, replay.live.liveSeq)
   } catch {
@@ -221,13 +282,23 @@ async function hydrateAndReplay({
       // so anything already covered by the replay buffer is skipped.
       hydratedRef.current = true
       loadedOnceRef.current = true
-      for (const { event, seq, live } of liveQueueRef.current) applyLive(event, seq, live)
+      for (const { event, seq, live, at } of liveQueueRef.current) applyLive(event, seq, live, at)
       liveQueueRef.current = []
       // The loaded state is complete at once, not a frame later.
       flushLive()
       onHydrated()
     }
   }
+}
+
+/** Pages asked for in one `timelinePages` request, at most. */
+const PAGES_PER_REQUEST = 32
+
+/** Whether page `page` has a row not loaded. */
+function pageHasUnloaded(timeline: TimelineRows, page: number, pageRows: number): boolean {
+  const end = Math.min(timeline.length, (page + 1) * pageRows)
+  for (let i = page * pageRows; i < end; i++) if (timeline[i] === undefined) return true
+  return false
 }
 
 /** The next animation frame (a timer where there is none, e.g. a non-DOM test). */
@@ -284,7 +355,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const genRef = useRef(0)
   const hydratedRef = useRef(false)
   const loadedOnceRef = useRef(false)
-  const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number; live?: number }>>([])
+  const liveQueueRef = useRef<
+    Array<{ event: AgentEvent; seq: number; live?: number; at?: number }>
+  >([])
 
   // Live events (stream fragments) wait for the next animation frame and go to
   // the reducer together: a burst of deltas is one render, not one per message
@@ -315,9 +388,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // A LIVE event (`live` set: a streaming fragment, a `sending` state — never
   // saved) belongs right after saved event `seq`: it applies only if that is
   // still the newest saved event here and it is newer than the last live one.
-  // Otherwise it is stale (the saved event it led to is already applied).
+  // Otherwise it is stale (the saved event it led to is already applied). A
+  // saved event's rows show `at`, when it was saved.
   const applyLive = useCallback(
-    (event: AgentEvent, seq: number, live?: number): void => {
+    (event: AgentEvent, seq: number, live?: number, at?: number): void => {
       if (live !== undefined) {
         if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
         lastLiveRef.current = live
@@ -333,7 +407,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       if (seq <= lastSeqRef.current) return
       lastSeqRef.current = seq
       flushLive()
-      dispatch({ type: 'event', event })
+      dispatch({ type: 'event', event, at, seq })
     },
     [flushLive]
   )
@@ -341,20 +415,140 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // same as applying each through `applyLive` (fragments waiting for a frame
   // still go first), in one reducer call and one render.
   const applySaved = useCallback(
-    (saved: ReadonlyArray<{ seq: number; event: AgentEvent }>): void => {
+    (saved: ReadonlyArray<{ seq: number; event: AgentEvent; at?: number }>): void => {
       const events: AgentEvent[] = []
-      for (const { seq, event } of saved) {
-        if (seq <= lastSeqRef.current) continue
-        lastSeqRef.current = seq
-        events.push(event)
+      const at: Array<number | undefined> = []
+      const seq: number[] = []
+      for (const b of saved) {
+        if (b.seq <= lastSeqRef.current) continue
+        lastSeqRef.current = b.seq
+        events.push(b.event)
+        at.push(b.at)
+        seq.push(b.seq)
       }
       if (events.length === 0) return
       flushLive()
-      dispatch({ type: 'events', events })
+      dispatch({ type: 'events', events, at, seq })
     },
     [flushLive]
   )
   useEffect(() => discardPendingLive, [discardPendingLive])
+
+  // Paged history (`openTimeline`): the page table, and the pages on their way.
+  const [paging, setPaging] = useState<ChatPaging | null>(null)
+  // Bumped to open the tab again (pages asked for no longer fit: rows moved).
+  const [reopenToken, setReopenToken] = useState(0)
+  const loadingPagesRef = useRef<Set<number>>(new Set())
+  // Renderer actions (a message sent) while a load runs: a paged open replaces
+  // the state, so they are applied again on top of it.
+  const localActionsRef = useRef<ChatTimelineAction[]>([])
+  // Stable: refs + dispatch only.
+  const dispatchLocal = useCallback((action: ChatTimelineAction): void => {
+    if (!hydratedRef.current) localActionsRef.current.push(action)
+    dispatch(action)
+  }, [])
+  // Stable: refs + dispatch + setters only.
+  const openPaged = useCallback((opened: OpenedPaged): void => {
+    dispatch({ type: 'restore', state: decodeTimelineState(opened.snapshot.state) })
+    for (const action of localActionsRef.current) dispatch(action)
+    localActionsRef.current = []
+    lastSeqRef.current = opened.snapshot.seq
+    loadingPagesRef.current.clear()
+    setPaging({
+      pageRows: opened.snapshot.pageRows,
+      sealed: opened.snapshot.summaries.length,
+      summaries: opened.snapshot.summaries as TimelinePageSummary[]
+    })
+  }, [])
+  const openFull = useCallback((): void => {
+    loadingPagesRef.current.clear()
+    setPaging(null)
+  }, [])
+
+  // Rows of pages, as of the events this state applied (a stall's queued ones
+  // are not in it yet). Rows that moved since they were asked for: open again.
+  const requestPages = useStableCallback(
+    (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
+      trpcClient.chat.timelinePages
+        .query({ tabId: opts.tabId, pages: wanted, asOfSeq, epoch })
+        .then(
+          (res) => {
+            for (const page of wanted) loadingPagesRef.current.delete(page)
+            if (gen !== genRef.current) return
+            if (res.expired) {
+              setReopenToken((t) => t + 1)
+              return
+            }
+            for (const page of res.pages) {
+              dispatch({
+                type: 'rows-loaded',
+                from: page.from,
+                rows: page.rows as TimelineItem[],
+                epoch
+              })
+            }
+          },
+          () => {
+            for (const page of wanted) loadingPagesRef.current.delete(page)
+            // Without those rows the reducer can't go on: open again.
+            if (gen === genRef.current) setReopenToken((t) => t + 1)
+          }
+        )
+    }
+  )
+  const loadPages = useStableCallback((pages: readonly number[]): void => {
+    if (!paging) return
+    const { pageRows, sealed } = paging
+    const wanted = pages.filter(
+      (page) =>
+        page >= 0 &&
+        page < sealed &&
+        !loadingPagesRef.current.has(page) &&
+        pageHasUnloaded(state.timeline, page, pageRows)
+    )
+    if (wanted.length === 0) return
+    for (const page of wanted) loadingPagesRef.current.add(page)
+    const gen = genRef.current
+    const epoch = state.rowsEpoch
+    const asOfSeq = state.appliedSeq
+    // A request at most this many pages (a whole history loads in several).
+    for (let at = 0; at < wanted.length; at += PAGES_PER_REQUEST) {
+      requestPages(wanted.slice(at, at + PAGES_PER_REQUEST), gen, epoch, asOfSeq)
+    }
+  })
+  const searchPages = useStableCallback(
+    (query: string): Promise<number[]> =>
+      paging
+        ? trpcClient.chat.searchTimeline.query({ tabId: opts.tabId, query }).catch(() => [])
+        : Promise.resolve([])
+  )
+  const unloadPages = useStableCallback((pages: readonly number[]): void => {
+    if (!paging) return
+    const summaries = paging.summaries.slice()
+    let changed = false
+    for (const page of pages) {
+      if (page < 0 || page >= paging.sealed) continue
+      const from = page * paging.pageRows
+      const rows = state.timeline.slice(from, from + paging.pageRows)
+      if (rows.some((r) => r === undefined)) continue
+      // What the page holds NOW (a late event may have changed it since the
+      // hub's summary): the summary stands in for it while it is not loaded.
+      summaries[page] = summarizeRows(rows as TimelineItem[], from)
+      changed = true
+      dispatch({ type: 'rows-unloaded', from, to: from + paging.pageRows })
+    }
+    if (changed) setPaging({ ...paging, summaries })
+  })
+  // The reducer waits for a row: load its page. Not a page row (a tail row
+  // never leaves): open again, from scratch.
+  const onStalled = useStableCallback((need: number): void => {
+    if (!paging || need >= paging.sealed * paging.pageRows) setReopenToken((t) => t + 1)
+    else loadPages([Math.floor(need / paging.pageRows)])
+  })
+  const stalledNeed = state.stalled?.need ?? null
+  useEffect(() => {
+    if (stalledNeed !== null) onStalled(stalledNeed)
+  }, [stalledNeed, onStalled])
 
   // Subscribe (always-on; mounted on first render, BEFORE the hydrate effect
   // runs) so we don't miss events emitted between session spawn and the
@@ -372,19 +566,21 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       tabId,
       event,
       seq,
-      live
+      live,
+      at
     }: {
       tabId: string
       event: unknown
       seq: number
       live?: number
+      at?: number
     }) => {
       if (tabId !== opts.tabId) return
       if (!hydratedRef.current) {
-        liveQueueRef.current.push({ event: event as AgentEvent, seq, live })
+        liveQueueRef.current.push({ event: event as AgentEvent, seq, live, at })
         return
       }
-      applyLive(event as AgentEvent, seq, live)
+      applyLive(event as AgentEvent, seq, live, at)
     }
   )
   // Stable: refs + dispatch only.
@@ -459,6 +655,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     const gen = ++genRef.current
     hydratedRef.current = false
     liveQueueRef.current = []
+    localActionsRef.current = []
     discardPendingLive()
     lastSeqRef.current = -1
     lastLiveRef.current = 0
@@ -489,6 +686,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       applySaved,
       flushLive,
       applySnapshot,
+      openPaged,
+      openFull,
       dispatch,
       onHydrated: () => setLoadedInputs(inputs)
     })
@@ -509,7 +708,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     flushLive,
     discardPendingLive,
     applySnapshot,
-    trpcClient
+    openPaged,
+    openFull,
+    trpcClient,
+    reopenToken
   ])
 
   const createOpts = (): {
@@ -540,11 +742,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // roundtrip. Main still emits the canonical `user-message` event and the
       // reducer confirms it in place by id — single source of truth for replay.
       // `user-sent` is renderer-only; never persisted.
-      dispatch({ type: 'user-sent', id, text: userMessageText(content), content })
+      dispatchLocal({ type: 'user-sent', id, text: userMessageText(content), content })
       try {
         await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
       } catch (err) {
-        dispatch({
+        dispatchLocal({
           type: 'user-send-failed',
           id,
           error: err instanceof Error ? err.message : String(err)
@@ -552,15 +754,17 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         throw err
       }
     },
-    [opts.tabId, trpcClient]
+    [opts.tabId, trpcClient, dispatchLocal]
   )
 
   // Read the failed message's text from the reducer; `state` is read via a
   // stable callback so this stays stable for renderers.
   const retryMessage = useStableCallback(async (id: string): Promise<void> => {
-    const item = state.timeline.find((it) => it.kind === 'user-text' && it.id === id)
+    // The message's row (by id; it is the newest one — the one Retry is on).
+    const rows = state.userIndex.get(id)
+    const item = rows ? state.timeline[rows[rows.length - 1]] : undefined
     if (!item || item.kind !== 'user-text') return
-    dispatch({ type: 'user-retry', id })
+    dispatchLocal({ type: 'user-retry', id })
     // The whole message, files included (attachments first, as it was sent).
     const content: UserContentBlock[] = [
       ...(item.attachments ?? []).map((attachment) => ({
@@ -573,7 +777,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // Same id: the server retries it (or takes it, if it never got it).
       await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
     } catch (err) {
-      dispatch({
+      dispatchLocal({
         type: 'user-send-failed',
         id,
         error: err instanceof Error ? err.message : String(err)
@@ -669,6 +873,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),
     hydrating,
+    paging,
+    loadPages,
+    unloadPages,
+    searchPages,
     permissionMode: state.permissionMode,
     prompts: state.prompts,
     submittingPrompts,

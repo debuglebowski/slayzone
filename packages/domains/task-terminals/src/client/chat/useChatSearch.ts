@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import type { TimelineItem } from '@slayzone/terminal/client'
+import { searchableText, type TimelineItem } from '@slayzone/terminal/client'
 
 /**
  * Owns chat-search state: query, case sensitivity, currently-active match
@@ -26,51 +26,7 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
     if (needle.length === 0) return map
     for (let i = 0; i < displayedTimeline.length; i++) {
       const item = displayedTimeline[i]
-      let hay = ''
-      switch (item.kind) {
-        case 'user-text':
-          hay = item.text
-          break
-        case 'text':
-          hay = item.text
-          break
-        case 'thinking':
-          hay = item.text
-          break
-        case 'result':
-          hay = item.text ?? ''
-          break
-        case 'stderr':
-          hay = item.text
-          break
-        case 'command-output':
-          hay = item.text
-          break
-        case 'agent-problem':
-          hay = item.message
-          break
-        case 'turn-error':
-          hay = item.text
-          break
-        case 'compaction':
-          hay = item.error ?? ''
-          break
-        case 'hook':
-          hay = `${item.hookName} ${item.text}`
-          break
-        case 'notice':
-          hay = item.text
-          break
-        case 'tool': {
-          const inv = item.invocation
-          hay = `${inv.name} ${typeof inv.input === 'string' ? inv.input : JSON.stringify(inv.input)}`
-          // A hook's block shown on the card (its row is folded into it).
-          if (inv.blockedBy) hay += ` ${inv.blockedBy.hookName} ${inv.blockedBy.text}`
-          break
-        }
-        default:
-          hay = ''
-      }
+      const hay = searchableText(item)
       if (!hay) continue
       const cmp = caseSensitive ? hay : hay.toLowerCase()
       const ranges: { start: number; end: number }[] = []

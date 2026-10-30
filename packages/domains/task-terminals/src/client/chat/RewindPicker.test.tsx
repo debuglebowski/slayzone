@@ -22,7 +22,7 @@ beforeAll(() => {
 })
 afterEach(cleanup)
 
-const user = (id: string, text: string): TimelineItem => ({
+const user = (id: string, text: string): Extract<TimelineItem, { kind: 'user-text' }> => ({
   kind: 'user-text',
   id,
   text,
@@ -44,15 +44,21 @@ function view(
 }
 
 describe('RewindPicker', () => {
+  // The rows of the user messages (`activeUserRows`); u3 is not active.
   const timeline = [
     user('u1', 'first question'),
     user('u2', 'second question\nwith a second line'),
     user('u3', 'folded away')
-  ]
+  ].map((item, row) => ({ row, item }))
 
   it('lists the messages the conversation holds, newest first', () => {
     render(
-      <RewindPicker kind="edit" timeline={timeline} view={view(['u1', 'u2'])} onClose={() => {}} />
+      <RewindPicker
+        kind="edit"
+        activeUsers={timeline}
+        view={view(['u1', 'u2'])}
+        onClose={() => {}}
+      />
     )
     const rows = screen.getAllByTestId('rewind-picker-item')
     expect(rows.map((r) => r.getAttribute('data-message-id'))).toEqual(['u2', 'u1'])
@@ -63,7 +69,7 @@ describe('RewindPicker', () => {
   it('Enter picks the selected one: the action starts on it, the list closes', () => {
     const v = view(['u1', 'u2'])
     const onClose = vi.fn()
-    render(<RewindPicker kind="edit" timeline={timeline} view={v} onClose={onClose} />)
+    render(<RewindPicker kind="edit" activeUsers={timeline} view={v} onClose={onClose} />)
     const input = screen.getByTestId('rewind-picker-input')
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -76,7 +82,7 @@ describe('RewindPicker', () => {
 
   it('typing filters; fork mode says so', () => {
     const v = view(['u1', 'u2'])
-    render(<RewindPicker kind="fork" timeline={timeline} view={v} onClose={() => {}} />)
+    render(<RewindPicker kind="fork" activeUsers={timeline} view={v} onClose={() => {}} />)
     expect(screen.getByRole('dialog').textContent).toContain('Fork')
     fireEvent.change(screen.getByTestId('rewind-picker-input'), { target: { value: 'first' } })
     expect(screen.getAllByTestId('rewind-picker-item').map((r) => r.textContent)).toEqual([
@@ -85,7 +91,9 @@ describe('RewindPicker', () => {
   })
 
   it('closed when there is no kind', () => {
-    render(<RewindPicker kind={null} timeline={timeline} view={view(['u1'])} onClose={() => {}} />)
+    render(
+      <RewindPicker kind={null} activeUsers={timeline} view={view(['u1'])} onClose={() => {}} />
+    )
     expect(screen.queryByTestId('rewind-picker-item')).toBeNull()
   })
 })

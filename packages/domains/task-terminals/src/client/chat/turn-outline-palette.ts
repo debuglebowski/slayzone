@@ -31,7 +31,7 @@ export function turnOutlinePaletteCommands({
         items: turns.map((t, i) => ({
           id: `chat-turn-${String(t.key)}`,
           label: `${i + 1}. ${t.title}`,
-          run: () => reveal(t.key, { align: 'start' })
+          run: () => reveal(t.key, { align: 'start', row: t.row })
         }))
       }
     },

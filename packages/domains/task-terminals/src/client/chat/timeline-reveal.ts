@@ -6,7 +6,14 @@ import { createContext, useContext, type Key } from 'react'
  * is virtualized, so this is the only way to reach a row far from the view.
  * `align` puts the row at the top of the view (`start`, default) or centres it.
  */
-export type RevealTimelineItem = (key: Key, opts?: { align?: 'start' | 'center' }) => void
+export type RevealTimelineItem = (
+  key: Key,
+  opts?: {
+    align?: 'start' | 'center'
+    /** The row's index in the timeline: a paged history loads it first when it isn't here. */
+    row?: number
+  }
+) => void
 
 /**
  * Outside a timeline (no provider), only a row that is rendered can be reached:

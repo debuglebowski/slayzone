@@ -1,7 +1,7 @@
 import { useContext, useState } from 'react'
 import { ChevronDown, ChevronRight, FileDiff } from 'lucide-react'
 import { cn, useDepsChanged } from '@slayzone/ui'
-import type { TimelineItem, TurnFileChange } from '@slayzone/terminal/client'
+import type { TimelineItem, TimelineRows, TurnFileChange } from '@slayzone/terminal/client'
 import { useChatView } from '../ChatViewContext'
 import { CHAT_CARD_INDENT } from '../tool-cards/card-shell'
 import { CardBadge } from '../tool-cards/links'
@@ -67,14 +67,14 @@ function flashRow(key: string): void {
  * inside the outermost one, a row of the timeline). Null when one is missing.
  */
 function subAgentsAround(
-  timeline: readonly TimelineItem[],
+  timeline: Readonly<TimelineRows>,
   parentToolUseId: string | undefined
 ): Array<Extract<TimelineItem, { kind: 'sub-agent' }>> | null {
   const chain: Array<Extract<TimelineItem, { kind: 'sub-agent' }>> = []
   for (let parent = parentToolUseId; parent != null; ) {
     const agent = timeline.find(
       (it): it is Extract<TimelineItem, { kind: 'sub-agent' }> =>
-        it.kind === 'sub-agent' && it.toolUseId === parent
+        it?.kind === 'sub-agent' && it.toolUseId === parent
     )
     if (!agent || chain.includes(agent)) return null
     chain.unshift(agent)
@@ -102,7 +102,7 @@ export function FilesChangedRow({ item }: { item: FilesChangedItem }) {
 
   const show = (file: TurnFileChange): void => {
     const id = file.toolUseIds[0]
-    const tool = timeline.find((it) => it.kind === 'tool' && it.invocation.id === id)
+    const tool = timeline.find((it) => it?.kind === 'tool' && it.invocation.id === id)
     const around = tool && !finalOnly ? subAgentsAround(timeline, tool.parentToolUseId) : null
     // The timeline row the card is in: its own, or its outermost sub-agent's.
     const host = around ? (around[0] ?? tool) : undefined

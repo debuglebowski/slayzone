@@ -57,8 +57,9 @@ export function CodexApprovalPreview({ prompt }: { prompt: ChatPrompt }) {
   if (isCodexFileApproval(prompt.toolName)) {
     let changes = legacyChanges(prompt.input)
     if (changes.length === 0 && prompt.toolUseId) {
+      // (A pending call is in the timeline's tail: always loaded.)
       const tool = timeline.find(
-        (it) => it.kind === 'tool' && it.invocation.id === prompt.toolUseId
+        (it) => it?.kind === 'tool' && it.invocation.id === prompt.toolUseId
       )
       if (tool?.kind === 'tool') changes = codexFileChanges(tool.invocation)
     }

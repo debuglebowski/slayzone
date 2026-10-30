@@ -8,7 +8,11 @@
   },
   "scale": {
     "_doc": "Opening a saved session reduces its whole history as ONE batch (useChatSession): linear in the events, Claude and Codex alike, with and without a prompt per tool call. Node, best of 3.",
-    "hydrateBatchMs": { "10000": 40, "50000": 200, "100000": 400 },
+    "hydrateBatchMs": {
+      "10000": 40,
+      "50000": 200,
+      "100000": 400
+    },
     "_ratioDoc": "Linear: 10x the events may cost at most this many times the 10k time (quadratic would be ~100x).",
     "maxRatio100kTo10k": 15
   },
@@ -18,5 +22,25 @@
     "frameP95Ms": 34,
     "frameMaxMs": 120,
     "mountedRowsMax": 80
+  },
+  "render100k": {
+    "_doc": "A 100,000-event session opened PAGED (chat F): the 10k session's limits, plus the renderer JS heap after opening + a fast scroll (it holds what is loaded, not the history).",
+    "events": 100000,
+    "openMs": 1500,
+    "scrollSettleMs": 500,
+    "frameP95Ms": 34,
+    "frameMaxMs": 120,
+    "mountedRowsMax": 80,
+    "heapMbMax": 200
+  },
+  "paged": {
+    "_doc": "Opening a 100,000-event session PAGED (chat F), Claude and Codex, best of 3, store in memory. Hub: rebuild (no stored projection: every event folded + every page written; once per tab, or after a reducer version change), reopen from the stored checkpoint, the snapshot a client opens from. Client: restore that snapshot (it holds the tail only). Memory: rows the client holds, pages the hub holds at once.",
+    "events": 100000,
+    "rebuildMs": 1000,
+    "reopenMs": 150,
+    "snapshotMs": 50,
+    "clientOpenMs": 100,
+    "clientRowsMax": 600,
+    "hubPeakPagesMax": 20
   }
 }

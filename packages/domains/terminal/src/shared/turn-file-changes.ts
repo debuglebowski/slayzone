@@ -1,5 +1,6 @@
 import type { TimelineItem, ToolInvocation } from './chat-timeline'
 import { CODEX_FILE_CHANGE_TOOL, codexChangeCounts, codexFileChanges } from './codex-file-changes'
+import { rowAt, rowAtIfAny, type TimelineRows } from './timeline-rows'
 
 /**
  * Claude Code's file tools: what they changed is in their structured result
@@ -125,17 +126,17 @@ export function withTurnFilesChanged(timeline: TimelineItem[]): TimelineItem[] {
  * The turn's `files-changed` row (see {@link withTurnFilesChanged}) — what goes
  * right before the `result` that ends `timeline` — or null when no file changed.
  */
-export function turnFilesChangedRow(timeline: readonly TimelineItem[]): TimelineItem | null {
+export function turnFilesChangedRow(timeline: Readonly<TimelineRows>): TimelineItem | null {
   const end = timeline.length - 1
-  const result = timeline[end]
+  const result = rowAtIfAny(timeline, end)
   if (result?.kind !== 'result') return null
   const files = new Map<string, TurnFileChange>()
   let lastToolUseId: string | null = null
   let shellCommands = 0
   let start = end
-  while (start > 0 && timeline[start - 1].kind !== 'result') start--
+  while (start > 0 && rowAt(timeline, start - 1).kind !== 'result') start--
   for (let i = start; i < end; i++) {
-    const it = timeline[i]
+    const it = rowAt(timeline, i)
     if (it.kind !== 'tool') continue
     if (SHELL_TOOL_NAMES.has(it.invocation.name)) shellCommands++
     const changes = fileChangesOf(it.invocation)

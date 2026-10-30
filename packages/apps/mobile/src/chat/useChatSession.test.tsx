@@ -54,7 +54,7 @@ describe('useChatSession', () => {
     await waitFor(() => expect(result.current.hydrating).toBe(false))
     expect(order).toEqual(['hydrate', 'replay -1'])
     expect(hub.subscribed['chat.onEvent']).toEqual([{ tabIds: ['tab-1'] }])
-    expect(result.current.state.timeline.map((i) => i.kind)).toEqual(['user-text'])
+    expect(result.current.state.timeline.map((i) => i?.kind)).toEqual(['user-text'])
   })
 
   it("reads a turn Claude Code starts by itself (a background task's answer) as working", async () => {

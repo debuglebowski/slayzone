@@ -13,7 +13,7 @@ import { afterAll, expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import * as mgr from './chat-transport-manager'
 import { chatWriteError, type ChatDisposable, type ChatProcHandle } from './chat-proc-handle'
-import { initialState, reducer } from '../../client/chat-timeline'
+import { initialState, reducer } from '../../shared/chat-timeline'
 
 // ---- seeded PRNG (mulberry32) ----
 function prng(seed: number): () => number {
@@ -314,7 +314,7 @@ test('chaos × 200: no lost message, none answered twice, no overwritten or stal
   // A reload (replaying the saved history through the real reducer) shows each
   // message once, with its final state.
   const state = saved.reduce((s, event) => reducer(s, { type: 'event', event }), initialState())
-  const bubbles = state.timeline.filter((i) => i.kind === 'user-text')
+  const bubbles = state.timeline.filter((i) => i?.kind === 'user-text')
   expect(bubbles.map((b) => (b as { id?: string }).id)).toEqual(accepted)
   for (const b of bubbles) {
     const id = (b as { id: string }).id

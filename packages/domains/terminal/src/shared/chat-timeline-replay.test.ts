@@ -14,6 +14,12 @@ import { codexChatBackend } from '../server/agents/codex/codex-chat-session'
 import type { ChatDriverContext } from '../server/agents/types'
 import { initialState, reducer, replayIndexProblems, type ChatTimelineState } from './chat-timeline'
 import { copiedSlotCount } from './replay-batch'
+import type { TimelineRows } from './timeline-rows'
+import type { TimelineItem } from './chat-timeline'
+
+/** A full state holds every row: its timeline as plain items. */
+const rowsOf = (s: { timeline: ReadonlyArray<TimelineItem | undefined> }): TimelineItem[] =>
+  s.timeline as TimelineItem[]
 
 const CLAUDE_DIR = new URL('../../test/fixtures/claude-stream/', import.meta.url)
 const CODEX_FIXTURE = new URL(
@@ -300,5 +306,143 @@ describe('replay: one batch is linear in its length', () => {
       // keys into its trie (33 nodes of 32 slots) — never rows several times.
       expect(copiedSlotCount() - before).toBeLessThanOrEqual(rows + 2 * 33 * 32 + 512)
     }
+  })
+})
+
+describe('replay: a row shows the time its event was saved', () => {
+  test('one event, a batch, and the bg-shell spawn time — not the time of the replay', () => {
+    const t0 = Date.UTC(2026, 0, 2, 3, 4, 5)
+    const one = reducer(fresh(true), {
+      type: 'event',
+      event: { kind: 'user-message', id: 'u1', text: 'hi' },
+      at: t0
+    })
+    expect(one.timeline[0]?.timestamp).toBe(t0)
+    const events: AgentEvent[] = [
+      { kind: 'user-message', id: 'u1', text: 'run it' },
+      {
+        kind: 'tool-call',
+        id: 'b1',
+        name: 'Bash',
+        input: { command: 'sleep 9', run_in_background: true }
+      },
+      { kind: 'assistant-text', messageId: 'm1', text: 'ok' }
+    ]
+    const batch = reducer(fresh(true), { type: 'events', events, at: [t0, t0 + 1, t0 + 2] })
+    expect(batch.timeline.map((r) => r?.timestamp)).toEqual([t0, t0 + 1, t0 + 2])
+    expect(batch.bgShells.get('b1')?.spawnedAt).toBe(t0 + 1)
+    // Without a time (a live-only event, a renderer action): now, as before.
+    const live = reducer(fresh(true), { type: 'events', events: events.slice(0, 1) })
+    expect(live.timeline[0]?.timestamp).toBe(Date.now())
+  })
+})
+
+describe('paged: a state holding only some rows ends exactly where a full replay ends', () => {
+  // Before every event some rows are unloaded (dropped); when the reducer needs
+  // one it stalls, the rows come back (as of the same events — the "hub" is a
+  // full replay kept in step) and it goes on. Every step must equal the full one.
+  const prng = (seed: number) => () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    return seed / 2147483648
+  }
+
+  test.each([0.02, 0.3])('every session, a page dropped before an event with p=%s', (p) => {
+    let totalStalls = 0
+    for (const s of sessions) {
+      const rand = prng(11)
+      let full = fresh(s.agentStartedTurns)
+      let paged = fresh(s.agentStartedTurns)
+      let stalls = 0
+      let prevPaged: TimelineRows = []
+      let prevFull: TimelineRows = []
+      for (const [i, event] of s.events.entries()) {
+        if (rand() < p && paged.timeline.length > 0) {
+          const from = Math.floor(rand() * paged.timeline.length)
+          paged = reducer(paged, {
+            type: 'rows-unloaded',
+            from,
+            to: from + 1 + Math.floor(rand() * 40)
+          })
+        }
+        paged = reducer(paged, { type: 'event', event })
+        for (let guard = 0; paged.stalled && guard < 10_000; guard++) {
+          stalls++
+          const need = paged.stalled.need
+          const from = Math.max(0, need - 8)
+          paged = reducer(paged, {
+            type: 'rows-loaded',
+            from,
+            rows: rowsOf(full).slice(from, need + 8),
+            epoch: paged.rowsEpoch
+          })
+        }
+        full = reducer(full, { type: 'event', event })
+        expect(paged.stalled, `${s.name} event ${i}`).toBeNull()
+        expect(paged.timeline.length).toBe(full.timeline.length)
+        // Every row it holds is the full replay's row. Both copy on write: a
+        // row neither side touched since the last event is the one already
+        // compared, so only rows that changed (or appeared, or loaded) on
+        // EITHER side are compared again — a change the paged side missed is
+        // a full-side change.
+        for (let at = 0; at < paged.timeline.length; at++) {
+          const row = paged.timeline[at]
+          if (row === undefined) continue
+          if (row === prevPaged[at] && full.timeline[at] === prevFull[at]) continue
+          expect(row, `${s.name} event ${i} row ${at}`).toEqual(full.timeline[at])
+        }
+        prevPaged = paged.timeline
+        prevFull = full.timeline
+      }
+      const filled = reducer(paged, {
+        type: 'rows-loaded',
+        from: 0,
+        rows: rowsOf(full),
+        epoch: paged.rowsEpoch
+      })
+      const { timeline: _a, stalled: _b, ...pagedRest } = filled
+      const { timeline: _c, stalled: _d, ...fullRest } = full
+      expect(snapshot({ ...pagedRest, timeline: filled.timeline } as never), s.name).toEqual(
+        snapshot({ ...fullRest, timeline: full.timeline } as never)
+      )
+      totalStalls += stalls
+    }
+    // The drops did make the reducer wait for rows (the path under test ran).
+    expect(totalStalls).toBeGreaterThan(p > 0.1 ? 200 : 10)
+  })
+
+  test('actions that arrive while stalled wait, in order, behind the one that stalled', () => {
+    const events = buildLongSession({ events: 400, seed: 9 })
+    const full = reducer(fresh(true), { type: 'events', events: events.slice(0, 300) })
+    // Everything unloaded: the next tool result for an old call must stall.
+    let paged = reducer(full, { type: 'rows-unloaded', from: 0, to: full.timeline.length })
+    paged = reducer(paged, { type: 'events', events: events.slice(300, 350) })
+    paged = reducer(paged, { type: 'events', events: events.slice(350) })
+    paged = reducer(paged, { type: 'user-sent', id: 'opt', text: 'typed meanwhile' })
+    expect(paged.stalled?.queue.map((a) => a.type)).toEqual(['events', 'events', 'user-sent'])
+    const done = reducer(paged, {
+      type: 'rows-loaded',
+      from: 0,
+      rows: rowsOf(full),
+      epoch: paged.rowsEpoch
+    })
+    const expected = reducer(reducer(full, { type: 'events', events: events.slice(300) }), {
+      type: 'user-sent',
+      id: 'opt',
+      text: 'typed meanwhile'
+    })
+    expect(done.stalled).toBeNull()
+    expect(snapshot(done)).toEqual(snapshot(expected))
+  })
+
+  test('rows asked for before the rows moved (another epoch) are not filled in', () => {
+    const full = reducer(fresh(true), { type: 'events', events: buildLongSession({ events: 50 }) })
+    const paged = reducer(full, { type: 'rows-unloaded', from: 0, to: 10 })
+    const stale = reducer(paged, {
+      type: 'rows-loaded',
+      from: 0,
+      rows: rowsOf(full),
+      epoch: paged.rowsEpoch + 1
+    })
+    expect(stale.timeline.slice(0, 10).every((r) => r === undefined)).toBe(true)
   })
 })

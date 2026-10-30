@@ -67,7 +67,13 @@ describe('buildLongSession', () => {
       const names = new Set(events.flatMap((e) => (e.kind === 'tool-call' ? [e.name] : [])))
       expect([...names].sort()).toEqual(['codex/commandExecution', 'codex/fileChange'])
       const kinds = new Set(events.map((e) => e.kind))
-      for (const k of ['user-message-delivery', 'agent-plan', 'assistant-text', 'tool-result'])
+      for (const k of [
+        'user-message-delivery',
+        'agent-plan',
+        'assistant-text',
+        'tool-result',
+        'context-usage'
+      ])
         expect(kinds.has(k as never)).toBe(true)
       // Every message is answered: delivered, then answered before its result.
       const delivered = events.flatMap((e) =>

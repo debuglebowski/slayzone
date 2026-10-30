@@ -94,4 +94,29 @@ describe('PersistentIndex', () => {
     expect(before.get('k8')).toBe(8)
     expect(before.get('k4999')).toBeUndefined()
   })
+
+  it('without(key): a version that lacks the key, small and trie alike; older versions keep it', () => {
+    for (const n of [10, 500]) {
+      let idx = PersistentIndex.empty<number>()
+      for (let i = 0; i < n; i++) idx = idx.with(`k${i}`, i)
+      const smaller = idx.without('k3').without('nope')
+      expect(smaller.size).toBe(n - 1)
+      expect(smaller.has('k3')).toBe(false)
+      expect(smaller.get('k4')).toBe(4)
+      expect(idx.get('k3')).toBe(3)
+      expect(idx.size).toBe(n)
+      expect(idx.without('nope')).toBe(idx)
+    }
+  })
+
+  it('entries(): every key once, with its value', () => {
+    for (const n of [10, 500]) {
+      let idx = PersistentIndex.empty<number>()
+      for (let i = 0; i < n; i++) idx = idx.with(`k${i}`, i)
+      const got = new Map(idx.entries())
+      expect(got.size).toBe(n)
+      expect(got.get('k7')).toBe(7)
+      expect(PersistentIndex.fromEntries(idx.entries()).get('k9')).toBe(9)
+    }
+  })
 })

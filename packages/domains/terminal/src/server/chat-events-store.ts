@@ -4,6 +4,12 @@ import type { AgentEvent } from '@slayzone/terminal-contracts'
 export interface BufferedEvent {
   seq: number
   event: AgentEvent
+  /**
+   * When it was saved (ms since epoch) — the time its rows show, the same on
+   * every device and every replay. Rows saved before this existed read their
+   * `created_at` (seconds) instead; absent only where neither is known.
+   */
+  at?: number
 }
 
 /**
@@ -23,13 +29,14 @@ export async function persistChatEvent(
   db: SlayzoneDb,
   tabId: string,
   seq: number,
-  event: AgentEvent
+  event: AgentEvent,
+  at?: number
 ): Promise<'inserted' | 'clash'> {
   const res = await db
     .prepare(
-      'INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?) ON CONFLICT(tab_id, seq) DO NOTHING'
+      'INSERT INTO chat_events (tab_id, seq, event, saved_at) VALUES (?, ?, ?, ?) ON CONFLICT(tab_id, seq) DO NOTHING'
     )
-    .run(tabId, seq, JSON.stringify(event))
+    .run(tabId, seq, JSON.stringify(event), at ?? null)
   // No per-tab trimming: the whole history stays (it used to keep the newest
   // 2,000 rows and delete the rest). Old sessions age out by time instead
   // (hub session retention).
@@ -38,7 +45,7 @@ export async function persistChatEvent(
 
 /** Where a {@link ChatEventLog} writes its rows, and reads back what left its cache. */
 export interface ChatEventPersistence {
-  insert(tabId: string, seq: number, event: AgentEvent): Promise<'inserted' | 'clash'>
+  insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
   /** Saved events with `afterSeq < seq < beforeSeq`, in seq order. */
   readRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
 }
@@ -96,9 +103,9 @@ export class ChatEventLog {
     return this.ring
   }
 
-  /** Assign the next seq, keep it in memory, and queue its write. */
-  append(event: AgentEvent): BufferedEvent {
-    const entry: BufferedEvent = { seq: this.nextSeq++, event }
+  /** Assign the next seq and the time it is saved, keep it in memory, and queue its write. */
+  append(event: AgentEvent): BufferedEvent & { at: number } {
+    const entry = { seq: this.nextSeq++, event, at: Date.now() }
     this.ring.push(entry)
     if (this.ring.length > this.cap) {
       const evicted = this.ring.splice(0, this.ring.length - this.cap)
@@ -106,7 +113,7 @@ export class ChatEventLog {
     }
     this.chain = this.chain.then(async () => {
       try {
-        const outcome = await this.persistence.insert(this.tabId, entry.seq, event)
+        const outcome = await this.persistence.insert(this.tabId, entry.seq, event, entry.at)
         if (outcome === 'clash') this.opts.onClash?.(entry.seq, event)
       } catch (err) {
         this.opts.onWriteError?.(entry.seq, err)
@@ -146,19 +153,43 @@ export class ChatEventLog {
   }
 }
 
-export async function loadChatEvents(db: SlayzoneDb, tabId: string): Promise<BufferedEvent[]> {
-  const rows = (await db
-    .prepare('SELECT seq, event FROM chat_events WHERE tab_id = ? ORDER BY seq ASC')
-    .all(tabId)) as Array<{ seq: number; event: string }>
+interface EventRow {
+  seq: number
+  event: string
+  saved_at: number | null
+  created_at: string | null
+}
+
+const EVENT_COLUMNS = 'seq, event, saved_at, created_at'
+
+/** SQLite's `datetime('now')` (`YYYY-MM-DD HH:MM:SS`, UTC) in ms; undefined when unreadable. */
+function createdAtMs(createdAt: string | null): number | undefined {
+  if (!createdAt) return undefined
+  const ms = Date.parse(`${createdAt.replace(' ', 'T')}Z`)
+  return Number.isNaN(ms) ? undefined : ms
+}
+
+/** Parsed rows; a corrupt one is dropped (better than crashing the chat panel). */
+function toBuffered(rows: EventRow[]): BufferedEvent[] {
   const out: BufferedEvent[] = []
   for (const row of rows) {
+    let event: AgentEvent
     try {
-      out.push({ seq: row.seq, event: JSON.parse(row.event) as AgentEvent })
+      event = JSON.parse(row.event) as AgentEvent
     } catch {
-      // Drop corrupt rows silently — better than crashing the chat panel.
+      continue
     }
+    const at = row.saved_at ?? createdAtMs(row.created_at)
+    out.push(at === undefined ? { seq: row.seq, event } : { seq: row.seq, event, at })
   }
   return out
+}
+
+export async function loadChatEvents(db: SlayzoneDb, tabId: string): Promise<BufferedEvent[]> {
+  const rows = (await db
+    .prepare(`SELECT ${EVENT_COLUMNS} FROM chat_events WHERE tab_id = ? ORDER BY seq ASC`)
+    .all(tabId)) as EventRow[]
+  return toBuffered(rows)
 }
 
 export async function loadChatEventsRange(
@@ -169,18 +200,10 @@ export async function loadChatEventsRange(
 ): Promise<BufferedEvent[]> {
   const rows = (await db
     .prepare(
-      'SELECT seq, event FROM chat_events WHERE tab_id = ? AND seq > ? AND seq < ? ORDER BY seq ASC'
+      `SELECT ${EVENT_COLUMNS} FROM chat_events WHERE tab_id = ? AND seq > ? AND seq < ? ORDER BY seq ASC`
     )
-    .all(tabId, afterSeq, beforeSeq)) as Array<{ seq: number; event: string }>
-  const out: BufferedEvent[] = []
-  for (const row of rows) {
-    try {
-      out.push({ seq: row.seq, event: JSON.parse(row.event) as AgentEvent })
-    } catch {
-      // Drop corrupt rows silently — as loadChatEvents does.
-    }
-  }
-  return out
+    .all(tabId, afterSeq, beforeSeq)) as EventRow[]
+  return toBuffered(rows)
 }
 
 export async function getNextSeqForTab(db: SlayzoneDb, tabId: string): Promise<number> {

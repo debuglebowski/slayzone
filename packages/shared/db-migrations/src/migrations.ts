@@ -4244,6 +4244,44 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 179,
+    up: (db) => {
+      // Paged chat history (chat F).
+      //
+      // `chat_events.saved_at`: when the event was saved (ms since epoch). A row's
+      // time comes from it, so every device and every replay shows the same time.
+      // NULL on rows saved before: their `created_at` (seconds) stands in.
+      //
+      // The hub's timeline projection — DERIVED state, safe to throw away (it is
+      // rebuilt from `chat_events` whenever its `version` differs or it can't be
+      // read). `chat_timeline_checkpoints`: per tab, the reducer state without
+      // its rows, the page table and the hub's own folds, as of event `seq`.
+      // `chat_timeline_pages`: the rows of each sealed page, a summary of what the
+      // whole-history features need from them, and their searchable text. A
+      // checkpoint and the pages it names are written in one transaction.
+      db.exec(`
+        ALTER TABLE chat_events ADD COLUMN saved_at INTEGER;
+        CREATE TABLE chat_timeline_checkpoints (
+          tab_id     TEXT PRIMARY KEY REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          version    TEXT NOT NULL,
+          seq        INTEGER NOT NULL,
+          data       TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE chat_timeline_pages (
+          tab_id      TEXT NOT NULL REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          page        INTEGER NOT NULL,
+          start_row   INTEGER NOT NULL,
+          end_row     INTEGER NOT NULL,
+          rows        TEXT NOT NULL,
+          summary     TEXT NOT NULL,
+          search_text TEXT NOT NULL,
+          PRIMARY KEY (tab_id, page)
+        );
+      `)
+    }
   }
 ]
 

@@ -2,20 +2,20 @@
  * `ChatEventLog`: the one owner of a chat tab's sequence numbers. Rows are
  * inserted in order, never replaced; a clash is reported, never an overwrite.
  */
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { ChatEventLog, type ChatEventPersistence } from './chat-events-store'
 
 function memoryStore(opts: { delayMs?: number; readDelayMs?: number } = {}) {
-  const rows = new Map<string, { seq: number; event: AgentEvent }>()
+  const rows = new Map<string, { seq: number; event: AgentEvent; at?: number }>()
   const order: number[] = []
   const reads: Array<[number, number]> = []
   const persistence: ChatEventPersistence = {
-    insert: async (tabId, seq, event) => {
+    insert: async (tabId, seq, event, at) => {
       if (opts.delayMs) await new Promise((r) => setTimeout(r, Math.random() * opts.delayMs!))
       const key = `${tabId}:${seq}`
       if (rows.has(key)) return 'clash'
-      rows.set(key, { seq, event })
+      rows.set(key, { seq, event, at })
       order.push(seq)
       return 'inserted'
     },
@@ -170,4 +170,26 @@ test('events appended while the store is read are neither lost nor doubled', asy
   expect(got[0]).toBe(0)
   expect(got).toEqual(range(0, got.at(-1)!))
   expect(got.at(-1)).toBeGreaterThanOrEqual(19)
+})
+
+test('every appended event is stamped with the time it was saved: kept, written, read back', async () => {
+  vi.useFakeTimers({ now: 1_793_376_000_000, toFake: ['Date'] })
+  try {
+    const store = memoryStore()
+    const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })
+    expect(log.append(text('a')).at).toBe(1_793_376_000_000)
+    vi.setSystemTime(1_793_376_000_500)
+    log.append(text('b'))
+    log.append(text('c'))
+    await log.flush()
+    expect([...store.rows.values()].map((r) => r.at)).toEqual([
+      1_793_376_000_000, 1_793_376_000_500, 1_793_376_000_500
+    ])
+    // 'a' left the cache: read back from the store, time and all.
+    expect((await log.readSince(-1)).map((e) => e.at)).toEqual([
+      1_793_376_000_000, 1_793_376_000_500, 1_793_376_000_500
+    ])
+  } finally {
+    vi.useRealTimers()
+  }
 })

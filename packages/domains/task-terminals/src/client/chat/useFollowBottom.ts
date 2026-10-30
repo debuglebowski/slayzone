@@ -189,10 +189,12 @@ function createFollowBottomController(
     for (const row of el.querySelectorAll<HTMLElement>('[data-anchor-key]')) {
       const box = row.getBoundingClientRect()
       if (box.bottom > top) {
+        const at = row.dataset.row === undefined ? Number.NaN : Number(row.dataset.row)
         return {
           atBottom: false,
           key: row.dataset.anchorKey ?? '',
-          offsetPx: Math.round(top - box.top)
+          offsetPx: Math.round(top - box.top),
+          ...(Number.isInteger(at) && at >= 0 ? { row: at } : {})
         }
       }
     }

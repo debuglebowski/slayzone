@@ -67,6 +67,14 @@ export interface VirtualTimelineController {
  * reveal lands first): a mounted row is measured. Close guesses mean less
  * correction while scrolling up into history.
  */
+/** Height a placeholder for rows not loaded takes, per root row it stands for. */
+const GAP_PX_PER_ROW = 64
+
+/** A history placeholder's height (`HistoryGapRow`): about what its rows will take. */
+export function gapHeight(item: Extract<TimelineItem, { kind: 'history-gap' }>): number {
+  return Math.max(48, Math.round(item.rows * GAP_PX_PER_ROW))
+}
+
 export function estimateRowSize(item: TimelineItem | undefined): number {
   if (!item) return 40
   const lines = (text: string | undefined): number => {
@@ -90,6 +98,8 @@ export function estimateRowSize(item: TimelineItem | undefined): number {
       return 44
     case 'sub-agent':
       return 48
+    case 'history-gap':
+      return gapHeight(item)
     case 'hook':
     case 'notice':
     case 'turn-error':
@@ -126,6 +136,12 @@ export function createVirtualTimelineController(
   let keyIndex: Map<Key, number> | null = null
   let revealTimer: ReturnType<typeof setTimeout> | null = null
   let detachInput: (() => void) | null = null
+  /**
+   * The row at the top of the view when the rows changed, and how far into it
+   * the view was: put back after the commit, so rows coming or going ABOVE it
+   * (a page of history loading) don't move what the user looks at.
+   */
+  let anchor: { key: Key; delta: number } | null = null
 
   const bump = (): void => {
     version += 1
@@ -179,6 +195,24 @@ export function createVirtualTimelineController(
   })
 
   const virtualizer = new Virtualizer<HTMLElement, HTMLElement>(options())
+  // A row above the view measured to another height moves the view by as much
+  // (it stays on what the user reads) — except at the bottom while it is
+  // followed: there the browser already keeps the view at the end (it clamps a
+  // shrink; growth is the follow lock's), and moving it too would leave it
+  // above the end by the difference.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    const el = getScrollElement()
+    if (follow.isStuck() && el && el.scrollHeight - el.scrollTop - el.clientHeight <= 2) {
+      return false
+    }
+    // Otherwise virtual-core's own rule: a first measurement of a row whose top
+    // is above the fold; a re-measurement of one entirely above it (not while
+    // scrolling up).
+    const fold = (instance.scrollOffset ?? 0) + instance.scrollAdjustments
+    if (!instance.itemSizeCache.has(item.key)) return item.start < fold
+    const size = instance.itemSizeCache.get(item.key) ?? item.size
+    return item.start + size <= fold && instance.scrollDirection !== 'backward'
+  }
 
   const cancelReveal = (): void => {
     if (revealTimer === null) return
@@ -210,6 +244,30 @@ export function createVirtualTimelineController(
   const bind = (): void => {
     if (detachInput === null && scrollRef.current) detachInput = watchUserInput(scrollRef.current)
     virtualizer._willUpdate()
+    keepAnchor()
+  }
+
+  /** The anchored row back where it was in the view (rows above it changed). */
+  const keepAnchor = (): void => {
+    const held = anchor
+    anchor = null
+    const el = getScrollElement()
+    if (!held || !el || follow.isStuck() || revealTimer !== null) return
+    const index = indexOfKey(held.key)
+    const row = index === undefined ? undefined : virtualizer.measurementsCache[index]
+    if (!row) return
+    const target = row.start + held.delta
+    if (Math.abs(el.scrollTop - target) <= 1) return
+    el.scrollTop = target
+    virtualizer.scrollOffset = el.scrollTop
+  }
+
+  const indexOfKey = (key: Key): number | undefined => {
+    if (keyIndex === null) {
+      keyIndex = new Map()
+      for (let i = 0; i < items.length; i++) keyIndex.set(itemKey(items[i], i), i)
+    }
+    return keyIndex.get(key)
   }
 
   const scrollRef = ((el: HTMLElement | null) => {
@@ -231,6 +289,24 @@ export function createVirtualTimelineController(
 
   const view: VirtualTimelineController['view'] = (nextItems, nextItemKey) => {
     if (nextItems !== items || nextItemKey !== itemKey) {
+      // Away from the bottom (by the scroller itself: at the bottom, or before it
+      // has its size, the bottom lock owns the position) and not revealing: hold
+      // the top row in place.
+      const el = getScrollElement()
+      const awayFromBottom = el !== null && el.scrollHeight - el.scrollTop - el.clientHeight > 2
+      if (
+        awayFromBottom &&
+        !follow.isStuck() &&
+        revealTimer === null &&
+        items.length > 0 &&
+        !hidden
+      ) {
+        const offset = el.scrollTop
+        const top = virtualizer.getVirtualItemForOffset(offset)
+        if (top && items[top.index]) {
+          anchor = { key: itemKey(items[top.index], top.index), delta: offset - top.start }
+        }
+      }
       items = nextItems
       itemKey = nextItemKey
       keyIndex = null
@@ -260,11 +336,7 @@ export function createVirtualTimelineController(
   }
 
   const revealKey: RevealTimelineItem = (key, opts) => {
-    if (keyIndex === null) {
-      keyIndex = new Map()
-      for (let i = 0; i < items.length; i++) keyIndex.set(itemKey(items[i], i), i)
-    }
-    const index = keyIndex.get(key)
+    const index = indexOfKey(key)
     if (index !== undefined) revealIndex(index, opts)
   }
 

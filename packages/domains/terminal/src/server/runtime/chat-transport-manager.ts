@@ -7,6 +7,13 @@ import type {
   ResultEvent
 } from '@slayzone/terminal-contracts'
 import { chatCapabilitiesForMode, userMessageText } from '@slayzone/terminal-contracts'
+import {
+  TIMELINE_PROJECTION_VERSION,
+  TimelineProjection,
+  type TimelineOpen,
+  type TimelinePagesResult,
+  type TimelineProjectionStore
+} from './chat-timeline-projection'
 import type {
   RewindFilesPreview,
   RewindResult,
@@ -69,8 +76,8 @@ export type ChatTerminalState = 'not-spawned' | 'starting' | 'running' | 'idle' 
 /** Where a tab's saved events live. Default: nowhere (tests, standalone). */
 export interface ChatEventStore {
   load(tabId: string): Promise<BufferedEvent[]>
-  /** Insert-only: `'clash'` when a row already exists at that seq. */
-  insert(tabId: string, seq: number, event: AgentEvent): Promise<'inserted' | 'clash'>
+  /** Insert-only: `'clash'` when a row already exists at that seq. `at`: when it was saved (ms). */
+  insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
   /** Saved events with `afterSeq < seq < beforeSeq` — history older than the log's cache. */
   readRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
 }
@@ -95,9 +102,16 @@ export interface TransportDeps {
   /**
    * `seq` is the event's own (saved events), or — for a LIVE event (`live` set:
    * a streaming fragment or a `sending` state, never saved) — the seq of the
-   * newest saved event it follows; `live` is the tab's live counter.
+   * newest saved event it follows; `live` is the tab's live counter. `at`: when
+   * a saved event was saved (ms) — the time its rows show.
    */
-  broadcastEvent: (tabId: string, event: AgentEvent, seq: number, live?: number) => void
+  broadcastEvent: (
+    tabId: string,
+    event: AgentEvent,
+    seq: number,
+    live?: number,
+    at?: number
+  ) => void
   /**
    * sessionId tags the dying session so the renderer reducer can drop stale
    * exits (e.g. an old session that died while a new one is starting after reset).
@@ -136,6 +150,12 @@ export interface TransportDeps {
   persistEvent: (tabId: string, seq: number, event: AgentEvent) => void
   /** The tabs' saved history. chat-handlers wires the SQLite store. */
   eventStore: ChatEventStore
+  /**
+   * Where a tab's timeline projection persists (paged history: what a client
+   * opens from without replaying every event). Unset: no projection — clients
+   * open from the full replay, as before.
+   */
+  timelineStore?: (tabId: string) => TimelineProjectionStore
   /**
    * Non-destructive process-liveness probe (`process.kill(pid, 0)`-style).
    * Injected so the watchdog tests can control the verdict deterministically.
@@ -179,7 +199,7 @@ function electronBroadcast(
  * live-only events (see `TransportDeps.broadcastEvent`).
  */
 export type ChatEventMap = {
-  event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number]
+  event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   exit: [tabId: string, sessionId: string, code: number | null, signal: string | null]
 }
 export const chatEvents = new TypedEmitter<ChatEventMap>()
@@ -218,9 +238,9 @@ const noEventStore: ChatEventStore = {
 const defaultDeps: TransportDeps = {
   spawn: realSpawn,
   whichBinary: realWhichBinary,
-  broadcastEvent: (tabId, event, seq, live) => {
-    chatEvents.emit('event', tabId, event, seq, live)
-    electronBroadcast('chat:event')(tabId, event, seq, live)
+  broadcastEvent: (tabId, event, seq, live, at) => {
+    chatEvents.emit('event', tabId, event, seq, live, at)
+    electronBroadcast('chat:event')(tabId, event, seq, live, at)
   },
   broadcastExit: (tabId, sessionId, code, signal) => {
     chatEvents.emit('exit', tabId, sessionId, code, signal)
@@ -347,6 +367,8 @@ interface ChatTab {
   backend: AgentBackend
   /** Sole owner of this tab's seqs; written insert-only. */
   log: ChatEventLog
+  /** Its timeline projection, fed every saved event (null: none, or it failed to open). */
+  projection: Promise<TimelineProjection | null>
   splitter: ChatEventSplitter
   outbox: ChatOutbox
   /** The current agent process (generation), or null before the first spawn. */
@@ -759,9 +781,12 @@ function routeHostEvent(tab: ChatTab, event: AgentEvent): void {
 
 function commitEvent(tab: ChatTab, event: AgentEvent): void {
   if (tab.closed) return
-  const { seq } = tab.log.append(event)
+  const entry = tab.log.append(event)
+  const { seq, at } = entry
+  // Folded into the projection before any client can ask for rows after it.
+  void tab.projection.then((p) => p?.apply(entry))
   tab.lastOutputTime = Date.now()
-  deps.broadcastEvent(tab.tabId, event, seq)
+  deps.broadcastEvent(tab.tabId, event, seq, undefined, at)
   try {
     deps.persistEvent(tab.tabId, seq, event)
   } catch (err) {
@@ -1490,6 +1515,7 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
     }
   )
   tab.outbox = createOutbox(tab)
+  tab.projection = openProjection(opts.tabId, opts.mode, history)
   tabs.set(opts.tabId, tab)
 
   // Messages the previous run never got confirmed are failed (Retry), not lost.
@@ -2356,8 +2382,10 @@ async function forgetPopped(tab: ChatTab, id: string): Promise<void> {
  */
 function commitHistory(tab: ChatTab, event: AgentEvent): void {
   if (tab.closed) return
-  const { seq } = tab.log.append(event)
-  deps.broadcastEvent(tab.tabId, event, seq)
+  const entry = tab.log.append(event)
+  const { seq, at } = entry
+  void tab.projection.then((p) => p?.apply(entry))
+  deps.broadcastEvent(tab.tabId, event, seq, undefined, at)
   try {
     deps.persistEvent(tab.tabId, seq, event)
   } catch (err) {
@@ -2862,11 +2890,91 @@ export function removeSession(tabId: string): Promise<void> {
     }, 2000)
     t.unref?.()
   }
-  const flushed = tab.log.flush().finally(() => {
-    if (closing.get(tabId) === flushed) closing.delete(tabId)
-  })
+  const flushed = Promise.all([
+    tab.log.flush(),
+    tab.projection.then((p) => p?.close()).catch(() => undefined)
+  ])
+    .then(() => undefined)
+    .finally(() => {
+      if (closing.get(tabId) === flushed) closing.delete(tabId)
+    })
   closing.set(tabId, flushed)
   return flushed
+}
+
+/** A tab's projection, from its checkpoint or rebuilt from `history` (null: none). */
+function openProjection(
+  tabId: string,
+  mode: string,
+  history: readonly BufferedEvent[]
+): Promise<TimelineProjection | null> {
+  const store = deps.timelineStore?.(tabId)
+  if (!store) return Promise.resolve(null)
+  return TimelineProjection.open({
+    store,
+    history,
+    agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns
+  }).catch((err: unknown) => {
+    console.error(`[chat-transport] timeline projection of ${tabId} failed to open:`, err)
+    return null
+  })
+}
+
+/**
+ * How a client opens a tab: `paged` — the projection's snapshot (state as of
+ * `snapshot.seq`, its tail's rows; older rows load by page), the saved events
+ * after it, and what streams right now; `full` — replay every event
+ * (`getReplay`): no projection, or the client's reducer is another version.
+ */
+export type ChatTimelineOpenResult =
+  | {
+      kind: 'paged'
+      snapshot: TimelineOpen
+      events: BufferedEvent[]
+      live: ChatReplay['live']
+    }
+  | { kind: 'full' }
+
+export async function openTimeline(
+  tabId: string,
+  clientVersion: string
+): Promise<ChatTimelineOpenResult> {
+  const tab = tabs.get(tabId)
+  if (!tab || clientVersion !== TIMELINE_PROJECTION_VERSION) return { kind: 'full' }
+  const projection = await tab.projection
+  if (!projection?.usable) return { kind: 'full' }
+  let snapshot: TimelineOpen
+  try {
+    snapshot = await projection.openSnapshot()
+  } catch {
+    return { kind: 'full' }
+  }
+  // Events saved while the snapshot was taken; the live part follows the newest.
+  const events = await tab.log.readSince(snapshot.seq)
+  return {
+    kind: 'paged',
+    snapshot,
+    events,
+    live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
+  }
+}
+
+/** Rows of sealed pages as of a client's newest event (`expired`: open again). */
+export async function timelinePages(
+  tabId: string,
+  pages: number[],
+  asOfSeq: number,
+  epoch: number
+): Promise<TimelinePagesResult> {
+  const projection = await tabs.get(tabId)?.projection
+  if (!projection) return { expired: true }
+  return projection.pagesAsOf(pages, asOfSeq, epoch)
+}
+
+/** Sealed pages that may hold `query` (the client checks the rows it loads). */
+export async function searchTimeline(tabId: string, query: string): Promise<number[]> {
+  const projection = await tabs.get(tabId)?.projection
+  return projection ? projection.searchPages(query) : []
 }
 
 /** The CACHED saved events after `afterSeq` (the newest ones; in-process checks). */

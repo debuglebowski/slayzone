@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { toast, useStableCallback } from '@slayzone/ui'
-import { selectActiveUserIds, type TimelineItem } from '@slayzone/terminal/client'
+import type { TimelinePageSummary } from '@slayzone/terminal/client'
 import {
   chatCapabilitiesForMode,
   type RewindFilesPreview,
@@ -64,7 +64,8 @@ const messageOf = (err: unknown): string => (err instanceof Error ? err.message 
  */
 export function useConversationActions(opts: {
   mode: string
-  timeline: readonly TimelineItem[]
+  /** The user messages the conversation still holds, oldest first (`activeUserRows`). */
+  activeUsers: TimelinePageSummary['users']
   rewindPreview: (messageId: string, scope: RewindScope) => Promise<RewindFilesPreview>
   rewind: (args: {
     messageId: string
@@ -77,7 +78,10 @@ export function useConversationActions(opts: {
   prefill: (text: string) => void
 }): { view: ConversationActionsView; dialog: ConversationActionsDialog } {
   const caps = chatCapabilitiesForMode(opts.mode)
-  const active = useMemo(() => selectActiveUserIds(opts.timeline), [opts.timeline])
+  const active = useMemo(
+    () => opts.activeUsers.flatMap((u) => (u.item.id ? [u.item.id] : [])),
+    [opts.activeUsers]
+  )
   const activeIds = useMemo(() => new Set(active), [active])
   const lastActiveId = active.at(-1) ?? null
   const [pending, setPending] = useState<PendingConversationAction | null>(null)

@@ -37,6 +37,8 @@ export interface UseChatPanelKeyboardOpts {
   jumpTurn?: (dir: -1 | 1) => void
   /** Cmd+↓: to the end AND follow it again (`useFollowBottom.scrollToBottom`). */
   scrollToBottom?: () => void
+  /** Cmd+↑: stop following the end first (`useFollowBottom.unstick`). */
+  unstick?: () => void
 }
 
 /**
@@ -77,7 +79,8 @@ export function useChatPanelKeyboard({
   draftEmpty = false,
   onDoubleEscape,
   jumpTurn,
-  scrollToBottom
+  scrollToBottom,
+  unstick
 }: UseChatPanelKeyboardOpts): void {
   useEffect(() => {
     // When the last Esc that could start a double-Esc was pressed (0: none).
@@ -142,6 +145,9 @@ export function useChatPanelKeyboard({
       }
       if (mod && e.key === 'ArrowUp') {
         e.preventDefault()
+        // Not following the end any more: rows loading above (paged history)
+        // must not pull the view back down to it.
+        unstick?.()
         scrollRef.current?.scrollTo({ top: 0 })
         return
       }
@@ -212,6 +218,7 @@ export function useChatPanelKeyboard({
     draftEmpty,
     onDoubleEscape,
     jumpTurn,
-    scrollToBottom
+    scrollToBottom,
+    unstick
   ])
 }

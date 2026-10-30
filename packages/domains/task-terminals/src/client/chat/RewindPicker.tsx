@@ -9,7 +9,7 @@ import {
   DialogDescription,
   DialogTitle
 } from '@slayzone/ui'
-import type { TimelineItem } from '@slayzone/terminal/client'
+import type { TimelinePageSummary } from '@slayzone/terminal/client'
 import type { ConversationActionsView } from './useConversationActions'
 import { useChatProvider } from './ChatViewContext'
 
@@ -50,24 +50,24 @@ function ago(ts: number): string {
  */
 export function RewindPicker({
   kind,
-  timeline,
+  activeUsers,
   view,
   onClose
 }: {
   kind: RewindPickerKind | null
-  timeline: readonly TimelineItem[]
+  /** The user messages the conversation still holds, oldest first (`activeUserRows`). */
+  activeUsers: TimelinePageSummary['users']
   view: ConversationActionsView
   onClose: () => void
 }) {
   const messages = useMemo(() => {
     const out: Array<{ id: string; text: string; timestamp: number }> = []
-    for (const it of timeline) {
-      if (it.kind !== 'user-text' || !it.id || it.parentToolUseId != null) continue
-      if (!view.activeIds.has(it.id)) continue
-      out.push({ id: it.id, text: it.text, timestamp: it.timestamp })
+    for (const { item } of activeUsers) {
+      if (!item.id || !view.activeIds.has(item.id)) continue
+      out.push({ id: item.id, text: item.text, timestamp: item.timestamp })
     }
     return out.reverse()
-  }, [timeline, view.activeIds])
+  }, [activeUsers, view.activeIds])
 
   const provider = useChatProvider()
   const copy = kind ? COPY[kind] : null

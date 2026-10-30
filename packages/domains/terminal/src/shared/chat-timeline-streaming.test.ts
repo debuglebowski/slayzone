@@ -17,6 +17,10 @@ import {
   type TimelineItem
 } from './chat-timeline'
 
+/** A test state holds every row: its timeline as plain items. */
+const rowsOf = (s: { timeline: ReadonlyArray<TimelineItem | undefined> }): TimelineItem[] =>
+  s.timeline as TimelineItem[]
+
 const apply = (s: ChatTimelineState, ...events: AgentEvent[]): ChatTimelineState =>
   events.reduce((acc, event) => reducer(acc, { type: 'event', event }), s)
 
@@ -79,12 +83,12 @@ const result: AgentEvent = {
 }
 
 const rows = (s: ChatTimelineState, kind: TimelineItem['kind']) =>
-  s.timeline.filter((i) => i.kind === kind)
+  rowsOf(s).filter((i) => i.kind === kind)
 
 describe('streaming: deltas are live state, not timeline', () => {
   test('a text delta updates state.live only; the timeline keeps its identity', () => {
     let s = apply(begin(), msgStart('m1'), blockStart(0, 'text'), delta(0, 'Hel'))
-    const timeline = s.timeline
+    const timeline = rowsOf(s)
     const [row] = rows(s, 'text')
     expect(row).toMatchObject({ kind: 'text', messageId: 'm1', blockOrdinal: 0, stream: 'open' })
     const key = streamKeyOf(row)
@@ -92,20 +96,20 @@ describe('streaming: deltas are live state, not timeline', () => {
     expect(liveBlockOf(s.live, key!)).toEqual({ key: 'text:m1:0', text: 'Hel', json: '' })
 
     s = apply(s, delta(0, 'lo'), delta(0, ' world'))
-    expect(s.timeline).toBe(timeline)
+    expect(rowsOf(s)).toBe(timeline)
     expect(liveBlockOf(s.live, key!)?.text).toBe('Hello world')
   })
 
   test('the saved block finalizes the streamed row in place (Claude: before the stop)', () => {
     let s = apply(begin(), msgStart('m1'), blockStart(0, 'text'), delta(0, 'Hello'))
-    const at = s.timeline.findIndex((i) => i.kind === 'text')
+    const at = rowsOf(s).findIndex((i) => i.kind === 'text')
     s = apply(s, savedText('m1', 'Hello world'))
-    expect(s.timeline[at]).toMatchObject({ kind: 'text', text: 'Hello world', blockOrdinal: 0 })
-    expect((s.timeline[at] as { stream?: string }).stream).toBeUndefined()
+    expect(rowsOf(s)[at]).toMatchObject({ kind: 'text', text: 'Hello world', blockOrdinal: 0 })
+    expect((rowsOf(s)[at] as { stream?: string }).stream).toBeUndefined()
     expect(liveBlockOf(s.live, 'text:m1:0')).toBeUndefined()
     s = apply(s, blockStop(0), msgStop)
     expect(rows(s, 'text')).toHaveLength(1)
-    expect(s.timeline[at]).toMatchObject({ text: 'Hello world' })
+    expect(rowsOf(s)[at]).toMatchObject({ text: 'Hello world' })
   })
 
   test('two text blocks of one message get their own rows and keys (live = replay)', () => {
@@ -173,9 +177,9 @@ describe('streaming: deltas are live state, not timeline', () => {
       blockStart(0, 'tool_use', { id: 'toolu_1', name: 'Bash' }),
       delta(0, '{"command": "npm ', 'input_json')
     )
-    const timeline = s.timeline
+    const timeline = rowsOf(s)
     s = apply(s, delta(0, 'run build"}', 'input_json'))
-    expect(s.timeline).toBe(timeline)
+    expect(rowsOf(s)).toBe(timeline)
     const [tool] = rows(s, 'tool')
     expect(tool).toMatchObject({ inputStreaming: true, invocation: { id: 'toolu_1', input: null } })
     expect(streamKeyOf(tool)).toBe('tool:toolu_1')
@@ -240,8 +244,8 @@ describe('streaming: deltas are live state, not timeline', () => {
     ]
     const one = apply(begin(), ...events)
     const batch = reducer(begin(), { type: 'events', events })
-    expect(batch.timeline.map(({ timestamp: _t, ...rest }) => rest)).toEqual(
-      one.timeline.map(({ timestamp: _t, ...rest }) => rest)
+    expect(rowsOf(batch).map(({ timestamp: _t, ...rest }) => rest)).toEqual(
+      rowsOf(one).map(({ timestamp: _t, ...rest }) => rest)
     )
     expect(batch.live).toEqual(one.live)
   })

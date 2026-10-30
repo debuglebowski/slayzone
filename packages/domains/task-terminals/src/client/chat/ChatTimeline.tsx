@@ -59,6 +59,8 @@ export interface ChatTimelineProps {
   /** `virtual.bindScroller`, as its own prop: what goes to `ref` must not be read off `virtual`. */
   scrollRef: CallbackRef<HTMLElement>
   itemKey: (item: TimelineItem, index: number) => Key
+  /** A displayed row's index in the timeline (scroll anchors keep it). */
+  rowOf?: (item: TimelineItem) => number | undefined
   /** The user turns, for the turn outline (`useTurnOutline`). */
   turns?: readonly TurnEntry[]
   contentRef: CallbackRef<HTMLElement>
@@ -93,6 +95,7 @@ export function ChatTimeline({
   awaitingUser,
   appearance,
   items,
+  rowOf,
   virtual,
   scrollRef,
   itemKey,
@@ -109,6 +112,8 @@ export function ChatTimeline({
   resetting,
   onHandoff
 }: ChatTimelineProps) {
+  let loadedRows = 0
+  for (const row of state.timeline) if (row !== undefined) loadedRows++
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const commandTasks = useCommandTaskActions()
@@ -168,6 +173,10 @@ export function ChatTimeline({
               // measured; the browser's own scroll anchoring would fight it.
               className="h-full overflow-y-auto [overflow-anchor:none]"
               data-testid="chat-timeline-scroller"
+              data-chat-scroller
+              // What the renderer holds (paged history): diagnostics, e2e.
+              data-rows-total={state.timeline.length}
+              data-rows-loaded={loadedRows}
             >
               <div ref={contentRef} className="min-h-full">
                 {!hydrating && !(isEmpty && !inFlight) && (
@@ -176,6 +185,7 @@ export function ChatTimeline({
                       controller={virtual}
                       items={items}
                       itemKey={itemKey}
+                      rowOf={rowOf}
                       renderRow={renderTimelineItem}
                     />
                     {inFlight && !awaitingUser && !tailStreaming && (
@@ -222,7 +232,7 @@ export function ChatTimeline({
           <ContextMenuItem
             onSelect={() => {
               // Rows scrolled out of view are closed too, when they come back.
-              collapseAllRows(rowUiState, items, itemKey)
+              collapseAllRows(rowUiState, items, itemKey, state.timeline.length)
               setCollapseSignal((n) => n + 1)
             }}
           >

@@ -18,7 +18,7 @@
  * never by scanning them all: a session in a mode that asks for every tool call
  * has as many prompts as tool calls, and a scan per event made replay quadratic.
  *
- * @module client/chat-prompts
+ * @module shared/chat-prompts
  */
 import type {
   AgentEvent,

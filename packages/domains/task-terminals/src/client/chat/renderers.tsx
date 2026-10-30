@@ -34,6 +34,7 @@ import {
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
+import { HistoryGapRow } from './HistoryGapRow'
 import {
   CHAT_CARD_INDENT,
   formatTime,
@@ -361,22 +362,27 @@ export function UnknownBlock({ item }: { item: Extract<TimelineItem, { kind: 'un
   )
 }
 
+const NO_CHILDREN: readonly number[] = []
+
 export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub-agent' }> }) {
-  const { timeline, childIndex } = useChatView()
+  const { timeline, childIndex, history } = useChatView()
   const rowKey = useContext(TimelineRowKeyContext)
   const inFlight = item.phase === 'in-flight'
   const errored = item.phase === 'failed' || item.status === 'failed' || item.status === 'error'
   const seconds = item.durationMs != null ? (item.durationMs / 1000).toFixed(1) : null
   const tokens = item.totalTokens != null ? formatTokens(item.totalTokens) : null
 
-  const childIndices = childIndex.get(item.toolUseId) ?? []
+  const childIndices = useMemo(
+    () => childIndex.get(item.toolUseId) ?? NO_CHILDREN,
+    [childIndex, item.toolUseId]
+  )
   // The Agent/Task launcher tool that spawned this sub-agent — rendered inside
   // the accordion so users can see the prompt + subagent_type after expanding.
   const launcherTool = useMemo(
     () =>
       timeline.find(
         (t) =>
-          t.kind === 'tool' &&
+          t?.kind === 'tool' &&
           isAgentLauncherToolName(t.invocation.name) &&
           t.invocation.id === item.toolUseId
       ),
@@ -391,6 +397,14 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
   useEffect(() => {
     if (focusRequested && !open) setOpen(true)
   }, [focusRequested, open, setOpen])
+  // Open, its children not loaded (paged history: they sit in a page that is
+  // not): they load.
+  const loadRows = history?.loadRows
+  useEffect(() => {
+    if (!open || !loadRows) return
+    const missing = childIndices.filter((idx) => timeline[idx] === undefined)
+    if (missing.length > 0) loadRows(missing)
+  }, [open, loadRows, childIndices, timeline])
 
   return (
     <>
@@ -700,20 +714,22 @@ export function ToolCallTodoWrite({ invocation, timestamp }: ToolProps) {
  */
 export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
   const questions = questionsOf(invocation.input)
-  const { timeline } = useChatView()
+  const { timeline, latestAskId } = useChatView()
   const prompt = usePromptFor(invocation.id)
   const answers = answersOf(prompt, invocation)
   // Latest AskUserQuestion in the timeline stays expanded; older ones auto-collapse
   // when a newer ask appears. User can still toggle manually.
   const isLatestAsk = useMemo(() => {
+    // The whole history's newest (paged history: from its summary).
+    if (latestAskId !== undefined) return latestAskId === invocation.id
     for (let i = timeline.length - 1; i >= 0; i--) {
       const it = timeline[i]
-      if (it.kind === 'tool' && it.invocation.name === 'AskUserQuestion') {
+      if (it?.kind === 'tool' && it.invocation.name === 'AskUserQuestion') {
         return it.invocation.id === invocation.id
       }
     }
     return false
-  }, [timeline, invocation.id])
+  }, [latestAskId, timeline, invocation.id])
   // Kept while scrolled away; "Collapse all" collapses it (`useRowUiState`).
   // Skip mount: initial state already honors latest-ask. Afterwards follow
   // latest-ask changes (adjusted during render — an `[isLatestAsk]` effect's trigger).
@@ -1013,5 +1029,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <UnknownBlock key={key} item={item} />
     case 'files-changed':
       return <FilesChangedRow key={key} item={item} />
+    case 'history-gap':
+      return <HistoryGapRow key={key} item={item} />
   }
 }

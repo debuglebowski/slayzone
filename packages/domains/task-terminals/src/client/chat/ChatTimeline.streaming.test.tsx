@@ -187,7 +187,7 @@ function Harness({
             inFlight
             awaitingUser={false}
             appearance={{ chatWidth: 'narrow' } as never}
-            items={state.timeline}
+            items={state.timeline as TimelineItem[]}
             virtual={virtual}
             scrollRef={virtual.bindScroller}
             itemKey={itemKey}

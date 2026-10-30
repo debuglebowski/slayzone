@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { AgentMode } from '@slayzone/ui'
-import type { ChatPrompt, TimelineItem } from '@slayzone/terminal/client'
+import type { ChatPrompt, TimelineRows } from '@slayzone/terminal/client'
 import {
   chatProviderForMode,
   type ChatProviderInfo,
@@ -8,6 +8,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { ConversationActionsView } from './useConversationActions'
 import type { DiffLineComment } from './diff-comments/format'
+import type { HistoryGap } from './HistoryGapRow'
 
 export interface ChatViewState {
   /**
@@ -91,8 +92,9 @@ export interface ChatViewState {
    * Full flat timeline + parent→children index, exposed so SubAgentRow can
    * render the items emitted while it ran (parentToolUseId === toolUseId).
    * Empty defaults are safe for harnesses that don't construct sub-agents.
+   * `undefined` = a row not loaded here (paged history).
    */
-  timeline: TimelineItem[]
+  timeline: Readonly<TimelineRows>
   childIndex: Map<string, number[]>
   /**
    * Cmd+Click on URL → in-app slay browser. Mirrors terminal pane wiring.
@@ -112,6 +114,14 @@ export interface ChatViewState {
   filesPanel?: { open: (path?: string) => void }
   /** A comment on a diff line goes into the composer (absent: the provider takes none). */
   addDiffComment?: (comment: DiffLineComment) => void
+  /** The newest AskUserQuestion call of the whole history (it stays open; older ones fold). */
+  latestAskId?: string | null
+  /** Paged history: a placeholder for rows not loaded is in view at row `row` (load there). */
+  history?: {
+    onGapVisible: (gap: HistoryGap, row: number) => void
+    /** Rows a component needs that are not loaded: load them. */
+    loadRows: (rows: readonly number[]) => void
+  }
 }
 
 /** What a chat view without a provider value sees (harnesses, previews). */

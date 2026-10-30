@@ -51,3 +51,48 @@ export function longSessionEvents(events = 10_000): Array<Record<string, unknown
   if (out.length !== events) throw new Error(`long session: ${out.length} events, wanted ${events}`)
   return out as unknown as Array<Record<string, unknown>>
 }
+
+/**
+ * The same session, each message answered (as the outbox saves it). Without
+ * deliveries, the hub marks every message failed when it loads the tab (sent
+ * before an app restart, never confirmed): ~1,500 changes to old rows.
+ */
+export function answeredLongSessionEvents(events = 10_000): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = []
+  for (const e of longSessionEvents(events)) {
+    out.push(e)
+    if (e.kind === 'user-message' && typeof e.id === 'string') {
+      out.push({ kind: 'user-message-delivery', id: e.id, state: 'answered' })
+    }
+  }
+  return out
+}
+
+export const CODEX_FIRST = 'FIRST-CODEX-182 where it begins'
+export const CODEX_NEEDLE = 'OKAPI-182'
+export const CODEX_LAST = 'The codex probe ran.'
+/** The thread id the generated Codex session's turn-init names. */
+export const CODEX_THREAD = 'codex-thread'
+
+/**
+ * A Codex chat session of `events` events (as `codex-chat-session.ts` saves
+ * one): the first prompt, a needle in turns 3 and 600, a last answer.
+ */
+export function codexLongSessionEvents(events: number): Array<Record<string, unknown>> {
+  const out = buildLongSession({ events: events - 4, provider: 'codex' }) as unknown as Array<
+    Record<string, unknown>
+  >
+  for (const e of out) {
+    if (e.kind !== 'user-message') continue
+    if (e.id === 'u0') e.text = CODEX_FIRST
+    if (e.id === 'u3') e.text = `${CODEX_NEEDLE} the first one`
+    if (e.id === 'u600') e.text = `${CODEX_NEEDLE} the second one`
+  }
+  out.push(
+    { kind: 'user-message', id: 'u-probe', text: 'run the probe' },
+    { kind: 'user-message-delivery', id: 'u-probe', state: 'answered' },
+    { kind: 'assistant-text', messageId: 'msg-probe', text: CODEX_LAST },
+    { ...RESULT, subtype: 'completed', text: null }
+  )
+  return out
+}

@@ -382,6 +382,8 @@ run_harness packages/shared/db-migrations/src/v175-conversation-handoff-fork-ori
 run_harness packages/shared/db-migrations/src/v177-chat-composer-migration.test.ts
 # v178 (Codex chat, X1): chat_cli_models — the models a chat CLI offers, per project + mode.
 run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.test.ts
+# v179 (paged chat history, chat F): saved_at + timeline checkpoints/pages.
+run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -816,6 +818,7 @@ run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/history-summary.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.codex.test.ts
@@ -838,16 +841,19 @@ run_harness packages/domains/task/src/server/main-agent.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
-run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
+run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 # Replay guards: batch = one by one (both providers), never changes its input, linear,
 # indexes = scans after every event.
-run_harness packages/domains/terminal/src/client/chat-timeline-replay.test.ts
-run_harness packages/domains/terminal/src/client/turn-file-changes.test.ts
-run_harness packages/domains/terminal/src/client/codex-file-changes.test.ts
-run_harness packages/domains/terminal/src/client/chat-timeline.codex-usage.test.ts
-run_harness packages/domains/terminal/src/client/persistent-index.test.ts
+run_harness packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
+# Timeline checkpoint: decode + rest of events = full replay; reducer version hash guard.
+run_harness packages/domains/terminal/src/shared/chat-timeline-checkpoint.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-timeline-projection.test.ts
+run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
+run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
+run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts
+run_harness packages/domains/terminal/src/shared/persistent-index.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
-run_harness packages/domains/terminal/src/client/chat-timeline-streaming.test.ts
+run_harness packages/domains/terminal/src/shared/chat-timeline-streaming.test.ts
 # A streaming tool input as far as it arrived; per-row live block notifications (chat plan 3.2).
 run_harness packages/domains/terminal/src/client/partial-json.test.ts
 run_harness packages/domains/terminal/src/client/live-blocks.test.ts

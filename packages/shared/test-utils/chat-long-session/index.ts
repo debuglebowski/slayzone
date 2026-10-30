@@ -421,6 +421,8 @@ export function buildLongSession(opts: LongSessionOpts = {}): AgentEvent[] {
     }
     out.push(
       { kind: 'assistant-text', messageId: `msg_${turn}_${block++}`, text: markdown() },
+      // The context the thread holds now (`thread/tokenUsage/updated`), as it grows.
+      { kind: 'context-usage', contextTokens: 4_000 + turn * 900, contextWindow: 258_400 },
       { kind: 'user-message-delivery', id, state: 'answered' },
       {
         kind: 'result',

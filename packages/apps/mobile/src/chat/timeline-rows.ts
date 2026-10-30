@@ -11,6 +11,7 @@ import {
   type ChatTimelineState,
   streamKeyOf,
   type TimelineItem,
+  type TimelineRows,
   type ToolInvocation
 } from '@slayzone/terminal/reducer'
 
@@ -41,17 +42,18 @@ export interface TimelineRow {
  * the user (their folded rows show); every other fold stays hidden.
  */
 export function timelineRows(
-  timeline: readonly TimelineItem[],
+  timeline: Readonly<TimelineRows>,
   openBranches: ReadonlySet<string> = new Set()
 ): TimelineRow[] {
   const folded = new Set<number>()
   for (const it of timeline) {
-    if (it.kind !== 'conversation-branch' || openBranches.has(it.id)) continue
+    if (it?.kind !== 'conversation-branch' || openBranches.has(it.id)) continue
     for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) folded.add(i)
   }
   const rows: TimelineRow[] = []
   timeline.forEach((item, index) => {
-    if (!folded.has(index) && isShown(item)) rows.push({ key: rowKey(item, index), item })
+    // (Mobile loads the whole history: no row is ever unloaded here.)
+    if (item && !folded.has(index) && isShown(item)) rows.push({ key: rowKey(item, index), item })
   })
   return rows
 }

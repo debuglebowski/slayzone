@@ -19,7 +19,13 @@ export interface ChatDraft {
  */
 export type ChatScrollAnchor =
   | { atBottom: true }
-  | { atBottom: false; key: string; offsetPx: number }
+  | {
+      atBottom: false
+      key: string
+      offsetPx: number
+      /** The row's index in the timeline: a paged history loads its page to restore. */
+      row?: number
+    }
 
 export interface ChatTabState {
   /** `rev` counts saves (the composer's local journal compares it). */

@@ -7,8 +7,10 @@ export type TurnStatus = 'running' | 'done' | 'error' | 'stopped' | 'sending' | 
 export interface TurnEntry {
   /** The user message row's `itemKey`: what the outline reveals. */
   key: Key
-  /** Its index in the displayed timeline. */
+  /** Its index in the displayed timeline (not loaded here: its placeholder's). */
   index: number
+  /** Its row in the timeline (a paged history loads it to reveal it). */
+  row?: number
   /** The message's first line (or its attachments' names). */
   title: string
   timestamp: number
@@ -37,7 +39,11 @@ function titleOf(item: Extract<TimelineItem, { kind: 'user-text' }>): string {
 export function selectTurnOutline(
   items: readonly TimelineItem[],
   itemKey: (item: TimelineItem, index: number) => Key,
-  opts: { turnOpen: boolean }
+  opts: {
+    turnOpen: boolean
+    /** Item `i`'s display index (default `i`) and timeline row, when `items` stands in for more. */
+    placeOf?: (i: number) => { index: number; row?: number }
+  }
 ): TurnEntry[] {
   const turns: TurnEntry[] = []
   let current: TurnEntry | null = null
@@ -59,9 +65,11 @@ export function selectTurnOutline(
           : item.delivery === 'sending' || item.delivery === 'queued'
             ? 'sending'
             : null
+      const place = opts.placeOf?.(i) ?? { index: i }
       current = {
         key: itemKey(item, i),
-        index: i,
+        index: place.index,
+        ...(place.row !== undefined ? { row: place.row } : {}),
         title: titleOf(item),
         timestamp: item.timestamp,
         status: 'running'

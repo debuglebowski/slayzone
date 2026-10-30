@@ -132,3 +132,17 @@ describe('row UI state', () => {
     expect(label('loose')).toBe('closed')
   })
 })
+
+describe('RowUiStateStore: paged history', () => {
+  it('"Collapse all" also closes rows that existed but were not loaded (by timeline index)', () => {
+    const store = new RowUiStateStore()
+    store.collapseAll(['user-text:a'], 100)
+    // Loaded later, never displayed at the time: index below 100 → closed.
+    expect(store.read('tool:old', 'open', true, false, 42)).toBe(false)
+    // A row added after: its own default.
+    expect(store.read('tool:new', 'open', true, false, 100)).toBe(true)
+    // Toggled since: what the user chose.
+    store.write('tool:old', 'open', true, true)
+    expect(store.read('tool:old', 'open', true, false, 42)).toBe(true)
+  })
+})

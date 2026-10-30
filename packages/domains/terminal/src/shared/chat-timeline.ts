@@ -31,6 +31,9 @@ import {
   type ChatPrompt
 } from './chat-prompts'
 import { turnFilesChangedRow, type TurnFileChange } from './turn-file-changes'
+import { firstUnloaded, rowAt, rowAtIfAny, RowsNotLoaded, type TimelineRows } from './timeline-rows'
+
+export { RowsNotLoaded, firstUnloaded, type TimelineRows } from './timeline-rows'
 import {
   appended,
   beginReducerCall,
@@ -278,6 +281,19 @@ export type TimelineItem =
       timestamp: number
       parentToolUseId?: string
     }
+  | {
+      /**
+       * DISPLAY-ONLY — the reducer never makes one: rows `from`..`to`
+       * (exclusive) not loaded here (paged history), shown as one placeholder
+       * of about `rows` root rows; scrolled to, they load.
+       */
+      kind: 'history-gap'
+      from: number
+      to: number
+      rows: number
+      timestamp: number
+      parentToolUseId?: undefined
+    }
 
 /**
  * Where a streamed text/thinking row is:
@@ -406,8 +422,16 @@ export interface BgShell {
   spawnedInSpawnId: string | null
 }
 
+/** Waiting for rows: what to load, and the actions to apply once they are in. */
+export interface ChatTimelineStall {
+  /** The row that was needed. */
+  need: number
+  /** Every action given since, in order (the first is the one that stopped). */
+  queue: QueuedAction[]
+}
+
 export interface ChatTimelineState {
-  timeline: TimelineItem[]
+  timeline: TimelineRows
   /** tool_use_id → index into `timeline` for paired mutation. */
   /** Tool call id → its row. Persistent: a new version per call, no full copy. */
   toolIndex: PersistentIndex<number>
@@ -508,10 +532,32 @@ export interface ChatTimelineState {
   /** Positions in `prompts` of the pending ones, ascending. */
   pendingPrompts: readonly number[]
   /**
-   * User message id → its row (the newest row with that id) — what a scan of the
-   * timeline from the end finds, without the scan (`findUserItem`).
+   * User message id → its rows, ascending (normally one): the newest is what a
+   * scan of the timeline from the end finds, without the scan (`findUserItem`).
    */
-  userIndex: PersistentIndex<number>
+  userIndex: PersistentIndex<readonly number[]>
+  /** Rows of `conversation-branch` items, ascending (what the branch lookbacks read). */
+  branchRows: readonly number[]
+  /** Rows still streaming (text / thinking with a `stream`, a tool whose input streams). */
+  streamingRows: readonly number[]
+  /** The first row after the last `result` row (0 when there is none): where this turn starts. */
+  turnStart: number
+  /** Rows `subAgentIndex` names that hold an in-flight sub-agent (what a Stop fails). */
+  inFlightSubAgents: readonly number[]
+  /**
+   * Bumped whenever rows already there move or go (a row added on top, one taken
+   * out of the middle, a restart that clears them): rows loaded for an older
+   * epoch would land at the wrong index.
+   */
+  rowsEpoch: number
+  /** Waiting for an unloaded row (paged history): see {@link ChatTimelineStall}. */
+  stalled: ChatTimelineStall | null
+  /**
+   * The seq of the newest saved event applied (-1: none, or events given
+   * without one). Rows loaded for this state are asked for as of it: a stall's
+   * queued events are not in it yet.
+   */
+  appliedSeq: number
   /** Rows sent optimistically without an id, not yet confirmed (legacy sends). */
   idlessOptimistic: number
   /**
@@ -576,6 +622,13 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
     ...initialPromptState(),
     userIndex: PersistentIndex.empty(),
+    branchRows: [],
+    streamingRows: [],
+    turnStart: 0,
+    inFlightSubAgents: [],
+    rowsEpoch: 0,
+    stalled: null,
+    appliedSeq: -1,
     idlessOptimistic: 0,
     blockOrdinals: EMPTY_ORDINALS,
     freshStartPending: false,
@@ -586,9 +639,24 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
 }
 
 export type Action =
-  | { type: 'event'; event: AgentEvent }
-  /** Several events in order — one dispatch for a frame's worth of stream deltas. */
-  | { type: 'events'; events: AgentEvent[] }
+  /**
+   * `at`: when the event was saved (ms) — the time its rows show, the same on
+   * every replay. Absent for a live-only event: now.
+   */
+  | { type: 'event'; event: AgentEvent; at?: number; seq?: number }
+  /**
+   * Several events in order — a saved history, or a frame's worth of stream
+   * deltas. `at[i]`: when `events[i]` was saved (as `at` above).
+   */
+  | {
+      type: 'events'
+      events: AgentEvent[]
+      at?: ReadonlyArray<number | undefined>
+      /** `seq[i]`: `events[i]`'s saved seq (see `appliedSeq`). */
+      seq?: ReadonlyArray<number | undefined>
+    }
+  /** Open from a snapshot (paged history: `decodeTimelineState`): this state, as is. */
+  | { type: 'restore'; state: ChatTimelineState }
   | { type: 'user-sent'; text: string; id?: string; content?: UserContentBlock[] }
   | { type: 'user-send-failed'; id?: string; error?: string }
   /** Send a failed message again (same id). */
@@ -603,6 +671,17 @@ export type Action =
   | { type: 'reset' }
   /** The tab's mode changed: whether its provider starts turns by itself. */
   | { type: 'configure'; agentStartedTurns: boolean }
+  /**
+   * Rows of a page this state does not hold, `rows[k]` at `from + k`, as of this
+   * state's events (`epoch`: its `rowsEpoch` when they were asked for). They
+   * fill only unloaded rows; a stalled reducer then goes on with its queue.
+   */
+  | { type: 'rows-loaded'; from: number; rows: TimelineItem[]; epoch: number }
+  /**
+   * Drop rows `from`..`to` (exclusive) from memory — never their meaning: the
+   * reducer loads any it needs again (paged history keeps what is in view).
+   */
+  | { type: 'rows-unloaded'; from: number; to: number }
 
 /**
  * Pure: never changes `state`. One call is one copy-on-write scope
@@ -610,16 +689,83 @@ export type Action =
  * so reducing N events costs time linear in N.
  */
 export function reducer(state: ChatTimelineState, action: Action): ChatTimelineState {
+  if (action.type === 'restore') return action.state
+  if (action.type === 'rows-loaded') return loadRows(state, action)
+  if (action.type === 'rows-unloaded') return unloadRows(state, action.from, action.to)
+  // Waiting for rows: everything waits behind the action that needs them.
+  if (state.stalled) {
+    return { ...state, stalled: { ...state.stalled, queue: [...state.stalled.queue, action] } }
+  }
+  return attempt(state, action)
+}
+
+/**
+ * One action in its own copy-on-write scope. A row it needs is not loaded: the
+ * state it was given — never written, so intact even when the action got
+ * halfway — waits with the action queued.
+ */
+function attempt(state: ChatTimelineState, action: QueuedAction): ChatTimelineState {
   beginReducerCall()
   try {
     return reduceAction(state, action)
+  } catch (err) {
+    if (!(err instanceof RowsNotLoaded)) throw err
+    return { ...state, stalled: { need: err.row, queue: [action] } }
   } finally {
     endReducerCall()
   }
 }
 
-function reduceAction(state: ChatTimelineState, action: Action): ChatTimelineState {
-  if (action.type === 'events') return reduceEvents(state, action.events)
+/** `state` without rows `from`..`to` in memory. */
+function unloadRows(state: ChatTimelineState, from: number, to: number): ChatTimelineState {
+  const end = Math.min(to, state.timeline.length)
+  let timeline: TimelineRows | null = null
+  for (let at = Math.max(0, from); at < end; at++) {
+    if (state.timeline[at] === undefined) continue
+    timeline ??= state.timeline.slice()
+    timeline[at] = undefined
+  }
+  return timeline ? { ...state, timeline } : state
+}
+
+/** Fill unloaded rows, then apply what waited for them (each may wait again). */
+function loadRows(
+  state: ChatTimelineState,
+  action: Extract<Action, { type: 'rows-loaded' }>
+): ChatTimelineState {
+  // Asked for before rows moved: they would land at the wrong index.
+  if (action.epoch !== state.rowsEpoch) return state
+  let timeline: TimelineRows | null = null
+  for (let k = 0; k < action.rows.length; k++) {
+    const at = action.from + k
+    if (at >= state.timeline.length || state.timeline[at] !== undefined) continue
+    timeline ??= state.timeline.slice()
+    timeline[at] = action.rows[k]
+  }
+  let next: ChatTimelineState = timeline ? { ...state, timeline } : state
+  const stall = next.stalled
+  if (!stall) return next
+  next = { ...next, stalled: null }
+  for (let i = 0; i < stall.queue.length; i++) {
+    next = attempt(next, stall.queue[i])
+    if (next.stalled) {
+      return {
+        ...next,
+        stalled: { ...next.stalled, queue: [...next.stalled.queue, ...stall.queue.slice(i + 1)] }
+      }
+    }
+  }
+  return next
+}
+
+/** What can wait in a stall (everything but loading / dropping rows: those apply at once). */
+type QueuedAction = Exclude<
+  Action,
+  { type: 'rows-loaded' } | { type: 'rows-unloaded' } | { type: 'restore' }
+>
+
+function reduceAction(state: ChatTimelineState, action: QueuedAction): ChatTimelineState {
+  if (action.type === 'events') return reduceEvents(state, action.events, action.at, action.seq)
   // A turn's end (or its process's) ends every stream it left open: those rows
   // keep the text they got. The splitter saved them first, so this only heals.
   const kind = action.type === 'event' ? action.event.kind : null
@@ -633,13 +779,20 @@ function reduceAction(state: ChatTimelineState, action: Action): ChatTimelineSta
   // subscription. We post-process AgentEvents here so the timeline pass stays
   // focused on rendering and bg-shell logic stays in one place.
   if (action.type === 'event') {
-    return applyAgentTurn(
+    const done = applyAgentTurn(
       applyPromptEvent(
-        applyBgShellEvent(applyContextUsage(next, action.event), action.event),
+        applyBgShellEvent(
+          applyContextUsage(next, action.event),
+          action.event,
+          action.at ?? Date.now()
+        ),
         action.event
       ),
       action.event
     )
+    return action.seq === undefined || action.seq === done.appliedSeq
+      ? done
+      : { ...done, appliedSeq: action.seq }
   }
   if (action.type === 'process-exit') {
     // Live `chat:exit` IPC path. Mirrors the agent-event path so bg shells
@@ -659,14 +812,21 @@ function reduceAction(state: ChatTimelineState, action: Action): ChatTimelineSta
   return next
 }
 
-/** A frame's worth of events, in order — the same as dispatching them one by one. */
-function reduceEvents(state: ChatTimelineState, events: AgentEvent[]): ChatTimelineState {
+/** Events in order — the same as dispatching them one by one. */
+function reduceEvents(
+  state: ChatTimelineState,
+  events: AgentEvent[],
+  at: ReadonlyArray<number | undefined> | undefined,
+  seq: ReadonlyArray<number | undefined> | undefined
+): ChatTimelineState {
   let acc = state
-  for (const event of events) acc = reduceAction(acc, { type: 'event', event })
+  for (let i = 0; i < events.length; i++) {
+    acc = reduceAction(acc, { type: 'event', event: events[i], at: at?.[i], seq: seq?.[i] })
+  }
   return acc
 }
 
-type SingleAction = Exclude<Action, { type: 'events' }>
+type SingleAction = Exclude<QueuedAction, { type: 'events' }>
 
 /**
  * Append `newIdx` to the children list keyed by `parentId`, returning a new map.
@@ -693,22 +853,83 @@ function withUserRow(
   const at = state.timeline.length
   return {
     timeline: appended(state.timeline, item),
-    userIndex: item.id ? state.userIndex.with(item.id, at) : state.userIndex,
+    userIndex: item.id
+      ? state.userIndex.with(item.id, [...(state.userIndex.get(item.id) ?? []), at])
+      : state.userIndex,
     idlessOptimistic:
       item.optimistic && !item.id ? state.idlessOptimistic + 1 : state.idlessOptimistic
   }
 }
 
-/** User rows moved (a row removed, or one added on top): index them again. */
-function reindexUserRows(state: ChatTimelineState): ChatTimelineState {
-  let userIndex = PersistentIndex.empty<number>()
+/** `rows` (ascending) with `at` in it. */
+function withRowIn(rows: readonly number[], at: number): readonly number[] {
+  if (rows.includes(at)) return rows
+  const out = [...rows, at]
+  if (rows.length > 0 && rows[rows.length - 1] > at) out.sort((a, b) => a - b)
+  return out
+}
+
+/** `rows` without `at`. */
+function withoutRowIn(rows: readonly number[], at: number): readonly number[] {
+  return rows.includes(at) ? rows.filter((r) => r !== at) : rows
+}
+
+const isStreamingRow = (it: TimelineItem): boolean =>
+  ((it.kind === 'text' || it.kind === 'thinking') && it.stream !== undefined) ||
+  (it.kind === 'tool' && it.inputStreaming === true)
+
+/** `streamingRows` once row `at` became `it`. */
+function streamingAfter(state: ChatTimelineState, at: number, it: TimelineItem): readonly number[] {
+  return isStreamingRow(it)
+    ? withRowIn(state.streamingRows, at)
+    : withoutRowIn(state.streamingRows, at)
+}
+
+/**
+ * Rows moved (one added on top, one taken out of the middle): index them again
+ * from the rows — every row must be loaded, so a paged state loads them all
+ * first (rare: a session's first turn-init, a legacy failed send).
+ */
+function reindexRows(state: ChatTimelineState): ChatTimelineState {
+  const unloaded = firstUnloaded(state.timeline)
+  if (unloaded >= 0) throw new RowsNotLoaded(unloaded)
+  let userIndex = PersistentIndex.empty<readonly number[]>()
   let idlessOptimistic = 0
+  const branchRows: number[] = []
+  const streamingRows: number[] = []
+  let turnStart = 0
   state.timeline.forEach((it, i) => {
+    if (!it) return
+    if (it.kind === 'result') turnStart = i + 1
+    if (isStreamingRow(it)) streamingRows.push(i)
+    if (it.kind === 'conversation-branch') branchRows.push(i)
     if (it.kind !== 'user-text') return
-    if (it.id) userIndex = userIndex.with(it.id, i)
+    if (it.id) userIndex = userIndex.with(it.id, [...(userIndex.get(it.id) ?? []), i])
     else if (it.optimistic) idlessOptimistic++
   })
-  return { ...state, userIndex, idlessOptimistic }
+  return {
+    ...state,
+    userIndex,
+    idlessOptimistic,
+    branchRows,
+    streamingRows,
+    turnStart,
+    inFlightSubAgents: inFlightSubAgentRows(state.subAgentIndex, state.timeline),
+    rowsEpoch: state.rowsEpoch + 1
+  }
+}
+
+/** The rows `subAgentIndex` names that hold an in-flight sub-agent. */
+function inFlightSubAgentRows(
+  subAgentIndex: ReadonlyMap<string, number>,
+  timeline: TimelineRows
+): number[] {
+  const out: number[] = []
+  for (const idx of subAgentIndex.values()) {
+    const it = rowAtIfAny(timeline, idx)
+    if (it?.kind === 'sub-agent' && it.phase === 'in-flight' && !out.includes(idx)) out.push(idx)
+  }
+  return out.sort((a, b) => a - b)
 }
 
 const ordinalKey = (kind: 'text' | 'thinking', messageId: string): string =>
@@ -782,11 +1003,11 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       // ordering guarantees FIFO: the first user-sent that has no matching
       // user-message back is the one that failed.
       for (let i = 0; i < state.timeline.length; i++) {
-        const it = state.timeline[i]
+        const it = rowAt(state.timeline, i)
         if (it.kind === 'user-text' && it.optimistic) {
           const next = writable(state.timeline)
           next.splice(i, 1)
-          return reindexUserRows({
+          return reindexRows({
             ...state,
             timeline: next,
             userMessagesSent: Math.max(0, state.userMessagesSent - 1)
@@ -817,7 +1038,7 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       }
     }
     case 'event':
-      return applyEvent(state, action.event)
+      return applyEvent(state, action.event, action.at ?? Date.now())
     case 'prompt-refused':
       // Prompt-only (post-pass in `reducer`).
       return state
@@ -834,7 +1055,8 @@ function agentProblemCode(detail: unknown): string | null {
 
 /** The newest user row with message id `id`, or -1 (through `userIndex`, no scan). */
 function findUserItem(state: ChatTimelineState, id: string): number {
-  return state.userIndex.get(id) ?? -1
+  const rows = state.userIndex.get(id)
+  return rows ? rows[rows.length - 1] : -1
 }
 
 /**
@@ -850,7 +1072,7 @@ function setDelivery(
 ): ChatTimelineState {
   const at = findUserItem(state, id)
   if (at < 0) return state
-  const it = state.timeline[at] as Extract<TimelineItem, { kind: 'user-text' }>
+  const it = rowAt(state.timeline, at) as UserTextItem
   if (it.delivery === delivery && it.deliveryError === error) return state
   const wasFailed = it.delivery === 'failed'
   const isFailed = delivery === 'failed'
@@ -882,8 +1104,8 @@ function applyTransportEvent(
   return state
 }
 
-function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineState {
-  const ts = Date.now()
+/** `ts`: the time the event's rows show (when it was saved). */
+function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): ChatTimelineState {
   switch (event.kind) {
     case 'user-message': {
       if (event.history) {
@@ -900,7 +1122,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         // Confirm the optimistic bubble with the same id in place.
         const at = findUserItem(state, event.id)
         if (at >= 0) {
-          const it = state.timeline[at] as Extract<TimelineItem, { kind: 'user-text' }>
+          const it = rowAt(state.timeline, at) as UserTextItem
           const next = writable(state.timeline)
           // A bubble the client had failed (its request errored) but the server
           // did take is back in flight.
@@ -927,7 +1149,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // Replay path (cold reattach, no prior `user-sent` dispatch) finds none
       // and falls through to append. Scanned only when such a bubble exists.
       for (let i = 0; !event.id && state.idlessOptimistic > 0 && i < state.timeline.length; i++) {
-        const it = state.timeline[i]
+        const it = rowAt(state.timeline, i)
         if (it.kind === 'user-text' && it.optimistic && !it.id) {
           const next = writable(state.timeline)
           next[i] = { ...it, text: event.text, timestamp: ts, optimistic: false }
@@ -984,8 +1206,10 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       if (event.reason === 'fork-failed') {
         // The CLI refused the last fork: its row says so and folds nothing; the
         // original conversation goes on (no other id is coming).
-        for (let i = len - 1; i >= 0; i--) {
-          const it = state.timeline[i]
+        // (Branch rows only: `branchRows`, newest first.)
+        for (let k = state.branchRows.length - 1; k >= 0; k--) {
+          const i = state.branchRows[k]
+          const it = rowAt(state.timeline, i)
           if (it.kind !== 'conversation-branch' || it.reason !== 'forked') continue
           const timeline = writable(state.timeline)
           timeline[i] = { ...it, reason: 'fork-failed', hiddenCount: 0 }
@@ -1002,7 +1226,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         // Everything after the fork point's turn: from the next user message on.
         const at = event.messageId ? findUserItem(state, event.messageId) : -1
         for (let i = at + 1; at >= 0 && i < len; i++) {
-          const it = state.timeline[i]
+          const it = rowAt(state.timeline, i)
           if (it.kind === 'user-text' && it.parentToolUseId == null) {
             from = i
             break
@@ -1011,8 +1235,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       } else {
         // The whole previous conversation: everything since the last switch.
         from = 0
-        for (let i = len - 1; i >= 0; i--) {
-          const it = state.timeline[i]
+        for (let k = state.branchRows.length - 1; k >= 0; k--) {
+          const i = state.branchRows[k]
+          const it = rowAt(state.timeline, i)
           if (it.kind === 'conversation-branch' && it.reason === 'switched') {
             from = i + 1
             break
@@ -1032,6 +1257,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       return {
         ...state,
         timeline: appended(state.timeline, item),
+        branchRows: [...state.branchRows, len],
         // A fork / switch runs another conversation id: its turn-init must not
         // wipe the timeline (the history above stays, a divider marks the start).
         freshStartPending: event.reason === 'rewound' ? state.freshStartPending : true
@@ -1043,7 +1269,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // content); refuse if anything else sits between us and the matching
       // user-text — main side gates emission so this is defensive replay-safety.
       for (let i = state.timeline.length - 1; i >= 0; i--) {
-        const it = state.timeline[i]
+        const it = rowAt(state.timeline, i)
         if (it.kind === 'session-start') continue
         const matches =
           it.kind === 'user-text' &&
@@ -1053,11 +1279,24 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         if (matches) {
           const next = writable(state.timeline)
           next.splice(i, 1)
-          return reindexUserRows({
+          // Only session-start rows sat after it: no other indexed row moved.
+          const ids = it.id ? state.userIndex.get(it.id) : undefined
+          return {
             ...state,
             timeline: next,
+            userIndex:
+              it.id && ids
+                ? ids.length > 1
+                  ? state.userIndex.with(
+                      it.id,
+                      ids.filter((r) => r !== i)
+                    )
+                  : state.userIndex.without(it.id)
+                : state.userIndex,
+            idlessOptimistic:
+              it.optimistic && !it.id ? state.idlessOptimistic - 1 : state.idlessOptimistic,
             userMessagesSent: Math.max(0, state.userMessagesSent - 1)
-          })
+          }
         }
         return state
       }
@@ -1106,6 +1345,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         return {
           ...initialState(),
           timeline: [item],
+          // Every row before is gone: rows asked for earlier would land wrong.
+          rowsEpoch: state.rowsEpoch + 1,
           sessionStarted: true,
           sessionId: event.sessionId,
           model: event.model,
@@ -1135,7 +1376,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // (optimistic user-sent dispatch races the stream). Keep session-start at the top.
       // Also clear any stale end-state: a fresh turn-init means a live process, which may
       // arrive AFTER a late process-exit from a prior (already-replaced) session during reset.
-      return reindexUserRows({
+      return reindexRows({
         ...state,
         timeline: owning([item, ...state.timeline]),
         sessionStarted: true,
@@ -1153,7 +1394,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // index and key: no flicker); otherwise (replay, no stream) it is a row.
       const at = findStreamingRow(state, 'text', event.messageId)
       if (at >= 0) {
-        const row = state.timeline[at] as Extract<TimelineItem, { kind: 'text' }>
+        const row = rowAt(state.timeline, at) as Extract<TimelineItem, { kind: 'text' }>
         return finalizeRow(state, at, { ...row, text: event.text, stream: undefined })
       }
       const item: TimelineItem = {
@@ -1176,7 +1417,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'assistant-thinking': {
       const at = findStreamingRow(state, 'thinking', event.messageId)
       if (at >= 0) {
-        const row = state.timeline[at] as Extract<TimelineItem, { kind: 'thinking' }>
+        const row = rowAt(state.timeline, at) as Extract<TimelineItem, { kind: 'thinking' }>
         return finalizeRow(state, at, {
           ...row,
           text: event.text,
@@ -1206,7 +1447,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // input (the stream only had partial JSON); preserve parentToolUseId.
       const existingIdx = state.toolIndex.get(event.id)
       if (existingIdx !== undefined) {
-        const target = state.timeline[existingIdx]
+        const target = rowAtIfAny(state.timeline, existingIdx)
         if (target?.kind === 'tool') {
           const next: TimelineItem = {
             ...target,
@@ -1219,7 +1460,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           }
           const t = writable(state.timeline)
           t[existingIdx] = next
-          return { ...state, timeline: t, live: dropLive(state.live, `tool:${event.id}`) }
+          return {
+            ...state,
+            timeline: t,
+            streamingRows: withoutRowIn(state.streamingRows, existingIdx),
+            live: dropLive(state.live, `tool:${event.id}`)
+          }
         }
       }
       const invocation: ToolInvocation = {
@@ -1294,6 +1540,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           openBlocks: nextOpen,
           toolIndex: nextToolIndex,
           childIndex,
+          streamingRows: withRowIn(state.streamingRows, timelineIndex),
           live: setLive(state.live, { key: liveKey, text: '', json: '' })
         }
       }
@@ -1322,6 +1569,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           openBlocks: nextOpen,
           childIndex,
           blockOrdinals: countBlock(state, 'thinking', messageId),
+          streamingRows: withRowIn(state.streamingRows, timelineIndex),
           live: setLive(state.live, { key: liveKey, text: '', json: '' })
         }
       }
@@ -1350,22 +1598,24 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           parentToolUseId: event.parentToolUseId
         }
         const liveKey = `text:${messageId}:${blockOrdinal}`
+        const at = state.timeline.length
         const nextOpen = new Map(state.openBlocks)
-        nextOpen.set(event.blockIndex, { ...open, timelineIndex: state.timeline.length, liveKey })
-        const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
+        nextOpen.set(event.blockIndex, { ...open, timelineIndex: at, liveKey })
+        const childIndex = registerChild(state, at, event.parentToolUseId)
         return {
           ...state,
           timeline: appended(state.timeline, item),
           openBlocks: nextOpen,
           childIndex,
           blockOrdinals: countBlock(state, 'text', messageId),
+          streamingRows: withRowIn(state.streamingRows, at),
           live: setLive(state.live, { key: liveKey, text: event.text, json: '' })
         }
       }
 
       if (event.deltaType === 'signature') {
         // Structural, once per block: the row records that the CLI signed it.
-        const target = state.timeline[open.timelineIndex]
+        const target = rowAtIfAny(state.timeline, open.timelineIndex)
         if (target?.kind !== 'thinking' || target.hasSignature) return state
         const t = writable(state.timeline)
         t[open.timelineIndex] = { ...target, hasSignature: true }
@@ -1428,7 +1678,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           childIndex
         }
       }
-      const target = baseState.timeline[idx]
+      const target = rowAt(baseState.timeline, idx)
       if (target.kind !== 'tool') return baseState
       const nextInvocation: ToolInvocation = {
         ...target.invocation,
@@ -1444,7 +1694,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const hookAt = event.isError
         ? blockingHookIndex(baseState.timeline, idx, event.rawContent)
         : -1
-      const hook = hookAt >= 0 ? baseState.timeline[hookAt] : undefined
+      const hook = hookAt >= 0 ? rowAt(baseState.timeline, hookAt) : undefined
       if (hook?.kind === 'hook') {
         nextInvocation.blockedBy = {
           hookId: hook.hookId,
@@ -1461,7 +1711,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       // Collect this turn's assistant text (back to the last user-text or start) for Copy.
       const texts: string[] = []
       for (let i = state.timeline.length - 1; i >= 0; i--) {
-        const it = state.timeline[i]
+        const it = rowAt(state.timeline, i)
         if (it.kind === 'user-text') break
         if (it.kind === 'text' && it.role === 'assistant') texts.unshift(it.text)
         if (it.kind === 'command-output') texts.unshift(it.text)
@@ -1499,7 +1749,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         if (!id) continue
         const idx = state.toolIndex.get(id)
         if (idx === undefined) continue
-        const target = nextTimeline[idx]
+        const target = rowAtIfAny(nextTimeline, idx)
         if (target?.kind !== 'tool' || target.invocation.denied) continue
         nextTimeline[idx] = {
           ...target,
@@ -1512,7 +1762,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       return {
         ...state,
         timeline: nextTimeline,
-        // A new turn's blocks count from 0.
+        // A new turn starts after the result row; its blocks count from 0.
+        turnStart: nextTimeline.length,
         blockOrdinals: EMPTY_ORDINALS,
         lastResult: item,
         // Capped: after Stop (or a prompt's "No") the persisted `interrupted`
@@ -1537,7 +1788,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
     case 'api-retry':
       return {
         ...state,
-        timeline: appended<TimelineItem>(state.timeline, {
+        timeline: appended<TimelineItem | undefined>(state.timeline, {
           kind: 'api-retry',
           attempt: event.attempt,
           maxRetries: event.maxRetries,
@@ -1576,7 +1827,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
       const id = event.toolUseId
       const existingIdx = id ? state.subAgentIndex.get(id) : undefined
       if (existingIdx !== undefined) {
-        const target = state.timeline[existingIdx]
+        const target = rowAtIfAny(state.timeline, existingIdx)
         if (target?.kind === 'sub-agent') {
           // Don't regress a terminal state. Late notification after tool-result
           // is rare but possible (out-of-order delivery).
@@ -1593,7 +1844,14 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           }
           const t = writable(state.timeline)
           t[existingIdx] = next
-          return { ...state, timeline: t }
+          return {
+            ...state,
+            timeline: t,
+            inFlightSubAgents:
+              next.phase === 'in-flight'
+                ? withRowIn(state.inFlightSubAgents, existingIdx)
+                : withoutRowIn(state.inFlightSubAgents, existingIdx)
+          }
         }
       }
       const item: TimelineItem = {
@@ -1609,14 +1867,19 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         timestamp: ts,
         parentToolUseId: event.parentToolUseId
       }
+      const at = state.timeline.length
       const nextIdx = writableMap(state.subAgentIndex)
-      if (id) nextIdx.set(id, state.timeline.length)
-      const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
+      if (id) nextIdx.set(id, at)
+      const childIndex = registerChild(state, at, event.parentToolUseId)
       return {
         ...state,
         timeline: appended(state.timeline, item),
         subAgentIndex: nextIdx,
-        childIndex
+        childIndex,
+        inFlightSubAgents:
+          incomingPhase === 'in-flight'
+            ? withRowIn(state.inFlightSubAgents, at)
+            : state.inFlightSubAgents
       }
     }
     case 'agent-plan': {
@@ -1632,7 +1895,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         timestamp: ts
       }
       for (let i = state.timeline.length - 1; i >= 0; i--) {
-        const it = state.timeline[i]
+        const it = rowAt(state.timeline, i)
         if (it.kind === 'user-text' || it.kind === 'result' || it.kind === 'session-start') {
           break
         }
@@ -1748,7 +2011,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         const binary = (event.detail as { binary?: unknown }).binary
         return {
           ...state,
-          timeline: appended<TimelineItem>(state.timeline, {
+          timeline: appended<TimelineItem | undefined>(state.timeline, {
             kind: 'agent-problem',
             code,
             message: event.message,
@@ -1888,11 +2151,19 @@ function findStreamingRow(
 ): number {
   // Every streaming row has a live block: none, no streaming row.
   if (state.live.length === 0) return -1
-  for (let i = state.timeline.length - 1; i >= 0; i--) {
-    const it = state.timeline[i]
-    // Streams end with their turn (settled at its result).
-    if (it.kind === 'result') return -1
-    if (it.kind === kind && it.messageId === messageId && it.stream !== undefined) return i
+  // Streams end with their turn (settled at its result): every streaming row is
+  // in this turn, and `streamingRows` names them.
+  for (let k = state.streamingRows.length - 1; k >= 0; k--) {
+    const i = state.streamingRows[k]
+    if (i < state.turnStart) break
+    const it = rowAt(state.timeline, i)
+    if (
+      (it.kind === 'text' || it.kind === 'thinking') &&
+      it.kind === kind &&
+      it.messageId === messageId &&
+      it.stream !== undefined
+    )
+      return i
   }
   return -1
 }
@@ -1919,7 +2190,12 @@ function dropLive(live: LiveBlocks, key: string | undefined): LiveBlocks {
 function finalizeRow(state: ChatTimelineState, at: number, row: TimelineItem): ChatTimelineState {
   const t = writable(state.timeline)
   t[at] = row
-  return { ...state, timeline: t, live: dropLive(state.live, streamKeyOf(row)) }
+  return {
+    ...state,
+    timeline: t,
+    streamingRows: streamingAfter(state, at, row),
+    live: dropLive(state.live, streamKeyOf(row))
+  }
 }
 
 /** A tool call's streamed input JSON (fallback when no saved call replaced it). */
@@ -1942,7 +2218,7 @@ function settleRow(
   at: number,
   mode: 'closed' | 'final'
 ): ChatTimelineState {
-  const row = at >= 0 ? state.timeline[at] : undefined
+  const row = at >= 0 ? rowAtIfAny(state.timeline, at) : undefined
   if (!row) return state
   const key = streamKeyOf(row)
   const live = liveBlockOf(state.live, key)
@@ -1957,13 +2233,23 @@ function settleRow(
       return { ...state, timeline: t }
     }
     t[at] = { ...row, text, stream: undefined }
-    return { ...state, timeline: t, live: dropLive(state.live, key) }
+    return {
+      ...state,
+      timeline: t,
+      streamingRows: withoutRowIn(state.streamingRows, at),
+      live: dropLive(state.live, key)
+    }
   }
   if (row.kind === 'tool' && row.inputStreaming) {
     const input = row.invocation.input ?? parseToolJson(live?.json ?? '')
     const t = writable(state.timeline)
     t[at] = { ...row, inputStreaming: undefined, invocation: { ...row.invocation, input } }
-    return { ...state, timeline: t, live: dropLive(state.live, key) }
+    return {
+      ...state,
+      timeline: t,
+      streamingRows: withoutRowIn(state.streamingRows, at),
+      live: dropLive(state.live, key)
+    }
   }
   return state
 }
@@ -1973,14 +2259,11 @@ function settleStreams(state: ChatTimelineState): ChatTimelineState {
   // Nothing streams: no live block (every streaming row has one), no open block.
   if (state.live.length === 0 && state.openBlocks.size === 0) return state
   let next = state
-  // Rows of an earlier turn were settled at its end (its `result` row).
-  for (let i = state.timeline.length - 1; i >= 0; i--) {
-    const it = state.timeline[i]
-    if (it.kind === 'result') break
-    const streaming =
-      ((it.kind === 'text' || it.kind === 'thinking') && it.stream !== undefined) ||
-      (it.kind === 'tool' && it.inputStreaming)
-    if (streaming) next = settleRow(next, i, 'final')
+  // Rows of an earlier turn were settled at its end (its `result` row): this
+  // turn's streaming rows, newest first.
+  const rows = state.streamingRows
+  for (let k = rows.length - 1; k >= 0 && rows[k] >= state.turnStart; k--) {
+    next = settleRow(next, rows[k], 'final')
   }
   return {
     ...next,
@@ -2001,7 +2284,7 @@ function setCommandTask(
   const commandTasks = writableMap(state.commandTasks)
   commandTasks.set(toolUseId, view)
   const at = state.toolIndex.get(toolUseId)
-  const row = at === undefined ? undefined : state.timeline[at]
+  const row = rowAtIfAny(state.timeline, at)
   if (at === undefined || row?.kind !== 'tool') return { ...state, commandTasks }
   const t = writable(state.timeline)
   t[at] = { ...row, invocation: { ...row.invocation, task: view } }
@@ -2056,7 +2339,7 @@ function nextCliCommands(
 /** True when the current turn (after the last user-text) holds a failed compaction with this error. */
 function isCurrentTurnCompactionError(state: ChatTimelineState, text: string): boolean {
   for (let i = state.timeline.length - 1; i >= 0; i--) {
-    const it = state.timeline[i]
+    const it = rowAt(state.timeline, i)
     if (it.kind === 'user-text') return false
     if (it.kind === 'compaction' && it.outcome === 'failed') {
       return (it.error ?? '').trim() === text.trim()
@@ -2066,9 +2349,9 @@ function isCurrentTurnCompactionError(state: ChatTimelineState, text: string): b
 }
 
 /** Command name of the latest user message when it was a `/name …` command, else null. */
-function lastSentCommand(timeline: TimelineItem[]): string | null {
+function lastSentCommand(timeline: TimelineRows): string | null {
   for (let i = timeline.length - 1; i >= 0; i--) {
-    const it = timeline[i]
+    const it = rowAt(timeline, i)
     if (it.kind === 'user-text') return /^\/(\S+)/.exec(it.text.trim())?.[1] ?? null
   }
   return null
@@ -2160,6 +2443,7 @@ export interface UsageSummary {
 export function selectConversationAttachmentBytes(state: ChatTimelineState): number {
   const entries: BudgetEntry[] = []
   for (const it of state.timeline) {
+    if (!it) continue
     if (it.kind === 'user-text') {
       if (it.attachments)
         entries.push({
@@ -2189,10 +2473,10 @@ export function selectUsageSummary(state: ChatTimelineState): UsageSummary | nul
  * `conversation-branch` item (rewound, left behind by a fork, a previous
  * conversation).
  */
-export function selectFoldedIndexes(timeline: readonly TimelineItem[]): ReadonlySet<number> {
+export function selectFoldedIndexes(timeline: Readonly<TimelineRows>): ReadonlySet<number> {
   const folded = new Set<number>()
   for (const it of timeline) {
-    if (it.kind !== 'conversation-branch') continue
+    if (it?.kind !== 'conversation-branch') continue
     for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) folded.add(i)
   }
   return folded
@@ -2203,11 +2487,11 @@ export function selectFoldedIndexes(timeline: readonly TimelineItem[]): Readonly
  * what edit / rewind / fork can act on (the server resolves the same list from
  * its log). A failed message never reached the agent.
  */
-export function selectActiveUserIds(timeline: readonly TimelineItem[]): string[] {
+export function selectActiveUserIds(timeline: Readonly<TimelineRows>): string[] {
   const folded = selectFoldedIndexes(timeline)
   const ids: string[] = []
   timeline.forEach((it, i) => {
-    if (it.kind !== 'user-text' || !it.id || folded.has(i) || it.parentToolUseId != null) return
+    if (it?.kind !== 'user-text' || !it.id || folded.has(i) || it.parentToolUseId != null) return
     if (it.delivery === 'failed') return
     ids.push(it.id)
   })
@@ -2221,27 +2505,42 @@ export function selectActiveUserIds(timeline: readonly TimelineItem[]): string[]
  */
 export function replayIndexProblems(state: ChatTimelineState): string[] {
   const problems: string[] = []
-  const newest = new Map<string, number>()
+  const userRows = new Map<string, number[]>()
   let idless = 0
-  let lastResult = -1
+  let turnStart = 0
+  const branchRows: number[] = []
+  const streamingRows: number[] = []
   state.timeline.forEach((it, i) => {
-    if (it.kind === 'result') lastResult = i
+    if (!it) return
+    if (it.kind === 'result') turnStart = i + 1
+    if (it.kind === 'conversation-branch') branchRows.push(i)
+    if (isStreamingRow(it)) streamingRows.push(i)
     if (it.kind !== 'user-text') return
-    if (it.id) newest.set(it.id, i)
+    if (it.id) userRows.set(it.id, [...(userRows.get(it.id) ?? []), i])
     else if (it.optimistic) idless++
   })
-  for (const [id, at] of newest) {
+  for (const [id, rows] of userRows) {
     const indexed = state.userIndex.get(id)
-    if (indexed !== at) problems.push(`userIndex[${id}] = ${indexed}, scan finds row ${at}`)
+    if (indexed?.join() !== rows.join())
+      problems.push(`userIndex[${id}] = ${indexed}, scan finds rows ${rows}`)
   }
-  if (state.userIndex.size !== newest.size)
-    problems.push(`userIndex has ${state.userIndex.size} ids, the rows ${newest.size}`)
+  if (state.userIndex.size !== userRows.size)
+    problems.push(`userIndex has ${state.userIndex.size} ids, the rows ${userRows.size}`)
   if (state.idlessOptimistic !== idless)
     problems.push(`idlessOptimistic = ${state.idlessOptimistic}, scan counts ${idless}`)
+  if (state.turnStart !== turnStart)
+    problems.push(`turnStart = ${state.turnStart}, scan finds ${turnStart}`)
+  if (state.branchRows.join() !== branchRows.join())
+    problems.push(`branchRows [${state.branchRows}], scan [${branchRows}]`)
+  if (state.streamingRows.join() !== streamingRows.join())
+    problems.push(`streamingRows [${state.streamingRows}], scan [${streamingRows}]`)
+  const inFlight = inFlightSubAgentRows(state.subAgentIndex, state.timeline)
+  if (state.inFlightSubAgents.join() !== inFlight.join())
+    problems.push(`inFlightSubAgents [${state.inFlightSubAgents}], scan [${inFlight}]`)
   const blocks = new Map<string, number>()
-  for (let i = lastResult + 1; i < state.timeline.length; i++) {
+  for (let i = turnStart; i < state.timeline.length; i++) {
     const it = state.timeline[i]
-    if (it.kind !== 'text' && it.kind !== 'thinking') continue
+    if (it?.kind !== 'text' && it?.kind !== 'thinking') continue
     const key = ordinalKey(it.kind, it.messageId)
     blocks.set(key, (blocks.get(key) ?? 0) + 1)
   }
@@ -2335,7 +2634,8 @@ function endAgentTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
 export function isAwaitingUserQuestion(state: ChatTimelineState): boolean {
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
-    if (item.kind === 'user-text') return false
+    // A display question over what is loaded: an unloaded row ends the look.
+    if (!item || item.kind === 'user-text') return false
     if (item.kind === 'tool' && item.invocation.name === 'AskUserQuestion') return true
   }
   return false
@@ -2372,11 +2672,11 @@ function resultText(raw: unknown): string {
  * is in the result, which the CLI writes as `<hook name> hook error: …`. The
  * newest match wins; -1 when none (any other error).
  */
-function blockingHookIndex(timeline: TimelineItem[], toolAt: number, raw: unknown): number {
+function blockingHookIndex(timeline: TimelineRows, toolAt: number, raw: unknown): number {
   const text = resultText(raw)
   if (!text) return -1
   for (let i = timeline.length - 1; i > toolAt; i--) {
-    const it = timeline[i]
+    const it = rowAt(timeline, i)
     if (it.kind !== 'hook' || it.effect !== 'blocked' || it.hookEvent !== 'PreToolUse') continue
     if (it.foldedInto !== undefined) continue
     const reason = it.text.trim()
@@ -2412,7 +2712,7 @@ function closeSubAgentForToolResult(
 ): ChatTimelineState {
   const idx = state.subAgentIndex.get(event.toolUseId)
   if (idx === undefined) return state
-  const row = state.timeline[idx]
+  const row = rowAtIfAny(state.timeline, idx)
   if (row?.kind !== 'sub-agent' || row.phase !== 'in-flight') return state
   const closed: TimelineItem = {
     ...row,
@@ -2421,7 +2721,7 @@ function closeSubAgentForToolResult(
   }
   const t = writable(state.timeline)
   t[idx] = closed
-  return { ...state, timeline: t }
+  return { ...state, timeline: t, inFlightSubAgents: withoutRowIn(state.inFlightSubAgents, idx) }
 }
 
 /**
@@ -2442,15 +2742,15 @@ function normalizeSubAgentPhase(phase: string): 'in-flight' | 'completed' | 'fai
  * (the outer `tool-result` that would normally close it never arrives).
  */
 function failInFlightSubAgents(state: ChatTimelineState, statusLabel: string): ChatTimelineState {
-  let nextTimeline: TimelineItem[] | null = null
-  for (const idx of state.subAgentIndex.values()) {
-    const row = state.timeline[idx]
-    if (row?.kind !== 'sub-agent') continue
-    if (row.phase !== 'in-flight') continue
-    if (!nextTimeline) nextTimeline = writable(state.timeline)
+  // Only the in-flight ones (`inFlightSubAgents`): never a sweep of every sub-agent.
+  if (state.inFlightSubAgents.length === 0) return state
+  const nextTimeline = writable(state.timeline)
+  for (const idx of state.inFlightSubAgents) {
+    const row = rowAt(state.timeline, idx)
+    if (row.kind !== 'sub-agent' || row.phase !== 'in-flight') continue
     nextTimeline[idx] = { ...row, phase: 'failed', status: row.status ?? statusLabel }
   }
-  return nextTimeline ? { ...state, timeline: nextTimeline } : state
+  return { ...state, timeline: nextTimeline, inFlightSubAgents: [] }
 }
 
 /**
@@ -2469,9 +2769,10 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
   if (state.compacting) return 'Compacting conversation…'
   // The current turn's rows only: back to its user message — or, for a turn
   // the agent started by itself, to the previous turn's result.
+  // (Over what is loaded: an unloaded row ends the look, like a turn boundary.)
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
-    if (item.kind === 'user-text' || item.kind === 'result') break
+    if (!item || item.kind === 'user-text' || item.kind === 'result') break
     if (item.kind === 'api-retry') {
       const sec = Math.max(1, Math.round(item.delayMs / 1000))
       return `Retrying (${item.attempt}/${item.maxRetries}) in ${sec}s…`
@@ -2491,7 +2792,8 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
   }
   if (latestOpen) {
     if (latestOpen.blockType === 'tool_use') {
-      const item = latestOpen.timelineIndex >= 0 ? state.timeline[latestOpen.timelineIndex] : null
+      const item =
+        latestOpen.timelineIndex >= 0 ? (state.timeline[latestOpen.timelineIndex] ?? null) : null
       return formatToolLabel(latestOpen.toolName, item)
     }
     if (latestOpen.blockType === 'thinking') return 'Thinking…'
@@ -2500,7 +2802,7 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
 
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
-    if (item.kind === 'user-text' || item.kind === 'result') break
+    if (!item || item.kind === 'user-text' || item.kind === 'result') break
     if (item.kind === 'tool') {
       return formatToolLabel(item.invocation.name, item)
     }
@@ -2646,15 +2948,19 @@ function setBgShell(state: ChatTimelineState, shell: BgShell): ChatTimelineState
   }
 }
 
-function applyBgShellEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineState {
-  if (event.kind === 'command-task') return applyBgShellCommandTask(state, event)
+function applyBgShellEvent(
+  state: ChatTimelineState,
+  event: AgentEvent,
+  ts: number
+): ChatTimelineState {
+  if (event.kind === 'command-task') return applyBgShellCommandTask(state, event, ts)
   if (event.kind === 'command-task-output') {
     const shell = state.bgShells.get(event.toolUseId)
     if (!shell) return state
     return setBgShell(state, { ...shell, latestStdout: tail(event.output, BG_OUTPUT_KEEP) })
   }
-  if (event.kind === 'tool-call') return applyBgShellToolCall(state, event)
-  if (event.kind === 'tool-result') return applyBgShellToolResult(state, event)
+  if (event.kind === 'tool-call') return applyBgShellToolCall(state, event, ts)
+  if (event.kind === 'tool-result') return applyBgShellToolResult(state, event, ts)
   if (event.kind === 'session-spawn') return invalidateForeignSpawnShells(state, event.spawnId)
   if (event.kind === 'process-exit') return invalidateActiveShells(state)
   return state
@@ -2723,14 +3029,15 @@ function dropActiveShells(
  */
 function applyBgShellCommandTask(
   state: ChatTimelineState,
-  event: Extract<AgentEvent, { kind: 'command-task' }>
+  event: Extract<AgentEvent, { kind: 'command-task' }>,
+  ts: number
 ): ChatTimelineState {
   const existing = state.bgShells.get(event.toolUseId)
   if (!existing && !event.backgrounded) return state
   const status: BgShellStatus = event.status
   if (existing) return setBgShell(state, { ...existing, shellId: event.taskId, status })
   const at = state.toolIndex.get(event.toolUseId)
-  const row = at === undefined ? undefined : state.timeline[at]
+  const row = rowAtIfAny(state.timeline, at)
   const input =
     row?.kind === 'tool' ? ((row.invocation.input ?? {}) as Record<string, unknown>) : {}
   return setBgShell(state, {
@@ -2741,7 +3048,7 @@ function applyBgShellCommandTask(
       event.description ?? (typeof input.description === 'string' ? input.description : undefined),
     status,
     exitCode: null,
-    spawnedAt: event.startedAt ?? Date.now(),
+    spawnedAt: event.startedAt ?? ts,
     lastPolledAt: null,
     latestStdout: '',
     latestStderr: '',
@@ -2749,7 +3056,11 @@ function applyBgShellCommandTask(
   })
 }
 
-function applyBgShellToolCall(state: ChatTimelineState, event: ToolCallEvent): ChatTimelineState {
+function applyBgShellToolCall(
+  state: ChatTimelineState,
+  event: ToolCallEvent,
+  ts: number
+): ChatTimelineState {
   // 1. Bash with run_in_background=true → register a new shell (status pending).
   const spawn = extractBgShellSpawn(event)
   if (spawn) {
@@ -2761,7 +3072,7 @@ function applyBgShellToolCall(state: ChatTimelineState, event: ToolCallEvent): C
       description: spawn.description,
       status: 'pending',
       exitCode: null,
-      spawnedAt: Date.now(),
+      spawnedAt: ts,
       lastPolledAt: null,
       latestStdout: '',
       latestStderr: '',
@@ -2789,7 +3100,8 @@ function applyBgShellToolCall(state: ChatTimelineState, event: ToolCallEvent): C
 
 function applyBgShellToolResult(
   state: ChatTimelineState,
-  event: ToolResultEvent
+  event: ToolResultEvent,
+  ts: number
 ): ChatTimelineState {
   // 1. Spawn result → assign shell id.
   const spawnOwner = state.bgShells.get(event.toolUseId)
@@ -2820,7 +3132,7 @@ function applyBgShellToolResult(
     ...owner,
     status: nextStatus,
     exitCode: sig.exitCode ?? owner.exitCode,
-    lastPolledAt: Date.now(),
+    lastPolledAt: ts,
     latestStdout: sig.stdout ? tail(sig.stdout, BG_OUTPUT_KEEP) : owner.latestStdout,
     latestStderr: sig.stderr ? tail(sig.stderr, BG_OUTPUT_KEEP) : owner.latestStderr
   }

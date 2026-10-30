@@ -47,3 +47,23 @@ test('events saved after the cache filled are in the replay too', async () => {
   expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i))
   expect(await mgr.readEventsSince(TAB_OPTS.tabId, -1)).toHaveLength(seqs.length)
 })
+
+test('a saved event carries the time it was saved: its broadcast, its row and a replay agree', async () => {
+  const h = transportHarness({
+    history: [{ seq: 0, event: { kind: 'stderr', text: 'old' } as AgentEvent, at: 1_000 }]
+  })
+  await startTab()
+  emitLine(h.fakes[0], sj.init('sid-t'))
+  await until(() => h.rows.length > 0)
+  const saved = h.broadcasts.filter((b) => b.live === undefined)
+  expect(saved.length).toBeGreaterThan(0)
+  for (const b of saved) {
+    expect(typeof b.at).toBe('number')
+    expect(h.rows.find((r) => r.seq === b.seq)?.at).toBe(b.at)
+  }
+  // Live-only events (fragments, `sending`) have no saved time.
+  for (const b of h.broadcasts.filter((b) => b.live !== undefined)) expect(b.at).toBeUndefined()
+  const replay = await mgr.getReplay(TAB_OPTS.tabId, -1)
+  expect(replay.events[0].at).toBe(1_000)
+  for (const b of saved) expect(replay.events.find((e) => e.seq === b.seq)?.at).toBe(b.at)
+})

@@ -29,6 +29,7 @@ import {
   LONG_SESSION_FIXTURE,
   hydrateBatchMs,
   longSessionEvents,
+  pagedOpen,
   replayAllBestOf,
   replayEvents,
   scaleSessionEvents,
@@ -92,7 +93,7 @@ function writeBaseline(entries: BaselineEntry[]): void {
   writeFileSync(BASELINE_PATH, JSON.stringify(entries, null, 2) + '\n', 'utf8')
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const update = process.argv.includes('--update')
   // 1000 iterations × best-of-5 runs after a warmup. Min-of-N + warmup gives
   // tight, repeatable totals while still representing real reducer cost.
@@ -131,6 +132,15 @@ function main(): void {
   const budgets = JSON.parse(readFileSync(BUDGET_PATH, 'utf8')) as {
     longSession: LongSessionBudget
     scale: { hydrateBatchMs: Record<string, number>; maxRatio100kTo10k: number }
+    paged: {
+      events: number
+      rebuildMs: number
+      reopenMs: number
+      snapshotMs: number
+      clientOpenMs: number
+      clientRowsMax: number
+      hubPeakPagesMax: number
+    }
   }
   const budget = budgets.longSession
   console.log(
@@ -179,6 +189,28 @@ function main(): void {
         `  ${linear ? '✓' : '✗'} ${label} 100k / 10k = ${ratio.toFixed(1)}x (max ${budgets.scale.maxRatio100kTo10k}x)`
       )
       if (!linear) overBudget++
+    }
+  }
+
+  // Paged open (chat F): what a 100k session costs to open from the hub's projection.
+  const paged = budgets.paged
+  console.log(`\n  Paged open (${paged.events} events, best of 3):`)
+  for (const provider of ['claude', 'codex'] as const) {
+    const m = await pagedOpen(scaleSessionEvents(paged.events, provider), provider)
+    const checks = [
+      ['hub rebuild', m.rebuildMs, paged.rebuildMs, 'ms'],
+      ['hub reopen', m.reopenMs, paged.reopenMs, 'ms'],
+      ['hub snapshot', m.snapshotMs, paged.snapshotMs, 'ms'],
+      ['client open', m.clientOpenMs, paged.clientOpenMs, 'ms'],
+      ['client rows', m.clientRows, paged.clientRowsMax, ''],
+      ['hub peak pages', m.hubPeakPages, paged.hubPeakPagesMax, '']
+    ] as const
+    for (const [label, value, limit, unit] of checks) {
+      const ok = value <= limit
+      console.log(
+        `  ${ok ? '✓' : '✗'} ${provider.padEnd(6)} ${label.padEnd(15)} ${value.toFixed(unit ? 1 : 0)}${unit} (budget ${limit}${unit})`
+      )
+      if (!ok) overBudget++
     }
   }
 
@@ -255,4 +287,4 @@ function main(): void {
   console.log('\n  ✓ All metrics within budget')
 }
 
-main()
+void main()

@@ -38,7 +38,25 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       seq INTEGER NOT NULL,
       event TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now')),
+      saved_at INTEGER,
       PRIMARY KEY (tab_id, seq)
+    );
+    CREATE TABLE chat_timeline_checkpoints (
+      tab_id TEXT PRIMARY KEY,
+      version TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE chat_timeline_pages (
+      tab_id TEXT NOT NULL,
+      page INTEGER NOT NULL,
+      start_row INTEGER NOT NULL,
+      end_row INTEGER NOT NULL,
+      rows TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      search_text TEXT NOT NULL,
+      PRIMARY KEY (tab_id, page)
     );
     CREATE TABLE chat_cli_snapshots (
       project_id TEXT NOT NULL,
@@ -70,7 +88,15 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
           return stmt.run(...(params as []))
         }
       }
-    }
+    },
+    // One transaction, as the worker runs it.
+    batchTxn: async (ops: Array<{ type: 'get' | 'all' | 'run'; sql: string; params: unknown[] }>) =>
+      raw.transaction(() =>
+        ops.map((op) => {
+          if (op.type === 'run') runLog.push(op.sql)
+          return raw.prepare(op.sql)[op.type](...(op.params as []))
+        })
+      )()
   } as unknown as SlayzoneDb
   return { raw, db, runLog }
 }
@@ -279,7 +305,7 @@ test('chat history is never trimmed: every saved event of a tab stays (no per-ta
   }
   const events = await ops.loadChatEvents('tab-1')
   expect(events.length).toBe(2_100)
-  expect(events[0]).toEqual({ seq: 0, event: { kind: 'stderr', text: 'e0' } })
+  expect(events[0]).toMatchObject({ seq: 0, event: { kind: 'stderr', text: 'e0' } })
 })
 
 test('loadChatEventsRange reads the rows strictly between two seqs, in order', async () => {
@@ -377,4 +403,81 @@ test('CLI command details: corrupt JSON reads as no details', async () => {
     )
     .run()
   expect(await ops.getCliCommandDetails('t1', 'claude-chat')).toBeNull()
+})
+
+test('a saved event keeps the time it was saved (ms); rows saved before fall back to created_at', async () => {
+  const { raw, db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  raw
+    .prepare('INSERT INTO chat_events (tab_id, seq, event, created_at) VALUES (?, ?, ?, ?)')
+    .run('tab-1', 0, JSON.stringify({ kind: 'stderr', text: 'old' }), '2026-10-30 12:00:05')
+  await ops.persistChatEvent('tab-1', 1, { kind: 'stderr', text: 'new' } as never, 1793376000123)
+  const all = await ops.loadChatEvents('tab-1')
+  expect(all.map((e) => e.at)).toEqual([Date.UTC(2026, 9, 30, 12, 0, 5), 1793376000123])
+  const range = await ops.loadChatEventsRange('tab-1', -1, 9)
+  expect(range.map((e) => e.at)).toEqual([Date.UTC(2026, 9, 30, 12, 0, 5), 1793376000123])
+})
+
+test('timeline projection: pages + checkpoint saved together, read back, searched, dropped, cleared with the events', async () => {
+  const { db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  const page = (n: number, text: string) => ({
+    page: n,
+    startRow: n * 2,
+    endRow: n * 2 + 2,
+    rows: `[${n}]`,
+    summary: `{"p":${n}}`,
+    searchText: text
+  })
+  expect(await ops.loadTimelineCheckpoint('tab-1')).toBeNull()
+  await ops.saveTimeline('tab-1', {
+    dropPagesFrom: null,
+    pages: [page(0, 'alpha\u0000beta'), page(1, 'gamma'), page(2, 'beta again')],
+    checkpoint: { version: '1', seq: 41, data: '{}' }
+  })
+  expect(await ops.loadTimelineCheckpoint('tab-1')).toEqual({ version: '1', seq: 41, data: '{}' })
+  expect((await ops.loadTimelinePages('tab-1', [2, 0])).sort((a, b) => a.page - b.page)).toEqual([
+    { page: 0, rows: '[0]' },
+    { page: 2, rows: '[2]' }
+  ])
+  expect(await ops.loadTimelineSummaries('tab-1')).toEqual([
+    { page: 0, summary: '{"p":0}' },
+    { page: 1, summary: '{"p":1}' },
+    { page: 2, summary: '{"p":2}' }
+  ])
+  expect(await ops.searchTimelinePages('tab-1', 'beta')).toEqual([0, 2])
+  // Rows moved: pages from 1 on go, the new page 1 and checkpoint land with them.
+  await ops.saveTimeline('tab-1', {
+    dropPagesFrom: 1,
+    pages: [page(1, 'delta')],
+    checkpoint: { version: '1', seq: 50, data: '{"x":1}' }
+  })
+  expect((await ops.loadTimelineSummaries('tab-1')).map((p) => p.page)).toEqual([0, 1])
+  expect(await ops.searchTimelinePages('tab-1', 'beta')).toEqual([0])
+  expect((await ops.loadTimelineCheckpoint('tab-1'))?.seq).toBe(50)
+  // Pages written ahead of any checkpoint (a long run): the stored one goes.
+  await ops.saveTimeline('tab-1', {
+    dropPagesFrom: null,
+    pages: [page(2, 'eps')],
+    checkpoint: null
+  })
+  expect(await ops.loadTimelineCheckpoint('tab-1')).toBeNull()
+  expect((await ops.loadTimelineSummaries('tab-1')).map((p) => p.page)).toEqual([0, 1, 2])
+  // Thrown away (`clearTimeline`): pages and checkpoint.
+  await ops.saveTimeline('tab-1', {
+    dropPagesFrom: null,
+    pages: [],
+    checkpoint: { version: '1', seq: 60, data: '{}' }
+  })
+  await ops.clearTimeline('tab-1')
+  expect(await ops.loadTimelineCheckpoint('tab-1')).toBeNull()
+  expect(await ops.loadTimelineSummaries('tab-1')).toEqual([])
+  await ops.saveTimeline('tab-1', {
+    dropPagesFrom: null,
+    pages: [page(0, 'x')],
+    checkpoint: { version: '1', seq: 61, data: '{}' }
+  })
+  await ops.clearChatEventsForTab('tab-1')
+  expect(await ops.loadTimelineCheckpoint('tab-1')).toBeNull()
+  expect(await ops.loadTimelineSummaries('tab-1')).toEqual([])
 })

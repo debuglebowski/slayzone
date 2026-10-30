@@ -22,6 +22,10 @@ import {
 } from './chat-timeline'
 import { selectPendingPrompts, selectPromptForTool, hasPendingPrompt } from './chat-prompts'
 
+/** A test state holds every row: its timeline as plain items. */
+const rowsOf = (s: { timeline: ReadonlyArray<TimelineItem | undefined> }): TimelineItem[] =>
+  s.timeline as TimelineItem[]
+
 const ev = {
   turnInit: (sessionId = 'sid-1'): AgentEvent => ({
     kind: 'turn-init',
@@ -77,7 +81,7 @@ test('agent-plan: first update appends a plan card', () => {
     type: 'event',
     event: { kind: 'agent-plan', steps: [{ step: 'a', status: 'pending' }] }
   })
-  const plans = s.timeline.filter((i) => i.kind === 'plan')
+  const plans = rowsOf(s).filter((i) => i.kind === 'plan')
   expect(plans.length).toBe(1)
 })
 
@@ -98,7 +102,7 @@ test('agent-plan: consecutive updates in one turn collapse into a single card', 
       ]
     }
   })
-  const plans = s.timeline.filter((i) => i.kind === 'plan')
+  const plans = rowsOf(s).filter((i) => i.kind === 'plan')
   expect(plans.length).toBe(1)
   const plan = plans[0]
   expect(plan.kind === 'plan' && plan.steps.length).toBe(2)
@@ -116,7 +120,7 @@ test('agent-plan: a new turn gets its own plan card', () => {
     type: 'event',
     event: { kind: 'agent-plan', steps: [{ step: 'b', status: 'pending' }] }
   })
-  const plans = s.timeline.filter((i) => i.kind === 'plan')
+  const plans = rowsOf(s).filter((i) => i.kind === 'plan')
   expect(plans.length).toBe(2)
 })
 
@@ -125,7 +129,7 @@ test('call + result → one tool item with status done', () => {
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: ev.call('t-1', 'Bash') })
   s = reducer(s, { type: 'event', event: ev.result('t-1') })
-  const tools = s.timeline.filter((i) => i.kind === 'tool')
+  const tools = rowsOf(s).filter((i) => i.kind === 'tool')
   expect(tools.length).toBe(1)
   const only = tools[0]
   if (only.kind !== 'tool') throw new Error('wrong kind')
@@ -138,7 +142,7 @@ test('out-of-order: result before call still pairs', () => {
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: ev.result('t-late') })
   // Then a subsequent call with the same id (rare but possible) — reducer should not duplicate
-  const tools = s.timeline.filter((i) => i.kind === 'tool')
+  const tools = rowsOf(s).filter((i) => i.kind === 'tool')
   expect(tools.length).toBe(1)
   const only = tools[0]
   if (only.kind !== 'tool') throw new Error('wrong kind')
@@ -150,7 +154,7 @@ test('tool-result with isError=true → status error', () => {
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: ev.call('e-1') })
   s = reducer(s, { type: 'event', event: ev.result('e-1', true) })
-  const tools = s.timeline.filter((i) => i.kind === 'tool')
+  const tools = rowsOf(s).filter((i) => i.kind === 'tool')
   if (tools[0].kind !== 'tool') throw new Error('wrong kind')
   expect(tools[0].invocation.status).toBe('error')
 })
@@ -160,7 +164,7 @@ test('second turn-init does not duplicate session-start item', () => {
   s = reducer(s, { type: 'event', event: ev.turnInit('a') })
   s = reducer(s, { type: 'event', event: ev.turnInit('a') })
   s = reducer(s, { type: 'event', event: ev.turnInit('a') })
-  const sessionStarts = s.timeline.filter((i) => i.kind === 'session-start')
+  const sessionStarts = rowsOf(s).filter((i) => i.kind === 'session-start')
   expect(sessionStarts.length).toBe(1)
 })
 
@@ -228,7 +232,7 @@ test('drift recovery: replay w/ orphaned mid-buffer user-message self-heals', ()
   s = reducer(s, { type: 'event', event: ev.turnResult() })
   expect(isInFlight(s)).toBe(false)
   // Synthetic interrupted from heal must be visible between the two user-text rows.
-  const kinds = s.timeline.map((it) => it.kind)
+  const kinds = rowsOf(s).map((it) => it.kind)
   const u1 = kinds.indexOf('user-text')
   const interrupted = kinds.indexOf('interrupted', u1)
   const u2 = kinds.indexOf('user-text', interrupted)
@@ -295,7 +299,7 @@ test('drift recovery: optimistic user-sent over orphaned prior turn heals first'
   // Heal closed turn 1 (resultCount bumped to match userMessagesSent), then optimistic
   // bumped userMessagesSent again. So drift = 1 (just for the new turn).
   expect(s.userMessagesSent - s.resultCount).toBe(1)
-  const interrupted = s.timeline.filter((it) => it.kind === 'interrupted')
+  const interrupted = rowsOf(s).filter((it) => it.kind === 'interrupted')
   expect(interrupted.length).toBe(1)
 })
 
@@ -312,9 +316,9 @@ test('drift recovery: idempotent — replay produces same state regardless of or
   for (const e of events) live = reducer(live, { type: 'event', event: e })
   let replay = initialState()
   for (const e of events) replay = reducer(replay, { type: 'event', event: e })
-  const strip = (t: typeof live.timeline): unknown =>
+  const strip = (t: TimelineItem[]): unknown =>
     JSON.stringify(t, (k, v) => (k === 'timestamp' ? 0 : v))
-  expect(strip(live.timeline)).toBe(strip(replay.timeline))
+  expect(strip(rowsOf(live))).toBe(strip(rowsOf(replay)))
   expect(isInFlight(live)).toBe(false)
 })
 
@@ -332,9 +336,9 @@ test('replay determinism: live vs getBuffer yields identical timeline (timestamp
   let replay = initialState()
   for (const e of events) replay = reducer(replay, { type: 'event', event: e })
   // Timestamps are Date.now() — reducer is otherwise deterministic. Strip timestamps for structural comparison.
-  const strip = (t: typeof live.timeline): unknown =>
+  const strip = (t: TimelineItem[]): unknown =>
     JSON.stringify(t, (k, v) => (k === 'timestamp' ? 0 : v))
-  expect(strip(live.timeline)).toBe(strip(replay.timeline))
+  expect(strip(rowsOf(live))).toBe(strip(rowsOf(replay)))
 })
 
 test('thinking event → thinking timeline item', () => {
@@ -343,7 +347,7 @@ test('thinking event → thinking timeline item', () => {
     type: 'event',
     event: { kind: 'assistant-thinking', messageId: 'm', text: '', hasSignature: true }
   })
-  const thinking = s.timeline.filter((i) => i.kind === 'thinking')
+  const thinking = rowsOf(s).filter((i) => i.kind === 'thinking')
   expect(thinking.length).toBe(1)
   if (thinking[0].kind !== 'thinking') throw new Error('wrong')
   expect(thinking[0].hasSignature).toBe(true)
@@ -355,7 +359,7 @@ test('unknown event is dropped from timeline', () => {
     type: 'event',
     event: { kind: 'unknown', reason: 'unknown-type', raw: { type: 'speculative' } }
   })
-  const unknown = s.timeline.filter((i) => i.kind === 'unknown')
+  const unknown = rowsOf(s).filter((i) => i.kind === 'unknown')
   expect(unknown.length).toBe(0)
 })
 
@@ -407,7 +411,7 @@ test('stream deltas build text item incrementally', () => {
   })
   s = reducer(s, { type: 'event', event: { kind: 'stream-block-stop', blockIndex: 0 } })
   s = reducer(s, { type: 'event', event: { kind: 'stream-message-stop' } })
-  const texts = s.timeline.filter((i) => i.kind === 'text')
+  const texts = rowsOf(s).filter((i) => i.kind === 'text')
   expect(texts.length).toBe(1)
   if (texts[0].kind !== 'text') throw new Error('wrong')
   expect(texts[0].text).toBe('Hello world')
@@ -429,7 +433,7 @@ test('atomic assistant-text is suppressed when messageId was streamed', () => {
   s = reducer(s, { type: 'event', event: { kind: 'stream-message-stop' } })
   // Final atomic event arrives — should NOT duplicate the text item.
   s = reducer(s, { type: 'event', event: ev.text('msg-x', 'streamed') })
-  const texts = s.timeline.filter((i) => i.kind === 'text')
+  const texts = rowsOf(s).filter((i) => i.kind === 'text')
   expect(texts.length).toBe(1)
 })
 
@@ -437,7 +441,7 @@ test('atomic assistant-text still appears when no streaming happened (fallback)'
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: ev.text('msg-y', 'atomic only') })
-  const texts = s.timeline.filter((i) => i.kind === 'text')
+  const texts = rowsOf(s).filter((i) => i.kind === 'text')
   expect(texts.length).toBe(1)
   if (texts[0].kind !== 'text') throw new Error('wrong')
   expect(texts[0].text).toBe('atomic only')
@@ -476,7 +480,7 @@ test('tool_use input_json deltas accumulate + parse on block-stop', () => {
     }
   })
   s = reducer(s, { type: 'event', event: { kind: 'stream-block-stop', blockIndex: 0 } })
-  const tools = s.timeline.filter((i) => i.kind === 'tool')
+  const tools = rowsOf(s).filter((i) => i.kind === 'tool')
   expect(tools.length).toBe(1)
   if (tools[0].kind !== 'tool') throw new Error('wrong')
   expect(tools[0].invocation.name).toBe('Read')
@@ -493,7 +497,7 @@ test('empty text block (start + stop, no delta) does not leave placeholder', () 
   })
   s = reducer(s, { type: 'event', event: { kind: 'stream-block-stop', blockIndex: 0 } })
   s = reducer(s, { type: 'event', event: { kind: 'stream-message-stop' } })
-  const texts = s.timeline.filter((i) => i.kind === 'text')
+  const texts = rowsOf(s).filter((i) => i.kind === 'text')
   expect(texts.length).toBe(0)
 })
 
@@ -505,7 +509,7 @@ test('atomic fallback fires when stream produced no content for messageId', () =
   s = reducer(s, { type: 'event', event: { kind: 'stream-message-stop' } })
   // Atomic arrives with content — should render since stream didn't mark messageId streamed.
   s = reducer(s, { type: 'event', event: ev.text('msg-fb', 'atomic content') })
-  const texts = s.timeline.filter((i) => i.kind === 'text')
+  const texts = rowsOf(s).filter((i) => i.kind === 'text')
   expect(texts.length).toBe(1)
   if (texts[0].kind !== 'text') throw new Error('wrong')
   expect(texts[0].text).toBe('atomic content')
@@ -520,7 +524,7 @@ test('result.copyText aggregates assistant text from this turn', () => {
   s = reducer(s, { type: 'event', event: ev.result('t-1') })
   s = reducer(s, { type: 'event', event: ev.text('m-2', 'Second reply.') })
   s = reducer(s, { type: 'event', event: ev.turnResult() })
-  const results = s.timeline.filter((i) => i.kind === 'result')
+  const results = rowsOf(s).filter((i) => i.kind === 'result')
   expect(results.length).toBe(1)
   if (results[0].kind !== 'result') throw new Error('wrong')
   expect(results[0].copyText).toBe('First reply.\n\nSecond reply.')
@@ -533,7 +537,7 @@ test('result.copyText null when turn has no assistant text (tool-only)', () => {
   s = reducer(s, { type: 'event', event: ev.call('t-1', 'Bash') })
   s = reducer(s, { type: 'event', event: ev.result('t-1') })
   s = reducer(s, { type: 'event', event: ev.turnResult() })
-  const results = s.timeline.filter((i) => i.kind === 'result')
+  const results = rowsOf(s).filter((i) => i.kind === 'result')
   expect(results.length).toBe(1)
   if (results[0].kind !== 'result') throw new Error('wrong')
   expect(results[0].copyText).toBe(null)
@@ -550,7 +554,7 @@ test('result.copyText only scans back to most recent user-text boundary', () => 
   s = reducer(s, { type: 'user-sent', text: 'second' })
   s = reducer(s, { type: 'event', event: ev.text('m-2', 'Turn 2 reply.') })
   s = reducer(s, { type: 'event', event: ev.turnResult() })
-  const results = s.timeline.filter((i) => i.kind === 'result')
+  const results = rowsOf(s).filter((i) => i.kind === 'result')
   expect(results.length).toBe(2)
   if (results[0].kind !== 'result' || results[1].kind !== 'result') throw new Error('wrong')
   expect(results[0].copyText).toBe('Turn 1 reply.')
@@ -574,7 +578,7 @@ test('signature_delta flips hasSignature on thinking item', () => {
     event: { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'signature', text: 'sig-xyz' }
   })
   s = reducer(s, { type: 'event', event: { kind: 'stream-block-stop', blockIndex: 0 } })
-  const thinking = s.timeline.filter((i) => i.kind === 'thinking')
+  const thinking = rowsOf(s).filter((i) => i.kind === 'thinking')
   expect(thinking.length).toBe(1)
   if (thinking[0].kind !== 'thinking') throw new Error('wrong')
   expect(thinking[0].text).toBe('pondering')
@@ -607,7 +611,7 @@ test('sub-agent: enrichment events accumulate on one row while in-flight', () =>
       raw: {}
     }
   })
-  const subAgents = s.timeline.filter((i) => i.kind === 'sub-agent')
+  const subAgents = rowsOf(s).filter((i) => i.kind === 'sub-agent')
   expect(subAgents.length).toBe(1)
   if (subAgents[0].kind !== 'sub-agent') throw new Error('wrong')
   expect(subAgents[0].description).toBe('Investigate X')
@@ -643,7 +647,7 @@ test('sub-agent: tool-result for the outer Task closes the row to completed', ()
       structured: null
     }
   })
-  const subAgents = s.timeline.filter((i) => i.kind === 'sub-agent')
+  const subAgents = rowsOf(s).filter((i) => i.kind === 'sub-agent')
   expect(subAgents.length).toBe(1)
   if (subAgents[0].kind !== 'sub-agent') throw new Error('wrong')
   expect(subAgents[0].phase).toBe('completed')
@@ -672,7 +676,7 @@ test('sub-agent: tool-result with isError closes the row to failed', () => {
       structured: null
     }
   })
-  const sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  const sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('failed')
 })
@@ -702,7 +706,7 @@ test('sub-agent: closes via tool-result even without any task_notification', () 
       structured: null
     }
   })
-  const sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  const sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('completed')
 })
@@ -742,7 +746,7 @@ test('sub-agent: late notification after tool-result does not regress phase', ()
       raw: {}
     }
   })
-  const sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  const sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('completed')
   expect(sub.totalTokens).toBe(100)
@@ -764,7 +768,7 @@ test('sub-agent: interrupt flips in-flight rows to failed', () => {
     }
   })
   s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
-  const sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  const sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('failed')
   expect(sub.status).toBe('interrupted')
@@ -785,7 +789,7 @@ test('sub-agent: process-exit while in-flight heals the spinner', () => {
     }
   })
   s = reducer(s, { type: 'event', event: { kind: 'process-exit', code: 1, signal: null } })
-  const sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  const sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('failed')
 })
@@ -818,7 +822,7 @@ test('sub-agent: legacy persisted phase strings normalize to in-flight on replay
     } as unknown as AgentEvent
   })
   // Legacy notification → still in-flight (canonical close = tool-result).
-  let sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  let sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('in-flight')
   // Replay the tool-result that was also persisted → closes correctly.
@@ -832,7 +836,7 @@ test('sub-agent: legacy persisted phase strings normalize to in-flight on replay
       structured: null
     }
   })
-  sub = s.timeline.find((i) => i.kind === 'sub-agent')
+  sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
   if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
   expect(sub.phase).toBe('completed')
 })
@@ -848,7 +852,7 @@ test('sub-agent: distinct toolUseIds get their own rows', () => {
     type: 'event',
     event: { kind: 'sub-agent', phase: 'in-flight', toolUseId: 'b', description: 'B', raw: {} }
   })
-  const subAgents = s.timeline.filter((i) => i.kind === 'sub-agent')
+  const subAgents = rowsOf(s).filter((i) => i.kind === 'sub-agent')
   expect(subAgents.length).toBe(2)
 })
 
@@ -889,7 +893,7 @@ test('sub-agent children: parentToolUseId on tool-call routes into childIndex', 
     }
   })
   // Inner tool item exists in flat timeline (one of the items, not first since session-start + sub-agent precede).
-  const tools = s.timeline.filter((i) => i.kind === 'tool')
+  const tools = rowsOf(s).filter((i) => i.kind === 'tool')
   expect(tools.length).toBe(1)
   const inner = tools[0]
   if (inner.kind !== 'tool') throw new Error('wrong kind')
@@ -900,7 +904,7 @@ test('sub-agent children: parentToolUseId on tool-call routes into childIndex', 
   if (!children) throw new Error('expected childIndex entry')
   expect(children.length).toBe(1)
   const childIdx = children[0]
-  expect(s.timeline[childIdx].kind).toBe('tool')
+  expect(rowsOf(s)[childIdx].kind).toBe('tool')
 })
 
 test('sub-agent children: assistant-text + thinking are routed by parentToolUseId', () => {
@@ -937,7 +941,7 @@ test('sub-agent children: assistant-text + thinking are routed by parentToolUseI
   })
   const children = s.childIndex.get('tu_TASK') ?? []
   expect(children.length).toBe(2)
-  const kinds = children.map((i) => s.timeline[i].kind).sort()
+  const kinds = children.map((i) => rowsOf(s)[i].kind).sort()
   expect(kinds.join(',')).toBe('text,thinking')
 })
 
@@ -948,7 +952,7 @@ test('sub-agent children: events without parent stay at root (childIndex empty)'
   s = reducer(s, { type: 'event', event: ev.result('t-1') })
   expect(s.childIndex.size).toBe(0)
   // Tool item itself has no parentToolUseId.
-  const tool = s.timeline.find((i) => i.kind === 'tool')
+  const tool = rowsOf(s).find((i) => i.kind === 'tool')
   if (!tool || tool.kind !== 'tool') throw new Error('wrong')
   expect(tool.parentToolUseId).toBe(undefined)
 })
@@ -979,7 +983,7 @@ test('sub-agent children: nested sub-agent inside sub-agent registers under oute
   })
   const outerChildren = s.childIndex.get('tu_OUTER') ?? []
   expect(outerChildren.length).toBe(1)
-  const innerItem = s.timeline[outerChildren[0]]
+  const innerItem = rowsOf(s)[outerChildren[0]]
   if (innerItem.kind !== 'sub-agent') throw new Error('wrong kind')
   expect(innerItem.toolUseId).toBe('tu_INNER')
   expect(innerItem.parentToolUseId).toBe('tu_OUTER')
@@ -1146,7 +1150,7 @@ test('interrupted event: appends marker + drops inFlight (mirrors turn-interrupt
   expect(isInFlight(s)).toBe(true)
   s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
   expect(isInFlight(s)).toBe(false)
-  expect(s.timeline.some((i) => i.kind === 'interrupted')).toBe(true)
+  expect(rowsOf(s).some((i) => i.kind === 'interrupted')).toBe(true)
 })
 
 test('user-message-popped: removes matching user-text + drops inFlight', () => {
@@ -1154,10 +1158,10 @@ test('user-message-popped: removes matching user-text + drops inFlight', () => {
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'hello' } })
   expect(isInFlight(s)).toBe(true)
-  expect(s.timeline.some((i) => i.kind === 'user-text')).toBe(true)
+  expect(rowsOf(s).some((i) => i.kind === 'user-text')).toBe(true)
   s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'hello' } })
   expect(isInFlight(s)).toBe(false)
-  expect(s.timeline.some((i) => i.kind === 'user-text')).toBe(false)
+  expect(rowsOf(s).some((i) => i.kind === 'user-text')).toBe(false)
 })
 
 test('user-message-popped: refuses pop when assistant progress sits between', () => {
@@ -1169,8 +1173,8 @@ test('user-message-popped: refuses pop when assistant progress sits between', ()
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'hi' } })
   s = reducer(s, { type: 'event', event: ev.text('m-1', 'assistant reply') })
   s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'hi' } })
-  expect(s.timeline.some((i) => i.kind === 'user-text')).toBe(true)
-  expect(s.timeline.some((i) => i.kind === 'text')).toBe(true)
+  expect(rowsOf(s).some((i) => i.kind === 'user-text')).toBe(true)
+  expect(rowsOf(s).some((i) => i.kind === 'text')).toBe(true)
 })
 
 test('user-message-popped: replay-safe (user-message + popped → empty timeline)', () => {
@@ -1180,7 +1184,7 @@ test('user-message-popped: replay-safe (user-message + popped → empty timeline
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'edit me' } })
   s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'edit me' } })
-  expect(s.timeline.filter((i) => i.kind === 'user-text').length).toBe(0)
+  expect(rowsOf(s).filter((i) => i.kind === 'user-text').length).toBe(0)
 })
 
 // ---- optimistic send -------------------------------------------------
@@ -1189,7 +1193,7 @@ test('optimistic: user-sent flags item as optimistic', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'user-sent', text: 'hi' })
-  const items = s.timeline.filter((i) => i.kind === 'user-text')
+  const items = rowsOf(s).filter((i) => i.kind === 'user-text')
   expect(items.length).toBe(1)
   if (items[0].kind !== 'user-text') throw new Error('wrong kind')
   expect(items[0].optimistic === true).toBe(true)
@@ -1201,7 +1205,7 @@ test('optimistic: user-message confirms in place, no duplicate, no double-bump',
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'user-sent', text: 'hi' })
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'hi' } })
-  const items = s.timeline.filter((i) => i.kind === 'user-text')
+  const items = rowsOf(s).filter((i) => i.kind === 'user-text')
   expect(items.length).toBe(1)
   if (items[0].kind !== 'user-text') throw new Error('wrong kind')
   expect(items[0].optimistic === true).toBe(false)
@@ -1215,7 +1219,7 @@ test('optimistic: two rapid sends → both confirmed FIFO in order', () => {
   s = reducer(s, { type: 'user-sent', text: 'second' })
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'first' } })
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'second' } })
-  const items = s.timeline.filter((i) => i.kind === 'user-text')
+  const items = rowsOf(s).filter((i) => i.kind === 'user-text')
   expect(items.length).toBe(2)
   if (items[0].kind !== 'user-text' || items[1].kind !== 'user-text') throw new Error('wrong kind')
   expect(items[0].text).toBe('first')
@@ -1230,7 +1234,7 @@ test('optimistic: user-send-failed removes oldest optimistic + decrements count'
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'user-sent', text: 'hi' })
   s = reducer(s, { type: 'user-send-failed' })
-  expect(s.timeline.filter((i) => i.kind === 'user-text').length).toBe(0)
+  expect(rowsOf(s).filter((i) => i.kind === 'user-text').length).toBe(0)
   expect(s.userMessagesSent).toBe(0)
 })
 
@@ -1241,7 +1245,7 @@ test('optimistic: user-send-failed only removes optimistic, not confirmed items'
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'sent' } })
   s = reducer(s, { type: 'user-sent', text: 'failing' })
   s = reducer(s, { type: 'user-send-failed' })
-  const items = s.timeline.filter((i) => i.kind === 'user-text')
+  const items = rowsOf(s).filter((i) => i.kind === 'user-text')
   expect(items.length).toBe(1)
   if (items[0].kind !== 'user-text') throw new Error('wrong kind')
   expect(items[0].text).toBe('sent')
@@ -1253,7 +1257,7 @@ test('optimistic: replay path (no prior user-sent) appends user-message normally
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'replayed' } })
-  const items = s.timeline.filter((i) => i.kind === 'user-text')
+  const items = rowsOf(s).filter((i) => i.kind === 'user-text')
   expect(items.length).toBe(1)
   if (items[0].kind !== 'user-text') throw new Error('wrong kind')
   expect(items[0].text).toBe('replayed')
@@ -1266,7 +1270,7 @@ test('optimistic: user-send-failed with no optimistic items is a no-op', () => {
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'user-send-failed' })
   expect(s.userMessagesSent).toBe(0)
-  expect(s.timeline.filter((i) => i.kind === 'user-text').length).toBe(0)
+  expect(rowsOf(s).filter((i) => i.kind === 'user-text').length).toBe(0)
 })
 
 test('optimistic: replay determinism after dedup matches direct user-message append', () => {
@@ -1281,9 +1285,9 @@ test('optimistic: replay determinism after dedup matches direct user-message app
   replay = reducer(replay, { type: 'event', event: { kind: 'user-message', text: 'hi' } })
   // userMessagesSent + visible timeline must match (timestamps/optimistic flag aside)
   expect(live.userMessagesSent).toBe(replay.userMessagesSent)
-  expect(live.timeline.length).toBe(replay.timeline.length)
-  const liveText = live.timeline.find((i) => i.kind === 'user-text')
-  const replayText = replay.timeline.find((i) => i.kind === 'user-text')
+  expect(rowsOf(live).length).toBe(rowsOf(replay).length)
+  const liveText = rowsOf(live).find((i) => i.kind === 'user-text')
+  const replayText = rowsOf(replay).find((i) => i.kind === 'user-text')
   if (liveText?.kind !== 'user-text' || replayText?.kind !== 'user-text') throw new Error('missing')
   expect(liveText.text).toBe(replayText.text)
   expect(liveText.optimistic === true).toBe(false)
@@ -1680,7 +1684,7 @@ describe('compaction', () => {
       { kind: 'compact-status', phase: 'started' },
       { kind: 'compact-boundary', trigger: 'manual', preTokens: 49079, postTokens: 6408 }
     ])
-    const items = s.timeline.filter((i) => i.kind === 'compaction')
+    const items = rowsOf(s).filter((i) => i.kind === 'compaction')
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ outcome: 'compacted', trigger: 'manual', preTokens: 49079 })
     expect(s.compacting).toBe(false)
@@ -1700,10 +1704,10 @@ describe('compaction', () => {
         text: 'Not enough messages to compact.'
       }
     ])
-    const items = s.timeline.filter((i) => i.kind === 'compaction')
+    const items = rowsOf(s).filter((i) => i.kind === 'compaction')
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ outcome: 'failed', error: 'Not enough messages to compact.' })
-    expect(s.timeline.some((i) => i.kind === 'command-output')).toBe(false)
+    expect(rowsOf(s).some((i) => i.kind === 'command-output')).toBe(false)
     expect(s.compacting).toBe(false)
   })
 
@@ -1726,7 +1730,7 @@ describe('command output', () => {
       { kind: 'command-output', id: 'c1', command: 'context', text: '## Context Usage' },
       ev.turnResult()
     ])
-    const out = s.timeline.find((i) => i.kind === 'command-output')
+    const out = rowsOf(s).find((i) => i.kind === 'command-output')
     expect(out).toMatchObject({ command: 'context', text: '## Context Usage' })
     expect(s.lastResult?.copyText).toBe('## Context Usage')
   })
@@ -1766,7 +1770,7 @@ describe('context + session cost', () => {
       costResult(0.009, haiku(0.009))
     ])
     s = run([{ kind: 'user-message', text: 'b' }, costResult(0.011, haiku(0.011))], s)
-    const results = s.timeline.filter((i) => i.kind === 'result')
+    const results = rowsOf(s).filter((i) => i.kind === 'result')
     expect(results.map((r) => (r.kind === 'result' ? r.turnCostUsd : -1))).toEqual([
       0.009,
       0.011 - 0.009
@@ -1798,7 +1802,7 @@ describe('context + session cost', () => {
   test('provider without per-model accounting (Codex shape) → no usage summary, no footer cost', () => {
     const s = run([ev.turnInit(), { kind: 'user-message', text: 'a' }, costResult(0, {})])
     expect(selectUsageSummary(s)).toBeNull()
-    const result = s.timeline.find((i) => i.kind === 'result')
+    const result = rowsOf(s).find((i) => i.kind === 'result')
     // No cost reported is not a $0 turn: the footer shows no amount.
     expect(result?.kind === 'result' && result.turnCostUsd).toBeUndefined()
   })
@@ -1861,11 +1865,11 @@ test('recorded /compact session replays to one divider, cumulative cost and the 
     .map((l) => claudeCodeAdapter.parseLine(l))
     .filter((e): e is AgentEvent => e !== null)
   const s = run(events)
-  expect(s.timeline.filter((i) => i.kind === 'compaction')).toHaveLength(1)
+  expect(rowsOf(s).filter((i) => i.kind === 'compaction')).toHaveLength(1)
   expect(s.usage.sessionCostUsd).toBeCloseTo(0.014659365)
   expect(s.usage.contextWindow).toBe(1_000_000)
   expect(s.usage.contextTokens).toBe(8036 + 2569 + 39334)
-  expect(s.timeline.filter((i) => i.kind === 'command-output')).toHaveLength(1)
+  expect(rowsOf(s).filter((i) => i.kind === 'command-output')).toHaveLength(1)
   expect(s.compacting).toBe(false)
 })
 
@@ -1883,7 +1887,7 @@ describe('custom command errors', () => {
       },
       ev.turnResult()
     ])
-    const out = s.timeline.find((i) => i.kind === 'command-output')
+    const out = rowsOf(s).find((i) => i.kind === 'command-output')
     expect(out).toMatchObject({
       command: 'y',
       text: 'Shell command permission check failed',
@@ -1897,7 +1901,7 @@ describe('custom command errors', () => {
       { kind: 'user-message', text: 'plain text' },
       { kind: 'command-output', id: 'u-1', command: null, text: 'boom', isError: true }
     ])
-    expect(s.timeline.find((i) => i.kind === 'command-output')).toMatchObject({
+    expect(rowsOf(s).find((i) => i.kind === 'command-output')).toMatchObject({
       command: null,
       isError: true
     })
@@ -1921,7 +1925,7 @@ describe('hook output + notices', () => {
       },
       { kind: 'notice', id: 'n1', level: 'notice', text: 'PostToolUse:Bash says: hi' }
     ])
-    expect(s.timeline.find((i) => i.kind === 'hook')).toMatchObject({
+    expect(rowsOf(s).find((i) => i.kind === 'hook')).toMatchObject({
       hookId: 'h1',
       hookName: 'PreToolUse:Bash',
       effect: 'blocked',
@@ -1929,7 +1933,7 @@ describe('hook output + notices', () => {
       text: 'Blocked by policy',
       exitCode: 2
     })
-    expect(s.timeline.find((i) => i.kind === 'notice')).toMatchObject({
+    expect(rowsOf(s).find((i) => i.kind === 'notice')).toMatchObject({
       id: 'n1',
       level: 'notice',
       text: 'PostToolUse:Bash says: hi'
@@ -1949,7 +1953,7 @@ describe('hook output + notices', () => {
       .map((l) => claudeCodeAdapter.parseLine(l))
       .filter((e): e is AgentEvent => e !== null)
     const s = run(events)
-    const order = s.timeline
+    const order = rowsOf(s)
       .filter((i) => i.kind === 'hook' || i.kind === 'notice' || i.kind === 'tool')
       .map((i) =>
         i.kind === 'hook'
@@ -1987,7 +1991,7 @@ describe('hook output + notices', () => {
       .map((l) => claudeCodeAdapter.parseLine(l))
       .filter((e): e is AgentEvent => e !== null)
     const s = run(events)
-    const blocked = s.timeline.find(
+    const blocked = rowsOf(s).find(
       (i) => i.kind === 'tool' && i.invocation.status === 'denied'
     ) as Extract<TimelineItem, { kind: 'tool' }>
     expect(blocked.invocation.blockedBy).toMatchObject({
@@ -1995,10 +1999,10 @@ describe('hook output + notices', () => {
       audience: 'agent'
     })
     expect(blocked.invocation.blockedBy?.text).toContain('Blocked by policy')
-    const hook = s.timeline.find((i) => i.kind === 'hook' && i.effect === 'blocked')
+    const hook = rowsOf(s).find((i) => i.kind === 'hook' && i.effect === 'blocked')
     expect(hook).toMatchObject({ foldedInto: blocked.invocation.id })
     // Other hook rows are untouched.
-    for (const i of s.timeline) {
+    for (const i of rowsOf(s)) {
       if (i.kind === 'hook' && i.effect !== 'blocked') expect(i.foldedInto).toBeUndefined()
     }
   })
@@ -2021,12 +2025,12 @@ describe('hook output + notices', () => {
     structured: null
   })
   const toolOf = (s: ChatTimelineState, id: string) =>
-    s.timeline.find((i) => i.kind === 'tool' && i.invocation.id === id) as Extract<
+    rowsOf(s).find((i) => i.kind === 'tool' && i.invocation.id === id) as Extract<
       TimelineItem,
       { kind: 'tool' }
     >
   const hookOf = (s: ChatTimelineState, id: string) =>
-    s.timeline.find((i) => i.kind === 'hook' && i.hookId === id) as Extract<
+    rowsOf(s).find((i) => i.kind === 'hook' && i.hookId === id) as Extract<
       TimelineItem,
       { kind: 'hook' }
     >
@@ -2195,7 +2199,7 @@ describe('outbox: delivery states on the user message', () => {
     error?: string
   ): AgentEvent => ({ kind: 'user-message-delivery', id, state, ...(error ? { error } : {}) })
   const userItems = (s: ReturnType<typeof initialState>) =>
-    s.timeline.filter((i) => i.kind === 'user-text') as Array<
+    rowsOf(s).filter((i) => i.kind === 'user-text') as Array<
       Extract<ReturnType<typeof initialState>['timeline'][number], { kind: 'user-text' }>
     >
 
@@ -2278,7 +2282,7 @@ describe('transport notices', () => {
         text: 'Claude Code stopped responding and was stopped.'
       }
     ])
-    expect(s.timeline.at(-1)).toMatchObject({
+    expect(rowsOf(s).at(-1)).toMatchObject({
       kind: 'notice',
       code: 'watchdog-killed',
       text: 'Claude Code stopped responding and was stopped.'
@@ -2325,9 +2329,9 @@ describe('transport notices', () => {
       ],
       s
     )
-    const kinds = s.timeline.map((i) => i.kind)
+    const kinds = rowsOf(s).map((i) => i.kind)
     expect(kinds).toContain('text')
-    expect(s.timeline.some((i) => i.kind === 'user-text' && i.text === 'hello again')).toBe(true)
+    expect(rowsOf(s).some((i) => i.kind === 'user-text' && i.text === 'hello again')).toBe(true)
     expect(kinds.filter((k) => k === 'session-start')).toHaveLength(2)
     expect(s.sessionId).toBe('new-sid')
   })
@@ -2340,7 +2344,7 @@ describe('transport notices', () => {
         detail: { code: 'cli-not-installed', binary: 'claude' }
       }
     ])
-    expect(s.timeline.at(-1)).toMatchObject({
+    expect(rowsOf(s).at(-1)).toMatchObject({
       kind: 'agent-problem',
       code: 'cli-not-installed',
       binary: 'claude'
@@ -2376,7 +2380,7 @@ describe('turn errors are visible', () => {
       errorResult('Invalid API key · Please run /login')
     ])
     expect(
-      s.timeline.some(
+      rowsOf(s).some(
         (i) => i.kind === 'turn-error' && i.text === 'Invalid API key · Please run /login'
       )
     ).toBe(true)
@@ -2390,7 +2394,7 @@ describe('turn errors are visible', () => {
       { kind: 'user-message', text: 'again' },
       errorResult(null)
     ])
-    expect(s.timeline.some((i) => i.kind === 'turn-error')).toBe(false)
+    expect(rowsOf(s).some((i) => i.kind === 'turn-error')).toBe(false)
   })
 })
 
@@ -2422,8 +2426,8 @@ test('the result of a turn the user stopped is an end, not an error: no turn-err
   s = reducer(s, { type: 'event', event: userMsg('go', 'u1') })
   s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
   s = reducer(s, { type: 'event', event: abortedResult() })
-  expect(s.timeline.some((it) => it.kind === 'turn-error')).toBe(false)
-  const result = s.timeline.find((it) => it.kind === 'result')
+  expect(rowsOf(s).some((it) => it.kind === 'turn-error')).toBe(false)
+  const result = rowsOf(s).find((it) => it.kind === 'result')
   expect(result).toMatchObject({ isError: false })
   expect(isInFlight(s)).toBe(false)
 })
@@ -2432,9 +2436,9 @@ test('user-message-popped matches by id when it has one: same text, other id →
   let s: ChatTimelineState = initialState()
   s = reducer(s, { type: 'event', event: userMsg('same', 'u1') })
   s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'same', id: 'u9' } })
-  expect(s.timeline.filter((it) => it.kind === 'user-text')).toHaveLength(1)
+  expect(rowsOf(s).filter((it) => it.kind === 'user-text')).toHaveLength(1)
   s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', text: 'same', id: 'u1' } })
-  expect(s.timeline.filter((it) => it.kind === 'user-text')).toHaveLength(0)
+  expect(rowsOf(s).filter((it) => it.kind === 'user-text')).toHaveLength(0)
   expect(isInFlight(s)).toBe(false)
 })
 
@@ -2447,7 +2451,7 @@ test('a message Claude Code already had closes its turn with its reason', () => 
     event: { kind: 'interrupted', reason: 'already-in-conversation' }
   })
   expect(isInFlight(s)).toBe(false)
-  expect(s.timeline.at(-1)).toMatchObject({
+  expect(rowsOf(s).at(-1)).toMatchObject({
     kind: 'interrupted',
     reason: 'already-in-conversation'
   })
@@ -2466,15 +2470,15 @@ test('rewound: the fold hides the forgotten message and everything after it', ()
   s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
   s = reducer(s, { type: 'event', event: userMsg('one', 'u1') })
   s = answer(s, 'r1')
-  const from = s.timeline.length
+  const from = rowsOf(s).length
   s = reducer(s, { type: 'event', event: userMsg('two', 'u2') })
   s = answer(s, 'r2')
-  const upTo = s.timeline.length
+  const upTo = rowsOf(s).length
   s = reducer(s, {
     type: 'event',
     event: { kind: 'conversation-branch', reason: 'rewound', messageId: 'u2' }
   })
-  const fold = s.timeline.at(-1)
+  const fold = rowsOf(s).at(-1)
   expect(fold).toMatchObject({ kind: 'conversation-branch', reason: 'rewound', hiddenFrom: from })
   expect((fold as { hiddenCount: number }).hiddenCount).toBe(upTo - from)
   expect(isInFlight(s)).toBe(false)
@@ -2485,7 +2489,7 @@ test('forked: what followed the fork point is folded; the new conversation id do
   s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
   s = reducer(s, { type: 'event', event: userMsg('one', 'u1') })
   s = answer(s, 'r1')
-  const nextTurn = s.timeline.length
+  const nextTurn = rowsOf(s).length
   s = reducer(s, { type: 'event', event: userMsg('two', 'u2') })
   s = answer(s, 'r2')
   s = reducer(s, {
@@ -2497,9 +2501,9 @@ test('forked: what followed the fork point is folded; the new conversation id do
       conversationId: 'sid-2'
     }
   })
-  expect(s.timeline.at(-1)).toMatchObject({ reason: 'forked', hiddenFrom: nextTurn })
+  expect(rowsOf(s).at(-1)).toMatchObject({ reason: 'forked', hiddenFrom: nextTurn })
   s = reducer(s, { type: 'event', event: ev.turnInit('sid-2') })
-  expect(s.timeline.some((it) => it.kind === 'user-text' && it.text === 'one')).toBe(true)
+  expect(rowsOf(s).some((it) => it.kind === 'user-text' && it.text === 'one')).toBe(true)
   expect(s.sessionId).toBe('sid-2')
 })
 
@@ -2519,16 +2523,16 @@ test('fork-failed: the fork is undone — nothing folded, the same conversation 
       conversationId: 'sid-2'
     }
   })
-  const forkAt = s.timeline.length - 1
+  const forkAt = rowsOf(s).length - 1
   s = reducer(s, {
     type: 'event',
     event: { kind: 'conversation-branch', reason: 'fork-failed', conversationId: 'sid-1' }
   })
   // The fork's row says it failed and folds nothing; no second row.
-  expect(s.timeline).toHaveLength(forkAt + 1)
-  expect(s.timeline[forkAt]).toMatchObject({ reason: 'fork-failed', hiddenCount: 0 })
-  expect(selectFoldedIndexes(s.timeline).size).toBe(0)
-  expect(selectActiveUserIds(s.timeline)).toEqual(['u1', 'u2'])
+  expect(rowsOf(s)).toHaveLength(forkAt + 1)
+  expect(rowsOf(s)[forkAt]).toMatchObject({ reason: 'fork-failed', hiddenCount: 0 })
+  expect(selectFoldedIndexes(rowsOf(s)).size).toBe(0)
+  expect(selectActiveUserIds(rowsOf(s))).toEqual(['u1', 'u2'])
   // The original goes on: its turn-init is a restart, nothing is kept pending.
   expect(s.freshStartPending).toBe(false)
 })
@@ -2538,7 +2542,7 @@ test('switched: the previous conversation is folded; imported history is answere
   s = reducer(s, { type: 'event', event: ev.turnInit('sid-1') })
   s = reducer(s, { type: 'event', event: userMsg('old', 'u1') })
   s = answer(s, 'r1')
-  const before = s.timeline.length
+  const before = rowsOf(s).length
   s = reducer(s, {
     type: 'event',
     event: {
@@ -2548,7 +2552,7 @@ test('switched: the previous conversation is folded; imported history is answere
       source: 'terminal'
     }
   })
-  expect(s.timeline.at(-1)).toMatchObject({
+  expect(rowsOf(s).at(-1)).toMatchObject({
     reason: 'switched',
     hiddenFrom: 0,
     hiddenCount: before
@@ -2560,15 +2564,15 @@ test('switched: the previous conversation is folded; imported history is answere
   s = reducer(s, { type: 'event', event: ev.text('h-a', 'tui answer') })
   expect(isInFlight(s)).toBe(false)
   expect(
-    s.timeline.find((it) => it.kind === 'user-text' && it.text === 'from the TUI')
+    rowsOf(s).find((it) => it.kind === 'user-text' && it.text === 'from the TUI')
   ).toMatchObject({
     id: 'h1',
     delivery: 'answered'
   })
   s = reducer(s, { type: 'event', event: ev.turnInit('sid-9') })
-  expect(s.timeline.some((it) => it.kind === 'user-text' && it.text === 'from the TUI')).toBe(true)
+  expect(rowsOf(s).some((it) => it.kind === 'user-text' && it.text === 'from the TUI')).toBe(true)
   // A second switch folds only what came after the first.
-  const second = s.timeline.length
+  const second = rowsOf(s).length
   s = reducer(s, {
     type: 'event',
     event: {
@@ -2578,7 +2582,7 @@ test('switched: the previous conversation is folded; imported history is answere
       source: 'sessions'
     }
   })
-  expect(s.timeline.at(-1)).toMatchObject({
+  expect(rowsOf(s).at(-1)).toMatchObject({
     hiddenFrom: before + 1,
     hiddenCount: second - before - 1
   })
@@ -2593,12 +2597,12 @@ test('selectActiveUserIds: messages still in the conversation (folds and history
   s = answer(s, 'r2')
   s = reducer(s, { type: 'event', event: userMsg('legacy') })
   s = answer(s, 'r3')
-  expect([...selectActiveUserIds(s.timeline)]).toEqual(['u1', 'u2'])
+  expect([...selectActiveUserIds(rowsOf(s))]).toEqual(['u1', 'u2'])
   s = reducer(s, {
     type: 'event',
     event: { kind: 'conversation-branch', reason: 'rewound', messageId: 'u2' }
   })
-  expect([...selectActiveUserIds(s.timeline)]).toEqual(['u1'])
+  expect([...selectActiveUserIds(rowsOf(s))]).toEqual(['u1'])
   s = reducer(s, {
     type: 'event',
     event: {
@@ -2612,7 +2616,7 @@ test('selectActiveUserIds: messages still in the conversation (folds and history
     type: 'event',
     event: { kind: 'user-message', text: 'h', id: 'h1', history: true }
   })
-  expect([...selectActiveUserIds(s.timeline)]).toEqual(['h1'])
+  expect([...selectActiveUserIds(rowsOf(s))]).toEqual(['h1'])
 })
 
 describe('composer: attachments + CLI command details', () => {
@@ -2637,7 +2641,7 @@ describe('composer: attachments + CLI command details', () => {
         ]
       }
     })
-    expect(s.timeline[0]).toMatchObject({
+    expect(rowsOf(s)[0]).toMatchObject({
       kind: 'user-text',
       text: 'what colour?',
       attachments: [file]
@@ -2647,10 +2651,10 @@ describe('composer: attachments + CLI command details', () => {
   test('the optimistic bubble shows them at once, and keeps them when confirmed', () => {
     const content = [{ type: 'attachment' as const, attachment: file }]
     let s = reducer(initialState(), { type: 'user-sent', id: 'm1', text: '', content })
-    expect(s.timeline[0]).toMatchObject({ kind: 'user-text', text: '', attachments: [file] })
+    expect(rowsOf(s)[0]).toMatchObject({ kind: 'user-text', text: '', attachments: [file] })
     s = reducer(s, { type: 'event', event: { kind: 'user-message', id: 'm1', text: '', content } })
-    expect(s.timeline).toHaveLength(1)
-    expect(s.timeline[0]).toMatchObject({ attachments: [file], optimistic: false })
+    expect(rowsOf(s)).toHaveLength(1)
+    expect(rowsOf(s)[0]).toMatchObject({ attachments: [file], optimistic: false })
   })
 
   test('a text-only message has no attachments field', () => {
@@ -2658,7 +2662,7 @@ describe('composer: attachments + CLI command details', () => {
       type: 'event',
       event: { kind: 'user-message', id: 'm1', text: 'hi', content: [{ type: 'text', text: 'hi' }] }
     })
-    expect(s.timeline[0]).not.toHaveProperty('attachments')
+    expect(rowsOf(s)[0]).not.toHaveProperty('attachments')
   })
 
   test('cli-command-details: kept by name, and survives a new conversation (restart)', () => {
@@ -2855,7 +2859,7 @@ describe('agent-started turn', () => {
     s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
     s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
     expect(isTurnOpen(s)).toBe(false)
-    expect(s.timeline.at(-1)?.kind).toBe('interrupted')
+    expect(rowsOf(s).at(-1)?.kind).toBe('interrupted')
     // Its aborted result does not finish the NEXT turn early.
     s = reducer(s, { type: 'event', event: abortedResult() })
     s = reducer(s, { type: 'user-sent', id: 'u3', text: 'again' })

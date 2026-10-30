@@ -88,11 +88,13 @@ function parseAnchor(raw: string | null): ChatScrollAnchor | null {
       atBottom: unknown
       key: unknown
       offsetPx: unknown
+      row: unknown
     }> | null
     if (!v || typeof v !== 'object' || Array.isArray(v)) return null
     if (v.atBottom === true) return { atBottom: true }
     if (v.atBottom === false && typeof v.key === 'string' && typeof v.offsetPx === 'number') {
-      return { atBottom: false, key: v.key, offsetPx: v.offsetPx }
+      const row = typeof v.row === 'number' && Number.isInteger(v.row) && v.row >= 0 ? v.row : null
+      return { atBottom: false, key: v.key, offsetPx: v.offsetPx, ...(row !== null ? { row } : {}) }
     }
     return null
   } catch {

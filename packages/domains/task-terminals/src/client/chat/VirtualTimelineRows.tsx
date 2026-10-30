@@ -1,7 +1,7 @@
 import { memo, useLayoutEffect, useSyncExternalStore, type Key, type ReactNode } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { stableAnchorKey } from './useChatDisplay'
-import { TimelineRowKeyContext } from './row-ui-state'
+import { TimelineRowIndexContext, TimelineRowKeyContext } from './row-ui-state'
 import type { VirtualTimelineController } from './virtual-timeline'
 
 export interface VirtualTimelineRowsProps {
@@ -9,6 +9,8 @@ export interface VirtualTimelineRowsProps {
   items: readonly TimelineItem[]
   itemKey: (item: TimelineItem, index: number) => Key
   renderRow: (item: TimelineItem, index: number) => ReactNode
+  /** A row's index in the timeline (`data-row`: scroll anchors keep it). */
+  rowOf?: (item: TimelineItem) => number | undefined
 }
 
 /**
@@ -28,7 +30,8 @@ export const VirtualTimelineRows = memo(function VirtualTimelineRows({
   controller,
   items,
   itemKey,
-  renderRow
+  renderRow,
+  rowOf
 }: VirtualTimelineRowsProps) {
   const version = useSyncExternalStore(
     controller.subscribe,
@@ -47,6 +50,7 @@ export const VirtualTimelineRows = memo(function VirtualTimelineRows({
           rowKey={row.key}
           item={items[row.index]}
           index={row.index}
+          row={rowOf?.(items[row.index])}
           start={row.start}
           measure={controller.measureElement}
           renderRow={renderRow}
@@ -60,6 +64,7 @@ const TimelineRow = memo(function TimelineRow({
   rowKey,
   item,
   index,
+  row,
   start,
   measure,
   renderRow
@@ -67,6 +72,7 @@ const TimelineRow = memo(function TimelineRow({
   rowKey: Key
   item: TimelineItem
   index: number
+  row: number | undefined
   start: number
   measure: (el: HTMLElement | null) => void
   renderRow: (item: TimelineItem, index: number) => ReactNode
@@ -75,13 +81,16 @@ const TimelineRow = memo(function TimelineRow({
     <div
       ref={measure}
       data-index={index}
+      data-row={row}
       data-item-key={String(rowKey)}
       data-anchor-key={stableAnchorKey(item) ?? undefined}
       className="absolute inset-x-0 top-0 flow-root"
       style={{ transform: `translateY(${start}px)` }}
     >
       <TimelineRowKeyContext.Provider value={String(rowKey)}>
-        <RowContent item={item} index={index} renderRow={renderRow} />
+        <TimelineRowIndexContext.Provider value={row}>
+          <RowContent item={item} index={index} renderRow={renderRow} />
+        </TimelineRowIndexContext.Provider>
       </TimelineRowKeyContext.Provider>
     </div>
   )

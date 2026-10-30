@@ -74,7 +74,7 @@ describe('Codex usage', () => {
   test('a turn with no reported cost has no dollar amount', () => {
     const state = run([{ kind: 'user-message', text: 'hi' }, codexResult()])
     const result = state.timeline.find(
-      (it): it is Extract<TimelineItem, { kind: 'result' }> => it.kind === 'result'
+      (it): it is Extract<TimelineItem, { kind: 'result' }> => it?.kind === 'result'
     )
     expect(result).toBeDefined()
     expect(result?.turnCostUsd).toBeUndefined()
@@ -99,7 +99,7 @@ describe('Codex usage', () => {
       } as AgentEvent
     ])
     const result = state.timeline.find(
-      (it): it is Extract<TimelineItem, { kind: 'result' }> => it.kind === 'result'
+      (it): it is Extract<TimelineItem, { kind: 'result' }> => it?.kind === 'result'
     )
     expect(result?.turnCostUsd).toBe(0.25)
   })
