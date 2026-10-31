@@ -132,6 +132,10 @@ export interface CodexAgentMessageItem extends CodexThreadItemBase {
   type: 'agentMessage'
   text: string
 }
+export interface CodexPlanItem extends CodexThreadItemBase {
+  type: 'plan'
+  text: string
+}
 /** `reasoning` thread item. */
 export interface CodexReasoningItem extends CodexThreadItemBase {
   type: 'reasoning'

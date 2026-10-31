@@ -21,6 +21,7 @@ import {
   LiveBlockStore,
   LiveBlockStoreContext,
   selectUsageSummary,
+  selectCodexPlanReview,
   useChatSession
 } from '@slayzone/terminal/client'
 import { chatCapabilitiesForMode, chatProviderForMode } from '@slayzone/terminal-contracts'
@@ -49,6 +50,7 @@ import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
+import { CodexPlanPrompt } from './CodexPlanPrompt'
 import { CommandTaskContext } from './tool-cards'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
@@ -174,13 +176,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       tabId,
       cwd
     })
-    const { chatCollaboration, collaborationChanging, handleCollaborationChange } =
-      useChatCollaboration({
-        taskId,
-        mode,
-        tabId,
-        cwd
-      })
+    const {
+      chatCollaboration,
+      collaborationChanging,
+      handleCollaborationChange,
+      syncCollaboration
+    } = useChatCollaboration({
+      taskId,
+      mode,
+      tabId,
+      cwd
+    })
+    const codexPlanReview = useMemo(
+      () => (mode === 'codex-chat' ? selectCodexPlanReview(timeline, chatCollaboration) : null),
+      [mode, timeline, chatCollaboration]
+    )
     const { chatFastMode, fastModeChanging, handleFastModeChange } = useChatFastMode({
       taskId,
       mode,
@@ -679,6 +689,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         {...(onHandoff && state.sessionId ? { onHandoff } : {})}
                       />
 
+                      {codexPlanReview && (
+                        <CodexPlanPrompt
+                          key={codexPlanReview.planId}
+                          review={codexPlanReview}
+                          target={{ tabId, taskId, mode, cwd }}
+                          onResolved={syncCollaboration}
+                        />
+                      )}
                       <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
                       <RewindDialog dialog={conversation.dialog} />
                       <RewindPicker

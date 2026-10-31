@@ -7,6 +7,20 @@ import { expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { ChatEventSplitter } from './chat-event-splitter'
 
+test('Codex plan deltas stay live; completed plan alone persists', () => {
+  const s = new ChatEventSplitter()
+  const draft = {
+    kind: 'codex-plan' as const,
+    planId: 'p',
+    turnId: 't',
+    text: 'draft',
+    phase: 'streaming' as const
+  }
+  const final = { ...draft, text: 'final', phase: 'completed' as const }
+  expect(s.route(draft)).toEqual({ live: [draft], saved: [] })
+  expect(s.route(final)).toEqual({ live: [], saved: [final] })
+})
+
 const start = (messageId: string): AgentEvent => ({ kind: 'stream-message-start', messageId })
 const blockStart = (
   blockIndex: number,

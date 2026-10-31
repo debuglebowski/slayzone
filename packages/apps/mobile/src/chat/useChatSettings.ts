@@ -16,6 +16,7 @@
 import {
   type ChatEffort,
   DEFAULT_CHAT_EFFORT,
+  DEFAULT_CHAT_COLLABORATION,
   rawPermissionModeToChatMode
 } from '@slayzone/terminal-contracts'
 import { useQuery } from '@tanstack/react-query'
@@ -23,12 +24,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatTarget } from './useChatSession'
 import { type HubTrpcClient, useTRPC, useTRPCClient } from '../trpc'
 
-type Kind = 'mode' | 'model' | 'effort'
+type Kind = 'mode' | 'model' | 'effort' | 'collaboration'
 
 export interface ChatSettings {
   mode: string | null
   model: string | null
   effort: string
+  collaboration: string
   /** The account may use Claude's `auto` mode (desktop hides it otherwise). */
   autoEligible: boolean
   autoOptedIn: boolean
@@ -37,12 +39,15 @@ export interface ChatSettings {
   setMode: (next: string) => Promise<void>
   setModel: (next: string) => Promise<void>
   setEffort: (next: string) => Promise<void>
+  setCollaboration: (next: string) => Promise<void>
+  syncCollaboration: (next: string) => void
 }
 
 interface SessionInfoLite {
   chatMode?: string | null
   chatModel?: string | null
   chatEffort?: string | null
+  chatCollaboration?: string | null
 }
 
 function apply(
@@ -53,7 +58,13 @@ function apply(
 ): Promise<string | null> {
   const opts = { ...target }
   const pick = (info: SessionInfoLite | null | undefined) =>
-    kind === 'mode' ? info?.chatMode : kind === 'model' ? info?.chatModel : info?.chatEffort
+    kind === 'mode'
+      ? info?.chatMode
+      : kind === 'model'
+        ? info?.chatModel
+        : kind === 'effort'
+          ? info?.chatEffort
+          : info?.chatCollaboration
   switch (kind) {
     case 'mode':
       return client.chat.setMode.mutate({ ...opts, chatMode: value }).then((i) => pick(i) ?? value)
@@ -64,6 +75,10 @@ function apply(
     case 'effort':
       return client.chat.setEffort
         .mutate({ ...opts, chatEffort: value })
+        .then((i) => pick(i) ?? value)
+    case 'collaboration':
+      return client.chat.setCollaboration
+        .mutate({ ...opts, chatCollaboration: value })
         .then((i) => pick(i) ?? value)
   }
 }
@@ -96,6 +111,12 @@ export function useChatSettings(
       { enabled: info.isSuccess && !live?.chatEffort }
     )
   )
+  const storedCollaboration = useQuery(
+    trpc.chat.getCollaboration.queryOptions(
+      { taskId, mode: terminalMode },
+      { enabled: terminalMode === 'codex-chat' && info.isSuccess && !live?.chatCollaboration }
+    )
+  )
   const auto = useQuery(trpc.chat.getAutoEligibility.queryOptions())
 
   const loaded: Record<Kind, string | null> = {
@@ -104,25 +125,37 @@ export function useChatSettings(
     effort:
       live?.chatEffort ??
       (storedEffort.data as string | null | undefined) ??
-      (storedEffort.isSuccess ? DEFAULT_CHAT_EFFORT : null)
+      (storedEffort.isSuccess ? DEFAULT_CHAT_EFFORT : null),
+    collaboration:
+      live?.chatCollaboration ??
+      (storedCollaboration.data as string | undefined) ??
+      DEFAULT_CHAT_COLLABORATION
   }
 
   // What the user (or the agent) set since the load; null = the loaded value.
   const [own, setOwn] = useState<Record<Kind, string | null>>({
     mode: null,
     model: null,
-    effort: null
+    effort: null,
+    collaboration: null
   })
   const [changing, setChanging] = useState<Record<Kind, boolean>>({
     mode: false,
     model: false,
-    effort: false
+    effort: false,
+    collaboration: false
   })
-  const pendingRef = useRef<Record<Kind, string | null>>({ mode: null, model: null, effort: null })
+  const pendingRef = useRef<Record<Kind, string | null>>({
+    mode: null,
+    model: null,
+    effort: null,
+    collaboration: null
+  })
   const runningRef = useRef<Record<Kind, Promise<void> | null>>({
     mode: null,
     model: null,
-    effort: null
+    effort: null,
+    collaboration: null
   })
   const value = (kind: Kind): string | null => own[kind] ?? loaded[kind]
   const valueRef = useRef(value)
@@ -161,7 +194,7 @@ export function useChatSettings(
         if (failure !== null) {
           setOwn((prev) => ({ ...prev, [kind]: previous }))
           onError(
-            `${kind === 'mode' ? 'Mode' : kind === 'model' ? 'Model' : 'Effort'} change failed: ${
+            `${kind === 'mode' ? 'Mode' : kind === 'model' ? 'Model' : kind === 'effort' ? 'Effort' : 'Collaboration'} change failed: ${
               failure instanceof Error ? failure.message : String(failure)
             }`
           )
@@ -189,6 +222,7 @@ export function useChatSettings(
     mode: value('mode'),
     model: value('model'),
     effort: value('effort') ?? (DEFAULT_CHAT_EFFORT as ChatEffort),
+    collaboration: value('collaboration') ?? DEFAULT_CHAT_COLLABORATION,
     autoEligible: auto.data?.eligible ?? false,
     autoOptedIn: auto.data?.optedIn ?? false,
     changing,
@@ -201,6 +235,9 @@ export function useChatSettings(
       return change('mode', next)
     },
     setModel: (next) => (next === value('model') ? Promise.resolve() : change('model', next)),
-    setEffort: (next) => (next === value('effort') ? Promise.resolve() : change('effort', next))
+    setEffort: (next) => (next === value('effort') ? Promise.resolve() : change('effort', next)),
+    setCollaboration: (next) =>
+      next === value('collaboration') ? Promise.resolve() : change('collaboration', next),
+    syncCollaboration: (next) => setOwn((prev) => ({ ...prev, collaboration: next }))
   }
 }

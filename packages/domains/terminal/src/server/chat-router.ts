@@ -138,6 +138,7 @@ export const chatRouter = router({
   start: publicProcedure
     .input(chatCreateOpts.extend({ reason: z.enum(['user', 'restore']).optional() }))
     .mutation(({ input }) => ops().start(input)),
+  restart: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().restart(input)),
   send: publicProcedure
     .input(sendInput)
     .mutation(({ input }) =>
@@ -262,6 +263,15 @@ export const chatRouter = router({
   setCollaboration: publicProcedure
     .input(chatCreateOpts.extend({ chatCollaboration: z.string() }))
     .mutation(({ input }) => ops().setCollaboration(input)),
+  decidePlan: publicProcedure
+    .input(
+      chatCreateOpts.extend({
+        planId: z.string(),
+        decision: z.enum(['implement', 'keep-planning']),
+        messageId: z.string().optional()
+      })
+    )
+    .mutation(({ input }) => ops().decidePlan(input)),
   getFastMode: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getFastMode(input.taskId, input.mode)),

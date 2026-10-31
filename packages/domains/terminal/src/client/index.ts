@@ -42,6 +42,7 @@ export { PulseGrid } from './TerminalLoadingAnimations'
 export { LoopModeDialog } from './LoopModeDialog'
 export { SlayNudgeBanner } from './SlayNudgeBanner'
 export { useSlayNudge } from './useSlayNudge'
+export { selectCodexPlanReview, type CodexPlanReview } from '../shared/codex-plan-review'
 export {
   searchableText,
   summarizeRows,

@@ -107,6 +107,140 @@ function seedTask(
   }
 }
 
+test('Codex plan approval switches once and queues one implementation message', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  seedTask(
+    db,
+    'task-codex-plan',
+    JSON.stringify({ 'codex-chat': { chatCollaboration: 'plan' } }),
+    'tab-codex-plan'
+  )
+  db.prepare("UPDATE terminal_tabs SET mode = 'codex-chat' WHERE id = 'tab-codex-plan'").run()
+  const ops = createChatOps(localChatOpts(db))
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/codex',
+    spawn: () => makeFakeChild(),
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const target = {
+    tabId: 'tab-codex-plan',
+    taskId: 'task-codex-plan',
+    mode: 'codex-chat',
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  }
+  await mgr.hydrateSession({
+    ...target,
+    conversationId: null,
+    providerFlags: [],
+    chatCollaboration: 'plan',
+    initialBuffer: [
+      {
+        seq: 1,
+        event: {
+          kind: 'codex-plan',
+          planId: 'p1',
+          turnId: 't1',
+          text: 'Build it',
+          phase: 'completed'
+        }
+      },
+      {
+        seq: 2,
+        event: {
+          kind: 'result',
+          subtype: 'success',
+          isError: false,
+          durationMs: 1,
+          durationApiMs: 0,
+          totalCostUsd: 0,
+          numTurns: 1,
+          stopReason: null,
+          terminalReason: null,
+          text: null,
+          modelUsage: {},
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0
+          },
+          permissionDenials: []
+        }
+      }
+    ]
+  })
+  const choice = { ...target, planId: 'p1', decision: 'implement' as const, messageId: 'm1' }
+  await ops.decidePlan(choice)
+  await ops.decidePlan(choice)
+  expect(mgr.getSessionInfo(target.tabId)?.chatCollaboration).toBe('default')
+  const events = mgr.getEventBufferSince(target.tabId, -1).map((row) => row.event)
+  expect(events.filter((event) => event.kind === 'user-message' && event.id === 'm1')).toHaveLength(
+    1
+  )
+  expect(
+    events.filter((event) => event.kind === 'codex-plan-decision' && event.phase === 'completed')
+  ).toHaveLength(1)
+})
+
+test('chat:restart replaces a live process and preserves conversation history', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  const taskId = 'task-restart-account'
+  const tabId = 'tab-restart-account'
+  const conversationId = 'old-stored-sid'
+  seedTask(
+    db,
+    taskId,
+    JSON.stringify({ 'claude-chat': { chatConversationId: conversationId } }),
+    tabId
+  )
+
+  const children: FakeChild[] = []
+  const spawnArgs: string[][] = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: (_cmd, args) => {
+      spawnArgs.push(args)
+      const child = fakeChild({ exitOnKill: true })
+      children.push(child)
+      setImmediate(() => child.emitter.emit('spawn'))
+      return child.child
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  const target = { tabId, taskId, mode: 'claude-chat', cwd: '/tmp', providerFlagsOverride: null }
+  await ipc.invoke('chat:start', target)
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 100, {
+    kind: 'assistant-text',
+    messageId: 'prior',
+    text: 'history survives'
+  })
+
+  const restarted = (await ipc.invoke('chat:restart', target)) as { sessionId: string }
+  expect(children).toHaveLength(2)
+  expect(children[0]!.kills).toContain('SIGTERM')
+  expect(spawnArgs[1]).toContain('--resume')
+  expect(restarted.sessionId).toBe(conversationId)
+  const saved = db
+    .prepare('SELECT event FROM chat_events WHERE tab_id = ? AND seq = 100')
+    .get(tabId) as { event: string } | undefined
+  expect(saved?.event).toContain('history survives')
+})
+
 test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversationId', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
@@ -723,10 +857,11 @@ test('chat:reset wipes DB and leaves the new session lazy (no spawn)', async () 
   })
 
   const ipc = createMockIpcMain()
+  const sessionStore = createFakeTaskSessionStore()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
     createSlayzoneDbAdapter(db),
-    localChatOpts(db)
+    { dataOps: createDbChatDataOps(createSlayzoneDbAdapter(db), sessionStore) }
   )
 
   await ipc.invoke('chat:reset', {
@@ -753,6 +888,18 @@ test('chat:reset wipes DB and leaves the new session lazy (no spawn)', async () 
     { chatConversationId?: string | null }
   >
   expect(cfg[mode]?.chatConversationId).toBe(null)
+  expect(sessionStore.calls).toContainEqual(
+    expect.objectContaining({
+      method: 'recordConversation',
+      args: {
+        taskId,
+        mode,
+        conversationId: null,
+        origin: 'manual-reset',
+        legacyJsonField: 'chatConversationId'
+      }
+    })
+  )
 })
 
 test('chat:setMode pre-spawn persists DB without spawning', async () => {

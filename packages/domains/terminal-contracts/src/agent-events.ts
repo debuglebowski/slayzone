@@ -44,6 +44,8 @@ export type AgentEvent =
   | HostControlRequestEvent
   | SessionSpawnEvent
   | AgentPlanEvent
+  | CodexPlanEvent
+  | CodexPlanDecisionEvent
   | UserMessageDeliveryEvent
   | HeartbeatEvent
   | CommandLifecycleEvent
@@ -68,6 +70,24 @@ export interface AgentPlanEvent {
   /** Optional one-line rationale from the agent. */
   explanation?: string
   steps: AgentPlanStep[]
+}
+
+/** Codex Plan mode's proposed plan, distinct from its progress checklist. */
+export interface CodexPlanEvent {
+  kind: 'codex-plan'
+  planId: string
+  turnId: string
+  text: string
+  phase: 'streaming' | 'completed'
+}
+
+/** Host-owned review state; replay keeps plan approval stable after reload. */
+export interface CodexPlanDecisionEvent {
+  kind: 'codex-plan-decision'
+  planId: string
+  decision: 'implement' | 'keep-planning'
+  messageId?: string
+  phase: 'requested' | 'completed'
 }
 
 export interface AgentPlanStep {

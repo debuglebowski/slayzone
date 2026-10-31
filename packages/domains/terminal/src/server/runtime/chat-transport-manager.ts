@@ -1952,6 +1952,16 @@ export function dispatchUserMessage(
   return { id: message.id, state }
 }
 
+/** Persist a host-owned Codex plan review decision in the chat event log. */
+export function recordCodexPlanDecision(
+  tabId: string,
+  event: Extract<AgentEvent, { kind: 'codex-plan-decision' }>
+): void {
+  const tab = tabs.get(tabId)
+  if (!tab || tab.closed) throw new ChatTransportError(`No chat session for tab ${tabId}`)
+  routeHostEvent(tab, event)
+}
+
 /** Legacy text send (queue drain, tests): a message with a fresh id. False: no tab. */
 export function sendUserMessage(tabId: string, text: string): boolean {
   const tab = tabs.get(tabId)

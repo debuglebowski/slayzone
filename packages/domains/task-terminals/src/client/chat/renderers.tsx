@@ -967,6 +967,7 @@ export function renderTool(invocation: ToolInvocation, timestamp?: number): Reac
  */
 export function isRenderable(item: TimelineItem): boolean {
   if (item.kind === 'session-start') return false
+  if (item.kind === 'codex-plan-decision') return false
   if (item.kind === 'rate-limit' && item.status === 'allowed') return false
   // Launcher tool is rendered inside SubAgentRow's accordion, not at root.
   if (item.kind === 'tool' && isAgentLauncherToolName(item.invocation.name)) return false
@@ -1017,6 +1018,21 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <ConversationBranchRow key={key} item={item} />
     case 'plan':
       return <PlanBlock key={key} item={item} />
+    case 'codex-plan':
+      return (
+        <AssistantText
+          key={key}
+          item={{
+            kind: 'text',
+            role: 'assistant',
+            messageId: item.planId,
+            text: item.text,
+            timestamp: item.timestamp
+          }}
+        />
+      )
+    case 'codex-plan-decision':
+      return null
     case 'compaction':
       return <CompactionRow key={key} item={item} />
     case 'command-output':

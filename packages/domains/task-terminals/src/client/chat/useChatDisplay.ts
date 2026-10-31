@@ -49,6 +49,7 @@ function itemKeyOf(item: TimelineItem, row: number): Key {
   if (streamKey) return streamKey
   if (item.kind === 'text' || item.kind === 'thinking') return `${item.kind}:${item.messageId}`
   if (item.kind === 'session-start') return `session:${item.sessionId}`
+  if (item.kind === 'codex-plan') return `codex-plan:${item.planId}`
   if (item.kind === 'conversation-branch') return item.id
   if (item.kind === 'user-text' && item.id) return `user-text:${item.id}`
   if (item.kind === 'result') return `result:${item.timestamp}:${row}`
@@ -111,6 +112,8 @@ export function stableAnchorKey(item: TimelineItem): string | null {
       )
     case 'hook':
       return item.hookId ? `hook:${item.hookId}` : null
+    case 'codex-plan':
+      return `codex-plan:${item.planId}`
     case 'sub-agent':
       return `sub-agent:${item.toolUseId}`
     case 'notice':
@@ -271,6 +274,9 @@ export function useChatDisplay({
         out.push(item)
       } else if (item.kind === 'text' && item.role === 'assistant') {
         pendingFinal = item
+      } else if (item.kind === 'codex-plan') {
+        flushPending()
+        out.push(item)
       } else if (
         item.kind === 'tool' &&
         (item.invocation.name === 'ExitPlanMode' || item.invocation.name === 'AskUserQuestion')
@@ -429,6 +435,8 @@ export function useChatDisplay({
           }
           case 'text':
             return it.text
+          case 'codex-plan':
+            return it.text
           case 'thinking':
             return `[thinking] ${it.text}`
           case 'result':
@@ -466,8 +474,10 @@ export function useChatDisplay({
   }, [hasUnloaded, pinPages, copyNow])
 
   const copyLastResponse = useCallback(() => {
-    const last = [...displayedTimeline].reverse().find((it) => it.kind === 'text')
-    if (last && last.kind === 'text') {
+    const last = [...displayedTimeline]
+      .reverse()
+      .find((it) => it.kind === 'text' || it.kind === 'codex-plan')
+    if (last && (last.kind === 'text' || last.kind === 'codex-plan')) {
       void safeClipboardWriteText(last.text)
       toast('Last response copied')
     } else {

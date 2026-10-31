@@ -213,6 +213,32 @@ describe('which model and effort a turn sends', () => {
   })
 })
 
+describe('Plan mode proposal', () => {
+  it('uses completed plan item text, even when streamed text differs', async () => {
+    const h = await harness({ chatCollaboration: 'plan' })
+    await turn(h)
+    await h.feed({
+      method: 'item/started',
+      params: { item: { type: 'plan', id: 'plan-1', text: '' }, turnId: 'turn-1' }
+    })
+    await h.feed({
+      method: 'item/plan/delta',
+      params: { itemId: 'plan-1', turnId: 'turn-1', delta: 'draft' }
+    })
+    await h.feed({
+      method: 'item/completed',
+      params: { item: { type: 'plan', id: 'plan-1', text: 'final plan' }, turnId: 'turn-1' }
+    })
+    expect(h.emitted).toContainEqual({
+      kind: 'codex-plan',
+      planId: 'plan-1',
+      turnId: 'turn-1',
+      text: 'final plan',
+      phase: 'completed'
+    })
+  })
+})
+
 describe('readable errors', () => {
   const blob = (message: string, code = 'model_not_found') =>
     JSON.stringify({

@@ -14,6 +14,7 @@ import { chatCapabilitiesForMode, type PermissionDecision } from '@slayzone/term
 import { hasPendingPrompt } from '@slayzone/terminal/chat-prompts'
 import { LiveBlockStore, LiveBlockStoreContext } from '@slayzone/terminal/live-blocks'
 import { isAwaitingUserQuestion } from '@slayzone/terminal/reducer'
+import { selectCodexPlanReview } from '@slayzone/terminal/reducer'
 import {
   type ComponentRef,
   type JSX,
@@ -36,6 +37,7 @@ import {
 import type { ChromeColors } from '../theme'
 import { BackgroundJobs } from './BackgroundJobs'
 import { ChatControls } from './ChatControls'
+import { CodexPlanPrompt } from './CodexPlanPrompt'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatViewContext, type ChatViewValue } from './ChatViewContext'
 import { Composer } from './Composer'
@@ -131,6 +133,16 @@ function ChatView({ target }: { target: ChatTarget }) {
     if (hit) slash.bump({ source: hit.source, name: hit.name })
   })
   const settings = useChatSettings(target, state.permissionMode, notify)
+  const codexPlanReview = useMemo(
+    () =>
+      target.mode === 'codex-chat'
+        ? selectCodexPlanReview(
+            state.timeline,
+            settings.collaboration === 'plan' ? 'plan' : 'default'
+          )
+        : null,
+    [target.mode, state.timeline, settings.collaboration]
+  )
 
   const [restarting, setRestarting] = useState(false)
   const ended = state.sessionEnded && !state.notStarted && !restarting
@@ -233,6 +245,15 @@ function ChatView({ target }: { target: ChatTarget }) {
             working={session.inFlight && !awaitingUser}
             emptyText="Send a message to start."
           />
+          {codexPlanReview && (
+            <CodexPlanPrompt
+              key={codexPlanReview.planId}
+              review={codexPlanReview}
+              target={target}
+              onResolved={settings.syncCollaboration}
+              notify={notify}
+            />
+          )}
           {session.loadError && (
             <View style={s.bar}>
               <Text style={s.barText} numberOfLines={2}>

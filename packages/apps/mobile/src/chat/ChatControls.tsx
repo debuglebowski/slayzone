@@ -17,7 +17,7 @@ import {
 import { useThemedStyles } from './styles'
 import type { ChatSettings } from './useChatSettings'
 
-type Picker = 'mode' | 'model' | 'effort'
+type Picker = 'mode' | 'model' | 'effort' | 'collaboration'
 
 export function ChatControls({ mode, settings }: { mode: string; settings: ChatSettings }) {
   const { s } = useThemedStyles(makeStyles)
@@ -52,7 +52,17 @@ export function ChatControls({ mode, settings }: { mode: string; settings: ChatS
               value: settings.effort,
               pick: (id) => void settings.setEffort(id).catch(() => undefined)
             }
-          : null
+          : picker === 'collaboration'
+            ? {
+                title: 'Collaboration mode',
+                options: [
+                  { id: 'default', label: 'Default', description: 'Implement and edit' },
+                  { id: 'plan', label: 'Plan', description: 'Explore and propose' }
+                ],
+                value: settings.collaboration,
+                pick: (id) => void settings.setCollaboration(id).catch(() => undefined)
+              }
+            : null
 
   return (
     <View style={s.bar}>
@@ -80,6 +90,15 @@ export function ChatControls({ mode, settings }: { mode: string; settings: ChatS
           busy={settings.changing.effort}
           onPress={() => setPicker('effort')}
           a11y="Effort"
+          s={s}
+        />
+      )}
+      {mode === 'codex-chat' && (
+        <Chip
+          label={settings.collaboration === 'plan' ? 'Plan' : 'Default'}
+          busy={settings.changing.collaboration}
+          onPress={() => setPicker('collaboration')}
+          a11y="Collaboration mode"
           s={s}
         />
       )}

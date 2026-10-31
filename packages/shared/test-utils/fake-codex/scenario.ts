@@ -165,6 +165,14 @@ const agentItem = (id: string, text: string) => ({
 
 /** Notifications, in codex-cli 0.159.2's shapes. */
 export const cx = {
+  planStarted: (id: string): CodexNotification =>
+    item('item/started', { type: 'plan', id, text: '' }),
+  planDelta: (id: string, delta: string): CodexNotification => ({
+    method: 'item/plan/delta',
+    params: { ...T, itemId: id, delta }
+  }),
+  planCompleted: (id: string, text: string): CodexNotification =>
+    item('item/completed', { type: 'plan', id, text }),
   notification: (method: string, params: unknown): CodexNotification => ({ method, params }),
   agentStarted: (id: string): CodexNotification => item('item/started', agentItem(id, '')),
   agentDelta: (itemId: string, delta: string): CodexNotification => ({

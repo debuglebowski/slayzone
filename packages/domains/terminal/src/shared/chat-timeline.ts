@@ -269,6 +269,24 @@ export type TimelineItem =
       timestamp: number
       parentToolUseId?: string
     }
+  | {
+      kind: 'codex-plan'
+      planId: string
+      turnId: string
+      text: string
+      phase: 'streaming' | 'completed'
+      timestamp: number
+      parentToolUseId?: string
+    }
+  | {
+      kind: 'codex-plan-decision'
+      planId: string
+      decision: 'implement' | 'keep-planning'
+      messageId?: string
+      phase: 'requested' | 'completed'
+      timestamp: number
+      parentToolUseId?: string
+    }
   | { kind: 'unknown'; reason: string; timestamp: number; parentToolUseId?: string }
   | {
       /** End of a turn: the files the agent's file tools changed in it (`withTurnFilesChanged`). */
@@ -1714,6 +1732,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         const it = rowAt(state.timeline, i)
         if (it.kind === 'user-text') break
         if (it.kind === 'text' && it.role === 'assistant') texts.unshift(it.text)
+        if (it.kind === 'codex-plan') texts.unshift(it.text)
         if (it.kind === 'command-output') texts.unshift(it.text)
       }
       const copyText = texts.length > 0 ? texts.join('\n\n') : null
@@ -1907,6 +1926,34 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       }
       return { ...state, timeline: appended(state.timeline, item) }
     }
+    case 'codex-plan': {
+      const at = state.timeline.findIndex(
+        (row) => row?.kind === 'codex-plan' && row.planId === event.planId
+      )
+      if (at >= 0) {
+        const previous = rowAt(state.timeline, at) as Extract<TimelineItem, { kind: 'codex-plan' }>
+        const next = writable(state.timeline)
+        next[at] = {
+          ...previous,
+          text: event.phase === 'completed' ? event.text : previous.text + event.text,
+          phase: event.phase
+        }
+        return { ...state, timeline: next }
+      }
+      return {
+        ...state,
+        timeline: appended(state.timeline, {
+          kind: 'codex-plan',
+          planId: event.planId,
+          turnId: event.turnId,
+          text: event.text,
+          phase: event.phase,
+          timestamp: ts
+        })
+      }
+    }
+    case 'codex-plan-decision':
+      return { ...state, timeline: appended(state.timeline, { ...event, timestamp: ts }) }
     case 'compact-status': {
       if (event.phase === 'started')
         return state.compacting ? state : { ...state, compacting: true }
@@ -3154,3 +3201,5 @@ function findShellByShellId(state: ChatTimelineState, shellId: string): BgShell 
   }
   return null
 }
+
+export { selectCodexPlanReview, type CodexPlanReview } from './codex-plan-review'

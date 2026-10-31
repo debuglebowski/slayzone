@@ -697,6 +697,16 @@ class CodexChatSession implements ChatSessionDriver {
           if (typeof item.text === 'string' && item.text)
             out.push({ kind: 'assistant-text', messageId: item.id, text: item.text })
           break
+        case 'plan':
+          if (typeof item.text === 'string' && item.text.trim())
+            out.push({
+              kind: 'codex-plan',
+              planId: item.id,
+              turnId: turn.id,
+              text: item.text,
+              phase: 'completed'
+            })
+          break
         case 'reasoning': {
           const text = [...(item.summary ?? []), ...(item.content ?? [])]
             .filter((t): t is string => typeof t === 'string')
@@ -1123,6 +1133,18 @@ class CodexChatSession implements ChatSessionDriver {
       case 'item/agentMessage/delta':
         this.onDelta(ctx, params as CodexDeltaNotification, 'text', 'agentMessage')
         return
+      case 'item/plan/delta': {
+        const p = params as CodexDeltaNotification
+        if (p?.itemId && typeof p.delta === 'string')
+          this.emit(ctx, {
+            kind: 'codex-plan',
+            planId: p.itemId,
+            turnId: p.turnId,
+            text: p.delta,
+            phase: 'streaming'
+          })
+        return
+      }
       case 'item/reasoning/textDelta':
       case 'item/reasoning/summaryTextDelta':
         this.onDelta(ctx, params as CodexDeltaNotification, 'thinking', 'reasoning')
@@ -1215,6 +1237,17 @@ class CodexChatSession implements ChatSessionDriver {
     const item = params?.item
     if (!item) return
     if (item.type === 'userMessage') return
+    if (item.type === 'plan') {
+      if (typeof item.text === 'string')
+        this.emit(ctx, {
+          kind: 'codex-plan',
+          planId: item.id,
+          turnId: params.turnId,
+          text: item.text,
+          phase: 'completed'
+        })
+      return
+    }
     if (item.type === 'agentMessage' || item.type === 'reasoning') {
       if (this.streamItemId === item.id) this.closeStream(ctx)
       return

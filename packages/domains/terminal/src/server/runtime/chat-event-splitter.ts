@@ -133,6 +133,11 @@ export class ChatEventSplitter {
       case 'cli-models':
         // Describes the CLI, not the conversation (stored per project instead).
         return { live: [event], saved: [] }
+      case 'codex-plan':
+        // Stream fragments are preview-only. Completed item text is authoritative.
+        return event.phase === 'streaming'
+          ? { live: [event], saved: [] }
+          : { live: [], saved: [event] }
       default: {
         if (endsTurn(event.kind)) return { live: [], saved: [...this.closeOpen(), event] }
         return { live: [], saved: [event] }

@@ -141,6 +141,13 @@ export const TimelineRow = memo(function TimelineRow({
           ))}
         </View>
       )
+    case 'codex-plan':
+      return (
+        <View style={s.box}>
+          <Text style={s.caption}>Plan</Text>
+          <Markdown text={item.text} />
+        </View>
+      )
     default:
       return null
   }

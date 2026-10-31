@@ -83,6 +83,45 @@ describe('ChatSession: the folder it runs in', () => {
   })
 })
 
+describe('ChatSession: Codex plan approval', () => {
+  it('offers implementation and sends decision to hub', async () => {
+    const hub = fakeHub({
+      tabId: TAB,
+      taskId: TASK,
+      session: { taskId: TASK, cwd: '/w', chatCollaboration: 'plan' }
+    })
+    await open(hub, 'codex-chat')
+    await screen.findByText('Send a message to start.')
+    await hubSends(hub, [
+      { kind: 'codex-plan', planId: 'p1', turnId: 't1', text: '# Build it', phase: 'completed' },
+      {
+        kind: 'result',
+        subtype: 'success',
+        isError: false,
+        durationMs: 1,
+        durationApiMs: 0,
+        numTurns: 1,
+        totalCostUsd: 0,
+        stopReason: null,
+        terminalReason: null,
+        text: null,
+        modelUsage: {},
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0
+        },
+        permissionDenials: []
+      }
+    ])
+    expect(await screen.findByText('Implement this plan?')).toBeOnTheScreen()
+    await userEvent.setup().press(screen.getByText('Implement'))
+    await waitFor(() => expect(hub.callsTo('chat.decidePlan')).toHaveLength(1))
+    expect(hub.callsTo('chat.decidePlan')[0]).toMatchObject({ planId: 'p1', decision: 'implement' })
+  })
+})
+
 describe('ChatSession: sending', () => {
   it('keeps a message the hub did not take on screen, and retries it under the same id', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })

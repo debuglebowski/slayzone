@@ -53,6 +53,7 @@ const HANDLED_NOTIFICATIONS = new Set([
   'item/started',
   'item/completed',
   'item/agentMessage/delta',
+  'item/plan/delta',
   'item/reasoning/textDelta',
   'item/reasoning/summaryTextDelta',
   'thread/tokenUsage/updated',
@@ -79,7 +80,6 @@ const KNOWN_UNHANDLED: Record<string, string> = {
   'item/fileChange/outputDelta': 'live progress of a patch being applied',
   'item/fileChange/patchUpdated': 'a patch changed while it was being applied',
   'item/mcpToolCall/progress': 'progress of a running MCP tool',
-  'item/plan/delta': 'plan-mode plan text, streamed',
   'item/reasoning/summaryPartAdded':
     'section break between reasoning summary parts (parts run together)',
   'turn/diff/updated': "the turn's unified diff (files-changed panel)",
@@ -275,6 +275,7 @@ const SAMPLE: Record<string, Json> = {
   'item/started': { item: { type: 'commandExecution', id: 'i1', command: 'ls', cwd: '/w' } },
   'item/completed': { item: { type: 'commandExecution', id: 'i1', status: 'completed' } },
   'item/agentMessage/delta': { itemId: 'a1', delta: 'hi' },
+  'item/plan/delta': { itemId: 'p1', delta: 'draft' },
   'item/reasoning/textDelta': { itemId: 'r1', delta: 'hm' },
   'item/reasoning/summaryTextDelta': { itemId: 'r1', delta: 'hm' },
   'turn/plan/updated': { explanation: null, plan: [{ step: 's', status: 'pending' }] },

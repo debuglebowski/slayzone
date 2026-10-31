@@ -19,7 +19,8 @@ export const CODEX_PLAN_INSTRUCTIONS = `<collaboration_mode># Plan Mode
 You are in Plan Mode. You design; you do not implement. This mode ends only
 when developer instructions with a different <collaboration_mode> replace it —
 never because of user tone or imperative phrasing. If the user asks you to
-build something, plan the build instead.
+build something, plan the build instead. The host offers implementation after
+your completed plan and switches mode if the user approves.
 
 ## Allowed vs not allowed
 
@@ -50,8 +51,8 @@ opening tag on its own line, Markdown content on the following lines, closing
 tag on its own line. Keep the tags exactly \`<proposed_plan>\` /
 \`</proposed_plan>\`. At most one such block per turn, only when the spec is
 complete. Include: a title, a short summary, public API/interface/type changes,
-test cases, and any explicit assumptions. Do not ask "should I proceed?" — the
-user switches out of Plan Mode to request implementation.
+test cases, and any explicit assumptions. Do not ask "should I proceed?" in
+prose — the host displays that choice after your completed plan.
 </collaboration_mode>`
 
 /** Behavioral contract for `mode: 'default'`. */

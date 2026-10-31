@@ -6,6 +6,7 @@ import {
   hydrateSession,
   ensureSpawned,
   dispatchUserMessage,
+  recordCodexPlanDecision,
   respawn,
   getReplay,
   openTimeline,
@@ -656,6 +657,23 @@ export function createChatOps(opts: ChatHandlerOpts) {
   // The local-DB impl (same SQL as before the hub/computer split) is built by
   // the composition root, which owns the task-side `taskStore` it needs.
   const data = opts.dataOps
+  const planDecisionLocks = new Map<string, Promise<void>>()
+  async function withPlanDecisionLock<T>(tabId: string, action: () => Promise<T>): Promise<T> {
+    const previous = planDecisionLocks.get(tabId) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const queued = previous.then(() => current)
+    planDecisionLocks.set(tabId, queued)
+    await previous
+    try {
+      return await action()
+    } finally {
+      release()
+      if (planDecisionLocks.get(tabId) === queued) planDecisionLocks.delete(tabId)
+    }
+  }
   // Last CLI command list stored per task + mode — `turn-init` repeats it every
   // turn, so only a changed list is written.
   const storedCliLists = new Map<string, CliCommandList>()
@@ -871,6 +889,11 @@ export function createChatOps(opts: ChatHandlerOpts) {
         admission: o.reason === 'restore' ? 'background' : 'foreground'
       })
       return ensureSpawned(o.tabId)
+    },
+
+    /** Replace the running process while retaining this tab's conversation and events. */
+    restart: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      return respawn(o.tabId, await buildHydrateOpts(data, o, { fresh: false }))
     },
 
     /**
@@ -1190,8 +1213,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
     },
 
     /**
-     * Atomic reset: kills the current session, wipes persisted history + queue +
-     * stored conversation id, and re-hydrates a fresh skeleton in one call. The
+     * Atomic reset: kills the current session, wipes this tab's cached events +
+     * queue, records a ledger reset, and re-hydrates a fresh skeleton in one call. The
      * fresh skeleton is `not-spawned` — no subprocess until the user's next
      * `chat:send`. Matches the lazy-spawn end-to-end semantics: nothing runs
      * until the user actually engages. Inlining the whole sequence here closes a
@@ -1211,11 +1234,14 @@ export function createChatOps(opts: ChatHandlerOpts) {
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
-      try {
-        await data.clearChatConversationId(o.taskId, o.mode)
-      } catch (err) {
-        console.error('[chat-handlers] clearChatConversationId failed:', err)
-      }
+      await data.recordConversation({
+        taskId: o.taskId,
+        mode: o.mode,
+        conversationId: null,
+        origin: 'manual-reset',
+        legacyJsonField: 'chatConversationId'
+      })
+      await data.clearChatConversationId(o.taskId, o.mode)
       return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
     },
 
@@ -1501,6 +1527,91 @@ export function createChatOps(opts: ChatHandlerOpts) {
       return created
     },
 
+    decidePlan: async (
+      o: ChatCreateOpts & {
+        planId: string
+        decision: 'implement' | 'keep-planning'
+        messageId?: string
+      }
+    ): Promise<{
+      status: 'completed'
+      chatCollaboration: ChatCollaborationMode
+      messageId?: string
+    }> =>
+      withPlanDecisionLock(o.tabId, async () => {
+        if (o.mode !== 'codex-chat') throw new Error('Plan approval requires Codex chat')
+        const events = getEventBufferSince(o.tabId, -1).map((entry) => entry.event)
+        const decisions = events.filter(
+          (event): event is Extract<AgentEvent, { kind: 'codex-plan-decision' }> =>
+            event.kind === 'codex-plan-decision' && event.planId === o.planId
+        )
+        const existing = decisions.at(-1)
+        if (existing && existing.decision !== o.decision) throw new Error('Plan already reviewed')
+        if (existing?.phase === 'completed')
+          return {
+            status: 'completed',
+            chatCollaboration: existing.decision === 'implement' ? 'default' : 'plan',
+            ...(existing.messageId ? { messageId: existing.messageId } : {})
+          }
+
+        if (!existing) {
+          const latestPlan = events.findLastIndex((event) => event.kind === 'codex-plan')
+          const plan = events[latestPlan]
+          if (
+            latestPlan < 0 ||
+            plan?.kind !== 'codex-plan' ||
+            plan.planId !== o.planId ||
+            plan.phase !== 'completed'
+          )
+            throw new Error('Plan is no longer current')
+          const later = events.slice(latestPlan + 1)
+          if (later.some((event) => event.kind === 'user-message'))
+            throw new Error('Plan is no longer current')
+          const result = later.findLast((event) => event.kind === 'result')
+          if (result?.kind !== 'result' || result.isError)
+            throw new Error('Plan turn has not completed successfully')
+          if (getSessionInfo(o.tabId)?.chatCollaboration !== 'plan')
+            throw new Error('Plan mode is no longer active')
+        }
+
+        if (o.decision === 'keep-planning') {
+          recordCodexPlanDecision(o.tabId, {
+            kind: 'codex-plan-decision',
+            planId: o.planId,
+            decision: 'keep-planning',
+            phase: 'completed'
+          })
+          return { status: 'completed', chatCollaboration: 'plan' }
+        }
+        const messageId = existing?.messageId ?? o.messageId
+        if (!messageId) throw new Error('Implementation message ID required')
+        if (existing?.messageId && o.messageId && existing.messageId !== o.messageId)
+          throw new Error('Plan approval already uses another message ID')
+        if (!existing)
+          recordCodexPlanDecision(o.tabId, {
+            kind: 'codex-plan-decision',
+            planId: o.planId,
+            decision: 'implement',
+            messageId,
+            phase: 'requested'
+          })
+        if (getSessionInfo(o.tabId)?.chatCollaboration !== 'default')
+          await ops.setCollaboration({ ...o, chatCollaboration: 'default' })
+        const delivery = await ops.send(o.tabId, {
+          id: messageId,
+          content: [{ type: 'text', text: 'Implement the plan.' }]
+        })
+        if (delivery.state === 'failed') throw new Error('Implementation message failed to queue')
+        recordCodexPlanDecision(o.tabId, {
+          kind: 'codex-plan-decision',
+          planId: o.planId,
+          decision: 'implement',
+          messageId,
+          phase: 'completed'
+        })
+        return { status: 'completed', chatCollaboration: 'default', messageId }
+      }),
+
     getFastMode: async (taskId: string, mode: string): Promise<boolean> => {
       if (!modeSupportsFastMode(mode)) return false
       const cfg = await data.readProviderConfig(taskId, mode)
@@ -1643,6 +1754,7 @@ export function registerChatHandlers(
   ipcMain.handle('chat:supports', (_, mode: string): boolean => ops.supports(mode))
   ipcMain.handle('chat:hydrate', (_, o: ChatCreateOpts) => ops.hydrate(o))
   ipcMain.handle('chat:start', (_, o: ChatCreateOpts) => ops.start(o))
+  ipcMain.handle('chat:restart', (_, o: ChatCreateOpts) => ops.restart(o))
   ipcMain.handle('chat:send', (_, tabId: string, message: OutgoingUserMessage) =>
     ops.send(tabId, message)
   )

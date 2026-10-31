@@ -30,7 +30,7 @@ export function fakeHub(opts: {
   tabId: string
   taskId: string
   /** The tab's session on the hub; null = none yet. */
-  session?: { taskId: string; cwd: string } | null
+  session?: { taskId: string; cwd: string; chatCollaboration?: string } | null
   task?: Record<string, unknown> | null
   projects?: Array<Record<string, unknown>>
 }): FakeHub {
@@ -76,10 +76,17 @@ export function fakeHub(opts: {
     'chat.getModel': () => 'opus',
     'chat.getModels': () => [],
     'chat.getEffort': () => null,
+    'chat.getCollaboration': () => opts.session?.chatCollaboration ?? null,
     'chat.getAutoEligibility': () => ({ eligible: false, optedIn: false }),
     'chat.setMode': (input) => ({ chatMode: input.chatMode }),
     'chat.setModel': (input) => ({ chatModel: input.chatModel }),
     'chat.setEffort': (input) => ({ chatEffort: input.chatEffort }),
+    'chat.setCollaboration': (input) => ({ chatCollaboration: input.chatCollaboration }),
+    'chat.decidePlan': (input) => ({
+      status: 'completed',
+      chatCollaboration: input.decision === 'implement' ? 'default' : 'plan',
+      messageId: input.messageId
+    }),
     'chat.listSkills': () => [],
     'chat.listCommands': () => [],
     'chat.listAgents': () => [],

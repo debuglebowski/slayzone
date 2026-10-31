@@ -112,5 +112,10 @@ export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollab
     [chatCollaboration, collaborationChanging, tabId, taskId, mode, cwd, trpcClient]
   )
 
-  return { chatCollaboration, collaborationChanging, handleCollaborationChange }
+  return {
+    chatCollaboration,
+    collaborationChanging,
+    handleCollaborationChange,
+    syncCollaboration: setChatCollaborationState
+  }
 }
