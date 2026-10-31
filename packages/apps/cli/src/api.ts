@@ -6,6 +6,7 @@ interface ApiTarget {
   baseUrl: string
   token: string | null
   hub: boolean
+  relay?: boolean
 }
 
 /**
@@ -24,7 +25,8 @@ interface ApiTarget {
  */
 async function resolveTarget(): Promise<ApiTarget> {
   const hub = resolveTaskCommandTarget()
-  if (hub) return { baseUrl: hub.baseUrl, token: hub.token, hub: true }
+  if (hub)
+    return { baseUrl: hub.baseUrl, token: hub.token, hub: true, relay: hub.source === 'relay' }
   // A task terminal with no address belongs to the app whose root it names, and the
   // probe below checks exactly that. With no root either, nothing can tell the app
   // that spawned it from any other: refuse rather than act on a guess. (Every app
@@ -74,7 +76,11 @@ function withAuth(init: RequestInit | undefined, token: string | null): RequestI
 }
 
 function connectError(target: ApiTarget): never {
-  if (target.hub) {
+  if (target.relay) {
+    console.error(
+      'Task CLI relay is unavailable. Check the computer connection and open a new task terminal.'
+    )
+  } else if (target.hub) {
     console.error(`Could not connect to SlayZone hub at ${target.baseUrl}.`)
   } else {
     console.error('SlayZone is not running (could not connect to app).')

@@ -206,6 +206,10 @@ export interface ComputerPeer {
 }
 
 export interface HubComputerGateway {
+  /** Private CLI tunnel dispatcher; receives identity from the authed socket. */
+  setCliRelayHandler(
+    handler: ((computerId: string, method: string, params: unknown) => Promise<unknown>) | null
+  ): void
   /**
    * Whether to complete a `/computers` upgrade from `peer` (T-26). Call it BEFORE the
    * upgrade, in the same tick as `handleConnection` would follow it: a refusal costs
@@ -789,6 +793,18 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       return
     }
     markAlive(conn)
+    if (method.startsWith('cli.v1.') && cliRelayHandler) {
+      void cliRelayHandler(conn.descriptor.computerId, method, params).then(
+        (result) => conn.rpc.respond(id, result),
+        () =>
+          conn.rpc.respondError(
+            id,
+            JSON_RPC_METHOD_NOT_FOUND,
+            'CLI relay request refused or closed'
+          )
+      )
+      return
+    }
     switch (method) {
       case ComputerToHubMethods.heartbeat: {
         const parsed = heartbeatParamsSchema.safeParse(params ?? {})
@@ -934,7 +950,13 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     return byComputerId.get(computerId) ?? null
   }
 
+  let cliRelayHandler:
+    | ((computerId: string, method: string, params: unknown) => Promise<unknown>)
+    | null = null
   return {
+    setCliRelayHandler(handler) {
+      cliRelayHandler = handler
+    },
     events,
     admitUpgrade,
     handleConnection,

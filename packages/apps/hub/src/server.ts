@@ -22,6 +22,7 @@ import {
   createDevicePage,
   createWebSignIn,
   ENTRA_AUTHORITY,
+  findHubAccount,
   loadEntraClientCredential
 } from '@slayzone/hub-auth/server'
 import {
@@ -93,6 +94,7 @@ import type { ServerHandle, StartServerConfig } from './index.js'
 import { withSecurityHeaders } from './security-headers.js'
 import { createWarmWindowSockets } from './warm-window-sockets.js'
 import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
+import { createHubCliRelay } from './cli-relay'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -525,7 +527,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (handleWebAssets(WEB_ROOT, req, res)) return
     mcpRest.app(req, res)
   }
+  let cliRelay: ReturnType<typeof createHubCliRelay> | null = null
   const gatedDispatch = withRestAuth({
+    resolveInternalPrincipal: (req) => cliRelay?.principalOf(req),
     getHubAuthRequired: () => hubAuthRequired,
     getSsoActive: () => boot.ssoActive,
     // Off: every password route answers 403 HUB_PASSWORD_DISABLED before the gate (T-10).
@@ -550,6 +554,19 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       publicAddress: boot.publicAddress,
       telemetry: switches.enableTelemetry
     })
+  )
+  cliRelay = createHubCliRelay({
+    computer: async (id) =>
+      (await db.get<{ owner_user_id: string | null; revoked_at: string | null }>(
+        'SELECT owner_user_id, revoked_at FROM computers WHERE id = ?',
+        [id]
+      )) ?? null,
+    account: async (id) => (hubAuth ? findHubAccount(hubAuth, id) : null),
+    dispatch: gatedDispatch
+  })
+  computerGateway?.setCliRelayHandler(cliRelay.request)
+  computerGateway?.events.on('computer-disconnected', ({ computerId }) =>
+    cliRelay?.disconnect(computerId)
   )
 
   // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.
@@ -854,6 +871,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     stop: async () => {
       if (stopped) return
       stopped = true
+      computerGateway?.setCliRelayHandler(null)
+      cliRelay?.close()
       // FIRST, before anything that can fire a pty/chat exit handler. Closing the
       // computer gateway below disposes every session on that computer, and each exit
       // would otherwise record `terminal_tabs.agent_state = 'stopped'` — the exact

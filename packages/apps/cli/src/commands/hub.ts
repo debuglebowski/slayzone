@@ -627,6 +627,8 @@ function describeTargetSource(target: ResolvedHubTarget): string {
   switch (target.source) {
     case 'flag':
       return '--hub'
+    case 'relay':
+      return 'authenticated computer CLI relay'
     case 'break-glass':
       return `break-glass session, ${getBreakGlassSessionPath()}`
     case 'env':
@@ -641,10 +643,13 @@ function describeTargetSource(target: ResolvedHubTarget): string {
 /** `GET /health` on a target, as one `Health: …` line. */
 async function probeHealth(target: ResolvedHubTarget): Promise<{ ok: boolean; line: string }> {
   try {
-    const res = await fetch(`${target.baseUrl}/health`, {
-      headers: target.token ? { Authorization: `Bearer ${target.token}` } : {},
-      signal: AbortSignal.timeout(5000)
-    })
+    const res = await fetch(
+      `${target.baseUrl}${target.source === 'relay' ? '/api/computers' : '/health'}`,
+      {
+        headers: target.token ? { Authorization: `Bearer ${target.token}` } : {},
+        signal: AbortSignal.timeout(5000)
+      }
+    )
     return res.ok
       ? { ok: true, line: `Health: ok (HTTP ${res.status})` }
       : { ok: false, line: `Health: failed (HTTP ${res.status})` }
@@ -664,16 +669,28 @@ export function hubCommand(): Command {
   // slay hub ls
   cmd
     .command('ls')
-    .description('List the hubs running on this machine')
+    .description('List local hubs and the remote task hub target')
     .option('--json', 'Output as JSON')
-    .action(async (opts: { json?: boolean }) => {
+    .option('--json-v2', 'Output versioned JSON including the task hub target')
+    .action(async (opts: { json?: boolean; jsonV2?: boolean }) => {
       const hubs = await discoverAllHubs()
+      const target = isTaskTerminal() ? resolveTaskCommandTarget() : null
+      const url = target?.hubUrl ?? target?.baseUrl
+      const taskHub = url
+        ? { url, connection: target!.source === 'relay' ? 'relay' : 'configured', verified: false }
+        : null
+      if (opts.jsonV2) {
+        console.log(JSON.stringify({ version: 2, hubs, taskHub }, null, 2))
+        return
+      }
       if (opts.json) {
         console.log(JSON.stringify(hubs, null, 2))
         return
       }
       if (hubs.length === 0) {
-        console.log('No hubs running. Create one with `slay hub create <name>`.')
+        if (taskHub)
+          console.log(`Task hub: ${taskHub.url} (${taskHub.connection}; connection not checked)`)
+        else console.log('No hubs running. Create one with `slay hub create <name>`.')
         return
       }
       const nameW = Math.max(4, ...hubs.map((h) => h.name.length))
@@ -708,6 +725,8 @@ export function hubCommand(): Command {
             `${formatUptime(h.uptimeMs)}${mine}`
         )
       }
+      if (taskHub)
+        console.log(`\nTask hub: ${taskHub.url} (${taskHub.connection}; connection not checked)`)
     })
 
   // slay hub create <name>
@@ -1272,7 +1291,7 @@ export function hubCommand(): Command {
           console.log(`  Hub:    ${none}`)
           continue
         }
-        console.log(`  Hub:    ${target.baseUrl}`)
+        console.log(`  Hub:    ${target.hubUrl ?? target.baseUrl}`)
         console.log(`  Source: ${describeTargetSource(target)}`)
         console.log(`  Token:  ${target.token ? 'set' : 'not set'}`)
         // One probe per distinct target: both blocks usually name the same one.

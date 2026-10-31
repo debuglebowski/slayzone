@@ -2,6 +2,8 @@ import type { Express } from 'express'
 import { resolveProjectByPath } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
+import { restComputerOf } from '../principal'
+import { ownedProjectIdsOrAll } from '../../owner-scope'
 
 /**
  * GET /api/projects/resolve-by-path?path=<dir> — which project contains this
@@ -21,7 +23,11 @@ export function registerProjectsResolveByPathRoute(app: Express, deps: RestApiDe
       return
     }
     try {
-      const best = await resolveProjectByPath(deps.db, dirPath)
+      const computerId = restComputerOf(req)
+      const best = await resolveProjectByPath(deps.db, dirPath, {
+        ...(computerId ? { computerId } : {}),
+        projectIds: await ownedProjectIdsOrAll()
+      })
       if (!best) {
         res.status(404).json({ ok: false, error: `No project found for directory: ${dirPath}` })
         return

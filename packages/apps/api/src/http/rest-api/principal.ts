@@ -17,6 +17,16 @@ import type { RestPrincipal } from './types'
  * "no user attached" case the callers treat as such (e.g. a project with no owner).
  */
 const principals = new WeakMap<IncomingMessage, RestPrincipal>()
+const computers = new WeakMap<IncomingMessage, string>()
+
+/** Internal transport identity; no HTTP header can populate this map. */
+export function bindRestComputer(req: IncomingMessage, computerId: string): void {
+  computers.set(req, computerId)
+}
+
+export function restComputerOf(req: IncomingMessage): string | null {
+  return computers.get(req) ?? null
+}
 
 export function bindRestPrincipal(req: IncomingMessage, principal: RestPrincipal): void {
   principals.set(req, principal)

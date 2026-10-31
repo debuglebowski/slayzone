@@ -94,6 +94,7 @@ export const ProcNotifications = {
 const WRITE_ID_MEMORY = 256
 
 interface ProcSession {
+  revokeCli?: () => void
   child: ChildProcess
   /** stdout only — the replayable stream. */
   buffer: RingBuffer
@@ -237,6 +238,7 @@ export function createProcHandlers(
     // Replace any pre-existing process with the same sessionId.
     const existing = procs.get(params.sessionId)
     if (existing) {
+      existing.revokeCli?.()
       killTree(existing.child)
       procs.delete(params.sessionId)
     }
@@ -247,10 +249,12 @@ export function createProcHandlers(
     // spawn does not, so its resolved binary + argv reach execve untouched and a
     // missing binary still reports ENOENT via `error` (null exitCode + message)
     // rather than being flattened to a shell's exit 127.
-    const env = buildSpawnEnv(ctx, params.env)
+    const capability = ctx.cliRelay?.issue()
+    const env = buildSpawnEnv(ctx, params.env, capability)
     // A literal command is looked up first, so a missing one is refused with its
     // name (the hub shows "Claude Code isn't installed") instead of a bare exit.
     if (!params.shell && resolveCommand(params.command, env, cwd) === null) {
+      capability?.revoke()
       throw refuse(
         ProcRefusalReasons.binaryNotFound,
         `${params.command} was not found on this computer's PATH`,
@@ -260,17 +264,24 @@ export function createProcHandlers(
     const invocation = params.shell
       ? buildShellInvocation(params.command)
       : { file: params.command, args: params.args ?? [] }
-    const child = spawn(invocation.file, invocation.args, {
-      ...(cwd ? { cwd } : {}),
-      env,
-      // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // Its own process group, so a kill reaches everything it started (`pnpm dev`
-      // → node → …), not just the shell — see `killTree`.
-      detached: PROCESS_TREE_DETACHED
-    })
+    let child: ChildProcess
+    try {
+      child = spawn(invocation.file, invocation.args, {
+        ...(cwd ? { cwd } : {}),
+        env,
+        // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Its own process group, so a kill reaches everything it started (`pnpm dev`
+        // → node → …), not just the shell — see `killTree`.
+        detached: PROCESS_TREE_DETACHED
+      })
+    } catch (error) {
+      capability?.revoke()
+      throw error
+    }
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: ProcSession = {
+      revokeCli: capability?.revoke,
       child,
       buffer,
       ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {}),
@@ -296,6 +307,7 @@ export function createProcHandlers(
       signal: string | null
       error?: string
     }): void => {
+      capability?.revoke()
       releaseSlot(session)
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
@@ -483,6 +495,7 @@ export function createProcHandlers(
     }
     queued.clear()
     for (const [sessionId, session] of procs) {
+      session.revokeCli?.()
       releaseSlot(session)
       killTree(session.child)
       ctx.log('proc disposed on shutdown', { sessionId })

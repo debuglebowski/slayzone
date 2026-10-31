@@ -9,6 +9,7 @@
  */
 
 import type { ComputerConfig } from '../config'
+import type { ComputerCliRelay } from '../cli-relay'
 
 /** Minimal slice of the HubDialer the handlers depend on (fire-and-forget). */
 export interface ComputerDialer {
@@ -19,6 +20,7 @@ export interface ComputerDialer {
 export type ComputerLog = (message: string, meta?: Record<string, unknown>) => void
 
 export interface HandlerContext {
+  cliRelay?: ComputerCliRelay
   dialer: ComputerDialer
   config: ComputerConfig
   log: ComputerLog

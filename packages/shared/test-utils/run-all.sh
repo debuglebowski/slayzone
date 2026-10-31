@@ -144,6 +144,11 @@ run_harness packages/apps/hub/src/leavers.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_harness packages/apps/hub/src/rest-auth.test.ts
+# Task CLI delegates through the authenticated computer connection, with session
+# capabilities, streaming, current owner checks and a real bundled CLI round trip.
+run_harness packages/apps/computer/src/cli-relay.test.ts
+run_harness packages/apps/hub/src/cli-relay.test.ts
+run_harness packages/apps/hub/src/cli-relay-integration.test.ts
 # Project ownership (T-16): the boot backfill over real hub-auth + app DB, and the
 # same through the real built hub against a v168 database (upgrade).
 run_harness packages/apps/hub/src/ownership-backfill.test.ts

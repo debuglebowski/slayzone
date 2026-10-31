@@ -30,7 +30,9 @@
  *   - `global`   — same app-wide, safe to inherit verbatim. KEEP.
  *   - `infra`    — SlayZone process wiring a terminal must not reinterpret
  *                  (hub address, ports, mode, dev toggles). STRIP.
- *   - `secret`   — credentials/tokens. Must never reach a terminal. STRIP.
+ *   - `secret`   — credentials/tokens. STRIP. Infrastructure credentials never
+ *                  reach a terminal; the computer re-adds only a freshly issued,
+ *                  session-limited CLI relay capability at the spawn boundary.
  *   - `identity` — per-task/agent identity. STRIP from the inherited base; the
  *                  caller's per-spawn overlay (buildMcpEnv) re-adds the CORRECT
  *                  value, so a terminal for task B never inherits task A's id and
@@ -56,8 +58,9 @@ export type EnvScope = 'global' | 'infra' | 'secret' | 'identity'
  * inherited value is stripped by the same default that covers a brand-new var.
  */
 export const ENV_MANIFEST: Record<string, EnvScope> = {
-  // --- secret: credentials/tokens, never in a terminal ---
+  // --- secret: credentials/tokens, never inherited into a terminal ---
   SLAYZONE_HUB_TOKEN: 'secret',
+  SLAYZONE_CLI_RELAY_TOKEN: 'secret', // computer-issued capability, re-added per session
   // HMAC signing key for ALL of hub-auth (better-auth's session/cookie signer AND
   // the computer enroll/api-key credentials) — hence `HUB_AUTH`, not the former
   // `HUB_COMPUTER_TRANSPORT_SECRET`, which named just one of its consumers. Rule 2
@@ -93,6 +96,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // name refuses to boot. Stripping both here keeps a terminal's dial address from
   // ever being mistaken for another process's listen address.
   SLAYZONE_HUB_ADDRESS: 'infra',
+  SLAYZONE_CLI_RELAY_ADDRESS: 'infra', // computer loopback; re-added per session
   SLAYZONE_HUB_LISTEN_ADDRESS: 'infra', // hub-only; where the hub listens
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; how other machines reach it, written into join tokens
   // Hub-only; the front ends (IPs/CIDRs, comma-separated) whose X-Forwarded-For names

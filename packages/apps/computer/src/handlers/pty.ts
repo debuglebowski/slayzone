@@ -82,6 +82,7 @@ const MAX_BUFFER_SIZE = 750 * 1024
 const STARTUP_KILL_REAP_MS = 2_000
 
 interface PtySession {
+  revokeCli?: () => void
   proc: pty.IPty
   buffer: RingBuffer
   /**
@@ -256,21 +257,24 @@ export function createPtyHandlers(
       sessions.delete(id)
     }
 
+    const capability = ctx.cliRelay?.issue()
     let proc: pty.IPty
     try {
       proc = spawnPty(opts.command, opts.args ?? [], {
         name: 'xterm-color',
         cwd,
-        env: buildSpawnEnv(ctx, opts.env),
+        env: buildSpawnEnv(ctx, opts.env, capability),
         cols: opts.cols ?? 80,
         rows: opts.rows ?? 24
       })
     } catch (err) {
+      capability?.revoke()
       throw explainSpawnFailure(err)
     }
 
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: PtySession = {
+      revokeCli: capability?.revoke,
       proc,
       buffer,
       id,
@@ -328,6 +332,7 @@ export function createPtyHandlers(
     })
 
     proc.onExit(({ exitCode, signal }) => {
+      capability?.revoke()
       reap(
         session,
         typeof exitCode === 'number' ? exitCode : null,
@@ -822,6 +827,7 @@ export function createPtyHandlers(
   function disposeAll(): void {
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
+      session.revokeCli?.()
       session.deadline?.cancel()
       releaseAdmission(session)
       try {

@@ -19,7 +19,7 @@ import {
   type DeniedRef
 } from '../owner-scope'
 import { restRouteKey } from './admin-routes'
-import { restPrincipalOf } from './principal'
+import { restPrincipalOf, restComputerOf } from './principal'
 
 /**
  * The owner gate (T-18) for `/api/*`, applied PER ROUTE AT REGISTRATION exactly like
@@ -140,7 +140,12 @@ export function ownerRouteGuard(
       return
     }
     const scope = createAccessScope(db, httpAccessRequest(principal.userId))
-    if (rule.ids && rule.ids.length > 0) {
+    // A computer's cwd is not a hub filesystem path. This route's handler
+    // resolves it using that computer's placements AND the carried owner scope;
+    // its output gate still checks the resolved project.
+    const computerPathLookup =
+      key === 'GET /api/projects/resolve-by-path' && restComputerOf(req) !== null
+    if (rule.ids && rule.ids.length > 0 && !computerPathLookup) {
       const denied = await firstDeniedRef(db, scope, rule.ids, {
         params: req.params,
         query: req.query,

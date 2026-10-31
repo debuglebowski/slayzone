@@ -94,7 +94,12 @@ export {
   evictAgentTree,
   resetAgentHookStateForTest
 } from './http/rest-api'
-export { bindRestPrincipal, restPrincipalOf } from './http/rest-api/principal'
+export {
+  bindRestPrincipal,
+  restPrincipalOf,
+  bindRestComputer,
+  restComputerOf
+} from './http/rest-api/principal'
 export type {
   RestApiDeps,
   RestPrincipal,

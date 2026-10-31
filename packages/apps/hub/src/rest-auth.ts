@@ -467,6 +467,9 @@ export function withRestAuth(opts: {
   /** Is this request's `Origin` the hub's own page (ws-origin.ts `cookieOriginDecision`)?
    *  Absent = never: a state-changing request never authenticates by the cookie. */
   isCookieOriginAllowed?: (req: IncomingMessage) => boolean
+  /** In-process, authenticated computer transport only. Undefined means a normal
+   * HTTP request; null means a delegated request whose identity was refused. */
+  resolveInternalPrincipal?: (req: IncomingMessage) => Promise<RestPrincipal | null> | undefined
   next: (req: IncomingMessage, res: ServerResponse) => void
 }): (req: IncomingMessage, res: ServerResponse) => void {
   const deny = (res: ServerResponse, code: 401 | 403, message: string): void => {
@@ -497,6 +500,40 @@ export function withRestAuth(opts: {
         detail: { reason, status: code }
       })
       deny(res, code, message)
+    }
+    const admitPrincipal = (principal: RestPrincipal): void => {
+      if (!principal.scopes.includes('full')) {
+        refuse(
+          403,
+          'a scoped web session cannot use the REST API — use /trpc instead',
+          'scoped_session',
+          principal.userId
+        )
+        return
+      }
+      bindRestPrincipal(req, principal)
+      admit(principal.userId)
+    }
+    const delegated = opts.resolveInternalPrincipal?.(req)
+    if (delegated) {
+      void delegated
+        .then((principal) => {
+          if (!principal && opts.getHubAuthRequired()) {
+            refuse(
+              401,
+              'Computer owner authentication unavailable. Check computer enrollment and account access.',
+              'computer_owner',
+              null
+            )
+            return
+          }
+          if (principal) admitPrincipal(principal)
+          else admit(null)
+        })
+        .catch(() =>
+          refuse(401, 'Computer owner authentication unavailable.', 'computer_owner', null)
+        )
+      return
     }
     const passwordEnabled = opts.getPasswordEnabled?.() !== false
     const passwordRefusal = passwordRouteRefusal(req.url, passwordEnabled)
@@ -604,19 +641,9 @@ export function withRestAuth(opts: {
         // yet — so `full` is the only principal class this surface accepts.
         // 403, not 401: the credential is real, just the wrong class for this
         // door — a distinction worth preserving for whoever reads the log.
-        if (!principal.scopes.includes('full')) {
-          refuse(
-            403,
-            'a scoped web session cannot use the REST API — use /trpc instead',
-            'scoped_session',
-            principal.userId
-          )
-          return
-        }
         // Route handlers read it back with `restPrincipalOf(req)` — who created a
         // project, for one (T-16).
-        bindRestPrincipal(req, principal)
-        admit(principal.userId)
+        admitPrincipal(principal)
       })
       .catch(() => {
         if (!res.headersSent) refuse(401, 'Unauthorized', 'gate_error', null)

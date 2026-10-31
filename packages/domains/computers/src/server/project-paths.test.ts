@@ -203,6 +203,21 @@ test('reverse lookup finds a project through the hub copy', async () => {
   expect(hit).toMatchObject({ id: 'p-mirror', path: '/srv/work/moved' })
 })
 
+test('reverse lookup scopes identical paths to the calling computer and accessible projects', async () => {
+  await recordComputerProjectPaths(t.db, r1, [{ projectId: 'p-mirror', path: '/repo' }])
+  await recordComputerProjectPaths(t.db, r2, [{ projectId: 'p-legacy', path: '/repo' }])
+  expect(
+    await resolveProjectByPath(t.db, '/repo/src', { computerId: r1, projectIds: ['p-mirror'] })
+  ).toMatchObject({ id: 'p-mirror' })
+  expect(
+    await resolveProjectByPath(t.db, '/repo/src', { computerId: r2, projectIds: ['p-legacy'] })
+  ).toMatchObject({ id: 'p-legacy' })
+  expect(
+    await resolveProjectByPath(t.db, '/repo/src', { computerId: r1, projectIds: ['p-legacy'] })
+  ).toBeNull()
+  expect(await resolveProjectByPath(t.db, '/legacy/root', { computerId: r1 })).toBeNull()
+})
+
 test('reverse lookup trusts a pending folder but not a missing or refused one', async () => {
   await setPlacement(t.db, {
     computerId: r1,

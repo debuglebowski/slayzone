@@ -46,6 +46,7 @@ import {
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
+import { createComputerCliRelay, type ComputerCliRelay } from './cli-relay'
 import { createFsHandlers } from './handlers/fs'
 import { createGhHandlers } from './handlers/gh'
 import { createClaudeSessionHandlers } from './handlers/claude-session'
@@ -92,6 +93,7 @@ interface HubConnection {
 }
 
 export interface HubRequestHandlerDeps {
+  cliRelayReady?: Promise<ComputerCliRelay>
   /** Trigger a graceful stop (after the ack flushes). */
   shutdown: (reason: string) => void
   /** Dialer used by streaming handlers (pty.data/exit, proc.data/exit, …). */
@@ -162,6 +164,10 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {}),
     ...(deps.hubAddress ? { hubAddress: deps.hubAddress } : {})
   }
+  const cliReady = deps.cliRelayReady?.then((relay) => {
+    ctx.cliRelay = relay
+  })
+  void cliReady?.catch(() => log('CLI relay is unavailable'))
 
   const pty = createPtyHandlers(ctx, deps.getProjectPaths, {
     ...(deps.admission ? { admission: deps.admission } : {}),
@@ -233,6 +239,12 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       throw err
     }
     try {
+      if (
+        method === HubToComputerMethods.ptySpawn ||
+        method === HubToComputerMethods.ptyWarmSpawn ||
+        method === HubToComputerMethods.procSpawn
+      )
+        await cliReady
       if (deps.pathReady && !ptyMethods.has(method)) await deps.pathReady
       const result = await entry(params)
       record('ok')
@@ -398,7 +410,11 @@ export function startComputer(
       })
       .catch((err) => log('project path map failed to load', { hubUrl, error: String(err) }))
 
+    const cliRelayReady = createComputerCliRelay(dialer)
+    // Observe startup failures even before the first spawn arrives.
+    void cliRelayReady.catch(() => log('CLI relay failed to start', { hubUrl }))
     dispatch = createHubRequestHandler({
+      cliRelayReady,
       shutdown: (reason) => {
         log('computer shutdown requested by hub', { hubUrl, reason })
         void handle.stop().then(() => deps.onShutdown?.(reason))
@@ -421,6 +437,12 @@ export function startComputer(
       log('connected to hub', { hubUrl, computerId, mode })
     )
     dialer.events.on('disconnected', ({ reason }) => {
+      void cliRelayReady.then(
+        (relay) => relay.disconnect(),
+        () => {
+          // Startup failure was already logged; there is no relay to disconnect.
+        }
+      )
       log('disconnected from hub', { hubUrl, reason })
       dispatch.hubDisconnected(String(reason))
     })
@@ -465,6 +487,12 @@ export function startComputer(
         // Kill live ptys/processes and close fs watches before the socket drops, so
         // nothing is orphaned and no handle keeps the stopped process alive.
         dispatch.dispose()
+        await cliRelayReady.then(
+          (relay) => relay.close(),
+          () => {
+            // Startup failure was already logged; there is no listener to close.
+          }
+        )
         if (agentHookServer) await agentHookServer.close()
         await dialer.stop()
       }

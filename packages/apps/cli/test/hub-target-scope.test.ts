@@ -47,6 +47,8 @@ const ENV_KEYS = [
   'SLAYZONE_TASK_ID',
   'SLAYZONE_HUB_ADDRESS',
   'SLAYZONE_HUB_TOKEN',
+  'SLAYZONE_CLI_RELAY_ADDRESS',
+  'SLAYZONE_CLI_RELAY_TOKEN',
   'SLAYZONE_ROOT',
   'SLAYZONE_DEV'
 ] as const
@@ -153,6 +155,39 @@ async function runHub(...args: string[]) {
 // --- task terminal --------------------------------------------------------
 
 describe('task terminal (SLAYZONE_TASK_ID set)', () => {
+  test('hub ls includes the remote task hub', async () => {
+    setEnv({ SLAYZONE_TASK_ID: 'task-1', SLAYZONE_HUB_ADDRESS: 'hub.example.com:443' })
+    const { stdout } = await runHub('ls', '--json-v2')
+    expect(JSON.parse(stdout.join('\n')).taskHub).toMatchObject({ url: 'https://hub.example.com' })
+  })
+
+  test('hub ls shows a loopback tunnel outside discovery; legacy JSON stays hub-shaped', async () => {
+    setEnv({ SLAYZONE_TASK_ID: 'task-1', SLAYZONE_HUB_ADDRESS: '127.0.0.1:60000' })
+    const { stdout } = await runHub('ls')
+    expect(stdout.join('\n')).toContain('http://127.0.0.1:60000')
+    const json = await runHub('ls', '--json')
+    for (const hub of JSON.parse(json.stdout.join('\n'))) {
+      expect(typeof hub.name).toBe('string')
+      expect(typeof hub.port).toBe('number')
+    }
+  })
+
+  test('task API uses its relay capability, never the stored hub bearer', async () => {
+    signInToRemote()
+    setEnv({
+      SLAYZONE_TASK_ID: 'task-1',
+      SLAYZONE_HUB_ADDRESS: 'hub.example.com',
+      SLAYZONE_CLI_RELAY_ADDRESS: new URL(app.url).host,
+      SLAYZONE_CLI_RELAY_TOKEN: 'session-capability'
+    })
+    await apiGet('/api/tasks')
+    expect(app.seen).toEqual([
+      { method: 'GET', url: '/api/tasks', auth: 'Bearer session-capability' }
+    ])
+    expect(remote.seen).toHaveLength(0)
+    expect(resolveHubCommandTarget()?.source).toBe('file')
+  })
+
   test('task commands go to the app that spawned it, never to the stored remote target', async () => {
     signInToRemote()
     setEnv({

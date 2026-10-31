@@ -41,9 +41,10 @@
  *
  * Precedence, task commands:
  *   1. `--hub`
- *   2. `SLAYZONE_HUB_ADDRESS`
- *   3. the stored target — OUTSIDE a task terminal only
- *   4. null — the local app, found by probing its fixed port (api.ts); in a task
+ *   2. computer-issued loopback CLI relay + session capability, in a task terminal
+ *   3. `SLAYZONE_HUB_ADDRESS`
+ *   4. the stored target — OUTSIDE a task terminal only
+ *   5. null — the local app, found by probing its fixed port (api.ts); in a task
  *      terminal the responder must serve this terminal's `SLAYZONE_ROOT`, and with
  *      neither that nor an address api.ts refuses rather than guess.
  *
@@ -68,10 +69,12 @@ export interface HubTarget {
 }
 
 /** Which channel a resolved target came from — `slay hub current` reports it. */
-export type HubTargetSource = 'flag' | 'break-glass' | 'env' | 'file'
+export type HubTargetSource = 'flag' | 'break-glass' | 'env' | 'file' | 'relay'
 
 export interface ResolvedHubTarget extends HubTarget {
   source: HubTargetSource
+  /** Actual hub behind a computer loopback relay; display only. */
+  hubUrl?: string
 }
 
 interface HubFileConfig {
@@ -242,12 +245,26 @@ function flagTarget(): ResolvedHubTarget | null {
   return hubOverride ? { ...hubOverride, source: 'flag' } : null
 }
 
+function relayTarget(): ResolvedHubTarget | null {
+  if (!isTaskTerminal()) return null
+  const address = process.env.SLAYZONE_CLI_RELAY_ADDRESS
+  const token = process.env.SLAYZONE_CLI_RELAY_TOKEN
+  if (!address && !token) return null // terminals opened by an older computer
+  if (!address || !/^127\.0\.0\.1:\d+$/.test(address) || !isBareAuthority(address) || !token) {
+    console.error('Invalid task CLI relay configuration. Open a new task terminal.')
+    process.exit(1)
+  }
+  return { baseUrl: `http://${address}`, token, source: 'relay', hubUrl: envTarget()?.baseUrl }
+}
+
 /**
  * Where a TASK command goes, or null for the local app (api.ts probes for it).
  * See the module header for the precedence.
  */
 export function resolveTaskCommandTarget(): ResolvedHubTarget | null {
-  return flagTarget() ?? envTarget() ?? (isTaskTerminal() ? null : storedTarget(true))
+  return (
+    flagTarget() ?? relayTarget() ?? envTarget() ?? (isTaskTerminal() ? null : storedTarget(true))
+  )
 }
 
 /**

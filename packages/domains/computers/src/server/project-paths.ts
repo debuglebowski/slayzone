@@ -218,7 +218,8 @@ export async function deleteProjectPlacements(db: SlayzoneDb, projectId: string)
  */
 export async function resolveProjectByPath(
   db: SlayzoneDb,
-  dirPath: string
+  dirPath: string,
+  options: { computerId?: string; projectIds?: readonly string[] | null } = {}
 ): Promise<{ id: string; name: string; path: string } | null> {
   const normalized = dirPath.replace(/[/\\]+$/, '')
 
@@ -226,17 +227,21 @@ export async function resolveProjectByPath(
     `SELECT p.id AS id, p.name AS name, c.root_path AS path
        FROM project_placements c
        JOIN projects p ON p.id = c.project_id
-      WHERE c.status IN (${USABLE_SQL})`
+      WHERE c.status IN (${USABLE_SQL})${options.computerId ? ' AND c.computer_id = ?' : ''}`,
+    options.computerId ? [options.computerId] : []
   )
-  const legacy = await db.all<{ id: string; name: string; path: string }>(
-    `SELECT id, name, path FROM projects WHERE path IS NOT NULL AND path <> ''`
-  )
+  const legacy = options.computerId
+    ? []
+    : await db.all<{ id: string; name: string; path: string }>(
+        `SELECT id, name, path FROM projects WHERE path IS NOT NULL AND path <> ''`
+      )
 
   let best: { id: string; name: string; path: string } | null = null
   let bestLen = -1
   // The copy first, so at equal depth a re-pointed folder wins over the stale
   // legacy value; the legacy row only decides when nothing placed matches.
   for (const candidate of [...placed, ...legacy]) {
+    if (options.projectIds && !options.projectIds.includes(candidate.id)) continue
     const candidatePath = candidate.path.replace(/[/\\]+$/, '')
     const contained =
       normalized === candidatePath ||

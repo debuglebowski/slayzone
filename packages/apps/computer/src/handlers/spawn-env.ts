@@ -7,10 +7,12 @@
 import { mergePathLists } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import type { HandlerContext } from './types'
+import type { CliRelayCapability } from '../cli-relay'
 
 export function buildSpawnEnv(
   ctx: HandlerContext,
-  overrides?: Record<string, string>
+  overrides?: Record<string, string>,
+  capability?: CliRelayCapability
 ): Record<string, string> {
   // Base channel: the computer inherits its parent (supervisor) process.env, so
   // sanitize it through the shared manifest — keep the user env (PATH/HOME/
@@ -39,6 +41,15 @@ export function buildSpawnEnv(
   // target stored by `slay hub use/login` — a remote sign-in silently retargeted
   // every agent toolbox on the machine.
   if (ctx.hubAddress) merged.SLAYZONE_HUB_ADDRESS = ctx.hubAddress
+  // Never accept relay credentials from the hub or an inherited shell. Only the
+  // computer can issue a capability for this particular spawned session.
+  delete merged.SLAYZONE_CLI_RELAY_ADDRESS
+  delete merged.SLAYZONE_CLI_RELAY_TOKEN
+  if (capability && ctx.cliRelay) {
+    delete merged.SLAYZONE_HUB_TOKEN
+    merged.SLAYZONE_CLI_RELAY_ADDRESS = new URL(ctx.cliRelay.url).host
+    merged.SLAYZONE_CLI_RELAY_TOKEN = capability.token
+  }
   // Last, so it wins over whichever channel supplied PATH (inherited or a hub
   // override): a configured override dir resolves before anything else. Node
   // looks a bare command up on `env.PATH`, so this is what an agent spawn resolves.

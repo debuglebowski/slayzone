@@ -109,6 +109,19 @@ Mode adapter builds command
 PTY data streams → xterm.js renders
 ```
 
+### Task CLI on a computer
+
+The computer gives each PTY or process a loopback CLI relay address and a session
+capability. Task CLI requests travel over its existing authenticated WebSocket,
+using bounded HTTP chunks with backpressure. The hub resolves the computer's
+current owner, then applies the ordinary REST role and project ownership gates.
+Capabilities expire with the spawned session; connection loss aborts in-flight
+requests without replaying writes. Project path lookup uses that computer's
+placements. Hub administration still requires an explicit user login.
+
+`slay hub ls` shows local hubs and the task's hub target. `--json` retains the local
+discovery array; `--json-v2` adds task-hub metadata in a versioned envelope.
+
 ## Dependency Rules
 
 1. **Apps** compose domains. No business logic.
