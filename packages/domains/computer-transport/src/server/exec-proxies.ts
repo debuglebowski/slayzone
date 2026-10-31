@@ -803,6 +803,7 @@ interface PtyEntry extends DetachableEntry {
 export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyBackend {
   const { gateway, resolveComputerId, gate } = options
   const sessions = new Map<string, PtyEntry>()
+  const spawnFlights = new Map<string, Promise<void>>()
 
   function drain(entry: PtyEntry): void {
     if (entry.sealed) return
@@ -838,6 +839,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     try {
       const res = await gateway.request(entry.computerId, HubToComputerMethods.ptyGetBufferSince, {
         sessionId: entry.sessionId,
+        ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
         seq: entry.lastSeq
       })
       if (entry.disposed) return
@@ -898,11 +900,13 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
   gateway.events.on('pty.data', (payload) => {
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
-    if (entry) ingest(entry, payload.seq, payload.data)
+    if (entry && (!payload.spawnId || !entry.spawnId || payload.spawnId === entry.spawnId))
+      ingest(entry, payload.seq, payload.data)
   })
   gateway.events.on('pty.exit', (payload) => {
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
-    if (entry) finalize(entry, payload.exitCode, payload.signal ?? null, payload.reason)
+    if (entry && (!payload.spawnId || !entry.spawnId || payload.spawnId === entry.spawnId))
+      finalize(entry, payload.exitCode, payload.signal ?? null, payload.reason)
   })
   const detach = joinDetachController<PtyEntry>({
     gateway,
@@ -1009,11 +1013,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           })
         ),
       write: (data: string): void => {
-        void send(HubToComputerMethods.ptyWrite, { sessionId, data }).catch(noop)
+        void send(HubToComputerMethods.ptyWrite, {
+          sessionId,
+          ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+          data
+        }).catch(noop)
       },
       resize: (cols: number, rows: number): void => {
         void send(HubToComputerMethods.ptyResize, {
           sessionId,
+          ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
           cols,
           rows
         }).catch(noop)
@@ -1026,7 +1035,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           // nothing: the caller ending it already owns reporting that.
           entry.disposed = true
           entry.pendingSpawn = undefined
-          sessions.delete(entry.key)
+          if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
           return
         }
         void send(HubToComputerMethods.ptyKill, {
@@ -1097,13 +1106,18 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
     async probeBackgroundJobs(sessionId: string, jobs: BackgroundJobQuery[]) {
       let computerId: string | null = null
+      let spawnId: string | undefined
       for (const entry of sessions.values()) {
-        if (entry.sessionId === sessionId && !entry.disposed) computerId = entry.computerId
+        if (entry.sessionId === sessionId && !entry.disposed) {
+          computerId = entry.computerId
+          spawnId = entry.spawnId
+        }
       }
       if (computerId === null) return null
       try {
         const res = await gateway.request(computerId, HubToComputerMethods.ptyBackgroundJobs, {
           sessionId,
+          ...(spawnId ? { spawnId } : {}),
           jobs
         })
         const parsed = ptyBackgroundJobsResultSchema.parse(res)
@@ -1162,143 +1176,190 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       if (computerId == null)
         throw new NoComputerAvailableError(`terminal session ${spec.sessionId}`)
 
-      // `pid` is null until the remote `pty.spawn` reply lands (remote ptys key by
-      // sessionId, not pid). The handle exposes it via a getter so it stays a
-      // valid `readonly pid` under the terminal `PtyHandle` seam. `onExit` adapts
-      // the wider remote `PtyExitEvent` (exitCode may be null on signal death /
-      // computer-loss; signal may be a string like 'computer-lost') to the seam's
-      // `{ exitCode: number; signal?: number }` — lossless for pty-manager, which
-      // only reads `exitCode`.
-      // The gate's answer for this spawn's task. The handle still comes back
-      // synchronously (pty-manager's local path needs that); the spawn request — and
-      // any input written meanwhile — waits behind it, and a refusal rejects
-      // `whenSpawned` without anything reaching the computer.
-      const admitted = gate ? gate(computerId, { kind: 'task', id: spec.taskId }) : null
-      const { entry, handle, setPid } = register(
-        computerId,
-        spec.sessionId,
-        spec.file,
-        false,
-        admitted
-      )
+      const key = sessionKey(computerId, spec.sessionId)
+      const start = (): PtyHandle => {
+        // `pid` is null until the remote `pty.spawn` reply lands (remote ptys key by
+        // sessionId, not pid). The handle exposes it via a getter so it stays a
+        // valid `readonly pid` under the terminal `PtyHandle` seam. `onExit` adapts
+        // the wider remote `PtyExitEvent` (exitCode may be null on signal death /
+        // computer-loss; signal may be a string like 'computer-lost') to the seam's
+        // `{ exitCode: number; signal?: number }` — lossless for pty-manager, which
+        // only reads `exitCode`.
+        // The gate's answer for this spawn's task. The handle still comes back
+        // synchronously (pty-manager's local path needs that); the spawn request — and
+        // any input written meanwhile — waits behind it, and a refusal rejects
+        // `whenSpawned` without anything reaching the computer.
+        const admitted = gate ? gate(computerId, { kind: 'task', id: spec.taskId }) : null
+        const { entry, handle, setPid } = register(
+          computerId,
+          spec.sessionId,
+          spec.file,
+          false,
+          admitted
+        )
 
-      // One key per spawn ATTEMPT, re-sent unchanged if the reply is lost — see
-      // `spawnIdField` in frames.ts.
-      const spawnId = randomUUID()
-      entry.spawnId = spawnId
-      // The startup deadline travels with the spawn: the computer sees the output
-      // directly, so only it can tell a silent session from one whose output is
-      // merely still in flight to a stalled hub.
-      const requestsDeadline = spec.startupTimeoutMs !== undefined
-      const params = {
-        sessionId: spec.sessionId,
-        spawnId,
-        ...(requestsDeadline ? { startupTimeoutMs: spec.startupTimeoutMs } : {}),
-        // An agent start waits on the computer for an admission slot; the reply
-        // (and the computer's startup deadline) come when it has really started.
-        ...(spec.admission ? { admission: spec.admission } : {}),
-        command: spec.file,
-        args: spec.args,
-        ...(!spec.transport
-          ? {
-              computerShell: true,
-              computerShellCommand: spec.computerShellCommand
-            }
-          : {}),
-        // Send cwd only when there IS one — an empty string used to travel as a
-        // "path" and land the agent in the computer's launch directory. Absent,
-        // the computer resolves the project's own checkout from `projectId`,
-        // which is the only side that knows where it is.
-        ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
-        ...(spec.projectId ? { projectId: spec.projectId } : {}),
-        env: pickHubPtyEnv(spec.options.env),
-        cols: spec.options.cols,
-        rows: spec.options.rows
-      }
-      // Timeout 0 (none): latency here is unbounded in practice — a computer
-      // restoring dozens of sessions at once, or one across a real network — and
-      // whether the computer is still there is the heartbeat's question, not this
-      // request's. A per-request deadline turned a slow spawn into a refused one.
-      const requestSpawn = () =>
-        gateway.request(computerId, HubToComputerMethods.ptySpawn, params, 0)
-      if (spec.admission) {
-        const requestPrioritize = () =>
-          gateway.request(computerId, HubToComputerMethods.ptyPrioritize, {
-            sessionId: spec.sessionId
-          })
-        // Behind the gate like the spawn itself, so it can never overtake it. A
-        // computer that predates admission answers `unimplemented`: nothing to do.
-        entry.prioritize = () => {
-          void (admitted ? admitted.then(requestPrioritize) : requestPrioritize()).catch(noop)
-        }
-      }
-
-      // Handed to the caller as `whenSpawned`: the round-trip IS the readiness
-      // signal, so anything that needs to know the session really started awaits
-      // this rather than sampling `pid` on a timer.
-      const whenSpawned = new Promise<PtySpawnConfirmation>((resolve, reject) => {
-        const confirm = (spawnedPid: number | null, ownsStartupDeadline: boolean): void => {
-          entry.pendingSpawn = undefined
-          // Started: nothing left to move up the admission queue.
-          entry.prioritize = undefined
-          setPid(spawnedPid)
-          resolve({ pid: spawnedPid, ownsStartupDeadline })
-        }
-        const attempt = (): void => {
-          void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
-            (res) => {
-              const parsed = ptySpawnResultSchema.safeParse(res)
-              confirm(
-                parsed.success ? parsed.data.pid : null,
-                requestsDeadline && parsed.success && parsed.data.startupDeadline === true
-              )
-            },
-            (err: unknown) => {
-              // Closed while its outcome was unknown: nothing tracks it any more.
-              if (entry.disposed) return
-              if (isConnectionLoss(err)) {
-                // No verdict — the computer may already be running it. Keep the
-                // session and settle it on reconnect (detach controller): resume
-                // if the computer holds it, report its real exit if it reaped it,
-                // send it again if it never arrived. Deliberately NOT a timer.
-                entry.pendingSpawn = {
-                  resend: attempt,
-                  confirm: (listedPid, listedBySpawnId) =>
-                    confirm(listedPid, requestsDeadline && listedBySpawnId)
-                }
-                // A disconnect already detached every entry it could see; this
-                // one was sent after it, to a computer with no socket.
-                if (!entry.detached) detach(entry)
-                return
+        // One key per spawn ATTEMPT, re-sent unchanged if the reply is lost — see
+        // `spawnIdField` in frames.ts.
+        const spawnId = randomUUID()
+        entry.spawnId = spawnId
+        // The startup deadline travels with the spawn: the computer sees the output
+        // directly, so only it can tell a silent session from one whose output is
+        // merely still in flight to a stalled hub.
+        const requestsDeadline = spec.startupTimeoutMs !== undefined
+        const params = {
+          sessionId: spec.sessionId,
+          spawnId,
+          ...(requestsDeadline ? { startupTimeoutMs: spec.startupTimeoutMs } : {}),
+          // An agent start waits on the computer for an admission slot; the reply
+          // (and the computer's startup deadline) come when it has really started.
+          ...(spec.admission ? { admission: spec.admission } : {}),
+          command: spec.file,
+          args: spec.args,
+          ...(!spec.transport
+            ? {
+                computerShell: true,
+                computerShellCommand: spec.computerShellCommand
               }
-              // The computer refused the spawn: finalize (which emits the exit
-              // through the buffering emitter, so a not-yet-subscribed caller still
-              // gets it) AND propagate, so a caller awaiting confirmation sees the
-              // failure rather than a promise that never settles.
-              // A project with no folder on that computer is its own reason: the fix
-              // is picking the folder, not anything about the computer.
-              finalize(
-                entry,
-                null,
-                null,
-                isProjectNotPlacedError(err) ? 'project-not-placed' : 'spawn-failed',
-                errorMessage(err)
-              )
-              reject(err)
-            }
-          )
+            : {}),
+          // Send cwd only when there IS one — an empty string used to travel as a
+          // "path" and land the agent in the computer's launch directory. Absent,
+          // the computer resolves the project's own checkout from `projectId`,
+          // which is the only side that knows where it is.
+          ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
+          ...(spec.projectId ? { projectId: spec.projectId } : {}),
+          env: pickHubPtyEnv(spec.options.env),
+          cols: spec.options.cols,
+          rows: spec.options.rows
         }
-        attempt()
-      })
-      // Keep the rejection handled here too — `whenSpawned` is optional in the
-      // seam, so a backend consumer that ignores it must not trip an unhandled
-      // rejection. Attaching this does not consume it for anyone else.
-      void whenSpawned.catch(noop)
+        // Timeout 0 (none): latency here is unbounded in practice — a computer
+        // restoring dozens of sessions at once, or one across a real network — and
+        // whether the computer is still there is the heartbeat's question, not this
+        // request's. A per-request deadline turned a slow spawn into a refused one.
+        const requestSpawn = () =>
+          gateway.request(computerId, HubToComputerMethods.ptySpawn, params, 0)
+        if (spec.admission) {
+          const requestPrioritize = () =>
+            gateway.request(computerId, HubToComputerMethods.ptyPrioritize, {
+              sessionId: spec.sessionId,
+              spawnId
+            })
+          // Behind the gate like the spawn itself, so it can never overtake it. A
+          // computer that predates admission answers `unimplemented`: nothing to do.
+          entry.prioritize = () => {
+            void (admitted ? admitted.then(requestPrioritize) : requestPrioritize()).catch(noop)
+          }
+        }
 
-      // Object.assign, NOT a spread: `pid` is a getter that tracks `setPid`, and
-      // spreading would evaluate it once — freezing the handle's pid at its
-      // pre-reply `null` for the life of the session.
-      return Object.assign(handle, { whenSpawned })
+        // Handed to the caller as `whenSpawned`: the round-trip IS the readiness
+        // signal, so anything that needs to know the session really started awaits
+        // this rather than sampling `pid` on a timer.
+        const whenSpawned = new Promise<PtySpawnConfirmation>((resolve, reject) => {
+          const confirm = (spawnedPid: number | null, ownsStartupDeadline: boolean): void => {
+            entry.pendingSpawn = undefined
+            // Started: nothing left to move up the admission queue.
+            entry.prioritize = undefined
+            setPid(spawnedPid)
+            resolve({ pid: spawnedPid, ownsStartupDeadline })
+          }
+          const attempt = (): void => {
+            void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
+              (res) => {
+                const parsed = ptySpawnResultSchema.safeParse(res)
+                confirm(
+                  parsed.success ? parsed.data.pid : null,
+                  requestsDeadline && parsed.success && parsed.data.startupDeadline === true
+                )
+              },
+              (err: unknown) => {
+                // Closed while its outcome was unknown: nothing tracks it any more.
+                if (entry.disposed) return
+                if (isConnectionLoss(err)) {
+                  // No verdict — the computer may already be running it. Keep the
+                  // session and settle it on reconnect (detach controller): resume
+                  // if the computer holds it, report its real exit if it reaped it,
+                  // send it again if it never arrived. Deliberately NOT a timer.
+                  entry.pendingSpawn = {
+                    resend: attempt,
+                    confirm: (listedPid, listedBySpawnId) =>
+                      confirm(listedPid, requestsDeadline && listedBySpawnId)
+                  }
+                  // A disconnect already detached every entry it could see; this
+                  // one was sent after it, to a computer with no socket.
+                  if (!entry.detached) detach(entry)
+                  return
+                }
+                // The computer refused the spawn: finalize (which emits the exit
+                // through the buffering emitter, so a not-yet-subscribed caller still
+                // gets it) AND propagate, so a caller awaiting confirmation sees the
+                // failure rather than a promise that never settles.
+                // A project with no folder on that computer is its own reason: the fix
+                // is picking the folder, not anything about the computer.
+                finalize(
+                  entry,
+                  null,
+                  null,
+                  isProjectNotPlacedError(err) ? 'project-not-placed' : 'spawn-failed',
+                  errorMessage(err)
+                )
+                reject(err)
+              }
+            )
+          }
+          attempt()
+        })
+        // Keep the rejection handled here too — `whenSpawned` is optional in the
+        // seam, so a backend consumer that ignores it must not trip an unhandled
+        // rejection. Attaching this does not consume it for anyone else.
+        void whenSpawned.catch(noop)
+
+        // Object.assign, NOT a spread: `pid` is a getter that tracks `setPid`, and
+        // spreading would evaluate it once — freezing the handle's pid at its
+        // pre-reply `null` for the life of the session.
+        return Object.assign(handle, { whenSpawned })
+      }
+
+      const preceding = spawnFlights.get(key)
+      if (sessions.has(key) || preceding) {
+        const replacement = (preceding ?? Promise.resolve()).catch(noop).then(async () => {
+          const old = sessions.get(key)
+          if (old && !old.disposed) {
+            await gateway.request(
+              computerId,
+              HubToComputerMethods.ptyKill,
+              {
+                sessionId: spec.sessionId,
+                ...(old.spawnId ? { spawnId: old.spawnId } : {})
+              },
+              0
+            )
+            finalize(old, null, null, 'replaced')
+          }
+          const handle = start()
+          await handle.whenSpawned
+          return handle
+        })
+        const flight = replacement.then(
+          () => undefined,
+          () => undefined
+        )
+        spawnFlights.set(key, flight)
+        void flight.finally(() => {
+          if (spawnFlights.get(key) === flight) spawnFlights.delete(key)
+        })
+        return replacement
+      }
+      const handle = start()
+      if (handle.whenSpawned) {
+        const flight = handle.whenSpawned.then(
+          () => undefined,
+          () => undefined
+        )
+        spawnFlights.set(key, flight)
+        void flight.finally(() => {
+          if (spawnFlights.get(key) === flight) spawnFlights.delete(key)
+        })
+      }
+      return handle
     }
   }
 }

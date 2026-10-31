@@ -85,6 +85,20 @@ async function enroll(ws: FakeSocket): Promise<{ computerId: string; apiKey: str
 }
 
 describe('hello carries the protocol version', () => {
+  it('refuses a v3 computer during the v4 rollout', async () => {
+    const { gateway, ws } = setup()
+    const { apiKey } = await enroll(ws)
+    const old = new FakeSocket()
+    gateway.handleConnection(old as unknown as WebSocket, { ip: '127.0.0.1' })
+    old.frame({ id: 2, method: 'hello', params: { apiKey, protocolVersion: 3 } })
+    await flush()
+    expect(old.response(2)?.error).toMatchObject({
+      code: ComputerTransportErrorCodes.protocolMismatch
+    })
+    expect(old.closeCode).toBe(1008)
+    gateway.close()
+  })
+
   it('refuses a pre-v3 computer reconnecting, and audits it', async () => {
     const { gateway, ws } = setup()
     const { apiKey } = await enroll(ws)

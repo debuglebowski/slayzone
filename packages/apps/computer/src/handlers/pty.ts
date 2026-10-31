@@ -107,6 +107,7 @@ interface PtySession {
   exited: Promise<void>
   resolveExit: () => void
   replacing?: boolean
+  stopping?: Promise<void>
 }
 
 /**
@@ -240,33 +241,55 @@ export function createPtyHandlers(
     return current
   }
 
+  async function waitForExit(session: PtySession, timeoutMs: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        session.exited.then(() => true),
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), timeoutMs)
+          timer.unref?.()
+        })
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  function stopPty(session: PtySession, signal?: string): Promise<void> {
+    if (session.stopping) return session.stopping
+    session.stopping = (async () => {
+      try {
+        session.proc.kill(signal)
+      } catch {
+        // Exit may already be in flight.
+      }
+      if (await waitForExit(session, 2_000)) return
+      try {
+        session.proc.kill('SIGKILL')
+      } catch {
+        // Exit may already be in flight.
+      }
+      if (!(await waitForExit(session, 2_000))) {
+        throw new Error(`pty ${session.id}: process ${session.proc.pid} did not exit`)
+      }
+    })()
+    void session.stopping.catch(() => {
+      // A later kill may retry when the process did not exit.
+      session.stopping = undefined
+    })
+    return session.stopping
+  }
+
   async function stopBeforeReplacement(id: string): Promise<void> {
     const old = sessions.get(id)
     if (!old) return
     old.replacing = true
     try {
-      old.proc.kill()
-    } catch {
-      // Exit may already be in flight.
-    }
-    const exited = await Promise.race([
-      old.exited.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))
-    ])
-    if (!exited) {
-      try {
-        old.proc.kill('SIGKILL')
-      } catch {
-        // Exit may already be in flight.
-      }
-      const killed = await Promise.race([
-        old.exited.then(() => true),
-        new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))
-      ])
-      if (!killed) {
-        old.replacing = false
-        throw new Error(`pty ${id}: old process ${old.proc.pid} did not exit`)
-      }
+      await stopPty(old)
+    } catch (err) {
+      old.replacing = false
+      throw err
     }
   }
 
@@ -384,6 +407,7 @@ export function createPtyHandlers(
       if (session.warm) return
       ctx.dialer.notify(ComputerNotificationMethods.ptyData, {
         sessionId: session.id,
+        ...(session.spawnId ? { spawnId: session.spawnId } : {}),
         seq,
         data
       })
@@ -448,6 +472,7 @@ export function createPtyHandlers(
     const reason = session.exitReason
     const delivered = ctx.dialer.notify(ComputerNotificationMethods.ptyExit, {
       sessionId: session.id,
+      ...(session.spawnId ? { spawnId: session.spawnId } : {}),
       exitCode,
       signal,
       ...(reason ? { reason } : {})
@@ -699,7 +724,10 @@ export function createPtyHandlers(
     const item = queued.get(params.sessionId)
     return {
       ok: true,
-      queued: item ? admission.prioritize(item.ticket) : false
+      queued:
+        item && (params.spawnId === undefined || item.spawnId === params.spawnId)
+          ? admission.prioritize(item.ticket)
+          : false
     }
   }
 
@@ -708,7 +736,11 @@ export function createPtyHandlers(
    *  this computer no longer holds has none. */
   async function backgroundJobs(rawParams: unknown): Promise<PtyBackgroundJobsResult> {
     const params = ptyBackgroundJobsParamsSchema.parse(rawParams)
-    const pid = sessions.get(params.sessionId)?.proc.pid
+    const session = sessions.get(params.sessionId)
+    const pid =
+      session && (params.spawnId === undefined || session.spawnId === params.spawnId)
+        ? session.proc.pid
+        : undefined
     if (pid === undefined) return { ok: true, supported: true, alive: [] }
     const alive = await probeBackgroundJobs(pid, params.jobs)
     return alive === null
@@ -794,18 +826,13 @@ export function createPtyHandlers(
     return { pid: session.proc.pid, data, seq }
   }
 
-  function warmKill(rawParams: unknown): { ok: true } {
+  async function warmKill(rawParams: unknown): Promise<{ ok: true }> {
     const params = ptyWarmKillParamsSchema.parse(rawParams)
     // A warm start still waiting for its slot never runs.
     cancelQueued(params.warmId, 'killed')
     const session = sessions.get(params.warmId)
     if (!session) return { ok: true }
-    sessions.delete(params.warmId)
-    try {
-      session.proc.kill()
-    } catch {
-      // Already dead — ignore.
-    }
+    await stopPty(session)
     return { ok: true }
   }
 
@@ -835,34 +862,28 @@ export function createPtyHandlers(
     return { warms }
   }
 
-  function kill(rawParams: unknown): { ok: true } {
+  async function kill(rawParams: unknown): Promise<{ ok: true }> {
     const params = ptyKillParamsSchema.parse(rawParams)
     const starting = starts.get(params.sessionId)
     if (starting && (params.spawnId === undefined || starting.spawnId === params.spawnId)) {
       starting.cancelled = true
     }
     const live = sessions.get(params.sessionId)
-    if (params.spawnId !== undefined && live && live.spawnId !== params.spawnId) {
-      return { ok: true }
-    }
     const pending = queued.get(params.sessionId)
-    if (params.spawnId !== undefined && pending && pending.spawnId !== params.spawnId) {
-      return { ok: true }
-    }
-    const waiting = queued.get(params.sessionId)
-    if (waiting) {
+    if (pending && (params.spawnId === undefined || pending.spawnId === params.spawnId)) {
       // Killed while waiting for its slot: it never runs, and ends exactly as a
       // killed process would — with an exit the hub's session settles on. The
       // exit goes out BEFORE the spawn's (error) reply, so the hub has already
       // closed the session when that reply lands and ignores it.
       const delivered = ctx.dialer.notify(ComputerNotificationMethods.ptyExit, {
         sessionId: params.sessionId,
+        ...(pending.spawnId ? { spawnId: pending.spawnId } : {}),
         exitCode: null,
         signal: params.signal ?? 'SIGHUP',
         reason: 'killed-before-start'
       })
       tombstones.add(params.sessionId, {
-        spawnId: waiting.spawnId,
+        spawnId: pending.spawnId,
         exitCode: null,
         signal: params.signal ?? 'SIGHUP',
         reason: 'killed-before-start'
@@ -872,35 +893,17 @@ export function createPtyHandlers(
           sessionId: params.sessionId
         })
       cancelQueued(params.sessionId, 'killed')
-      // An older process still filed under this id was due to be replaced by the
-      // queued start; end it silently, as that replacement would have.
-      const superseded = sessions.get(params.sessionId)
-      if (superseded) {
-        sessions.delete(params.sessionId)
-        superseded.deadline?.cancel()
-        releaseAdmission(superseded)
-        try {
-          superseded.proc.kill(params.signal)
-        } catch {
-          // Already dead — ignore.
-        }
-      }
+      // A generation-scoped kill cancels only that queued start. Legacy
+      // session-wide kills also stop any older process still running.
+      if (live && params.spawnId === undefined) await stopPty(live, params.signal)
       return { ok: true }
     }
-    const session = sessions.get(params.sessionId)
-    if (!session) {
+    if (!live || (params.spawnId !== undefined && live.spawnId !== params.spawnId)) {
       // Idempotent: the session may already have exited (network race).
       ctx.log('pty kill on unknown session', { sessionId: params.sessionId })
       return { ok: true }
     }
-    try {
-      session.proc.kill(params.signal)
-    } catch (err) {
-      ctx.log('pty kill failed', {
-        sessionId: params.sessionId,
-        error: String(err)
-      })
-    }
+    await stopPty(live, params.signal)
     return { ok: true }
   }
 
@@ -908,12 +911,15 @@ export function createPtyHandlers(
     const params = ptyResizeParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
     if (waiting) {
+      if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
       // Starts at the size the terminal has by then.
       waiting.cols = params.cols
       waiting.rows = params.rows
       return { ok: true }
     }
     const session = sessions.get(params.sessionId)
+    if (session && params.spawnId !== undefined && session.spawnId !== params.spawnId)
+      return { ok: true }
     if (!session) {
       ctx.log('pty resize on unknown session', { sessionId: params.sessionId })
       return { ok: true }
@@ -926,11 +932,14 @@ export function createPtyHandlers(
     const params = ptyWriteParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
     if (waiting) {
+      if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
       // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
       waiting.writes.push(params.data)
       return { ok: true }
     }
     const session = sessions.get(params.sessionId)
+    if (session && params.spawnId !== undefined && session.spawnId !== params.spawnId)
+      return { ok: true }
     if (!session) {
       ctx.log('pty write on unknown session', { sessionId: params.sessionId })
       return { ok: true }
@@ -973,8 +982,14 @@ export function createPtyHandlers(
     const params = ptyGetBufferSinceParamsSchema.parse(rawParams)
     // A reaped session's output is still served when its exit never reached the
     // hub — the tail it missed while away (see exit-tombstones.ts).
+    const live = sessions.get(params.sessionId)
+    const exited = tombstones.get(params.sessionId)
     const buffer =
-      sessions.get(params.sessionId)?.buffer ?? tombstones.get(params.sessionId)?.buffer
+      live && (params.spawnId === undefined || live.spawnId === params.spawnId)
+        ? live.buffer
+        : exited && (params.spawnId === undefined || exited.spawnId === params.spawnId)
+          ? exited.buffer
+          : undefined
     if (!buffer) return { frames: [] }
     const frames = buffer.getChunksSince(params.seq).map((c) => ({ seq: c.seq, data: c.data }))
     return { frames }

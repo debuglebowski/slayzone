@@ -193,7 +193,7 @@ describe('createRoutingPtyBackend', () => {
     await vi.waitFor(() => expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e']))
     await vi.waitFor(() => expect(handle.pid).toBe(4242))
 
-    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toMatchObject({
       sessionId: 'sess-1',
       seq: 1
     })
@@ -418,7 +418,7 @@ describe('createRoutingPtyBackend', () => {
 
     await vi.waitFor(() => expect(chunks).toEqual(['zero', 'one', 'two']))
     // `getBufferSince` returns `seq > params.seq`, so -1 is what includes seq 0.
-    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toMatchObject({
       sessionId: 'sess-1',
       seq: -1
     })
@@ -460,13 +460,13 @@ describe('createRoutingPtyBackend', () => {
     })
 
     handle.write('input')
-    expect(requireCall(gateway, 'pty.write').params).toEqual({
+    expect(requireCall(gateway, 'pty.write').params).toMatchObject({
       sessionId: 'sess-1',
       data: 'input'
     })
 
     handle.resize(120, 40)
-    expect(requireCall(gateway, 'pty.resize').params).toEqual({
+    expect(requireCall(gateway, 'pty.resize').params).toMatchObject({
       sessionId: 'sess-1',
       cols: 120,
       rows: 40
@@ -483,6 +483,74 @@ describe('createRoutingPtyBackend', () => {
     expect(gateway.requestsOf('pty.kill')[1]?.params).toMatchObject({
       sessionId: 'sess-1'
     })
+  })
+
+  it('keeps old routing until computer confirms kill, then confirms replacement', async () => {
+    const gateway = new FakeGateway()
+    let releaseKill!: () => void
+    let releaseSpawn!: () => void
+    let starts = 0
+    gateway.onMethod('pty.spawn', () => {
+      starts += 1
+      return starts === 1
+        ? { pid: 11 }
+        : new Promise((resolve) => {
+            releaseSpawn = () => resolve({ pid: 22 })
+          })
+    })
+    gateway.onMethod(
+      'pty.kill',
+      () =>
+        new Promise((resolve) => {
+          releaseKill = () => resolve({ ok: true })
+        })
+    )
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    const old = (await backend.spawn(ptySpec())) as PtyHandle
+    await old.whenSpawned
+    const oldSpawnId = (requireCall(gateway, 'pty.spawn').params as { spawnId: string }).spawnId
+    const oldData: string[] = []
+    old.onData((data) => oldData.push(data))
+    const replacing = Promise.resolve(backend.spawn(ptySpec()))
+    await vi.waitFor(() => expect(gateway.requestsOf('pty.kill')).toHaveLength(1))
+    expect(gateway.requestsOf('pty.spawn')).toHaveLength(1)
+    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'A' })
+    expect(oldData).toEqual(['A'])
+    releaseKill()
+    await vi.waitFor(() => expect(gateway.requestsOf('pty.spawn')).toHaveLength(2))
+    let delivered = false
+    void replacing.then(() => {
+      delivered = true
+    })
+    await Promise.resolve()
+    expect(delivered).toBe(false)
+    releaseSpawn()
+    const next = (await replacing) as PtyHandle
+    expect(next.pid).toBe(22)
+    const nextData: string[] = []
+    let nextExited = false
+    next.onData((data) => nextData.push(data))
+    next.onExit(() => {
+      nextExited = true
+    })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      spawnId: oldSpawnId,
+      seq: 0,
+      data: 'late A'
+    })
+    gateway.emit('pty.exit', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      spawnId: oldSpawnId,
+      exitCode: 0
+    })
+    expect(nextData).toEqual([])
+    expect(nextExited).toBe(false)
   })
 
   // ── Detach / reattach across a dropped computer connection ──────────────────
@@ -591,7 +659,7 @@ describe('createRoutingPtyBackend', () => {
     await vi.waitFor(() => expect(chunks).toEqual(['a', 'b']))
     expect(exit()).toBeNull()
     // Backfill resumes from the last seq actually delivered, not from scratch.
-    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toMatchObject({
       sessionId: 'sess-1',
       seq: 0
     })
@@ -843,7 +911,7 @@ describe('createRoutingPtyBackend', () => {
     // Still waiting for its slot on the computer: the reveal is forwarded.
     backend.prioritize?.('sess-1')
     await settle()
-    expect(gateway.requestsOf('pty.prioritize').map((c) => c.params)).toEqual([
+    expect(gateway.requestsOf('pty.prioritize').map((c) => c.params)).toMatchObject([
       { sessionId: 'sess-1' }
     ])
 
@@ -876,7 +944,7 @@ describe('createRoutingPtyBackend', () => {
 
     await (backend.spawn(ptySpec()) as PtyHandle).whenSpawned
     await expect(backend.probeBackgroundJobs?.('sess-1', jobs)).resolves.toEqual(['j1'])
-    expect(requireCall(gateway, 'pty.backgroundJobs').params).toEqual({
+    expect(requireCall(gateway, 'pty.backgroundJobs').params).toMatchObject({
       sessionId: 'sess-1',
       jobs
     })

@@ -7,11 +7,106 @@ import { createSpawnAdmission } from '../spawn-admission'
 import { createPtyHandlers } from './pty'
 import type { ComputerDialer } from './types'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
+import type * as nodePty from 'node-pty'
 
 interface Notify {
   method: string
   params: Record<string, unknown>
 }
+
+function controlledPty(pid: number) {
+  let onExit: ((event: { exitCode: number; signal: number }) => void) | undefined
+  const proc = {
+    pid,
+    kill: vi.fn(),
+    write: vi.fn(),
+    resize: vi.fn(),
+    onData: () => ({ dispose() {} }),
+    onExit: (listener: typeof onExit) => {
+      onExit = listener
+      return { dispose() {} }
+    }
+  } as unknown as nodePty.IPty
+  return { proc, exit: () => onExit?.({ exitCode: 0, signal: 0 }) }
+}
+
+describe('remote session ownership', () => {
+  it('acknowledges kill only after the process exits', async () => {
+    const { ctx } = makeCtx()
+    const child = controlledPty(9001)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn
+    })
+    await pty.handlers['pty.spawn']({
+      sessionId: 's',
+      spawnId: 'one',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    let acknowledged = false
+    const killed = Promise.resolve(
+      pty.handlers['pty.kill']({ sessionId: 's', spawnId: 'one' })
+    ).then(() => {
+      acknowledged = true
+    })
+    await Promise.resolve()
+    expect(acknowledged).toBe(false)
+    child.exit()
+    await killed
+    expect(acknowledged).toBe(true)
+  })
+
+  it('waits for a warm process to exit before acknowledging warmKill', async () => {
+    const { ctx } = makeCtx()
+    const child = controlledPty(9002)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn
+    })
+    await pty.handlers['pty.warmSpawn']({ warmId: 'warm-one', command: 'cat', cwd: process.cwd() })
+    let acknowledged = false
+    const killed = Promise.resolve(pty.handlers['pty.warmKill']({ warmId: 'warm-one' })).then(
+      () => {
+        acknowledged = true
+      }
+    )
+    await Promise.resolve()
+    expect(acknowledged).toBe(false)
+    child.exit()
+    await killed
+    expect(acknowledged).toBe(true)
+  })
+
+  it('ignores a late write and resize for the previous start', async () => {
+    const { ctx } = makeCtx()
+    const first = controlledPty(9003)
+    const second = controlledPty(9004)
+    const children = [first, second]
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => children.shift()!.proc) as typeof nodePty.spawn
+    })
+    await pty.handlers['pty.spawn']({
+      sessionId: 's',
+      spawnId: 'one',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    const replacement = Promise.resolve(
+      pty.handlers['pty.spawn']({
+        sessionId: 's',
+        spawnId: 'two',
+        command: 'cat',
+        cwd: process.cwd()
+      })
+    )
+    first.exit()
+    await replacement
+    await pty.handlers['pty.write']({ sessionId: 's', spawnId: 'one', data: 'late' })
+    await pty.handlers['pty.resize']({ sessionId: 's', spawnId: 'one', cols: 99, rows: 31 })
+    expect(second.proc.write).not.toHaveBeenCalled()
+    expect(second.proc.resize).not.toHaveBeenCalled()
+    second.exit()
+  })
+})
 
 /** `online: false` models a computer whose hub connection is down — every
  *  notification is recorded but reported undelivered, as the real dialer does. */
