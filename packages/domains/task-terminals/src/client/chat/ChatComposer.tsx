@@ -418,7 +418,7 @@ export function ChatComposer({
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              className="w-[360px] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-2"
+              className="w-[320px] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-2"
             >
               <ChatDisplayOptions appearance={appearance} />
             </PopoverContent>
