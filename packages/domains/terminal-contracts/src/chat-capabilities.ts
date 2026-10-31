@@ -124,6 +124,7 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     fork: true,
     // The task's Codex threads; a switched-to one's past comes from `thread/turns/list`.
     sessions: true,
+    restoreComposerState: true,
     // `turn/diff`-free: from the file-change items (X2).
     filesChanged: true,
     diffComments: true,

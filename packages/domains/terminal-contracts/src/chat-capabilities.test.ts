@@ -40,7 +40,7 @@ test('Codex chat: prompt cards, live Stop + effort, rewind, fork, sessions, comp
     sessions: true,
     handoff: false,
     attachments: 'paths',
-    restoreComposerState: false,
+    restoreComposerState: true,
     editableQueue: false,
     filesChanged: true,
     diffComments: true,
