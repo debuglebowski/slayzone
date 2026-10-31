@@ -47,21 +47,24 @@ export function useSessionsSidebarOpen(taskId: string): [boolean, () => void] {
 }
 
 /**
- * Tab-bar button that OPENS the sessions sidebar (the close affordance is the X
- * in the sidebar header). Same IconButton (size-7, size-3.5 glyph, ghost) as the
+ * Tab-bar button that toggles the sessions sidebar. Same IconButton
+ * (size-7, size-3.5 glyph, ghost) as the
  * sibling `AgentPromptsToggleButton` so size + spacing match exactly.
  */
 export function SessionHistoryToggleButton({
-  onToggle
+  onToggle,
+  open
 }: {
   onToggle: () => void
+  open: boolean
 }): React.ReactElement {
   return (
     <IconButton
       data-testid="session-history-toggle"
       variant="ghost"
       className="size-7"
-      aria-label="Show sessions sidebar"
+      aria-label={open ? 'Hide sessions sidebar' : 'Show sessions sidebar'}
+      aria-pressed={open}
       onClick={onToggle}
     >
       <History className="size-3.5" />
@@ -177,7 +180,7 @@ export function SessionsSidebar({
           Sessions
         </span>
         <IconButton
-          data-testid="session-history-toggle"
+          data-testid="session-history-close"
           variant="ghost"
           className="size-7"
           aria-label="Close sessions sidebar"
@@ -240,9 +243,12 @@ export function SessionsSidebar({
                         <span>·</span>
                       </>
                     )}
-                    <span className="flex items-center gap-0.5">
+                    <span
+                      className="flex items-center gap-0.5"
+                      title={s.messageCount === null ? 'Message count unavailable' : undefined}
+                    >
                       <MessageSquare className="size-2.5" />
-                      {s.messageCount}
+                      {s.messageCount ?? '—'}
                     </span>
                     <span>·</span>
                     <time>{formatRelative(s.lastActiveAt, now)}</time>

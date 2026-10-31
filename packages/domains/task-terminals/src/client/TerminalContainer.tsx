@@ -192,10 +192,9 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
 
     // Session history: lists every agent session (distinct provider conversation)
     // tied to the MAIN agent. Same gate as the prompts sidebar (main group active,
-    // capture-capable terminal agent). The toggle button only appears once the
-    // task has MORE THAN ONE session — a single-session task has no history worth
-    // a separate view. Query only runs while that gate holds, so idle tasks pay
-    // nothing.
+    // capture-capable terminal agent). Show the toggle for multiple sessions or
+    // one previous session after Reset (when none is current). Query only runs
+    // while that gate holds, so idle tasks pay nothing.
     // The Sessions list also serves Claude chat (its resume picker), listing the
     // chat's and the terminal's conversations together (one CLI session store).
     const sessionsEnabled =
@@ -203,7 +202,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       !!mainMode &&
       (isPromptCaptureMode(mainMode) || chatCapabilitiesForMode(mainMode).sessions)
     const sessions = useFamilySessions(taskId, mainMode ?? '', sessionsEnabled)
-    const canShowSessions = sessionsEnabled && sessions.length > 1
+    const canShowSessions =
+      sessionsEnabled && (sessions.length > 1 || (sessions.length === 1 && !sessions[0].isCurrent))
     const [sessionsOpen, toggleSessions] = useSessionsSidebarOpen(taskId)
     // The chat palette's "Sessions…": opens the sidebar (never closes it).
     const openSessions = useCallback(() => {
@@ -531,10 +531,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             onPaneMove={movePane}
             onGroupRename={renameTab}
             rightContent={
-              (canShowSessions && !sessionsOpen) || (canShowPrompts && !promptsOpen) ? (
+              canShowSessions || (canShowPrompts && !promptsOpen) ? (
                 <div className="flex items-center gap-2">
-                  {canShowSessions && !sessionsOpen && (
-                    <SessionHistoryToggleButton onToggle={toggleSessions} />
+                  {canShowSessions && (
+                    <SessionHistoryToggleButton onToggle={toggleSessions} open={sessionsOpen} />
                   )}
                   {canShowPrompts && !promptsOpen && (
                     <AgentPromptsToggleButton onToggle={togglePrompts} />

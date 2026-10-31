@@ -2434,6 +2434,9 @@ importers:
       '@milkdown/core':
         specifier: ^7.22.2
         version: 7.22.2(supports-color@7.2.0)
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../agent-turns
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../computers

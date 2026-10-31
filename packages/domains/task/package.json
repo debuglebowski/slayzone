@@ -36,6 +36,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.9.1",
     "@milkdown/core": "^7.22.2",
+    "@slayzone/agent-turns": "workspace:*",
     "@slayzone/computers": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",

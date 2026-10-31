@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { type ConversationOrigin, HONORED_ORIGINS_SQL } from '@slayzone/task-contracts'
-import { isBuiltinTerminalMode, modeAgentId } from '@slayzone/terminal-contracts'
+import {
+  isBuiltinTerminalMode,
+  isSyntheticChatPrompt,
+  modeAgentId
+} from '@slayzone/terminal-contracts'
 import { agentSessionsEvents } from '../events'
 
 /**
@@ -334,12 +338,68 @@ export interface TaskSessionSummary {
   startedAt: number
   /** Latest spawn timestamp for this conversation (most recent re-spawn/resume). */
   lastActiveAt: number
-  /** User prompts captured for this conversation (join on cli_session_id). */
-  messageCount: number
+  /** User prompts captured or recovered for this conversation; null when unavailable. */
+  messageCount: number | null
   /** Earliest captured user prompt text — the human-readable session label. */
   firstPrompt: string | null
   /** True when this conversation is the honored "current" one (reset-aware). */
   isCurrent: boolean
+}
+
+/** Recover pre-recorder Codex chat prompts still held in the tab's event log. */
+async function codexChatEventPrompts(
+  db: SlayzoneDb,
+  taskId: string
+): Promise<Map<string, { count: number; firstPrompt: string | null }>> {
+  const events = await db.all<{
+    tab_id: string
+    seq: number
+    kind: string
+    session_id: string | null
+    conversation_id: string | null
+    message_id: string | null
+    text: string | null
+  }>(
+    `SELECT e.tab_id, e.seq,
+            json_extract(e.event, '$.kind') AS kind,
+            json_extract(e.event, '$.sessionId') AS session_id,
+            json_extract(e.event, '$.conversationId') AS conversation_id,
+            json_extract(e.event, '$.id') AS message_id,
+            json_extract(e.event, '$.text') AS text
+       FROM chat_events e
+       JOIN terminal_tabs t ON t.id = e.tab_id
+      WHERE t.task_id = ? AND t.mode = 'codex-chat'
+        AND json_extract(e.event, '$.kind') IN ('turn-init', 'conversation-branch', 'user-message')
+      ORDER BY e.tab_id, e.seq`,
+    [taskId]
+  )
+  const summaries = new Map<string, { count: number; firstPrompt: string | null }>()
+  const seen = new Set<string>()
+  let tabId: string | null = null
+  let conversationId: string | null = null
+  for (const event of events) {
+    if (event.tab_id !== tabId) {
+      tabId = event.tab_id
+      conversationId = null
+    }
+    if (event.kind === 'turn-init') {
+      conversationId = event.session_id
+      continue
+    }
+    if (event.kind === 'conversation-branch') {
+      conversationId = event.conversation_id
+      continue
+    }
+    const text = event.text?.trim()
+    if (!conversationId || !text || isSyntheticChatPrompt(text)) continue
+    const key = `${conversationId}:${event.message_id ?? `${event.tab_id}:${event.seq}`}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const prior = summaries.get(conversationId)
+    if (prior) prior.count += 1
+    else summaries.set(conversationId, { count: 1, firstPrompt: text })
+  }
+  return summaries
 }
 
 /**
@@ -360,7 +420,8 @@ export interface TaskSessionSummary {
  * (`NOT_DELETED_SQL`) are excluded too.
  *
  * `messageCount` + `firstPrompt` join `agent_prompts` on
- * `cli_session_id = conversation_id` (they are the same value). `isCurrent`
+ * `cli_session_id = conversation_id` (they are the same value). Codex chat also
+ * recovers older prompts from its retained tab events. `isCurrent`
  * mirrors `getCurrentConversationId` — the latest honored conversation strictly
  * after the most recent reset — so a reset leaves the history intact but marks
  * no session current.
@@ -401,15 +462,24 @@ export async function listTaskSessions(
      ORDER BY started_at DESC`,
     [taskId, mode]
   )
-  return rows.map((r) => ({
-    conversationId: r.conversation_id,
-    origin: r.origin,
-    startedAt: r.started_at,
-    lastActiveAt: r.last_active_at,
-    messageCount: r.message_count,
-    firstPrompt: r.first_prompt,
-    isCurrent: r.conversation_id === current
-  }))
+  const savedChatPrompts = mode === 'codex-chat' ? await codexChatEventPrompts(db, taskId) : null
+  return rows.map((r) => {
+    const saved = savedChatPrompts?.get(r.conversation_id)
+    return {
+      conversationId: r.conversation_id,
+      origin: r.origin,
+      startedAt: r.started_at,
+      lastActiveAt: r.last_active_at,
+      messageCount:
+        r.message_count > 0 || saved?.count
+          ? Math.max(r.message_count, saved?.count ?? 0)
+          : mode === 'codex-chat'
+            ? null
+            : 0,
+      firstPrompt: saved && saved.count > r.message_count ? saved.firstPrompt : r.first_prompt,
+      isCurrent: r.conversation_id === current
+    }
+  })
 }
 
 /**

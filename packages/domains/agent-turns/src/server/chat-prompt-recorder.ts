@@ -20,7 +20,7 @@ export interface ChatPromptContext {
 /**
  * Chat-mode counterpart of `capturePrompt`. Chat CLIs get no UserPromptSubmit
  * hook, so the chat runtime's `user-message` events (exactly what was sent) are
- * recorded instead — only for modes whose UI offers prompt history. Wired as the
+ * recorded instead — for modes with prompt history or session history. Wired as the
  * chat handlers' `onChatEvent` by the composition root. Best-effort: never
  * throws into the event path.
  */
@@ -30,7 +30,8 @@ export function createChatPromptRecorder(
   return async (_tabId, event, ctx) => {
     // Imported history (a resumed conversation's past) was recorded when it was sent.
     if (event.kind !== 'user-message' || event.history || !ctx) return
-    if (!chatCapabilitiesForMode(ctx.mode).promptHistory) return
+    const capabilities = chatCapabilitiesForMode(ctx.mode)
+    if (!capabilities.promptHistory && !capabilities.sessions) return
     const text = event.text
     if (!text.trim() || isSyntheticChatPrompt(text)) return
     try {
@@ -42,7 +43,9 @@ export function createChatPromptRecorder(
         text,
         created_at: Date.now()
       })
-      await prunePrompts(db, ctx.taskId, ctx.mode)
+      // Session counts use these rows. Codex has no composer prompt history to
+      // bound, so retain its full per-session count across chat resets.
+      if (capabilities.promptHistory) await prunePrompts(db, ctx.taskId, ctx.mode)
       agentPromptsEvents.emit('agent-prompts:changed', ctx.taskId)
     } catch (err) {
       console.error('[chat-prompt-recorder] record failed:', err)

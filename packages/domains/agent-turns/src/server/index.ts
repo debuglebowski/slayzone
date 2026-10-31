@@ -14,6 +14,10 @@ export {
 } from './prompt-capture'
 export { listPromptsForTask, insertPrompt, prunePrompts } from './prompt-db'
 export { createChatPromptRecorder, type ChatPromptContext } from './chat-prompt-recorder'
-export { agentPromptsRouter, type AgentPromptsRouter } from './agent-prompts-router'
+export {
+  agentPromptsRouter,
+  type AgentPromptsRouter,
+  type AgentPromptsMounts
+} from './agent-prompts-router'
 export { agentPromptsEvents, type AgentPromptsEventMap } from './events'
 export type { AgentPrompt } from '../shared/types'

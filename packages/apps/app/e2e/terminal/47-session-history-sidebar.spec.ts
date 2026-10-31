@@ -7,7 +7,7 @@ import type { ElectronApplication } from '@playwright/test'
  * provider conversation) tied to the MAIN agent. The listTaskSessions grouping
  * + exclusion rules are unit-covered (task/server list-task-sessions.test.ts);
  * this spec proves the live chain — agent_sessions rows → tRPC → sidebar render
- * — plus the ">1 session" gate on the toggle button.
+ * — plus the session-history gate on the toggle button.
  *
  * Sessions are seeded BEFORE the task terminal opens: the sidebar/query mounts
  * fresh per task, so its first fetch already sees the seeded set (no reliance on
@@ -84,6 +84,9 @@ test.describe('Session history sidebar', () => {
     await toggle.click()
     const sidebar = mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible').first()
     await expect(sidebar).toBeVisible()
+    await expect(
+      mainWindow.locator('[data-testid="session-history-toggle"][aria-pressed="true"]:visible')
+    ).toHaveCount(1)
     const items = sidebar.locator('[data-testid="agent-session-item"]')
     await expect(items).toHaveCount(2)
     await expect(sidebar.getByText('newer session')).toBeVisible()

@@ -66,9 +66,9 @@ describe('createChatPromptRecorder', () => {
     expect(await listPromptsForTask(db, taskId)).toHaveLength(0)
   })
 
-  test('modes without prompt history (Codex chat) are not recorded', async () => {
+  test('Codex chat records prompts for session history', async () => {
     await record('tab-2', { kind: 'user-message', text: 'hi' }, { ...ctx, mode: 'codex-chat' })
-    expect(await listPromptsForTask(db, taskId)).toHaveLength(0)
+    expect((await listPromptsForTask(db, taskId, 'codex-chat')).map((r) => r.text)).toEqual(['hi'])
   })
 })
 

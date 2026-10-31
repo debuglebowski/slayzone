@@ -35,6 +35,13 @@ raw.exec(`
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, agent_id TEXT NOT NULL,
     cli_session_id TEXT, text TEXT NOT NULL, created_at INTEGER NOT NULL
   );
+  CREATE TABLE terminal_tabs (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL
+  );
+  CREATE TABLE chat_events (
+    tab_id TEXT NOT NULL, seq INTEGER NOT NULL, event TEXT NOT NULL,
+    PRIMARY KEY (tab_id, seq)
+  );
 `)
 
 const db: SlayzoneDb = {
@@ -272,4 +279,40 @@ describe('listTaskSessions', () => {
   test('after reset still 2 sessions', () => {
     expect(afterReset).toHaveLength(2)
   })
+})
+
+test('Codex chat session count and title recover from saved chat events', async () => {
+  insSession({
+    id: 'chat-1',
+    taskId: 'CHAT',
+    mode: 'codex-chat',
+    conv: 'THREAD',
+    origin: 'slay-spawned-fresh',
+    createdAt: 2000
+  })
+  insSession({
+    id: 'chat-old',
+    taskId: 'CHAT',
+    mode: 'codex-chat',
+    conv: 'OLD',
+    origin: 'slay-spawned-fresh',
+    createdAt: 1000
+  })
+  raw.prepare(`INSERT INTO terminal_tabs (id, task_id, mode) VALUES ('chat-tab', 'CHAT', 'codex-chat')`).run()
+  const events = [
+    { kind: 'turn-init', sessionId: 'THREAD' },
+    { kind: 'user-message', text: 'first question' },
+    { kind: 'user-message', text: 'second question' }
+  ]
+  for (const [seq, event] of events.entries()) {
+    raw.prepare(`INSERT INTO chat_events (tab_id, seq, event) VALUES ('chat-tab', ?, ?)`).run(
+      seq,
+      JSON.stringify(event)
+    )
+  }
+  const sessions = await listTaskSessions(db, 'CHAT', 'codex-chat')
+  const session = sessions.find((s) => s.conversationId === 'THREAD')!
+  expect(session.messageCount).toBe(2)
+  expect(session.firstPrompt).toBe('first question')
+  expect(sessions.find((s) => s.conversationId === 'OLD')?.messageCount).toBeNull()
 })

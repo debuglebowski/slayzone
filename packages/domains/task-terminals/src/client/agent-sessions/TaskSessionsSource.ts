@@ -19,8 +19,8 @@ export interface TaskSessionRow {
   startedAt: number
   /** Latest spawn timestamp for this conversation (most recent re-spawn/resume). */
   lastActiveAt: number
-  /** User prompts captured for this conversation. */
-  messageCount: number
+  /** User prompts captured for this conversation; null when older chat counts are unavailable. */
+  messageCount: number | null
   /** Earliest captured user prompt text — the human-readable session label. */
   firstPrompt: string | null
   /** True when this conversation is the honored "current" one (reset-aware). */

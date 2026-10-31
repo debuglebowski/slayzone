@@ -13,8 +13,8 @@ export { registerTaskSessionsSource } from '@slayzone/task-terminals/client/Task
 /**
  * Every agent session tied to a task's main agent (mode `agentId`), newest
  * first — one entry per distinct provider conversation (`--resume` re-spawns
- * collapse into one). Refetches when `agentSessions.onChanged` fires for THIS
- * task. `enabled` gates both the query and the subscription so a task whose
+ * collapse into one). Refetches when sessions or prompts change for THIS
+ * task. `enabled` gates the query and subscriptions so a task whose
  * sidebar/button is not shown costs nothing.
  *
  * Task's half of task-terminals' `TaskSessionsSource` contract: task owns the
@@ -31,6 +31,15 @@ function useAgentSessions(
 
   useSubscription(
     trpc.agentSessions.onChanged.subscriptionOptions(undefined, {
+      enabled,
+      onData: (changedTaskId) => {
+        if (changedTaskId === taskId) void query.refetch()
+      }
+    })
+  )
+
+  useSubscription(
+    trpc.agentPrompts.onChanged.subscriptionOptions(undefined, {
       enabled,
       onData: (changedTaskId) => {
         if (changedTaskId === taskId) void query.refetch()

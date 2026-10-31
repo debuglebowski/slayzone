@@ -1,5 +1,6 @@
 import { typedTrpc } from '@slayzone/transport/client'
 // Type-only: erased from the client bundle. The routers' runtime stays server-side.
+import type { AgentPromptsMounts } from '@slayzone/agent-turns/server'
 import type { ComputersMounts } from '@slayzone/computers/server'
 import type { WorkspaceMounts } from '@slayzone/file-editor/server'
 import type { HistoryMounts } from '@slayzone/history/server'
@@ -26,6 +27,7 @@ import type { TaskMounts } from '../server/router-mounts'
  * `app.{meta,screenshot,shell,taskWindows,window}`.
  */
 type TaskClientMounts = TaskMounts &
+  AgentPromptsMounts &
   TagsMounts &
   HistoryMounts &
   WorkspaceMounts &
