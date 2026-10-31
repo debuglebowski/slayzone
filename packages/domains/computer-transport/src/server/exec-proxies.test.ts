@@ -135,7 +135,10 @@ const procSpec = (over: Partial<ProcSpawnSpec> = {}): ProcSpawnSpec => ({
 describe('createRoutingPtyBackend', () => {
   it('throws NoComputerAvailableError when no computer resolves (never spawns on the hub)', () => {
     const gateway = new FakeGateway()
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => null })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
 
     // Computers run the agents. This used to fall through to an in-process spawn,
     // which made "which machine ran this?" invisible DB state.
@@ -167,10 +170,25 @@ describe('createRoutingPtyBackend', () => {
     })
 
     // Sequences start at 0 — that is what the computer's RingBuffer emits.
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'a' })
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 1, data: 'b' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 0,
+      data: 'a'
+    })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 1,
+      data: 'b'
+    })
     // Gap: seq 4 arrives before 2 & 3 → backfill from lastSeq (1).
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 4, data: 'e' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 4,
+      data: 'e'
+    })
 
     await vi.waitFor(() => expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e']))
     await vi.waitFor(() => expect(handle.pid).toBe(4242))
@@ -181,7 +199,12 @@ describe('createRoutingPtyBackend', () => {
     })
 
     // Duplicate / stale frame is ignored (no double delivery).
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 2, data: 'DUP' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 2,
+      data: 'DUP'
+    })
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
 
     gateway.emit('pty.exit', {
@@ -193,14 +216,26 @@ describe('createRoutingPtyBackend', () => {
     expect(exit).toEqual({ exitCode: 0, signal: undefined })
 
     // Post-exit frames are dropped (session disposed).
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 5, data: 'zzz' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 5,
+      data: 'zzz'
+    })
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
   it('adopt: seeds warm output first, then drains frames that raced the reply', async () => {
     const gateway = new FakeGateway()
-    gateway.onMethod('pty.warmAdopt', () => ({ pid: 4242, data: 'BOOT-BANNER', seq: 5 }))
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+    gateway.onMethod('pty.warmAdopt', () => ({
+      pid: 4242,
+      data: 'BOOT-BANNER',
+      seq: 5
+    }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => 'computer-1'
+    })
 
     const chunks: string[] = []
     // Start the adopt but do not await it yet, so we can emit a live frame while
@@ -256,7 +291,10 @@ describe('createRoutingPtyBackend', () => {
     gateway.onMethod('pty.warmAdopt', () => {
       throw new Error('no warm session warm-gone to adopt')
     })
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => 'computer-1'
+    })
 
     await expect(backend.adopt!('computer-1', 'warm-gone', 'sess-x', 'bash')).rejects.toThrow(
       /no warm session/
@@ -371,7 +409,12 @@ describe('createRoutingPtyBackend', () => {
     handle.onData((d) => chunks.push(d))
 
     // seq 2 first: gap at 0 and 1 → backfill must ask from BEFORE seq 0.
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 2, data: 'two' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 2,
+      data: 'two'
+    })
 
     await vi.waitFor(() => expect(chunks).toEqual(['zero', 'one', 'two']))
     // `getBufferSince` returns `seq > params.seq`, so -1 is what includes seq 0.
@@ -393,7 +436,13 @@ describe('createRoutingPtyBackend', () => {
       ptySpec({
         file: 'zsh',
         args: ['-l'],
-        options: { cwd: '/work', env: { FOO: 'bar' }, cols: 100, rows: 30, name: 'xterm-256color' }
+        options: {
+          cwd: '/work',
+          env: { FOO: 'bar', SLAYZONE_TASK_ID: 'task-1' },
+          cols: 100,
+          rows: 30,
+          name: 'xterm-256color'
+        }
       })
     )) as PtyHandle
 
@@ -404,14 +453,17 @@ describe('createRoutingPtyBackend', () => {
         command: 'zsh',
         args: ['-l'],
         cwd: '/work',
-        env: { FOO: 'bar' },
+        env: { SLAYZONE_TASK_ID: 'task-1' },
         cols: 100,
         rows: 30
       }
     })
 
     handle.write('input')
-    expect(requireCall(gateway, 'pty.write').params).toEqual({ sessionId: 'sess-1', data: 'input' })
+    expect(requireCall(gateway, 'pty.write').params).toEqual({
+      sessionId: 'sess-1',
+      data: 'input'
+    })
 
     handle.resize(120, 40)
     expect(requireCall(gateway, 'pty.resize').params).toEqual({
@@ -421,13 +473,16 @@ describe('createRoutingPtyBackend', () => {
     })
 
     handle.kill('SIGTERM')
-    expect(requireCall(gateway, 'pty.kill').params).toEqual({
+    expect(requireCall(gateway, 'pty.kill').params).toMatchObject({
       sessionId: 'sess-1',
       signal: 'SIGTERM'
     })
+    expect((requireCall(gateway, 'pty.kill').params as { spawnId: string }).spawnId).toBeTruthy()
 
     handle.kill()
-    expect(gateway.requestsOf('pty.kill')[1]?.params).toEqual({ sessionId: 'sess-1' })
+    expect(gateway.requestsOf('pty.kill')[1]?.params).toMatchObject({
+      sessionId: 'sess-1'
+    })
   })
 
   // ── Detach / reattach across a dropped computer connection ──────────────────
@@ -469,8 +524,16 @@ describe('createRoutingPtyBackend', () => {
     handle.onExit((e) => {
       exit = e
     })
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'a' })
-    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 0,
+      data: 'a'
+    })
+    gateway.emit('computer-lost', {
+      computerId: 'computer-1',
+      reason: 'heartbeat-timeout'
+    })
     return { chunks, exit: () => exit }
   }
 
@@ -483,7 +546,12 @@ describe('createRoutingPtyBackend', () => {
     expect(exit()).toBeNull()
 
     // Still tracked, so anything that does arrive is still delivered.
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 1, data: 'b' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 1,
+      data: 'b'
+    })
     expect(chunks).toEqual(['a', 'b'])
   })
 
@@ -501,14 +569,21 @@ describe('createRoutingPtyBackend', () => {
       exit = e
     })
 
-    gateway.emit('computer-disconnected', { computerId: 'computer-1', reason: 'socket-closed' })
+    gateway.emit('computer-disconnected', {
+      computerId: 'computer-1',
+      reason: 'socket-closed'
+    })
     expect(exit).toBeNull()
   })
 
   it('reconnect with the SAME epoch reattaches sessions the computer still holds, backfilling the gap', async () => {
     const gateway = new FakeGateway()
-    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: 1 }] }))
-    gateway.onMethod('pty.getBufferSince', () => ({ frames: [{ seq: 1, data: 'b' }] }))
+    gateway.onMethod('pty.list', () => ({
+      sessions: [{ sessionId: 'sess-1', pid: 1, seq: 1 }]
+    }))
+    gateway.onMethod('pty.getBufferSince', () => ({
+      frames: [{ seq: 1, data: 'b' }]
+    }))
     const { chunks, exit } = await spawnDetached(gateway)
 
     connect(gateway, 'epoch-a') // same process came back
@@ -531,7 +606,11 @@ describe('createRoutingPtyBackend', () => {
 
     // Absent from the computer's own list ⇒ it really did exit while we were away.
     await vi.waitFor(() =>
-      expect(exit()).toEqual({ exitCode: 1, signal: undefined, reason: 'exited-while-detached' })
+      expect(exit()).toEqual({
+        exitCode: 1,
+        signal: undefined,
+        reason: 'exited-while-detached'
+      })
     )
   })
 
@@ -542,7 +621,11 @@ describe('createRoutingPtyBackend', () => {
     connect(gateway, 'epoch-b') // computer restarted
 
     await vi.waitFor(() =>
-      expect(exit()).toEqual({ exitCode: 1, signal: undefined, reason: 'computer-restarted' })
+      expect(exit()).toEqual({
+        exitCode: 1,
+        signal: undefined,
+        reason: 'computer-restarted'
+      })
     )
     // A new process provably holds nothing of ours — no point listing.
     expect(gateway.requestsOf('pty.list')).toHaveLength(0)
@@ -550,7 +633,9 @@ describe('createRoutingPtyBackend', () => {
 
   it('a computer that reports no epoch keeps the conservative pre-epoch behavior', async () => {
     const gateway = new FakeGateway()
-    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: 0 }] }))
+    gateway.onMethod('pty.list', () => ({
+      sessions: [{ sessionId: 'sess-1', pid: 1, seq: 0 }]
+    }))
     const { exit } = await spawnDetached(gateway, undefined)
 
     connect(gateway, undefined)
@@ -558,7 +643,11 @@ describe('createRoutingPtyBackend', () => {
     // Identity unverified ⇒ never reattach on it, even though the computer says
     // it still holds the session. Absence of an epoch is not a match.
     await vi.waitFor(() =>
-      expect(exit()).toEqual({ exitCode: 1, signal: undefined, reason: 'computer-restarted' })
+      expect(exit()).toEqual({
+        exitCode: 1,
+        signal: undefined,
+        reason: 'computer-restarted'
+      })
     )
     expect(gateway.requestsOf('pty.list')).toHaveLength(0)
   })
@@ -599,7 +688,11 @@ describe('createRoutingPtyBackend', () => {
       expect(exit()).toBeNull() // still inside the window
 
       await vi.advanceTimersByTimeAsync(60_001)
-      expect(exit()).toEqual({ exitCode: 1, signal: undefined, reason: 'reattach-timeout' })
+      expect(exit()).toEqual({
+        exitCode: 1,
+        signal: undefined,
+        reason: 'reattach-timeout'
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -624,7 +717,9 @@ describe('createRoutingPtyBackend', () => {
     // agent mode turns into a recovery shell for a process that exited cleanly.
     const gateway = new FakeGateway()
     const { exit } = await spawnDetached(gateway)
-    const { spawnId } = requireCall(gateway, 'pty.spawn').params as { spawnId: string }
+    const { spawnId } = requireCall(gateway, 'pty.spawn').params as {
+      spawnId: string
+    }
     gateway.onMethod('pty.list', () => ({
       sessions: [],
       exited: [{ sessionId: 'sess-1', spawnId, pid: 1, exitCode: 0, signal: null }]
@@ -652,7 +747,10 @@ describe('createRoutingPtyBackend', () => {
   ): {
     handle: PtyHandle
     exit: () => PtyExitEvent | null
-    confirmed: () => { pid: number | null; ownsStartupDeadline?: boolean } | null
+    confirmed: () => {
+      pid: number | null
+      ownsStartupDeadline?: boolean
+    } | null
     spawnId: string
   } => {
     let rejectSpawn: (err: unknown) => void = noopReject
@@ -670,7 +768,10 @@ describe('createRoutingPtyBackend', () => {
     connect(gateway, 'epoch-a')
     const handle = backend.spawn(spec) as PtyHandle
     let exit: PtyExitEvent | null = null
-    let confirmed: { pid: number | null; ownsStartupDeadline?: boolean } | null = null
+    let confirmed: {
+      pid: number | null
+      ownsStartupDeadline?: boolean
+    } | null = null
     handle.onExit((e) => {
       exit = e
     })
@@ -680,11 +781,16 @@ describe('createRoutingPtyBackend', () => {
       },
       () => undefined
     )
-    const { spawnId } = requireCall(gateway, 'pty.spawn').params as { spawnId: string }
+    const { spawnId } = requireCall(gateway, 'pty.spawn').params as {
+      spawnId: string
+    }
     // The real teardown order: dispose() rejects pending requests (settling on a
     // later microtask), then `computer-disconnected` is emitted synchronously.
     rejectSpawn(new RpcDisposedError('computer-hub', 'socket-closed'))
-    gateway.emit('computer-disconnected', { computerId: 'computer-1', reason: 'socket-closed' })
+    gateway.emit('computer-disconnected', {
+      computerId: 'computer-1',
+      reason: 'socket-closed'
+    })
     return { handle, exit: () => exit, confirmed: () => confirmed, spawnId }
   }
 
@@ -702,13 +808,19 @@ describe('createRoutingPtyBackend', () => {
     const handle = backend.spawn(ptySpec({ startupTimeoutMs: 10_000 })) as PtyHandle
 
     const call = requireCall(gateway, 'pty.spawn')
-    expect(call.params).toMatchObject({ sessionId: 'sess-1', startupTimeoutMs: 10_000 })
+    expect(call.params).toMatchObject({
+      sessionId: 'sess-1',
+      startupTimeoutMs: 10_000
+    })
     expect(typeof (call.params as { spawnId?: unknown }).spawnId).toBe('string')
     // Liveness is the heartbeat's job. A request timeout here turned a slow spawn
     // (a computer restoring dozens of sessions) into a refused one.
     expect(call.timeoutMs).toBe(0)
     // The computer acknowledged owning the deadline, so the hub must not run its own.
-    await expect(handle.whenSpawned).resolves.toEqual({ pid: 5, ownsStartupDeadline: true })
+    await expect(handle.whenSpawned).resolves.toEqual({
+      pid: 5,
+      ownsStartupDeadline: true
+    })
   })
 
   it('an agent spawn carries its admission lane; prioritize reaches the computer only until it starts', async () => {
@@ -774,15 +886,27 @@ describe('createRoutingPtyBackend', () => {
     const gateway = new FakeGateway()
     const facts = {
       ok: true,
-      problems: [{ check: 'spawn-helper executable', detail: 'not executable', fix: 'chmod +x h' }],
+      problems: [
+        {
+          check: 'spawn-helper executable',
+          detail: 'not executable',
+          fix: 'chmod +x h'
+        }
+      ],
       shellExists: true,
       binaries: [{ binary: 'claude', path: '/opt/bin/claude' }]
     }
     gateway.onMethod('pty.doctor', () => facts)
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => 'computer-1'
+    })
 
     await expect(
-      backend.doctor?.('computer-1', { shell: '/bin/zsh', binaries: ['claude'] })
+      backend.doctor?.('computer-1', {
+        shell: '/bin/zsh',
+        binaries: ['claude']
+      })
     ).resolves.toEqual({
       problems: facts.problems,
       shellExists: true,
@@ -795,7 +919,10 @@ describe('createRoutingPtyBackend', () => {
 
   it('doctor: old computer → null (can not tell); lost link → rejects', async () => {
     const gateway = new FakeGateway()
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => 'computer-1' })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => 'computer-1'
+    })
     const ask = () => backend.doctor?.('computer-1', { shell: '/bin/zsh', binaries: [] })
 
     gateway.onMethod('pty.doctor', () => {
@@ -878,7 +1005,10 @@ describe('createRoutingPtyBackend', () => {
 
     const handle = backend.spawn(ptySpec({ startupTimeoutMs: 10_000 })) as PtyHandle
 
-    await expect(handle.whenSpawned).resolves.toEqual({ pid: 5, ownsStartupDeadline: false })
+    await expect(handle.whenSpawned).resolves.toEqual({
+      pid: 5,
+      ownsStartupDeadline: false
+    })
   })
 
   it('a spawn in flight when the socket drops is NOT declared dead', async () => {
@@ -935,10 +1065,19 @@ describe('createRoutingPtyBackend', () => {
     gateway.onMethod('pty.list', () => ({
       sessions: [],
       exited: [
-        { sessionId: 'sess-1', spawnId, pid: 9, exitCode: 3, signal: null, reason: undefined }
+        {
+          sessionId: 'sess-1',
+          spawnId,
+          pid: 9,
+          exitCode: 3,
+          signal: null,
+          reason: undefined
+        }
       ]
     }))
-    gateway.onMethod('pty.getBufferSince', () => ({ frames: [{ seq: 0, data: 'bye' }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({
+      frames: [{ seq: 0, data: 'bye' }]
+    }))
 
     connect(gateway, 'epoch-a')
 
@@ -958,7 +1097,11 @@ describe('createRoutingPtyBackend', () => {
     connect(gateway, 'epoch-b')
 
     await vi.waitFor(() =>
-      expect(exit()).toEqual({ exitCode: 1, signal: undefined, reason: 'computer-restarted' })
+      expect(exit()).toEqual({
+        exitCode: 1,
+        signal: undefined,
+        reason: 'computer-restarted'
+      })
     )
     expect(gateway.requestsOf('pty.spawn')).toHaveLength(1)
   })
@@ -971,7 +1114,10 @@ describe('createRoutingPtyBackend', () => {
       resolveComputerId: (s) => s.computerId ?? null
     })
     connect(gateway, 'epoch-a')
-    gateway.emit('computer-disconnected', { computerId: 'computer-1', reason: 'socket-closed' })
+    gateway.emit('computer-disconnected', {
+      computerId: 'computer-1',
+      reason: 'socket-closed'
+    })
 
     // The gateway refuses a request to a computer it has no socket for.
     gateway.onMethod('pty.spawn', () => {
@@ -1088,7 +1234,9 @@ describe('createRoutingPtyBackend', () => {
     // own startup deadline because nothing on the other end owns one.
     const gateway = new FakeGateway()
     const { confirmed } = spawnInFlight(gateway)
-    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 42, seq: -1 }] }))
+    gateway.onMethod('pty.list', () => ({
+      sessions: [{ sessionId: 'sess-1', pid: 42, seq: -1 }]
+    }))
 
     connect(gateway, 'epoch-a')
 
@@ -1154,7 +1302,11 @@ describe('createRoutingPtyBackend', () => {
       reason: 'startup-timeout'
     })
 
-    expect(exit).toEqual({ exitCode: 0, signal: undefined, reason: 'startup-timeout' })
+    expect(exit).toEqual({
+      exitCode: 0,
+      signal: undefined,
+      reason: 'startup-timeout'
+    })
   })
 })
 
@@ -1165,7 +1317,10 @@ describe('createRoutingPtyBackend', () => {
 describe('createRoutingProcessBackend', () => {
   it('throws NoComputerAvailableError when no computer resolves', () => {
     const gateway = new FakeGateway()
-    const backend = createRoutingProcessBackend({ gateway, resolveComputerId: () => null })
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
 
     expect(() => backend.spawn(procSpec({ computerId: null }))).toThrow(NoComputerAvailableError)
     expect(gateway.calls).toHaveLength(0)
@@ -1193,7 +1348,11 @@ describe('createRoutingProcessBackend', () => {
     })
     await vi.waitFor(() => expect(handle.pid).toBe(555))
 
-    gateway.emit('proc.data', { computerId: 'computer-1', sessionId: 'proc-1', data: 'one' })
+    gateway.emit('proc.data', {
+      computerId: 'computer-1',
+      sessionId: 'proc-1',
+      data: 'one'
+    })
     gateway.emit('proc.data', {
       computerId: 'computer-1',
       sessionId: 'proc-1',
@@ -1218,7 +1377,11 @@ describe('createRoutingProcessBackend', () => {
     })
     expect(exit).toEqual({ code: 1, signal: null })
 
-    gateway.emit('proc.data', { computerId: 'computer-1', sessionId: 'proc-1', data: 'after-exit' })
+    gateway.emit('proc.data', {
+      computerId: 'computer-1',
+      sessionId: 'proc-1',
+      data: 'after-exit'
+    })
     expect(chunks).toEqual(['one', 'two'])
   })
 
@@ -1252,7 +1415,10 @@ describe('createRoutingProcessBackend', () => {
     handle.onExit((e) => {
       exit = e
     })
-    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    gateway.emit('computer-lost', {
+      computerId: 'computer-1',
+      reason: 'heartbeat-timeout'
+    })
     return { exit: () => exit }
   }
 
@@ -1263,7 +1429,9 @@ describe('createRoutingProcessBackend', () => {
 
   it('reconnect with the same epoch resumes a process the computer still holds', async () => {
     const gateway = new FakeGateway()
-    gateway.onMethod('proc.list', () => ({ sessions: [{ sessionId: 'proc-1', pid: 1, seq: 0 }] }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [{ sessionId: 'proc-1', pid: 1, seq: 0 }]
+    }))
     const { exit } = spawnDetachedProc(gateway)
 
     connectProc(gateway, 'epoch-a')
@@ -1298,7 +1466,10 @@ describe('createRoutingProcessBackend', () => {
       })
     }
 
-    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    gateway.emit('computer-lost', {
+      computerId: 'computer-1',
+      reason: 'heartbeat-timeout'
+    })
     connectProc(gateway, 'epoch-a')
 
     await vi.waitFor(() => expect(gateway.requestsOf('proc.list')).toHaveLength(1))
@@ -1343,9 +1514,14 @@ describe('createRoutingProcessBackend', () => {
     handle.onExit((e) => {
       exit = e
     })
-    const { spawnId } = requireCall(gateway, 'proc.spawn').params as { spawnId: string }
+    const { spawnId } = requireCall(gateway, 'proc.spawn').params as {
+      spawnId: string
+    }
     rejectSpawn(new RpcDisposedError('computer-hub', 'socket-closed'))
-    gateway.emit('computer-disconnected', { computerId: 'computer-1', reason: 'socket-closed' })
+    gateway.emit('computer-disconnected', {
+      computerId: 'computer-1',
+      reason: 'socket-closed'
+    })
     return { handle, exit: () => exit, spawnId }
   }
 
@@ -1478,10 +1654,14 @@ describe('createRemoteWorktreeAdapters', () => {
     })
 
     expect(await adapters.isGitRepo(TASK, '/repo')).toBe(true)
-    expect(requireCall(gateway, 'git.isGitRepo').params).toEqual({ path: '/repo' })
+    expect(requireCall(gateway, 'git.isGitRepo').params).toEqual({
+      path: '/repo'
+    })
 
     expect(await adapters.getCurrentBranch(TASK, '/repo')).toBe('main')
-    expect(requireCall(gateway, 'git.getCurrentBranch').params).toEqual({ repoPath: '/repo' })
+    expect(requireCall(gateway, 'git.getCurrentBranch').params).toEqual({
+      repoPath: '/repo'
+    })
 
     await adapters.createWorktree(TASK, '/repo', '/wt', 'feature', 'main')
     expect(requireCall(gateway, 'git.createWorktree').params).toEqual({
@@ -1491,7 +1671,9 @@ describe('createRemoteWorktreeAdapters', () => {
       sourceBranch: 'main'
     })
 
-    expect(await adapters.removeWorktree(TASK, '/proj', '/wt')).toEqual({ branchDeleted: true })
+    expect(await adapters.removeWorktree(TASK, '/proj', '/wt')).toEqual({
+      branchDeleted: true
+    })
     expect(requireCall(gateway, 'git.removeWorktree').params).toEqual({
       projectPath: '/proj',
       worktreePath: '/wt'
@@ -1517,7 +1699,9 @@ describe('createRemoteWorktreeAdapters', () => {
     })
 
     expect(await adapters.pathExists(TASK, '/some/path')).toBe(true)
-    expect(requireCall(gateway, 'fs.pathExists').params).toEqual({ path: '/some/path' })
+    expect(requireCall(gateway, 'fs.pathExists').params).toEqual({
+      path: '/some/path'
+    })
 
     // Artifact dirs live in the HUB's own storage, so they are served locally and
     // never cross the wire — routing them would have made archiving a task
@@ -1555,7 +1739,11 @@ describe('createRemoteWorktreeAdapters', () => {
   it('throws for every WORKSPACE method, but keeps hub-owned ops working', async () => {
     const gateway = new FakeGateway()
     const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveComputerId: () => null })
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local,
+      resolveComputerId: () => null
+    })
 
     // Workspace work must land on the same machine as the agent that will use it,
     // so "no computer" cannot silently mean "do it on the hub".
@@ -1577,7 +1765,11 @@ describe('createRemoteWorktreeAdapters', () => {
   it('serves the color ops locally even with no computer (hub-local UI state)', async () => {
     const gateway = new FakeGateway()
     const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveComputerId: () => null })
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local,
+      resolveComputerId: () => null
+    })
 
     // The documented exception to the invariant: colors are hub-local UI state and
     // `getWorktreeColor` is sync, so it could never be a network call.
@@ -1616,10 +1808,16 @@ describe('no-computer: every exec kind fails loudly, nothing reaches the gateway
 
     // The invariant in one place: with no computer there is nowhere to run, and the
     // hub must not quietly become the execution host.
-    const pty = createRoutingPtyBackend({ gateway, resolveComputerId: () => null })
+    const pty = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
     expect(() => pty.spawn(ptySpec({ computerId: null }))).toThrow(NoComputerAvailableError)
 
-    const proc = createRoutingProcessBackend({ gateway, resolveComputerId: () => null })
+    const proc = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
     expect(() => proc.spawn(procSpec({ computerId: null }))).toThrow(NoComputerAvailableError)
 
     const wt = createRemoteWorktreeAdapters({
@@ -1697,7 +1895,10 @@ describe('the no-computer error is actionable', () => {
   // it replaces.
   it('names the computer requirement and how to fix it', () => {
     const gateway = new FakeGateway()
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => null })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
 
     let caught: Error | null = null
     try {
@@ -1716,7 +1917,10 @@ describe('the no-computer error is actionable', () => {
 
   it('identifies which work failed, per exec kind', async () => {
     const gateway = new FakeGateway()
-    const chat = createRoutingChatBackend({ gateway, resolveComputerId: () => null })
+    const chat = createRoutingChatBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
     await expect(
       chat.spawn({
         sessionId: 's',
@@ -1729,7 +1933,10 @@ describe('the no-computer error is actionable', () => {
       })
     ).rejects.toThrow(/chat agent claude/)
 
-    const proc = createRoutingProcessBackend({ gateway, resolveComputerId: () => null })
+    const proc = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: () => null
+    })
     expect(() => proc.spawn(procSpec({ computerId: null, id: 'proc-42' }))).toThrow(
       /process proc-42/
     )
@@ -1828,7 +2035,14 @@ describe('createRemoteFsAdapters — browse ops', () => {
     gateway.onMethod('fs.listDir', () => ({
       path: '/srv/work',
       parent: null,
-      entries: [{ name: 'app', path: '/srv/work/app', type: 'directory', isGitRepo: true }]
+      entries: [
+        {
+          name: 'app',
+          path: '/srv/work/app',
+          type: 'directory',
+          isGitRepo: true
+        }
+      ]
     }))
     gateway.onMethod('fs.mkdir', () => ({ path: '/srv/work/new' }))
 
@@ -1841,13 +2055,17 @@ describe('createRemoteFsAdapters — browse ops', () => {
       platform: 'linux',
       sep: '/'
     })
-    const listed = await fs.listDir('computer-1', '/srv/work', { dirsOnly: true })
+    const listed = await fs.listDir('computer-1', '/srv/work', {
+      dirsOnly: true
+    })
     expect(listed.entries[0]?.isGitRepo).toBe(true)
     expect(requireCall(gateway, 'fs.listDir').params).toMatchObject({
       path: '/srv/work',
       dirsOnly: true
     })
-    expect(await fs.mkdir('computer-1', '/srv/work/new')).toEqual({ path: '/srv/work/new' })
+    expect(await fs.mkdir('computer-1', '/srv/work/new')).toEqual({
+      path: '/srv/work/new'
+    })
 
     // Nothing touched the hub's disk.
     expect(local.calls).toEqual([])
@@ -1900,7 +2118,10 @@ describe('createRemoteFsAdapters — allowedRoots', () => {
   // A hub has no jail. Pretending to save would leave the user believing they
   // had widened access that was never restricted in the first place.
   it('refuses when there is no computer, rather than silently accepting', async () => {
-    const fs = createRemoteFsAdapters({ gateway: new FakeGateway(), local: makeLocalFs() })
+    const fs = createRemoteFsAdapters({
+      gateway: new FakeGateway(),
+      local: makeLocalFs()
+    })
     await expect(fs.setAllowedRoots(null, ['/srv/work'])).rejects.toThrow(/no path jail/)
   })
 })
@@ -1914,9 +2135,18 @@ describe('createRemoteFsAdapters — editor ops', () => {
     gateway.onMethod('fs.readFile', () => ({ content: 'remote' }))
     gateway.onMethod('fs.writeFile', () => ({ ok: true }))
     gateway.onMethod('fs.copyIn', () => ({ path: 'assets/pic.png' }))
-    gateway.onMethod('fs.gitStatus', () => ({ files: { 'a.ts': 'modified' }, isGitRepo: true }))
-    gateway.onMethod('fs.listAllFiles', () => ({ files: ['a.ts'], truncated: true }))
-    gateway.onMethod('fs.searchFiles', () => ({ results: [], truncated: false }))
+    gateway.onMethod('fs.gitStatus', () => ({
+      files: { 'a.ts': 'modified' },
+      isGitRepo: true
+    }))
+    gateway.onMethod('fs.listAllFiles', () => ({
+      files: ['a.ts'],
+      truncated: true
+    }))
+    gateway.onMethod('fs.searchFiles', () => ({
+      results: [],
+      truncated: false
+    }))
 
     const local = makeLocalFs()
     const fs = createRemoteFsAdapters({ gateway, local })
@@ -1924,7 +2154,9 @@ describe('createRemoteFsAdapters — editor ops', () => {
     expect(await fs.readDir('computer-1', '/srv/app', '')).toEqual([
       { name: 'src', path: 'src', type: 'directory' }
     ])
-    expect(await fs.readFile('computer-1', '/srv/app', 'a.ts')).toEqual({ content: 'remote' })
+    expect(await fs.readFile('computer-1', '/srv/app', 'a.ts')).toEqual({
+      content: 'remote'
+    })
     await fs.writeFile('computer-1', '/srv/app', 'a.ts', 'x')
     expect(await fs.copyIn('computer-1', '/srv/app', '/tmp/pic.png')).toBe('assets/pic.png')
     expect(await fs.gitStatus('computer-1', '/srv/app')).toEqual({
@@ -1938,7 +2170,10 @@ describe('createRemoteFsAdapters — editor ops', () => {
   // present a partial tree as the complete one.
   it('preserves the truncated flag on capped whole-tree reads', async () => {
     const gateway = new FakeGateway()
-    gateway.onMethod('fs.listAllFiles', () => ({ files: ['a.ts'], truncated: true }))
+    gateway.onMethod('fs.listAllFiles', () => ({
+      files: ['a.ts'],
+      truncated: true
+    }))
     const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs() })
     expect(await fs.listAllFiles('computer-1', '/srv/app')).toEqual({
       files: ['a.ts'],
@@ -1996,7 +2231,9 @@ describe('createRemoteFsAdapters — watch', () => {
 
     expect(seen).toEqual(['changed:a.ts'])
     stop()
-    expect(requireCall(gateway, 'fs.watchStop').params).toEqual({ watchId: 'watch-1' })
+    expect(requireCall(gateway, 'fs.watchStop').params).toEqual({
+      watchId: 'watch-1'
+    })
   })
 
   it('stops delivering after dispose', async () => {
@@ -2064,7 +2301,10 @@ describe('createRemoteFsAdapters — watch', () => {
     await vi.waitFor(() => expect(gateway.requestsOf('fs.watchStart')).toHaveLength(1))
 
     gateway.emit('computer-connected', { computer: computer('computer-1') })
-    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    gateway.emit('computer-lost', {
+      computerId: 'computer-1',
+      reason: 'heartbeat-timeout'
+    })
 
     gateway.emit('fs.change', {
       computerId: 'computer-1',
@@ -2126,7 +2366,11 @@ describe('the work gate: a computer works only for the work it was admitted for'
   it('pty adopt: asks for the session before anything is tracked or sent', async () => {
     const gateway = new FakeGateway()
     const { gate, asked } = gateFor('mine')
-    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => null, gate })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => null,
+      gate
+    })
     await expect(backend.adopt!('theirs', 'warm:1', 'task-1:tab-1', 'bash')).rejects.toThrow(
       'not yours'
     )
@@ -2137,7 +2381,11 @@ describe('the work gate: a computer works only for the work it was admitted for'
   it('chat spawn: asks for the task; a refusal sends nothing', async () => {
     const gateway = new FakeGateway()
     const { gate, asked } = gateFor('mine')
-    const chat = createRoutingChatBackend({ gateway, resolveComputerId: () => 'theirs', gate })
+    const chat = createRoutingChatBackend({
+      gateway,
+      resolveComputerId: () => 'theirs',
+      gate
+    })
     await expect(
       chat.spawn({
         sessionId: 's',

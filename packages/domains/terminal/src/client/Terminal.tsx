@@ -95,7 +95,9 @@ const heartbeatRearms = new Set<() => void>()
  */
 function installHeartbeatSeam(): void {
   ;(
-    window as unknown as { __slayzone_setAtlasHeartbeatMs?: (ms: number) => void }
+    window as unknown as {
+      __slayzone_setAtlasHeartbeatMs?: (ms: number) => void
+    }
   ).__slayzone_setAtlasHeartbeatMs = (ms) => {
     atlasHeartbeatMs = ms
     for (const rearm of heartbeatRearms) rearm()
@@ -387,7 +389,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         if (e.type === 'keydown') {
-          void trpcClient.pty.write.mutate({ sessionId, data: KITTY_SHIFT_ENTER })
+          void trpcClient.pty.write.mutate({
+            sessionId,
+            data: KITTY_SHIFT_ENTER
+          })
         }
         return false
       }
@@ -811,7 +816,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const handleResizeNeeded = useStableCallback(({ sessionId: sid }: { sessionId: string }) => {
     if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
     fitAddonRef.current.fit()
-    diag(sessionId, 'fit', { site: 'resize-needed', terminal: terminalRef.current })
+    diag(sessionId, 'fit', {
+      site: 'resize-needed',
+      terminal: terminalRef.current
+    })
     scheduleAtlasCorrection('fit:resize-needed')
     void trpcClient.pty.resize.mutate({
       sessionId,
@@ -820,7 +828,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     })
   })
   useSubscription(
-    trpc.pty.onResizeNeeded.subscriptionOptions(undefined, { onData: handleResizeNeeded })
+    trpc.pty.onResizeNeeded.subscriptionOptions(undefined, {
+      onData: handleResizeNeeded
+    })
   )
 
   // Safety net: prevent permanent 'starting' state after init completes.
@@ -837,7 +847,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       const exists = await trpcClient.pty.exists.query({ sessionId })
       const actual = await trpcClient.pty.getState.query({ sessionId })
       if (cancelled) return
-      const verdict = startingWatchdogVerdict({ exists, actual, waitedMs: Date.now() - armedAt })
+      const verdict = startingWatchdogVerdict({
+        exists,
+        actual,
+        waitedMs: Date.now() - armedAt
+      })
       if (verdict.kind === 'adopt') {
         setPtyState(verdict.state)
       } else if (verdict.kind === 'wait') {
@@ -1167,7 +1181,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     container.addEventListener('keydown', onInteract, true)
     container.addEventListener('mousedown', onInteract, true)
-    container.addEventListener('wheel', onInteract, { capture: true, passive: true })
+    container.addEventListener('wheel', onInteract, {
+      capture: true,
+      passive: true
+    })
     container.addEventListener('paste', onInteract, true)
     container.addEventListener('focusin', onFocus, true)
     return () => {
@@ -1304,6 +1321,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // provider-named message + a single "Start fresh" action instead of the
   // generic exit-code overlay.
   const isStaleSession = deadReason === 'SESSION_NOT_FOUND'
+  const isSessionInUse = deadReason === 'SESSION_IN_USE'
   const providerLabel = DETECTION_ENGINES.find((e) => e.type === mode)?.label ?? 'The agent'
 
   return (
@@ -1320,7 +1338,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         className={`h-full w-full rounded-lg outline-none overflow-hidden transition-colors ${
           isDragOver ? 'ring-2 ring-info/50 ring-inset' : ''
         }`}
-        style={{ padding: '8px', backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a' }}
+        style={{
+          padding: '8px',
+          backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a'
+        }}
         onClick={() => terminalRef.current?.focus()}
       >
         {/* Hidden terminal: keep parsing output, stop painting it. A hidden tab is
@@ -1339,7 +1360,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         {isLoading && (
           <div
             className="absolute inset-0 z-10"
-            style={{ backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a' }}
+            style={{
+              backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a'
+            }}
           >
             <PulseGrid />
           </div>
@@ -1354,6 +1377,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         {showDeadOverlay && (
           <TerminalDeadOverlay
             isStaleSession={isStaleSession}
+            isSessionInUse={isSessionInUse}
             providerLabel={providerLabel}
             deadCrashOutput={deadCrashOutput}
             deadExitCode={deadExitCode}

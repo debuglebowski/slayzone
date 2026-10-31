@@ -488,6 +488,9 @@ export const ptySpawnParamsSchema = z
     startupTimeoutMs: z.number().int().positive().optional(),
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
+    /** New computers resolve their own login shell; command/args remain for older peers. */
+    computerShell: z.boolean().optional(),
+    computerShellCommand: z.string().optional(),
     /**
      * Absolute cwd. Optional now: when absent the COMPUTER resolves it from
      * `projectId` against its own `project.*` mapping, because the hub cannot —
@@ -512,6 +515,22 @@ export const ptySpawnParamsSchema = z
   })
 export type PtySpawnParams = z.infer<typeof ptySpawnParamsSchema>
 
+/** Only task/agent identity is permitted from hub into a computer PTY. */
+export const HUB_PTY_ENV_KEYS = [
+  'SLAYZONE_TASK_ID',
+  'SLAYZONE_PROJECT_ID',
+  'SLAYZONE_AGENT_ID',
+  'SLAYZONE_AGENT_HOOK_CONTEXT'
+] as const
+
+export function pickHubPtyEnv(env?: Record<string, string>): Record<string, string> {
+  const picked: Record<string, string> = {}
+  for (const key of HUB_PTY_ENV_KEYS) {
+    if (env?.[key] !== undefined) picked[key] = env[key]
+  }
+  return picked
+}
+
 export const ptySpawnResultSchema = z.object({
   pid: z.number().int(),
   /** The computer armed the requested `startupTimeoutMs`. Absent from a computer
@@ -522,6 +541,7 @@ export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 
 export const ptyKillParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: spawnIdField,
   signal: z.string().optional()
 })
 export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>
@@ -696,6 +716,7 @@ export const ptyWarmSpawnParamsSchema = z.object({
   warmId: z.string().min(1),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
+  computerShell: z.boolean().optional(),
   cwd: z.string().min(1),
   env: z.record(z.string(), z.string()).optional(),
   cols: z.number().int().positive().optional(),

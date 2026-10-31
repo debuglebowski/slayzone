@@ -4,8 +4,10 @@
  *
  * @module computer/handlers/spawn-env
  */
-import { mergePathLists } from '@slayzone/platform'
+import { mergePathLists, resolveUserShell } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
+import { userInfo } from 'node:os'
+import { pickHubPtyEnv } from '@slayzone/computer-transport/shared'
 import type { HandlerContext } from './types'
 
 export function buildSpawnEnv(
@@ -46,4 +48,21 @@ export function buildSpawnEnv(
     merged.PATH = mergePathLists(ctx.config.binOverrideDir, merged.PATH)
   }
   return merged
+}
+
+export function buildPtySpawnEnv(
+  ctx: HandlerContext,
+  hubEnv?: Record<string, string>
+): Record<string, string> {
+  const env = buildSpawnEnv(ctx, pickHubPtyEnv(hubEnv))
+  // Supervisors may launch this service with a synthetic HOME/USER/SHELL.
+  // The account database, not those inherited values, owns process identity.
+  const account = userInfo()
+  env.HOME = account.homedir
+  env.USER = account.username
+  env.LOGNAME = account.username
+  env.SHELL = resolveUserShell()
+  env.TERM = 'xterm-256color'
+  env.COLORTERM = 'truecolor'
+  return env
 }
