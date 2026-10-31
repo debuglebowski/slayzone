@@ -384,13 +384,6 @@ export function ChatComposer({
                   variant="text"
                 />
               )}
-              {appearance.chatWidth === 'wide' && (
-                <span>
-                  {inFlight
-                    ? 'Enter to queue · Shift+Enter for newline'
-                    : 'Enter to send · Shift+Enter for newline'}
-                </span>
-              )}
             </>
           )}
           <div className="flex-1" />

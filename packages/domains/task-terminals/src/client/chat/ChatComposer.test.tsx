@@ -457,12 +457,12 @@ describe('ChatComposer pills', () => {
     await act(() => Promise.resolve())
   })
 
-  it('the wide layout shows the send hint, which says "queue" while a turn runs', () => {
+  it('does not show keyboard hints below the composer', () => {
     const appearance = { ...appearanceDefaults, chatWidth: 'wide' as const }
     const { rerender } = setup({ appearance })
-    expect(screen.getByText('Enter to send · Shift+Enter for newline')).toBeDefined()
+    expect(screen.queryByText('Enter to send · Shift+Enter for newline')).toBeNull()
     rerender(<ChatComposer {...makeProps({ appearance, inFlight: true })} />)
-    expect(screen.getByText('Enter to queue · Shift+Enter for newline')).toBeDefined()
+    expect(screen.queryByText('Enter to queue · Shift+Enter for newline')).toBeNull()
   })
 })
 
