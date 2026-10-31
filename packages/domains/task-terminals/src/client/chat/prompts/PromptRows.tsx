@@ -33,12 +33,27 @@ export function PromptRows({
             disabled && 'opacity-60 cursor-not-allowed'
           )}
         >
-          <span aria-hidden className="shrink-0 w-6 select-none font-mono text-muted-foreground">
-            {i === selected ? '❯' : ' '} {i + 1}.
-          </span>
+          <PromptRowMarker index={i} selected={i === selected} />
           <span className="min-w-0">{option.label}</span>
         </button>
       ))}
     </div>
+  )
+}
+
+/**
+ * A row's `❯ 1.`: one line at any width (the label beside it wraps under its
+ * own text), the pointer in a fixed box so every row's label starts in the
+ * same column whether selected or not.
+ */
+export function PromptRowMarker({ index, selected }: { index: number; selected: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className="flex shrink-0 select-none whitespace-nowrap font-mono tabular-nums text-muted-foreground"
+    >
+      <span className="w-[2ch]">{selected ? '❯' : ''}</span>
+      <span className="min-w-[3ch]">{index + 1}.</span>
+    </span>
   )
 }

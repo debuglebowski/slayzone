@@ -17,6 +17,7 @@ import {
   modelsForMode,
   userMessageAttachments,
   type ChatAttachment,
+  type ChatModelsView,
   type CliCommandList,
   type StopResult,
   type UserContentBlock
@@ -42,7 +43,6 @@ import type {
 } from './autocomplete/types'
 
 /** Claude's effort levels (`/effort` when the model lists none of its own). */
-const CLAUDE_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 export interface UseChatComposerOpts {
   tabId: string
@@ -62,8 +62,10 @@ export interface UseChatComposerOpts {
   getArtifactFilePath: (id: string) => Promise<string | null>
   scrollToBottom: () => void
   handleEffortChange: (next: string) => Promise<void>
-  /** Effort levels `/effort` accepts (the model's own, from `chat.getModels`); absent: Claude's. */
-  effortIds?: readonly string[]
+  /** The models the pickers offer (`chat.getModels`): `/effort` checks the level against them. */
+  models: ChatModelsView
+  /** The chat's current model ('' / null: none chosen). */
+  chatModel: string | null
   handleModelChange: (next: AgentModel) => Promise<void>
   /** The chat CLI's slash commands (live or last known); null when unknown / not offered. */
   cliCommands: CliCommandList | null
@@ -107,7 +109,8 @@ export function useChatComposer({
   getArtifactFilePath,
   scrollToBottom,
   handleEffortChange,
-  effortIds,
+  models,
+  chatModel,
   handleModelChange,
   cliCommands,
   attachmentsUsedBytes = 0,
@@ -319,19 +322,14 @@ export function useChatComposer({
       // through the same canonical field, no flag-string mutation.
       const effortMatch = /^\/effort\s+(\S+)\s*$/.exec(text)
       if (effortMatch) {
-        const raw = effortMatch[1].toLowerCase()
-        const valid = effortIds ?? CLAUDE_EFFORTS
-        if (!valid.includes(raw)) {
-          toast(
-            valid.length > 0
-              ? `Invalid effort level "${raw}". Use: ${valid.join(', ')}`
-              : 'This model has no effort levels.'
-          )
+        const effort = models.effortCommand(chatModel, effortMatch[1])
+        if (!effort.ok) {
+          toast(effort.message)
           return
         }
         setDraft('')
-        await handleEffortChange(raw)
-        toast(`Effort set to ${raw}`)
+        await handleEffortChange(effort.level)
+        toast(`Effort set to ${effort.level}`)
         return
       }
 
@@ -454,7 +452,8 @@ export function useChatComposer({
       autocomplete,
       scrollToBottom,
       handleEffortChange,
-      effortIds,
+      models,
+      chatModel,
       handleModelChange,
       capabilities.nativeSlashCommands,
       capabilities.attachments,

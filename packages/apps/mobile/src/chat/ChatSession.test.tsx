@@ -223,6 +223,64 @@ describe('ChatSession: controls', () => {
     )
     await screen.findByLabelText('Permission mode: Plan mode')
   })
+
+  /** What Codex's CLI listed for the account (`chat.getModels`): not a list of the app's. */
+  const CODEX_LISTED = [
+    {
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
+      supportsEffort: true,
+      isDefault: true,
+      efforts: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'ultra', label: 'Ultra' }
+      ],
+      defaultEffort: 'medium'
+    },
+    { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', supportsEffort: false }
+  ]
+
+  it("Codex: offers the models its CLI listed (the hub's), each with its own effort levels", async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.getModels', () => CODEX_LISTED)
+    hub.on('chat.getModel', () => 'gpt-6-luna')
+    hub.on('chat.getEffort', () => 'ultra')
+    await open(hub, 'codex-chat')
+    const user = userEvent.setup()
+    await user.press(await screen.findByLabelText('Model: GPT-6 Luna'))
+    expect(screen.getByText('GPT-6.1 Sol')).toBeOnTheScreen()
+    expect(screen.queryByText('GPT-5.5')).toBeNull()
+    expect(hub.callsTo('chat.getModels')).toContainEqual({ taskId: TASK, mode: 'codex-chat' })
+    await user.press(screen.getByLabelText('Close'))
+
+    await user.press(await screen.findByLabelText('Effort: Ultra'))
+    expect(screen.getAllByRole('radio').map((r) => r.props.accessibilityState.checked)).toEqual([
+      false,
+      false,
+      true
+    ])
+    expect(screen.getByText('Low')).toBeOnTheScreen()
+    expect(screen.queryByText('Max')).toBeNull()
+    await user.press(screen.getByLabelText('Close'))
+
+    // A model that lists no efforts: no effort chip.
+    await user.press(screen.getByLabelText('Model: GPT-6 Luna'))
+    await user.press(screen.getByText('GPT-6.1 Sol'))
+    await screen.findByLabelText('Model: GPT-6.1 Sol')
+    expect(screen.queryByLabelText(/^Effort:/)).toBeNull()
+  })
+
+  it('Codex before its first run: no list to offer, the CLI default applies, no effort chip', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.getModel', () => '')
+    await open(hub, 'codex-chat')
+    const user = userEvent.setup()
+    await user.press(await screen.findByLabelText('Model: Default'))
+    expect(screen.getByText('Codex lists its models once it has started.')).toBeOnTheScreen()
+    expect(screen.queryAllByRole('radio')).toEqual([])
+    expect(screen.queryByLabelText(/^Effort:/)).toBeNull()
+  })
 })
 
 describe('ChatSession: what changed the conversation', () => {

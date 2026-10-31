@@ -23,13 +23,10 @@ import {
 } from '@slayzone/task-terminals/slash-commands'
 import {
   type AgentInfo,
-  CHAT_EFFORTS,
   type ChatCapabilities,
-  type ChatEffort,
+  type ChatModelsView,
   type CliCommandList,
   type CommandInfo,
-  isValidModelForMode,
-  modelsForMode,
   type SkillInfo
 } from '@slayzone/terminal-contracts'
 
@@ -206,45 +203,48 @@ export function enterSlash(
   return text === null ? acceptSlash(item, draft, caps) : { type: 'send', text, draft: '' }
 }
 
+/** The models the pickers offer (`chat.getModels`) and the chat's current one. */
+export interface SendModels {
+  view: ChatModelsView
+  current: string | null
+}
+
 /** What a send of `text` does (desktop's composer `handleSend`, before the queue). */
 export type SendPlan =
   | { type: 'empty' }
-  | { type: 'effort'; level: ChatEffort }
+  | { type: 'effort'; level: string }
   | { type: 'model'; id: string }
   | { type: 'invalid'; message: string }
   | { type: 'send'; text: string }
 
 export function planSend(
   raw: string,
-  mode: string,
+  models: SendModels,
   caps: ChatCapabilities,
   commands: readonly CommandInfo[]
 ): SendPlan {
   const text = raw.trim()
   if (!text) return { type: 'empty' }
-  // `/effort <level>`: the effort pill's path (provider config + respawn).
+  // `/effort <level>`: the effort pill's path (provider config + respawn), checked by
+  // the shared rule: the model's own levels where the provider lists them (Codex — a
+  // model with none refuses), else Claude's.
   const effort = /^\/effort\s+(\S+)\s*$/.exec(text)
   if (effort) {
-    const level = effort[1].toLowerCase()
-    return (CHAT_EFFORTS as readonly string[]).includes(level)
-      ? { type: 'effort', level: level as ChatEffort }
-      : {
-          type: 'invalid',
-          message: `Invalid effort level "${level}". Use: ${CHAT_EFFORTS.join(', ')}`
-        }
+    const result = models.view.effortCommand(models.current, effort[1])
+    return result.ok
+      ? { type: 'effort', level: result.level }
+      : { type: 'invalid', message: result.message }
   }
   // `/model <id>` where the CLI runs commands: its own /model would switch the running
   // process only, so it goes through the model pill's path.
   const model = caps.nativeSlashCommands ? /^\/model\s+(\S+)\s*$/.exec(text) : null
   if (model) {
     const id = model[1]
-    return isValidModelForMode(mode, id)
+    return models.view.models.some((m) => m.id === id)
       ? { type: 'model', id }
       : {
           type: 'invalid',
-          message: `Unknown model "${id}". Use: ${modelsForMode(mode)
-            .map((m) => m.id)
-            .join(', ')}`
+          message: `Unknown model "${id}". Use: ${models.view.models.map((m) => m.id).join(', ')}`
         }
   }
   if (!caps.nativeSlashCommands) {

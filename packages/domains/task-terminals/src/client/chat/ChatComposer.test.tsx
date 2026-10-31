@@ -3,7 +3,11 @@ import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { appearanceDefaults } from '@slayzone/ui'
-import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contracts'
+import {
+  type ChatAttachment,
+  chatModelsView,
+  type QueuedChatMessage
+} from '@slayzone/terminal-contracts'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const mutate = vi.fn()
@@ -21,7 +25,6 @@ vi.mock('@slayzone/editor/hooks', () => ({
 }))
 
 import { ChatComposer, type ChatComposerProps } from './ChatComposer'
-import { chatModelsView } from './chat-models'
 import type { AutocompleteSource } from './autocomplete/types'
 
 // jsdom ships no ResizeObserver; Radix popper content (Display popover, pill menus)

@@ -21,10 +21,13 @@ import {
   modeSupportsCollaboration,
   modeSupportsFastMode
 } from '@slayzone/terminal-contracts'
-import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type {
+  ChatAttachment,
+  ChatModelsView,
+  QueuedChatMessage
+} from '@slayzone/terminal-contracts'
 import type { UsageSummary } from '@slayzone/terminal/client'
 import type { UseChatAttachmentsResult } from './attachments/useChatAttachments'
-import type { ChatModelsView } from './chat-models'
 import { AttachmentChip } from './attachments/AttachmentChip'
 import { ChatQueueList, type ChatQueueListProps } from './ChatQueueList'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
