@@ -74,8 +74,10 @@ function contentBox(parent: HTMLElement, height = 1000) {
 }
 
 /** Scroll container + content, both attached; the box starts at the bottom. */
-function setup(init: Partial<Dims> = {}) {
-  const hook = renderHook(() => useFollowBottom())
+function setup(init: Partial<Dims> = {}, autoScroll = true) {
+  const hook = renderHook(({ enabled }) => useFollowBottom(enabled), {
+    initialProps: { enabled: autoScroll }
+  })
   const { el, dims } = scrollBox(init)
   const content = contentBox(el)
   act(() => {
@@ -414,5 +416,19 @@ describe('useFollowBottom scroll anchor', () => {
       ok = result.current.restoreAnchor({ atBottom: false, key: 'r9', offsetPx: 0 })
     })
     expect(ok).toBe(false)
+  })
+})
+
+describe('auto-scroll preference', () => {
+  it('keeps position during growth while disabled, then follows when enabled', () => {
+    const { result, dims, rerender } = setup({}, false)
+    dims.scrollTop = 100
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(100)
+    expect(result.current.isStuck()).toBe(false)
+    rerender({ enabled: true })
+    grow(dims, 2000)
+    expect(dims.scrollTop).toBe(bottom(dims))
+    expect(result.current.isStuck()).toBe(true)
   })
 })

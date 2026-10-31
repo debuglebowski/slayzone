@@ -21,6 +21,8 @@ export interface UseChatDisplayOpts {
   timeline: Readonly<TimelineRows>
   finalOnly: boolean
   showLastMessageTools: boolean
+  errorsOnly?: boolean
+  showThinking?: boolean
   /** The timeline's follow-bottom lock (`useFollowBottom`). */
   follow: Pick<FollowBottomApi, 'scrollRef' | 'isStuck' | 'unstick' | 'restoreAnchor'>
   /** Paged history (`useChatSession`): page summaries, and loading pages. */
@@ -164,6 +166,8 @@ export function useChatDisplay({
   timeline,
   finalOnly,
   showLastMessageTools,
+  errorsOnly = false,
+  showThinking,
   follow,
   paging,
   loadPages,
@@ -235,6 +239,7 @@ export function useChatDisplay({
           i = gap.to - 1
           continue
         }
+        if (item.kind === 'thinking' && showThinking === false) continue
         if (!folded.has(i) && isRoot(item) && isRenderable(item)) out.push(item)
       }
       return withoutFoldedHooks(out)
@@ -269,6 +274,7 @@ export function useChatDisplay({
         continue
       }
       if (!isRoot(item) || folded.has(i)) continue
+      if (item.kind === 'thinking' && showThinking === false) continue
       if (item.kind === 'user-text') {
         flushPending()
         out.push(item)
@@ -283,13 +289,19 @@ export function useChatDisplay({
       ) {
         flushPending()
         out.push(item)
+      } else if (item.kind === 'tool' && errorsOnly && item.invocation.status === 'error') {
+        flushPending()
+        out.push(item)
       } else if (item.kind === 'tool' && showLastMessageTools && i > lastUserIdx) {
         flushPending()
         out.push(item)
       } else if (item.kind === 'sub-agent' && showLastMessageTools && i > lastUserIdx) {
         flushPending()
         out.push(item)
-      } else if (item.kind === 'thinking' && showLastMessageTools && i > lastUserIdx) {
+      } else if (
+        item.kind === 'thinking' &&
+        (showThinking === true || (showLastMessageTools && i > lastUserIdx))
+      ) {
         flushPending()
         out.push(item)
       } else if (item.kind === 'result') {
@@ -315,7 +327,7 @@ export function useChatDisplay({
     }
     flushPending()
     return withoutFoldedHooks(out.filter(isRenderable))
-  }, [timeline, finalOnly, showLastMessageTools, folded, gapAt])
+  }, [timeline, finalOnly, showLastMessageTools, errorsOnly, showThinking, folded, gapAt])
 
   // Each displayed row's index in the timeline: keys stay the same when rows
   // load above them (a key by display position would shift).

@@ -118,12 +118,13 @@ export function ChatTimeline({
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const commandTasks = useCommandTaskActions()
   const rowUiState = useContext(RowUiStateContext)
-  const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-4xl'
+  const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-5xl'
   // A row that streams already says what the agent does ("Thinking… 3s", the
   // reply growing): no second indicator under it.
   const tail = items[items.length - 1]
   const tailStreaming =
-    (tail?.kind === 'text' || tail?.kind === 'thinking') && tail.stream === 'open'
+    (tail?.kind === 'text' || (tail?.kind === 'thinking' && appearance.chatShowThinking)) &&
+    tail.stream === 'open'
   return (
     <>
       {/* Header: mode pill + (override notice if explicitly passed by parent) */}
@@ -180,7 +181,14 @@ export function ChatTimeline({
             >
               <div ref={contentRef} className="min-h-full">
                 {!hydrating && !(isEmpty && !inFlight) && (
-                  <div className={cn('mx-auto w-full', widthClass)}>
+                  <div
+                    className={cn(
+                      'mx-auto w-full',
+                      widthClass,
+                      appearance.chatWrapCode &&
+                        '[&_pre]:whitespace-pre-wrap [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words'
+                    )}
+                  >
                     <VirtualTimelineRows
                       controller={virtual}
                       items={items}
@@ -244,12 +252,16 @@ export function ChatTimeline({
               <ContextMenuRadioGroup
                 value={appearance.chatWidth}
                 onValueChange={(v) => {
-                  settingsSetMutation.mutate({ key: 'chat_width', value: v })
-                  window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+                  settingsSetMutation.mutate(
+                    { key: 'chat_width', value: v },
+                    {
+                      onSuccess: () => window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+                    }
+                  )
                 }}
               >
-                <ContextMenuRadioItem value="narrow">Narrow</ContextMenuRadioItem>
-                <ContextMenuRadioItem value="wide">Wide</ContextMenuRadioItem>
+                <ContextMenuRadioItem value="narrow">Default</ContextMenuRadioItem>
+                <ContextMenuRadioItem value="wide">Full width</ContextMenuRadioItem>
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
           </ContextMenuSub>

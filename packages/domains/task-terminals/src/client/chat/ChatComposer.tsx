@@ -1,7 +1,6 @@
 import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2, FileDiff } from 'lucide-react'
-import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '../trpc'
+import { ChatDisplayOptions } from './ChatDisplayOptions'
 import {
   cn,
   AgentModePill,
@@ -11,7 +10,6 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-  Switch,
   type AppearanceSettings
 } from '@slayzone/ui'
 import {
@@ -159,16 +157,13 @@ export function ChatComposer({
   fastModeChanging,
   filesChanged
 }: ChatComposerProps) {
-  const trpc = useTRPC()
-  const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
-  const composerWidthClass = appearance.chatWidth === 'wide' ? 'max-w-4xl' : 'max-w-2xl'
   // Only providers that take files as content blocks get a picker (Codex: paste/drop images).
   const canPickFiles = chatCapabilitiesForMode(mode).attachments === 'blocks'
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attaching = attachmentsApi.pending.length > 0
   return (
     <div className="bg-background px-4 pt-6 pb-1">
-      <div className={cn('mx-auto w-full', composerWidthClass)}>
+      <div className={'mx-auto w-full max-w-[60rem]'}>
         <ChatQueueList items={queuedMessages} onRemove={removeQueue} {...queueApi} />
         {(attachments.length > 0 || attaching) && (
           <div className="flex flex-wrap gap-1.5 mb-1.5 px-1">
@@ -421,53 +416,11 @@ export function ChatComposer({
                 Display
               </button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-3 space-y-3">
-              <DisplayOptionRow
-                label="Show tools"
-                description="Show all tool calls inline. When off, only user messages + final assistant reply per turn."
-                checked={appearance.chatShowTools}
-                onCheckedChange={(c) => {
-                  settingsSetMutation.mutate({ key: 'chat_show_tools', value: c ? '1' : '0' })
-                  window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-                }}
-              />
-              <DisplayOptionRow
-                label="Show last message tools"
-                description="When tools are hidden, still show tools after the most recent user message."
-                checked={appearance.chatShowLastMessageTools}
-                disabled={appearance.chatShowTools}
-                onCheckedChange={(c) => {
-                  settingsSetMutation.mutate({
-                    key: 'chat_show_last_message_tools',
-                    value: c ? '1' : '0'
-                  })
-                  window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-                }}
-              />
-              <DisplayOptionRow
-                label="File edits opened by default"
-                description="Auto-expand Edit and Write tool cards."
-                checked={appearance.chatFileEditsOpenByDefault}
-                onCheckedChange={(c) => {
-                  settingsSetMutation.mutate({
-                    key: 'chat_file_edits_open_by_default',
-                    value: c ? '1' : '0'
-                  })
-                  window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-                }}
-              />
-              <DisplayOptionRow
-                label="Show message meta"
-                description="Per-turn footer with duration, cost, and turn count."
-                checked={appearance.chatShowMessageMeta}
-                onCheckedChange={(c) => {
-                  settingsSetMutation.mutate({
-                    key: 'chat_show_message_meta',
-                    value: c ? '1' : '0'
-                  })
-                  window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-                }}
-              />
+            <PopoverContent
+              align="end"
+              className="w-[360px] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-2"
+            >
+              <ChatDisplayOptions appearance={appearance} />
             </PopoverContent>
           </Popover>
           <button
@@ -483,35 +436,6 @@ export function ChatComposer({
           </button>
         </div>
       </div>
-    </div>
-  )
-}
-
-function DisplayOptionRow({
-  label,
-  description,
-  checked,
-  disabled,
-  onCheckedChange
-}: {
-  label: string
-  description: string
-  checked: boolean
-  disabled?: boolean
-  onCheckedChange: (next: boolean) => void
-}) {
-  return (
-    <div className={cn('flex items-start gap-3', disabled && 'opacity-50')}>
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium text-foreground">{label}</div>
-        <div className="text-[11px] text-muted-foreground leading-snug mt-0.5">{description}</div>
-      </div>
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onCheckedChange}
-        className="mt-0.5"
-      />
     </div>
   )
 }

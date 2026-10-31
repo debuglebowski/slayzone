@@ -135,6 +135,8 @@ export type TimelineItem =
     }
   | {
       kind: 'result'
+      model?: string | null
+      tokenUsage?: { inputTokens: number; outputTokens: number }
       subtype: string
       isError: boolean
       durationMs: number
@@ -1743,6 +1745,16 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         typeof event.terminalReason === 'string' && event.terminalReason.startsWith('aborted')
       const item: TimelineItem = {
         kind: 'result',
+        model: state.model,
+        tokenUsage: event.usage
+          ? {
+              inputTokens:
+                event.usage.inputTokens +
+                event.usage.cacheReadInputTokens +
+                event.usage.cacheCreationInputTokens,
+              outputTokens: event.usage.outputTokens
+            }
+          : undefined,
         subtype: event.subtype,
         isError: event.isError && !stopped,
         durationMs: event.durationMs,

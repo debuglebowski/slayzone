@@ -201,7 +201,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // The prompt dock's key handler, consulted first by the panel's keys.
     const promptKeysRef = useRef<PromptKeyHandler | null>(null)
     const [collapseSignal, setCollapseSignal] = useState(0)
-    const follow = useFollowBottom()
+    const follow = useFollowBottom(appearance.chatAutoScroll)
     const { scrollRef, contentRef, isAtBottom, scrollToBottom, captureAnchor } = follow
     // What rows have expanded, kept while they are scrolled out of view.
     const [rowUiState] = useState(() => new RowUiStateStore())
@@ -264,6 +264,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       timeline,
       finalOnly,
       showLastMessageTools,
+      errorsOnly: appearance.chatToolVisibility === 'errors',
+      showThinking: appearance.chatShowThinking,
       follow,
       paging,
       loadPages,

@@ -48,8 +48,10 @@ const { useAppearance, appearanceDefaults } = await import(
 
 type Seen = { terminalFontSize: number; notesReadability: string; diffWrap: boolean }
 let seen: Seen[] = []
+let chatAppearance = appearanceDefaults
 function Consumer() {
   const a = useAppearance()
+  chatAppearance = a
   seen.push({
     terminalFontSize: a.terminalFontSize,
     notesReadability: a.notesReadability,
@@ -164,5 +166,38 @@ describe('AppearanceProvider', () => {
       { key: 'notes_readability', value: 'compact' },
       { key: 'notes_line_spacing', value: '' }
     ])
+  })
+})
+
+describe('chat display preferences', () => {
+  it.each([
+    [{}, 'all'],
+    [{ chat_show_tools: '0' }, 'recent'],
+    [{ chat_show_tools: '0', chat_show_last_message_tools: '0' }, 'none'],
+    [{ chat_tool_visibility: 'errors' }, 'errors']
+  ])('reads tool visibility from %j as %s', async (settings, expected) => {
+    snapshot = settings as Record<string, string>
+    renderProvider()
+    await flush()
+    expect(chatAppearance.chatToolVisibility).toBe(expected)
+    expect(chatAppearance.chatShowTools).toBe(expected === 'all')
+    expect(chatAppearance.chatShowLastMessageTools).toBe(expected === 'recent')
+  })
+
+  it('reads advanced settings and preserves existing defaults', async () => {
+    snapshot = {
+      chat_show_thinking: '0',
+      chat_wrap_code: '1',
+      chat_compact_spacing: '1',
+      chat_auto_scroll: '0'
+    }
+    renderProvider()
+    await flush()
+    expect(chatAppearance).toMatchObject({
+      chatShowThinking: false,
+      chatWrapCode: true,
+      chatCompactSpacing: true,
+      chatAutoScroll: false
+    })
   })
 })

@@ -7,13 +7,17 @@ import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contr
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const mutate = vi.fn()
+let mutationOnSuccess: (() => void) | undefined
 
 vi.mock('../trpc', () => ({
   useTRPC: () => ({ settings: { set: { mutationOptions: () => ({}) } } })
 }))
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  useMutation: () => ({ mutate })
+  useMutation: (options: { onSuccess?: () => void }) => {
+    mutationOnSuccess = options.onSuccess
+    return { mutate }
+  }
 }))
 // Thumbnails resolve the artifact's file path through the app's uploader.
 vi.mock('@slayzone/editor/hooks', () => ({
@@ -468,40 +472,62 @@ describe('ChatComposer pills', () => {
 
 describe('ChatComposer Display options', () => {
   it.each([
-    ['Show tools', 'chat_show_tools'],
-    ['File edits opened by default', 'chat_file_edits_open_by_default'],
-    ['Show message meta', 'chat_show_message_meta']
+    ['Full-width messages', 'chat_width'],
+    ['Expand file edits', 'chat_file_edits_open_by_default'],
+    ['Message details', 'chat_show_message_meta']
   ])('"%s" writes %s and announces the change', (label, key) => {
     const changed = vi.fn()
     window.addEventListener('sz:settings-changed', changed)
     setup()
     openDisplay()
     fireEvent.click(switchFor(label))
+    expect(changed).not.toHaveBeenCalled()
+    mutationOnSuccess?.()
     window.removeEventListener('sz:settings-changed', changed)
-    expect(mutate).toHaveBeenCalledWith({ key, value: '0' })
+    expect(mutate).toHaveBeenCalledWith({ key, value: key === 'chat_width' ? 'wide' : '0' })
     expect(changed).toHaveBeenCalledTimes(1)
+  })
+
+  it('toggles when clicking the option label', () => {
+    setup()
+    openDisplay()
+    fireEvent.click(screen.getByText('Message details'))
+    expect(mutate).toHaveBeenCalledWith({ key: 'chat_show_message_meta', value: '0' })
   })
 
   it('turning an option on writes "1"', () => {
     setup({ appearance: { ...appearanceDefaults, chatShowMessageMeta: false } })
     openDisplay()
-    fireEvent.click(switchFor('Show message meta'))
+    fireEvent.click(switchFor('Message details'))
     expect(mutate).toHaveBeenCalledWith({ key: 'chat_show_message_meta', value: '1' })
   })
 
-  it('"Show last message tools" is disabled while all tools are shown', () => {
+  it('shows all options in sections without an expansion button', () => {
     setup()
     openDisplay()
-    expect(switchFor('Show last message tools').disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull()
+    for (const name of ['Layout', 'Conversation', 'Scrolling']) {
+      expect(screen.getByRole('region', { name })).toBeDefined()
+    }
+    expect(screen.getAllByRole('switch')).toHaveLength(8)
+    fireEvent.click(switchFor('Wrap code lines'))
+    expect(mutate).toHaveBeenCalledWith({ key: 'chat_wrap_code', value: '1' })
+    expect(screen.getByRole('switch', { name: 'Auto-scroll' })).toBeDefined()
   })
 
-  it('"Show last message tools" writes its key when tools are hidden', () => {
-    setup({ appearance: { ...appearanceDefaults, chatShowTools: false } })
+  it('turns tool calls off with a binary switch', () => {
+    setup()
     openDisplay()
-    const toggle = switchFor('Show last message tools')
-    expect(toggle.disabled).toBe(false)
-    fireEvent.click(toggle)
-    expect(mutate).toHaveBeenCalledWith({ key: 'chat_show_last_message_tools', value: '0' })
+    expect(screen.queryByRole('combobox', { name: 'Tool calls' })).toBeNull()
+    fireEvent.click(switchFor('Tool calls'))
+    expect(mutate).toHaveBeenCalledWith({ key: 'chat_tool_visibility', value: 'none' })
+  })
+
+  it('turns hidden tool calls on with a binary switch', () => {
+    setup({ appearance: { ...appearanceDefaults, chatToolVisibility: 'none' } })
+    openDisplay()
+    fireEvent.click(switchFor('Tool calls'))
+    expect(mutate).toHaveBeenCalledWith({ key: 'chat_tool_visibility', value: 'all' })
   })
 })
 

@@ -22,7 +22,7 @@ import {
   User,
   Bot
 } from 'lucide-react'
-import { cn, safeClipboardWriteText, useDepsChanged, useNow } from '@slayzone/ui'
+import { cn, safeClipboardWriteText, useDepsChanged, useNow, useAppearance } from '@slayzone/ui'
 import { ChatDiffView } from './diff-comments/ChatDiffView'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import {
@@ -92,11 +92,17 @@ function useCopy(text: string): { copied: boolean; copy: () => void } {
 
 /** User prompt — right-aligned card. */
 export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user-text' }> }) {
+  const appearance = useAppearance()
   return (
-    <div className="group px-4 py-2 flex justify-end items-center gap-2">
+    <div
+      className={cn(
+        'group px-4 flex justify-end items-center gap-2',
+        appearance.chatCompactSpacing ? 'py-0.5' : 'py-2'
+      )}
+    >
       <UserMessageActions item={item} />
       <span className="shrink-0 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
-        {formatTime(item.timestamp)}
+        {appearance.chatShowMessageMeta && formatTime(item.timestamp)}
       </span>
       <div className="max-w-[85%] min-w-0 rounded-lg border border-primary/25 bg-primary/5 shadow-sm px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
         <UserMessageAttachments attachments={item.attachments} />
@@ -113,11 +119,12 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
  * The saved block then finalizes the same row: same element, same text.
  */
 export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
+  const appearance = useAppearance()
   const streaming = item.stream === 'open'
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
   const text = useDeferredValue(live?.text ?? item.text)
   return (
-    <div className="pl-4 pr-[10%] py-2">
+    <div className={cn('pl-4 pr-[10%]', appearance.chatCompactSpacing ? 'py-0.5' : 'py-2')}>
       <div className="group flex gap-3 items-start">
         <AssistantAvatar />
         <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 shadow-sm px-3 py-2">
@@ -131,7 +138,7 @@ export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 't
           </div>
         </div>
         <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
-          {formatTime(item.timestamp)}
+          {appearance.chatShowMessageMeta && formatTime(item.timestamp)}
         </span>
       </div>
     </div>
@@ -172,13 +179,14 @@ export function _UserAvatar() {
  * thinking text arrives late, in one burst); expanded, the text so far.
  */
 export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 'thinking' }> }) {
+  const appearance = useAppearance()
   // Kept while scrolled away; "Collapse all" closes it.
   const [open, setOpen] = useRowUiState('thinking', false, false)
   const streaming = item.stream === 'open'
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
   const text = live?.text || item.text
   const now = useNow(1000, { enabled: streaming })
-  if (!streaming && !text) return null
+  if (!appearance.chatShowThinking || (!streaming && !text)) return null
   return (
     <div
       data-chat-thinking
@@ -236,6 +244,13 @@ export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 're
           <CircleX className="size-3" />
         ) : (
           <CircleCheck className="size-3 text-success" />
+        )}
+        {item.model && <span>{item.model}</span>}
+        {item.tokenUsage && (
+          <span>
+            {item.tokenUsage.inputTokens.toLocaleString()} in ·{' '}
+            {item.tokenUsage.outputTokens.toLocaleString()} out
+          </span>
         )}
         <span>{(item.durationMs / 1000).toFixed(1)}s</span>
         <span>·</span>

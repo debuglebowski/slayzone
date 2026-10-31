@@ -46,6 +46,7 @@ interface FollowBottomController {
   restoreAnchor: (anchor: ChatScrollAnchor) => boolean
   isStuck: () => boolean
   unstick: () => void
+  setAutoScroll: (enabled: boolean) => void
   dispose: () => void
 }
 
@@ -65,6 +66,7 @@ function isUserSelectingInside(root: HTMLElement): boolean {
 function createFollowBottomController(
   setIsAtBottom: (atBottom: boolean) => void
 ): FollowBottomController {
+  const autoScrollRef = { current: true }
   const stuckRef = { current: true }
   /** `unstick()` was called: reaching the bottom re-engages only after user input. */
   const heldRef = { current: false }
@@ -164,13 +166,13 @@ function createFollowBottomController(
         const grew = height > prevHeight
         prevHeight = height
         if (!grew) return
-        if (!stuckRef.current) return
+        if (!autoScrollRef.current || !stuckRef.current) return
         if (isUserSelectingInside(el)) return
         scrollNow()
       })
       ro.observe(el)
       resizeObserverRef.current = ro
-      if (stuckRef.current) scrollNow()
+      if (autoScrollRef.current && stuckRef.current) scrollNow()
     }) as CallbackRef<HTMLElement>
     ref.current = null
     return ref
@@ -184,7 +186,7 @@ function createFollowBottomController(
   const captureAnchor = (): ChatScrollAnchor | null => {
     const el = scrollRef.current
     if (!el || el.clientHeight === 0) return null
-    if (stuckRef.current) return { atBottom: true }
+    if (autoScrollRef.current && stuckRef.current) return { atBottom: true }
     const top = el.getBoundingClientRect().top
     for (const row of el.querySelectorAll<HTMLElement>('[data-anchor-key]')) {
       const box = row.getBoundingClientRect()
@@ -221,7 +223,7 @@ function createFollowBottomController(
     return true
   }
 
-  const isStuck = (): boolean => stuckRef.current
+  const isStuck = (): boolean => autoScrollRef.current && stuckRef.current
 
   const unstick = (): void => {
     stuckRef.current = false
@@ -236,6 +238,9 @@ function createFollowBottomController(
     restoreAnchor,
     isStuck,
     unstick,
+    setAutoScroll: (enabled) => {
+      autoScrollRef.current = enabled
+    },
     dispose
   }
 }
@@ -249,12 +254,15 @@ function createFollowBottomController(
  * independently so a stale scroll event during streaming bursts cannot
  * falsely release the lock — releases require explicit user input.
  */
-export function useFollowBottom(): FollowBottomApi {
+export function useFollowBottom(autoScroll = true): FollowBottomApi {
   const [isAtBottom, setIsAtBottom] = useState(true)
   // Created once; `scrollRef`, `contentRef` and `scrollToBottom` keep stable
   // identity for the hook's lifetime.
   const [controller] = useState(() => createFollowBottomController(setIsAtBottom))
 
+  useEffect(() => {
+    controller.setAutoScroll(autoScroll)
+  }, [controller, autoScroll])
   useEffect(() => () => controller.dispose(), [controller])
 
   return {

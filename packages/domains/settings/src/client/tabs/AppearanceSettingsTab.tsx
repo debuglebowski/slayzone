@@ -362,7 +362,7 @@ export function AppearanceSettingsTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-            <SettingLabel tip="Horizontal width of agent chat — message column and composer max-width">
+            <SettingLabel tip="Horizontal width of agent chat messages">
               Width
             </SettingLabel>
             <Select
@@ -376,8 +376,8 @@ export function AppearanceSettingsTab() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent position="popper" side="bottom" className="max-h-none">
-                <SelectItem value="narrow">Narrow</SelectItem>
-                <SelectItem value="wide">Wide</SelectItem>
+                <SelectItem value="narrow">Default</SelectItem>
+                <SelectItem value="wide">Full width</SelectItem>
               </SelectContent>
             </Select>
           </div>

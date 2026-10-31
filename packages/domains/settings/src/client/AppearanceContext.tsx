@@ -51,6 +51,18 @@ function parseAppearance(all: Record<string, string>): AppearanceSettings {
   const chatShowTools = get('chat_show_tools')
   const chatShowLastMessageTools = get('chat_show_last_message_tools')
   const chatFileEditsOpenByDefault = get('chat_file_edits_open_by_default')
+  const savedToolVisibility = get('chat_tool_visibility')
+  const chatToolVisibility =
+    savedToolVisibility === 'all' ||
+    savedToolVisibility === 'recent' ||
+    savedToolVisibility === 'errors' ||
+    savedToolVisibility === 'none'
+      ? savedToolVisibility
+      : chatShowTools !== '0'
+        ? 'all'
+        : chatShowLastMessageTools !== '0'
+          ? 'recent'
+          : 'none'
   const chatShowMessageMeta = get('chat_show_message_meta')
   const mdViewMode = get('editor_markdown_view_mode')
   const minimapEnabled = get('editor_minimap_enabled')
@@ -89,8 +101,13 @@ function parseAppearance(all: Record<string, string>): AppearanceSettings {
     notesShowToolbar: notesShowToolbar === '1',
     notesSpellcheck: notesSpellcheck !== '0',
     chatWidth: chatWidth === 'wide' ? 'wide' : 'narrow',
-    chatShowTools: chatShowTools !== '0',
-    chatShowLastMessageTools: chatShowLastMessageTools !== '0',
+    chatToolVisibility,
+    chatShowTools: chatToolVisibility === 'all',
+    chatShowLastMessageTools: chatToolVisibility === 'recent',
+    chatShowThinking: get('chat_show_thinking') !== '0',
+    chatWrapCode: get('chat_wrap_code') === '1',
+    chatCompactSpacing: get('chat_compact_spacing') === '1',
+    chatAutoScroll: get('chat_auto_scroll') !== '0',
     chatFileEditsOpenByDefault: chatFileEditsOpenByDefault !== '0',
     chatShowMessageMeta: chatShowMessageMeta !== '0',
     editorMarkdownViewMode: mdViewMode === 'split' || mdViewMode === 'code' ? mdViewMode : 'rich',

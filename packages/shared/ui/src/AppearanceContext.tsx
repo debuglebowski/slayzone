@@ -62,6 +62,11 @@ export interface AppearanceSettings {
   notesShowToolbar: boolean
   notesSpellcheck: boolean
   // Chat
+  chatToolVisibility: 'all' | 'recent' | 'errors' | 'none'
+  chatShowThinking: boolean
+  chatWrapCode: boolean
+  chatCompactSpacing: boolean
+  chatAutoScroll: boolean
   chatWidth: 'narrow' | 'wide'
   chatShowTools: boolean
   chatShowLastMessageTools: boolean
@@ -101,6 +106,11 @@ export const appearanceDefaults: AppearanceSettings = {
   notesCheckedHighlight: false,
   notesShowToolbar: false,
   notesSpellcheck: true,
+  chatToolVisibility: 'all',
+  chatShowThinking: true,
+  chatWrapCode: false,
+  chatCompactSpacing: false,
+  chatAutoScroll: true,
   chatWidth: 'narrow',
   chatShowTools: true,
   chatShowLastMessageTools: true,

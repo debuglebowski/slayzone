@@ -291,3 +291,29 @@ describe('useChatDisplay scroll anchors', () => {
     expect(layout.scroller()!.scrollTop).toBe(top)
   })
 })
+
+describe('display preferences', () => {
+  it('keeps only failed tools in errors mode and hides thinking independently', () => {
+    const items = [
+      { kind: 'thinking', text: 'Thinking', timestamp: 0 },
+      { kind: 'tool', invocation: { id: 'ok', name: 'Bash', status: 'complete' }, timestamp: 1 },
+      { kind: 'tool', invocation: { id: 'bad', name: 'Bash', status: 'error' }, timestamp: 2 },
+      text('reply', 3)
+    ] as TimelineItem[]
+    let shown: TimelineItem[] = []
+    function Probe() {
+      shown = useChatDisplay({
+        timeline: items,
+        finalOnly: true,
+        showLastMessageTools: false,
+        errorsOnly: true,
+        showThinking: false,
+        follow: detachedFollow()
+      }).displayedTimeline
+      return null
+    }
+    render(<Probe />)
+    expect(shown.map((item) => item.kind)).toEqual(['tool', 'text'])
+    expect(shown[0]).toBe(items[2])
+  })
+})

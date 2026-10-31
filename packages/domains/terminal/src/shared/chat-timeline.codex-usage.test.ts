@@ -104,3 +104,16 @@ describe('Codex usage', () => {
     expect(result?.turnCostUsd).toBe(0.25)
   })
 })
+
+test('turn details retain the model and turn token counts', () => {
+  const state = run([
+    { kind: 'turn-init', sessionId: 'thread-1', model: 'gpt-6-luna', cwd: '/r', tools: [] },
+    codexResult()
+  ])
+  const result = state.timeline.find((item) => item?.kind === 'result')
+  expect(result).toMatchObject({
+    kind: 'result',
+    model: 'gpt-6-luna',
+    tokenUsage: { inputTokens: 1, outputTokens: 1 }
+  })
+})
