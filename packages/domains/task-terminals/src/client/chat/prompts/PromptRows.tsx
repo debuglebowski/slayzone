@@ -1,42 +1,86 @@
 import { cn } from '@slayzone/ui'
-import type { PromptOption } from './prompt-options'
+
+export interface PromptRowOption {
+  id: string
+  label: string
+  description?: string
+}
 
 /**
- * The TUI's numbered rows: `❯ 1. Yes`. The number and pointer are decoration
- * (keys 1–9 pick a row); each row's accessible name is its label.
+ * Numbered choices shared by approval and question prompts. Approval rows
+ * execute when clicked; question rows select a value for later submission.
  */
 export function PromptRows({
   options,
   selected,
   disabled,
-  onChoose
+  onChoose,
+  appearance = 'plain',
+  selectionMode = 'cursor',
+  label
 }: {
-  options: PromptOption[]
+  options: PromptRowOption[]
   selected: number
   disabled: boolean
   onChoose: (index: number) => void
+  appearance?: 'plain' | 'cards'
+  selectionMode?: 'cursor' | 'answer'
+  label?: string
 }) {
   return (
-    <div role="group" className="grid gap-0.5">
+    <div
+      role="group"
+      aria-label={label}
+      className={cn('grid', appearance === 'cards' ? 'gap-1.5' : 'gap-0.5')}
+    >
       {options.map((option, i) => (
         <button
           key={option.id}
           type="button"
           disabled={disabled}
-          aria-current={i === selected ? 'true' : undefined}
+          aria-current={selectionMode === 'cursor' && i === selected ? 'true' : undefined}
+          aria-pressed={selectionMode === 'answer' ? i === selected : undefined}
           onClick={() => onChoose(i)}
           className={cn(
-            'flex items-start gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors',
-            i === selected
-              ? 'bg-accent text-accent-foreground'
-              : 'hover:bg-muted/60 text-foreground',
+            'flex w-full items-start gap-2 rounded-md text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            appearance === 'cards'
+              ? cn(
+                  'border px-3 py-2 text-sm',
+                  i === selected
+                    ? 'border-primary/60 bg-primary/10 text-foreground'
+                    : 'border-border bg-background/40 text-foreground hover:border-primary/40 hover:bg-muted/60'
+                )
+              : cn(
+                  'px-2 py-1 text-xs',
+                  i === selected
+                    ? 'bg-accent text-accent-foreground'
+                    : 'hover:bg-muted/60 text-foreground'
+                ),
             disabled && 'opacity-60 cursor-not-allowed'
           )}
         >
           <span aria-hidden className="shrink-0 w-6 select-none font-mono text-muted-foreground">
-            {i === selected ? '❯' : ' '} {i + 1}.
+            {selectionMode === 'cursor' && i === selected ? '❯' : ' '} {i + 1}.
           </span>
-          <span className="min-w-0">{option.label}</span>
+          <span className="min-w-0 flex-1 break-words">
+            <span className={cn(appearance === 'cards' && 'font-medium')}>{option.label}</span>
+            {option.description && (
+              <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                {option.description}
+              </span>
+            )}
+          </span>
+          {selectionMode === 'answer' && appearance === 'cards' && (
+            <span
+              aria-hidden
+              className={cn(
+                'mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full border',
+                i === selected ? 'border-primary' : 'border-muted-foreground/50'
+              )}
+            >
+              {i === selected && <span className="size-1.5 rounded-full bg-primary" />}
+            </span>
+          )}
         </button>
       ))}
     </div>

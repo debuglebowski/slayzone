@@ -261,12 +261,13 @@ export function PermissionPrompt({
       {view.decisionReason && (
         <div className="text-xs text-muted-foreground">{view.decisionReason}</div>
       )}
-      <div className="text-sm text-foreground">{view.question}</div>
+      <div className="text-sm font-medium text-foreground">{view.question}</div>
       <PromptRows
         options={view.options}
         selected={selected}
         disabled={submitting}
         onChoose={choose}
+        appearance="cards"
       />
       {amendFor && (
         <input

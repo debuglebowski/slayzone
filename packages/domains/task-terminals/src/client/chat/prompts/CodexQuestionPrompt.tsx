@@ -1,11 +1,12 @@
 import { useState, type RefObject } from 'react'
-import { Button, cn } from '@slayzone/ui'
+import { Button } from '@slayzone/ui'
 import type { ChatPrompt } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import type { PromptAnswer } from './PermissionPrompt'
+import { PromptRows } from './PromptRows'
 import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
 
-/** Codex's plan-mode questions (`item/tool/requestUserInput`). */
+/** Codex's user-input questions (`item/tool/requestUserInput`). */
 export const CODEX_QUESTIONS = 'item/tool/requestUserInput'
 
 interface CodexQuestion {
@@ -56,7 +57,7 @@ const SKIP: PermissionDecision = { behavior: 'deny', message: '' }
 const CANCEL: PermissionDecision = { behavior: 'deny', message: '', interrupt: true }
 
 /**
- * The questions Codex asks in plan mode: each with its options (one pick) and,
+ * The questions Codex asks through requestUserInput: each with its options (one pick) and,
  * where offered, a typed answer. Submit sends every answer keyed by question
  * id; Skip answers nothing (the turn goes on); Esc stops the turn. Keys 1–9
  * pick an option of the first unanswered question.
@@ -112,47 +113,30 @@ export function CodexQuestionPrompt({
   return (
     <div className="space-y-3">
       {questions.map((q) => (
-        <div key={q.id} className="space-y-1.5">
-          {q.header && (
+        <div key={q.id} className="space-y-2">
+          {questions.length > 1 && q.header && (
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {q.header}
             </div>
           )}
-          <div className="text-sm text-foreground">{q.question}</div>
+          <div className="text-sm font-medium text-foreground">{q.question}</div>
           {q.options.length > 0 && (
-            <div role="group" className="grid gap-0.5">
-              {q.options.map((o, i) => {
-                const selected = picked[q.id] === o.label && !(typed[q.id] ?? '').trim()
-                return (
-                  <button
-                    key={o.label}
-                    type="button"
-                    disabled={submitting}
-                    aria-pressed={selected}
-                    onClick={() => pick(q, o.label)}
-                    className={cn(
-                      'flex items-start gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors',
-                      selected
-                        ? 'bg-accent text-accent-foreground'
-                        : 'hover:bg-muted/60 text-foreground'
-                    )}
-                  >
-                    <span
-                      aria-hidden
-                      className="shrink-0 w-6 select-none font-mono text-muted-foreground"
-                    >
-                      {selected ? '❯' : ' '} {i + 1}.
-                    </span>
-                    <span className="min-w-0">
-                      {o.label}
-                      {o.description && (
-                        <span className="text-muted-foreground"> — {o.description}</span>
-                      )}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+            <PromptRows
+              options={q.options.map((o) => ({ id: o.label, ...o }))}
+              selected={
+                (typed[q.id] ?? '').trim()
+                  ? -1
+                  : q.options.findIndex((o) => o.label === picked[q.id])
+              }
+              disabled={submitting}
+              onChoose={(i) => {
+                const option = q.options[i]
+                if (option) pick(q, option.label)
+              }}
+              appearance="cards"
+              selectionMode="answer"
+              label={q.question}
+            />
           )}
           {(q.isOther || q.options.length === 0) && (
             <input
@@ -171,7 +155,7 @@ export function CodexQuestionPrompt({
                   submit()
                 }
               }}
-              className="w-full rounded-md border border-input bg-input/30 px-2 py-1 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-input/30 px-3 py-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           )}
         </div>

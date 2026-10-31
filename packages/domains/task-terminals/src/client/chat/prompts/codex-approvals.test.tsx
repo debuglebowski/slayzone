@@ -335,6 +335,20 @@ describe('Codex questions (item/tool/requestUserInput)', () => {
     ]
   }
 
+  it('shows topic labels only when asking several questions', () => {
+    setup([
+      codexPrompt('item/tool/requestUserInput', {
+        ...QUESTIONS,
+        questions: [QUESTIONS.questions[0]]
+      })
+    ])
+    expect(screen.queryByText('Database')).toBeNull()
+    cleanup()
+    setup([codexPrompt('item/tool/requestUserInput', QUESTIONS)])
+    expect(screen.getByText('Database')).toBeTruthy()
+    expect(screen.getByText('Token')).toBeTruthy()
+  })
+
   it('each question with its options; answers go back keyed by question id', () => {
     const { respondPermission } = setup([codexPrompt('item/tool/requestUserInput', QUESTIONS)])
     expect(document.body.textContent).toContain('Which database?')
