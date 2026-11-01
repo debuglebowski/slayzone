@@ -239,8 +239,8 @@ importers:
   packages/apps/api:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: 1.30.1
-        version: 1.30.1(supports-color@7.2.0)(zod@4.6.5)
+        specifier: 1.32.0
+        version: 1.32.0(supports-color@7.2.0)(zod@4.6.5)
       '@slayzone/agent-panels':
         specifier: workspace:*
         version: link:../../domains/agent-panels
@@ -375,8 +375,8 @@ importers:
   packages/apps/app:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: 1.30.1
-        version: 1.30.1(supports-color@7.2.0)(zod@4.6.5)
+        specifier: 1.32.0
+        version: 1.32.0(supports-color@7.2.0)(zod@4.6.5)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
@@ -6401,8 +6401,8 @@ packages:
   '@milkdown/utils@7.22.2':
     resolution: {integrity: sha512-lRKIaX+kFZycqHxc2xtIwgPdp5BWlSKJKCljZ8Uiih98uaNWQvFlpfzc5Bp4+XJS6BEq2K3ZVILUKa5eWJofWw==}
 
-  '@modelcontextprotocol/sdk@1.30.1':
-    resolution: {integrity: sha512-H2HxLvC3HDNybePJaLdSrU1hhUK5iQw+WvV1b01myFyI7sdVGe1u/IPTE5D9fGCiJDVtgMV/lmFkQXLmQyIFYA==}
+  '@modelcontextprotocol/sdk@1.32.0':
+    resolution: {integrity: sha512-8BviX/hK4Gd2eL1KdTwm0gfl4d3wdoErW0Jd00h6nomUAtk6IJk5vwQJc6kfWtJTzN5OEV/lgIiJKI8fiDGAlA==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -18226,7 +18226,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/sdk@1.30.1(supports-color@7.2.0)(zod@4.6.5)':
+  '@modelcontextprotocol/sdk@1.32.0(supports-color@7.2.0)(zod@4.6.5)':
     dependencies:
       '@hono/node-server': 1.19.9(hono@4.11.9)
       ajv: 8.20.0
