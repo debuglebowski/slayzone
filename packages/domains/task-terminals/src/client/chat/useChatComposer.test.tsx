@@ -529,18 +529,6 @@ describe('useChatComposer effects', () => {
     rerender({ isActive: true })
     expect(document.activeElement).toBe(textarea())
   })
-
-  it('scrolls to the bottom only when the draft goes from empty to non-empty', () => {
-    setup()
-    expect(scrollToBottom).not.toHaveBeenCalled()
-    type('h')
-    expect(scrollToBottom).toHaveBeenCalledTimes(1)
-    type('he')
-    expect(scrollToBottom).toHaveBeenCalledTimes(1)
-    type('')
-    type('x')
-    expect(scrollToBottom).toHaveBeenCalledTimes(2)
-  })
 })
 
 describe('useChatComposer attachments as content blocks (Claude)', () => {
@@ -665,6 +653,14 @@ describe('useChatComposer argument hint (ghost text after `/name `)', () => {
 })
 
 describe('useChatComposer draft restore (per tab, survives remount + reload)', () => {
+  it.each(['claude-chat', 'codex-chat'])('%s typing leaves the timeline in place', (mode) => {
+    setup({ mode })
+    for (const text of ['h', 'hello', 'hello\nworld', '', 'new draft']) {
+      fireEvent.change(textarea(), { target: { value: text } })
+      expect(scrollToBottom).not.toHaveBeenCalled()
+    }
+  })
+
   it.each(['claude-chat', 'codex-chat'])('%s history arrows do not snap the timeline down', (mode) => {
     mocks.history.entries = ['newer prompt', 'older prompt']
     setup({ mode })
@@ -675,7 +671,7 @@ describe('useChatComposer draft restore (per tab, survives remount + reload)', (
     fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
     expect(composer.draft).toBe('')
     type('new draft')
-    expect(scrollToBottom).toHaveBeenCalledTimes(1)
+    expect(scrollToBottom).not.toHaveBeenCalled()
   })
 
   it.each(['claude-chat', 'codex-chat'])('%s recalls prompts and restores the draft', (mode) => {

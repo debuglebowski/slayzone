@@ -195,13 +195,10 @@ export function useChatComposer({
   })
   // Restore once, as soon as the saved draft is known — adjusted during render,
   // so the first painted frame already shows it.
-  const [restore, setRestore] = useState<{ done: boolean; text: string | null }>({
-    done: false,
-    text: null
-  })
-  if (!restore.done && persistence.loaded) {
+  const [restored, setRestored] = useState(false)
+  if (!restored && persistence.loaded) {
     const saved = capabilities.restoreComposerState && !touched ? persistence.saved : null
-    setRestore({ done: true, text: saved?.text ?? null })
+    setRestored(true)
     if (saved) {
       setDraftState(saved.text)
       setAttachmentsState(saved.attachments)
@@ -301,20 +298,6 @@ export function useChatComposer({
     el.style.height = '0px'
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`
   }, [draft])
-
-  // Snap timeline to bottom when user starts composing — empty→non-empty edge.
-  // Stick-to-bottom only auto-sticks when already at bottom; this forces re-stick
-  // so the latest history is visible while typing.
-  // Restoring a draft or browsing prompt history is not "starting to compose":
-  // the timeline keeps its place.
-  const wasDraftEmptyRef = useRef(true)
-  useEffect(() => {
-    const empty = draft.length === 0
-    if (wasDraftEmptyRef.current && !empty && draft !== restore.text && !browsingHistory) {
-      void scrollToBottom()
-    }
-    wasDraftEmptyRef.current = empty
-  }, [draft, scrollToBottom, restore.text, browsingHistory])
 
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
   const handleSend = useCallback(
