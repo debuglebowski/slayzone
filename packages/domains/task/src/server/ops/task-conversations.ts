@@ -30,7 +30,7 @@ const MODE_LEGACY_COL: Record<string, string> = {
 }
 
 const TTL_PENDING_MS = 10 * 60 * 1000 // 10 minutes — pending rows with a pre-minted expected sessionId.
-const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // 30 seconds — null-expected rows accept any first observation, so the window is kept tight to limit the temporal-proximity exposure for providers without `--session-id` support.
+const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // Legacy spawns without a launch token.
 const FIND_PENDING_RETRY_MS = 100
 
 /**
@@ -50,7 +50,7 @@ export async function recordConversation(
     mode: string
     conversationId: string | null
     origin: ConversationOrigin
-    pendingMeta?: { usedResume: boolean; spawnedAt: number }
+    pendingMeta?: { usedResume: boolean; spawnedAt: number; spawnToken?: string }
     /**
      * Which JSON key inside `provider_config.{mode}` to mirror to during the
      * transition slice. Defaults to `'conversationId'` (the field non-chat
@@ -301,6 +301,7 @@ export async function recordPendingSpawn(
      */
     expectedSessionId: string | null
     usedResume: boolean
+    spawnToken?: string
   }
 ): Promise<void> {
   await recordConversation(db, {
@@ -308,12 +309,19 @@ export async function recordPendingSpawn(
     mode: args.mode,
     conversationId: args.expectedSessionId,
     origin: 'pending-spawn',
-    pendingMeta: { usedResume: args.usedResume, spawnedAt: Date.now() }
+    pendingMeta: {
+      usedResume: args.usedResume,
+      spawnedAt: Date.now(),
+      ...(args.spawnToken ? { spawnToken: args.spawnToken } : {})
+    }
   })
 }
 
 /**
- * Look up the still-pending spawn for (taskId, mode) within the TTL window.
+ * Look up the still-pending spawn for (taskId, mode). A provider that mints its
+ * own id may not emit SessionStart until its first prompt, long after spawn.
+ * A token-bearing null-expected row remains valid until PTY exit. Older rows
+ * without a launch token retain the 30-second gate.
  * Does a single 100 ms re-read if no row is found, to defend the residual
  * race between `recordPendingSpawn` and the agent's SessionStart hook.
  */
@@ -326,13 +334,8 @@ export async function findPendingSpawn(
   expectedSessionId: string | null
   usedResume: boolean
   spawnedAt: number
+  spawnToken?: string
 } | null> {
-  // Two TTL windows depending on whether the pending row pre-minted a sessionId:
-  //   - explicit expected id → wide window (10 min), since binary match is safe
-  //     regardless of timing
-  //   - null-expected (fresh, provider mints internally) → tight 30 s window,
-  //     since the row accepts any first observation and we want to limit the
-  //     temporal-proximity exposure
   const cutoffExpected = Date.now() - TTL_PENDING_MS
   const cutoffNull = Date.now() - TTL_PENDING_NULL_EXPECTED_MS
   const query = async (): Promise<{
@@ -340,14 +343,17 @@ export async function findPendingSpawn(
     pending_meta: string | null
   } | null> =>
     (await db.get(
-      `SELECT conversation_id, pending_meta
-         FROM task_conversations
-         WHERE task_id = ? AND mode = ? AND origin = 'pending-spawn'
+      `SELECT p.conversation_id, p.pending_meta
+         FROM task_conversations p
+         JOIN agent_sessions s ON s.id = p.id
+         WHERE p.task_id = ? AND p.mode = ? AND p.origin = 'pending-spawn'
+           AND s.status != 'dead'
            AND (
-             (conversation_id IS NOT NULL AND created_at >= ?)
-             OR (conversation_id IS NULL AND created_at >= ?)
+             (p.conversation_id IS NOT NULL AND p.created_at >= ?)
+             OR (p.conversation_id IS NULL AND
+               (p.created_at >= ? OR json_extract(p.pending_meta, '$.spawnToken') IS NOT NULL))
            )
-         ORDER BY created_at DESC
+         ORDER BY p.created_at DESC
          LIMIT 1`,
       [taskId, mode, cutoffExpected, cutoffNull]
     )) ?? null
@@ -362,11 +368,13 @@ export async function findPendingSpawn(
     const meta = JSON.parse(row.pending_meta) as {
       usedResume: boolean
       spawnedAt: number
+      spawnToken?: string
     }
     return {
       expectedSessionId: row.conversation_id, // may be null for fresh-without-pre-mint
       usedResume: meta.usedResume,
-      spawnedAt: meta.spawnedAt
+      spawnedAt: meta.spawnedAt,
+      spawnToken: meta.spawnToken
     }
   } catch {
     return null
@@ -374,9 +382,9 @@ export async function findPendingSpawn(
 }
 
 /**
- * Sweep pending-spawn rows. With no args, prunes anything older than the TTL
- * — the periodic 10-min belt-and-suspenders sweep. With scope, prunes every
- * pending row for that (taskId, mode) regardless of age — call on PTY exit.
+ * Sweep legacy pending rows. Token-bearing rows can stay active indefinitely,
+ * so only PTY exit may remove them by scope. Old token-bearing rows left by a
+ * crash cannot match a new launch token and are harmless until DB maintenance.
  */
 export async function prunePendingSpawns(
   db: SlayzoneDb,
@@ -400,12 +408,14 @@ export async function prunePendingSpawns(
   const cutoff = Date.now() - TTL_PENDING_MS
   const res = await db.run(
     `DELETE FROM task_conversations
-       WHERE origin = 'pending-spawn' AND created_at < ?`,
+       WHERE origin = 'pending-spawn' AND created_at < ?
+         AND json_extract(pending_meta, '$.spawnToken') IS NULL`,
     [cutoff]
   )
   await db.run(
     `DELETE FROM agent_sessions
-       WHERE origin = 'pending-spawn' AND created_at < ?`,
+       WHERE origin = 'pending-spawn' AND created_at < ?
+         AND json_extract(pending_meta, '$.spawnToken') IS NULL`,
     [cutoff]
   )
   return res.changes

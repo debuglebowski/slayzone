@@ -79,6 +79,7 @@ type LedgerCalls = {
     mode: string
     expectedSessionId: string | null
     usedResume: boolean
+    spawnToken?: string
   }>
   prune: Array<{ taskId: string; mode: string }>
   bind: Array<{ sessionId: string; taskId: string; tabId: string }>
@@ -168,6 +169,37 @@ test('pending-spawn is recorded durably BEFORE the agent starts (no bind on plai
     ).toBeLessThan(firstWrite)
     // Plain (non-pre-warmed) adoption must NOT bind a pooled session.
     expect(calls.bind.length, `bind must not fire on plain adopt: ${calls.bind.length}`).toBe(0)
+    killPty(sessionId)
+  } finally {
+    setPtySessionLedger(null)
+  }
+})
+
+test('Codex launch token is recorded and exported to its hook context', async () => {
+  const events: string[] = []
+  const { ledger, calls } = makeFakeLedger(events)
+  ledger.buildMcpEnv = async (taskId) => ({
+    SLAYZONE_TASK_ID: taskId ?? '',
+    SLAYZONE_AGENT_HOOK_CONTEXT: JSON.stringify({ v: 1, agentId: 'codex', taskId })
+  })
+  setPtySessionLedger(ledger)
+  try {
+    const fake = makeFakePty(events)
+    installAdoptBackend(fake)
+    const sessionId = 'tokenA:tokenA'
+    const res = await createPty({
+      win: fakeWin,
+      sessionId,
+      cwd: '/tmp',
+      mode: 'codex',
+      type: 'codex',
+      initialCommand: 'codex {flags}',
+      adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
+    })
+    expect(res.success).toBe(true)
+    const token = calls.record[0]?.spawnToken
+    expect(token).toMatch(/^[0-9a-f-]{36}$/)
+    expect(fake.written.join('')).toContain(token)
     killPty(sessionId)
   } finally {
     setPtySessionLedger(null)

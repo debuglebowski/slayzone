@@ -2976,13 +2976,26 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="text-xs text-blue-500 cursor-default">
-                              Session not saved — resume won't work until detected
+                              {task.terminal_mode === 'codex'
+                                ? 'Session not saved yet — automatic detection after first prompt'
+                                : "Session not saved — resume won't work until detected"}
                             </span>
                           </TooltipTrigger>
                           <TooltipContent side="bottom" className="max-w-72">
-                            The AI provider's session ID hasn't been captured yet. Without it,
-                            closing and reopening this task will start a fresh conversation instead
-                            of resuming. Click "Run {sessionIdCommand}" to detect it automatically.
+                            {task.terminal_mode === 'codex' ? (
+                              <>
+                                Codex creates its saved session after the first prompt. SlayZone
+                                captures it automatically. If this remains after a prompt, use "Run
+                                /status" to retry detection.
+                              </>
+                            ) : (
+                              <>
+                                The AI provider's session ID hasn't been captured yet. Without it,
+                                closing and reopening this task will start a fresh conversation
+                                instead of resuming. Click "Run {sessionIdCommand}" to detect it
+                                automatically.
+                              </>
+                            )}
                           </TooltipContent>
                         </Tooltip>
                         <Button

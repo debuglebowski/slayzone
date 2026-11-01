@@ -954,6 +954,62 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
+  test('codex delayed first ID is claimed once; later different ID stays foreign', async () => {
+    getCurrentConversationIdSpy
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue('11111111-1111-4111-8111-111111111111')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx-task',
+        sessionId: '11111111-1111-4111-8111-111111111111'
+      })
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx-task',
+        sessionId: '22222222-2222-4222-8222-222222222222'
+      })
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-fresh'
+      })
+      expect(recordConversationSpy.mock.calls[1][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex delayed first ID must match the launch token', async () => {
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: null,
+      usedResume: false,
+      spawnToken: 'launch-A'
+    })
+    const srv = await startServer()
+    try {
+      for (const spawnToken of ['launch-B', 'launch-A']) {
+        await postJson(srv.port, {
+          agentId: 'codex',
+          ctx: { taskId: 'cx-task', spawnToken },
+          raw: {
+            hook_event_name: 'SessionStart',
+            session_id: '11111111-1111-4111-8111-111111111111'
+          }
+        })
+      }
+      expect(recordConversationSpy.mock.calls.map((call) => call[1].origin)).toEqual([
+        'foreign-observed',
+        'slay-spawned-fresh'
+      ])
+    } finally {
+      await srv.close()
+    }
+  })
+
   // --- Warm agents ---------------------------------------------------------
   // A warm agent boots with the id of a task that is created later, if ever. Until
   // a terminal adopts it, its hooks name a task with no terminal (and maybe no row),

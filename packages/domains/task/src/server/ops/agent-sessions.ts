@@ -143,7 +143,7 @@ export async function isTurnTrackedMode(db: SlayzoneDb, mode: string): Promise<b
 }
 
 const TTL_PENDING_MS = 10 * 60 * 1000 // explicit pre-minted expected id → wide window.
-const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // null-expected → tight window (temporal-proximity gate only).
+const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // Legacy spawns without a launch token.
 const FIND_PENDING_RETRY_MS = 100
 
 /**
@@ -483,7 +483,8 @@ export async function listTaskSessions(
 }
 
 /**
- * Look up the still-pending spawn for (taskId, mode) within the TTL window.
+ * Look up the still-pending spawn for (taskId, mode). Token-bearing fresh spawns
+ * stay eligible until PTY exit; legacy spawns keep the short time window.
  * Mirror of `task-conversations.findPendingSpawn` against `agent_sessions`.
  * One 100 ms re-read defends the race between the pending write and the
  * agent's SessionStart hook.
@@ -498,6 +499,7 @@ export async function findPendingSpawn(
   expectedSessionId: string | null
   usedResume: boolean
   spawnedAt: number
+  spawnToken?: string
 } | null> {
   const cutoffExpected = Date.now() - TTL_PENDING_MS
   const cutoffNull = Date.now() - TTL_PENDING_NULL_EXPECTED_MS
@@ -513,7 +515,8 @@ export async function findPendingSpawn(
            AND status != 'dead'
            AND (
              (conversation_id IS NOT NULL AND created_at >= ?)
-             OR (conversation_id IS NULL AND created_at >= ?)
+             OR (conversation_id IS NULL AND
+               (created_at >= ? OR json_extract(pending_meta, '$.spawnToken') IS NOT NULL))
            )
          ORDER BY created_at DESC
          LIMIT 1`,
@@ -530,12 +533,14 @@ export async function findPendingSpawn(
     const meta = JSON.parse(row.pending_meta) as {
       usedResume: boolean
       spawnedAt: number
+      spawnToken?: string
     }
     return {
       sessionId: row.id,
       expectedSessionId: row.conversation_id,
       usedResume: meta.usedResume,
-      spawnedAt: meta.spawnedAt
+      spawnedAt: meta.spawnedAt,
+      spawnToken: meta.spawnToken
     }
   } catch {
     return null
@@ -634,11 +639,16 @@ export async function recordSessionSpawn(
      *  provider mints its own. */
     expectedConversationId: string | null
     usedResume: boolean
+    spawnToken?: string
     status: 'pooled' | 'bound'
   }
 ): Promise<void> {
   const createdAt = Date.now()
-  const meta = JSON.stringify({ usedResume: args.usedResume, spawnedAt: createdAt })
+  const meta = JSON.stringify({
+    usedResume: args.usedResume,
+    spawnedAt: createdAt,
+    ...(args.spawnToken ? { spawnToken: args.spawnToken } : {})
+  })
   await db.run(
     `INSERT INTO agent_sessions
        (id, mode, cwd, task_id, tab_id, conversation_id, origin, status, pending_meta, created_at, bound_at, ended_at)

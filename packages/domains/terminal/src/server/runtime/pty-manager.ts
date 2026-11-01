@@ -1612,6 +1612,26 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         ? await ledger.buildMcpEnv(taskId, terminalMode, remoteMcpEnv)
         : await buildMcpEnv(null, taskId, terminalMode, undefined, remoteMcpEnv)
 
+    // Bind the pending-spawn ledger row to this exact launch. Codex may wait
+    // minutes for its first prompt before emitting SessionStart; a timestamp
+    // alone cannot safely distinguish that hook from a stale row after a crash.
+    let spawnToken: string | undefined
+    if (mcpEnv.SLAYZONE_AGENT_HOOK_CONTEXT) {
+      try {
+        const hookContext = JSON.parse(mcpEnv.SLAYZONE_AGENT_HOOK_CONTEXT) as unknown
+        if (hookContext && typeof hookContext === 'object' && !Array.isArray(hookContext)) {
+          spawnToken = randomUUID()
+          mcpEnv.SLAYZONE_AGENT_HOOK_CONTEXT = JSON.stringify({
+            ...hookContext,
+            spawnToken
+          })
+        }
+      } catch {
+        // A malformed injected context must not stop the agent from launching.
+        // The legacy short-window capture path remains available.
+      }
+    }
+
     // Adoption: the warm shell was spawned without the task-scoped MCP env
     // (SLAYZONE_TASK_ID etc.) — env can't be mutated on a live process, so export
     // it into the shell immediately before `exec <agent>`. Reuses the SAME mcpEnv a
@@ -1717,15 +1737,16 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // about to ask the agent to resume; `null` means "fresh PTY spawn — agent
     // will mint its own id, accept the first observation as fresh". Awaited
     // so the row is durable before the child process can race ahead. Drops
-    // on PTY exit via `prunePendingSpawns` below, and a periodic 10-min TTL
-    // sweep belt-and-suspenders.
+    // on PTY exit via `prunePendingSpawns` below. Legacy rows without tokens
+    // retain the time limit; token-bearing rows can wait for the first prompt.
     if (ledger && !opts.adoptPty?.preWarmedAgent) {
       try {
         await ledger.recordPendingSpawn({
           taskId,
           mode: terminalMode,
           expectedSessionId: effectiveConversationId || null,
-          usedResume: resuming
+          usedResume: resuming,
+          spawnToken
         })
       } catch {
         // Best-effort — a failed pending row falls back to "no pending" in the
@@ -1989,13 +2010,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       const exiting = sessions.get(sessionId)
       if (exiting && exiting.pty === ptyProcess) exiting.exited = true
       // Drop the pending-spawn provenance row for this (task, mode). A row that
-      // isn't pruned here gets swept by the periodic 10-min TTL anyway, but
-      // explicit pruning here keeps the table small and avoids stale rows
-      // matching a fast restart on the same task/mode.
+      // isn't pruned here cannot match a later launch's token, but explicit
+      // pruning keeps the ledger small and avoids stale lookup candidates.
       if (ledger) {
         void ledger.prunePendingSpawns({ taskId, mode: terminalMode }).catch(() => {
-          // Best-effort — failure leaks at most one pending row per spawn,
-          // which the periodic sweep collects within 10 min.
+          // Best-effort — a leaked token-bearing row cannot claim a later spawn.
         })
       }
       // Record how the agent ended — UNLESS we're in app shutdown, in which case

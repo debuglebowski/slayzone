@@ -48,7 +48,7 @@ export interface RecordConversationInput {
   mode: string
   conversationId: string | null
   origin: ConversationOrigin
-  pendingMeta?: { usedResume: boolean; spawnedAt: number }
+  pendingMeta?: { usedResume: boolean; spawnedAt: number; spawnToken?: string }
   /**
    * Which JSON key inside `provider_config.{mode}` to mirror to during the
    * transition slice. Defaults to `'conversationId'`; chat-mode callers pass
@@ -64,6 +64,8 @@ export interface PendingSpawnInput {
   /** `null` = fresh spawn without a pre-minted id (agent mints its own). */
   expectedSessionId: string | null
   usedResume: boolean
+  /** Per-launch proof echoed by the agent hook. */
+  spawnToken?: string
 }
 
 /** Input of `TaskSessionStore.recordSessionSpawn`. */
@@ -76,5 +78,6 @@ export interface SessionSpawnInput {
   /** Id slay expects the provider to echo back (pre-minted), or null. */
   expectedConversationId: string | null
   usedResume: boolean
+  spawnToken?: string
   status: 'pooled' | 'bound'
 }

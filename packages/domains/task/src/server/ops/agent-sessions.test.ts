@@ -242,7 +242,8 @@ describe('agent_sessions parity', () => {
       taskId: 't1',
       mode: 'codex',
       expectedSessionId: null,
-      usedResume: false
+      usedResume: false,
+      spawnToken: 'launch-codex'
     })
     p1 = await findNew(db, 't1', 'codex')
     expect(p1).not.toBeNull()
@@ -254,6 +255,32 @@ describe('agent_sessions parity', () => {
 
   test('usedResume preserved', () => {
     expect(p1?.usedResume).toBe(false)
+  })
+
+  test('fresh pending remains discoverable after delayed Codex SessionStart', async () => {
+    raw
+      .prepare(
+        `UPDATE agent_sessions SET created_at = ?
+         WHERE task_id = 't1' AND mode = 'codex' AND origin = 'pending-spawn'`
+      )
+      .run(Date.now() - 120_000)
+    expect(await findNew(db, 't1', 'codex')).not.toBeNull()
+  })
+
+  test('legacy pending without token still expires after 30 seconds', async () => {
+    await recordPendingSpawn(db, {
+      taskId: 't1',
+      mode: 'opencode',
+      expectedSessionId: null,
+      usedResume: false
+    })
+    raw
+      .prepare(
+        `UPDATE agent_sessions SET created_at = ?
+         WHERE task_id = 't1' AND mode = 'opencode' AND origin = 'pending-spawn'`
+      )
+      .run(Date.now() - 120_000)
+    expect(await findNew(db, 't1', 'opencode')).toBeNull()
   })
 
   // 7. findPendingSpawn (new) with explicit id.

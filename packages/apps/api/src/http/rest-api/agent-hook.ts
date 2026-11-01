@@ -399,6 +399,8 @@ interface ResolvedHook {
   taskId?: string
   /** CLI session UUID (claude/codex `session_id`, antigravity `conversationId`). */
   sessionId?: string
+  /** Per-launch proof from SlayZone's hook context. */
+  spawnToken?: string
   /**
    * `SessionStart.source` — WHY the agent started this session. Claude Code
    * emits: `startup` | `resume` | `clear` | `compact` | `fork`. Load-bearing for
@@ -476,6 +478,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
     source: typeof effRaw?.source === 'string' ? effRaw.source : undefined,
     taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
     sessionId: cliSessionId,
+    spawnToken: typeof ctx?.spawnToken === 'string' ? ctx.spawnToken : undefined,
     cwd: body.cwd ?? (typeof effRaw?.cwd === 'string' ? effRaw.cwd : undefined),
     raw: effRaw ?? body.raw,
     releaseChannel: typeof ctx?.releaseChannel === 'string' ? ctx.releaseChannel : undefined
@@ -523,7 +526,8 @@ async function persistConversationId(
   sessionId: string,
   /** `SessionStart.source` — see `ResolvedHook.source`. Only `'clear'` alters
    *  the decision below; every other value falls through to the id-match gate. */
-  source?: string
+  source?: string,
+  spawnToken?: string
 ): Promise<void> {
   try {
     // The task's board row as the renderer sees it (`provider_config` legacy
@@ -597,14 +601,24 @@ async function persistConversationId(
     const pending = await findPendingSpawn(deps.db, taskId, mode)
     // No pending → no spawn-intent record: definitely foreign.
     // Pending w/ expectedSessionId === null → fresh PTY spawn where slay did
-    // NOT pre-mint a UUID; accept the first observed id as fresh (temporal-
-    // proximity gate only — Claude mints its own).
+    // NOT pre-mint a UUID. Accept a delayed hook only when its per-launch token
+    // matches. Older launches without tokens retain the short lookup window.
     // Pending w/ exact match → honored.
     // Pending w/ mismatch → foreign (e.g. user typed `claude --resume X`).
+    const currentId =
+      pending?.expectedSessionId === null
+        ? await getCurrentConversationId(deps.db, taskId, mode)
+        : null
+    if (currentId === sessionId) return
+    const freshSpawnMatches =
+      pending?.expectedSessionId === null &&
+      (!pending.spawnToken || pending.spawnToken === spawnToken)
     const origin: ConversationOrigin = !pending
       ? 'foreign-observed'
       : pending.expectedSessionId === null
-        ? 'slay-spawned-fresh'
+        ? currentId || !freshSpawnMatches
+          ? 'foreign-observed'
+          : 'slay-spawned-fresh'
         : sessionId === pending.expectedSessionId
           ? pending.usedResume
             ? 'slay-spawned-resume'
@@ -766,7 +780,14 @@ export async function processAgentHook(
       // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
       // and the capture event is low-frequency (repeats short-circuit in the
       // helper) — keeping it deterministic beats a fire-and-forget race.
-      await persistConversationId(deps, hook.mode, hook.taskId, cliSessionId, hook.source)
+      await persistConversationId(
+        deps,
+        hook.mode,
+        hook.taskId,
+        cliSessionId,
+        hook.source,
+        hook.spawnToken
+      )
       // Mirror onto the live PTY session for the idle-close gate.
       const ptySessionId = bridge?.findSession(hook.taskId, hook.mode as TerminalMode)
       if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)

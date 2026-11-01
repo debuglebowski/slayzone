@@ -199,7 +199,8 @@ describe('task_conversations', () => {
       taskId: 't1',
       mode: 'codex',
       expectedSessionId: null,
-      usedResume: false
+      usedResume: false,
+      spawnToken: 'launch-codex'
     })
     p1 = await findPendingSpawn(db, 't1', 'codex')
     expect(p1).not.toBeNull()
@@ -230,39 +231,63 @@ describe('task_conversations', () => {
     expect(p2?.usedResume).toBe(true)
   })
 
-  // 7b. Phase 2: TTL window for null-expected pending rows is much tighter
-  //     (30 s) than for explicit-expected (10 min). Simulate by inserting a
-  //     synthetic null-expected row 60 s in the past — findPendingSpawn must
-  //     not return it. An explicit-expected row at the same age must still be
-  //     returned (10-min window).
-  const past60s = Date.now() - 60_000
-  test('60s-old null-expected pending must be outside the tight TTL window', async () => {
+  // Codex may emit SessionStart only after its first prompt, minutes after spawn.
+  // A pending row remains valid while its PTY is bound, regardless of age.
+  const pastTwoMinutes = Date.now() - 120_000
+  test('old null-expected pending remains valid while its PTY is bound', async () => {
     raw
       .prepare(
-        `INSERT INTO task_conversations
-           (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-         VALUES (?, 't1', 'qwen-code', NULL, 'pending-spawn', ?, ?)`
+        `UPDATE task_conversations SET created_at = ?
+         WHERE task_id = 't1' AND mode = 'codex' AND origin = 'pending-spawn'`
       )
-      .run(
-        'stale-null-expected',
-        JSON.stringify({ usedResume: false, spawnedAt: past60s }),
-        past60s
-      )
-    expect(await findPendingSpawn(db, 't1', 'qwen-code')).toBeNull()
+      .run(pastTwoMinutes)
+    expect(await findPendingSpawn(db, 't1', 'codex')).not.toBeNull()
   })
 
-  test('60s-old explicit-expected pending must still be inside the 10-min window', async () => {
+  test('old null-expected row without token expires', async () => {
+    await recordPendingSpawn(db, {
+      taskId: 't1',
+      mode: 'opencode',
+      expectedSessionId: null,
+      usedResume: false
+    })
     raw
       .prepare(
-        `INSERT INTO task_conversations
-           (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-         VALUES (?, 't1', 'qwen-code', 'KEEP', 'pending-spawn', ?, ?)`
+        `UPDATE task_conversations SET created_at = ?
+         WHERE task_id = 't1' AND mode = 'opencode' AND origin = 'pending-spawn'`
       )
-      .run(
-        'fresh-explicit-expected',
-        JSON.stringify({ usedResume: false, spawnedAt: past60s }),
-        past60s
+      .run(pastTwoMinutes)
+    expect(await findPendingSpawn(db, 't1', 'opencode')).toBeNull()
+  })
+
+  test('age sweep preserves a still-bound launch token', async () => {
+    await prunePendingSpawns(db)
+    expect(await findPendingSpawn(db, 't1', 'codex')).not.toBeNull()
+  })
+
+  test('dead null-expected pending is ignored', async () => {
+    raw
+      .prepare(
+        `UPDATE agent_sessions SET status = 'dead'
+         WHERE task_id = 't1' AND mode = 'codex' AND origin = 'pending-spawn'`
       )
+      .run()
+    expect(await findPendingSpawn(db, 't1', 'codex')).toBeNull()
+  })
+
+  test('old explicit-expected pending remains inside the 10-min window', async () => {
+    await recordPendingSpawn(db, {
+      taskId: 't1',
+      mode: 'qwen-code',
+      expectedSessionId: 'KEEP',
+      usedResume: false
+    })
+    raw
+      .prepare(
+        `UPDATE task_conversations SET created_at = ?
+         WHERE task_id = 't1' AND mode = 'qwen-code' AND origin = 'pending-spawn'`
+      )
+      .run(pastTwoMinutes)
     const p3 = await findPendingSpawn(db, 't1', 'qwen-code')
     expect(p3?.expectedSessionId).toBe('KEEP')
   })

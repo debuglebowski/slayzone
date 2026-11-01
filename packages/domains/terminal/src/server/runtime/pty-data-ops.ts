@@ -38,6 +38,7 @@ export interface PtySessionLedger {
     /** `null` = fresh spawn without a pre-minted id (agent mints its own). */
     expectedSessionId: string | null
     usedResume: boolean
+    spawnToken?: string
   }): Promise<void>
   /** Drop pending rows for (taskId, mode) — called on PTY exit, best-effort. */
   prunePendingSpawns(scope: { taskId: string; mode: string }): Promise<number>

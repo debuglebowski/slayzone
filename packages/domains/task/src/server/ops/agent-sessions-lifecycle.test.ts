@@ -180,8 +180,14 @@ describe('agent_sessions B-lifecycle', () => {
       cwd: '/p',
       expectedConversationId: null,
       usedResume: false,
+      spawnToken: 'launch-codex',
       status: 'bound'
     })
+    // Codex can wait for first prompt before emitting SessionStart. Keep its
+    // bound spawn eligible after the old 30-second cutoff.
+    raw
+      .prepare(`UPDATE agent_sessions SET created_at = ? WHERE id = 'C1'`)
+      .run(Date.now() - 120_000)
     oc = await confirmSessionConversationByTaskMode(db, {
       taskId: 't1',
       mode: 'codex',
