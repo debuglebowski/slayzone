@@ -918,6 +918,7 @@ skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.tes
 #
 # A few non-jsdom node suites ride along here for other reasons (vi.mock, node:sqlite).
 run_vitest_files "vitest (jsdom client suites)" \
+  packages/apps/app/src/main/task-windows.test.ts \
   packages/apps/app/src/renderer/src/react-compiler-canary.test.tsx \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \

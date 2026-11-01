@@ -52,6 +52,16 @@ export const taskWindowsEvents = new EventEmitter() as EventEmitter & {
 
 export function attachTaskWindows(win: BrowserWindow): void {
   primaryWindow = win
+  const wcId = win.webContents.id
+  win.on('closed', () => {
+    if (primaryWindow === win) {
+      primaryWindow = null
+      primaryActiveTaskId = null
+      broadcast('task-window:primary-active-changed', null)
+      taskWindowsEvents.emit('primary-active-changed', null)
+    }
+    releaseWindowOwnership(wcId)
+  })
 }
 
 function allWindows(): BrowserWindow[] {
@@ -88,6 +98,26 @@ function broadcastOwnership(taskId: string): void {
   const ownership = ownershipSnapshotForTask(taskId)
   broadcast('panels:ownership-changed', { taskId, ownership }) // legacy IPC (slice 5 drops)
   taskWindowsEvents.emit('ownership-changed', { taskId, ownership }) // tRPC app.taskWindows.onOwnershipChanged
+}
+
+// Both primary and detached windows own panels. On macOS the primary can close
+// while the app stays alive; reopening creates a new webContents id.
+function releaseWindowOwnership(closedWindowId: number): void {
+  const releasedTasks = new Set<string>()
+  const released: OwnershipKey[] = []
+  for (const [key, ownerWindowId] of ownership.entries()) {
+    if (ownerWindowId !== closedWindowId) continue
+    ownership.delete(key)
+    const [taskId, panelId] = key.split('::')
+    released.push({ taskId, panelId })
+    releasedTasks.add(taskId)
+  }
+  for (const taskId of releasedTasks) broadcastOwnership(taskId)
+  if (released.length > 0) {
+    const payload = { closedWindowId, released }
+    broadcast('panels:released-on-close', payload)
+    taskWindowsEvents.emit('panels-released-on-close', payload)
+  }
 }
 
 function openTaskIds(): string[] {
@@ -139,29 +169,9 @@ function createSecondaryTaskWindow(taskId: string): BrowserWindow {
   taskWindows.set(wcId, { window: win, taskId })
 
   win.on('closed', () => {
-    const closedWcId = wcId
-    taskWindows.delete(closedWcId)
+    taskWindows.delete(wcId)
     broadcastTaskWindowList()
-
-    // Release ownership entries held by this window. Group by taskId for broadcasts.
-    const releasedTasks = new Set<string>()
-    const releasedKeys: OwnershipKey[] = []
-    for (const [key, ownerWindowId] of ownership.entries()) {
-      if (ownerWindowId === closedWcId) {
-        ownership.delete(key)
-        const [taskId, panelId] = key.split('::')
-        releasedKeys.push({ taskId, panelId })
-        releasedTasks.add(taskId)
-      }
-    }
-    for (const taskId of releasedTasks) broadcastOwnership(taskId)
-    if (releasedKeys.length > 0) {
-      broadcast('panels:released-on-close', { closedWindowId: closedWcId, released: releasedKeys }) // legacy IPC (slice 5 drops)
-      taskWindowsEvents.emit('panels-released-on-close', {
-        closedWindowId: closedWcId,
-        released: releasedKeys
-      }) // tRPC app.taskWindows.onPanelsReleasedOnClose
-    }
+    releaseWindowOwnership(wcId)
   })
 
   return win
