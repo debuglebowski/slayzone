@@ -25,6 +25,7 @@ export function activityView(
   const turns = new Map<TimelineItem, ActivityTurn>()
   const hosts = new Map<TimelineItem, TimelineItem>()
   let segment: TimelineItem[] = []
+  let completed = false
   const flush = (active: boolean): void => {
     if (!segment.length) return
     const activity = segment.filter(
@@ -74,8 +75,12 @@ export function activityView(
     }
     output.push(...kept)
     segment = []
+    completed = false
   }
   for (const item of rows) {
+    // CLI process diagnostics can arrive after turn completion. Keep consecutive
+    // diagnostics with that turn, stopping at any new content or history boundary.
+    if (completed && item.kind !== 'stderr') flush(false)
     if (item.kind === 'history-gap' || item.kind === 'conversation-branch') {
       flush(false)
       output.push(item)
@@ -84,9 +89,9 @@ export function activityView(
       segment.push(item)
     } else {
       segment.push(item)
-      if (item.kind === 'result' || item.kind === 'interrupted') flush(false)
+      if (item.kind === 'result' || item.kind === 'interrupted') completed = true
     }
   }
-  flush(inFlight)
+  flush(inFlight && !completed)
   return { rows: output, turns, hosts }
 }
