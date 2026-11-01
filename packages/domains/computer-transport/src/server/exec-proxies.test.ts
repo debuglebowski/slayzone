@@ -473,13 +473,16 @@ describe('createRoutingPtyBackend', () => {
     })
 
     handle.kill('SIGTERM')
-    expect(requireCall(gateway, 'pty.kill').params).toEqual({
+    expect(requireCall(gateway, 'pty.kill').params).toMatchObject({
       sessionId: 'sess-1',
       signal: 'SIGTERM'
     })
+    expect((requireCall(gateway, 'pty.kill').params as { spawnId: string }).spawnId).toBeTruthy()
 
     handle.kill()
-    expect(gateway.requestsOf('pty.kill')[1]?.params).toEqual({ sessionId: 'sess-1' })
+    expect(gateway.requestsOf('pty.kill')[1]?.params).toMatchObject({
+      sessionId: 'sess-1'
+    })
   })
 
   // ── Detach / reattach across a dropped computer connection ──────────────────

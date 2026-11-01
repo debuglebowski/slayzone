@@ -104,6 +104,10 @@ interface PtySession {
   exitReason?: string
   /** The agent-start slot this session holds until its first output (admitted spawns only). */
   admissionSlot?: AdmissionSlot
+  /** Settled by node-pty onExit even after this object has been superseded. */
+  exited: Promise<void>
+  resolveExit: () => void
+  replacing?: boolean
 }
 
 /**
@@ -202,6 +206,70 @@ export function createPtyHandlers(
   const installProblems = options.nodePtyInstallProblems ?? installProblemsOnDisk
   /** Spawns waiting for an agent-start slot, keyed like `sessions`. */
   const queued = new Map<string, QueuedSpawn>()
+  const starts = new Map<
+    string,
+    { spawnId?: string; promise: Promise<unknown>; cancelled: boolean }
+  >()
+
+  function serializeStart<T>(
+    id: string,
+    spawnId: string | undefined,
+    run: (assertActive: () => void) => Promise<T>
+  ): Promise<T> {
+    const prior = starts.get(id)?.promise ?? Promise.resolve()
+    const record = { spawnId, promise: undefined as unknown as Promise<T>, cancelled: false }
+    const assertActive = (): void => {
+      if (record.cancelled) throw new Error(`pty ${id}: spawn killed before start`)
+    }
+    const current = prior
+      .catch(() => {
+        // A refused predecessor must not block a later attempt.
+      })
+      .then(() => {
+        assertActive()
+        return run(assertActive)
+      })
+    record.promise = current
+    starts.set(id, record)
+    void current
+      .finally(() => {
+        if (starts.get(id)?.promise === current) starts.delete(id)
+      })
+      .catch(() => {
+        // Rejection belongs to caller; cleanup still ran.
+      })
+    return current
+  }
+
+  async function stopBeforeReplacement(id: string): Promise<void> {
+    const old = sessions.get(id)
+    if (!old) return
+    old.replacing = true
+    try {
+      old.proc.kill()
+    } catch {
+      // Exit may already be in flight.
+    }
+    const exited = await Promise.race([
+      old.exited.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))
+    ])
+    if (!exited) {
+      try {
+        old.proc.kill('SIGKILL')
+      } catch {
+        // Exit may already be in flight.
+      }
+      const killed = await Promise.race([
+        old.exited.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))
+      ])
+      if (!killed) {
+        old.replacing = false
+        throw new Error(`pty ${id}: old process ${old.proc.pid} did not exit`)
+      }
+    }
+  }
 
   /**
    * An explicit `cwd` wins: it is either a worktree this computer created or a
@@ -245,19 +313,7 @@ export function createPtyHandlers(
     }
   ): PtySession {
     const cwd = resolveCwd(opts)
-    // Replace any pre-existing session with the same id (defensive against a
-    // stale session that never signalled exit).
-    const existing = sessions.get(id)
-    if (existing) {
-      existing.deadline?.cancel()
-      releaseAdmission(existing)
-      try {
-        existing.proc.kill()
-      } catch {
-        // Already dead — ignore.
-      }
-      sessions.delete(id)
-    }
+    if (sessions.has(id)) throw new Error(`pty ${id}: old process still live`)
 
     const capability = ctx.cliRelay?.issue()
     let proc: pty.IPty
@@ -275,11 +331,15 @@ export function createPtyHandlers(
     }
 
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
+    let resolveExit!: () => void
+    const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
       revokeCli: capability?.revoke,
       proc,
       buffer,
       id,
+      exited,
+      resolveExit,
       ...(opts.warm ? { warm: opts.warm } : {}),
       ...(opts.spawnId !== undefined ? { spawnId: opts.spawnId } : {})
     }
@@ -335,6 +395,7 @@ export function createPtyHandlers(
 
     proc.onExit(({ exitCode, signal }) => {
       capability?.revoke()
+      session.resolveExit()
       reap(
         session,
         typeof exitCode === 'number' ? exitCode : null,
@@ -373,6 +434,16 @@ export function createPtyHandlers(
     sessions.delete(session.id)
     session.deadline?.cancel()
     releaseAdmission(session)
+    if (session.replacing) {
+      tombstones.add(session.id, {
+        spawnId: session.spawnId,
+        pid: session.proc.pid,
+        exitCode,
+        signal,
+        reason: 'replaced'
+      })
+      return
+    }
     // A warm session dying before adoption is the computer's business: the hub
     // holds no session for it. It re-warms on its own reconcile.
     if (session.warm) {
@@ -507,13 +578,20 @@ export function createPtyHandlers(
       }
       const waitedMs = Date.now() - enqueuedAt
       if (waitedMs >= 1_000) ctx.log('agent start admitted after queueing', { id, lane, waitedMs })
-      item.resolve(reply)
+      Promise.resolve(reply).then(item.resolve, (err) => {
+        slot.release()
+        item.reject(err)
+      })
     })
     return promise
   }
 
   function spawn(rawParams: unknown): SpawnReply | Promise<unknown> {
     const params = ptySpawnParamsSchema.parse(rawParams)
+    const starting = starts.get(params.sessionId)
+    if (starting && params.spawnId !== undefined && starting.spawnId === params.spawnId) {
+      return starting.promise
+    }
     if (params.spawnId !== undefined) {
       const live = sessions.get(params.sessionId)
       if (live && !live.warm && live.spawnId === params.spawnId) {
@@ -537,7 +615,14 @@ export function createPtyHandlers(
       // Not an agent start (or an older hub): start now. A start still queued
       // under this id is superseded by this one, like a live session would be.
       const prior = queued.get(params.sessionId)
-      const reply = startSession(params)
+      const reply =
+        sessions.has(params.sessionId) || starts.has(params.sessionId)
+          ? serializeStart(params.sessionId, params.spawnId, async (assertActive) => {
+              await stopBeforeReplacement(params.sessionId)
+              assertActive()
+              return startSession(params)
+            })
+          : startSession(params)
       if (prior) {
         queued.delete(params.sessionId)
         admission.cancel(prior.ticket)
@@ -545,11 +630,15 @@ export function createPtyHandlers(
       }
       return reply
     }
-    return enqueueSpawn(params.sessionId, params.admission, params, (slot, item) => {
-      const reply = startSession({
-        ...params,
-        ...(item.cols !== undefined ? { cols: item.cols } : {}),
-        ...(item.rows !== undefined ? { rows: item.rows } : {})
+    return enqueueSpawn(params.sessionId, params.admission, params, async (slot, item) => {
+      const reply = await serializeStart(params.sessionId, params.spawnId, async (assertActive) => {
+        await stopBeforeReplacement(params.sessionId)
+        assertActive()
+        return startSession({
+          ...params,
+          ...(item.cols !== undefined ? { cols: item.cols } : {}),
+          ...(item.rows !== undefined ? { rows: item.rows } : {})
+        })
       })
       const session = sessions.get(params.sessionId)!
       session.admissionSlot = slot
@@ -588,6 +677,10 @@ export function createPtyHandlers(
    */
   function warmSpawn(rawParams: unknown): Promise<unknown> {
     const params = ptyWarmSpawnParamsSchema.parse(rawParams)
+    const live = sessions.get(params.warmId)
+    if (live?.warm) return Promise.resolve({ pid: live.proc.pid })
+    const waiting = queued.get(params.warmId)
+    if (waiting) return waiting.promise
     return enqueueSpawn(params.warmId, 'warm', params, (slot, item) => {
       const session = startWarm(params, item.cols, item.rows)
       session.admissionSlot = slot
@@ -659,6 +752,14 @@ export function createPtyHandlers(
     seq: number
   } {
     const params = ptyWarmAdoptParamsSchema.parse(rawParams)
+    const adopted = sessions.get(params.sessionId)
+    if (adopted?.spawnId === params.warmId) {
+      return {
+        pid: adopted.proc.pid,
+        data: adopted.buffer.toString(),
+        seq: adopted.buffer.getCurrentSeq()
+      }
+    }
     const session = sessions.get(params.warmId)
     if (!session || !session.warm) {
       throw new RpcError(
@@ -674,16 +775,15 @@ export function createPtyHandlers(
     // dropped by the identity check in onData). Should never happen — log it.
     const displaced = sessions.get(params.sessionId)
     if (displaced) {
-      ctx.log('warm adopt displaced a live session', {
-        warmId: params.warmId,
-        sessionId: params.sessionId,
-        displacedPid: displaced.proc.pid,
-        displacedWarm: !!displaced.warm
-      })
+      throw new RpcError(
+        ComputerTransportErrorCodes.unknownComputer,
+        `session ${params.sessionId} already has live process ${displaced.proc.pid}`
+      )
     }
     sessions.delete(params.warmId)
     session.id = params.sessionId
     delete session.warm
+    session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
     releaseAdmission(session)
     // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
@@ -742,6 +842,18 @@ export function createPtyHandlers(
 
   function kill(rawParams: unknown): { ok: true } {
     const params = ptyKillParamsSchema.parse(rawParams)
+    const starting = starts.get(params.sessionId)
+    if (starting && (params.spawnId === undefined || starting.spawnId === params.spawnId)) {
+      starting.cancelled = true
+    }
+    const live = sessions.get(params.sessionId)
+    if (params.spawnId !== undefined && live && live.spawnId !== params.spawnId) {
+      return { ok: true }
+    }
+    const pending = queued.get(params.sessionId)
+    if (params.spawnId !== undefined && pending && pending.spawnId !== params.spawnId) {
+      return { ok: true }
+    }
     const waiting = queued.get(params.sessionId)
     if (waiting) {
       // Killed while waiting for its slot: it never runs, and ends exactly as a

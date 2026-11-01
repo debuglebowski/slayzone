@@ -708,6 +708,12 @@ describe('computer-owned session lifecycle', () => {
     })) as SpawnResult
 
     expect(second.pid).not.toBe(first.pid)
+    expect(() => process.kill(first.pid, 0)).toThrow()
+    // A delayed kill for the first attempt must not take down the replacement.
+    await pty.handlers['pty.kill']({
+      sessionId: 'reused',
+      spawnId: 'attempt-1'
+    })
     const listed = (await pty.handlers['pty.list']({})) as ListResult
     expect(listed.sessions.map((s) => s.spawnId)).toEqual(['attempt-2'])
     pty.disposeAll()

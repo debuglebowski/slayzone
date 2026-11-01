@@ -541,6 +541,7 @@ export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 
 export const ptyKillParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: spawnIdField,
   signal: z.string().optional()
 })
 export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>

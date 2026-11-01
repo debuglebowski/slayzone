@@ -887,7 +887,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // and settling it either way makes pty-manager overwrite the exit with a
     // synthetic -1 ("refused" / "confirmed without a pid").
     entry.pendingSpawn = undefined
-    sessions.delete(entry.key)
+    if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
     entry.exitEmitter.emit({
       exitCode,
       signal: signal ?? undefined,
@@ -960,16 +960,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     setPid: (pid: number | null) => void
   } {
     const key = sessionKey(computerId, sessionId)
-    // Leak diagnostics: a second live entry for the same key silently takes over
-    // its routing (the first's consumers stop receiving data). Should never happen.
+    // Replacing a routed handle must settle its consumers. The computer serializes
+    // the actual process replacement and suppresses the old process's exit frame.
     const displaced = sessions.get(key)
     if (displaced && !displaced.disposed) {
-      console.warn('[routing-pty] register displaced a live session entry', {
-        computerId,
-        sessionId,
-        displacedLastSeq: displaced.lastSeq,
-        displacedDetached: displaced.detached
-      })
+      finalize(displaced, null, null, 'replaced')
     }
     const dataEmitter = new BufferingEmitter<string>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
@@ -1036,6 +1031,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         }
         void send(HubToComputerMethods.ptyKill, {
           sessionId,
+          ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
           ...(signal ? { signal } : {})
         }).catch(noop)
       }
@@ -1135,7 +1131,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     async adopt(computerId: string, warmId: string, sessionId: string, processName: string) {
       // Before anything is tracked: a refused adopt leaves no session behind.
       if (gate) await gate(computerId, { kind: 'session', id: sessionId })
+      if (sessions.has(sessionKey(computerId, sessionId))) {
+        throw new Error(`session ${sessionId} already has a live routed process`)
+      }
       const { entry, handle, setPid } = register(computerId, sessionId, processName, true)
+      entry.spawnId = warmId
       try {
         const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
           warmId,
