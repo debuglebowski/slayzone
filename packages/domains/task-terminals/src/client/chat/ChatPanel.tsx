@@ -30,6 +30,7 @@ import {
 import {
   hasPendingPrompt,
   isAwaitingUserQuestion,
+  BackgroundJobsBanner,
   LiveBlockStore,
   LiveBlockStoreContext,
   selectUsageSummary,
@@ -64,6 +65,7 @@ import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 import { CodexPlanPrompt } from './CodexPlanPrompt'
 import { CommandTaskContext } from './tool-cards'
+import { useCommandTaskActions } from './tool-cards/command-task-hooks'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
 import { RewindPicker, type RewindPickerKind } from './RewindPicker'
@@ -418,7 +420,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
     const handleReset = useCallback(() => {
       if (!resetting) setResetConfirmOpen(true)
-    }, [resetting])
+    }, [resetting, setResetConfirmOpen])
 
     // Esc Esc / the palette's "Rewind…": the TUI's message list (chat E, plan 4.6).
     // Edit & resend puts the message back into the composer, so it waits for an
@@ -719,7 +721,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         if (!target) return
                         if (
                           target.closest(
-                            'button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]'
+                            'button, a, input, textarea, select, summary, [role="button"], [role="menuitem"], [contenteditable="true"]'
                           )
                         )
                           return
@@ -864,6 +866,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         </div>
                       )}
                       <ChatComposer
+                        backgroundJobs={
+                          state.bgShells.size > 0 ? (
+                            <ComposerBackgroundJobs
+                              shells={state.bgShells}
+                              order={state.bgShellOrder}
+                            />
+                          ) : null
+                        }
                         compact={props.isThread}
                         hasPlanReview={!!codexPlanReview}
                         appearance={appearance}
@@ -1020,3 +1030,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     )
   }
 )
+
+/** Composer-owned jobs use the same session scope as command cards. */
+function ComposerBackgroundJobs(props: React.ComponentProps<typeof BackgroundJobsBanner>) {
+  const commandTasks = useCommandTaskActions()
+  return (
+    <BackgroundJobsBanner
+      {...props}
+      onStop={(shell) => {
+        if (shell.shellId) commandTasks.stop(shell.shellId)
+      }}
+    />
+  )
+}

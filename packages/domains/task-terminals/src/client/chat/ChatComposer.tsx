@@ -1,4 +1,4 @@
-import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useRef, type ReactNode, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2, FileDiff } from 'lucide-react'
 import { ChatDisplayOptions } from './ChatDisplayOptions'
 import {
@@ -44,6 +44,7 @@ type CollaborationApi = ReturnType<typeof useChatCollaboration>
 type FastModeApi = ReturnType<typeof useChatFastMode>
 
 export interface ChatComposerProps {
+  backgroundJobs?: ReactNode
   compact?: boolean
   hasPlanReview?: boolean
   appearance: AppearanceSettings
@@ -117,6 +118,7 @@ export interface ChatComposerProps {
  * Purely presentational — all state + handlers are threaded in from ChatPanel.
  */
 export function ChatComposer({
+  backgroundJobs,
   compact = false,
   hasPlanReview = false,
   appearance,
@@ -170,6 +172,7 @@ export function ChatComposer({
   return (
     <div className={`bg-background px-4 pb-1 ${hasPlanReview ? 'pt-0' : 'pt-6'}`}>
       <div className={'mx-auto w-full max-w-[60rem]'}>
+        {backgroundJobs}
         <ChatQueueList items={queuedMessages} onRemove={removeQueue} {...queueApi} />
         {(attachments.length > 0 || attaching) && (
           <div className="flex flex-wrap gap-1.5 mb-1.5 px-1">

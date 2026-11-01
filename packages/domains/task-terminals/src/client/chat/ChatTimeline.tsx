@@ -30,7 +30,6 @@ import {
   withShortcut
 } from '@slayzone/ui'
 import {
-  BackgroundJobsBanner,
   PulseGrid,
   deriveLoadingLabel,
   type TimelineItem,
@@ -53,7 +52,6 @@ import {
   useRowUiState,
   collapseAllRows
 } from './row-ui-state'
-import { useCommandTaskActions } from './tool-cards/command-task-hooks'
 import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
 import { VirtualTimelineRows } from './VirtualTimelineRows'
@@ -105,7 +103,7 @@ export interface ChatTimelineProps {
 
 /**
  * Everything above the composer: the optional override-notice banner, the
- * Cmd+F search bar, the floating background-jobs banner, and the timeline scroll
+ * Cmd+F search bar, and the timeline scroll
  * region (virtualized item list + typing indicator) wrapped in its right-click
  * context menu, plus the Hydrating / Empty overlays and jump-to-latest button.
  *
@@ -145,7 +143,6 @@ export function ChatTimeline({
   for (const row of state.timeline) if (row !== undefined) loadedRows++
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
-  const commandTasks = useCommandTaskActions()
   const rowUiState = useContext(RowUiStateContext)
   const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-5xl'
   // A row that streams already says what the agent does ("Thinking… 3s", the
@@ -274,21 +271,6 @@ export function ChatTimeline({
           onClose={search.close}
           focusToken={search.focusToken}
         />
-      )}
-
-      {state.bgShells.size > 0 && (
-        <div className="pointer-events-none absolute top-6 right-6 z-20 flex flex-col gap-3">
-          <div className="pointer-events-auto">
-            <BackgroundJobsBanner
-              floating={false}
-              shells={state.bgShells}
-              order={state.bgShellOrder}
-              onStop={(shell) => {
-                if (shell.shellId) commandTasks.stop(shell.shellId)
-              }}
-            />
-          </div>
-        </div>
       )}
 
       {/* Timeline */}

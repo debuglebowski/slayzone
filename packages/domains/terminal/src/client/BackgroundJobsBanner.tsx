@@ -1,19 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useNow } from '@slayzone/ui'
-import { ChevronDown, ChevronRight, Terminal as TerminalIcon } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import type { BgShell, BgShellStatus } from '../shared/chat-timeline'
 
 interface BackgroundJobsBannerProps {
   shells: Map<string, BgShell>
   order: string[]
-  /** Force-collapse: hide details until user expands. */
   defaultCollapsed?: boolean
-  /**
-   * When true (default), the banner self-positions at top-right of its parent.
-   * Set false when stacking with other banners in a shared column container.
-   */
-  floating?: boolean
-  /** Stop a running job (shown when set, for a job whose id is known). */
   onStop?: (shell: BgShell) => void
 }
 
@@ -37,135 +30,103 @@ const STATUS_DOT_COLORS: Record<BgShellStatus, string> = {
 
 const ACTIVE_STATUSES = new Set<BgShellStatus>(['pending', 'running'])
 
-/** The warning tone at `pct`% opacity, for the banner's glow. */
-const glow = (pct: number): string =>
-  `color-mix(in oklab, var(--color-warning) ${pct}%, transparent)`
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + '…' : s
-}
-
 function formatAge(ms: number): string {
   const sec = Math.max(0, Math.round(ms / 1000))
   if (sec < 60) return `${sec}s`
   const min = Math.round(sec / 60)
   if (min < 60) return `${min}m`
-  const hr = Math.round(min / 60)
-  return `${hr}h`
+  return `${Math.round(min / 60)}h`
 }
 
-/**
- * Top-right overlay (mirrors LoopModeBanner positioning) listing background
- * shells spawned by the agent in the current chat session. State is owned by
- * the chat-timeline reducer — this component is a pure view.
- */
+/** Compact composer disclosure; timeline reducer owns job state. */
 export function BackgroundJobsBanner({
   shells,
   order,
-  defaultCollapsed = false,
-  floating = true,
+  defaultCollapsed = true,
   onStop
 }: BackgroundJobsBannerProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
-
-  const list = useMemo(() => {
-    const arr: BgShell[] = []
-    for (const id of order) {
-      const s = shells.get(id)
-      if (s) arr.push(s)
+  const id = useId()
+  const active = useMemo(() => {
+    const active: BgShell[] = []
+    for (const key of order) {
+      const shell = shells.get(key)
+      if (shell && ACTIVE_STATUSES.has(shell.status)) active.push(shell)
     }
-    return arr
+    return active
   }, [shells, order])
+  const now = useNow(1000, { enabled: active.length > 0 && !collapsed })
+  if (active.length === 0) return null
 
-  // Ages tick live, but only while the job rows are on screen.
-  const now = useNow(1000, { enabled: list.length > 0 && !collapsed })
-
-  if (list.length === 0) return null
-
-  const activeCount = list.filter((s) => ACTIVE_STATUSES.has(s.status)).length
-  const headerActive = activeCount > 0
+  const rows = (jobs: BgShell[]) =>
+    jobs.map((shell) => {
+      const label = shell.description || shell.command || 'Background job'
+      return (
+        <li key={shell.spawnToolUseId} className="flex min-w-0 items-start gap-2 px-3 py-2">
+          <span
+            className={`mt-1.5 size-1.5 shrink-0 rounded-full ${STATUS_DOT_COLORS[shell.status]}`}
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-mono text-foreground" title={shell.command || label}>
+              {label}
+            </div>
+            <div className="mt-0.5 flex flex-wrap gap-x-2 text-muted-foreground">
+              <span>{STATUS_LABELS[shell.status]}</span>
+              <span className="tabular-nums">{formatAge(now - shell.spawnedAt)}</span>
+            </div>
+            <details className="mt-1 text-muted-foreground">
+              <summary className="w-fit cursor-pointer text-[10px] hover:text-foreground">
+                Details
+              </summary>
+              {shell.shellId && <div className="mt-1 break-all font-mono">{shell.shellId}</div>}
+              <div className="mt-1 whitespace-pre-wrap break-all font-mono">
+                $ {shell.command || label}
+              </div>
+            </details>
+          </div>
+          {onStop && shell.shellId && (
+            <button
+              type="button"
+              onClick={() => onStop(shell)}
+              aria-label={`Stop background job ${label}`}
+              className="shrink-0 rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              Stop
+            </button>
+          )}
+        </li>
+      )
+    })
 
   return (
     <div
       data-testid="background-jobs-banner"
-      className={`${floating ? 'absolute top-6 right-6 z-10 ' : ''}w-72 rounded-xl border-2 ${
-        headerActive ? 'border-warning/60' : 'border-border'
-      } bg-surface-1 backdrop-blur-md text-xs overflow-hidden transition-all duration-300`}
-      style={{
-        boxShadow: headerActive
-          ? `0 0 20px 0 ${glow(35)}, 0 0 60px 0 ${glow(12)}`
-          : `0 4px 20px 0 ${glow(6)}, 0 0 15px 2px ${glow(6)}`
-      }}
+      className="mb-2 w-fit min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/10 text-xs"
     >
       <button
         type="button"
-        onClick={() => setCollapsed((v) => !v)}
-        className={`w-full flex items-center justify-between px-3 py-2 border-b ${
-          headerActive ? 'border-warning/20 bg-warning/5' : 'border-border'
-        } hover:bg-muted/30 transition-colors`}
+        onClick={() => setCollapsed((value) => !value)}
         aria-expanded={!collapsed}
+        aria-controls={id}
+        className="flex w-full items-center gap-1.5 px-2 py-[5px] text-[10px] leading-4 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
       >
-        <span className="flex items-center gap-1.5 font-bold text-foreground tracking-wide">
-          <TerminalIcon className="size-3.5" aria-hidden="true" />
-          BACKGROUND JOBS
+        <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+        <span className="min-w-0 truncate">
+          {active.length} {active.length === 1 ? 'job' : 'jobs'} running
         </span>
-        <span className="flex items-center gap-1.5 text-muted-foreground font-mono tabular-nums">
-          {activeCount > 0 && <span className="text-foreground">{activeCount}</span>}
-          <span>/{list.length}</span>
-          {collapsed ? (
-            <ChevronRight className="size-3.5" aria-hidden="true" />
-          ) : (
-            <ChevronDown className="size-3.5" aria-hidden="true" />
-          )}
-        </span>
+        <ChevronRight
+          className={`ml-auto size-3 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+          aria-hidden="true"
+        />
       </button>
-
       {!collapsed && (
-        <ul className="divide-y divide-border/40">
-          {list.map((shell) => {
-            const active = ACTIVE_STATUSES.has(shell.status)
-            const age = formatAge(now - shell.spawnedAt)
-            return (
-              <li key={shell.spawnToolUseId} className="px-3 py-2 space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span
-                      className={`size-2 rounded-full shrink-0 ${STATUS_DOT_COLORS[shell.status]} ${
-                        active ? 'animate-pulse' : ''
-                      }`}
-                      aria-hidden="true"
-                    />
-                    <span className="font-mono text-muted-foreground shrink-0">
-                      {shell.shellId ?? '…'}
-                    </span>
-                    <span className="text-foreground truncate">
-                      {STATUS_LABELS[shell.status]}
-                      {shell.exitCode !== null && shell.status !== 'running' && (
-                        <span className="text-muted-foreground"> · code {shell.exitCode}</span>
-                      )}
-                    </span>
-                  </div>
-                  <span className="flex items-center gap-1.5 shrink-0">
-                    {onStop && active && shell.shellId && (
-                      <button
-                        type="button"
-                        onClick={() => onStop(shell)}
-                        aria-label={`Stop background job ${shell.shellId}`}
-                        className="rounded px-1.5 py-px text-[10px] text-muted-foreground border border-border hover:bg-muted/60 hover:text-foreground"
-                      >
-                        Stop
-                      </button>
-                    )}
-                    <span className="text-muted-foreground font-mono tabular-nums">{age}</span>
-                  </span>
-                </div>
-                <div className="font-mono text-muted-foreground leading-snug truncate">
-                  $ {truncate(shell.command || shell.description || '', 80)}
-                </div>
-              </li>
-            )
-          })}
-        </ul>
+        <div
+          id={id}
+          className="max-h-56 w-75 max-w-full overflow-y-auto border-t border-border/40 bg-muted/20"
+        >
+          <ul className="divide-y divide-border/40">{rows(active)}</ul>
+        </div>
       )}
     </div>
   )
