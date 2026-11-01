@@ -15,6 +15,7 @@
  * string-echo-prone, so they are always honored.
  */
 export function shouldHonorDetectedError(code: string, checkingForSessionError: boolean): boolean {
-  if (code === 'SESSION_NOT_FOUND') return checkingForSessionError === true
+  if (code === 'SESSION_NOT_FOUND' || code === 'SESSION_IN_USE')
+    return checkingForSessionError === true
   return true
 }

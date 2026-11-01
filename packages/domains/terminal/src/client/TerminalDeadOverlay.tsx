@@ -5,6 +5,7 @@ import { describeExit } from './exit-description'
 
 export interface TerminalDeadOverlayProps {
   isStaleSession: boolean
+  isSessionInUse?: boolean
   providerLabel: string
   deadCrashOutput: string | null
   deadExitCode: number | null
@@ -27,6 +28,7 @@ export interface TerminalDeadOverlayProps {
 // on `showDeadOverlay`.
 export function TerminalDeadOverlay({
   isStaleSession,
+  isSessionInUse,
   providerLabel,
   deadCrashOutput,
   deadExitCode,
@@ -39,6 +41,24 @@ export function TerminalDeadOverlay({
   doctorLoading,
   doctorResults
 }: TerminalDeadOverlayProps): React.JSX.Element {
+  if (isSessionInUse) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-3 overflow-y-auto text-center">
+        <p className="text-sm font-medium text-foreground">
+          {providerLabel} session already running
+        </p>
+        <p className="text-sm text-muted-foreground max-w-md">
+          Another process holds this conversation. Stop it, then retry this session.
+        </p>
+        <button
+          onClick={onRetryClick}
+          className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
   if (isStaleSession) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-3 overflow-y-auto text-center">

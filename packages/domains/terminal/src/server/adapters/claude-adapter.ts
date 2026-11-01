@@ -69,6 +69,14 @@ export class ClaudeAdapter implements TerminalAdapter {
       }
     }
 
+    if (/Error: Session ID [\da-f-]+ is already in use\./i.test(data)) {
+      return {
+        code: 'SESSION_IN_USE',
+        message: 'Claude session already running',
+        recoverable: true
+      }
+    }
+
     // No generic `^Error:` matcher: `claude --resume` replays the prior
     // transcript, and a historical tool_result (is_error) renders as an
     // "Error: ..." line — in-band agent content, not a CLI crash. The old
@@ -78,7 +86,11 @@ export class ClaudeAdapter implements TerminalAdapter {
   }
 
   readonly doctorRequirements: readonly DoctorBinaryRequirement[] = [
-    { binary: 'claude', check: 'Binary found', fix: 'npm install -g @anthropic-ai/claude-code' }
+    {
+      binary: 'claude',
+      check: 'Binary found',
+      fix: 'npm install -g @anthropic-ai/claude-code'
+    }
   ]
 
   detectPrompt(data: string): PromptInfo | null {

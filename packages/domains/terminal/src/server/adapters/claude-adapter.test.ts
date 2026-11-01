@@ -64,6 +64,12 @@ describe('ClaudeAdapter.detectActivity', () => {
 })
 
 describe('ClaudeAdapter.detectError', () => {
+  test('detects a competing Claude process holding the resume id', () => {
+    const result = adapter.detectError(
+      'Error: Session ID 31a43eaa-1234-4567-8abc-ffffffffffff is already in use.'
+    )
+    expect(result).toMatchObject({ code: 'SESSION_IN_USE', recoverable: true })
+  })
   test('detectError flags the unrecoverable resume failure (SESSION_NOT_FOUND)', () => {
     // `claude --resume <id>` against a session claude no longer has prints this.
     // It produces no distinct exit signal, so output detection is the only hook.

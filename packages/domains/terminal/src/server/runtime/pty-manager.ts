@@ -2451,7 +2451,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             // CLI exits and the overlay rides that exit. From here on, suppress
             // forwarding this session's output so the raw "No conversation
             // found …" line never paints before that overlay.
-            if (resuming && detectedError.code === 'SESSION_NOT_FOUND') {
+            if (
+              resuming &&
+              (detectedError.code === 'SESSION_NOT_FOUND' ||
+                detectedError.code === 'SESSION_IN_USE')
+            ) {
               session.suppressOutput = true
             }
           }
@@ -2676,6 +2680,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             }
           }
           const isStaleResume = resuming && session.error?.code === 'SESSION_NOT_FOUND'
+          const isResumeConflict = resuming && session.error?.code === 'SESSION_IN_USE'
 
           const exitCtx = {
             exitCode,
@@ -2683,7 +2688,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             hasPostSpawnCommand: !!spawnConfig.postSpawnCommand,
             resuming,
             usedShellFallback,
-            isStale: isStaleResume
+            isStale: isStaleResume || isResumeConflict
           }
 
           // #5: Shell fallback — spawn interactive shell when AI provider exits

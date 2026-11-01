@@ -13,6 +13,11 @@ test('SESSION_NOT_FOUND IGNORED after startup window closes (the bug)', () => {
   expect(shouldHonorDetectedError('SESSION_NOT_FOUND', false)).toBe(false)
 })
 
+test('SESSION_IN_USE is only a startup error, not a transcript echo', () => {
+  expect(shouldHonorDetectedError('SESSION_IN_USE', true)).toBe(true)
+  expect(shouldHonorDetectedError('SESSION_IN_USE', false)).toBe(false)
+})
+
 // Other error codes are not string-echo-prone — always honored, any time.
 test('other error code honored after window closes', () => {
   expect(shouldHonorDetectedError('SOME_OTHER_ERROR', false)).toBe(true)
