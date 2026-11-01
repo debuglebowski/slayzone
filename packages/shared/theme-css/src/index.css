@@ -393,6 +393,103 @@
   }
 }
 
+/* LoadingDots (@slayzone/ui): 5px matte dots, a 4s flat/orbit cycle. Keep the
+   property registrations here so mounting a chat indicator never adds a stylesheet.
+   The viewport reserves the orbit's bounds; changing depth never shifts chat rows. */
+@property --loading-dots-depth {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+@property --loading-dots-turn {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+.loading-dots {
+  --loading-dots-depth: 0;
+  display: inline-block;
+  position: relative;
+  width: 52px;
+  height: 36px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  color: var(--muted-foreground);
+  perspective: 86px;
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
+  transform: rotateZ(calc(-10deg * var(--loading-dots-depth)));
+  animation: loading-dots-depth 4s ease-in-out infinite, loading-dots-orbit 4s linear infinite;
+}
+.loading-dots::before {
+  content: '';
+  position: absolute;
+  width: 32px;
+  height: 6px;
+  left: calc(50% - 16px);
+  top: calc(50% + 5px);
+  background: radial-gradient(ellipse, color-mix(in srgb, currentColor 28%, transparent), transparent 70%);
+  opacity: var(--loading-dots-depth);
+  filter: blur(2px);
+  pointer-events: none;
+}
+.loading-dots-dot {
+  --loading-dots-angle: calc(var(--loading-dots-turn) + var(--loading-dots-phase));
+  --loading-dots-z-angle: calc(var(--loading-dots-angle) + 35deg);
+  display: block;
+  position: absolute;
+  left: calc(50% - 2.5px);
+  top: calc(50% - 2.5px);
+  transform: translate3d(
+    calc(var(--loading-dots-home) * 1px * (1 - var(--loading-dots-depth)) + cos(var(--loading-dots-angle)) * 13px * var(--loading-dots-depth)),
+    calc(sin(var(--loading-dots-angle)) * 8px * var(--loading-dots-depth)),
+    calc(sin(var(--loading-dots-z-angle)) * 18px * var(--loading-dots-depth))
+  ) scale(calc(1 + var(--loading-dots-depth) * (.12 + .08 * sin(var(--loading-dots-z-angle)))));
+  opacity: calc(1 - .08 * var(--loading-dots-depth) * (1 - sin(var(--loading-dots-z-angle))));
+}
+.loading-dots-dot:nth-child(1) { --loading-dots-home: -11; --loading-dots-phase: 180deg; }
+.loading-dots-dot:nth-child(2) { --loading-dots-home: 0; --loading-dots-phase: 300deg; }
+.loading-dots-dot:nth-child(3) { --loading-dots-home: 11; --loading-dots-phase: 60deg; }
+.loading-dots-bounce {
+  display: block;
+  animation: loading-dots-bounce 1.05s ease-in-out infinite;
+}
+.loading-dots-dot:nth-child(2) .loading-dots-bounce { animation-delay: -.15s; }
+.loading-dots-dot:nth-child(3) .loading-dots-bounce { animation-delay: -.3s; }
+.loading-dots-seed {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 calc(1px * var(--loading-dots-depth)) calc(2px * var(--loading-dots-depth)) color-mix(in srgb, currentColor calc(14% * var(--loading-dots-depth)), transparent);
+}
+@keyframes loading-dots-depth {
+  0%, 20%, 76%, 100% { --loading-dots-depth: 0; }
+  39.2% { --loading-dots-depth: .45; }
+  52% { --loading-dots-depth: 1; }
+  61.6% { --loading-dots-depth: .65; }
+}
+@keyframes loading-dots-orbit {
+  0%, 20% { --loading-dots-turn: 0deg; }
+  76%, 100% { --loading-dots-turn: 720deg; }
+}
+@keyframes loading-dots-bounce {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: calc(.55 + .45 * var(--loading-dots-depth));
+  }
+  45% {
+    transform: translateY(calc(-3px * (1 - var(--loading-dots-depth))));
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-dots, .loading-dots * {
+    animation: none;
+  }
+}
+
 @keyframes loop-glow-active {
   0%, 100% { box-shadow: 0 4px 20px 0 rgba(249,115,22,0.08), 0 0 15px 2px rgba(249,115,22,0.08); }
   50% { box-shadow: 0 0 35px 5px rgba(249,115,22,0.6), 0 0 80px 10px rgba(249,115,22,0.25); }

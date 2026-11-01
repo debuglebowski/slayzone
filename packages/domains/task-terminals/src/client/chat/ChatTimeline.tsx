@@ -11,6 +11,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import {
   cn,
+  LoadingDots,
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
@@ -385,20 +386,7 @@ export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
 function TypingIndicator({ label }: { label?: string | null }) {
   return (
     <div data-testid="chat-working-indicator" className="pl-14 pr-4 py-2 flex gap-3 items-center">
-      <div className="flex gap-1 px-3 py-2 rounded-2xl bg-muted/40">
-        <span
-          className="size-1.5 rounded-full bg-foreground/40 animate-bounce"
-          style={{ animationDelay: '0ms' }}
-        />
-        <span
-          className="size-1.5 rounded-full bg-foreground/40 animate-bounce"
-          style={{ animationDelay: '150ms' }}
-        />
-        <span
-          className="size-1.5 rounded-full bg-foreground/40 animate-bounce"
-          style={{ animationDelay: '300ms' }}
-        />
-      </div>
+      <LoadingDots />
       {label && (
         <span className="text-xs text-muted-foreground truncate max-w-[60ch]">{label}</span>
       )}
