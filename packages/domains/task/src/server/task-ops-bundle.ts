@@ -1,6 +1,7 @@
 import {
   getAllTasksOp,
   getByProjectOp,
+  getDeletedTasksOp,
   getTaskOp,
   createTaskOp,
   getSubTasksOp,
@@ -33,6 +34,7 @@ import {
 export const taskOps = {
   getAllTasksOp,
   getByProjectOp,
+  getDeletedTasksOp,
   getTaskOp,
   createTaskOp,
   getSubTasksOp,

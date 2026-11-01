@@ -213,7 +213,7 @@ test.describe('Terminal mode switching', () => {
     expect(updated?.terminal_mode).toBe('codex')
   })
 
-  test('temporary terminal task is removed from active task list when tab is closed', async ({
+  test('scratch terminal stays in saved tasks when tab is closed', async ({
     mainWindow,
     electronApp
   }) => {
@@ -233,7 +233,7 @@ test.describe('Terminal mode switching', () => {
           const activeTasks = await mainWindow.evaluate(() =>
             window.getTrpcVanillaClient().task.getAll.query()
           )
-          return !activeTasks.some((task) => task.id === temp.id)
+          return activeTasks.some((task) => task.id === temp.id)
         },
         { timeout: 15_000 }
       )

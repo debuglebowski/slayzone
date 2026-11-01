@@ -380,7 +380,7 @@ export function BulkTaskContextMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {taskIds.length} tasks</AlertDialogTitle>
             <AlertDialogDescription>
-              Delete {taskIds.length} selected tasks? This can be undone via the toast.
+              Move {taskIds.length} selected tasks to Trash? You can restore them for 30 days.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

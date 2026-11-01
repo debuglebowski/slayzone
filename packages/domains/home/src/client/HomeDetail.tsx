@@ -14,7 +14,8 @@ import {
   FlaskConical,
   Zap,
   Lock,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react'
 import { useTRPCClient } from './trpc'
 import { Button, PanelToggle, cn } from '@slayzone/ui'
@@ -37,6 +38,7 @@ import {
 } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { getViewConfig } from '@slayzone/tasks/hooks'
+import { ProjectTaskLibrary } from '@slayzone/tasks/client'
 import { useHomePanel, HOME_PANEL_SIZE_KEY } from './useHomePanel'
 import {
   FilterBar,
@@ -68,6 +70,9 @@ export interface HomeDetailProps {
   selectedProject: Project | null
   selectedProjectId: string
   projects: Project[]
+  refreshData: () => Promise<void>
+  isRefreshing: boolean
+  refreshErrors: string[]
   updateProject: (project: Project) => void
   updateTask: (task: Task) => void
   projectNameInputRef: RefObject<HTMLTextAreaElement | null>
@@ -109,7 +114,7 @@ export interface HomeDetailProps {
   bulkContextMenuUpdate: KanbanProps['onBulkUpdateTasks']
   clearBlockers: KanbanProps['onClearBlockers']
   archiveTask: KanbanProps['onArchiveTask']
-  deleteTask: KanbanProps['onDeleteTask']
+  deleteTask: (taskId: string) => Promise<void>
   bulkDelete: KanbanProps['onBulkDeleteTasks']
   archiveTasks: KanbanProps['onArchiveAllTasks']
   activeAgentTaskIds: KanbanProps['activeAgentTaskIds']
@@ -132,6 +137,9 @@ export function HomeDetail({
   selectedProject,
   selectedProjectId,
   projects,
+  refreshData,
+  isRefreshing,
+  refreshErrors,
   updateProject,
   updateTask,
   projectNameInputRef,
@@ -242,6 +250,27 @@ export function HomeDetail({
                   rows={1}
                 />
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                aria-label="Refresh projects and tasks"
+                title="Refresh projects and tasks from all hubs"
+                disabled={isRefreshing}
+                onClick={() => void refreshData()}
+              >
+                <RefreshCw className={cn('size-3.5', isRefreshing && 'animate-spin')} />
+              </Button>
+              {selectedProject && (
+                <ProjectTaskLibrary
+                  key={selectedProject.id}
+                  project={selectedProject}
+                  tasks={tasks}
+                  onOpen={handleTaskClick}
+                  onUpdate={updateTask}
+                  onDelete={deleteTask}
+                />
+              )}
               {projects.length > 0 && !(projectPathMissing && selectedProjectId) && (
                 <div className="ml-auto flex items-center gap-1">
                   {selectedProject && lockOverrideActive && (
@@ -353,6 +382,11 @@ export function HomeDetail({
                   )
                 })()}
             </div>
+            {refreshErrors.length > 0 && (
+              <p role="alert" className="text-sm text-destructive">
+                Couldn’t refresh: {refreshErrors.join(', ')}. Some data may be out of date.
+              </p>
+            )}
           </header>
 
           {projects.length === 0 ? (

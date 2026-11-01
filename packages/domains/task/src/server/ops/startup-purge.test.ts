@@ -14,6 +14,8 @@ import crypto from 'node:crypto'
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import { purgeStaleAndOrphanedTasks } from './startup-purge.js'
+import { getDeletedTasksOp } from './get-by-project.js'
+import { restoreTaskOp } from './restore.js'
 import { configureTaskRuntimeAdapters } from './shared.js'
 
 // cleanupTaskFull (invoked by the purge) resolves the data root via the task
@@ -41,7 +43,7 @@ const survivingIds = (h: Awaited<ReturnType<typeof createTestHarness>>): Set<str
     )
   )
 
-test('purge: open stale temp survives, orphan stale temp purged, fresh + regular untouched', async () => {
+test('purge: open stale temp survives, orphan stale temp survives, fresh + regular untouched', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'CleanupProj')
@@ -69,10 +71,10 @@ test('purge: open stale temp survives, orphan stale temp purged, fresh + regular
   expect(ids.has(STALE_OPEN_ID)).toBe(true)
   expect(ids.has(FRESH_ID)).toBe(true)
   expect(ids.has(REGULAR_STALE_ID)).toBe(true)
-  expect(ids.has(STALE_ORPHAN_ID)).toBe(false)
+  expect(ids.has(STALE_ORPHAN_ID)).toBe(true)
 })
 
-test('purge: corrupt viewState falls back to time-only purge', async () => {
+test('purge: corrupt viewState never deletes scratch terminals', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'CleanupProj2')
@@ -85,10 +87,10 @@ test('purge: corrupt viewState falls back to time-only purge', async () => {
     .run('viewState', '{not valid json')
 
   await purgeStaleAndOrphanedTasks(h.slayDb)
-  expect(survivingIds(h).has('orphan-corrupt-vs')).toBe(false)
+  expect(survivingIds(h).has('orphan-corrupt-vs')).toBe(true)
 })
 
-test('purge: missing viewState still purges orphans by time gate', async () => {
+test('purge: missing viewState never deletes scratch terminals', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'CleanupProj3')
@@ -98,12 +100,11 @@ test('purge: missing viewState still purges orphans by time gate', async () => {
     .run('orphan-no-vs', projectId, 'Orphan')
 
   await purgeStaleAndOrphanedTasks(h.slayDb)
-  expect(survivingIds(h).has('orphan-no-vs')).toBe(false)
+  expect(survivingIds(h).has('orphan-no-vs')).toBe(true)
 })
 
 // T-16 (G-09): on a hub with login, `viewState` is per user (`user_settings`), and
-// the purge must honour EVERY user's open tabs — not just one global row, which let
-// user A's tabs decide which of user B's temporary tasks were deleted.
+// no user tab state should determine the lifetime of another user's work.
 test("purge: user B's open tabs keep B's temp tasks alive when A's viewState does not list them", async () => {
   const h = await createTestHarness()
   const projectA = crypto.randomUUID()
@@ -138,11 +139,11 @@ test("purge: user B's open tabs keep B's temp tasks alive when A's viewState doe
   expect(ids.has('a-open')).toBe(true)
   // A's view state does not list it; B's does — so it survives.
   expect(ids.has('b-open')).toBe(true)
-  // Open in nobody's tabs: still purged by the time gate.
-  expect(ids.has('b-orphan')).toBe(false)
+  // Closed scratch terminals stay available without any persisted tabs.
+  expect(ids.has('b-orphan')).toBe(true)
 })
 
-test("purge: one user's corrupt viewState protects nothing but does not void the others", async () => {
+test('purge: scratch terminals survive regardless of any user tab state', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'ProjMixed')
@@ -169,5 +170,46 @@ test("purge: one user's corrupt viewState protects nothing but does not void the
   const ids = survivingIds(h)
   expect(ids.has('kept-by-global')).toBe(true)
   expect(ids.has('kept-by-b')).toBe(true)
-  expect(ids.has('orphan')).toBe(false)
+  expect(ids.has('orphan')).toBe(true)
+})
+
+test('purge: deleted tasks remain recoverable for 30 days', async () => {
+  const h = await createTestHarness()
+  const projectId = crypto.randomUUID()
+  seedProject(h, projectId, 'TrashRetention')
+  const insert = h.db.prepare(`INSERT INTO tasks (id, project_id, title, deleted_at)
+    VALUES (?, ?, ?, datetime('now', ?))`)
+  insert.run('deleted-hour', projectId, 'Hour', '-1 hour')
+  insert.run('deleted-29-days', projectId, 'Recent', '-29 days')
+  insert.run('deleted-31-days', projectId, 'Expired', '-31 days')
+  await purgeStaleAndOrphanedTasks(h.slayDb)
+  const ids = h.db
+    .prepare('SELECT id FROM tasks')
+    .all()
+    .map((row) => (row as { id: string }).id)
+  expect(ids).toContain('deleted-hour')
+  expect(ids).toContain('deleted-29-days')
+  expect(ids).not.toContain('deleted-31-days')
+})
+
+test('Trash: lists only recoverable deletions in the selected project and restores them', async () => {
+  const h = await createTestHarness()
+  const projectId = crypto.randomUUID()
+  const otherProject = crypto.randomUUID()
+  seedProject(h, projectId, 'Trash')
+  seedProject(h, otherProject, 'OtherTrash')
+  const insert = h.db.prepare(`INSERT INTO tasks (id, project_id, title, is_temporary, deleted_at)
+    VALUES (?, ?, ?, 1, datetime('now', ?))`)
+  insert.run('recent', projectId, 'Recover me', '-2 days')
+  insert.run('expired', projectId, 'Expired', '-31 days')
+  insert.run('other-owner', otherProject, 'Other owner', '-1 hour')
+  expect((await getDeletedTasksOp(h.slayDb, projectId)).map((t) => t.id)).toEqual(['recent'])
+  const restored = await restoreTaskOp(h.slayDb, 'recent', {})
+  expect(h.db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get('recent')).toEqual({
+    deleted_at: null
+  })
+  expect(restored?.is_temporary).toBe(true)
+  expect(await getDeletedTasksOp(h.slayDb, projectId)).toEqual([])
+  await purgeStaleAndOrphanedTasks(h.slayDb)
+  expect(survivingIds(h).has('recent')).toBe(true)
 })

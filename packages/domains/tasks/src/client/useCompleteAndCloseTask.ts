@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useTabStore } from '@slayzone/tabs-state'
-import { getHubIdForTask, useHubOwnershipStore } from '@slayzone/transport/client'
+import { getHubIdForTask } from '@slayzone/transport/client'
 import { getClientForHub, useTRPCClient } from './trpc'
 import { getDoneStatus, type Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task-contracts'
@@ -13,17 +13,15 @@ interface CompleteAndCloseDeps {
   projects: Project[]
   /** Upsert one task into board state (useTasksData's updateTask). */
   updateTask: (task: Task | null | undefined) => void
-  /** The shell's tab close (useCloseTaskTab): deletes a temporary task, resolving once it has. */
+  /** Close the view, optionally waiting for a pending write. */
   closeTabByTaskId: (taskId: string, opts?: CloseTaskTabOptions) => Promise<void>
   openTask: (taskId: string) => void
 }
 
 /**
  * "Complete & Close Tab" (⌘⇧D): mark a task done in its project's completed
- * column and close its tab — undoably. Closing a temporary task's tab deletes the
- * task, so undo restores it on the hub before reverting its status there.
- * Every write goes to the hub that owns the task, captured up front because a
- * deleted task's owner can no longer be looked up from the board.
+ * column and close its tab — undoably. Closing the view preserves the task and
+ * its running processes, including scratch terminals. Writes reach its owning hub.
  *
  * Optimistic both ways: the done status and the tab close land in the caller's
  * synchronous turn — one render — so the open tab never shows the done state on
@@ -41,7 +39,6 @@ export function useCompleteAndCloseTask(deps: CompleteAndCloseDeps, undo: UndoAP
       const project = projects.find((p) => p.id === task.project_id)
       const doneStatus = getDoneStatus(project?.columns_config)
       const prevStatus = task.status
-      const isTemporary = !!task.is_temporary
       const hubId = getHubIdForTask(taskId)
       const client = () => getClientForHub(hubId, trpcClient)
 
@@ -54,7 +51,7 @@ export function useCompleteAndCloseTask(deps: CompleteAndCloseDeps, undo: UndoAP
           status: doneStatus
         })
         updateTask({ ...task, status: doneStatus })
-        // A temporary task's delete waits for the write (and is skipped if it fails).
+        // Await the status write while closing the view immediately.
         const closed = closeTabByTaskId(taskId, { after: write })
         return write.then(
           async (updated) => {
@@ -81,20 +78,13 @@ export function useCompleteAndCloseTask(deps: CompleteAndCloseDeps, undo: UndoAP
       )
       if (!completed) return
       // Nothing to put back: the status didn't change and the close deleted nothing.
-      if (prevStatus === doneStatus && !isTemporary) return
+      if (prevStatus === doneStatus) return
 
       const label = `Completed "${task.title}"`
-      // Mirror image of `complete`: the old status and the reopened tab land at once,
-      // the hub writes follow. A temporary task's restore goes first on the hub (its
-      // status write chains on it); its tab can open meanwhile — the detail load
-      // reads soft-deleted rows. If a write fails, the task is completed and closed
-      // again (closing a temporary task's tab re-deletes it).
+      // Undo restores the old status and opens the preserved task immediately.
       const revert = (): Promise<void> => {
         const restored = { ...task, status: prevStatus }
-        if (isTemporary && hubId) useHubOwnershipStore.getState().noteTaskHub(taskId, hubId)
-        const write = (
-          isTemporary ? client().task.restore.mutate({ id: taskId }) : Promise.resolve()
-        ).then(() => client().task.update.mutate({ id: taskId, status: prevStatus }))
+        const write = client().task.update.mutate({ id: taskId, status: prevStatus })
         updateTask(restored)
         // The tab store reads title/temporary-ness from its lookup when opening; a
         // restored temporary task isn't in it until the board sync catches up.

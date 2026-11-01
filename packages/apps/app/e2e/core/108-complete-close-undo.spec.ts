@@ -115,7 +115,7 @@ test.describe('Complete & Close Tab: undo/redo', () => {
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
   })
 
-  test('undo of a temporary task restores the deleted task and reopens its tab', async ({
+  test('undo of a scratch terminal reverts completion and reopens its preserved tab', async ({
     mainWindow
   }) => {
     const s = seed(mainWindow)
@@ -129,11 +129,11 @@ test.describe('Complete & Close Tab: undo/redo', () => {
     await s.refreshData()
     await openTaskById(mainWindow, task.id)
 
-    // Completing closes the tab, and closing a temporary task's tab deletes it.
+    // Completing closes the view and preserves the scratch terminal.
     await completeActiveTask(mainWindow)
     await expect
       .poll(async () => !!(await getTask(mainWindow, task.id))?.deleted_at, poll)
-      .toBe(true)
+      .toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
 
     await clickToastUndo(mainWindow, 'CU temporary task')
@@ -160,11 +160,11 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       )
       .toBe(true)
 
-    // Redo completes it again — which closes the tab and so deletes it again.
+    // Redo completes it again and closes only the view.
     await redo(mainWindow)
     await expect
       .poll(async () => !!(await getTask(mainWindow, task.id))?.deleted_at, poll)
-      .toBe(true)
+      .toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
   })
 })

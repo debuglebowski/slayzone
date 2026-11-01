@@ -298,6 +298,9 @@ function HomeContainerImpl({
       selectedProject={selectedProject}
       selectedProjectId={selectedProjectId}
       projects={projects}
+      refreshData={data.refreshData}
+      isRefreshing={data.isRefreshing}
+      refreshErrors={data.refreshErrors}
       updateProject={updateProject}
       updateTask={updateTask}
       projectNameInputRef={projectNameInputRef}

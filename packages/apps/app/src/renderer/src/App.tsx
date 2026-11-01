@@ -200,7 +200,10 @@ function App(): React.JSX.Element {
     setGroupCollapsed,
     reorderTopLevel,
     moveProjectToGroup,
-    reorderProjectsInGroup
+    reorderProjectsInGroup,
+    refreshData,
+    isRefreshing,
+    refreshErrors
   } = useTasksData()
 
   // Snooze wake-up timer — clears snooze + notifies when expiry passes
@@ -633,9 +636,9 @@ function App(): React.JSX.Element {
   )
 
   // Tab management (declared early so IPC-listener refs below can close over closeTab).
-  // Closing a temporary task's tab deletes the task on its owning hub.
-  const { closeTab, closeTabByTaskId } = useCloseTaskTab(rawDeleteTask)
-  // ⌘⇧T — restores a temporary task its close deleted before reopening the tab.
+  // Closing a tab preserves its task and running terminals.
+  const { closeTab, closeTabByTaskId } = useCloseTaskTab()
+  // ⌘⇧T — reopens the preserved tab (also handles legacy discarded tabs).
   const reopenClosedTab = useReopenClosedTab(updateTask)
   const completeAndCloseTask = useCompleteAndCloseTask(
     { tasks, projects, updateTask, closeTabByTaskId, openTask },
@@ -1287,6 +1290,9 @@ function App(): React.JSX.Element {
       selectedProject={selectedProject}
       selectedProjectId={selectedProjectId}
       projects={projects}
+      refreshData={refreshData}
+      isRefreshing={isRefreshing}
+      refreshErrors={refreshErrors}
       updateProject={updateProject}
       updateTask={updateTask}
       projectNameInputRef={projectNameInputRef}

@@ -2480,7 +2480,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               title={task.is_temporary ? undefined : 'Double-click to rename'}
               data-testid="compact-title"
             >
-              {task.is_temporary ? 'Temporary task' : task.title}
+              {task.is_temporary ? 'Scratch terminal' : task.title}
             </span>
           )}
           {!task.is_temporary && (
@@ -2553,9 +2553,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         <TooltipTrigger asChild>
                           <Info className="size-5 text-muted-foreground/55 shrink-0" />
                         </TooltipTrigger>
-                        <TooltipContent>Auto-deletes on terminal exit or tab close</TooltipContent>
+                        <TooltipContent>
+                          Saved in Scratch terminals until you delete it
+                        </TooltipContent>
                       </Tooltip>
-                      <span className="text-2xl italic text-muted-foreground">Temporary task</span>
+                      <span className="text-2xl italic text-muted-foreground">
+                        Scratch terminal
+                      </span>
                       <Button
                         variant="outline"
                         size="sm"
@@ -2568,7 +2572,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           }
                         }}
                       >
-                        Turn into task
+                        Save as task
                       </Button>
                       {templates.length > 0 && (
                         <DropdownMenu>

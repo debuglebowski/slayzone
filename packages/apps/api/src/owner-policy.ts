@@ -1115,6 +1115,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // ── tasks ──
   'task.getAll': listed(taskRows),
   'task.getByProject': checked(project('projectId')),
+  'task.getDeleted': checked(project('projectId')),
   'task.get': checked(task('id')),
   'task.testRecordPendingSpawn': checked(task('taskId')),
   'task.create': checked(project('projectId'), task('parentId'), template('templateId')),

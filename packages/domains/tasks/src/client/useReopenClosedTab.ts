@@ -5,12 +5,8 @@ import { getClientForHub, useTRPCClient } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { toast } from '@slayzone/ui'
 
-/**
- * ⌘⇧T: reopen the last closed tab. Closing a temporary task's tab deleted the
- * task (useCloseTaskTab), so reopening one first restores it on the hub that
- * owned it, and upserts it onto the board before the tab opens — otherwise the
- * tab sync that drops tabs of vanished tasks would close it again straight away.
- */
+/** Reopen a preserved tab. Also restores legacy scratch tabs closed before
+ * tab closing stopped deleting tasks, so existing reopen stacks keep working. */
 export function useReopenClosedTab(
   /** Upsert one task into board state (useTasksData's updateTask). */
   updateTask: (task: Task | null | undefined) => void

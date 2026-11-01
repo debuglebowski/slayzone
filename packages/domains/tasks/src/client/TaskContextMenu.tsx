@@ -464,7 +464,7 @@ export function TaskContextMenu({
             <AlertDialogHeader>
               <AlertDialogTitle>Delete Task</AlertDialogTitle>
               <AlertDialogDescription>
-                Delete "{task.title}"? This cannot be undone.
+                Move "{task.title}" to Trash? You can restore it for 30 days.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

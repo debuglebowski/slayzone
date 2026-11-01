@@ -341,3 +341,21 @@ describe('runtime', () => {
     expect(JSON.parse(lines[0]!).detail.reason).toBe('ownerless')
   })
 })
+
+test('Trash checks project ownership before listing deleted tasks', async () => {
+  setAuthGate(() => true)
+  setSecurityLogSink(() => {})
+  const db = {
+    get: async () => ({ owner_user_id: 'owner' }),
+    all: async () => []
+  } as unknown as TrpcContext['db']
+  const request = (userId: string) =>
+    checkOwnership({
+      ctx: { db, dataRoot: '', principal: { userId, role: 'user', scopes: ['full'] } },
+      path: 'task.getDeleted',
+      type: 'query',
+      getRawInput: async () => ({ projectId: 'owned-project' })
+    })
+  await expect(request('other')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  expect(await request('owner')).not.toBeNull()
+})

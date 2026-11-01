@@ -947,10 +947,10 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await undo()
       await expect.poll(async () => (await remoteTask(regularId))?.status, poll).toBe('todo')
 
-      // (2) Temporary task: the close deletes it on the REMOTE hub; undo restores it there.
+      // (2) Scratch terminal: completion and undo preserve it on the remote hub.
       await openTab(temporaryId)
       await complete()
-      await expect.poll(async () => !!(await remoteTask(temporaryId))?.deleted_at, poll).toBe(true)
+      await expect.poll(async () => !!(await remoteTask(temporaryId))?.deleted_at, poll).toBe(false)
       await undo()
       await expect
         .poll(async () => (await remoteTask(temporaryId))?.deleted_at ?? null, poll)

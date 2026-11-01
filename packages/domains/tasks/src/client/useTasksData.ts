@@ -22,6 +22,7 @@ import { useTabStore } from '@slayzone/tabs-state'
 import { applySidebarHubOrder, partitionSidebarOrder, sidebarTopLevelRefs } from './sidebar-order'
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
+import { useBoardRefresh, type BoardRefreshTarget } from './useBoardRefresh'
 import {
   MAX_PATCH_ROWS,
   parentIdsOf,
@@ -153,6 +154,9 @@ interface UseTasksDataReturn {
   // workspace — they read identical (all-empty) arrays otherwise.
   boardStatus: 'pending' | 'error' | 'success'
   boardError: { message: string } | null
+  refreshData: () => Promise<void>
+  isRefreshing: boolean
+  refreshErrors: string[]
 
   // Setters (for dialog callbacks)
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>
@@ -206,6 +210,7 @@ export function useTasksData(): UseTasksDataReturn {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
+  const { refresh, isRefreshing, refreshErrors } = useBoardRefresh()
 
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -273,7 +278,7 @@ export function useTasksData(): UseTasksDataReturn {
   // Rebuild the merged task/project/tag arrays + origin maps from the default
   // board (boardQ) plus every extra hub's board. With no extra hubs this is
   // exactly `setX(boardQ.data.x)` — byte-identical to the pre-federation seed.
-  const recomposeBoards = useCallback(() => {
+  const recomposeBoards = useStableCallback(() => {
     const projByHub = new Map<string, string>()
     const taskByHub = new Map<string, string>()
     const allTasks: Task[] = []
@@ -316,7 +321,7 @@ export function useTasksData(): UseTasksDataReturn {
     setLoadedHubIds((prev) =>
       prev.size === loaded.size && [...loaded].every((id) => prev.has(id)) ? prev : loaded
     )
-  }, [boardQ.data, defaultHubId])
+  })
 
   // Rebuild the merged project-groups array + origin map (default + extra hubs).
   const recomposeGroups = useCallback(() => {
@@ -516,6 +521,54 @@ export function useTasksData(): UseTasksDataReturn {
     // Fires exactly once: isPending only ever goes true → false (refetches keep data).
   }, [boardQ.isPending])
 
+  const refreshData = useCallback((): Promise<void> => {
+    const targets: BoardRefreshTarget[] = [
+      {
+        label: fed?.hubs.find((hub) => hub.id === defaultHubId)?.label ?? 'Local',
+        requests: [
+          () =>
+            queryClient
+              .refetchQueries(trpc.task.loadBoardData.queryFilter(), { throwOnError: true })
+              .then(afterFullBoardReload),
+          loadGroups
+        ]
+      }
+    ]
+    for (const hub of extraHubs) {
+      const resolved = fed?.resolve(hub.id)
+      const client = resolved ? tasksClientOf(resolved.ws) : null
+      targets.push({
+        label: hub.label,
+        requests: client
+          ? [
+              () =>
+                client.task.loadBoardData.query().then((data) => {
+                  extraBoardsRef.current.set(hub.id, data as BoardData)
+                  recomposeBoards()
+                }),
+              () =>
+                client.projectGroups.list.query().then((groups) => {
+                  extraGroupsRef.current.set(hub.id, groups as ProjectGroup[])
+                  recomposeGroups()
+                })
+            ]
+          : [() => Promise.reject(new Error('Hub unavailable'))]
+      })
+    }
+    return refresh(targets)
+  }, [
+    fed,
+    defaultHubId,
+    extraHubs,
+    queryClient,
+    trpc,
+    afterFullBoardReload,
+    loadGroups,
+    recomposeBoards,
+    recomposeGroups,
+    refresh
+  ])
+
   // Bridge the global to REFETCH (not invalidate the board): callers `await
   // __slayzone_refreshData()` and need it to resolve AFTER fresh board data
   // lands. ALSO invalidate every other tRPC query so the cross-domain "refresh
@@ -527,17 +580,12 @@ export function useTasksData(): UseTasksDataReturn {
     const w = window as unknown as Record<string, unknown>
     w.__slayzone_refreshData = () => {
       void queryClient.invalidateQueries()
-      return Promise.all([
-        queryClient
-          .refetchQueries(trpc.task.loadBoardData.queryFilter())
-          .then(afterFullBoardReload),
-        loadGroups()
-      ])
+      return refreshData()
     }
     return () => {
       delete w.__slayzone_refreshData
     }
-  }, [queryClient, trpc, loadGroups, afterFullBoardReload])
+  }, [queryClient, refreshData])
 
   // External changes: the app's ONE `tasks-changed` subscription (CLI → REST →
   // notify bus, agent state, other windows). It refreshes the board AND every
@@ -1375,6 +1423,9 @@ export function useTasksData(): UseTasksDataReturn {
     loadedHubIds,
     boardStatus: boardQ.status,
     boardError: boardQ.error,
+    refreshData,
+    isRefreshing,
+    refreshErrors,
     setTasks,
     setProjects,
     setProjectGroups,

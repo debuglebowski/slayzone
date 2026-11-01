@@ -73,6 +73,10 @@ export const taskRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => ops().getTaskOp(ctx.db, input.id)),
 
+  getDeleted: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(({ ctx, input }) => ops().getDeletedTasksOp(ctx.db, input.projectId)),
+
   // Test-only: seed the `pending-spawn` provenance row slay normally writes when
   // it launches an agent (pty-manager.recordPendingSpawn). Specs that fire an
   // agent-hook directly (without spawning a real PTY) need this so the hook's

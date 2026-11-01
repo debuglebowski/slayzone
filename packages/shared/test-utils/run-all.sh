@@ -943,6 +943,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
   packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
+  packages/domains/tasks/src/client/useBoardRefresh.test.tsx \
+  packages/domains/tasks/src/client/ProjectTaskLibrary.test.tsx \
   packages/domains/search/src/SearchDialog.algorithm.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \

@@ -1,11 +1,17 @@
 import type { ElectronApplication, Page } from '@playwright/test'
-import { test, expect, seed, openTaskById, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  openTaskById,
+  resetApp,
+  TEST_PROJECT_PATH,
+  goHome,
+  clickProject
+} from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
 
-// ⌘⇧T reopens the last closed tab. Closing a temporary task's tab DELETES the task
-// (scratch terminals have no home outside their tab), so reopening one has to
-// restore the task first. Before, a temporary tab never made it onto the reopen
-// stack at all, so ⌘⇧T skipped straight past it.
+// Closing a scratch tab preserves its task and live terminal; ⌘⇧T reattaches it.
 test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
   type TabStoreWindow = Window & {
     __slayzone_tabStore?: {
@@ -15,17 +21,14 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       }
     }
   }
-  type Row = { deleted_at: string | null } | null
-
   let projectId: string
 
-  const getTask = (page: Page, id: string) =>
+  const isDeleted = (page: Page, id: string) =>
     page.evaluate(
-      (i) => window.getTrpcVanillaClient().task.get.query({ id: i }) as Promise<Row>,
+      async (taskId) =>
+        !(await window.getTrpcVanillaClient().task.getAll.query()).some((t) => t.id === taskId),
       id
     )
-
-  const isDeleted = async (page: Page, id: string) => !!(await getTask(page, id))?.deleted_at
 
   const tabState = (page: Page, taskId: string) =>
     page.evaluate((id) => {
@@ -69,7 +72,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     projectId = p.id
   })
 
-  test('restores the deleted temporary task, reopens its tab, and respawns its terminal', async ({
+  test('preserves the scratch task and running terminal across close and reopen', async ({
     mainWindow,
     electronApp
   }) => {
@@ -86,9 +89,9 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     await expect.poll(() => ptyAlive(mainWindow, task.id), poll).toBe(true)
 
     await closeActiveTab(electronApp)
-    await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(true)
+    await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
-    await expect.poll(() => ptyAlive(mainWindow, task.id), poll).toBe(false)
+    await expect.poll(() => ptyAlive(mainWindow, task.id), poll).toBe(true)
 
     await reopen(mainWindow)
     await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(false)
@@ -111,9 +114,9 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       )
       .toBe(true)
 
-    // Still a scratch terminal: closing it again deletes it again.
+    // Closing it again still preserves the scratch terminal.
     await closeActiveTab(electronApp)
-    await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(true)
+    await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
   })
 
@@ -142,7 +145,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     await expect.poll(() => tabState(mainWindow, regular.id), poll).toBe('closed')
     await openTaskById(mainWindow, temp.id)
     await closeActiveTab(electronApp)
-    await expect.poll(() => isDeleted(mainWindow, temp.id), poll).toBe(true)
+    await expect.poll(() => isDeleted(mainWindow, temp.id), poll).toBe(false)
 
     // Last closed first: the temporary tab…
     await reopen(mainWindow)
@@ -153,5 +156,55 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     await reopen(mainWindow)
     await expect.poll(() => tabState(mainWindow, regular.id), poll).toBe('active regular')
     expect(await tabState(mainWindow, temp.id)).toBe('background temporary')
+  })
+
+  test('saved scratch terminals can be reopened, trashed, restored, and saved as tasks', async ({
+    mainWindow
+  }) => {
+    const s = seed(mainWindow)
+    const task = await s.createTask({
+      projectId,
+      title: 'Saved scratch',
+      isTemporary: true,
+      terminalMode: 'terminal'
+    })
+    await s.refreshData()
+    await goHome(mainWindow)
+    await clickProject(mainWindow, 'RE')
+    await mainWindow
+      .locator('#home-detail')
+      .getByRole('button', { name: /^Scratch terminals/ })
+      .click()
+    const dialog = mainWindow.getByRole('dialog', { name: 'Reopen Temp' })
+    const row = dialog.getByText('Saved scratch', { exact: true }).locator('..')
+    await row.getByRole('button', { name: 'Open', exact: true }).click()
+    await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('active temporary')
+    await goHome(mainWindow)
+    await mainWindow
+      .locator('#home-detail')
+      .getByRole('button', { name: /^Scratch terminals/ })
+      .click()
+    await row.getByRole('button', { name: 'Delete', exact: true }).click()
+    await expect(row).not.toBeVisible()
+    await dialog.getByRole('button', { name: 'Trash', exact: true }).click()
+    await row.getByRole('button', { name: 'Restore', exact: true }).click()
+    await expect(row).not.toBeVisible()
+    await dialog.getByRole('button', { name: 'Scratch terminals', exact: true }).click()
+    await row.getByRole('button', { name: 'Save as task', exact: true }).click()
+    await expect(row).not.toBeVisible()
+    await expect
+      .poll(
+        () =>
+          mainWindow.evaluate(
+            (id) =>
+              window
+                .getTrpcVanillaClient()
+                .task.get.query({ id })
+                .then((t) => t?.is_temporary),
+            task.id
+          ),
+        poll
+      )
+      .toBe(false)
   })
 })

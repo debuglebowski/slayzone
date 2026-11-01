@@ -165,18 +165,12 @@ describe('undo of ⌘⇧D', () => {
     expect(openTask).toHaveBeenCalledWith('t1')
   })
 
-  it('reopens a temporary task at once; its status write waits for the restore', async () => {
+  it('undoes completion of a scratch terminal without restoring or deleting it', async () => {
     const { action, openTask } = await completed(task({ is_temporary: true } as Partial<Task>))
-    const restored = deferred<Task>()
-    restore.mockReturnValue(restored.promise)
     mutate.mockResolvedValue(task({ is_temporary: true } as Partial<Task>))
-
-    const undone = action.undo()
-
+    await act(() => action.undo())
     expect(openTask).toHaveBeenCalledWith('t1')
-    expect(mutate).not.toHaveBeenCalled()
-    restored.resolve(task({ is_temporary: true } as Partial<Task>))
-    await act(() => undone)
+    expect(restore).not.toHaveBeenCalled()
     expect(mutate).toHaveBeenCalledWith({ id: 't1', status: 'in_progress' })
   })
 
@@ -195,7 +189,7 @@ describe('undo of ⌘⇧D', () => {
 describe('useCloseTaskTab with a pending write', () => {
   function closer() {
     const deleteTask = vi.fn(async () => undefined)
-    const { result } = renderHook(() => useCloseTaskTab(deleteTask))
+    const { result } = renderHook(() => useCloseTaskTab())
     return { ...result.current, deleteTask }
   }
 
@@ -205,17 +199,18 @@ describe('useCloseTaskTab with a pending write', () => {
     }
   })
 
-  it('closes the tab now but deletes a temporary task only after the write lands', async () => {
+  it('closes the tab without deleting the scratch terminal or killing its process', async () => {
     const write = deferred<unknown>()
     const { closeTabByTaskId, deleteTask } = closer()
 
     const closed = closeTabByTaskId('t1', { after: write.promise })
-    expect(tabState.closeTab).toHaveBeenCalledWith(1, { hubId: undefined })
+    expect(tabState.closeTab).toHaveBeenCalledWith(1)
     expect(deleteTask).not.toHaveBeenCalled()
 
     write.resolve(undefined)
     await closed
-    expect(deleteTask).toHaveBeenCalledWith('t1')
+    expect(deleteTask).not.toHaveBeenCalled()
+    expect(ptyKill).not.toHaveBeenCalled()
   })
 
   it('keeps a temporary task when the write fails', async () => {

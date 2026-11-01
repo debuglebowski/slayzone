@@ -226,12 +226,11 @@ export function HomeView({
     ;(window as unknown as Record<string, unknown>).__slayzone_openTask = openTask
   }, [openTask])
 
-  // Close a tab by index. Temporary tasks have no persistent home, so closing
-  // one kills its PTY + deletes the task on its owning hub (shared with the
-  // Electron App.tsx); the live board subscription + optimistic deleteTask drop
-  // it from the board.
-  const { closeTab, closeTabByTaskId } = useCloseTaskTab(rawData.deleteTask)
-  // ⌘⇧T — restores a temporary task its close deleted before reopening the tab.
+  // Close a tab by index. Closing hides its view while preserving the task
+  // and its running terminals
+  // (shared with the Electron app).
+  const { closeTab, closeTabByTaskId } = useCloseTaskTab()
+  // ⌘⇧T — reopens the preserved tab (also handles legacy discarded tabs).
   const reopenClosedTab = useReopenClosedTab(rawData.updateTask)
 
   // Complete & Close Tab (⌘⇧D) — confirm dialog lives in AppDialogs.
