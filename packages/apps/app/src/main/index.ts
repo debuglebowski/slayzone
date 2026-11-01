@@ -579,7 +579,7 @@ import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handler
 import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
-import { attachDocumentLinkBridges } from './document-link-bridge'
+import { attachDocumentLinkBridges, setDocumentShortcutKeysResolver } from './document-link-bridge'
 import { attachAppWindowNavigationGuard } from './app-window-navigation-guard'
 import {
   setProcessManagerWindow,
@@ -609,6 +609,10 @@ import { startDesktopBridgeServer } from './desktop-bridge-server'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
+
+setDocumentShortcutKeysResolver(() => [
+  resolveShortcutKeys(currentOverrides, 'artifacts-toggle-sidebar')
+])
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280

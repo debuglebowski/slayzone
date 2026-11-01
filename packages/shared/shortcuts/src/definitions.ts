@@ -362,6 +362,14 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   // Editor (editor scope — beats task-scope Cmd+S)
   { id: 'editor-save', label: 'Save File', group: 'Editor', defaultKeys: 'mod+s', scope: 'editor' },
 
+  {
+    id: 'artifacts-toggle-sidebar',
+    label: 'Toggle Artifacts Sidebar',
+    group: 'Artifacts',
+    defaultKeys: 'mod+shift+y',
+    scope: 'task'
+  },
+
   // Browser (browser scope — beats task-scope Cmd+G/F)
   {
     id: 'browser-find',

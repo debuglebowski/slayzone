@@ -15,6 +15,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
+import { detectPlatform, useShortcutStore } from '@slayzone/ui'
 
 type Row = Pick<TaskArtifact, 'id' | 'task_id' | 'title' | 'folder_id' | 'render_mode'> & {
   view_mode: string | null
@@ -208,6 +209,7 @@ async function switchAwayAndBack(view: ReturnType<typeof render>, saved = 'a1') 
 }
 
 beforeEach(() => {
+  useShortcutStore.setState({ overrides: {}, isRecording: false })
   server.rows = [row('a1'), row('a2', 'raw'), row('a3')]
   server.updateGate = null
   client = new QueryClient({ defaultOptions: { queries: { staleTime: 60_000, retry: false } } })
@@ -215,6 +217,73 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   client.clear()
+})
+
+function pressSidebarShortcut(key = 'y') {
+  const event = new KeyboardEvent('keydown', {
+    key,
+    metaKey: detectPlatform() === 'mac',
+    ctrlKey: detectPlatform() !== 'mac',
+    shiftKey: true,
+    cancelable: true
+  })
+  act(() => window.dispatchEvent(event))
+  return event.defaultPrevented
+}
+
+describe('ArtifactsPanel sidebar shortcut', () => {
+  it('toggles the sidebar in both directions with the default binding', async () => {
+    await mountLoaded()
+    expect(screen.getByTestId('artifacts-sidebar')).toBeTruthy()
+    expect(pressSidebarShortcut()).toBe(true)
+    expect(screen.queryByTestId('artifacts-sidebar')).toBeNull()
+    expect(pressSidebarShortcut()).toBe(true)
+    expect(screen.getByTestId('artifacts-sidebar')).toBeTruthy()
+  })
+
+  it('follows live customizations and can be cleared', async () => {
+    await mountLoaded()
+    act(() =>
+      useShortcutStore.setState({ overrides: { 'artifacts-toggle-sidebar': 'mod+shift+m' } })
+    )
+    expect(pressSidebarShortcut()).toBe(false)
+    expect(pressSidebarShortcut('m')).toBe(true)
+    expect(screen.queryByTestId('artifacts-sidebar')).toBeNull()
+
+    act(() => useShortcutStore.setState({ overrides: { 'artifacts-toggle-sidebar': null } }))
+    expect(pressSidebarShortcut('m')).toBe(false)
+    expect(pressSidebarShortcut()).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }))
+    expect(screen.getByTestId('artifacts-sidebar')).toBeTruthy()
+  })
+
+  it('unregisters while the task tab is hidden and rebinds on show', async () => {
+    const view = await mountLoaded()
+    view.rerender(<Tab mode="hidden" />)
+    expect(pressSidebarShortcut()).toBe(false)
+    view.rerender(<Tab mode="visible" />)
+    await idle()
+    expect(pressSidebarShortcut()).toBe(true)
+    expect(screen.queryByTestId('artifacts-sidebar')).toBeNull()
+  })
+
+  it('does not toggle while recording a shortcut or a modal is open', async () => {
+    await mountLoaded()
+    act(() => useShortcutStore.setState({ isRecording: true }))
+    expect(pressSidebarShortcut()).toBe(false)
+    act(() => useShortcutStore.setState({ isRecording: false }))
+
+    const modal = document.createElement('div')
+    modal.setAttribute('data-slot', 'dialog-overlay')
+    modal.setAttribute('data-state', 'open')
+    document.body.append(modal)
+    try {
+      expect(pressSidebarShortcut()).toBe(false)
+      expect(screen.getByTestId('artifacts-sidebar')).toBeTruthy()
+    } finally {
+      modal.remove()
+    }
+  })
 })
 
 describe('ArtifactsPanel view state across a tab switch', () => {

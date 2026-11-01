@@ -349,6 +349,7 @@ run_harness packages/apps/app/src/main/client-settings-migration.test.ts
 # ORIGINAL is byte-untouched, because a test that reads your live database is one
 # bad line from repeating the storage-migration incident.
 run_harness packages/apps/app/src/main/client-settings-migration.realstore.test.ts
+run_harness packages/apps/app/src/main/document-link-bridge.test.ts
 # The desktop app's one Convex deployment (renderer + its hub): the build's URL, or the
 # PLAYWRIGHT-only SLAYZONE_E2E_CONVEX_ADDRESS override (a bad value throws, never falls back).
 run_harness packages/apps/app/src/main/convex-deployment.test.ts

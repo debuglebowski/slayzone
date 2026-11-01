@@ -51,7 +51,12 @@ import {
   TooltipTrigger,
   TooltipContent,
   TooltipProvider,
-  PulseGrid
+  PulseGrid,
+  matchesShortcut,
+  useShortcutStore,
+  useShortcutDisplay,
+  withShortcut,
+  withModalGuard
 } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
@@ -241,6 +246,19 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     // Search state
     const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
     const [sidebarVisible, setSidebarVisible] = useState(true)
+    const sidebarKeys = useShortcutStore((s) => s.getKeys('artifacts-toggle-sidebar'))
+    const isRecordingShortcut = useShortcutStore((s) => s.isRecording)
+    const sidebarShortcut = useShortcutDisplay('artifacts-toggle-sidebar')
+    useEffect(() => {
+      if (!sidebarKeys || isRecordingShortcut) return
+      const handleKeyDown = withModalGuard((event: KeyboardEvent) => {
+        if (event.defaultPrevented || !matchesShortcut(event, sidebarKeys)) return
+        event.preventDefault()
+        setSidebarVisible((visible) => !visible)
+      })
+      window.addEventListener('keydown', handleKeyDown)
+      return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [sidebarKeys, isRecordingShortcut])
     const [findOpen, setFindOpen] = useState(false)
     const [findQuery, setFindQuery] = useState('')
     const [findActiveIndex, setFindActiveIndex] = useState(0)
@@ -684,7 +702,11 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
               <button
                 className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                 onClick={() => setSidebarVisible((v) => !v)}
-                title={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+                aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+                title={withShortcut(
+                  sidebarVisible ? 'Hide sidebar' : 'Show sidebar',
+                  sidebarShortcut
+                )}
               >
                 {sidebarVisible ? (
                   <PanelLeftClose className="size-4" />
