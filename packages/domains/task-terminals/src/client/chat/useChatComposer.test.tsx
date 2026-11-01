@@ -665,6 +665,19 @@ describe('useChatComposer argument hint (ghost text after `/name `)', () => {
 })
 
 describe('useChatComposer draft restore (per tab, survives remount + reload)', () => {
+  it.each(['claude-chat', 'codex-chat'])('%s history arrows do not snap the timeline down', (mode) => {
+    mocks.history.entries = ['newer prompt', 'older prompt']
+    setup({ mode })
+    for (const key of ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowUp']) {
+      fireEvent.keyDown(textarea(), { key })
+      expect(scrollToBottom).not.toHaveBeenCalled()
+    }
+    fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
+    expect(composer.draft).toBe('')
+    type('new draft')
+    expect(scrollToBottom).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['claude-chat', 'codex-chat'])('%s recalls prompts and restores the draft', (mode) => {
     mocks.history.entries = ['newer prompt', 'older prompt']
     setup({ mode })

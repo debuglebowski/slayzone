@@ -305,15 +305,16 @@ export function useChatComposer({
   // Snap timeline to bottom when user starts composing — empty→non-empty edge.
   // Stick-to-bottom only auto-sticks when already at bottom; this forces re-stick
   // so the latest history is visible while typing.
-  // A restored draft is not "starting to compose": the timeline keeps its place.
+  // Restoring a draft or browsing prompt history is not "starting to compose":
+  // the timeline keeps its place.
   const wasDraftEmptyRef = useRef(true)
   useEffect(() => {
     const empty = draft.length === 0
-    if (wasDraftEmptyRef.current && !empty && draft !== restore.text) {
+    if (wasDraftEmptyRef.current && !empty && draft !== restore.text && !browsingHistory) {
       void scrollToBottom()
     }
     wasDraftEmptyRef.current = empty
-  }, [draft, scrollToBottom, restore.text])
+  }, [draft, scrollToBottom, restore.text, browsingHistory])
 
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
   const handleSend = useCallback(
