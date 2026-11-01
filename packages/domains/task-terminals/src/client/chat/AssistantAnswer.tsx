@@ -1,5 +1,5 @@
 import { useContext, useRef, useState } from 'react'
-import { Copy, MessageSquare, MoreHorizontal, Quote, ChevronRight } from 'lucide-react'
+import { Copy, GitBranch, MessageSquare, MoreHorizontal, Quote, ChevronRight } from 'lucide-react'
 import {
   cn,
   useAppearance,
@@ -12,7 +12,7 @@ import {
 } from '@slayzone/ui'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { LiveBlockStoreContext, streamKeyOf } from '@slayzone/terminal/client'
-import { AssistantMessageBody } from './renderers'
+import { AssistantMessageBody, InterruptedBlock } from './renderers'
 import { ActivityTurn } from './ActivityTurn'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { MessageDetails } from './MessageDetails'
@@ -24,7 +24,7 @@ export function AssistantAnswer({
   appearance,
   rowOf
 }: {
-  item: Extract<TimelineItem, { kind: 'text' }>
+  item: Extract<TimelineItem, { kind: 'text' | 'interrupted' }>
   turn?: ActivityTurnData
   appearance?: Pick<
     AppearanceSettings,
@@ -36,21 +36,40 @@ export function AssistantAnswer({
   >
   rowOf?: (item: TimelineItem) => number | undefined
 }) {
-  const { quoteReply, threads } = useChatView()
+  const { quoteReply, threads, conversation } = useChatView()
   const liveStore = useContext(LiveBlockStoreContext)
+  const answer = item.kind === 'text' ? item : null
+  const hasResponse =
+    answer !== null ||
+    turn?.items.some((entry) => entry.kind === 'text' && entry.text.trim()) === true
   // Read on click rather than subscribing the toolbar to every stream delta.
   const answerMarkdown = (): string => {
-    const key = item.stream === 'open' ? streamKeyOf(item) : undefined
-    return (key ? liveStore?.get(key)?.text : undefined) ?? item.text
+    if (!answer) {
+      return (turn?.items ?? [])
+        .filter((entry) => entry.kind === 'text')
+        .map((entry) => entry.text)
+        .join('\n\n')
+    }
+    const key = answer.stream === 'open' ? streamKeyOf(answer) : undefined
+    return (key ? liveStore?.get(key)?.text : undefined) ?? answer.text
   }
+  const copyResponse = (): string =>
+    (answer ? bodyRef.current?.innerText : undefined) ?? answerMarkdown()
   const compact = useAppearance().chatCompactSpacing
-  const answerId = `${item.messageId}:${item.blockOrdinal ?? 0}`
+  const answerId = answer ? `${answer.messageId}:${answer.blockOrdinal ?? 0}` : null
   const discussions =
     threads?.threads.filter(
       (thread) =>
         thread.answerId === answerId &&
         (!turn?.userMessageId || thread.sourceMessageId === turn.userMessageId)
     ) ?? []
+  const forkMessageId =
+    item.kind === 'interrupted' &&
+    conversation?.canFork &&
+    turn?.userMessageId &&
+    conversation.activeIds.has(turn.userMessageId)
+      ? turn.userMessageId
+      : null
   const [menuOpen, setMenuOpen] = useState(false)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const actionClass =
@@ -73,18 +92,20 @@ export function AssistantAnswer({
         role="toolbar"
         aria-label="Answer actions"
       >
-        <button
-          type="button"
-          className={actionClass}
-          aria-label="Copy response"
-          title="Copy response"
-          onClick={() => {
-            void safeClipboardWriteText(bodyRef.current?.innerText ?? answerMarkdown())
-          }}
-        >
-          <Copy className="size-3.5" />
-        </button>
-        {threads && turn?.userMessageId && item.stream !== 'open' && (
+        {hasResponse && (
+          <button
+            type="button"
+            className={actionClass}
+            aria-label="Copy response"
+            title="Copy response"
+            onClick={() => {
+              void safeClipboardWriteText(copyResponse())
+            }}
+          >
+            <Copy className="size-3.5" />
+          </button>
+        )}
+        {threads && answerId && turn?.userMessageId && answer?.stream !== 'open' && (
           <button
             type="button"
             className={actionClass}
@@ -95,47 +116,67 @@ export function AssistantAnswer({
             <MessageSquare className="size-3.5" />
           </button>
         )}
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className={actionClass}
-              aria-label="More answer actions"
-              title="More answer actions"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="bottom">
-            <DropdownMenuItem
-              onSelect={() => {
-                void safeClipboardWriteText(bodyRef.current?.innerText ?? answerMarkdown())
-              }}
-            >
-              <Copy className="size-3.5" />
-              Copy response
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                void safeClipboardWriteText(answerMarkdown())
-              }}
-            >
-              <Copy className="size-3.5" />
-              Copy as Markdown
-            </DropdownMenuItem>
-            {quoteReply && (
-              <DropdownMenuItem onSelect={() => quoteReply(answerMarkdown())}>
-                <Quote className="size-3.5" />
-                Quote in main chat
+        {forkMessageId && conversation && (
+          <button
+            type="button"
+            className={actionClass}
+            aria-label="Fork from here"
+            title="Fork from here"
+            disabled={conversation.busy}
+            onClick={() =>
+              conversation.begin('fork', { id: forkMessageId, text: answerMarkdown() })
+            }
+          >
+            <GitBranch className="size-3.5" />
+          </button>
+        )}
+        {hasResponse && (
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={actionClass}
+                aria-label="More answer actions"
+                title="More answer actions"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="bottom">
+              <DropdownMenuItem
+                onSelect={() => {
+                  void safeClipboardWriteText(copyResponse())
+                }}
+              >
+                <Copy className="size-3.5" />
+                Copy response
               </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <DropdownMenuItem
+                onSelect={() => {
+                  void safeClipboardWriteText(answerMarkdown())
+                }}
+              >
+                <Copy className="size-3.5" />
+                Copy as Markdown
+              </DropdownMenuItem>
+              {quoteReply && (
+                <DropdownMenuItem onSelect={() => quoteReply(answerMarkdown())}>
+                  <Quote className="size-3.5" />
+                  Quote in main chat
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       <div className="flex items-start gap-3">
         <div className="min-w-0 max-w-full">
           <div ref={bodyRef} className="min-w-0">
-            <AssistantMessageBody item={item} />
+            {item.kind === 'interrupted' ? (
+              <InterruptedBlock item={item} />
+            ) : (
+              <AssistantMessageBody item={item} />
+            )}
           </div>
           {turn && (
             <div

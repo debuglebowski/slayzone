@@ -44,9 +44,7 @@ describe('activity view late diagnostics', () => {
       active: false
     })
     expect(view.turns.get(next)).toMatchObject({ items: [next], active: true })
-    expect(
-      activityView([reply, result, diagnostic], true).turns.get(reply)?.active
-    ).toBe(false)
+    expect(activityView([reply, result, diagnostic], true).turns.get(reply)?.active).toBe(false)
   })
 
   it.each(['user-text', 'history-gap', 'conversation-branch'] as const)(
@@ -71,6 +69,17 @@ describe('activity view late diagnostics', () => {
     expect(view.turns.get(interrupted)).toMatchObject({
       final: null,
       items: [reply, diagnostic],
+      active: false
+    })
+  })
+
+  it('keeps the source message on interruptions with no assistant output', () => {
+    const user = { kind: 'user-text', id: 'question', text: 'Go', timestamp: 0 } as TimelineItem
+    const interrupted = { kind: 'interrupted', timestamp: 1 } as TimelineItem
+    const view = activityView([user, interrupted], false)
+    expect(view.turns.get(interrupted)).toMatchObject({
+      userMessageId: 'question',
+      final: null,
       active: false
     })
   })

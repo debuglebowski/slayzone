@@ -182,7 +182,7 @@ export function ChatTimeline({
       const turn = activityTurns?.get(item)
       if (turn) {
         const showWorking = turn.active && !awaitingUser
-        if (turn.final && item.kind === 'text') {
+        if ((turn.final && item.kind === 'text') || item.kind === 'interrupted') {
           return (
             <AssistantAnswer
               item={item}

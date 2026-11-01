@@ -1750,7 +1750,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // The CLI's end of a turn the user stopped (Stop, or a prompt's plain "No"):
       // an end, not a failure.
       const stopped =
-        typeof event.terminalReason === 'string' && event.terminalReason.startsWith('aborted')
+        event.subtype === 'interrupted' ||
+        (typeof event.terminalReason === 'string' && event.terminalReason.startsWith('aborted'))
       const item: TimelineItem = {
         kind: 'result',
         model: state.model,
@@ -1781,7 +1782,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           : []
       // Mark any tools the SDK denied this turn — `result.permissionDenials`
       // is the authoritative source (e.g. `ExitPlanMode` in plan mode).
-      const nextTimeline = appended(state.timeline, ...turnError, item)
+      const baseState = stopped ? failInFlightSubAgents(state, 'interrupted') : state
+      const nextTimeline = appended(baseState.timeline, ...turnError, item)
       const denials = Array.isArray(event.permissionDenials) ? event.permissionDenials : []
       for (const denial of denials) {
         const id = (denial as { tool_use_id?: string } | null)?.tool_use_id
@@ -1798,8 +1800,15 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // What the turn's file tools changed: its row goes right before the result.
       const filesChanged = turnFilesChangedRow(nextTimeline)
       if (filesChanged) nextTimeline.splice(nextTimeline.length - 1, 0, filesChanged)
+      // Providers can end an interrupted turn without a host Stop event (e.g.
+      // Codex's interrupted result). Keep the boundary visible even when result
+      // metadata is hidden, and don't promote progress text into a final answer.
+      // A persisted Stop already closed the turn and supplied its marker.
+      if (stopped && isTurnOpen(state)) {
+        nextTimeline.splice(nextTimeline.length - 1, 0, { kind: 'interrupted', timestamp: ts })
+      }
       return {
-        ...state,
+        ...baseState,
         timeline: nextTimeline,
         // A new turn starts after the result row; its blocks count from 0.
         turnStart: nextTimeline.length,

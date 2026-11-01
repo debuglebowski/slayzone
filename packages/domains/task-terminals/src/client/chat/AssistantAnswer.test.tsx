@@ -10,6 +10,7 @@ vi.mock('@slayzone/diff-view', () => ({ DiffView: () => null }))
 import { ChatViewContext, defaultChatView } from './ChatViewContext'
 import { AssistantAnswer } from './AssistantAnswer'
 import { activityView } from './activity-view'
+import type { ConversationActionsView } from './useConversationActions'
 
 vi.stubGlobal(
   'ResizeObserver',
@@ -158,5 +159,43 @@ describe('assistant answer presentation', () => {
     )
     expect(screen.queryByText('gpt-6.1')).toBeNull()
     expect(screen.getByText('Yes.')).toBeDefined()
+  })
+})
+
+describe('interrupted assistant answer', () => {
+  const user: TimelineItem = { kind: 'user-text', id: 'question', text: 'Question?', timestamp: 0 }
+  it.each([true, false])('keeps interrupted turns actionable (has output: %s)', (hasOutput) => {
+    const interrupted: Extract<TimelineItem, { kind: 'interrupted' }> = {
+      kind: 'interrupted',
+      timestamp: 2000
+    }
+    const interruptedTurn = activityView(
+      [user, ...(hasOutput ? [reply] : []), interrupted],
+      false
+    ).turns.get(interrupted)!
+    const conversation: ConversationActionsView = {
+      canRewind: true,
+      canFork: true,
+      activeIds: new Set(['question']),
+      lastActiveId: 'question',
+      busy: false,
+      begin: vi.fn()
+    }
+    render(
+      <ChatViewContext.Provider value={{ ...defaultChatView, conversation }}>
+        <AssistantAnswer item={interrupted} turn={interruptedTurn} />
+      </ChatViewContext.Provider>
+    )
+    expect(screen.getByText('Turn interrupted')).toBeDefined()
+    const toolbar = screen.getByRole('toolbar', { name: 'Answer actions' })
+    expect(within(toolbar).queryByRole('button', { name: 'Copy response' }) !== null).toBe(
+      hasOutput
+    )
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Fork from here' }))
+    expect(conversation.begin).toHaveBeenCalledWith('fork', {
+      id: 'question',
+      text: hasOutput ? 'Yes.' : ''
+    })
+    expect(screen.queryByRole('button', { name: 'Start thread' })).toBeNull()
   })
 })

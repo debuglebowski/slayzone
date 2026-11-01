@@ -73,7 +73,10 @@ export function activityView(
     const kept = segment.filter((item) => !hidden.has(item))
     // Preserve a row as an anchor for assistant-initiated turns with no final reply.
     const host = final ?? kept[kept.length - 1] ?? entries[0] ?? files[0]
-    if (host && (entries.length || files.length || active || final)) {
+    if (
+      host &&
+      (entries.length || files.length || active || final || host.kind === 'interrupted')
+    ) {
       const hostIsActivity = hidden.has(host)
       if (hostIsActivity) kept.push(host)
       turns.set(host, {

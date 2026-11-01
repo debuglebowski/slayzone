@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Brain,
   CircleCheck,
+  CircleStop,
   CircleX,
   Loader2,
   FileText,
@@ -298,11 +299,14 @@ export function InterruptedBlock({
     <div
       data-testid="chat-interrupted"
       data-reason={item.reason}
-      className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-warning-foreground"
+      className="flex items-start gap-2 py-2 text-sm leading-5 text-muted-foreground"
     >
-      {item.reason === 'already-in-conversation'
-        ? `Not run again: ${provider.agent} already had this message`
-        : 'Turn interrupted'}
+      <CircleStop aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>
+        {item.reason === 'already-in-conversation'
+          ? `Not run again: ${provider.agent} already had this message`
+          : 'Turn interrupted'}
+      </span>
     </div>
   )
 }

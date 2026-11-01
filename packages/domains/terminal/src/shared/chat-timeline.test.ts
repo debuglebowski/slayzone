@@ -2442,7 +2442,7 @@ const userMsg = (text: string, id?: string): AgentEvent => ({
   text,
   ...(id ? { id } : {})
 })
-const abortedResult = (): AgentEvent => ({
+const abortedResult = (): Extract<AgentEvent, { kind: 'result' }> => ({
   kind: 'result',
   subtype: 'error_during_execution',
   isError: true,
@@ -2467,6 +2467,37 @@ test('the result of a turn the user stopped is an end, not an error: no turn-err
   const result = rowsOf(s).find((it) => it.kind === 'result')
   expect(result).toMatchObject({ isError: false })
   expect(isInFlight(s)).toBe(false)
+})
+
+describe('interrupted results without a host interruption event', () => {
+  const codexResult = (): AgentEvent => ({
+    ...abortedResult(),
+    subtype: 'interrupted',
+    isError: false,
+    terminalReason: null,
+    text: null
+  })
+
+  test.each([
+    ['Codex', codexResult],
+    ['Claude', abortedResult]
+  ] as const)('%s result adds a visible interruption boundary', (_provider, result) => {
+    let s = reducer(initialState(), { type: 'event', event: userMsg('go', 'u1') })
+    s = reducer(s, { type: 'event', event: ev.text('progress', 'Checking…') })
+    s = reducer(s, { type: 'event', event: result() })
+    expect(rowsOf(s).map((it) => it.kind)).toEqual(['user-text', 'text', 'interrupted', 'result'])
+    expect(s.lastResult).toMatchObject({ isError: false })
+    expect(isInFlight(s)).toBe(false)
+    s = reducer(s, { type: 'event', event: userMsg('continue', 'u2') })
+    expect(isInFlight(s)).toBe(true)
+  })
+
+  test('does not duplicate a persisted interruption marker', () => {
+    let s = reducer(initialState(), { type: 'event', event: userMsg('go', 'u1') })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    s = reducer(s, { type: 'event', event: codexResult() })
+    expect(rowsOf(s).filter((it) => it.kind === 'interrupted')).toHaveLength(1)
+  })
 })
 
 test('user-message-popped matches by id when it has one: same text, other id → nothing is removed', () => {
