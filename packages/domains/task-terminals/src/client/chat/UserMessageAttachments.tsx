@@ -3,6 +3,8 @@ import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { formatAttachmentSize, type ChatAttachment } from '@slayzone/terminal-contracts'
 import { useChatView } from './ChatViewContext'
 import { HighlightedText } from './HighlightedText'
+import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
+import { AttachmentHoverPreview } from './attachments/AttachmentHoverPreview'
 import { AttachmentKindIcon } from './attachments/AttachmentChip'
 
 /** Codex path-based uploads are saved as leading image Markdown in the prompt. */
@@ -54,23 +56,24 @@ export function UserMessageContent({
 function PathImageAttachment({ name, path }: { name: string; path: string }): React.JSX.Element {
   const { onOpenFile, onOpenArtifact } = useChatView()
   return (
-    <button
-      type="button"
-      onClick={() => {
-        const artifactId = /\/artifacts\/[^/]+\/([a-f0-9-]{36})(?:\.[^/]*)?$/i.exec(
-          path.replaceAll('\\', '/')
-        )?.[1]
-        if (artifactId && onOpenArtifact) onOpenArtifact(artifactId)
-        else onOpenFile?.(path)
-      }}
-      disabled={!onOpenFile && !onOpenArtifact}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs text-foreground/80 hover:bg-muted/60 transition-colors"
-      title={name}
-      aria-label={`Open ${name}`}
-    >
-      <AttachmentKindIcon kind="image" className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="max-w-[200px] truncate">{name}</span>
-    </button>
+    <AttachmentHoverPreview name={name} source={{ url: toSlzFileUrl(path) }}>
+      <button
+        type="button"
+        onClick={() => {
+          const artifactId = /\/artifacts\/[^/]+\/([a-f0-9-]{36})(?:\.[^/]*)?$/i.exec(
+            path.replaceAll('\\', '/')
+          )?.[1]
+          if (artifactId && onOpenArtifact) onOpenArtifact(artifactId)
+          else onOpenFile?.(path)
+        }}
+        disabled={!onOpenFile && !onOpenArtifact}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs text-foreground/80 hover:bg-muted/60 transition-colors"
+        aria-label={`Open ${name}`}
+      >
+        <AttachmentKindIcon kind="image" className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="max-w-[200px] truncate">{name}</span>
+      </button>
+    </AttachmentHoverPreview>
   )
 }
 
@@ -106,12 +109,12 @@ function SentAttachment({ attachment }: { attachment: ChatAttachment }): React.J
     })
   }
 
-  return (
+  const button = (
     <button
       type="button"
       onClick={open}
       className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs text-foreground/80 hover:bg-muted/60 transition-colors"
-      title={attachment.name}
+      title={attachment.kind === 'image' ? undefined : attachment.name}
       aria-label={`Open ${attachment.name}`}
       data-kind={attachment.kind}
     >
@@ -121,5 +124,12 @@ function SentAttachment({ attachment }: { attachment: ChatAttachment }): React.J
         {formatAttachmentSize(attachment.size)}
       </span>
     </button>
+  )
+  return attachment.kind === 'image' ? (
+    <AttachmentHoverPreview name={attachment.name} source={{ attachment }}>
+      {button}
+    </AttachmentHoverPreview>
+  ) : (
+    button
   )
 }

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render as renderRTL, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
+import { TooltipProvider } from '@slayzone/ui'
 import type { ChatAttachment } from '@slayzone/terminal-contracts'
 
 const paths: Record<string, string> = {
@@ -19,7 +21,26 @@ import { UserMessageAttachments, UserMessageContent } from './UserMessageAttachm
 import { ChatViewContext, defaultChatView } from './ChatViewContext'
 import { AttachmentChip } from './attachments/AttachmentChip'
 
-afterEach(cleanup)
+function render(ui: ReactElement) {
+  return renderRTL(<TooltipProvider>{ui}</TooltipProvider>)
+}
+
+beforeEach(() => {
+  // Radix Popper measures its trigger; jsdom does not implement ResizeObserver.
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+  )
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const IMG: ChatAttachment = {
   artifactId: 'a',
@@ -150,4 +171,33 @@ it('places clickable attachments below the text card; image-only messages have n
   view.unmount()
   render(<UserMessageContent text="![shot.png](/tmp/shot.png)" />)
   expect(screen.queryByTestId('chat-user-message-card')).toBeNull()
+})
+
+it('shows an image preview on hover without putting images inside the message card', async () => {
+  const onOpenFile = renderWith([IMG])
+  const button = screen.getByRole('button', { name: 'Open red.png' })
+  expect(screen.queryByRole('img')).toBeNull()
+  fireEvent.pointerMove(button, { pointerType: 'mouse' })
+  const tooltip = await screen.findByRole('tooltip')
+  const image = await within(tooltip).findByAltText('red.png')
+  expect(image.getAttribute('src')).toContain('slz-file://app/')
+  expect(within(tooltip).queryByText('red.png')).toBeNull()
+  fireEvent.click(button)
+  await vi.waitFor(() => expect(onOpenFile).toHaveBeenCalledWith(paths.a))
+})
+
+it('previews legacy image references on keyboard focus; missing images show a fallback', async () => {
+  const path = '/tmp/legacy.png'
+  render(
+    <ChatViewContext.Provider value={{ ...defaultChatView, onOpenFile: vi.fn() }}>
+      <UserMessageContent text={`![legacy.png](${path})\n\nDescribe this`} />
+    </ChatViewContext.Provider>
+  )
+  const button = screen.getByRole('button', { name: 'Open legacy.png' })
+  fireEvent.focus(button)
+  const tooltip = await screen.findByRole('tooltip')
+  const image = within(tooltip).getByAltText('legacy.png')
+  expect(image.getAttribute('src')).toContain(path)
+  fireEvent.error(image)
+  expect(within(tooltip).getByText('Preview unavailable')).toBeDefined()
 })
