@@ -100,6 +100,49 @@ function scrollTo(el: HTMLElement, dims: Dims, top: number) {
 
 const bottom = (dims: Dims) => dims.scrollHeight - dims.clientHeight
 
+describe('chat bottom scroll padding', () => {
+  function paddedSetup() {
+    const hook = setup()
+    hook.content.dataset.chatScrollContent = ''
+    hook.content.style.paddingBottom = '200px'
+    act(() => hook.result.current.scrollToBottom())
+    return hook
+  }
+
+  it('aligns the last message with the viewport bottom, excluding padding', () => {
+    const { dims } = paddedSetup()
+    expect(dims.scrollTop).toBe(400)
+  })
+
+  it('follows streaming growth without consuming the padding', () => {
+    const { dims } = paddedSetup()
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(900)
+  })
+
+  it('measures the bottom indicator against the message end', () => {
+    const { result, el, dims } = paddedSetup()
+    scrollTo(el, dims, 400)
+    expect(result.current.isAtBottom).toBe(true)
+    scrollTo(el, dims, 329)
+    expect(result.current.isAtBottom).toBe(false)
+  })
+
+  it('allows manual scrolling through padding', () => {
+    const { el, dims } = paddedSetup()
+    fireEvent.wheel(el, { deltaY: 200 })
+    scrollTo(el, dims, 600)
+    expect(dims.scrollTop).toBe(600)
+  })
+
+  it('keeps short conversations at the top', () => {
+    const { result, dims } = paddedSetup()
+    dims.scrollHeight = 500
+    act(() => result.current.scrollToBottom())
+    expect(dims.scrollTop).toBe(0)
+  })
+})
+
 describe('useFollowBottom isAtBottom', () => {
   it('starts at the bottom', () => {
     const { result } = renderHook(() => useFollowBottom())

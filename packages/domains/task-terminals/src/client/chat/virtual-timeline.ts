@@ -11,6 +11,7 @@ import type { Key } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import type { RevealTimelineItem } from './timeline-reveal'
 import type { CallbackRef, FollowBottomApi } from './useFollowBottom'
+import { getFollowBottomOffset } from './useFollowBottom'
 
 /** Space above the first row (what `pt-4` was before the list was virtual). */
 export const TIMELINE_PADDING_TOP = 16
@@ -153,7 +154,7 @@ export function createVirtualTimelineController(
   const restoreAfterShow = (): void => {
     const el = getScrollElement()
     if (!el) return
-    const offset = follow.isStuck() ? el.scrollHeight : offsetWhenHidden
+    const offset = follow.isStuck() ? getFollowBottomOffset(el) : offsetWhenHidden
     if (Math.abs(el.scrollTop - offset) > 1) el.scrollTop = offset
     virtualizer.scrollOffset = el.scrollTop
   }
@@ -202,7 +203,7 @@ export function createVirtualTimelineController(
   // above the end by the difference.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
     const el = getScrollElement()
-    if (follow.isStuck() && el && el.scrollHeight - el.scrollTop - el.clientHeight <= 2) {
+    if (follow.isStuck() && el && getFollowBottomOffset(el) - el.scrollTop <= 2) {
       return false
     }
     // Otherwise virtual-core's own rule: a first measurement of a row whose top
@@ -278,7 +279,7 @@ export function createVirtualTimelineController(
     scrollRef.current = el
     // Opening while following (the default): start at the bottom. The rows'
     // container already has its height; the content's own growth comes later.
-    if (el && follow.isStuck()) el.scrollTop = el.scrollHeight
+    if (el && follow.isStuck()) el.scrollTop = getFollowBottomOffset(el)
     // Rendering before this read the offset as 0 (no scroller yet): binding
     // would scroll there. Start from where the scroller is.
     if (el) virtualizer.scrollOffset = el.scrollTop
@@ -293,7 +294,7 @@ export function createVirtualTimelineController(
       // has its size, the bottom lock owns the position) and not revealing: hold
       // the top row in place.
       const el = getScrollElement()
-      const awayFromBottom = el !== null && el.scrollHeight - el.scrollTop - el.clientHeight > 2
+      const awayFromBottom = el !== null && getFollowBottomOffset(el) - el.scrollTop > 2
       if (
         awayFromBottom &&
         !follow.isStuck() &&

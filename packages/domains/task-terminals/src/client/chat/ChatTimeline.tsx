@@ -299,7 +299,7 @@ export function ChatTimeline({
               ref={scrollRef}
               // The virtualizer keeps the view in place as rows above it get
               // measured; the browser's own scroll anchoring would fight it.
-              className="h-full overflow-y-auto [overflow-anchor:none]"
+              className="h-full overflow-y-auto [container-type:size] [overflow-anchor:none]"
               data-testid="chat-timeline-scroller"
               data-chat-scroller
               // What the renderer holds (paged history): diagnostics, e2e.
@@ -309,8 +309,9 @@ export function ChatTimeline({
               <div ref={contentRef} className="min-h-full">
                 {!hydrating && !(isEmpty && !inFlight) && (
                   <div
+                    data-chat-scroll-content
                     className={cn(
-                      'mx-auto w-full',
+                      'mx-auto w-full pb-[40cqh]',
                       widthClass,
                       appearance.chatWrapCode &&
                         '[&_pre]:whitespace-pre-wrap [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words'

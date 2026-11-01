@@ -5,6 +5,13 @@ const THRESHOLD_PX = 70
 /** Keys that scroll the timeline (the user's hand, like a wheel). */
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
 
+/** Align the message end with the viewport; trailing padding stays manually scrollable. */
+export function getFollowBottomOffset(el: HTMLElement): number {
+  const content = el.querySelector<HTMLElement>('[data-chat-scroll-content]')
+  const padding = content ? Number.parseFloat(getComputedStyle(content).paddingBottom) || 0 : 0
+  return Math.max(0, el.scrollHeight - padding - el.clientHeight)
+}
+
 /**
  * Callback ref that also exposes `.current` for imperative reads. Mirrors
  * the shape of React's `RefObject` so call sites can do both
@@ -74,7 +81,7 @@ function createFollowBottomController(
 
   const scrollRef = (() => {
     const measureAtBottom = (el: HTMLElement) => {
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      const dist = getFollowBottomOffset(el) - el.scrollTop
       return dist <= THRESHOLD_PX
     }
     // Scroll events update the UI indicator and re-engage the stick when the
@@ -140,7 +147,7 @@ function createFollowBottomController(
   const scrollNow = () => {
     const el = scrollRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
+    el.scrollTop = getFollowBottomOffset(el)
   }
 
   const scrollToBottom = () => {
@@ -218,7 +225,7 @@ function createFollowBottomController(
     stuckRef.current = false
     el.scrollTop +=
       row.getBoundingClientRect().top - el.getBoundingClientRect().top + anchor.offsetPx
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    const dist = getFollowBottomOffset(el) - el.scrollTop
     setIsAtBottom(dist <= THRESHOLD_PX)
     return true
   }

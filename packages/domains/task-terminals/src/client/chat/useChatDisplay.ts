@@ -15,6 +15,7 @@ import { useChatSearch } from './useChatSearch'
 import { isRenderable } from './renderers'
 import { useVirtualTimeline } from './useVirtualTimeline'
 import type { FollowBottomApi } from './useFollowBottom'
+import { getFollowBottomOffset } from './useFollowBottom'
 import { activityView } from './activity-view'
 
 export interface UseChatDisplayOpts {
@@ -398,7 +399,7 @@ export function useChatDisplay({
     // (a scrollbar drag moves the view without letting go of the end).
     if (!paging || !loadPages) return
     const el = follow.scrollRef.current
-    if (follow.isStuck() && el && el.scrollHeight - el.scrollTop - el.clientHeight <= 2) return
+    if (follow.isStuck() && el && getFollowBottomOffset(el) - el.scrollTop <= 2) return
     const at = Math.floor(row / paging.pageRows)
     const inGap = new Set(pagesOf(gap.from, gap.to, paging.pageRows))
     loadPages([at, at - 1, at + 1].filter((p) => inGap.has(p)))
