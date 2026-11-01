@@ -157,7 +157,7 @@ function StreamCaret() {
 
 function AssistantAvatar() {
   return (
-    <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
+    <div data-testid="chat-agent-avatar" className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
       <Sparkles className="size-3.5" />
     </div>
   )

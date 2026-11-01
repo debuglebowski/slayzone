@@ -104,6 +104,30 @@ function parseAppearance(all: Record<string, string>): AppearanceSettings {
     chatToolVisibility,
     chatShowTools: chatToolVisibility === 'all',
     chatShowLastMessageTools: chatToolVisibility === 'recent',
+    chatShowToolCallSummary:
+      get('chat_show_tool_call_summary') == null
+        ? chatToolVisibility !== 'none'
+        : get('chat_show_tool_call_summary') !== '0',
+    chatShowLatestToolCall: get('chat_show_latest_tool_call') !== '0',
+    chatFinalOnly:
+      get('chat_final_only') == null
+        ? chatToolVisibility !== 'all'
+        : get('chat_final_only') === '1',
+    chatShowActivities:
+      get('chat_show_activities') == null
+        ? get('chat_show_tool_call_summary') == null
+          ? chatToolVisibility !== 'none'
+          : get('chat_show_tool_call_summary') !== '0'
+        : get('chat_show_activities') !== '0',
+    chatPreviewLatestActivity:
+      (get('chat_preview_latest_activity') ?? get('chat_show_latest_tool_call')) !== '0',
+    chatShowActivityMessages:
+      get('chat_show_activity_messages') == null
+        ? get('chat_final_only') == null
+          ? chatToolVisibility === 'all'
+          : get('chat_final_only') !== '1'
+        : get('chat_show_activity_messages') !== '0',
+    chatShowActivityTools: get('chat_show_activity_tools') !== '0',
     chatShowThinking: get('chat_show_thinking') !== '0',
     chatWrapCode: get('chat_wrap_code') === '1',
     chatCompactSpacing: get('chat_compact_spacing') === '1',

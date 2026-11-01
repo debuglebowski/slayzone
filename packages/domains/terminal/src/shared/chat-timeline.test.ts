@@ -1026,17 +1026,17 @@ test('deriveLoadingLabel: tool with file_path → verb + basename', () => {
   expect(deriveLoadingLabel(s)).toBe('Read foo.ts')
 })
 
-test('deriveLoadingLabel: Bash command target', () => {
+test('deriveLoadingLabel: running shell command', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, {
     type: 'event',
     event: { kind: 'tool-call', id: 't', name: 'Bash', input: { command: 'pnpm build' } }
   })
-  expect(deriveLoadingLabel(s)).toBe('Run pnpm build')
+  expect(deriveLoadingLabel(s)).toBe('Running command…')
 })
 
-test('deriveLoadingLabel: long command truncated', () => {
+test('deriveLoadingLabel: Codex shell command', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, {
@@ -1044,13 +1044,11 @@ test('deriveLoadingLabel: long command truncated', () => {
     event: {
       kind: 'tool-call',
       id: 't',
-      name: 'Bash',
+      name: 'codex/commandExecution',
       input: { command: 'a'.repeat(60) }
     }
   })
-  const label = deriveLoadingLabel(s)
-  expect(label?.startsWith('Run ')).toBeTruthy()
-  expect((label?.length ?? 0) <= 'Run '.length + 32).toBeTruthy()
+  expect(deriveLoadingLabel(s)).toBe('Running command…')
 })
 
 test('deriveLoadingLabel: api-retry overrides open block', () => {
@@ -1069,7 +1067,7 @@ test('deriveLoadingLabel: api-retry overrides open block', () => {
   expect(deriveLoadingLabel(s)).toBe('Retrying (2/5) in 3s…')
 })
 
-test('deriveLoadingLabel: tool label sticks after tool-result completes', () => {
+test('deriveLoadingLabel: completed tool does not appear active', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, {
@@ -1078,10 +1076,10 @@ test('deriveLoadingLabel: tool label sticks after tool-result completes', () => 
   })
   s = reducer(s, { type: 'event', event: ev.result('t') })
   s = reducer(s, { type: 'event', event: { kind: 'stream-message-stop' } })
-  expect(deriveLoadingLabel(s)).toBe('Edit App.tsx')
+  expect(deriveLoadingLabel(s)).toBe(null)
 })
 
-test('deriveLoadingLabel: text label sticky after stream-block-stop', () => {
+test('deriveLoadingLabel: finished text stream does not appear active', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
   s = reducer(s, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm' } })
@@ -1094,7 +1092,16 @@ test('deriveLoadingLabel: text label sticky after stream-block-stop', () => {
     event: { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'hi' }
   })
   s = reducer(s, { type: 'event', event: { kind: 'stream-block-stop', blockIndex: 0 } })
-  expect(deriveLoadingLabel(s)).toBe('Writing…')
+  expect(deriveLoadingLabel(s)).toBe(null)
+})
+
+test('deriveLoadingLabel: another pending tool remains active after latest finishes', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'event', event: ev.call('first', 'Bash') })
+  s = reducer(s, { type: 'event', event: ev.call('second', 'Read') })
+  s = reducer(s, { type: 'event', event: ev.result('second') })
+  expect(deriveLoadingLabel(s)).toBe('Running command…')
 })
 
 test('isAwaitingUserQuestion: false when idle', () => {

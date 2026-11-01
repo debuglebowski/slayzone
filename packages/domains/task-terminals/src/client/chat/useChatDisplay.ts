@@ -15,14 +15,19 @@ import { useChatSearch } from './useChatSearch'
 import { isRenderable } from './renderers'
 import { useVirtualTimeline } from './useVirtualTimeline'
 import type { FollowBottomApi } from './useFollowBottom'
+import { activityView } from './activity-view'
 
 export interface UseChatDisplayOpts {
   /** The rows (`undefined`: not loaded here — not shown). */
   timeline: Readonly<TimelineRows>
   finalOnly: boolean
   showLastMessageTools: boolean
+  groupToolCalls?: boolean
+  groupActivity?: boolean
+  inFlight?: boolean
   errorsOnly?: boolean
   showThinking?: boolean
+  searchThinking?: boolean
   /** The timeline's follow-bottom lock (`useFollowBottom`). */
   follow: Pick<FollowBottomApi, 'scrollRef' | 'isStuck' | 'unstick' | 'restoreAnchor'>
   /** Paged history (`useChatSession`): page summaries, and loading pages. */
@@ -166,8 +171,12 @@ export function useChatDisplay({
   timeline,
   finalOnly,
   showLastMessageTools,
+  groupToolCalls = false,
+  groupActivity = false,
+  inFlight = false,
   errorsOnly = false,
   showThinking,
+  searchThinking = true,
   follow,
   paging,
   loadPages,
@@ -227,7 +236,7 @@ export function useChatDisplay({
     [openBranches, toggleBranch]
   )
 
-  const displayedTimeline = useMemo<TimelineItem[]>(() => {
+  const baseTimeline = useMemo<TimelineItem[]>(() => {
     const isRoot = (item: TimelineItem): boolean => item.parentToolUseId == null
     if (!finalOnly) {
       const out: TimelineItem[] = []
@@ -240,9 +249,17 @@ export function useChatDisplay({
           continue
         }
         if (item.kind === 'thinking' && showThinking === false) continue
+        if (
+          groupToolCalls &&
+          item.kind === 'tool' &&
+          item.invocation.name !== 'ExitPlanMode' &&
+          item.invocation.name !== 'AskUserQuestion'
+        )
+          continue
         if (!folded.has(i) && isRoot(item) && isRenderable(item)) out.push(item)
       }
-      return withoutFoldedHooks(out)
+      // A grouped tool may be collapsed or hidden, so keep its hook warning visible.
+      return groupActivity ? out : withoutFoldedHooks(out)
     }
     let lastUserIdx = -1
     if (showLastMessageTools) {
@@ -275,6 +292,14 @@ export function useChatDisplay({
       }
       if (!isRoot(item) || folded.has(i)) continue
       if (item.kind === 'thinking' && showThinking === false) continue
+      if (
+        groupToolCalls &&
+        item.kind === 'tool' &&
+        item.invocation.name !== 'ExitPlanMode' &&
+        item.invocation.name !== 'AskUserQuestion' &&
+        !(errorsOnly && item.invocation.status === 'error')
+      )
+        continue
       if (item.kind === 'user-text') {
         flushPending()
         out.push(item)
@@ -327,7 +352,29 @@ export function useChatDisplay({
     }
     flushPending()
     return withoutFoldedHooks(out.filter(isRenderable))
-  }, [timeline, finalOnly, showLastMessageTools, errorsOnly, showThinking, folded, gapAt])
+  }, [
+    timeline,
+    finalOnly,
+    showLastMessageTools,
+    groupToolCalls,
+    groupActivity,
+    errorsOnly,
+    showThinking,
+    folded,
+    gapAt
+  ])
+
+  // Searching shows matching rows in their original positions, including activity.
+  const searchTimeline = useMemo(
+    () => (searchThinking ? baseTimeline : baseTimeline.filter((item) => item.kind !== 'thinking')),
+    [baseTimeline, searchThinking]
+  )
+  const search = useChatSearch(searchTimeline)
+  const activity = useMemo(
+    () => (groupActivity && !search.query ? activityView(baseTimeline, inFlight) : null),
+    [baseTimeline, groupActivity, inFlight, search.query]
+  )
+  const displayedTimeline = activity?.rows ?? (search.query ? searchTimeline : baseTimeline)
 
   // Each displayed row's index in the timeline: keys stay the same when rows
   // load above them (a key by display position would shift).
@@ -370,7 +417,6 @@ export function useChatDisplay({
       return next
     })
   })
-  const search = useChatSearch(displayedTimeline)
   // Paged history: the pages that may hold the query load, so the search
   // counts and reaches matches in the whole history, not just what is loaded.
   const searchQuery = search.query
@@ -395,7 +441,11 @@ export function useChatDisplay({
   // (A ref: set by the handler, read + cleared when rows come in.)
   const pendingAnchorRef = useRef<string | null>(null)
   const revealAnchor = useStableCallback((anchorKey: string, row?: number): void => {
-    const at = displayedTimeline.findIndex((it) => stableAnchorKey(it) === anchorKey)
+    const target = baseTimeline.find((it) => stableAnchorKey(it) === anchorKey)
+    const host = target && activity?.hosts.get(target)
+    const at = displayedTimeline.findIndex((it) =>
+      host ? it === host : stableAnchorKey(it) === anchorKey
+    )
     if (at >= 0) {
       virtual.revealIndex(at, { align: 'start' })
       return
@@ -407,11 +457,15 @@ export function useChatDisplay({
   useEffect(() => {
     const pending = pendingAnchorRef.current
     if (pending === null) return
-    const at = displayedTimeline.findIndex((it) => stableAnchorKey(it) === pending)
+    const target = baseTimeline.find((it) => stableAnchorKey(it) === pending)
+    const host = target && activity?.hosts.get(target)
+    const at = displayedTimeline.findIndex((it) =>
+      host ? it === host : stableAnchorKey(it) === pending
+    )
     if (at < 0) return
     pendingAnchorRef.current = null
     virtual.revealIndex(at, { align: 'start' })
-  }, [displayedTimeline, virtual])
+  }, [displayedTimeline, baseTimeline, activity, virtual])
   const restoreAnchor = useStableCallback((anchor: ChatScrollAnchor): boolean => {
     const restored = follow.restoreAnchor(anchor)
     // The exact position is set: the reveal that brought the row in stops re-aiming.
@@ -435,7 +489,7 @@ export function useChatDisplay({
   }, [search.activeItemIdx, virtual])
 
   const copyNow = useCallback(() => {
-    const text = displayedTimeline
+    const text = baseTimeline
       .map((it) => {
         switch (it.kind) {
           case 'user-text': {
@@ -463,7 +517,7 @@ export function useChatDisplay({
       .join('\n\n')
     void safeClipboardWriteText(text)
     toast('Conversation copied')
-  }, [displayedTimeline])
+  }, [baseTimeline])
   // Paged history: the whole conversation loads first (held while it does).
   const hasUnloaded = useMemo(() => timeline.some((row) => row === undefined), [timeline])
   const copyPendingRef = useRef(false)
@@ -522,6 +576,13 @@ export function useChatDisplay({
   const pendingRevealRef = useRef<{ key: Key; align: 'start' | 'center' } | null>(null)
   const revealItem = useStableCallback<Parameters<RevealTimelineItem>, void>((key, opts) => {
     const align = opts?.align ?? 'start'
+    const target = baseTimeline.find((it, i) => itemKey(it, i) === key)
+    const host = target && activity?.hosts.get(target)
+    if (host) {
+      const at = displayedTimeline.indexOf(host)
+      if (at >= 0) virtual.revealIndex(at, { align })
+      return
+    }
     if (displayedTimeline.some((it, i) => itemKey(it, i) === key)) {
       virtual.revealKey(key, { align })
       return
@@ -553,13 +614,24 @@ export function useChatDisplay({
   useEffect(() => {
     const pending = pendingRevealRef.current
     if (pending === null) return
+    const target = baseTimeline.find((it, i) => itemKey(it, i) === pending.key)
+    const host = target && activity?.hosts.get(target)
+    if (host) {
+      const at = displayedTimeline.indexOf(host)
+      if (at >= 0) {
+        pendingRevealRef.current = null
+        virtual.revealIndex(at, { align: pending.align })
+      }
+      return
+    }
     if (!displayedTimeline.some((it, i) => itemKey(it, i) === pending.key)) return
     pendingRevealRef.current = null
     virtual.revealKey(pending.key, { align: pending.align })
-  }, [displayedTimeline, itemKey, virtual])
+  }, [displayedTimeline, baseTimeline, activity, itemKey, virtual])
 
   return {
     displayedTimeline,
+    activityTurns: activity?.turns,
     history,
     rowOf: rowOfItem,
     summary,

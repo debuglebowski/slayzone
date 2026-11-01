@@ -1,7 +1,7 @@
 import { type ComponentType } from 'react'
 import {
-  Brain,
-  Code,
+  Activity,
+  Eye,
   FileText,
   Maximize2,
   MessageSquare,
@@ -50,14 +50,6 @@ export function ChatDisplayOptions({ appearance }: { appearance: AppearanceSetti
           Conversation
         </h3>
         <Option
-          icon={Code}
-          label="Tool calls"
-          checked={appearance.chatToolVisibility !== 'none'}
-          onChange={(value) =>
-            mutate({ key: 'chat_tool_visibility', value: value ? 'all' : 'none' })
-          }
-        />
-        <Option
           icon={FileText}
           label="Expand file edits"
           checked={appearance.chatFileEditsOpenByDefault}
@@ -69,12 +61,45 @@ export function ChatDisplayOptions({ appearance }: { appearance: AppearanceSetti
           checked={appearance.chatShowMessageMeta}
           onChange={toggle('chat_show_message_meta')}
         />
+      </section>
+      <section aria-label="Activity">
+        <h3 className="px-2 pb-1 pt-2 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+          Activity
+        </h3>
         <Option
-          icon={Brain}
-          label="Show thinking"
-          checked={appearance.chatShowThinking}
-          onChange={toggle('chat_show_thinking')}
+          icon={Eye}
+          label="Preview latest activity"
+          checked={appearance.chatPreviewLatestActivity}
+          onChange={toggle('chat_preview_latest_activity')}
         />
+        <Option
+          icon={Activity}
+          label="Show activities"
+          checked={appearance.chatShowActivities}
+          onChange={toggle('chat_show_activities')}
+        />
+        {appearance.chatShowActivities && (
+          <>
+            <Option
+              nested
+              label="Messages"
+              checked={appearance.chatShowActivityMessages}
+              onChange={toggle('chat_show_activity_messages')}
+            />
+            <Option
+              nested
+              label="Thinking"
+              checked={appearance.chatShowThinking}
+              onChange={toggle('chat_show_thinking')}
+            />
+            <Option
+              nested
+              label="Tool calls"
+              checked={appearance.chatShowActivityTools}
+              onChange={toggle('chat_show_activity_tools')}
+            />
+          </>
+        )}
       </section>
       <section aria-label="Scrolling">
         <h3 className="px-2 pb-1 pt-2 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
@@ -99,16 +124,24 @@ function Option({
   icon: Icon,
   label,
   checked,
-  onChange
+  onChange,
+  nested = false
 }: {
-  icon: ComponentType<{ className?: string }>
+  icon?: ComponentType<{ className?: string }>
   label: string
   checked: boolean
   onChange: (value: boolean) => void
+  nested?: boolean
 }) {
   return (
-    <label className={cn(rowClass, 'group/option cursor-pointer')}>
-      <Icon className={iconClass} />
+    <label className={cn(rowClass, 'group/option relative cursor-pointer', nested && 'pl-[34px]')}>
+      {Icon && <Icon className={iconClass} />}
+      {nested && (
+        <span
+          aria-hidden="true"
+          className="absolute left-[15px] -top-2 h-6 w-2.5 rounded-bl border-b border-l border-muted-foreground/60"
+        />
+      )}
       <span className="flex-1 text-xs font-medium">{label}</span>
       <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
     </label>

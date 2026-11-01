@@ -506,10 +506,10 @@ describe('ChatComposer Display options', () => {
     setup()
     openDisplay()
     expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull()
-    for (const name of ['Layout', 'Conversation', 'Scrolling']) {
+    for (const name of ['Layout', 'Conversation', 'Activity', 'Scrolling']) {
       expect(screen.getByRole('region', { name })).toBeDefined()
     }
-    expect(screen.getAllByRole('switch')).toHaveLength(8)
+    expect(screen.getAllByRole('switch')).toHaveLength(11)
     fireEvent.click(switchFor('Wrap code lines'))
     expect(mutate).toHaveBeenCalledWith({ key: 'chat_wrap_code', value: '1' })
     expect(screen.getByRole('switch', { name: 'Auto-scroll' })).toBeDefined()
@@ -520,14 +520,35 @@ describe('ChatComposer Display options', () => {
     openDisplay()
     expect(screen.queryByRole('combobox', { name: 'Tool calls' })).toBeNull()
     fireEvent.click(switchFor('Tool calls'))
-    expect(mutate).toHaveBeenCalledWith({ key: 'chat_tool_visibility', value: 'none' })
+    expect(mutate).toHaveBeenCalledWith({ key: 'chat_show_activity_tools', value: '0' })
   })
 
   it('turns hidden tool calls on with a binary switch', () => {
-    setup({ appearance: { ...appearanceDefaults, chatToolVisibility: 'none' } })
+    setup({ appearance: { ...appearanceDefaults, chatShowActivityTools: false } })
     openDisplay()
     fireEvent.click(switchFor('Tool calls'))
-    expect(mutate).toHaveBeenCalledWith({ key: 'chat_tool_visibility', value: 'all' })
+    expect(mutate).toHaveBeenCalledWith({ key: 'chat_show_activity_tools', value: '1' })
+  })
+
+  it('hides activity filters when activities are off, but keeps preview independent', () => {
+    setup({ appearance: { ...appearanceDefaults, chatShowActivities: false } })
+    openDisplay()
+    expect(screen.queryByRole('switch', { name: 'Messages' })).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Thinking' })).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Tool calls' })).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Preview latest activity' })).toBeDefined()
+  })
+
+  it.each([
+    ['Preview latest activity', 'chat_preview_latest_activity'],
+    ['Show activities', 'chat_show_activities'],
+    ['Messages', 'chat_show_activity_messages'],
+    ['Thinking', 'chat_show_thinking']
+  ])('persists %s independently', (label, key) => {
+    setup()
+    openDisplay()
+    fireEvent.click(switchFor(label))
+    expect(mutate).toHaveBeenCalledWith({ key, value: '0' })
   })
 })
 

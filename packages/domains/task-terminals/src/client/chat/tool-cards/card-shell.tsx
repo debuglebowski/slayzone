@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { createContext, useContext, useEffect, useMemo } from 'react'
 import { ChevronDown, ChevronRight, CircleCheck, CircleX, Loader2, ShieldAlert } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { ToolInvocation } from '@slayzone/terminal/client'
@@ -105,6 +105,8 @@ function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy
   )
 }
 
+export const ToolInActivityContext = createContext(false)
+
 function ToolShell({
   invocation,
   icon,
@@ -122,9 +124,17 @@ function ToolShell({
   defaultOpen?: boolean
   timestamp?: number
 }) {
+  const inActivity = useContext(ToolInActivityContext)
   const status = invocation.status
   // Kept while scrolled away; "Collapse all" closes it (the default holds on mount).
-  const [open, setOpen] = useRowUiState('card', defaultOpen ?? status === 'error', false)
+  const [open, setOpen] = useRowUiState(
+    'card',
+    inActivity ? false : (defaultOpen ?? status === 'error'),
+    false
+  )
+  useEffect(() => {
+    if (inActivity) setOpen(false)
+  }, [inActivity, setOpen])
   // "Show this card" (files-changed row) opens it, also when it mounts after the
   // request (the timeline scrolled it in first).
   const focusRequested = useToolFocusRequest(invocation.id)
@@ -147,11 +157,17 @@ function ToolShell({
   }
   const canOpen = Boolean(body)
   return (
-    <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1 group flex items-start gap-2')}>
+    <div
+      className={cn(
+        inActivity ? 'pl-0 pr-0' : `${CHAT_CARD_INDENT} pr-4`,
+        'py-1 group flex items-start gap-2'
+      )}
+    >
       <div className="w-fit max-w-full rounded-lg border border-border/50 bg-card/40 overflow-hidden shadow-sm">
         <button
           onClick={() => canOpen && setOpen(!open)}
           disabled={!canOpen}
+          aria-expanded={canOpen ? open : undefined}
           className={cn(
             'flex items-center gap-2 px-3 py-1.5 text-xs text-left max-w-full',
             canOpen && 'hover:bg-muted/40 cursor-pointer',

@@ -70,6 +70,13 @@ export interface AppearanceSettings {
   chatWidth: 'narrow' | 'wide'
   chatShowTools: boolean
   chatShowLastMessageTools: boolean
+  chatShowToolCallSummary: boolean
+  chatShowLatestToolCall: boolean
+  chatFinalOnly: boolean
+  chatShowActivities: boolean
+  chatPreviewLatestActivity: boolean
+  chatShowActivityMessages: boolean
+  chatShowActivityTools: boolean
   chatFileEditsOpenByDefault: boolean
   chatShowMessageMeta: boolean
   // Markdown
@@ -114,6 +121,13 @@ export const appearanceDefaults: AppearanceSettings = {
   chatWidth: 'narrow',
   chatShowTools: true,
   chatShowLastMessageTools: true,
+  chatShowToolCallSummary: true,
+  chatShowLatestToolCall: true,
+  chatFinalOnly: false,
+  chatShowActivities: true,
+  chatPreviewLatestActivity: true,
+  chatShowActivityMessages: true,
+  chatShowActivityTools: true,
   chatFileEditsOpenByDefault: true,
   chatShowMessageMeta: true,
   editorMarkdownViewMode: 'rich',

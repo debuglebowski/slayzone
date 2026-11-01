@@ -1,4 +1,11 @@
-import { useContext, type Dispatch, type Key, type SetStateAction } from 'react'
+import {
+  useContext,
+  useMemo,
+  useCallback,
+  type Dispatch,
+  type Key,
+  type SetStateAction
+} from 'react'
 import { ArrowDown, Sparkles } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
@@ -25,6 +32,8 @@ import {
   type TimelineItem,
   type ChatTimelineState
 } from '@slayzone/terminal/client'
+import { ActivityTurn, AgentAvatar } from './ActivityTurn'
+import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { ChatSearchBar } from './ChatSearchBar'
 import { ChatTurnOutline } from './ChatTurnOutline'
 import { renderTimelineItem } from './renderers'
@@ -54,6 +63,7 @@ export interface ChatTimelineProps {
   awaitingUser: boolean
   appearance: AppearanceSettings
   /** Every displayed row; only those in view are mounted (`virtual`). */
+  activityTurns?: ReadonlyMap<TimelineItem, ActivityTurnData>
   items: TimelineItem[]
   virtual: VirtualTimelineController
   /** `virtual.bindScroller`, as its own prop: what goes to `ref` must not be read off `virtual`. */
@@ -95,6 +105,7 @@ export function ChatTimeline({
   awaitingUser,
   appearance,
   items,
+  activityTurns,
   rowOf,
   virtual,
   scrollRef,
@@ -125,6 +136,53 @@ export function ChatTimeline({
   const tailStreaming =
     (tail?.kind === 'text' || (tail?.kind === 'thinking' && appearance.chatShowThinking)) &&
     tail.stream === 'open'
+  const loadingLabel = deriveLoadingLabel(state) ?? 'Waiting for agent…'
+  const activityAppearance = useMemo(
+    () => ({
+      chatShowActivities: appearance.chatShowActivities,
+      chatPreviewLatestActivity: appearance.chatPreviewLatestActivity,
+      chatShowActivityMessages: appearance.chatShowActivityMessages,
+      chatShowThinking: appearance.chatShowThinking,
+      chatShowActivityTools: appearance.chatShowActivityTools
+    }),
+    [
+      appearance.chatShowActivities,
+      appearance.chatPreviewLatestActivity,
+      appearance.chatShowActivityMessages,
+      appearance.chatShowThinking,
+      appearance.chatShowActivityTools
+    ]
+  )
+  const renderRow = useCallback(
+    (item: TimelineItem, index: number) => {
+      const turn = activityTurns?.get(item)
+      if (turn) {
+        const showWorking = turn.active && !awaitingUser && turn.final?.stream !== 'open'
+        const showOwner =
+          !turn.final &&
+          (turn.active ||
+            turn.files.length > 0 ||
+            (activityAppearance.chatShowActivities && turn.items.length > 0))
+        return (
+          <>
+            {!turn.hostIsActivity && renderTimelineItem(item, index)}
+            <div className="relative">
+              {showOwner && (
+                <div className="absolute left-4 top-2">
+                  <AgentAvatar />
+                </div>
+              )}
+              {showWorking && <TypingIndicator label={loadingLabel} />}
+              <ActivityTurn turn={turn} appearance={activityAppearance} rowOf={rowOf} />
+            </div>
+          </>
+        )
+      }
+      return renderTimelineItem(item, index)
+    },
+    [activityTurns, awaitingUser, loadingLabel, rowOf, activityAppearance]
+  )
+  const hasActiveTurn = activityTurns && [...activityTurns.values()].some((turn) => turn.active)
   return (
     <>
       {/* Header: mode pill + (override notice if explicitly passed by parent) */}
@@ -194,10 +252,15 @@ export function ChatTimeline({
                       items={items}
                       itemKey={itemKey}
                       rowOf={rowOf}
-                      renderRow={renderTimelineItem}
+                      renderRow={renderRow}
                     />
-                    {inFlight && !awaitingUser && !tailStreaming && (
-                      <TypingIndicator label={deriveLoadingLabel(state)} />
+                    {inFlight && !awaitingUser && !tailStreaming && !hasActiveTurn && (
+                      <div className="relative">
+                        <div className="absolute left-4 top-2">
+                          <AgentAvatar />
+                        </div>
+                        <TypingIndicator label={loadingLabel} />
+                      </div>
                     )}
                   </div>
                 )}
@@ -321,10 +384,7 @@ export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
 
 function TypingIndicator({ label }: { label?: string | null }) {
   return (
-    <div data-testid="chat-working-indicator" className="px-4 py-2 flex gap-3 items-center">
-      <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
-        <Sparkles className="size-3.5 animate-pulse" />
-      </div>
+    <div data-testid="chat-working-indicator" className="pl-14 pr-4 py-2 flex gap-3 items-center">
       <div className="flex gap-1 px-3 py-2 rounded-2xl bg-muted/40">
         <span
           className="size-1.5 rounded-full bg-foreground/40 animate-bounce"

@@ -152,8 +152,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const historyOfSession = useMemo(() => historySummary(timeline, paging), [timeline, paging])
 
     const appearance = useAppearance()
-    const finalOnly = !appearance.chatShowTools
-    const showLastMessageTools = appearance.chatShowLastMessageTools
+    const finalOnly = false
+    const showLastMessageTools = false
 
     const { chatMode, handleModeChange, autoCapability } = useChatMode({
       taskId,
@@ -264,8 +264,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       timeline,
       finalOnly,
       showLastMessageTools,
-      errorsOnly: appearance.chatToolVisibility === 'errors',
-      showThinking: appearance.chatShowThinking,
+      groupActivity: true,
+      inFlight,
+      showThinking: true,
+      searchThinking: appearance.chatShowThinking,
       follow,
       paging,
       loadPages,
@@ -673,6 +675,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         }
                         appearance={appearance}
                         items={display.displayedTimeline}
+                        activityTurns={display.activityTurns}
                         virtual={display.virtual}
                         scrollRef={display.virtual.bindScroller}
                         itemKey={display.itemKey}

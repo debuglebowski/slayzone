@@ -13,6 +13,7 @@ vi.mock('@slayzone/markdown/client', () => ({
 }))
 
 import { useChatDisplay } from './useChatDisplay'
+import { activityView } from './activity-view'
 import { useFollowBottom, type CallbackRef } from './useFollowBottom'
 import { VirtualTimelineRows } from './VirtualTimelineRows'
 import { TimelineScroller } from './__tests__/TimelineScroller'
@@ -237,13 +238,14 @@ describe('useChatDisplay — a hook block folded into its card', () => {
     foldedInto: 't1'
   } as unknown as TimelineItem
   const other = { ...folded, hookId: 'h2', effect: 'failed', foldedInto: undefined } as TimelineItem
-  const shown = (finalOnly: boolean, items: TimelineItem[]) => {
+  const shown = (finalOnly: boolean, items: TimelineItem[], groupActivity = false) => {
     let out: TimelineItem[] = []
     function Probe() {
       out = useChatDisplay({
         timeline: items,
         finalOnly,
         showLastMessageTools: false,
+        groupActivity,
         follow: detachedFollow()
       }).displayedTimeline
       return null
@@ -259,6 +261,10 @@ describe('useChatDisplay — a hook block folded into its card', () => {
 
   it('where the card is not shown (final-only view), the hook row still explains the block', () => {
     expect(shown(true, [tool, folded, other])).toEqual(['hook:h1', 'hook:h2'])
+  })
+
+  it('keeps hook warnings visible when their tool is grouped', () => {
+    expect(shown(false, [tool, folded, other], true)).toEqual(['hook:h1', 'hook:h2'])
   })
 })
 
@@ -293,6 +299,99 @@ describe('useChatDisplay scroll anchors', () => {
 })
 
 describe('display preferences', () => {
+  it('groups progress, thinking and tools in order below the final message', () => {
+    const user = { kind: 'user-text', text: 'hello', timestamp: 0 } as TimelineItem
+    const progress = text('Checking', 1)
+    const thinking = {
+      kind: 'thinking',
+      messageId: 'thought',
+      text: 'Inspect',
+      timestamp: 2
+    } as TimelineItem
+    const tool = {
+      kind: 'tool',
+      invocation: { id: 't', name: 'Bash', status: 'done' },
+      timestamp: 3
+    } as TimelineItem
+    const final = text('Done', 4)
+    const result = { kind: 'result', timestamp: 5 } as TimelineItem
+    const view = activityView([user, progress, thinking, tool, final, result], false)
+    expect(view.rows).toEqual([user, final, result])
+    expect(view.turns.get(final)?.items).toEqual([progress, thinking, tool])
+    expect(view.hosts.get(tool)).toBe(final)
+  })
+
+  it('attaches the file summary to its own turn without duplicating its row', () => {
+    const user = { kind: 'user-text', text: 'edit', timestamp: 0 } as TimelineItem
+    const final = text('Done', 1)
+    const files = {
+      kind: 'files-changed',
+      id: 'files:t',
+      files: [],
+      timestamp: 2
+    } as unknown as TimelineItem
+    const result = { kind: 'result', timestamp: 3 } as TimelineItem
+    const view = activityView([user, final, files, result], false)
+    expect(view.rows).toEqual([user, final, result])
+    expect(view.turns.get(final)?.files).toEqual([files])
+    expect(view.hosts.get(files)).toBe(final)
+  })
+
+  it('keeps active and paged turns separate and never calls a pre-tool message final', () => {
+    const user = { kind: 'user-text', text: 'hello', timestamp: 0 } as TimelineItem
+    const progress = text('Checking', 1)
+    const tool = {
+      kind: 'tool',
+      invocation: { id: 't', name: 'Bash', status: 'pending' },
+      timestamp: 3
+    } as TimelineItem
+    const gap = { kind: 'history-gap', from: 3, to: 4, rows: 1, timestamp: 4 } as TimelineItem
+    const nextUser = { kind: 'user-text', text: 'next', timestamp: 5 } as TimelineItem
+    const view = activityView([user, progress, tool, gap, nextUser], true)
+    expect(view.turns.get(user)?.final).toBeNull()
+    expect(view.turns.get(user)?.items).toEqual([progress, tool])
+    expect(view.turns.get(user)?.active).toBe(false)
+    expect(view.turns.get(nextUser)?.active).toBe(true)
+    expect(view.rows).toEqual([user, gap, nextUser])
+  })
+
+  it('keeps the latest text visible while streaming and after it settles', () => {
+    const user = { kind: 'user-text', text: 'hello', timestamp: 0 } as TimelineItem
+    const progress = text('Checking', 1)
+    const pending = activityView([user, progress], true)
+    expect(pending.rows).toEqual([user, progress])
+    const streaming = { ...text('Writing', 2), stream: 'open' } as TimelineItem
+    const writing = activityView([user, progress, streaming], true)
+    expect(writing.turns.get(streaming)?.final).toBe(streaming)
+    expect(writing.turns.get(streaming)?.items).toEqual([progress])
+  })
+
+  it('groups ordinary tool calls without hiding messages or interactive prompts', () => {
+    const items = [
+      text('before', 0),
+      { kind: 'tool', invocation: { id: 't', name: 'Bash', status: 'pending' }, timestamp: 1 },
+      {
+        kind: 'tool',
+        invocation: { id: 'q', name: 'AskUserQuestion', status: 'pending' },
+        timestamp: 2
+      },
+      text('after', 3)
+    ] as TimelineItem[]
+    let shown: TimelineItem[] = []
+    function Probe() {
+      shown = useChatDisplay({
+        timeline: items,
+        finalOnly: false,
+        showLastMessageTools: false,
+        groupToolCalls: true,
+        follow: detachedFollow()
+      }).displayedTimeline
+      return null
+    }
+    render(<Probe />)
+    expect(shown).toEqual([items[0], items[2], items[3]])
+  })
+
   it('keeps only failed tools in errors mode and hides thinking independently', () => {
     const items = [
       { kind: 'thinking', text: 'Thinking', timestamp: 0 },

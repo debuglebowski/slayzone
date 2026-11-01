@@ -170,6 +170,53 @@ describe('AppearanceProvider', () => {
 })
 
 describe('chat display preferences', () => {
+  it('migrates activity preferences while allowing the preview to be independent', async () => {
+    snapshot = {
+      chat_show_tool_call_summary: '0',
+      chat_show_latest_tool_call: '1',
+      chat_show_thinking: '0',
+      chat_final_only: '1'
+    }
+    renderProvider()
+    await flush()
+    expect(chatAppearance).toMatchObject({
+      chatShowActivities: false,
+      chatPreviewLatestActivity: true,
+      chatShowActivityMessages: false,
+      chatShowThinking: false,
+      chatShowActivityTools: true
+    })
+  })
+
+  it('reads independent tool summary and latest call preferences', async () => {
+    snapshot = { chat_show_tool_call_summary: '0', chat_show_latest_tool_call: '1' }
+    renderProvider()
+    await flush()
+    expect(chatAppearance.chatShowToolCallSummary).toBe(false)
+    expect(chatAppearance.chatShowLatestToolCall).toBe(true)
+  })
+
+  it('preserves the previous tool and message display choices', async () => {
+    snapshot = { chat_tool_visibility: 'none' }
+    renderProvider()
+    await flush()
+    expect(chatAppearance.chatShowToolCallSummary).toBe(false)
+    expect(chatAppearance.chatFinalOnly).toBe(true)
+    expect(chatAppearance.chatShowLatestToolCall).toBe(true)
+  })
+
+  it('allows new preferences to override the previous display choices', async () => {
+    snapshot = {
+      chat_tool_visibility: 'none',
+      chat_show_tool_call_summary: '1',
+      chat_final_only: '0'
+    }
+    renderProvider()
+    await flush()
+    expect(chatAppearance.chatShowToolCallSummary).toBe(true)
+    expect(chatAppearance.chatFinalOnly).toBe(false)
+  })
+
   it.each([
     [{}, 'all'],
     [{ chat_show_tools: '0' }, 'recent'],

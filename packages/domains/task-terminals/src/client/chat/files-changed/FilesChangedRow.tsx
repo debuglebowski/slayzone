@@ -90,7 +90,13 @@ function subAgentsAround(
  * opened down to the card). One whose card is hidden (final replies only), or
  * whose sub-agent row is unknown, opens the files-changed panel at that file.
  */
-export function FilesChangedRow({ item }: { item: FilesChangedItem }) {
+export function FilesChangedRow({
+  item,
+  embedded = false
+}: {
+  item: FilesChangedItem
+  embedded?: boolean
+}) {
   const { cwd, timeline, finalOnly, filesPanel, collapseSignal } = useChatView()
   const reveal = useRevealTimelineItem()
   const focus = useContext(ToolFocusContext)
@@ -118,9 +124,23 @@ export function FilesChangedRow({ item }: { item: FilesChangedItem }) {
   }
 
   return (
-    <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1')} data-testid="chat-files-changed">
-      <div className="w-fit max-w-full rounded-lg border border-border/50 bg-card/40 text-xs overflow-hidden shadow-sm">
-        <div className="flex items-center gap-2 px-3 py-1.5">
+    <div
+      className={cn(embedded ? 'contents' : `${CHAT_CARD_INDENT} pr-4 py-1`)}
+      data-testid="chat-files-changed"
+    >
+      <div
+        className={
+          embedded
+            ? 'contents'
+            : 'w-fit max-w-full rounded-lg border border-border/50 bg-card/40 text-xs overflow-hidden shadow-sm'
+        }
+      >
+        <div
+          className={cn(
+            'flex items-center gap-2 px-3 py-1.5',
+            embedded && 'max-w-full rounded-lg border border-border/50 bg-card/40 text-xs shadow-sm'
+          )}
+        >
           <button
             type="button"
             data-testid="chat-files-changed-toggle"
@@ -151,7 +171,12 @@ export function FilesChangedRow({ item }: { item: FilesChangedItem }) {
           )}
         </div>
         {open && (
-          <ul className="border-t border-border/40 bg-background/40 py-1">
+          <ul
+            className={cn(
+              'border-t border-border/40 bg-background/40 py-1',
+              embedded && 'order-3 min-w-0 basis-full rounded-lg border text-xs'
+            )}
+          >
             {item.files.map((file) => (
               <li key={file.path}>
                 <button

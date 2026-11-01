@@ -40,7 +40,7 @@ vi.mock('../trpc', () => ({ useTRPC: () => fakeTrpc, useTRPCClient: () => fakeCl
 vi.mock('../../trpc', () => ({ useTRPC: () => fakeTrpc, useTRPCClient: () => fakeClient }))
 
 const { useMemo, useState } = await import('react')
-const { act, cleanup, render } = await import('@testing-library/react')
+const { act, cleanup, fireEvent, render } = await import('@testing-library/react')
 const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
 const { afterEach, beforeEach, describe, expect, it } = await import('vitest')
 const terminal = await import('@slayzone/terminal/client')
@@ -48,6 +48,8 @@ const { reducer, initialState } = await import('@slayzone/terminal/reducer')
 const { ChatTimeline } = await import('./ChatTimeline')
 const { ChatViewContext } = await import('./ChatViewContext')
 const { CommandTaskContext } = await import('./tool-cards')
+const { ToolFocusContext, ToolFocusStore } = await import('./tool-cards/tool-focus')
+const { appearanceDefaults } = await import('@slayzone/ui')
 const { useFollowBottom } = await import('./useFollowBottom')
 const { useChatDisplay } = await import('./useChatDisplay')
 const { installTimelineLayout } = await import('./__tests__/timeline-layout')
@@ -129,7 +131,23 @@ function codexSession(turns: number): AgentEvent[] {
 
 let display: ReturnType<typeof useChatDisplay> | null = null
 
-function Harness({ events, hidden = false }: { events: AgentEvent[]; hidden?: boolean }) {
+function Harness({
+  events,
+  hidden = false,
+  inFlight = false,
+  showSummary = true,
+  showLatest = true,
+  grouped = false,
+  appearanceOverrides
+}: {
+  events: AgentEvent[]
+  hidden?: boolean
+  inFlight?: boolean
+  showSummary?: boolean
+  showLatest?: boolean
+  grouped?: boolean
+  appearanceOverrides?: Partial<typeof appearanceDefaults>
+}) {
   const [state] = useState(() => reducer(initialState(), { type: 'events', events }))
   const [store] = useState(() => new terminal.LiveBlockStore())
   const follow = useFollowBottom()
@@ -137,6 +155,8 @@ function Harness({ events, hidden = false }: { events: AgentEvent[]; hidden?: bo
     timeline: state.timeline,
     finalOnly: false,
     showLastMessageTools: false,
+    groupActivity: grouped,
+    inFlight,
     follow
   })
   display = d
@@ -164,10 +184,19 @@ function Harness({ events, hidden = false }: { events: AgentEvent[]; hidden?: bo
               state={state}
               hydrating={false}
               isEmpty={false}
-              inFlight={false}
+              inFlight={inFlight}
               awaitingUser={false}
-              appearance={{ chatWidth: 'narrow' } as never}
+              appearance={{
+                ...appearanceDefaults,
+                chatWidth: 'narrow',
+                chatShowToolCallSummary: showSummary,
+                chatShowLatestToolCall: showLatest,
+                chatShowActivities: showSummary,
+                chatPreviewLatestActivity: showLatest,
+                ...appearanceOverrides
+              }}
               items={d.displayedTimeline}
+              activityTurns={d.activityTurns}
               virtual={d.virtual}
               scrollRef={d.virtual.bindScroller}
               itemKey={d.itemKey}
@@ -211,10 +240,259 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   layout.restore()
+  vi.unstubAllGlobals()
   display = null
 })
 
 describe('Codex chat on the virtualized timeline', () => {
+  it('places Activities and file changes together after the answer', async () => {
+    const events = codexSession(1)
+    const client = new QueryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Harness key="shown" events={events} grouped />
+      </QueryClientProvider>
+    )
+    await settle()
+    const activity = document.querySelector('[data-testid="chat-activity"]')!
+    const summary = Array.from(activity.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Activities')
+    )
+    const files = activity.querySelector('[data-testid="chat-files-changed"]')
+    expect(summary).toBeDefined()
+    expect(files).not.toBeNull()
+    expect(activity.classList.contains('flex')).toBe(true)
+    expect(document.querySelectorAll('[data-testid="chat-files-changed"]')).toHaveLength(1)
+    expect(document.body.textContent!.indexOf('done with turn 0')).toBeLessThan(
+      document.body.textContent!.indexOf('Activities')
+    )
+    fireEvent.click(summary!)
+    expect(summary?.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(files!.querySelector('[data-testid="chat-files-changed-toggle"]')!)
+    expect(files!.querySelector('[data-testid="chat-files-changed-file"]')).not.toBeNull()
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness key="hidden" events={events} grouped showSummary={false} />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.querySelector('[data-testid="chat-files-changed"]')).not.toBeNull()
+    expect(document.body.textContent).not.toContain('Activities')
+  })
+
+  it('shows one avatar, a live preview, and completed activity below the answer', async () => {
+    const start: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Check status' },
+      { kind: 'assistant-text', messageId: 'progress', text: 'Checking now' },
+      {
+        kind: 'assistant-thinking',
+        messageId: 'thought',
+        text: 'Inspect status',
+        hasSignature: false
+      },
+      {
+        kind: 'tool-call',
+        id: 'cmd',
+        name: 'codex/commandExecution',
+        input: { command: 'git status' }
+      }
+    ]
+    const client = new QueryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Harness key="active" events={start} grouped inFlight />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.querySelectorAll('[data-testid="chat-agent-avatar"]')).toHaveLength(1)
+    expect(document.querySelector('[data-testid="chat-working-indicator"]')?.textContent).toContain(
+      'Running command…'
+    )
+    expect(document.querySelector('[data-testid="chat-activity"]')?.textContent).toContain(
+      'git status'
+    )
+    const preview = document.querySelector('[data-testid="tool-codex-command"]')!
+    expect(preview.querySelector('button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(preview.querySelector('[data-testid="codex-command"]')).toBeNull()
+    fireEvent.click(preview.querySelector('button')!)
+    expect(preview.querySelector('[data-testid="codex-command"]')).not.toBeNull()
+    expect(document.body.textContent).not.toContain('Checking now')
+
+    const complete: AgentEvent[] = [
+      ...start,
+      { kind: 'tool-result', toolUseId: 'cmd', isError: false, rawContent: '', structured: null },
+      { kind: 'assistant-text', messageId: 'final', text: 'All done' },
+      codexSession(1).at(-1)!
+    ]
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness key="complete" events={complete} grouped />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.querySelectorAll('[data-testid="chat-agent-avatar"]')).toHaveLength(1)
+    const activity = document.querySelector('[data-testid="chat-activity"]')!
+    expect(document.body.textContent!.indexOf('All done')).toBeLessThan(
+      document.body.textContent!.indexOf('Activities')
+    )
+    expect(activity.textContent).toContain('3 items')
+    fireEvent.click(activity.querySelector('button')!)
+    expect(activity.textContent!.indexOf('Checking now')).toBeLessThan(
+      activity.textContent!.indexOf('Inspect status')
+    )
+    expect(activity.textContent!.indexOf('Inspect status')).toBeLessThan(
+      activity.textContent!.indexOf('git status')
+    )
+  })
+
+  it('previews the latest enabled kind even when activities are hidden', async () => {
+    const events: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Check status' },
+      {
+        kind: 'assistant-thinking',
+        messageId: 'thought',
+        text: 'Inspect status',
+        hasSignature: false
+      },
+      {
+        kind: 'tool-call',
+        id: 'cmd',
+        name: 'codex/commandExecution',
+        input: { command: 'git status' }
+      }
+    ]
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness
+          events={events}
+          grouped
+          inFlight
+          showSummary={false}
+          appearanceOverrides={{ chatShowActivityTools: false }}
+        />
+      </QueryClientProvider>
+    )
+    await settle()
+    const activity = document.querySelector('[data-testid="chat-activity"]')!
+    expect(activity.textContent).toContain('Inspect status')
+    expect(activity.textContent).not.toContain('git status')
+    const preview = activity.querySelector('button')!
+    expect(preview.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(preview)
+    expect(preview.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('opens activity with all tool calls collapsed', async () => {
+    const events: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Review changes' },
+      {
+        kind: 'tool-call',
+        id: 'cmd',
+        name: 'codex/commandExecution',
+        input: { command: 'git status' }
+      },
+      { kind: 'tool-result', toolUseId: 'cmd', isError: false, rawContent: '', structured: null },
+      {
+        kind: 'tool-call',
+        id: 'edit',
+        name: 'Edit',
+        input: { file_path: '/repo/a.ts', old_string: 'old', new_string: 'new' }
+      },
+      { kind: 'tool-result', toolUseId: 'edit', isError: false, rawContent: '', structured: null },
+      { kind: 'assistant-text', messageId: 'final', text: 'Done' },
+      codexSession(1).at(-1)!
+    ]
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness events={events} grouped />
+      </QueryClientProvider>
+    )
+    await settle()
+    const activity = document.querySelector('[data-testid="chat-activity"]')!
+    const disclosure = activity.querySelector('button')!
+    fireEvent.click(disclosure)
+    const history = document.getElementById(disclosure.getAttribute('aria-controls')!)!
+    let tools = Array.from(history.querySelectorAll('button[aria-expanded]'))
+    expect(tools).toHaveLength(2)
+    expect(tools.map((button) => button.getAttribute('aria-expanded'))).toEqual(['false', 'false'])
+    fireEvent.click(tools[0])
+    expect(tools[0].getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(disclosure)
+    fireEvent.click(disclosure)
+    tools = Array.from(history.querySelectorAll('button[aria-expanded]'))
+    expect(tools.map((button) => button.getAttribute('aria-expanded'))).toEqual(['false', 'false'])
+  })
+
+  it('searches messages inside collapsed activity', async () => {
+    const events: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Check status' },
+      { kind: 'assistant-text', messageId: 'progress', text: 'Looking for the walrus' },
+      {
+        kind: 'tool-call',
+        id: 'cmd',
+        name: 'codex/commandExecution',
+        input: { command: 'git status' }
+      },
+      { kind: 'assistant-text', messageId: 'final', text: 'All done' },
+      codexSession(1).at(-1)!
+    ]
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness events={events} grouped />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.body.textContent).not.toContain('Looking for the walrus')
+    act(() => display!.search.setQuery('walrus'))
+    await settle()
+    expect(display!.search.matchCount).toBe(1)
+    expect(document.body.textContent).toContain('Looking for the walrus')
+  })
+
+  it('reveals a requested tool even when activity and tool filters are hidden', async () => {
+    const events: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Check status' },
+      {
+        kind: 'tool-call',
+        id: 'cmd',
+        name: 'codex/commandExecution',
+        input: { command: 'git status' }
+      },
+      { kind: 'tool-result', toolUseId: 'cmd', isError: false, rawContent: '', structured: null },
+      { kind: 'assistant-text', messageId: 'final', text: 'All done' },
+      codexSession(1).at(-1)!
+    ]
+    const focus = new ToolFocusStore()
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ToolFocusContext.Provider value={focus}>
+          <Harness
+            events={events}
+            grouped
+            showSummary={false}
+            appearanceOverrides={{ chatShowActivityTools: false }}
+          />
+        </ToolFocusContext.Provider>
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.querySelector('[data-testid="chat-activity"]')).toBeNull()
+    act(() => {
+      focus.request('cmd')
+      display!.revealItem('tool:cmd')
+    })
+    await settle()
+    const activity = document.querySelector('[data-testid="chat-activity"]')!
+    expect(activity.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
+    expect(activity.textContent).toContain('git status')
+  })
+
   it('renders a long Codex session at the bottom, mounting only the rows in view', async () => {
     const client = new QueryClient()
     render(

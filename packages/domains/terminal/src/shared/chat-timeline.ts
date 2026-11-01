@@ -2820,9 +2820,7 @@ function failInFlightSubAgents(state: ChatTimelineState, statusLabel: string): C
  * Priority (top wins):
  *  1. Latest api-retry / rate-limit in current turn — explains stalls.
  *  2. Latest open stream block — current phase (thinking / writing / tool).
- *  3. Latest meaningful timeline item in current turn — keeps the label
- *     sticky across `stream-block-stop` / `stream-message-stop` gaps so the
- *     indicator never blanks while inFlight.
+ *  3. Latest pending tool or in-flight sub-agent in the current turn.
  */
 export function deriveLoadingLabel(state: ChatTimelineState): string | null {
   if (state.compacting) return 'Compacting conversation…'
@@ -2853,7 +2851,9 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
     if (latestOpen.blockType === 'tool_use') {
       const item =
         latestOpen.timelineIndex >= 0 ? (state.timeline[latestOpen.timelineIndex] ?? null) : null
-      return formatToolLabel(latestOpen.toolName, item)
+      if (item?.kind !== 'tool' || item.invocation.status === 'pending') {
+        return formatToolLabel(latestOpen.toolName, item)
+      }
     }
     if (latestOpen.blockType === 'thinking') return 'Thinking…'
     if (latestOpen.blockType === 'text') return 'Writing…'
@@ -2862,18 +2862,17 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
     if (!item || item.kind === 'user-text' || item.kind === 'result') break
-    if (item.kind === 'tool') {
+    if (item.kind === 'tool' && item.invocation.status === 'pending') {
       return formatToolLabel(item.invocation.name, item)
     }
-    if (item.kind === 'thinking') return 'Thinking…'
-    if (item.kind === 'text') return 'Writing…'
-    if (item.kind === 'sub-agent') return 'Sub-agent…'
+    if (item.kind === 'sub-agent' && item.phase === 'in-flight') return 'Sub-agent…'
   }
 
   return null
 }
 
 function formatToolLabel(name: string | undefined, item: TimelineItem | null): string {
+  if (name === 'Bash' || name === 'codex/commandExecution') return 'Running command…'
   const verb = toolVerb(name)
   const target = item?.kind === 'tool' ? extractToolTarget(item.invocation.input) : null
   return target ? `${verb} ${target}` : `${verb}…`

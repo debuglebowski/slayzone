@@ -113,6 +113,8 @@ const { useVirtualTimeline } = await import('./useVirtualTimeline')
 const { installTimelineLayout } = await import('./__tests__/timeline-layout')
 const { ChatViewContext } = await import('./ChatViewContext')
 const { CommandTaskContext } = await import('./tool-cards')
+const { activityView } = await import('./activity-view')
+const { appearanceDefaults } = await import('@slayzone/ui')
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { ChatTimelineState, TimelineItem } from '@slayzone/terminal/client'
 
@@ -121,10 +123,12 @@ type Dispatch = (events: AgentEvent[]) => void
 /** ChatPanel's part of the loop: reducer state, live store, contexts, ChatTimeline. */
 function Harness({
   initial,
-  onReady
+  onReady,
+  grouped = false
 }: {
   initial: ChatTimelineState
   onReady: (d: Dispatch) => void
+  grouped?: boolean
 }) {
   const [state, dispatch] = useReducer(reducer, initial)
   const [store] = useState(() => new terminal.LiveBlockStore())
@@ -175,6 +179,18 @@ function Harness({
   const asyncNoop = useCallback(async () => {}, [])
   const follow = useFollowBottom()
   const virtual = useVirtualTimeline(follow)
+  const groupedView = useMemo(
+    () =>
+      grouped
+        ? activityView(
+            state.timeline.filter(
+              (item): item is TimelineItem => !!item && item.kind !== 'session-start'
+            ),
+            true
+          )
+        : null,
+    [grouped, state.timeline]
+  )
   return (
     <ChatViewContext.Provider value={view}>
       <terminal.LiveBlockStoreContext.Provider value={store}>
@@ -186,8 +202,9 @@ function Harness({
             isEmpty={false}
             inFlight
             awaitingUser={false}
-            appearance={{ chatWidth: 'narrow' } as never}
-            items={state.timeline as TimelineItem[]}
+            appearance={grouped ? appearanceDefaults : ({ chatWidth: 'narrow' } as never)}
+            items={groupedView?.rows ?? (state.timeline as TimelineItem[])}
+            activityTurns={groupedView?.turns}
             virtual={virtual}
             scrollRef={virtual.bindScroller}
             itemKey={itemKey}
@@ -242,12 +259,13 @@ afterEach(() => {
 })
 
 describe('a stream delta re-renders only the row that streams', () => {
-  it('300 finished rows + a streaming reply: per delta, one AssistantText and nothing else of the timeline', async () => {
+  it.each([false, true])('streaming reply updates only its row (grouped=%s)', async (grouped) => {
     let dispatch: Dispatch = () => {}
     const client = new QueryClient()
     render(
       <QueryClientProvider client={client}>
         <Harness
+          grouped={grouped}
           initial={longSession(100)}
           onReady={(d) => {
             dispatch = d
@@ -293,11 +311,12 @@ describe('a stream delta re-renders only the row that streams', () => {
     expect(row?.textContent).toContain(`w${DELTAS - 1}`)
   })
 
-  it('the saved block finalizes the row in place: same DOM node, no caret', async () => {
+  it.each([false, true])('saved block finalizes in place (grouped=%s)', async (grouped) => {
     let dispatch: Dispatch = () => {}
     render(
       <QueryClientProvider client={new QueryClient()}>
         <Harness
+          grouped={grouped}
           initial={longSession(3)}
           onReady={(d) => {
             dispatch = d
