@@ -44,7 +44,7 @@ const rendered = vi.hoisted(() => {
         const name = nameOf(f.type)
         if (name) {
           counts.set(name, (counts.get(name) ?? 0) + 1)
-          if (name === 'AssistantMessageBody') {
+          if (name === 'AssistantMessageBody' || name === 'ActivityNarrative') {
             const id = f.memoizedProps?.item?.messageId ?? '?'
             textRows.set(id, (textRows.get(id) ?? 0) + 1)
           }
@@ -102,7 +102,7 @@ vi.mock('../trpc', () => ({ useTRPC: () => fakeTrpc, useTRPCClient: () => fakeCl
 vi.mock('../../trpc', () => ({ useTRPC: () => fakeTrpc, useTRPCClient: () => fakeClient }))
 
 const { useCallback, useLayoutEffect, useMemo, useReducer, useState } = await import('react')
-const { act, cleanup, render } = await import('@testing-library/react')
+const { act, cleanup, render, screen } = await import('@testing-library/react')
 const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
 const { afterEach, describe, expect, it } = await import('vitest')
 const terminal = await import('@slayzone/terminal/client')
@@ -120,6 +120,22 @@ import type { ChatTimelineState, TimelineItem } from '@slayzone/terminal/client'
 
 type Dispatch = (events: AgentEvent[]) => void
 
+const turnResult = (): AgentEvent => ({
+  kind: 'result',
+  subtype: 'success',
+  isError: false,
+  durationMs: 1,
+  durationApiMs: 1,
+  totalCostUsd: 0,
+  numTurns: 1,
+  text: null,
+  stopReason: 'end_turn',
+  terminalReason: 'completed',
+  modelUsage: {},
+  usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+  permissionDenials: []
+})
+
 /** ChatPanel's part of the loop: reducer state, live store, contexts, ChatTimeline. */
 function Harness({
   initial,
@@ -131,6 +147,7 @@ function Harness({
   grouped?: boolean
 }) {
   const [state, dispatch] = useReducer(reducer, initial)
+  const inFlight = terminal.isTurnOpen(state)
   const [store] = useState(() => new terminal.LiveBlockStore())
   useLayoutEffect(() => {
     store.publish(state.live)
@@ -186,10 +203,10 @@ function Harness({
             state.timeline.filter(
               (item): item is TimelineItem => !!item && item.kind !== 'session-start'
             ),
-            true
+            inFlight
           )
         : null,
-    [grouped, state.timeline]
+    [grouped, state.timeline, inFlight]
   )
   return (
     <ChatViewContext.Provider value={view}>
@@ -200,7 +217,7 @@ function Harness({
             state={state}
             hydrating={false}
             isEmpty={false}
-            inFlight
+            inFlight={inFlight}
             awaitingUser={false}
             appearance={grouped ? appearanceDefaults : ({ chatWidth: 'narrow' } as never)}
             items={groupedView?.rows ?? (state.timeline as TimelineItem[])}
@@ -241,7 +258,8 @@ function longSession(n: number): ChatTimelineState {
         isError: false,
         rawContent: `${i}`,
         structured: null
-      }
+      },
+      turnResult()
     )
   }
   events.push({ kind: 'user-message', text: 'stream please' })
@@ -307,8 +325,14 @@ describe('a stream delta re-renders only the row that streams', () => {
       expect(rendered.counts.get(name) ?? 0, name).toBe(0)
     }
     // And the live text is on screen.
-    const row = document.querySelector('[data-chat-text][data-streaming="true"]')
+    const row = document.querySelector(
+      grouped ? '[aria-label="Message"]' : '[data-chat-text][data-streaming="true"]'
+    )
     expect(row?.textContent).toContain(`w${DELTAS - 1}`)
+    if (grouped) {
+      expect(screen.queryByRole('toolbar', { name: 'Answer actions' })).toBeNull()
+      expect(screen.getByTestId('chat-working-indicator')).toBeDefined()
+    }
   })
 
   it.each([false, true])('saved block finalizes in place (grouped=%s)', async (grouped) => {
@@ -332,7 +356,9 @@ describe('a stream delta re-renders only the row that streams', () => {
         { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'world' }
       ])
     })
-    const live = document.querySelector('[data-chat-text][data-streaming="true"]')
+    const live = document.querySelector(
+      grouped ? '[aria-label="Message"]' : '[data-chat-text][data-streaming="true"]'
+    )
     expect(live?.textContent).toBe('Hello world')
     await act(async () => {
       dispatch([
@@ -341,10 +367,20 @@ describe('a stream delta re-renders only the row that streams', () => {
         { kind: 'stream-message-stop' }
       ])
     })
-    const rows = document.querySelectorAll('[data-chat-text]')
+    const rows = document.querySelectorAll(grouped ? '[aria-label="Message"]' : '[data-chat-text]')
     const final = rows[rows.length - 1]
     expect(final).toBe(live)
     expect(final.getAttribute('data-streaming')).toBe(null)
     expect(final.textContent).toBe('Hello world')
+    if (grouped) {
+      expect(screen.queryByRole('toolbar', { name: 'Answer actions' })).toBeNull()
+      expect(screen.getByTestId('chat-working-indicator')).toBeDefined()
+      await act(async () => {
+        dispatch([turnResult()])
+      })
+      expect(screen.getByRole('toolbar', { name: 'Answer actions' })).toBeDefined()
+      expect(screen.queryByTestId('chat-working-indicator')).toBeNull()
+      expect(document.querySelector('[data-chat-text]')?.textContent).toBe('Hello world')
+    }
   })
 })

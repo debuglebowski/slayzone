@@ -38,16 +38,19 @@ export function activityView(
     )
     // Process diagnostics can arrive after the reply; they don't make it progress text.
     const last = activity.findLast((item) => item.kind !== 'stderr')
-    // The last text stays visible while streaming and after it settles. If the
-    // agent emits more activity, it moves into that turn's activity history.
-    const final = last?.kind === 'text' ? last : null
+    const result = segment.find((item) => item.kind === 'result')
+    // A completed text block may still be progress. Only turn completion confirms
+    // an answer; pauses, interruptions and history gaps must not promote it.
+    const final =
+      result && !result.isError && last?.kind === 'text' && last.stream !== 'open'
+        ? last
+        : null
     const entries = final ? activity.filter((item) => item !== final) : activity
     const files = segment.filter(
       (item): item is Extract<TimelineItem, { kind: 'files-changed' }> =>
         item.kind === 'files-changed'
     )
     const hidden = new Set<TimelineItem>([...entries, ...files])
-    const result = segment.find((item) => item.kind === 'result')
     const user = segment.find((item) => item.kind === 'user-text')
     if (final && result) hidden.add(result)
     const kept = segment.filter((item) => !hidden.has(item))

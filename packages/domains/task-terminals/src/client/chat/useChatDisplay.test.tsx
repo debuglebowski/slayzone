@@ -367,15 +367,43 @@ describe('display preferences', () => {
     expect(view.rows).toEqual([user, gap, nextUser])
   })
 
-  it('keeps the latest text visible while streaming and after it settles', () => {
+  it('keeps progress and streaming text in activity until the turn completes', () => {
     const user = { kind: 'user-text', text: 'hello', timestamp: 0 } as TimelineItem
     const progress = text('Checking', 1)
     const pending = activityView([user, progress], true)
-    expect(pending.rows).toEqual([user, progress])
+    expect(pending.rows).toEqual([user])
+    expect(pending.turns.get(user)?.final).toBeNull()
+    expect(pending.turns.get(user)?.items).toEqual([progress])
     const streaming = { ...text('Writing', 2), stream: 'open' } as TimelineItem
     const writing = activityView([user, progress, streaming], true)
-    expect(writing.turns.get(streaming)?.final).toBe(streaming)
-    expect(writing.turns.get(streaming)?.items).toEqual([progress])
+    expect(writing.rows).toEqual([user])
+    expect(writing.turns.get(user)?.final).toBeNull()
+    expect(writing.turns.get(user)?.items).toEqual([progress, streaming])
+    const reply = text('Done', 2)
+    const result = { kind: 'result', timestamp: 3 } as TimelineItem
+    const done = activityView([user, progress, reply, result], true)
+    expect(done.rows).toEqual([user, reply])
+    expect(done.turns.get(reply)?.final).toBe(reply)
+    expect(done.turns.get(reply)?.active).toBe(false)
+    expect(done.turns.get(reply)?.items).toEqual([progress])
+  })
+
+  it('never promotes unfinished text at a pause, interruption, or history boundary', () => {
+    const user = { kind: 'user-text', text: 'hello', timestamp: 0 } as TimelineItem
+    const progress = text('Still compiling', 1)
+    const boundaries = [
+      [],
+      [{ kind: 'interrupted', timestamp: 2 }],
+      [{ kind: 'result', isError: true, timestamp: 2 }],
+      [{ kind: 'history-gap', from: 2, to: 4, rows: 2, timestamp: 2 }],
+      [{ kind: 'user-text', text: 'next', timestamp: 2 }]
+    ] as TimelineItem[][]
+    for (const boundary of boundaries) {
+      const view = activityView([user, progress, ...boundary], false)
+      expect(view.rows).not.toContain(progress)
+      expect([...view.turns.values()].every((turn) => turn.final === null)).toBe(true)
+      expect(view.hosts.has(progress)).toBe(true)
+    }
   })
 
   it('groups ordinary tool calls without hiding messages or interactive prompts', () => {

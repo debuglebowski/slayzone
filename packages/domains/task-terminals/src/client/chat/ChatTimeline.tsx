@@ -184,18 +184,15 @@ export function ChatTimeline({
     (item: TimelineItem, index: number) => {
       const turn = activityTurns?.get(item)
       if (turn) {
-        const showWorking = turn.active && !awaitingUser && turn.final?.stream !== 'open'
+        const showWorking = turn.active && !awaitingUser
         if (turn.final && item.kind === 'text') {
           return (
-            <>
-              <AssistantAnswer
-                item={item}
-                turn={turn}
-                appearance={activityAppearance}
-                rowOf={rowOf}
-              />
-              {showWorking && <TypingIndicator label={loadingLabel} />}
-            </>
+            <AssistantAnswer
+              item={item}
+              turn={turn}
+              appearance={activityAppearance}
+              rowOf={rowOf}
+            />
           )
         }
         const showOwner =
