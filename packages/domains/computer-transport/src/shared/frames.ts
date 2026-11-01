@@ -53,6 +53,10 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 /**
  * Bump on any breaking change to the frames below.
  *
+ * v4: the computer owns PTY shell/env and acknowledges kills only after exit.
+ * PTY commands and notifications identify the spawn attempt so delayed frames
+ * cannot affect a replacement. Both peers must upgrade together.
+ *
  * v3 (T-27): every hub → computer request carries the requesting user
  * ({@link requestActorSchema}, an envelope member), `hello` carries
  * `protocolVersion`, and `enroll`/`hello` results echo the hub's version.
@@ -61,7 +65,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 3
+export const COMPUTER_PROTOCOL_VERSION = 4
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {
@@ -239,6 +243,7 @@ export const ComputerNotificationMethods = {
 
 export const ptyDataParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: z.string().min(1).optional(),
   /** Monotonic per-session sequence number, preserved end-to-end. */
   seq: z.number().int().nonnegative(),
   data: z.string()
@@ -247,6 +252,7 @@ export type PtyDataParams = z.infer<typeof ptyDataParamsSchema>
 
 export const ptyExitParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: z.string().min(1).optional(),
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
   /**
@@ -552,7 +558,8 @@ export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>
  * already started, never existed, or a spawn sent without `admission`.
  */
 export const ptyPrioritizeParamsSchema = z.object({
-  sessionId: z.string().min(1)
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField
 })
 export type PtyPrioritizeParams = z.infer<typeof ptyPrioritizeParamsSchema>
 
@@ -570,6 +577,7 @@ export type PtyPrioritizeResult = z.infer<typeof ptyPrioritizeResultSchema>
  */
 export const ptyBackgroundJobsParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: spawnIdField,
   jobs: z
     .array(
       z.object({
@@ -630,6 +638,7 @@ export type PtyDoctorResult = z.infer<typeof ptyDoctorResultSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: spawnIdField,
   cols: z.number().int().positive(),
   rows: z.number().int().positive()
 })
@@ -637,6 +646,7 @@ export type PtyResizeParams = z.infer<typeof ptyResizeParamsSchema>
 
 export const ptyWriteParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: spawnIdField,
   data: z.string()
 })
 export type PtyWriteParams = z.infer<typeof ptyWriteParamsSchema>
@@ -644,6 +654,7 @@ export type PtyWriteParams = z.infer<typeof ptyWriteParamsSchema>
 /** Replay buffered output with `seq > since.seq` (gap recovery on reconnect). */
 export const ptyGetBufferSinceParamsSchema = z.object({
   sessionId: z.string().min(1),
+  spawnId: spawnIdField,
   /**
    * Exclusive lower bound — frames with `seq > this` are replayed.
    *

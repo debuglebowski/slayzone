@@ -1,0 +1,131 @@
+import { userInfo } from 'node:os'
+import { describe, expect, it, vi } from 'vitest'
+import { TypedEventEmitter } from '@slayzone/computer-transport/shared'
+import { createRoutingPtyBackend, type RoutingGateway } from '@slayzone/computer-transport/server'
+import type { ComputerGatewayEvents } from '@slayzone/computer-transport/server'
+import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
+import { createPtyHandlers } from './pty'
+import type { ComputerConfig } from '../config'
+import type { ComputerDialer } from './types'
+
+const computerId = 'remote-computer'
+const sessionId = 'task:tab'
+
+function setup() {
+  const events = new TypedEventEmitter<ComputerGatewayEvents>()
+  const config: ComputerConfig = {
+    hubUrl: 'ws://localhost:0/computers',
+    name: 'remote',
+    allowedRoots: [process.cwd()],
+    capabilities: ['pty']
+  }
+  const dialer: ComputerDialer = {
+    notify: (method, params) => {
+      events.emit(
+        method as 'pty.data',
+        {
+          ...(params as Record<string, unknown>),
+          computerId
+        } as ComputerGatewayEvents['pty.data']
+      )
+      return true
+    }
+  }
+  const computer = createPtyHandlers({ dialer, config, log: () => {} })
+  const gateway = {
+    events,
+    listComputers: () => [],
+    request: async (_id: string, method: string, params: unknown) =>
+      computer.handlers[method]!(params)
+  } as RoutingGateway
+  const backend = createRoutingPtyBackend({
+    gateway,
+    resolveComputerId: (spec) => spec.computerId
+  })
+  const spec: PtySpawnSpec = {
+    sessionId,
+    taskId: 'task',
+    computerId,
+    projectId: null,
+    // Deliberately unusable hub shell and hub identity: the computer must ignore both.
+    file: '/usr/sbin/nologin',
+    args: [],
+    options: {
+      cwd: process.cwd(),
+      env: {
+        HOME: '/tmp',
+        USER: 'slayzone',
+        PATH: '/hub/bin',
+        SLAYZONE_TASK_ID: 'task'
+      },
+      cols: 80,
+      rows: 24,
+      name: 'xterm-256color'
+    },
+    transport: false,
+    computerShellCommand: 'printf "HOME=%s USER=%s PATH=%s\\n" "$HOME" "$USER" "$PATH"; exec cat'
+  }
+  return { backend, computer, spec }
+}
+
+describe('desktop hub to remote computer PTY', () => {
+  it('uses computer identity and keeps one live process across reload', async () => {
+    const { backend, computer, spec } = setup()
+    try {
+      const first = (await backend.spawn(spec)) as PtyHandle
+      const firstData: string[] = []
+      first.onData((data) => firstData.push(data))
+      await first.whenSpawned
+      await vi.waitFor(
+        () =>
+          expect(firstData.join('')).toContain(
+            `HOME=${userInfo().homedir} USER=${userInfo().username}`
+          ),
+        { timeout: 8_000 }
+      )
+      expect(firstData.join('')).not.toContain('/hub/bin')
+      const firstPid = first.pid!
+
+      const second = (await backend.spawn(spec)) as PtyHandle
+      await second.whenSpawned
+      expect(second.pid).not.toBe(firstPid)
+      expect(() => process.kill(firstPid, 0)).toThrow()
+      const listed = computer.handlers['pty.list']({}) as {
+        sessions: Array<{ sessionId: string; pid: number }>
+      }
+      expect(listed.sessions).toEqual([expect.objectContaining({ sessionId, pid: second.pid })])
+
+      // Late command from old handle must not reach the replacement.
+      first.write('late input\n')
+      first.kill()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect((computer.handlers['pty.list']({}) as typeof listed).sessions).toHaveLength(1)
+      second.kill()
+    } finally {
+      computer.disposeAll()
+    }
+  }, 15_000)
+
+  it('kills an adopted warm agent before acknowledging', async () => {
+    const { backend, computer } = setup()
+    try {
+      const warm = await backend.warmSpawn!(computerId, {
+        warmId: 'warm-1',
+        command: '/usr/sbin/nologin',
+        args: [],
+        cwd: process.cwd(),
+        env: { HOME: '/tmp', SLAYZONE_TASK_ID: 'task' },
+        postSpawnCommand: 'exec cat'
+      })
+      const adopted = await backend.adopt!(computerId, 'warm-1', sessionId, 'cat')
+      expect(adopted.pid).toBe(warm.pid)
+      adopted.kill()
+      await vi.waitFor(() => expect(() => process.kill(warm.pid, 0)).toThrow())
+      await vi.waitFor(() =>
+        expect((computer.handlers['pty.list']({}) as { sessions: unknown[] }).sessions).toEqual([])
+      )
+    } finally {
+      computer.disposeAll()
+    }
+  }, 15_000)
+})
