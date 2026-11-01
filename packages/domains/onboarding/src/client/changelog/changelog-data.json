@@ -1,5 +1,72 @@
 [
   {
+    "version": "0.36.4",
+    "date": "2026-11-01",
+    "tagline": "Deeper chats, steadier sessions",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Codex chat",
+        "description": "Use Codex in chat with live tool output, file diffs, CLI-provided models, approvals, and a handoff from planning to implementation."
+      },
+      {
+        "category": "feature",
+        "title": "Answer threads",
+        "description": "Open a side discussion from any answer and bring its conclusion back to the main conversation."
+      },
+      {
+        "category": "feature",
+        "title": "Mobile task management",
+        "description": "Create and edit tasks on mobile, organise boards in kanban, list or tree views, and search and filter across hubs."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster chat history",
+        "description": "Long conversations load in pages while keeping search, outlines, file changes and saved scroll positions available."
+      },
+      {
+        "category": "improvement",
+        "title": "Clearer chat activity",
+        "description": "Agent work is grouped by turn, with clearer tool and file summaries and animated loading indicators."
+      },
+      {
+        "category": "improvement",
+        "title": "Chat display controls",
+        "description": "Choose how much detail chat shows, with consistent approval and question cards."
+      },
+      {
+        "category": "improvement",
+        "title": "Hub badges",
+        "description": "Project rows and task tiles show which hub they belong to, including connection status."
+      },
+      {
+        "category": "fix",
+        "title": "Conversation recovery",
+        "description": "Restarting an agent or reopening a completed task preserves its conversation, and Codex drafts survive reloads."
+      },
+      {
+        "category": "fix",
+        "title": "Reliable agent starts",
+        "description": "Agent restarts run in order, use the task computer’s shell and environment, and handle Claude session conflicts and delayed Codex session IDs."
+      },
+      {
+        "category": "fix",
+        "title": "Remote hubs and commands",
+        "description": "Project and task dialogs use the selected hub, remote boards recover after reconnecting, and task CLI commands authenticate through their computer."
+      },
+      {
+        "category": "fix",
+        "title": "Accurate chat status",
+        "description": "Chat keeps loading through intermediate replies and shows diagnostics separately from turn failures."
+      },
+      {
+        "category": "fix",
+        "title": "Remember dismissed notices",
+        "description": "Dismissed development server notices stay dismissed."
+      }
+    ]
+  },
+  {
     "version": "0.36.3",
     "date": "2026-10-30",
     "tagline": "Chat, fully grown",

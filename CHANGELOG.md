@@ -1,6 +1,66 @@
 # Changelog
 
 
+## v0.36.4
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.3...v0.36.4)
+
+### 🚀 Enhancements
+
+- **chat:** Codex UI — tool cards, approval cards, provider wording ([dcf74a40e](https://github.com/debuglebowski/slayzone/commit/dcf74a40e))
+- **mobile:** Task board: kanban, list, tree, moves, filters, task search ([6267ae665](https://github.com/debuglebowski/slayzone/commit/6267ae665))
+- **mobile:** Create, edit and organise tasks ([ac9fee9e4](https://github.com/debuglebowski/slayzone/commit/ac9fee9e4))
+- **chat:** Paged history — open any session in ~0.3 s ([1de26ae6a](https://github.com/debuglebowski/slayzone/commit/1de26ae6a))
+- **sidebar:** Hub name pill on tree project rows ([abae05d49](https://github.com/debuglebowski/slayzone/commit/abae05d49))
+- **sidebar:** Hub-tinted badge, no red hub colors ([b1b5c51cf](https://github.com/debuglebowski/slayzone/commit/b1b5c51cf))
+- **codex:** Add plan approval handoff ([4eb13f4b6](https://github.com/debuglebowski/slayzone/commit/4eb13f4b6))
+- **chat:** Refine display settings ([fc8de130c](https://github.com/debuglebowski/slayzone/commit/fc8de130c))
+- **chat:** Group agent turn activity ([77c9fd539](https://github.com/debuglebowski/slayzone/commit/77c9fd539))
+- **chat:** Add orbital loading dots ([2097ef9d9](https://github.com/debuglebowski/slayzone/commit/2097ef9d9))
+- **chat:** Add answer threads and hover toolbar ([d4290fa04](https://github.com/debuglebowski/slayzone/commit/d4290fa04))
+- **chat:** Refine tool and file summaries ([91e4f1a3a](https://github.com/debuglebowski/slayzone/commit/91e4f1a3a))
+
+### 🔥 Performance
+
+- **chat:** Linear history replay, open as one batch ([7924d9740](https://github.com/debuglebowski/slayzone/commit/7924d9740))
+
+### 🩹 Fixes
+
+- **chat:** Support ES2022 plan approval hosts ([010c32765](https://github.com/debuglebowski/slayzone/commit/010c32765))
+- **chat:** Codex engine — models from CLI, resume, Stop, approvals ([18f8384cc](https://github.com/debuglebowski/slayzone/commit/18f8384cc))
+- **terminal:** Revived task always resumes its conversation ([e3731c6e2](https://github.com/debuglebowski/slayzone/commit/e3731c6e2))
+- **projects:** Pick computer + folder on the chosen hub ([da3ce1235](https://github.com/debuglebowski/slayzone/commit/da3ce1235))
+- **federation:** Load remote hub projects after late connect; hub badges ([4614dd852](https://github.com/debuglebowski/slayzone/commit/4614dd852))
+- **federation:** Project/task dialogs talk to owning hub ([9011f86ad](https://github.com/debuglebowski/slayzone/commit/9011f86ad))
+- **task:** Persist dev server toast dismissal ([801b3e2d5](https://github.com/debuglebowski/slayzone/commit/801b3e2d5))
+- **chat:** Prompt row marker on one line; Codex models from hub everywhere ([cc1ff8171](https://github.com/debuglebowski/slayzone/commit/cc1ff8171))
+- **chat:** Remove composer keyboard hint ([b3a6f6c29](https://github.com/debuglebowski/slayzone/commit/b3a6f6c29))
+- **chat:** Preserve Codex drafts on reload ([c4d771a01](https://github.com/debuglebowski/slayzone/commit/c4d771a01))
+- **sessions:** Show and count chat history ([7371e7fff](https://github.com/debuglebowski/slayzone/commit/7371e7fff))
+- **chat:** Unify prompt card choices ([f0ee961e4](https://github.com/debuglebowski/slayzone/commit/f0ee961e4))
+- **chat:** Narrow display popup ([43ee02893](https://github.com/debuglebowski/slayzone/commit/43ee02893))
+- **cli:** Authenticate remote task commands ([01601bc33](https://github.com/debuglebowski/slayzone/commit/01601bc33))
+- **chat:** Keep loading after intermediate replies ([38d53b68f](https://github.com/debuglebowski/slayzone/commit/38d53b68f))
+- **pty:** Use computer shell and environment ([b5a95bddf](https://github.com/debuglebowski/slayzone/commit/b5a95bddf))
+- **pty:** Serialize process replacement ([7b3ad812a](https://github.com/debuglebowski/slayzone/commit/7b3ad812a))
+- **session:** Capture delayed Codex session IDs ([f44385cea](https://github.com/debuglebowski/slayzone/commit/f44385cea))
+- **terminal:** Handle Claude session conflicts ([1f5e81864](https://github.com/debuglebowski/slayzone/commit/1f5e81864))
+- **chat:** Preserve history on agent restart ([cfc2fe575](https://github.com/debuglebowski/slayzone/commit/cfc2fe575))
+- **chat:** Separate diagnostics from turn errors ([d4fa64a6f](https://github.com/debuglebowski/slayzone/commit/d4fa64a6f))
+- **codex:** Retain failed patch diagnostics ([65982df4e](https://github.com/debuglebowski/slayzone/commit/65982df4e))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.36.3 ([e2420c69d](https://github.com/debuglebowski/slayzone/commit/e2420c69d))
+
+### ✅ Tests
+
+- **chat:** Codex safety net — fake app-server, recordings, drift check ([51c7d3205](https://github.com/debuglebowski/slayzone/commit/51c7d3205))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.36.3
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.2...v0.36.3)
