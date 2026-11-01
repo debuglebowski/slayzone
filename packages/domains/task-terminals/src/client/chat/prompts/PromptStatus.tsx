@@ -130,7 +130,7 @@ export function PromptStatusLine({ toolUseId }: { toolUseId: string }) {
   }
   if (!text) return null
   return (
-    <div className="pl-14 pr-4 -mt-1 pb-1">
+    <div className="px-0 -mt-1 pb-1">
       <StatusText>{text}</StatusText>
     </div>
   )

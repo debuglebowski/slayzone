@@ -707,7 +707,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     <div
                       ref={panelRef}
                       data-chat-panel
-                      className="relative flex flex-col h-full min-w-0 flex-1 bg-background"
+                      className="relative flex flex-col h-full min-w-0 flex-1 bg-background px-14"
                       style={{ fontSize: `${appearance.terminalFontSize}px` }}
                       onFocus={palette.claim}
                       onDragEnter={attachmentsApi.onDragEnter}

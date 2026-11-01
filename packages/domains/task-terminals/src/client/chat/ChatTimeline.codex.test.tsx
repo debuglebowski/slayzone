@@ -385,7 +385,7 @@ describe('Codex chat on the virtualized timeline', () => {
     expect(document.body.textContent).not.toContain('Activities')
   })
 
-  it('shows one avatar, a live preview, and completed activity below the answer', async () => {
+  it('shows a live preview and completed activity below the answer without an avatar', async () => {
     const start: AgentEvent[] = [
       { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
       { kind: 'user-message', text: 'Check status' },
@@ -410,7 +410,7 @@ describe('Codex chat on the virtualized timeline', () => {
       </QueryClientProvider>
     )
     await settle()
-    expect(document.querySelectorAll('[data-testid="chat-agent-avatar"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-testid="chat-agent-avatar"]')).toHaveLength(0)
     expect(document.querySelector('[data-testid="chat-working-indicator"]')?.textContent).toContain(
       'Running command…'
     )
@@ -436,7 +436,7 @@ describe('Codex chat on the virtualized timeline', () => {
       </QueryClientProvider>
     )
     await settle()
-    expect(document.querySelectorAll('[data-testid="chat-agent-avatar"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-testid="chat-agent-avatar"]')).toHaveLength(0)
     const activity = document.querySelector('[data-testid="chat-activity"]')!
     expect(document.body.textContent!.indexOf('All done')).toBeLessThan(
       document.body.textContent!.indexOf('Activities')

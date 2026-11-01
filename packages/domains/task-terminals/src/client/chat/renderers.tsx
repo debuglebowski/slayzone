@@ -18,7 +18,6 @@ import {
   ListChecks,
   ClipboardList,
   HelpCircle,
-  Sparkles,
   User,
   Bot
 } from 'lucide-react'
@@ -90,7 +89,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
   return (
     <div
       className={cn(
-        'group px-4 flex justify-end items-center gap-2',
+        'group px-0 flex justify-end items-center gap-2',
         appearance.chatCompactSpacing ? 'mb-2 py-0.5' : 'mb-4 py-2'
       )}
     >
@@ -114,7 +113,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
 }
 
 /**
- * Assistant message — left-aligned avatar + card. Right edge bounded by outer pr.
+ * Assistant message — plain, left-aligned text. Right edge bounded by outer pr.
  * While it streams, its text is the live block (only this row re-renders per
  * delta; the markdown re-parse is deferred, so a long reply never blocks input).
  * The saved block then finalizes the same row: same element, same text.
@@ -124,7 +123,7 @@ export function AssistantMessageBody({ item }: { item: Extract<TimelineItem, { k
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
   const text = useDeferredValue(live?.text ?? item.text)
   return (
-    <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 shadow-sm px-3 py-2">
+    <div className="min-w-0">
       <div
         data-chat-text
         data-streaming={streaming ? 'true' : undefined}
@@ -140,9 +139,8 @@ export function AssistantMessageBody({ item }: { item: Extract<TimelineItem, { k
 export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
   const appearance = useAppearance()
   return (
-    <div className={cn('pl-4 pr-[10%]', appearance.chatCompactSpacing ? 'py-0.5' : 'py-2')}>
+    <div className={cn('px-0', appearance.chatCompactSpacing ? 'py-0.5' : 'py-2')}>
       <div className="group flex gap-3 items-start">
-        <AssistantAvatar />
         <AssistantMessageBody item={item} />
         {appearance.chatShowMessageMeta && (
           <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
@@ -161,17 +159,6 @@ function StreamCaret() {
       aria-hidden="true"
       className="inline-block w-1.5 h-3.5 align-text-bottom rounded-sm bg-foreground/50 animate-pulse"
     />
-  )
-}
-
-function AssistantAvatar() {
-  return (
-    <div
-      data-testid="chat-agent-avatar"
-      className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm"
-    >
-      <Sparkles className="size-3.5" />
-    </div>
   )
 }
 
@@ -239,7 +226,7 @@ export function SystemInit({ item }: { item: Extract<TimelineItem, { kind: 'sess
 
 export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 'result' }> }) {
   return (
-    <div className="pl-14 pr-4 pb-2 flex flex-wrap items-center gap-3">
+    <div className="px-0 pb-2 flex flex-wrap items-center gap-3">
       <MessageDetails item={item} standalone />
     </div>
   )
@@ -268,7 +255,7 @@ export function StderrBlock({ item }: { item: Extract<TimelineItem, { kind: 'std
   const id = useId()
   if (!text.trim()) return null
   return (
-    <div className={cn(!inActivity && `${CHAT_CARD_INDENT} pr-4`, 'py-1')}>
+    <div className={cn(!inActivity && `${CHAT_CARD_INDENT} pr-0`, 'py-1')}>
       <div className="w-fit max-w-full rounded-md border border-border/50 bg-card/40 text-xs text-muted-foreground overflow-hidden">
         <button
           type="button"
@@ -416,7 +403,7 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
   return (
     <>
       <div
-        className={cn(CHAT_CARD_INDENT, 'pr-4 py-1 group flex items-start gap-2')}
+        className={cn(CHAT_CARD_INDENT, 'pr-0 py-1 group flex items-start gap-2')}
         data-testid="sub-agent-row"
       >
         <div className="w-fit max-w-full rounded-md border border-border/50 bg-muted/20 overflow-hidden">

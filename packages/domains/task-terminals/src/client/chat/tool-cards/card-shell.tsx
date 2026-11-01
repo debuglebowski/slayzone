@@ -22,9 +22,8 @@ function LinkText({ text }: { text: string }) {
   return <LinkifiedText text={text} onOpenUrl={onOpenUrl} onOpenFile={onOpenFile} />
 }
 
-// Card indent for tool/sub-agent rows: aligns with assistant card position
-// (assistant uses pl-4 + size-7 avatar + gap-3 = 56px = pl-14).
-const CHAT_CARD_INDENT = 'pl-14'
+// Align tool/sub-agent rows with assistant text.
+const CHAT_CARD_INDENT = 'pl-0'
 
 function formatTime(ts: number): string {
   try {
@@ -162,7 +161,7 @@ function ToolShell({
   return (
     <div
       className={cn(
-        autoOpen === undefined && !inActivity ? `${CHAT_CARD_INDENT} pr-4` : 'pl-0 pr-0',
+        autoOpen === undefined && !inActivity ? `${CHAT_CARD_INDENT} pr-0` : 'pl-0 pr-0',
         'py-1 group flex items-start gap-2'
       )}
     >

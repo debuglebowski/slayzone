@@ -13,7 +13,7 @@ import {
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { LiveBlockStoreContext, streamKeyOf } from '@slayzone/terminal/client'
 import { AssistantMessageBody } from './renderers'
-import { ActivityTurn, AgentAvatar } from './ActivityTurn'
+import { ActivityTurn } from './ActivityTurn'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { MessageDetails } from './MessageDetails'
 import { useChatView } from './ChatViewContext'
@@ -52,21 +52,22 @@ export function AssistantAnswer({
         (!turn?.userMessageId || thread.sourceMessageId === turn.userMessageId)
     ) ?? []
   const [menuOpen, setMenuOpen] = useState(false)
-  const bubbleRef = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const actionClass =
     'flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring'
   return (
     <div
       className={cn(
-        'group/answer relative pl-4 pr-[10%] rounded-md transition-colors hover:bg-muted/50 focus-within:bg-muted/50',
-        compact ? 'py-0.5' : 'py-5',
+        'group/answer relative rounded-md transition-colors hover:bg-muted/50 focus-within:bg-muted/50',
+        compact ? '-mx-0.5 p-0.5' : '-mx-5 p-5',
         menuOpen && 'bg-muted/50'
       )}
       data-testid="chat-assistant-answer"
     >
       <div
         className={cn(
-          'absolute -top-2.5 right-4 z-10 flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5 shadow-sm opacity-0 pointer-events-none transition-opacity group-hover/answer:opacity-100 group-hover/answer:pointer-events-auto group-focus-within/answer:opacity-100 group-focus-within/answer:pointer-events-auto',
+          'absolute -top-2.5 z-10 flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5 shadow-sm opacity-0 pointer-events-none transition-opacity group-hover/answer:opacity-100 group-hover/answer:pointer-events-auto group-focus-within/answer:opacity-100 group-focus-within/answer:pointer-events-auto',
+          compact ? 'right-0.5' : 'right-5',
           menuOpen && 'opacity-100 pointer-events-auto'
         )}
         role="toolbar"
@@ -78,7 +79,7 @@ export function AssistantAnswer({
           aria-label="Copy response"
           title="Copy response"
           onClick={() => {
-            void safeClipboardWriteText(bubbleRef.current?.innerText ?? answerMarkdown())
+            void safeClipboardWriteText(bodyRef.current?.innerText ?? answerMarkdown())
           }}
         >
           <Copy className="size-3.5" />
@@ -108,7 +109,7 @@ export function AssistantAnswer({
           <DropdownMenuContent align="end" side="bottom">
             <DropdownMenuItem
               onSelect={() => {
-                void safeClipboardWriteText(bubbleRef.current?.innerText ?? answerMarkdown())
+                void safeClipboardWriteText(bodyRef.current?.innerText ?? answerMarkdown())
               }}
             >
               <Copy className="size-3.5" />
@@ -132,9 +133,8 @@ export function AssistantAnswer({
         </DropdownMenu>
       </div>
       <div className="flex items-start gap-3">
-        <AgentAvatar />
         <div className="min-w-0 max-w-full">
-          <div ref={bubbleRef} className="min-w-0">
+          <div ref={bodyRef} className="min-w-0">
             <AssistantMessageBody item={item} />
           </div>
           {turn && (

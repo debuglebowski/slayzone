@@ -36,8 +36,9 @@ import {
   type ChatTimelineState
 } from '@slayzone/terminal/client'
 import { toolActivityByRow, type TurnToolActivity } from './tool-activity'
-import { ActivityTurn, AgentAvatar } from './ActivityTurn'
+import { ActivityTurn } from './ActivityTurn'
 import { AssistantAnswer } from './AssistantAnswer'
+import { chatColumnClass } from './chat-layout'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { ToolAutoOpenContext } from './tool-cards/card-shell'
@@ -144,7 +145,6 @@ export function ChatTimeline({
   const trpc = useTRPC()
   const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const rowUiState = useContext(RowUiStateContext)
-  const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-5xl'
   // A row that streams already says what the agent does ("Thinking… 3s", the
   // reply growing): no second indicator under it.
   const tail = items[items.length - 1]
@@ -192,20 +192,10 @@ export function ChatTimeline({
             />
           )
         }
-        const showOwner =
-          !turn.final &&
-          (turn.active ||
-            turn.files.length > 0 ||
-            (activityAppearance.chatShowActivities && turn.items.length > 0))
         return (
           <>
             {!turn.hostIsActivity && renderTimelineItem(item, index)}
             <div className="relative">
-              {showOwner && (
-                <div className="absolute left-4 top-2">
-                  <AgentAvatar />
-                </div>
-              )}
               {showWorking && <TypingIndicator label={loadingLabel} />}
               <ActivityTurn turn={turn} appearance={activityAppearance} rowOf={rowOf} />
             </div>
@@ -221,7 +211,7 @@ export function ChatTimeline({
       return (
         <>
           {!files && renderTimelineItem(item, index)}
-          <div className="ml-14 mr-4 my-1 flex min-w-0 flex-wrap items-start gap-x-2">
+          <div className="mx-0 my-1 flex min-w-0 flex-wrap items-start gap-x-2">
             <ToolActivityDisclosure
               key={activity.key}
               tools={activity.tools}
@@ -293,8 +283,8 @@ export function ChatTimeline({
                   <div
                     data-chat-scroll-content
                     className={cn(
-                      'mx-auto w-full pb-[40cqh]',
-                      widthClass,
+                      'pb-[40cqh]',
+                      chatColumnClass(appearance.chatWidth),
                       appearance.chatWrapCode &&
                         '[&_pre]:whitespace-pre-wrap [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words'
                     )}
@@ -308,9 +298,6 @@ export function ChatTimeline({
                     />
                     {inFlight && !awaitingUser && !tailStreaming && !hasActiveTurn && (
                       <div className="relative">
-                        <div className="absolute left-4 top-2">
-                          <AgentAvatar />
-                        </div>
                         <TypingIndicator label={loadingLabel} />
                       </div>
                     )}
@@ -436,7 +423,7 @@ export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
 
 function TypingIndicator({ label }: { label?: string | null }) {
   return (
-    <div data-testid="chat-working-indicator" className="pl-14 pr-4 py-2 flex gap-3 items-center">
+    <div data-testid="chat-working-indicator" className="px-0 py-2 flex gap-3 items-center">
       <LoadingDots />
       {label && (
         <span className="text-xs text-muted-foreground truncate max-w-[60ch]">{label}</span>

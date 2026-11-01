@@ -1,5 +1,5 @@
 import { useContext, useEffect, useId, useState } from 'react'
-import { Brain, ChevronRight, MessageSquare, Sparkles, Wrench } from 'lucide-react'
+import { Brain, ChevronRight, MessageSquare, Wrench } from 'lucide-react'
 import { cn, type AppearanceSettings } from '@slayzone/ui'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
@@ -117,17 +117,6 @@ function ActivityEntry({
   )
 }
 
-export function AgentAvatar() {
-  return (
-    <div
-      data-testid="chat-agent-avatar"
-      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-agent to-agent-emphasis text-agent-contrast shadow-sm"
-    >
-      <Sparkles className="size-3.5" />
-    </div>
-  )
-}
-
 export function ActivityTurn({
   turn,
   appearance,
@@ -184,7 +173,7 @@ export function ActivityTurn({
   if ((!showSummary || !turn.items.length) && !latest && !turn.files.length) return null
   return (
     <div
-      className={embedded ? 'contents' : 'flex flex-wrap items-start gap-x-2 pl-14 pr-4'}
+      className={embedded ? 'contents' : 'flex flex-wrap items-start gap-x-2 px-0'}
       data-testid="chat-activity"
     >
       {showSummary && turn.items.length > 0 && (
