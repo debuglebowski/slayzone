@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
+import { CHAT_SUPPORTED_MODES } from '@slayzone/terminal-contracts'
 import {
   __resetTerminalFirstForTest,
   clearTerminalFirst,
@@ -27,6 +28,20 @@ afterEach(() => {
 })
 
 describe('terminal-first registry', () => {
+  it.each(CHAT_SUPPORTED_MODES)('leaves %s to the chat pane without spawning a shell', (mode) => {
+    const seen = vi.fn()
+    subscribeTerminalFirst(seen)
+    expect(markTerminalFirst(task({ terminal_mode: mode }), project)).toBe(false)
+    expect(getTerminalFirst('t1')).toBeNull()
+    expect(isTerminalFirstHolding('t1')).toBe(false)
+    expect(seen).not.toHaveBeenCalled()
+  })
+
+  it.each(['terminal', 'codex', 'claude-code'])('still opens %s terminal-first', (mode) => {
+    expect(markTerminalFirst(task({ terminal_mode: mode }), project)).toBe(true)
+    expect(isTerminalFirstHolding('t1')).toBe(true)
+  })
+
   it('accepts only a task whose terminal cwd needs nothing async', () => {
     expect(markTerminalFirst(task({ worktree_path: '/w' }), project)).toBe(false)
     expect(getTerminalFirst('t1')).toBeNull()

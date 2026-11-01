@@ -1,5 +1,6 @@
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
+import { isChatSupported } from '@slayzone/terminal-contracts'
 import { plainMainTerminalCwd } from '../shared/main-terminal'
 
 /**
@@ -36,8 +37,11 @@ const notify = (): void => {
   for (const l of listeners) l()
 }
 
-/** Mark `task` to open terminal-first. False when its terminal needs the page. */
+/** Mark `task` to open terminal-first. Chat panes and async cwd resolution need the page. */
 export function markTerminalFirst(task: Task, project: Project | null | undefined): boolean {
+  // The fallback mounts xterm, not a chat pane. Spawning a shell for a chat tab
+  // leaves an idle PTY that masks the chat's state in the session registry.
+  if (isChatSupported(task.terminal_mode)) return false
   const cwd = plainMainTerminalCwd(task, project)
   if (!cwd || !project) return false
   const prev = entries.get(task.id)
