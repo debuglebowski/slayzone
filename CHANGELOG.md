@@ -7,6 +7,10 @@
 
 Chat improvements, including full Codex support.
 
+### ⚠️ Breaking Changes
+
+- **computer:** Update hubs and connected computers together; remote terminal protocol v4 is incompatible with older peers.
+
 ### 🚀 Enhancements
 
 - **chat:** Codex UI — tool cards, approval cards, provider wording ([dcf74a40e](https://github.com/debuglebowski/slayzone/commit/dcf74a40e))
@@ -28,6 +32,8 @@ Chat improvements, including full Codex support.
 
 ### 🩹 Fixes
 
+- **computer:** Wait for confirmed process exit and scope terminal traffic to each spawn so delayed commands cannot affect replacement sessions ([10058a961](https://github.com/debuglebowski/slayzone/commit/10058a961)).
+- **computer:** Resolve remote shell and account environment on the computer ([afb285960](https://github.com/debuglebowski/slayzone/commit/afb285960)).
 - **chat:** Support ES2022 plan approval hosts ([010c32765](https://github.com/debuglebowski/slayzone/commit/010c32765))
 - **chat:** Codex engine — models from CLI, resume, Stop, approvals ([18f8384cc](https://github.com/debuglebowski/slayzone/commit/18f8384cc))
 - **terminal:** Revived task always resumes its conversation ([e3731c6e2](https://github.com/debuglebowski/slayzone/commit/e3731c6e2))

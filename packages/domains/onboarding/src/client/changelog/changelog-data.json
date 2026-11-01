@@ -5,6 +5,11 @@
     "tagline": "Deeper chats, steadier sessions",
     "items": [
       {
+        "category": "breaking",
+        "title": "Update hubs and computers together",
+        "description": "Update every hub and connected computer to this release together; older versions cannot connect because the remote terminal protocol has changed."
+      },
+      {
         "category": "feature",
         "title": "Chat improvements",
         "description": "Chat improvements include full Codex support, with live tool output, file diffs, model selection, approvals, and a handoff from planning to implementation."
