@@ -179,6 +179,7 @@ export function useChatComposer({
     },
     hydrate: (opts) => client.chat.hydrate.mutate(opts),
     start: (opts) => client.chat.start.mutate(opts),
+    restart: (opts) => client.chat.restart.mutate(opts),
     send: (tabId, text) => client.chat.send.mutate({ tabId, text }),
     interrupt: (opts) => client.chat.interrupt.mutate(opts)
   }

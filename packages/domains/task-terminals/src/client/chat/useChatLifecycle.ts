@@ -53,10 +53,9 @@ async function restartChat(
 ): Promise<void> {
   setRestarting(true)
   try {
-    // Explicit eager spawn — user clicked "Restart", they want a live
-    // subprocess immediately. chat.start hydrates if needed then
-    // ensureSpawned. chat.hydrate alone would leave the session lazy.
-    await chatApi.start(target)
+    // Replace even a still-running process: its cached login may have been
+    // revoked by an account switch. Keep the conversation and event history.
+    await chatApi.restart(target)
   } catch (err) {
     toast(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
   } finally {

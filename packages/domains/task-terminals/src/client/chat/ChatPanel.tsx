@@ -383,29 +383,38 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       void safeClipboardWriteText(state.sessionId)
     }, [state.sessionId])
 
-    const { resetting, restarting, displaySessionEnded, handleReset, handleRestart } =
-      useChatLifecycle({
-        tabId,
-        taskId,
-        mode,
-        cwd,
-        providerFlagsOverride,
-        agentState,
-        isMain,
-        isTemporary,
-        shown: isActive,
-        chatApi,
-        inFlight,
-        hydrating,
-        state,
-        resetTimeline,
-        // Reset clears the composer: its text and its attached files.
-        setDraft: (value: string) => {
-          composer.setDraft(value)
-          composer.setAttachments([])
-        },
-        clearQueue: composer.clearQueue
-      })
+    const {
+      resetting,
+      restarting,
+      displaySessionEnded,
+      handleReset: resetImmediately,
+      handleRestart
+    } = useChatLifecycle({
+      tabId,
+      taskId,
+      mode,
+      cwd,
+      providerFlagsOverride,
+      agentState,
+      isMain,
+      isTemporary,
+      shown: isActive,
+      chatApi,
+      inFlight,
+      hydrating,
+      state,
+      resetTimeline,
+      // Reset clears the composer: its text and its attached files.
+      setDraft: (value: string) => {
+        composer.setDraft(value)
+        composer.setAttachments([])
+      },
+      clearQueue: composer.clearQueue
+    })
+    const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+    const handleReset = useCallback(() => {
+      if (!resetting) setResetConfirmOpen(true)
+    }, [resetting])
 
     // Esc Esc / the palette's "Rewind…": the TUI's message list (chat E, plan 4.6).
     // Edit & resend puts the message back into the composer, so it waits for an
@@ -791,6 +800,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       )}
                       <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
                       <RewindDialog dialog={conversation.dialog} />
+                      <AlertDialog
+                        open={resetConfirmOpen}
+                        onOpenChange={(open) => {
+                          if (!open && !resetting) setResetConfirmOpen(false)
+                        }}
+                      >
+                        <AlertDialogContent data-testid="chat-reset-dialog">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Reset chat?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Clear this chat’s message history and start a new conversation? Files
+                              changed by the agent stay on disk.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              disabled={resetting}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                void resetImmediately().finally(() => setResetConfirmOpen(false))
+                              }}
+                            >
+                              {resetting ? 'Resetting…' : 'Reset chat'}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                       <RewindPicker
                         kind={pickerKind}
                         activeUsers={activeUsers}

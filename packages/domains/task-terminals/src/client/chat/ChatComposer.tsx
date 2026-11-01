@@ -431,6 +431,20 @@ export function ChatComposer({
               <ChatDisplayOptions appearance={appearance} />
             </PopoverContent>
           </Popover>
+          {!displaySessionEnded && (
+            <button
+              type="button"
+              onClick={() => {
+                void handleRestart()
+              }}
+              disabled={restarting || inFlight}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-muted/60 hover:text-foreground transition-colors disabled:opacity-50"
+              title="Restart agent process (keeps chat history)"
+            >
+              <RotateCcw className={cn('size-3', restarting && 'animate-spin')} />
+              {restarting ? 'Restarting…' : 'Restart'}
+            </button>
+          )}
           <button
             onClick={() => {
               void handleReset()

@@ -29,6 +29,7 @@ export function useChatActions(): UseChatActionsResult {
       reset: (opts) => trpcClient.chat.reset.mutate(opts),
       hydrate: (opts) => trpcClient.chat.hydrate.mutate(opts),
       start: (opts) => trpcClient.chat.start.mutate(opts),
+      restart: (opts) => trpcClient.chat.restart.mutate(opts),
       send: (tabId, text) => trpcClient.chat.send.mutate({ tabId, text }),
       interrupt: (opts) => trpcClient.chat.interrupt.mutate(opts)
     }),

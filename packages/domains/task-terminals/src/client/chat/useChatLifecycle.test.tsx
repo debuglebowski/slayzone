@@ -72,6 +72,7 @@ const makeChatApi = () => ({
   reset: vi.fn<ChatActions['reset']>(() => Promise.resolve()),
   hydrate: vi.fn<ChatActions['hydrate']>(() => Promise.resolve()),
   start: vi.fn<ChatActions['start']>(() => Promise.resolve()),
+  restart: vi.fn<ChatActions['restart']>(() => Promise.resolve()),
   send: vi.fn<ChatActions['send']>(() => Promise.resolve({ id: 'm', state: 'queued' })),
   interrupt: vi.fn<ChatActions['interrupt']>(() => Promise.resolve())
 })
@@ -383,16 +384,16 @@ describe('useChatLifecycle startup (main tab)', () => {
 })
 
 describe('useChatLifecycle handleRestart', () => {
-  it('eagerly starts the chat for the tab', async () => {
+  it('replaces the process for the tab', async () => {
     const { result, chatApi } = setup({ providerFlagsOverride: '--verbose' })
     await act(() => result.current.handleRestart())
-    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, providerFlagsOverride: '--verbose' })
+    expect(chatApi.restart).toHaveBeenCalledWith({ ...TARGET, providerFlagsOverride: '--verbose' })
   })
 
   it('flags restarting until the start settles', async () => {
     const { result, chatApi } = setup()
     const start = deferred<unknown>()
-    chatApi.start.mockReturnValueOnce(start.promise)
+    chatApi.restart.mockReturnValueOnce(start.promise)
     let done!: Promise<void>
     act(() => {
       done = result.current.handleRestart()
@@ -407,17 +408,17 @@ describe('useChatLifecycle handleRestart', () => {
 
   it('ignores a second restart while one is in flight', async () => {
     const { result, chatApi } = setup()
-    chatApi.start.mockReturnValueOnce(new Promise(() => {}))
+    chatApi.restart.mockReturnValueOnce(new Promise(() => {}))
     act(() => {
       void result.current.handleRestart()
     })
     await act(() => result.current.handleRestart())
-    expect(chatApi.start).toHaveBeenCalledTimes(1)
+    expect(chatApi.restart).toHaveBeenCalledTimes(1)
   })
 
   it('toasts a failed restart and clears the flag', async () => {
     const { result, chatApi } = setup()
-    chatApi.start.mockRejectedValueOnce(new Error('spawn failed'))
+    chatApi.restart.mockRejectedValueOnce(new Error('spawn failed'))
     await act(() => result.current.handleRestart())
     expect(m.toast).toHaveBeenCalledWith('Restart failed: spawn failed')
     expect(result.current.restarting).toBe(false)
@@ -425,7 +426,7 @@ describe('useChatLifecycle handleRestart', () => {
 
   it('toasts a non-Error rejection as text', async () => {
     const { result, chatApi } = setup()
-    chatApi.start.mockRejectedValueOnce('hub gone')
+    chatApi.restart.mockRejectedValueOnce('hub gone')
     await act(() => result.current.handleRestart())
     expect(m.toast).toHaveBeenCalledWith('Restart failed: hub gone')
   })

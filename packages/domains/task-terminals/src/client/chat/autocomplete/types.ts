@@ -65,6 +65,14 @@ export interface ChatActions {
     providerFlagsOverride?: string | null
     reason?: 'user' | 'restore'
   }) => Promise<unknown>
+  /** Replace a live or ended process, preserving conversation history. */
+  restart: (opts: {
+    tabId: string
+    taskId: string
+    mode: string
+    cwd: string
+    providerFlagsOverride?: string | null
+  }) => Promise<unknown>
   /** Raw send (no queue, no optimistic bubble). Prefer `AcceptCtx.submit`. */
   send: (tabId: string, text: string) => Promise<{ id: string; state: string }>
   interrupt: (opts: {

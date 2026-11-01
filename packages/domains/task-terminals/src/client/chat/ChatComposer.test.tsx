@@ -354,6 +354,20 @@ describe('ChatComposer ended session', () => {
   })
 })
 
+describe('ChatComposer running session', () => {
+  it('can restart an idle agent without resetting the conversation', () => {
+    setup({ inFlight: false })
+    fireEvent.click(button('Restart'))
+    expect(props.handleRestart).toHaveBeenCalledOnce()
+    expect(props.handleReset).not.toHaveBeenCalled()
+  })
+
+  it('does not restart during a turn', () => {
+    setup({ inFlight: true })
+    expect(button('Restart').disabled).toBe(true)
+  })
+})
+
 describe('ChatComposer pills', () => {
   it('mode, model and effort pills show when idle and are enabled', () => {
     setup()
