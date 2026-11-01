@@ -467,6 +467,46 @@ describe('CodexChatSession', () => {
     expect(sp.type, 'mode change flips the sandbox policy').toEqual('readOnly')
   })
 
+  test('interrupt_and_wait waits for turn completion, not just the interrupt reply', async () => {
+    const h = makeHarness()
+    await handshake(h)
+    h.driver.sendUserMessage('work')
+    h.driver.handleLine(JSON.stringify({ id: turnStartId(h), result: { turn: { id: 't1' } } }))
+    await flush()
+    let stopped = false
+    const stop = h.driver.applyControl({ subtype: 'interrupt_and_wait' }, 1000).then(() => {
+      stopped = true
+    })
+    await flush()
+    const req = h.sent.find((m) => m.method === 'turn/interrupt')
+    expect(req).toBeDefined()
+    h.driver.handleLine(JSON.stringify({ id: req!.id, result: {} }))
+    await flush()
+    expect(stopped).toBe(false)
+    h.driver.handleLine(
+      JSON.stringify({
+        method: 'turn/completed',
+        params: { turn: { id: 't1', status: 'interrupted' } }
+      })
+    )
+    await stop
+    expect(stopped).toBe(true)
+  })
+
+  test('interrupt_and_wait rejects when the turn never finishes stopping', async () => {
+    const h = makeHarness()
+    await handshake(h)
+    h.driver.sendUserMessage('work')
+    h.driver.handleLine(JSON.stringify({ id: turnStartId(h), result: { turn: { id: 't1' } } }))
+    await flush()
+    const stop = h.driver.applyControl({ subtype: 'interrupt_and_wait' }, 20)
+    const rejected = expect(stop).rejects.toThrow('did not finish stopping')
+    const req = h.sent.find((m) => m.method === 'turn/interrupt')!
+    h.driver.handleLine(JSON.stringify({ id: req.id, result: {} }))
+    await rejected
+    h.driver.dispose()
+  })
+
   // ---- approvals / server requests ----
 
   test('a server approval request emits a permission-request event', async () => {

@@ -3,7 +3,6 @@ import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2, FileDiff } from
 import { ChatDisplayOptions } from './ChatDisplayOptions'
 import {
   cn,
-  AgentModePill,
   AgentModelPill,
   AgentEffortPill,
   AgentCollaborationPill,
@@ -14,7 +13,6 @@ import {
 } from '@slayzone/ui'
 import {
   chatCapabilitiesForMode,
-  chatModesForMode,
   chatProviderForMode,
   modeSupportsCollaboration,
   modeSupportsFastMode
@@ -37,6 +35,7 @@ import type { useChatModel } from './useChatModel'
 import type { useChatEffort } from './useChatEffort'
 import type { useChatCollaboration } from './useChatCollaboration'
 import type { useChatFastMode } from './useChatFastMode'
+import { ChatPermissionMode } from './ChatPermissionMode'
 
 type ModeApi = ReturnType<typeof useChatMode>
 type ModelApi = ReturnType<typeof useChatModel>
@@ -342,17 +341,11 @@ export function ChatComposer({
             </button>
           ) : (
             <>
-              <AgentModePill
-                mode={chatMode}
-                modes={chatModesForMode(mode)}
-                onChange={(next) => {
-                  handleModeChange(next).catch(() => {
-                    /* toast already shown by hook */
-                  })
-                }}
-                disabled={inFlight}
-                compact
-                variant="text"
+              <ChatPermissionMode
+                mode={mode}
+                chatMode={chatMode}
+                inFlight={inFlight}
+                onChange={handleModeChange}
                 autoCapability={autoCapability}
               />
               {/* Null until hydrated; '' = the provider's default (Codex before it listed models). */}

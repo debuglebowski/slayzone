@@ -274,6 +274,40 @@ describe('useChatMode handleModeChange', () => {
     })
   })
 
+  it('passes the Codex stop-and-resume choice to the server', async () => {
+    m.getInfo.mockResolvedValue({ chatMode: 'auto-accept-edits' })
+    const { result } = await setup({ mode: 'codex-chat' })
+    await act(() => result.current.handleModeChange('full-access', { stopAndResume: true }))
+    expect(m.setMode).toHaveBeenCalledWith({
+      ...base,
+      mode: 'codex-chat',
+      chatMode: 'full-access',
+      stopAndResume: true
+    })
+  })
+
+  it('a superseding mode change keeps its own timing choice', async () => {
+    const first = deferred<Info>()
+    m.getInfo.mockResolvedValue({ chatMode: 'auto-accept-edits' })
+    m.setMode.mockReturnValueOnce(first.promise)
+    const { result } = await setup({ mode: 'codex-chat' })
+    let change!: Promise<void>
+    act(() => {
+      change = result.current.handleModeChange('full-access', { stopAndResume: true })
+    })
+    act(() => {
+      void result.current.handleModeChange('approval-required')
+    })
+    await act(async () => {
+      first.resolve({ chatMode: 'full-access' })
+      await change
+    })
+    expect(m.setMode).toHaveBeenCalledTimes(2)
+    expect(m.setMode.mock.calls[1][0]).toMatchObject({ chatMode: 'approval-required' })
+    expect(m.setMode.mock.calls[1][0]).not.toHaveProperty('stopAndResume')
+    expect(result.current.chatMode).toBe('approval-required')
+  })
+
   it('applies the server-resolved mode (a downgrade)', async () => {
     m.setMode.mockResolvedValueOnce({ chatMode: 'auto-accept' })
     m.getMode.mockResolvedValue('plan')

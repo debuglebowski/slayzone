@@ -954,9 +954,10 @@ class CodexChatSession implements ChatSessionDriver {
       })
   }
 
-  applyControl(request: Record<string, unknown>): Promise<unknown> {
+  applyControl(request: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
     const subtype = typeof request.subtype === 'string' ? request.subtype : ''
     if (subtype === 'interrupt') return this.interrupt()
+    if (subtype === 'interrupt_and_wait') return this.interruptAndWait(timeoutMs)
     if (subtype === 'rewind_files') {
       // Codex keeps no file checkpoints (`thread/revert` changes history only).
       return Promise.resolve({
@@ -1029,18 +1030,44 @@ class CodexChatSession implements ChatSessionDriver {
    * known yet (its `turn/start` reply is on its way) is stopped as soon as it is.
    * Resolves with the interrupt's reply; at once when no turn runs.
    */
-  private interrupt(): Promise<unknown> {
+  private interrupt(timeoutMs?: number): Promise<unknown> {
     const client = this.client
     if (!client || !this.threadId) return Promise.resolve()
     if (this.currentTurnId) {
-      return client.request('turn/interrupt', {
-        threadId: this.threadId,
-        turnId: this.currentTurnId
-      })
+      return client.request(
+        'turn/interrupt',
+        {
+          threadId: this.threadId,
+          turnId: this.currentTurnId
+        },
+        timeoutMs
+      )
     }
     if (this.turnStartsInFlight === 0) return Promise.resolve()
     this.pendingInterrupt ??= deferred<unknown>()
     return this.pendingInterrupt.promise
+  }
+
+  private async interruptAndWait(timeoutMs: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stopped = async () => {
+      await this.interrupt(timeoutMs)
+      await this.turnEnded(timeoutMs, true)
+      if (this.disposed) throw new Error('Codex stopped before permissions could change')
+    }
+    try {
+      await Promise.race([
+        stopped(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Codex did not finish stopping; permissions unchanged')),
+            timeoutMs
+          )
+        })
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   /** The running turn's id is known: remember it, and send a Stop that waited for it. */
@@ -1125,16 +1152,18 @@ class CodexChatSession implements ChatSessionDriver {
   }
 
   /** Resolves once no turn runs (or after `timeoutMs`). */
-  private turnEnded(timeoutMs: number): Promise<void> {
+  private turnEnded(timeoutMs: number, failOnTimeout = false): Promise<void> {
     if (!this.currentTurnId && this.turnStartsInFlight === 0) return Promise.resolve()
-    return new Promise((resolve) => {
-      const timer = setTimeout(done, timeoutMs)
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => done(true), timeoutMs)
       const waiters = this.turnEndWaiters
-      function done(): void {
+      function done(timedOut = false): void {
         clearTimeout(timer)
         const i = waiters.indexOf(done)
         if (i >= 0) waiters.splice(i, 1)
-        resolve()
+        if (timedOut && failOnTimeout)
+          reject(new Error('Codex did not finish stopping; permissions unchanged'))
+        else resolve()
       }
       waiters.push(done)
     })

@@ -19,6 +19,7 @@ import {
   sendControlRequest,
   respondToPermissionRequest,
   updateSessionChatMode,
+  changeCodexPermissionsAndResume,
   updateSessionChatModel,
   updateSessionChatEffort,
   updateSessionChatCollaboration,
@@ -1366,7 +1367,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
     getAutoEligibility: (): Promise<AutoModeEligibility> => getAutoModeEligibility(),
 
-    setMode: async (o: ChatCreateOpts & { chatMode: string }): Promise<ChatSessionInfo> => {
+    setMode: async (
+      o: ChatCreateOpts & { chatMode: string; stopAndResume?: boolean }
+    ): Promise<ChatSessionInfo> => {
       // Reject a mode that isn't valid for this terminal mode's vocabulary.
       if (!isValidChatModeForMode(o.mode, o.chatMode)) {
         throw new Error(`Invalid chat mode for mode ${o.mode}: ${String(o.chatMode)}`)
@@ -1375,6 +1378,14 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // already filters in the pill, but a stale renderer or a direct call
       // shouldn't be able to persist a forbidden mode.
       const safe = await resolveSafeChatMode(o.chatMode)
+
+      if (o.stopAndResume) {
+        if (o.mode !== 'codex-chat')
+          throw new Error('Stop and resume permissions is only supported for Codex')
+        return changeCodexPermissionsAndResume(o.tabId, safe, () =>
+          data.writeChatMode(o.taskId, o.mode, safe)
+        )
+      }
 
       // Pre-spawn fast path: skeleton session, no live subprocess to inform.
       // Just persist to DB + update the in-memory skeleton so the next spawn

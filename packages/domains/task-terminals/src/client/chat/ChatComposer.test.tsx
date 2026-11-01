@@ -373,6 +373,53 @@ describe('ChatComposer running session', () => {
 })
 
 describe('ChatComposer pills', () => {
+  it('Codex running: choosing permissions asks when to apply, without changing them yet', () => {
+    setup({ mode: 'codex-chat', chatMode: 'auto-accept-edits', inFlight: true })
+    expect(button(/^Agent mode:/).disabled).toBe(false)
+    fireEvent.keyDown(button(/^Agent mode:/), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /Full access/ }))
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+    expect(props.handleModeChange).not.toHaveBeenCalled()
+    fireEvent.click(button('Cancel'))
+    expect(props.handleModeChange).not.toHaveBeenCalled()
+  })
+
+  it('Codex running: next turn changes permissions without stopping', async () => {
+    setup({ mode: 'codex-chat', chatMode: 'auto-accept-edits', inFlight: true })
+    fireEvent.keyDown(button(/^Agent mode:/), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /Full access/ }))
+    fireEvent.click(button('Apply next turn'))
+    await act(() => Promise.resolve())
+    expect(props.handleModeChange).toHaveBeenCalledWith('full-access')
+    expect(props.handleStop).not.toHaveBeenCalled()
+  })
+
+  it('Codex running: stop and resume requests an atomic permission change', async () => {
+    setup({ mode: 'codex-chat', chatMode: 'auto-accept-edits', inFlight: true })
+    fireEvent.keyDown(button(/^Agent mode:/), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /Full access/ }))
+    fireEvent.click(button('Stop and resume'))
+    await act(() => Promise.resolve())
+    expect(props.handleModeChange).toHaveBeenCalledWith('full-access', { stopAndResume: true })
+    expect(props.handleStop).not.toHaveBeenCalled()
+    expect(props.handleSend).not.toHaveBeenCalled()
+  })
+
+  it('Codex running: a failed change keeps the timing choice available to retry', async () => {
+    setup({
+      mode: 'codex-chat',
+      chatMode: 'auto-accept-edits',
+      inFlight: true,
+      handleModeChange: vi.fn(() => Promise.reject(new Error('Cannot interrupt')))
+    })
+    fireEvent.keyDown(button(/^Agent mode:/), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /Full access/ }))
+    fireEvent.click(button('Stop and resume'))
+    await act(() => Promise.resolve())
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+    expect(button('Stop and resume').disabled).toBe(false)
+  })
+
   it('mode, model and effort pills show when idle and are enabled', () => {
     setup()
     expect(button(/^Agent mode:/).disabled).toBe(false)

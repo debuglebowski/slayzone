@@ -267,7 +267,7 @@ export const chatRouter = router({
     .query(({ input }) => ops().getMode(input.taskId, input.mode)),
   getAutoEligibility: publicProcedure.query(() => ops().getAutoEligibility()),
   setMode: publicProcedure
-    .input(chatCreateOpts.extend({ chatMode: z.string() }))
+    .input(chatCreateOpts.extend({ chatMode: z.string(), stopAndResume: z.boolean().optional() }))
     .mutation(({ input }) => ops().setMode(input)),
   getModel: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))

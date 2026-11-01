@@ -248,7 +248,7 @@ test('a resume that fails for another reason keeps the conversation; Retry resum
  * reply, then `turn/completed`), `thread/turns/list` + `thread/revert` keep the
  * turns by `clientUserMessageId`.
  */
-function turnServer(opts: { replyDelayMs?: number } = {}) {
+function turnServer(opts: { replyDelayMs?: number; refuseInterrupt?: boolean } = {}) {
   const turns: Array<{ id: string; clientId: string | null }> = []
   let child: CodexChild | null = null
   const reverts: string[] = []
@@ -270,6 +270,7 @@ function turnServer(opts: { replyDelayMs?: number } = {}) {
       return 'hang'
     }
     if (method === 'turn/interrupt') {
+      if (opts.refuseInterrupt) return { error: { code: -32000, message: 'Cannot interrupt' } }
       setTimeout(
         () =>
           child?.send({
@@ -359,6 +360,80 @@ test('Stop mid-turn: turn/interrupt in place, the process stays, the turn ends i
   await until(() => mgr.getSessionTerminalState('tab-stop') === 'idle')
   expect(h.states).not.toContain('error')
   expect(server.reverts).toEqual([])
+})
+
+test('permission change stops the turn before continuing with the new sandbox and holds the queue', async () => {
+  const server = turnServer()
+  const c = await openWithServer(server, 'tab-permissions')
+  mgr.dispatchUserMessage('tab-permissions', {
+    id: 'm1',
+    content: [{ type: 'text', text: 'work' }]
+  })
+  await until(() => server.turns.length === 1)
+  let persisted = false
+  await mgr.changeCodexPermissionsAndResume('tab-permissions', 'approval-required', async () => {
+    expect(server.turns).toHaveLength(1)
+    expect(mgr.isReadyForQueuedMessage('tab-permissions')).toBe(false)
+    persisted = true
+  })
+  await until(() => server.turns.length === 2)
+  expect(persisted).toBe(true)
+  expect(c.requests('turn/interrupt')).toHaveLength(1)
+  expect(c.requests('turn/start')[1].sandboxPolicy).toMatchObject({ type: 'readOnly' })
+  expect(mgr.getSessionInfo('tab-permissions')?.chatMode).toBe('approval-required')
+  expect(h.children).toHaveLength(1)
+  expect(server.reverts).toEqual([])
+})
+
+test('permission change after a turn finishes does not invent a continuation', async () => {
+  const server = turnServer()
+  const c = await openWithServer(server, 'tab-permissions-idle')
+  await mgr.changeCodexPermissionsAndResume('tab-permissions-idle', 'full-access', async () => {})
+  expect(c.requests('turn/interrupt')).toHaveLength(0)
+  expect(server.turns).toHaveLength(0)
+  expect(mgr.getSessionInfo('tab-permissions-idle')?.chatMode).toBe('full-access')
+})
+
+test('a refused interrupt keeps permissions and never sends a continuation', async () => {
+  const server = turnServer({ refuseInterrupt: true })
+  await openWithServer(server, 'tab-permissions-refused')
+  mgr.dispatchUserMessage('tab-permissions-refused', {
+    id: 'm1',
+    content: [{ type: 'text', text: 'work' }]
+  })
+  await until(() => server.turns.length === 1)
+  const previous = mgr.getSessionInfo('tab-permissions-refused')?.chatMode
+  let persisted = false
+  await expect(
+    mgr.changeCodexPermissionsAndResume(
+      'tab-permissions-refused',
+      'approval-required',
+      async () => {
+        persisted = true
+      }
+    )
+  ).rejects.toThrow('Cannot interrupt')
+  expect(persisted).toBe(false)
+  expect(server.turns).toHaveLength(1)
+  expect(mgr.getSessionInfo('tab-permissions-refused')?.chatMode).toBe(previous)
+})
+
+test('failure to save permissions restores the previous sandbox and releases the queue', async () => {
+  const server = turnServer()
+  const c = await openWithServer(server, 'tab-permissions-save')
+  await expect(
+    mgr.changeCodexPermissionsAndResume('tab-permissions-save', 'full-access', async () => {
+      throw new Error('Save failed')
+    })
+  ).rejects.toThrow('Save failed')
+  expect(server.turns).toHaveLength(0)
+  expect(mgr.isReadyForQueuedMessage('tab-permissions-save')).toBe(true)
+  mgr.dispatchUserMessage('tab-permissions-save', {
+    id: 'm1',
+    content: [{ type: 'text', text: 'work' }]
+  })
+  await until(() => server.turns.length === 1)
+  expect(c.requests('turn/start')[0].sandboxPolicy).toMatchObject({ type: 'workspaceWrite' })
 })
 
 test('Stop before any output: the message comes back and its turn leaves the thread (as Claude chat)', async () => {

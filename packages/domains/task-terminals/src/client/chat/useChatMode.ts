@@ -28,8 +28,13 @@ interface UseChatModeOpts {
 
 type TRPCClient = ReturnType<typeof useTRPCClient>
 
+interface PendingModeChange {
+  mode: AgentMode
+  stopAndResume?: boolean
+}
+
 interface ModeRefs {
-  pendingModeRef: RefObject<AgentMode | null>
+  pendingModeRef: RefObject<PendingModeChange | null>
   loopRunningRef: RefObject<boolean>
   /** The running loop's promise — what a joining click settles with. */
   loopPromiseRef: RefObject<Promise<void> | null>
@@ -70,11 +75,12 @@ async function runModeChange(
   { tabId, taskId, mode, cwd }: { tabId: string; taskId: string; mode: string; cwd: string },
   next: AgentMode,
   { pendingModeRef, loopRunningRef, loopPromiseRef, confirmedModeRef }: ModeRefs,
-  setChatModeState: (v: AgentMode) => void
+  setChatModeState: (v: AgentMode) => void,
+  options?: { stopAndResume?: boolean }
 ): Promise<void> {
   // Optimistic flip happens on every click, regardless of in-flight IPCs.
   // The loop below picks up `pendingModeRef` as the latest target.
-  pendingModeRef.current = next
+  pendingModeRef.current = { mode: next, ...options }
   setChatModeState(next)
 
   // Loop already running? Just update the target ref and join it: the active
@@ -89,7 +95,7 @@ async function runModeChange(
   let lastError: unknown = null
   try {
     while (pendingModeRef.current !== null) {
-      const target: AgentMode = pendingModeRef.current
+      const target: PendingModeChange = pendingModeRef.current
       let info: SessionInfoLite
       try {
         info = (await trpcClient.chat.setMode.mutate({
@@ -97,7 +103,8 @@ async function runModeChange(
           taskId,
           mode,
           cwd,
-          chatMode: target
+          chatMode: target.mode,
+          ...(target.stopAndResume ? { stopAndResume: true } : {})
         })) as SessionInfoLite
       } catch (err) {
         lastError = err
@@ -107,7 +114,7 @@ async function runModeChange(
       // and loop again with the new target.
       if (pendingModeRef.current !== target) continue
       // Latest target — apply server resolution (may downgrade) and exit.
-      const resolved = info?.chatMode ?? target
+      const resolved = info?.chatMode ?? target.mode
       setChatModeState(resolved)
       confirmedModeRef.current = resolved
       pendingModeRef.current = null
@@ -167,7 +174,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
   const lastAppliedLiveRef = useRef<string | null | undefined>(undefined)
   // Latest user-requested target. Updated synchronously on every click so the
   // loop in `handleModeChange` always picks up the freshest intent.
-  const pendingModeRef = useRef<AgentMode | null>(null)
+  const pendingModeRef = useRef<PendingModeChange | null>(null)
   // Synchronous gate. Without a ref two near-simultaneous clicks both see no
   // active loop and start parallel ones, racing the backend respawn path.
   const loopRunningRef = useRef(false)
@@ -235,7 +242,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
   }, [loadAutoEligibility])
 
   const handleModeChange = useCallback(
-    async (next: AgentMode) => {
+    async (next: AgentMode, options?: { stopAndResume?: boolean }) => {
       if (next === chatMode) return
       if (next === 'auto' && !autoCapability.optedIn) {
         toast('Auto mode requires Max/Team/Enterprise + opt-in via `claude` CLI')
@@ -246,7 +253,8 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
         { tabId, taskId, mode, cwd },
         next,
         { pendingModeRef, loopRunningRef, loopPromiseRef, confirmedModeRef },
-        setChatModeState
+        setChatModeState,
+        options
       )
       // The click that starts the loop publishes it for clicks that join. The
       // loop clears it in its `finally`, which runs after an await — so always

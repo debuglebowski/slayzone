@@ -6,7 +6,11 @@ import type {
   OutgoingUserMessage,
   ResultEvent
 } from '@slayzone/terminal-contracts'
-import { chatCapabilitiesForMode, userMessageText } from '@slayzone/terminal-contracts'
+import {
+  chatCapabilitiesForMode,
+  defaultChatModeForMode,
+  userMessageText
+} from '@slayzone/terminal-contracts'
 import {
   TIMELINE_PROJECTION_VERSION,
   TimelineProjection,
@@ -758,7 +762,8 @@ export function isSessionAwaitingUserInput(tabId: string): boolean {
  */
 export function isReadyForQueuedMessage(tabId: string): boolean {
   const tab = tabs.get(tabId)
-  if (!tab || tab.closed || tab.ended || tab.respawning) return false
+  if (!tab || tab.closed || tab.ended || tab.respawning || permissionChanges.has(tabId))
+    return false
   return (
     tab.terminalState === 'idle' && tab.pendingPrompts.size === 0 && tab.outbox.inFlight() === 0
   )
@@ -1549,10 +1554,13 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
 
 function createOutbox(tab: ChatTab): ChatOutbox {
   const current = (): ChatProcess | null =>
-    tab.proc && !tab.proc.ended && !tab.proc.replaced ? tab.proc : null
+    !permissionChanges.has(tab.tabId) && tab.proc && !tab.proc.ended && !tab.proc.replaced
+      ? tab.proc
+      : null
   return new ChatOutbox({
     current,
     ensureReady: async () => {
+      await permissionChanges.get(tab.tabId)
       if (tab.closed) throw new ChatTransportError('This chat tab was closed.')
       await ensureSpawned(tab.tabId)
       const proc = current()
@@ -2028,8 +2036,66 @@ export function sendControlRequest(
     return Promise.reject(new Error('driver has no control channel'))
   }
   // A 0-turn error after an interrupt is the interrupt, not a failed resume.
-  if (request.subtype === 'interrupt') proc.interruptIssued = true
+  if (request.subtype === 'interrupt' || request.subtype === 'interrupt_and_wait')
+    proc.interruptIssued = true
   return proc.driver.applyControl(request, timeoutMs)
+}
+
+/** Permission transitions keep queued messages behind the continuation. */
+const permissionChanges = new Map<string, Promise<void>>()
+
+export async function changeCodexPermissionsAndResume(
+  tabId: string,
+  mode: string,
+  persist: () => Promise<void>
+): Promise<ChatSessionInfo> {
+  const tab = tabs.get(tabId)
+  const proc = liveProcess(tabId)
+  if (!tab || tab.mode !== 'codex-chat' || !proc)
+    throw new ChatTransportError('No running Codex session')
+  if (permissionChanges.has(tabId)) throw new ChatTransportError('Permissions are already changing')
+  const shouldResume =
+    tab.terminalState === 'running' || tab.pendingPrompts.size > 0 || tab.outbox.inFlight() > 0
+  let release!: () => void
+  const paused = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  permissionChanges.set(tabId, paused)
+  try {
+    if (shouldResume) await sendControlRequest(tabId, { subtype: 'interrupt_and_wait' }, 10_000)
+    if (tabs.get(tabId) !== tab || liveProcess(tabId) !== proc)
+      throw new ChatTransportError('Codex session changed while updating permissions')
+    await sendControlRequest(tabId, { subtype: 'set_permission_mode', mode })
+    try {
+      await persist()
+    } catch (err) {
+      // No new turn has started: restore the old policy before reopening sends.
+      await sendControlRequest(tabId, {
+        subtype: 'set_permission_mode',
+        mode: tab.chatMode ?? defaultChatModeForMode(tab.mode)
+      })
+      throw err
+    }
+    if (tabs.get(tabId) !== tab || liveProcess(tabId) !== proc)
+      throw new ChatTransportError('Codex session changed while saving permissions')
+    updateSessionChatMode(tabId, mode)
+    // Accept before releasing the queue. The outbox waits on the same gate,
+    // so the continuation cannot start until persistence has succeeded.
+    if (shouldResume) {
+      const delivery = dispatchUserMessage(tabId, {
+        id: randomUUID(),
+        content: [
+          { type: 'text', text: 'Continue the interrupted task with the updated permissions.' }
+        ]
+      })
+      if (delivery.state === 'failed') throw new ChatTransportError('Continuation failed to send')
+    }
+    return getSessionInfo(tabId)!
+  } finally {
+    permissionChanges.delete(tabId)
+    release()
+    kickQueueDrainer(tab)
+  }
 }
 
 /**
