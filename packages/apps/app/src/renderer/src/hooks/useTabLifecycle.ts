@@ -4,22 +4,42 @@ import type { Project } from '@slayzone/projects-contracts'
 import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { useTrack } from '@slayzone/telemetry/client'
+import { getClientForHub } from '../trpc'
+import { useHubOwnershipStore } from '@slayzone/transport/client'
 
 type TaskTab = Extract<Tab, { type: 'task' }>
 
 /**
- * Whether a tab's task is gone for good, given it is not in the task list. Only
+ * Whether a missing tab is ready for a deletion check. Only
  * its own hub can say so: each hub's list arrives on its own, so one hub
  * answering first proves nothing about another's tasks (that closed every tab of
  * the slower hub). A hub that never answers (offline) never closes its tabs; a
  * hub removed from the app does. A tab whose hub is not known yet waits for all.
  */
-function isGone(
+function canCheckMissing(
   tab: TaskTab,
   hubs: { loaded: ReadonlySet<string>; registered: ReadonlySet<string> }
 ): boolean {
   if (tab.hubId === undefined) return [...hubs.registered].every((id) => hubs.loaded.has(id))
   return !hubs.registered.has(tab.hubId) || hubs.loaded.has(tab.hubId)
+}
+
+/** Close only the tab instances checked, preserving a surviving active tab. */
+function closeConfirmedTabs(removed: ReadonlySet<TaskTab>): void {
+  useTabStore.setState((store) => {
+    const removedTabs = store.tabs.filter(
+      (tab): tab is TaskTab => tab.type === 'task' && removed.has(tab)
+    )
+    if (removedTabs.length === 0) return store
+    const tabs = store.tabs.filter((tab) => tab.type !== 'task' || !removed.has(tab))
+    const active = tabs.indexOf(store.tabs[store.activeTabIndex])
+    return {
+      tabs,
+      activeTabIndex:
+        active >= 0 ? active : Math.max(0, Math.min(store.activeTabIndex, tabs.length - 1)),
+      closedTabs: [...store.closedTabs, ...removedTabs].slice(-20)
+    }
+  })
 }
 
 export function useTabLifecycle({
@@ -31,7 +51,8 @@ export function useTabLifecycle({
   hubIdByTask,
   defaultHubId,
   registeredHubIds,
-  loadedHubIds
+  loadedHubIds,
+  onTaskRecovered
 }: {
   tasks: Task[]
   projects: Project[]
@@ -46,6 +67,8 @@ export function useTabLifecycle({
   registeredHubIds: ReadonlySet<string>
   /** The hubs whose task list has arrived at least once. */
   loadedHubIds: ReadonlySet<string>
+  /** Restore a verified live row omitted by an older board response. */
+  onTaskRecovered: (task: Task) => void
 }): void {
   // Sync task/project data into tab store for worktree grouping + temp task
   // detection. Multi-hub: annotate each project with its owning hub so the
@@ -54,7 +77,9 @@ export function useTabLifecycle({
     const annotatedProjects = hubIdByProject
       ? projects.map((p) => ({ ...p, hubId: hubIdByProject.get(p.id) }))
       : projects
-    useTabStore.setState({ _taskLookup: { tasks, projects: annotatedProjects } })
+    useTabStore.setState({
+      _taskLookup: { tasks, projects: annotatedProjects }
+    })
   }, [tasks, projects, hubIdByProject])
 
   // Evict cache entries when task tabs close (prevent memory leaks). Multi-hub:
@@ -78,21 +103,11 @@ export function useTabLifecycle({
     const hubs = { loaded: loadedHubIds, registered: registeredHubIds }
     const store = useTabStore.getState()
     const prev = store.tabs
-    const removedTabs = prev.filter(
-      (tab): tab is TaskTab => tab.type === 'task' && !taskIds.has(tab.taskId) && isGone(tab, hubs)
+    const missing = prev.filter(
+      (tab): tab is TaskTab =>
+        tab.type === 'task' && !taskIds.has(tab.taskId) && canCheckMissing(tab, hubs)
     )
-    const removed = new Set(removedTabs)
-    if (removedTabs.length > 0) {
-      const newClosed = [...store.closedTabs, ...removedTabs]
-      while (newClosed.length > 20) newClosed.shift()
-      useTabStore.setState({ closedTabs: newClosed })
-    }
-    const filtered = prev.filter((tab) => tab.type !== 'task' || !removed.has(tab))
-    const newActive =
-      filtered.length < prev.length
-        ? Math.min(store.activeTabIndex, filtered.length - 1)
-        : store.activeTabIndex
-    const updated = filtered.map((tab) => {
+    const updated = prev.map((tab) => {
       if (tab.type !== 'task') return tab
       const task = tasks.find((t) => t.id === tab.taskId)
       if (task) {
@@ -106,13 +121,71 @@ export function useTabLifecycle({
           isTemporary !== tab.isTemporary ||
           hubId !== tab.hubId
         ) {
-          return { ...tab, title: task.title, status: task.status, isSubTask, isTemporary, hubId }
+          return {
+            ...tab,
+            title: task.title,
+            status: task.status,
+            isSubTask,
+            isTemporary,
+            hubId
+          }
         }
       }
       return tab
     })
-    useTabStore.setState({ tabs: updated, activeTabIndex: newActive })
-  }, [tasks, hubIdByTask, defaultHubId, registeredHubIds, loadedHubIds])
+    useTabStore.setState({ tabs: updated })
+
+    // A hub removed from the registry cannot own visible tabs any more.
+    const removedHubTabs = new Set(
+      missing.filter((tab) => tab.hubId !== undefined && !registeredHubIds.has(tab.hubId))
+    )
+    closeConfirmedTabs(removedHubTabs)
+
+    // Board reads may have started before a create or restore committed. Their
+    // absence is not proof of deletion: check the current row on its owning hub
+    // before changing (and persisting) the open-tab list. A failed/offline read
+    // preserves the tab. Legacy tabs with no hub need every hub to confirm.
+    let cancelled = false
+    for (const tab of missing) {
+      if (removedHubTabs.has(tab)) continue
+      const hubIds = tab.hubId === undefined ? [...registeredHubIds] : [tab.hubId]
+      void Promise.all(
+        hubIds.map((hubId) =>
+          getClientForHub(hubId)
+            .task.get.query({ id: tab.taskId })
+            .catch((error: unknown) => {
+              // Authenticated hubs report missing/inaccessible IDs as NOT_FOUND.
+              if (error && typeof error === 'object' && 'data' in error) {
+                const data = error.data
+                if (data && typeof data === 'object' && 'code' in data && data.code === 'NOT_FOUND')
+                  return null
+              }
+              throw error
+            })
+        )
+      )
+        .then((rows) => {
+          if (cancelled || !useTabStore.getState().tabs.includes(tab)) return
+          const liveIndex = rows.findIndex((row) => row && !row.deleted_at)
+          const live = rows[liveIndex]
+          if (live) {
+            useHubOwnershipStore.getState().noteTaskHub(live.id, hubIds[liveIndex])
+            onTaskRecovered(live)
+            return
+          }
+          // A later board/restore may already have brought the row back.
+          if (useTabStore.getState()._taskLookup.tasks.some((task) => task.id === tab.taskId))
+            return
+          closeConfirmedTabs(new Set([tab]))
+        })
+        .catch(() => {
+          // Unreachable or unauthenticated is not deleted.
+        })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [tasks, hubIdByTask, defaultHubId, registeredHubIds, loadedHubIds, onTaskRecovered])
 
   // Drop stale focus requests for tasks that no longer exist.
   useEffect(() => {

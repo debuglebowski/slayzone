@@ -232,6 +232,7 @@ run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
+run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
 # listForTask scoping — null taskId (Home/project view) must not leak other projects' processes.
 run_harness packages/domains/processes/src/server/process-manager.test.ts
 # Persistence seam — fake ProcessPersistence records insert/update/remove; loadAll hydration.

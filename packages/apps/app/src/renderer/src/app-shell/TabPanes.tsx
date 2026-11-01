@@ -106,8 +106,14 @@ export const TabPanes = memo(function TabPanes({
     [tabs]
   )
   const catcherHubIds = useMemo(
-    () => [...new Set([...openTaskIds].map((id) => hubIdByTask.get(id) ?? defaultHubId))],
-    [openTaskIds, hubIdByTask, defaultHubId]
+    () => [
+      ...new Set(
+        tabs.flatMap((tab) =>
+          tab.type === 'task' ? [hubIdByTask.get(tab.taskId) ?? tab.hubId ?? defaultHubId] : []
+        )
+      )
+    ],
+    [tabs, hubIdByTask, defaultHubId]
   )
   const isOpenTask = useCallback((taskId: string) => openTaskIds.has(taskId), [openTaskIds])
   return (
@@ -139,7 +145,7 @@ export const TabPanes = memo(function TabPanes({
             taskId={tab.taskId}
             task={task}
             project={projectsMap.get(task?.project_id ?? '') ?? null}
-            hubId={hubIdByTask.get(tab.taskId) ?? defaultHubId}
+            hubId={hubIdByTask.get(tab.taskId) ?? tab.hubId ?? defaultHubId}
             isViewActive={isViewActive}
             explodeMode={explodeMode}
             isExplodeFocused={explodeMode && focusedExplodeTaskId === tab.taskId}

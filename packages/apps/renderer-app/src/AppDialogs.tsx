@@ -46,7 +46,7 @@ import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/cl
 import { useTRPCClient, getClientForHub } from './trpc'
 import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
-import type { useTasksData } from '@slayzone/tasks/client'
+import { insertCreatedRow, type useTasksData } from '@slayzone/tasks/client'
 import { markSessionUnspawned, traceSessionOpen } from '@slayzone/terminal/client'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task-contracts'
@@ -230,11 +230,13 @@ export function AppDialogs({
     })
     if (!task) return
     if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
-    data.setTasks((prev) => [task, ...prev])
+    data.setTasks((prev) => insertCreatedRow(prev, task, 'start'))
     // openTask reads title/status out of the tab store's task lookup; without
     // this patch the fresh tab renders untitled until the next board load.
     const lookup = useTabStore.getState()._taskLookup
-    useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+    useTabStore.setState({
+      _taskLookup: { ...lookup, tasks: insertCreatedRow(lookup.tasks, task, 'start') }
+    })
     // Brand-new task: its main terminal has no PTY yet, so skip the attach probe;
     // trace the open so the mount timeline covers tab open → terminal init.
     markSessionUnspawned(`${task.id}:${task.id}`)
@@ -247,11 +249,11 @@ export function AppDialogs({
   // notify.onTasksChanged → board self-refreshes); these callbacks add the
   // optimistic patch to the lifted board + drive the store's open/close.
   const handleTaskCreated = (task: Task): void => {
-    data.setTasks((prev) => [task, ...prev])
+    data.setTasks((prev) => insertCreatedRow(prev, task, 'start'))
     useDialogStore.getState().closeCreateTask()
   }
   const handleTaskCreatedAndOpen = (task: Task): void => {
-    data.setTasks((prev) => [task, ...prev])
+    data.setTasks((prev) => insertCreatedRow(prev, task, 'start'))
     useDialogStore.getState().closeCreateTask()
     onOpenTask(task.id)
   }
@@ -266,7 +268,7 @@ export function AppDialogs({
   // the tRPC mutation themselves; these callbacks patch the shared board +
   // selection + drive the store's open/close.
   const handleProjectCreated: CreateProjectProps['onCreated'] = (project, context) => {
-    data.setProjects((prev) => [...prev, project])
+    data.setProjects((prev) => insertCreatedRow(prev, project, 'end'))
     onSelectProject(project.id)
     const store = useDialogStore.getState()
     store.closeCreateProject()

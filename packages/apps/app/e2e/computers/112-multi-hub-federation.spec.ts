@@ -440,6 +440,194 @@ async function spawnHubWithTwoComputers(storeDir: string): Promise<TwoComputerHu
 }
 
 base.describe('Multi-hub federation (2 hubs)', () => {
+  base('open tabs survive hub outages, offline reloads, and a full app restart', async () => {
+    base.setTimeout(240_000)
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-tab-recovery-hub-'))
+    let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    type TabState = {
+      tabs: Array<{ type: string; taskId?: string; hubId?: string }>
+      closedTabs: Array<{ taskId: string }>
+      _taskLookup: { tasks: Array<{ id: string; title: string }> }
+      openTaskInBackground: (id: string) => void
+    }
+    type TabWindow = {
+      __slayzone_tabStore: { getState: () => TabState; setState: (state: unknown) => void }
+    }
+    const readTabs = (page: Page) =>
+      page.evaluate(() => {
+        const state = (window as unknown as TabWindow).__slayzone_tabStore.getState()
+        return {
+          open: state.tabs.flatMap((tab) => (tab.type === 'task' ? [tab.taskId!] : [])).sort(),
+          closed: state.closedTabs.map((tab) => tab.taskId)
+        }
+      })
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const { port, url, token } = hub
+      hubComputer = await attachDefaultComputer(hub, secondStore)
+      const remoteIds = await withHubClient(url, async (client) => {
+        const project = (await client.projects.create.mutate({
+          name: 'Remote Recovery',
+          color: '#22c55e'
+        })) as { id: string }
+        const ids: string[] = []
+        for (const isTemporary of [false, true]) {
+          const task = (await client.task.create.mutate({
+            projectId: project.id,
+            title: `Remote recovery ${isTemporary}`,
+            status: 'in_progress',
+            terminalMode: 'terminal',
+            isTemporary
+          })) as { id: string }
+          ids.push(task.id)
+        }
+        return ids
+      })
+      launched = await launchIsolatedElectron({
+        name: 'tab-recovery-outages',
+        seedUserData: (dir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(dir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(dir),
+            JSON.stringify({
+              server_mode: 'local',
+              multi_hub: true,
+              default_hub_id: 'local',
+              hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url }]
+            })
+          )
+        }
+      })
+      let page = launched.page
+      await authorizeHubInApp(page, 'remote-b', token)
+      expect(await waitForUsableComputer(page)).toBe(true)
+      const localIds = await page.evaluate(async () => {
+        const client = window.getTrpcVanillaClient()
+        const project = await client.projects.create.mutate({
+          name: 'Local Recovery',
+          color: '#3b82f6'
+        })
+        const ids: string[] = []
+        for (const isTemporary of [false, true]) {
+          const task = await client.task.create.mutate({
+            projectId: project.id,
+            title: `Local recovery ${isTemporary}`,
+            status: 'in_progress',
+            terminalMode: 'terminal',
+            isTemporary
+          })
+          ids.push(task.id)
+        }
+        return ids
+      })
+      const expected = [...localIds, ...remoteIds].sort()
+      await page.evaluate(() => (window as unknown as FederationWindow).__slayzone_refreshData?.())
+      await expect
+        .poll(() =>
+          page.evaluate((ids) => {
+            const state = (window as unknown as TabWindow).__slayzone_tabStore.getState()
+            return ids.every((id) => state._taskLookup.tasks.some((task) => task.id === id))
+          }, expected)
+        )
+        .toBe(true)
+      await page.evaluate((ids) => {
+        const store = (window as unknown as TabWindow).__slayzone_tabStore
+        store.setState({ sidebarView: 'tree' })
+        for (const id of ids) store.getState().openTaskInBackground(id)
+      }, expected)
+      const assertSavedTabs = async () => {
+        expect((await readTabs(page)).open).toEqual(expected)
+        expect((await readTabs(page)).closed).toEqual([])
+        await expect
+          .poll(() =>
+            page.evaluate(async () => {
+              const raw = await window
+                .getTrpcVanillaClient()
+                .settings.get.query({ key: 'viewState' })
+              return raw
+                ? (JSON.parse(raw) as TabState).tabs
+                    .flatMap((tab) => (tab.type === 'task' ? [tab.taskId!] : []))
+                    .sort()
+                : []
+            })
+          )
+          .toEqual(expected)
+      }
+      await assertSavedTabs()
+
+      for (let cycle = 0; cycle < 2; cycle++) {
+        await hubComputer.stop()
+        hubComputer = null
+        await hub.stop()
+        hub = null
+        // Real renderer reload with one hub down: outlast its connect deadline.
+        await page.reload()
+        await page.waitForSelector('#root', { timeout: 30_000 })
+        await expect.poll(() => readTabs(page)).toEqual({ open: expected, closed: [] })
+        await page.waitForTimeout(20_000)
+        await assertSavedTabs()
+
+        if (cycle === 0) {
+          // A real Electron stop/start, carrying only this test's isolated store.
+          const previousDir = launched.userDataDir
+          await launched.close()
+          launched = await launchIsolatedElectron({
+            name: 'tab-recovery-restart',
+            seedUserData: (dir) => fs.cpSync(previousDir, dir, { recursive: true })
+          })
+          page = launched.page
+          await page.waitForSelector('#root', { timeout: 30_000 })
+          await page.waitForTimeout(20_000)
+          await assertSavedTabs()
+        }
+
+        hub = await spawnSecondHub(secondStore, { port })
+        await waitForHubHealth(port)
+        hubComputer = await attachDefaultComputer(hub, secondStore)
+        await withHubClient(url, (client) =>
+          client.task.update.mutate({
+            id: remoteIds[0],
+            title: `Remote reconnected ${cycle}`
+          })
+        )
+        await expect
+          .poll(
+            () =>
+              page.evaluate((id) => {
+                return (window as unknown as TabWindow).__slayzone_tabStore
+                  .getState()
+                  ._taskLookup.tasks.find((task) => task.id === id)?.title
+              }, remoteIds[0]),
+            { timeout: 60_000 }
+          )
+          .toBe(`Remote reconnected ${cycle}`)
+        await assertSavedTabs()
+        for (const name of ['Local Recovery', 'Remote Recovery']) {
+          await expect(
+            page.getByRole('button', { name: new RegExp(`^(Expand|Collapse) ${name}$`) })
+          ).toHaveCount(1)
+        }
+      }
+      const remoteTasks = await withHubClient(
+        url,
+        async (client) => (await client.task.getAll.query()) as Array<{ id: string }>
+      )
+      expect(remoteIds.every((id) => remoteTasks.some((task) => task.id === id))).toBe(true)
+      const localTasks = await page.evaluate(() =>
+        window.getTrpcVanillaClient().task.getAll.query()
+      )
+      expect(localIds.every((id) => localTasks.some((task) => task.id === id))).toBe(true)
+    } finally {
+      if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
   base('rail unions both hubs; local DB stays isolated; writes route to owner', async () => {
     base.setTimeout(180_000)
 

@@ -31,6 +31,7 @@ import {
 // Domains
 import {
   useTasksData,
+  insertCreatedRow,
   useUndoableTaskActions,
   useCloseTaskTab,
   useReopenClosedTab,
@@ -405,7 +406,8 @@ function App(): React.JSX.Element {
     hubIdByTask,
     defaultHubId,
     registeredHubIds,
-    loadedHubIds
+    loadedHubIds,
+    onTaskRecovered: updateTask
   })
 
   // Tab colors (extracted — pure derivation)
@@ -977,10 +979,12 @@ function App(): React.JSX.Element {
           : { pressToCreatedMs: Math.round(performance.now() - pressedAt) })
       })
       trackTask(task.id, 'temporary_task_created')
-      setTasks((prev) => [task, ...prev])
+      setTasks((prev) => insertCreatedRow(prev, task, 'start'))
       setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
       const lookup = useTabStore.getState()._taskLookup
-      useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+      useTabStore.setState({
+        _taskLookup: { ...lookup, tasks: insertCreatedRow(lookup.tasks, task, 'start') }
+      })
       // Brand-new task: its main terminal has no PTY yet, so skip the attach probe;
       // trace the open so the mount timeline covers tab open → terminal init.
       markSessionUnspawned(`${task.id}:${task.id}`)
@@ -1038,16 +1042,18 @@ function App(): React.JSX.Element {
 
   // Task handlers
   const handleTaskCreated = (task: Task): void => {
-    setTasks((prev) => [task, ...prev])
+    setTasks((prev) => insertCreatedRow(prev, task, 'start'))
     useDialogStore.getState().closeCreateTask()
   }
 
   const handleTaskCreatedAndOpen = (task: Task): void => {
-    setTasks((prev) => [task, ...prev])
+    setTasks((prev) => insertCreatedRow(prev, task, 'start'))
     useDialogStore.getState().closeCreateTask()
     setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
     const lookup = useTabStore.getState()._taskLookup
-    useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+    useTabStore.setState({
+      _taskLookup: { ...lookup, tasks: insertCreatedRow(lookup.tasks, task, 'start') }
+    })
     // Pass project override — guardTaskOpen can't resolve from stale `tasks` closure.
     openTask(
       task.id,
@@ -1191,7 +1197,7 @@ function App(): React.JSX.Element {
   )
 
   const handleProjectCreated = (project: Project, context: ProjectCreationContext): void => {
-    setProjects((prev) => [...prev, project])
+    setProjects((prev) => insertCreatedRow(prev, project, 'end'))
     setSelectedProjectId(project.id)
     useDialogStore.getState().closeCreateProject()
     if (context.startMode === 'github' || context.startMode === 'linear')

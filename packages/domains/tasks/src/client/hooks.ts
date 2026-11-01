@@ -1,4 +1,5 @@
 export { useTasksData } from './useTasksData'
+export { insertCreatedRow } from './insert-created-row'
 export { useUndoableTaskActions } from './useUndoableTaskActions'
 export { useCloseTaskTab } from './useCloseTaskTab'
 export { useReopenClosedTab } from './useReopenClosedTab'

@@ -706,6 +706,8 @@ export interface Task {
   order: number
   due_date: string | null
   archived_at: string | null
+  /** Soft-deletion timestamp; task.get can return Trash rows omitted from the board. */
+  deleted_at?: string | null
   // Terminal configuration
   terminal_mode: TerminalMode
   provider_config: ProviderConfig
