@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@slayzone/agent-turns": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/platform": "workspace:*",

@@ -771,6 +771,9 @@ importers:
 
   packages/apps/computer:
     dependencies:
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../../domains/agent-turns
       '@slayzone/computer-transport':
         specifier: workspace:*
         version: link:../../domains/computer-transport
@@ -1528,6 +1531,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../terminal-contracts
       ws:
         specifier: ^8.22.0
         version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)

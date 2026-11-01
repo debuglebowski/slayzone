@@ -65,7 +65,7 @@ function itemKeyOf(item: TimelineItem, row: number): Key {
   // By its Task call: the files-changed panel reveals a sub-agent's edits.
   if (item.kind === 'sub-agent') return `sub-agent:${item.toolUseId}`
   if (item.kind === 'notice' && item.id) return `notice:${item.id}`
-  if (item.kind === 'files-changed') return item.id
+  if (item.kind === 'files-changed' || item.kind === 'workspace-changes') return item.id
   // Its range: loading part of it makes it another placeholder.
   if (item.kind === 'history-gap') return `gap:${item.from}-${item.to}`
   return `${item.kind}:${row}`
@@ -127,6 +127,7 @@ export function stableAnchorKey(item: TimelineItem): string | null {
     case 'notice':
       return item.id ? `notice:${item.id}` : null
     case 'files-changed':
+    case 'workspace-changes':
       return item.id
     default:
       return null
@@ -340,6 +341,7 @@ export function useChatDisplay({
         item.kind === 'command-output' ||
         // What the turn changed is part of its outcome.
         item.kind === 'files-changed' ||
+        item.kind === 'workspace-changes' ||
         // Failures and notices stay visible in every view.
         item.kind === 'notice' ||
         item.kind === 'agent-problem' ||

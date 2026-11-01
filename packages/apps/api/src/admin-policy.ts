@@ -373,6 +373,8 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'automations.toggle': 'admin',
   'automations.update': 'admin',
   'chat.abortAndPop': 'user',
+  'chat.workspaceChanges.get': 'user',
+  'chat.workspaceChanges.getFileDiff': 'user',
   'chat.backgroundCommandTask': 'user',
   'chat.bumpAutocompleteUsage': 'user',
   'chat.commandTaskOutput': 'user',

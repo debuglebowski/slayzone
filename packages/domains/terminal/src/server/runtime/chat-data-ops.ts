@@ -394,6 +394,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
 
     clearChatEventsForTab: async (tabId) => {
       await clearChatEventsForTab(db, tabId)
+      await db.prepare('DELETE FROM chat_workspace_changes WHERE tab_id=?').run(tabId)
       // Derived from those events (a leftover would be refused anyway: its seq
       // is past the events).
       await clearTimeline(db, tabId)

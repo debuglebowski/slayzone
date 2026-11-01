@@ -4349,6 +4349,31 @@ export const migrations: Migration[] = [
           insert.run(row.task_id, event.id, JSON.stringify(attachments))
       }
     }
+  },
+  {
+    version: 183,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE chat_workspace_changes (
+          id TEXT PRIMARY KEY,
+          tab_id TEXT NOT NULL REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          message_id TEXT NOT NULL,
+          computer_id TEXT,
+          root_path TEXT NOT NULL,
+          status TEXT NOT NULL,
+          reason TEXT,
+          files TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX chat_workspace_changes_tab ON chat_workspace_changes(tab_id, created_at);
+        CREATE TABLE chat_workspace_diffs (
+          capture_id TEXT NOT NULL REFERENCES chat_workspace_changes(id) ON DELETE CASCADE,
+          path TEXT NOT NULL,
+          diff TEXT NOT NULL,
+          PRIMARY KEY (capture_id, path)
+        );
+      `)
+    }
   }
 ]
 

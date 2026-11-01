@@ -58,6 +58,10 @@ const spawn: AuditRule['detail'] = (p) => ({
 })
 
 export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
+  // Observations only; no source bytes, diffs, or per-turn read noise in the audit log.
+  'workspaceChanges.begin': null,
+  'workspaceChanges.finish': null,
+  'workspaceChanges.discard': null,
   'pty.spawn': { event: 'computer.pty.spawn', detail: spawn },
   'pty.warmSpawn': {
     event: 'computer.pty.spawn',

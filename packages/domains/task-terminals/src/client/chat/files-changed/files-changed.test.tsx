@@ -331,7 +331,7 @@ describe('files-changed panel', () => {
     const onClose = vi.fn()
     render(<FilesChangedPanel timeline={[]} cwd="/repo" onClose={onClose} />)
     const panel = screen.getByTestId('chat-files-panel')
-    expect(panel.textContent).toContain('No files changed')
+    expect(panel.textContent).toContain('No file-tool edits recorded')
     fireEvent.keyDown(panel, { key: 'Escape' })
     expect(onClose).toHaveBeenCalled()
   })

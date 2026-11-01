@@ -297,3 +297,5 @@ export {
   getAgentLifecycleEvents,
   type AgentLifecycleEventMap
 } from './agent-lifecycle-events'
+export { createWorkspaceChangesStore } from './workspace-changes-store'
+export type { WorkspaceCaptureBackend, WorkspaceCaptureContext } from './runtime/chat-workspace-tracker'

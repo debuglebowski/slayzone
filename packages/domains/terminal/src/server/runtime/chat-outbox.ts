@@ -61,6 +61,9 @@ export interface OutboxStateChange {
 }
 
 export interface OutboxDeps {
+  /** Optional, bounded observation barrier before bytes reach the agent. */
+  beforeWriting?(proc: OutboxProcess, id: string): Promise<void>
+  onCancelled?(id: string): void
   /** The tab's current process, ready or not (null: none). */
   current(): OutboxProcess | null
   /** The current process once ready — starting one if needed. Rejects with why it could not. */
@@ -168,6 +171,7 @@ export class ChatOutbox {
     const i = this.queue.indexOf(id)
     if (i >= 0) this.queue.splice(i, 1)
     this.set(entry, 'cancelled')
+    this.deps.onCancelled?.(id)
   }
 
   /** Messages the agent has not finished with (queued, sending, delivered). */
@@ -386,6 +390,28 @@ export class ChatOutbox {
   }
 
   private send(proc: OutboxProcess, entry: Entry, id: string, prepared: unknown): void {
+    if (this.deps.beforeWriting) {
+      this.deps.beforeWriting(proc, id).then(
+        () => {
+          if (entry.state !== 'queued') return this.finishWrite(id)
+          if (!proc.ready || this.deps.current() !== proc) {
+            this.queue.unshift(id)
+            this.finishWrite(id)
+            return
+          }
+          this.sendPrepared(proc, entry, id, prepared)
+        },
+        (err: unknown) => {
+          if (entry.state === 'queued') this.set(entry, 'failed', message(err))
+          this.finishWrite(id)
+        }
+      )
+      return
+    }
+    this.sendPrepared(proc, entry, id, prepared)
+  }
+
+  private sendPrepared(proc: OutboxProcess, entry: Entry, id: string, prepared: unknown): void {
     entry.gen = proc.gen
     entry.written = false
     entry.cli = 'none'

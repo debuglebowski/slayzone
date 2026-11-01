@@ -109,6 +109,7 @@ import {
   setPtyDeps,
   setChatDeps,
   setChatAttachmentReader,
+  createWorkspaceChangesStore,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
@@ -180,6 +181,7 @@ import {
 import {
   createHubComputerGateway,
   createRoutingChatBackend,
+  createRoutingWorkspaceCaptureBackend,
   createRoutingPtyBackend,
   createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
@@ -1576,6 +1578,8 @@ export function composeServer(opts: {
     // one agent kind the hub always ran in its OWN process, so a chat session
     // could never reach a remote workspace.
     configureTransport({
+      workspaceCapture: createRoutingWorkspaceCaptureBackend(computerGateway),
+      workspaceStore: createWorkspaceChangesStore(db),
       backend: createRoutingChatBackend({
         gateway: computerGateway,
         resolveComputerId: (spec) => resolveExecComputer(spec.computerId),

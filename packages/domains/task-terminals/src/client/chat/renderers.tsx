@@ -34,6 +34,7 @@ import {
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
+import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
 import { HistoryGapRow } from './HistoryGapRow'
 import {
   CHAT_CARD_INDENT,
@@ -1051,6 +1052,8 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <UnknownBlock key={key} item={item} />
     case 'files-changed':
       return <FilesChangedRow key={key} item={item} />
+    case 'workspace-changes':
+      return <WorkspaceChangesRow key={key} item={item} />
     case 'history-gap':
       return <HistoryGapRow key={key} item={item} />
   }

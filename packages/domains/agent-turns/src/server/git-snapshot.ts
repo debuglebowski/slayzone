@@ -1,7 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { writeWorkspaceTree } from './workspace-capture'
 import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 
@@ -75,24 +73,12 @@ export async function snapshotWorktree(
   const headSha = head.stdout.trim()
   if (!headSha) return null
 
-  let tmpDir: string | null = null
   try {
-    tmpDir = mkdtempSync(join(tmpdir(), 'slayzone-turn-'))
-    const tmpIdx = join(tmpDir, 'index')
-    const env = { GIT_INDEX_FILE: tmpIdx }
-
-    // Seed the temp index from HEAD so unchanged files inherit their existing tree entries.
-    const read = await exec(['read-tree', headSha], repoPath, env)
-    if (read.status !== 0) return null
-
-    // Sync temp index to current worktree (tracked edits + untracked non-ignored).
-    const add = await exec(['add', '-A'], repoPath, env)
-    if (add.status !== 0) return null
-
-    const tree = await exec(['write-tree'], repoPath, env)
-    if (tree.status !== 0) return null
-    const treeSha = tree.stdout.trim()
-    if (!treeSha) return null
+    const treeSha = await writeWorkspaceTree(async (args, env) => {
+      const result = await exec(args, repoPath, env)
+      if (result.status !== 0) throw new Error(result.stderr)
+      return { text: result.stdout, truncated: false }
+    }, headSha)
 
     // ALWAYS create a commit-tree with parent=HEAD. Avoids the previous
     // HEAD-shortcut that produced ambiguous diff bases (HEAD^ != HEAD-at-snap-time).
@@ -109,14 +95,8 @@ export async function snapshotWorktree(
     const ref = await exec(['update-ref', `refs/slayzone/turns/${turnId}`, sha], repoPath)
     if (ref.status !== 0) return null
     return { snapshotSha: sha, headSha }
-  } finally {
-    if (tmpDir) {
-      try {
-        rmSync(tmpDir, { recursive: true, force: true })
-      } catch {
-        /* ignore */
-      }
-    }
+  } catch {
+    return null
   }
 }
 

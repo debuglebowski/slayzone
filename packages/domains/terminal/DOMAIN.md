@@ -4,6 +4,16 @@ Manages PTY sessions for task execution. Supports multiple terminal modes (Claud
 
 ## Architecture
 
+### Workspace changes in chat
+
+Chat keeps exact native file-tool edits separate from saved net workspace changes.
+Before sending a turn, the computer takes an isolated-index Git baseline; after
+completion or interruption it captures the final tree. Saved diffs live in the hub
+and survive commits, reloads, and computer disconnection. The next turn waits for
+capture completion. Shared-workspace changes are observations, not authorship claims.
+Non-Git workspaces and failed captures show unavailable; oversized text diffs show
+partial. Capture helpers are exposed by `@slayzone/agent-turns/workspace-capture`.
+
 ### Chat side threads
 
 `chat.threads` persists answer discussions in `chat_threads` (migration 180).

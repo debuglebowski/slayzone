@@ -82,6 +82,29 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
+test('awaits beforeWriting without sending a withdrawn message', async () => {
+  const p = proc(1)
+  let release!: () => void
+  const outbox = new ChatOutbox({
+    current: () => p,
+    ensureReady: async () => p,
+    onChange: () => {},
+    onWriting: () => {},
+    beforeWriting: () =>
+      new Promise<void>((r) => {
+        release = r
+      })
+  })
+  outbox.accept(msg('one'))
+  expect(p.sent).toEqual([])
+  p.ready = false
+  outbox.cancel('one')
+  release()
+  await flush()
+  expect(p.sent).toEqual([])
+  outbox.dispose()
+})
+
 beforeEach(() => {
   vi.useFakeTimers()
 })

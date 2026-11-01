@@ -121,6 +121,20 @@ const rewindOpts = chatCreateOpts.extend({
 })
 
 export const chatRouter = router({
+  workspaceChanges: router({
+    get: publicProcedure
+      .input(z.object({ tabId: z.string(), captureId: z.string().max(200) }))
+      .query(({ input }) => ops().getWorkspaceChanges(input.tabId, input.captureId)),
+    getFileDiff: publicProcedure
+      .input(
+        z.object({
+          tabId: z.string(),
+          captureId: z.string().max(200),
+          path: z.string().max(10_000)
+        })
+      )
+      .query(({ input }) => ops().getWorkspaceFileDiff(input.tabId, input.captureId, input.path))
+  }),
   // Test-only (PLAYWRIGHT): shorten the chat watchdog for one spec; `null` restores
   // the defaults. Same gate as pty-router's test procedures.
   testSetWatchdogTimings: publicProcedure

@@ -51,6 +51,7 @@ import { createFsHandlers } from './handlers/fs'
 import { createGhHandlers } from './handlers/gh'
 import { createClaudeSessionHandlers } from './handlers/claude-session'
 import { createGitHandlers } from './handlers/git'
+import { createWorkspaceChangesHandlers } from './handlers/workspace-changes'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
@@ -194,6 +195,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
+    ...createWorkspaceChangesHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...fs.handlers,
     ...createComputerConfigHandlers(ctx),
     ...createGhHandlers(ctx),

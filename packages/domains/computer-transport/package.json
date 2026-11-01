@@ -16,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/platform": "workspace:*",

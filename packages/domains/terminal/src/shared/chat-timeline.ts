@@ -13,6 +13,7 @@ import type {
   ToolCallEvent,
   ToolResultEvent
 } from '@slayzone/terminal-contracts'
+import type { WorkspaceChangesEvent } from '@slayzone/terminal-contracts'
 import {
   cliCommandDetailsFromList,
   cliCommandListFromTurnInit,
@@ -67,6 +68,7 @@ export type UserDeliveryState =
   | 'cancelled'
 
 export type TimelineItem =
+  | (WorkspaceChangesEvent & { id: string; timestamp: number; parentToolUseId?: undefined })
   | {
       kind: 'user-text'
       text: string
@@ -455,6 +457,8 @@ export interface ChatTimelineState {
   /** tool_use_id → index into `timeline` for paired mutation. */
   /** Tool call id → its row. Persistent: a new version per call, no full copy. */
   toolIndex: PersistentIndex<number>
+  /** Host capture ID → its row; avoids scanning unloaded history on every new turn. */
+  workspaceIndex: PersistentIndex<number>
   /** Sub-agent tool_use_id → timeline index. Lets `notification` merge into the row started by `task_started`. */
   subAgentIndex: Map<string, number>
   /**
@@ -615,6 +619,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
   return {
     timeline: [],
     toolIndex: PersistentIndex.empty(),
+    workspaceIndex: PersistentIndex.empty(),
     subAgentIndex: new Map(),
     childIndex: new Map(),
     sessionStarted: false,
@@ -914,12 +919,14 @@ function reindexRows(state: ChatTimelineState): ChatTimelineState {
   const unloaded = firstUnloaded(state.timeline)
   if (unloaded >= 0) throw new RowsNotLoaded(unloaded)
   let userIndex = PersistentIndex.empty<readonly number[]>()
+  let workspaceIndex = PersistentIndex.empty<number>()
   let idlessOptimistic = 0
   const branchRows: number[] = []
   const streamingRows: number[] = []
   let turnStart = 0
   state.timeline.forEach((it, i) => {
     if (!it) return
+    if (it.kind === 'workspace-changes') workspaceIndex = workspaceIndex.with(it.captureId, i)
     if (it.kind === 'result') turnStart = i + 1
     if (isStreamingRow(it)) streamingRows.push(i)
     if (it.kind === 'conversation-branch') branchRows.push(i)
@@ -930,6 +937,7 @@ function reindexRows(state: ChatTimelineState): ChatTimelineState {
   return {
     ...state,
     userIndex,
+    workspaceIndex,
     idlessOptimistic,
     branchRows,
     streamingRows,
@@ -2028,6 +2036,21 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         timestamp: ts
       }
       return { ...state, timeline: appended(state.timeline, item) }
+    }
+    case 'workspace-changes': {
+      const item: TimelineItem = { ...event, id: `workspace:${event.captureId}`, timestamp: ts }
+      const at = state.workspaceIndex.get(event.captureId)
+      if (at !== undefined) {
+        const previous = rowAt(state.timeline, at)
+        const timeline = writable(state.timeline)
+        timeline[at] = { ...item, timestamp: previous.timestamp }
+        return { ...state, timeline }
+      }
+      return {
+        ...state,
+        workspaceIndex: state.workspaceIndex.with(event.captureId, state.timeline.length),
+        timeline: appended(state.timeline, item)
+      }
     }
     case 'notice': {
       const item: TimelineItem = {

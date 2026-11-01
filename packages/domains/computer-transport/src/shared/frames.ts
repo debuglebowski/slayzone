@@ -346,6 +346,9 @@ export type ComputerNotificationMethod = keyof typeof computerNotificationSchema
 // ---------------------------------------------------------------------------
 
 export const HubToComputerMethods = {
+  workspaceChangesBegin: 'workspaceChanges.begin',
+  workspaceChangesFinish: 'workspaceChanges.finish',
+  workspaceChangesDiscard: 'workspaceChanges.discard',
   ptySpawn: 'pty.spawn',
   ptyKill: 'pty.kill',
   ptyResize: 'pty.resize',

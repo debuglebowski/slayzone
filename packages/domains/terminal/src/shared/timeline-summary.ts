@@ -34,6 +34,8 @@ export interface TimelinePageSummary {
 /** The text chat search looks in for a row ('' = none). Shared with the hub. */
 export function searchableText(item: TimelineItem): string {
   switch (item.kind) {
+    case 'workspace-changes':
+      return `Workspace changes during this turn ${item.fileCount} ${item.status} ${item.reason ?? ''}`
     case 'user-text':
     case 'text':
     case 'thinking':

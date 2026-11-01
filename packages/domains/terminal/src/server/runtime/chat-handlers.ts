@@ -105,6 +105,7 @@ import {
 import type { AgentEvent as ChatAgentEvent } from '@slayzone/terminal-contracts'
 import { claudeSessionHistory } from '../agents/claude-session-import'
 import { randomUUID } from 'node:crypto'
+import { getWorkspaceChanges, getWorkspaceFileDiff } from './chat-transport-manager'
 import type {
   RewindFilesPreview,
   RewindResult,
@@ -1337,6 +1338,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getBufferSince: (tabId: string, afterSeq: number) => readEventsSince(tabId, afterSeq),
 
     getInfo: (tabId: string) => getSessionInfo(tabId),
+    getWorkspaceChanges,
+    getWorkspaceFileDiff,
 
     inspectPermissions: async (
       taskId: string,

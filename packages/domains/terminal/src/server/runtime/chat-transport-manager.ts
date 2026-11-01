@@ -1,5 +1,10 @@
 import { spawn as realSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import {
+  ChatWorkspaceTracker,
+  type WorkspaceCaptureBackend,
+  type WorkspaceChangesStore
+} from './chat-workspace-tracker'
 import type {
   AgentEvent,
   CommandTaskOutput,
@@ -102,6 +107,8 @@ export interface TransportDeps {
    * behavior is byte-identical to before this seam existed.
    */
   backend?: ChatBackend
+  workspaceCapture?: WorkspaceCaptureBackend
+  workspaceStore?: WorkspaceChangesStore
   whichBinary: (name: string) => Promise<string | null>
   /**
    * `seq` is the event's own (saved events), or — for a LIVE event (`live` set:
@@ -329,6 +336,14 @@ export function resetTransportDeps(): void {
   deps = defaultDeps
 }
 
+export function getWorkspaceChanges(tabId: string, id: string) {
+  return deps.workspaceStore?.get(tabId, id) ?? Promise.resolve(null)
+}
+
+export function getWorkspaceFileDiff(tabId: string, id: string, path: string) {
+  return deps.workspaceStore?.getFileDiff?.(tabId, id, path) ?? Promise.resolve(null)
+}
+
 export interface ChatSessionInfo {
   sessionId: string
   tabId: string
@@ -363,6 +378,7 @@ export interface ChatSessionInfo {
  * never re-use a seq or lose a message the old one had not confirmed.
  */
 interface ChatTab {
+  workspaceTracker?: ChatWorkspaceTracker
   /** Claude conversation id (`--resume` preserves it across processes). */
   sessionId: string
   tabId: string
@@ -1042,7 +1058,18 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
     return
   }
 
-  if (opensAgentTurn(tab, shown)) markAgentTurnStarted(tab)
+  if (opensAgentTurn(tab, shown)) {
+    tab.workspaceTracker?.observeAgentTurn({
+      tabId: tab.tabId,
+      gen: proc.gen,
+      rootPath: tab.cwd,
+      computerId: tab.respawnOpts.computerId ?? null,
+      projectId: tab.respawnOpts.projectId
+    })
+    markAgentTurnStarted(tab)
+  }
+  if (shown.kind === 'result' || shown.kind === 'interrupted')
+    void tab.workspaceTracker?.finish(proc.gen)
   trackTools(proc, shown)
   if (isProgressEventKind(shown.kind)) noteProgress(tab)
   if (shown.kind === 'result') tab.outbox.onResult(proc.gen)
@@ -1186,9 +1213,19 @@ function handleProcessExit(
   tab: ChatTab,
   proc: ChatProcess,
   code: number | null,
-  signal: string | null
+  signal: string | null,
+  unconfirmed = false
 ): void {
   const current = !tab.closed && tabs.get(tab.tabId) === tab && tab.proc === proc
+  if (current)
+    void tab.workspaceTracker?.finish(
+      proc.gen,
+      unconfirmed || (code === null && signal === null)
+        ? 'Agent exit could not be confirmed.'
+        : proc.replaced
+          ? 'Agent process was replaced.'
+          : undefined
+    )
   // A fork the CLI refused: it ends on its own, before confirming, with an error
   // (an unknown fork point exits 1 at startup — chat-a check R3b).
   if (
@@ -1533,6 +1570,15 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
         console.error(`[chat-transport] saving event ${seq} of ${opts.tabId} failed:`, err)
     }
   )
+  if (deps.workspaceCapture && deps.workspaceStore) {
+    tab.workspaceTracker = new ChatWorkspaceTracker({
+      backend: deps.workspaceCapture,
+      store: deps.workspaceStore,
+      emit: (event) => {
+        if (!tab.closed && tabs.get(tab.tabId) === tab) routeHostEvent(tab, event)
+      }
+    })
+  }
   tab.outbox = createOutbox(tab)
   tab.projection = openProjection(opts.tabId, opts.mode, history)
   tabs.set(opts.tabId, tab)
@@ -1548,6 +1594,8 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
   // triggers a spawn — critical for lazy mode where a buffer with an
   // unfinished turn may sit unspawned indefinitely.
   if (tailIsUnfinishedTurn(history)) routeHostEvent(tab, { kind: 'interrupted' })
+  for (const event of (await deps.workspaceStore?.recover?.(tab.tabId)) ?? [])
+    routeHostEvent(tab, event)
 
   return toInfo(tab)
 }
@@ -1559,6 +1607,22 @@ function createOutbox(tab: ChatTab): ChatOutbox {
       : null
   return new ChatOutbox({
     current,
+    onCancelled: (id) => tab.workspaceTracker?.cancel(id),
+    ...(tab.workspaceTracker
+      ? {
+          beforeWriting: (proc: { gen: number }, id: string) =>
+            tab.workspaceTracker!.beforeSend(
+              {
+                tabId: tab.tabId,
+                gen: proc.gen,
+                rootPath: tab.cwd,
+                computerId: tab.respawnOpts.computerId ?? null,
+                projectId: tab.respawnOpts.projectId
+              },
+              id
+            )
+        }
+      : {}),
     ensureReady: async () => {
       await permissionChanges.get(tab.tabId)
       if (tab.closed) throw new ChatTransportError('This chat tab was closed.')
@@ -1804,7 +1868,8 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
         if (tab.terminalState === 'starting') transitionState(tab, 'idle')
       },
       onEvent: (p, event) => handleProcessEvent(tab, p, event),
-      onExit: (p, code, signal) => handleProcessExit(tab, p, code, signal),
+      onExit: (p, code, signal, unconfirmed) =>
+        handleProcessExit(tab, p, code, signal, unconfirmed),
       onStartError: (p, err) => {
         tab.outbox.onProcessEnded(p.gen, { resend: false })
         if (tab.proc === p) failStart(tab, err)

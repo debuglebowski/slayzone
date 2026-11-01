@@ -105,7 +105,7 @@ export function FilesChangedPanel({
         )}
         {files.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No files changed yet.
+            No file-tool edits recorded.
           </p>
         ) : (
           <div className="py-2">

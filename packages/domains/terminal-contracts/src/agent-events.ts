@@ -8,8 +8,10 @@
 
 import type { ChatAttachment } from './chat-attachments'
 import type { ChatModelInfo } from './chat-model-catalog'
+import type { WorkspaceChangesEvent } from './workspace-changes'
 
 export type AgentEvent =
+  | WorkspaceChangesEvent
   | TurnInitEvent
   | UserMessageEvent
   | AssistantTextEvent

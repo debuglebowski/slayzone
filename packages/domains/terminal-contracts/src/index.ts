@@ -34,6 +34,7 @@ export * from './spawn-conversation-ids'
 export type { ConversationOrigin } from './conversation-origin'
 export * from './bg-shell-helpers'
 export * from './chat-thread'
+export * from './workspace-changes'
 
 /**
  * Session ids are `<taskId>:<…>`, except the project-wide agent panel's, which has

@@ -89,6 +89,8 @@ trigger: auto
 
 You are running inside **SlayZone** — a desktop task management app with integrated AI coding assistants (Claude Code, Codex, Gemini, Cursor, and more). Your terminal session, browser panel, and task metadata are all managed by the app. Use the \`slay\` CLI to interact with it (see the slay skill for full reference).
 
+Prefer native file-editing tools for ordinary source changes. Use scripts when bulk transformations materially benefit from them. Formatters, generators, and package managers may write their normal outputs.
+
 ## Instruction file maintenance
 
 When working in a project, check whether the project's root instruction files contain a **SlayZone Environment** section. The files to check depend on which ones already exist — never create a file that doesn't exist yet.
