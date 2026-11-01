@@ -245,6 +245,74 @@ afterEach(() => {
 })
 
 describe('Codex chat on the virtualized timeline', () => {
+  it('keeps loading visible after an intermediate reply while the agent is still running', async () => {
+    const start: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Check status' }
+    ]
+    const client = new QueryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Harness key="before-progress" events={start} grouped inFlight />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.querySelector('[data-testid="chat-working-indicator"]')).not.toBeNull()
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness
+          key="after-progress"
+          events={[
+            ...start,
+            { kind: 'assistant-text', messageId: 'progress', text: 'Checking now' }
+          ]}
+          grouped
+          inFlight
+        />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.body.textContent).toContain('Checking now')
+    expect(document.querySelector('[data-testid="chat-working-indicator"]')).not.toBeNull()
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness
+          key="tool-after-progress"
+          events={[
+            ...start,
+            { kind: 'assistant-text', messageId: 'progress', text: 'Checking now' },
+            {
+              kind: 'tool-call',
+              id: 'cmd',
+              name: 'codex/commandExecution',
+              input: { command: 'git status' }
+            }
+          ]}
+          grouped
+          inFlight
+        />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.querySelector('[data-testid="chat-working-indicator"]')).not.toBeNull()
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness
+          key="completed"
+          events={[
+            ...start,
+            { kind: 'assistant-text', messageId: 'final', text: 'All done' },
+            codexSession(1).at(-1)!
+          ]}
+          grouped
+        />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.body.textContent).toContain('All done')
+    expect(document.querySelector('[data-testid="chat-working-indicator"]')).toBeNull()
+  })
+
   it('places Activities and file changes together after the answer', async () => {
     const events = codexSession(1)
     const client = new QueryClient()

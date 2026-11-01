@@ -158,11 +158,16 @@ export function ChatTimeline({
   const renderRow = useCallback(
     (item: TimelineItem, index: number) => {
       const turn = activityTurns?.get(item)
-      if (turn?.final && item.kind === 'text') {
-        return <AssistantAnswer item={item} turn={turn} appearance={activityAppearance} rowOf={rowOf} />
-      }
       if (turn) {
         const showWorking = turn.active && !awaitingUser && turn.final?.stream !== 'open'
+        if (turn.final && item.kind === 'text') {
+          return (
+            <>
+              <AssistantAnswer item={item} turn={turn} appearance={activityAppearance} rowOf={rowOf} />
+              {showWorking && <TypingIndicator label={loadingLabel} />}
+            </>
+          )
+        }
         const showOwner =
           !turn.final &&
           (turn.active ||
