@@ -1640,7 +1640,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
           }
 
         if (!existing) {
-          const latestPlan = events.findLastIndex((event) => event.kind === 'codex-plan')
+          const latestPlan = events.map((event) => event.kind).lastIndexOf('codex-plan')
           const plan = events[latestPlan]
           if (
             latestPlan < 0 ||
@@ -1652,7 +1652,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
           const later = events.slice(latestPlan + 1)
           if (later.some((event) => event.kind === 'user-message'))
             throw new Error('Plan is no longer current')
-          const result = later.findLast((event) => event.kind === 'result')
+          const result = later.reverse().find((event) => event.kind === 'result')
           if (result?.kind !== 'result' || result.isError)
             throw new Error('Plan turn has not completed successfully')
           if (getSessionInfo(o.tabId)?.chatCollaboration !== 'plan')
