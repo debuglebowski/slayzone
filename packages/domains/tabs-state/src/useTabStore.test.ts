@@ -29,6 +29,25 @@ function reset() {
 
 beforeEach(reset)
 
+describe('sidebar hub interleaving persistence', () => {
+  test('loads saved interleaving and rejects malformed slots', () => {
+    store.getState()._loadState({
+      tabs: [{ type: 'home' }],
+      activeTabIndex: 0,
+      selectedProjectId: '',
+      sidebarHubOrder: ['remote', 'local', 'local', 42, null] as string[]
+    })
+    expect(store.getState().sidebarHubOrder).toEqual(['remote', 'local', 'local'])
+  })
+
+  test('old view state defaults to server order', () => {
+    store
+      .getState()
+      ._loadState({ tabs: [{ type: 'home' }], activeTabIndex: 0, selectedProjectId: '' })
+    expect(store.getState().sidebarHubOrder).toEqual([])
+  })
+})
+
 // Seed: focus on project A (task tab active), project B last viewed a task tab
 // (tB) that is still open. This is the precondition for the home-icon bug.
 function seedFocusedOnAWithBTaskOpen() {

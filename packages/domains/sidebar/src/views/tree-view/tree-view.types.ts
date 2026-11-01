@@ -26,6 +26,11 @@ export interface ProjectDragData {
   groupId: string | null
 }
 
+export interface ProjectGroupDragData {
+  kind: 'project-group'
+  groupId: string
+}
+
 export interface TaskBranchCtx {
   childrenByParent: Map<string, Task[]>
   activeTaskId: string | null

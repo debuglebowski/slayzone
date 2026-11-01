@@ -22,11 +22,8 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  closestCenter,
-  pointerWithin,
   useSensor,
   useSensors,
-  type CollisionDetection,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent
@@ -66,13 +63,15 @@ import {
   ProjectDragPreview,
   SortableProject,
   noShiftStrategy,
-  treeProjectDropMode,
+  treeCollisionDetection,
+  treeProjectDropTarget,
   rowGroupValue,
   type TaskBranchCtx,
   type ProjDropMode,
   type TaskRowDragData,
   type GroupDropData,
-  type ProjectDragData
+  type ProjectDragData,
+  type ProjectGroupDragData
 } from './tree-view'
 
 type RowItem =
@@ -522,16 +521,6 @@ export function TreeView({
       ),
     [visibleProjects, projectGroups]
   )
-  const renderedProjectIds = useMemo(
-    () => treeEntries.flatMap((e) => (e.kind === 'project' ? [e.id] : e.projects.map((p) => p.id))),
-    [treeEntries]
-  )
-  // pid → its group id (null = top level). Used to keep the "one line per gap"
-  // normalization within a single sibling scope.
-  const groupIdByProject = useMemo(
-    () => new Map(projects.map((p) => [p.id, p.group_id ?? null])),
-    [projects]
-  )
   // FULL top-level set (ignores the active/visible filter) — drag/reorder needs
   // every slot so a move stays complete even when some projects are hidden.
   const fullEntries = useMemo(
@@ -551,30 +540,6 @@ export function TreeView({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  // `closestCenter` resolves `over` per pointer position. Headers ARE
-  // valid drop targets (kind='group'): when pointer is closest to a
-  // header, that header becomes `over`, the strategy slides just the
-  // header (not the first/last task of the adjacent group), and the
-  // visible gap appears at the inter-group boundary — matching user
-  // mental model "drop between groups lands between groups".
-  const collisionDetection = useCallback<CollisionDetection>((args) => {
-    const kind = (args.active.data.current as { kind?: string } | undefined)?.kind
-    // A project/folder drag may land on a project row or a group header —
-    // never a task row. Prefer pointerWithin (precise, no jitter); fall back to
-    // closestCenter for gaps so reorder lines resolve.
-    if (kind === 'project' || kind === 'group') {
-      const containers = args.droppableContainers.filter((c) => {
-        const k = (c.data.current as { kind?: string } | undefined)?.kind
-        return k === 'project' || k === 'group'
-      })
-      const within = pointerWithin({ ...args, droppableContainers: containers })
-      return within.length > 0
-        ? within
-        : closestCenter({ ...args, droppableContainers: containers })
-    }
-    return closestCenter(args)
-  }, [])
-
   const handleDragStart = useCallback((event: DragStartEvent) => {
     // Project / group drags get their own overlay preview, not task bookkeeping.
     const kind = (event.active.data.current as { kind?: string } | undefined)?.kind
@@ -582,54 +547,21 @@ export function TreeView({
       setActiveDragProjectId((event.active.id as string).replace(/^project:/, ''))
       return
     }
-    if (kind === 'group') {
+    if (kind === 'project-group') {
       setActiveDragGroupId((event.active.id as string).replace(/^group:/, ''))
       return
     }
     setActiveDragTaskId(event.active.id as string)
   }, [])
 
-  // Track the project-drop indicator (insertion line / merge ring). Only for
-  // project drags — task drags keep their existing slide behavior untouched.
-  const handleDragMove = useCallback(
-    (event: DragMoveEvent) => {
-      const { active, over } = event
-      const activeKind = (active.data.current as { kind?: string } | undefined)?.kind
-      if (activeKind !== 'project' && activeKind !== 'group') return
-      if (!over || active.id === over.id) {
-        setProjectDrop(null)
-        return
-      }
-      const overKind = (over.data.current as { kind?: string } | undefined)?.kind
-      // A dragged FOLDER only reorders (never merges) → always a line.
-      // A dragged project onto a group header = join (whole header target).
-      if (overKind === 'group' && activeKind === 'project') {
-        setProjectDrop({ overId: String(over.id), mode: 'merge' })
-        return
-      }
-      let mode = treeProjectDropMode(event)
-      // Folders never merge → coerce the middle zone to a reorder line.
-      if (activeKind === 'group' && mode === 'merge') mode = 'before'
-      let overId = String(over.id)
-      // ONE line per gap: a gap between rows X and Y can resolve as either
-      // "after X" or "before Y" depending on cursor side. Normalize every
-      // 'after' to 'before next-row' so both map to the SAME single line (no
-      // double indicator). Last row keeps 'after' (its trailing edge).
-      if (mode === 'after') {
-        const pid = overId.replace(/^project:/, '')
-        const i = renderedProjectIds.indexOf(pid)
-        const next = i >= 0 ? renderedProjectIds[i + 1] : undefined
-        // Collapse only within the same scope (both top-level, or same group) —
-        // the last row of a scope keeps its own 'after' line.
-        if (next && groupIdByProject.get(pid) === groupIdByProject.get(next)) {
-          overId = `project:${next}`
-          mode = 'before'
-        }
-      }
-      setProjectDrop({ overId, mode })
-    },
-    [renderedProjectIds, groupIdByProject]
-  )
+  // The same target/mode drives the preview and the committed action. Keep
+  // the line on that exact slot: flattening projects skips intervening folders.
+  const handleDragMove = useCallback((event: DragMoveEvent) => {
+    const kind = event.active.data.current?.kind
+    if (kind !== 'project' && kind !== 'project-group') return
+    const target = treeProjectDropTarget(event)
+    setProjectDrop(target ? { overId: target.overId, mode: target.mode } : null)
+  }, [])
 
   const handleDragCancel = useCallback(() => {
     setActiveDragTaskId(null)
@@ -804,36 +736,24 @@ export function TreeView({
         | TaskRowDragData
         | GroupDropData
         | ProjectDragData
-        | { kind: 'group'; groupId: string }
+        | ProjectGroupDragData
         | undefined
 
       // === Project drag (top-level / member) OR folder drag. Geometry computed
       // here; the membership/reorder decision is the shared resolver (unit-
-      // tested, shared with the rail). A dragged folder (kind='group') only
+      // tested, shared with the rail). A dragged folder (kind='project-group') only
       // reorders the top level (isGroup → resolver ignores merge).
-      if (activeData?.kind === 'project' || activeData?.kind === 'group') {
+      if (activeData?.kind === 'project' || activeData?.kind === 'project-group') {
         if (active.id === over.id) return
-        const isGroup = activeData.kind === 'group'
-        const od = over.data.current as
-          | ProjectDragData
-          | { kind: 'group'; groupId: string }
-          | undefined
+        const target = treeProjectDropTarget(event)
+        if (!target) return
         const action = resolveProjectDrop({
-          active: isGroup
-            ? { id: (activeData as { groupId: string }).groupId, group: null, isGroup: true }
-            : { id: activeData.projectId, group: activeData.groupId },
-          over:
-            od?.kind === 'group'
-              ? { kind: 'group', id: od.groupId, group: null }
-              : {
-                  kind: 'project',
-                  id:
-                    od?.kind === 'project'
-                      ? od.projectId
-                      : (over.id as string).replace(/^project:/, ''),
-                  group: od?.kind === 'project' ? od.groupId : null
-                },
-          mode: treeProjectDropMode(event),
+          active:
+            activeData.kind === 'project-group'
+              ? { id: activeData.groupId, group: null, isGroup: true }
+              : { id: activeData.projectId, group: activeData.groupId },
+          over: target.over,
+          mode: target.mode,
           topLevel: allTopLevelRefs,
           members: fullGroupMembers
         })
@@ -1586,7 +1506,7 @@ export function TreeView({
       </div>
       <DndContext
         sensors={sensors}
-        collisionDetection={collisionDetection}
+        collisionDetection={treeCollisionDetection}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
@@ -1632,9 +1552,13 @@ export function TreeView({
               return (
                 <Collapsible.Root
                   key={`group:${entry.id}`}
+                  className="relative"
                   open={entry.group.collapsed === 0}
                   onOpenChange={(open) => onSetGroupCollapsed?.(entry.id, !open)}
                 >
+                  {projectDrop?.overId === `group:${entry.id}` && projectDrop.mode === 'after' && (
+                    <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+                  )}
                   <TreeGroupHeader
                     group={entry.group}
                     line={projectDrop?.overId === `group:${entry.id}` ? projectDrop.mode : null}

@@ -12,6 +12,158 @@ import {
   type DropInput,
   type DropMode
 } from './projectDrop.js'
+import { treeCollisionDetection, treeProjectDropTarget } from './tree-view/tree-view.utils'
+import type { DragMoveEvent, CollisionDetection } from '@dnd-kit/core'
+
+function treeEvent(active: object, over: object, y: number): DragMoveEvent {
+  return {
+    active: { id: 'source', data: { current: active } },
+    over: { id: 'target', data: { current: over }, rect: { top: 100, height: 30 } },
+    activatorEvent: { clientY: y },
+    delta: { x: 0, y: 0 }
+  } as unknown as DragMoveEvent
+}
+
+describe('tree project drop integration', () => {
+  test.each([
+    [104, 'before'],
+    [115, 'merge'],
+    [126, 'after']
+  ] as const)('project over folder at y=%s: preview and action share %s mode', (y, mode) => {
+    const target = treeProjectDropTarget(
+      treeEvent(
+        { kind: 'project', projectId: 'pA', groupId: null },
+        { kind: 'project-group', groupId: 'G' },
+        y
+      )
+    )
+    expect(target).toEqual({
+      overId: 'target',
+      over: { kind: 'group', id: 'G', group: null },
+      mode
+    })
+    const action = resolveProjectDrop(
+      input({ active: { id: 'pA', group: null }, over: target!.over, mode: target!.mode })
+    )
+    expect(action.type).toBe(mode === 'merge' ? 'join' : 'reorderTop')
+  })
+
+  test.each([
+    [113, 'before'],
+    [117, 'after']
+  ] as const)('folder center band at y=%s always reorders (%s)', (y, mode) => {
+    for (const over of [
+      { kind: 'project-group', groupId: 'G' },
+      { kind: 'project', projectId: 'pA', groupId: null }
+    ]) {
+      const target = treeProjectDropTarget(
+        treeEvent({ kind: 'project-group', groupId: 'H' }, over, y)
+      )
+      expect(target?.mode).toBe(mode)
+      const action = resolveProjectDrop({
+        active: { id: 'H', group: null, isGroup: true },
+        over: target!.over,
+        mode: target!.mode,
+        topLevel: [...TOP, { kind: 'group', id: 'H' }],
+        members
+      })
+      expect(action.type).toBe('reorderTop')
+      if (action.type !== 'reorderTop') throw new Error('expected folder reorder')
+      const targetIndex = action.refs.findIndex((ref) => ref.id === target!.over.id)
+      expect(action.refs.findIndex((ref) => ref.id === 'H')).toBe(
+        targetIndex + (mode === 'before' ? -1 : 1)
+      )
+      expect(action.refs).toHaveLength(4)
+    }
+  })
+
+  test.each([
+    [104, 'before'],
+    [126, 'after']
+  ] as const)(
+    'folder over expanded folder member resolves around containing folder (%s)',
+    (y, mode) => {
+      const target = treeProjectDropTarget(
+        treeEvent(
+          { kind: 'project-group', groupId: 'H' },
+          { kind: 'project', projectId: 'm1', groupId: 'G' },
+          y
+        )
+      )
+      expect(target).toEqual({
+        overId: 'group:G',
+        over: { kind: 'group', id: 'G', group: null },
+        mode
+      })
+      const action = resolveProjectDrop({
+        active: { id: 'H', group: null, isGroup: true },
+        over: target!.over,
+        mode: target!.mode,
+        topLevel: [...TOP, { kind: 'group', id: 'H' }],
+        members
+      })
+      const refs =
+        mode === 'before'
+          ? [TOP[0], { kind: 'group', id: 'H' }, TOP[1], TOP[2]]
+          : [TOP[0], TOP[1], { kind: 'group', id: 'H' }, TOP[2]]
+      expect(action).toEqual({ type: 'reorderTop', refs })
+    }
+  )
+
+  test('folder over its own member has no insertion preview', () => {
+    expect(
+      treeProjectDropTarget(
+        treeEvent(
+          { kind: 'project-group', groupId: 'G' },
+          { kind: 'project', projectId: 'm1', groupId: 'G' },
+          104
+        )
+      )
+    ).toBeNull()
+  })
+
+  test('status header cannot resolve as a folder', () => {
+    expect(
+      treeProjectDropTarget(
+        treeEvent(
+          { kind: 'project', projectId: 'pA', groupId: null },
+          { kind: 'group', projectId: 'pB', groupValue: 'todo' },
+          115
+        )
+      )
+    ).toBeNull()
+  })
+
+  test.each(['project', 'project-group', 'task'])(
+    '%s collision ignores targets from other tree levels',
+    (kind) => {
+      const rect = { top: 100, left: 0, right: 100, bottom: 130, width: 100, height: 30 }
+      const data = [
+        { kind: 'group', projectId: 'pA', groupValue: 'todo' },
+        { kind: 'project-group', groupId: 'G' },
+        { kind: 'project', projectId: 'pB', groupId: null },
+        { kind: 'task', projectId: 'pA' },
+        { kind: 'task', projectId: 'pB' }
+      ]
+      const args = {
+        active: { id: 'source', data: { current: { kind, projectId: 'pA' } } },
+        collisionRect: rect,
+        pointerCoordinates: { x: 50, y: 115 },
+        droppableRects: new Map(data.map((_, i) => [String(i), rect])),
+        droppableContainers: data.map((current, i) => ({
+          id: String(i),
+          data: { current },
+          rect: { current: rect }
+        }))
+      } as unknown as Parameters<CollisionDetection>[0]
+      expect(
+        treeCollisionDetection(args)
+          .map((c) => c.id)
+          .sort()
+      ).toEqual(kind === 'task' ? ['0', '3'] : ['1', '2'])
+    }
+  )
+})
 
 // Scenario: top level = [pA, G(=[m1,m2]), pB]; refs order pA, G, pB.
 const TOP: TopLevelEntryRef[] = [

@@ -17,7 +17,7 @@ import { useDialogStore } from '@slayzone/dialogs'
 import { type Task } from '@slayzone/task-contracts'
 import type { TreeGroup } from '../treeGrouping'
 import type { ProjectGroup } from '@slayzone/projects-contracts'
-import type { GroupDropData, ProjDropMode } from './tree-view.types'
+import type { GroupDropData, ProjectGroupDragData, ProjDropMode } from './tree-view.types'
 
 /**
  * Collapsible group label header in the tree. It's a SORTABLE (drag the label
@@ -37,7 +37,7 @@ export function TreeGroupHeader({
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: `group:${group.id}`,
-    data: { kind: 'group', groupId: group.id }
+    data: { kind: 'project-group', groupId: group.id } satisfies ProjectGroupDragData
   })
   if (isDragging) {
     return (
@@ -52,9 +52,6 @@ export function TreeGroupHeader({
       {/* gap-3 (0.75rem) child → center line at half-gap (-top-1.5). */}
       {line === 'before' && (
         <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
-      )}
-      {line === 'after' && (
-        <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
       )}
       <div
         className={cn(

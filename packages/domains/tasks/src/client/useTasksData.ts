@@ -18,6 +18,8 @@ import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task-contrac
 import { refreshTaskScopedQueries } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
+import { useTabStore } from '@slayzone/tabs-state'
+import { applySidebarHubOrder, partitionSidebarOrder, sidebarTopLevelRefs } from './sidebar-order'
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
 import {
@@ -240,8 +242,22 @@ export function useTasksData(): UseTasksDataReturn {
   // the selected project's hub from. Groups never leave this hook, so their
   // origin map stays a local ref.
   const groupHubIdRef = useRef<Map<string, string>>(new Map())
+  const [hubIdByGroup, setHubIdByGroup] = useState<Map<string, string>>(new Map())
   const hubIdByProject = useHubOwnershipStore((s) => s.hubIdByProject)
   const hubIdByTask = useHubOwnershipStore((s) => s.hubIdByTask)
+  const sidebarHubOrder = useTabStore((s) => s.sidebarHubOrder)
+  const sidebarRows = useMemo(
+    () =>
+      applySidebarHubOrder(
+        projects,
+        projectGroups,
+        hubIdByProject,
+        hubIdByGroup,
+        defaultHubId,
+        sidebarHubOrder
+      ),
+    [projects, projectGroups, hubIdByProject, hubIdByGroup, defaultHubId, sidebarHubOrder]
+  )
 
   // Per-hub raw payloads, recomposed into the merged arrays. The default hub's
   // board flows through `boardQ`; extra hubs through these refs.
@@ -315,6 +331,7 @@ export function useTasksData(): UseTasksDataReturn {
     absorb(defaultHubId, defaultGroupsRef.current)
     for (const [hubId, groups] of extraGroupsRef.current) absorb(hubId, groups)
     groupHubIdRef.current = byHub
+    setHubIdByGroup(byHub)
     setProjectGroups(all)
   }, [defaultHubId])
 
@@ -1201,9 +1218,22 @@ export function useTasksData(): UseTasksDataReturn {
           })
           recomposeGroups()
         })
-        .catch(() => {
-          setProjects(projSnap)
-          setProjectGroups(groupSnap)
+        .catch((error) => {
+          // Reorders may write several hubs independently. A failed hub must
+          // not roll back a different hub's successful mutation.
+          const projectHub = (p: Project) => ownedProjects().get(p.id) ?? defaultHubId
+          const groupHub = (g: ProjectGroup) => groupHubIdRef.current.get(g.id) ?? defaultHubId
+          setProjects((prev) => [
+            ...prev.filter((p) => projectHub(p) !== hubId),
+            ...projSnap.filter((p) => projectHub(p) === hubId)
+          ])
+          setProjectGroups((prev) => [
+            ...prev.filter((g) => groupHub(g) !== hubId),
+            ...groupSnap.filter((g) => groupHub(g) === hubId)
+          ])
+          toast.error(
+            `Couldn't update project order: ${error instanceof Error ? error.message : String(error)}`
+          )
         })
     },
     [defaultHubId, recomposeGroups]
@@ -1237,20 +1267,37 @@ export function useTasksData(): UseTasksDataReturn {
   )
   const reorderTopLevel = useCallback(
     (entries: TopLevelEntryRef[]) => {
-      // Top-level entries mix projects + groups; resolve each to its hub and
-      // reject a cross-hub reorder (top-level order is per-DB).
-      const hubIds = entries.map(
-        (e) =>
-          (e.kind === 'group' ? groupHubIdRef.current.get(e.id) : ownedProjects().get(e.id)) ??
-          defaultHubId
+      const projectHubs = ownedProjects()
+      const groupHubs = groupHubIdRef.current
+      const byHub = partitionSidebarOrder(entries, projectHubs, groupHubs, defaultHubId)
+      const current = partitionSidebarOrder(
+        sidebarTopLevelRefs(projects, projectGroups),
+        projectHubs,
+        groupHubs,
+        defaultHubId
       )
-      const hubId = hubIds[0] ?? defaultHubId
-      if (hubIds.some((h) => h !== hubId)) return // cross-hub top-level reorder rejected
-      runGroupMutation(hubId, () =>
-        clientForHub(hubId).projectGroups.reorderTopLevel.mutate({ entries })
-      )
+      // Cross-hub placement is view state, so it also works with an offline hub.
+      useTabStore
+        .getState()
+        .setSidebarHubOrder(
+          entries.map(
+            (entry) =>
+              (entry.kind === 'group' ? groupHubs : projectHubs).get(entry.id) ?? defaultHubId
+          )
+        )
+      for (const [hubId, hubEntries] of byHub) {
+        const previous = current.get(hubId)
+        if (
+          previous?.length === hubEntries.length &&
+          previous.every((e, i) => e.kind === hubEntries[i].kind && e.id === hubEntries[i].id)
+        )
+          continue
+        runGroupMutation(hubId, () =>
+          clientForHub(hubId).projectGroups.reorderTopLevel.mutate({ entries: hubEntries })
+        )
+      }
     },
-    [clientForHub, runGroupMutation, defaultHubId]
+    [clientForHub, runGroupMutation, defaultHubId, projects, projectGroups]
   )
   const moveProjectToGroup = useCallback(
     (projectId: string, groupId: string | null, targetIndex: number) => {
@@ -1317,8 +1364,8 @@ export function useTasksData(): UseTasksDataReturn {
 
   return {
     tasks,
-    projects,
-    projectGroups,
+    projects: sidebarRows.projects,
+    projectGroups: sidebarRows.groups,
     tags,
     taskTags,
     blockedTaskIds,
