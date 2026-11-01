@@ -35,27 +35,29 @@ export function CodexPlanPrompt({ review, target, onResolved }: Props) {
   }
 
   return (
-    <div className="mx-4 mb-2 rounded-lg border border-agent/40 bg-agent/5 px-3 py-2">
-      <div className="text-sm font-semibold">Implement this plan?</div>
-      <div className="mt-2 flex gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void choose('implement')}
-          className="rounded bg-agent px-3 py-1.5 text-xs font-medium text-agent-contrast disabled:opacity-50"
-        >
-          {review.phase === 'resume' ? 'Retry implementation' : 'Implement'}
-        </button>
-        {review.phase === 'pending' && (
+    <div className="mb-2 px-4">
+      <div className="mx-auto w-full max-w-[60rem] rounded-2xl border border-agent/40 bg-agent/5 px-4 py-3">
+        <div className="text-sm font-semibold">Implement this plan?</div>
+        <div className="mt-2 flex gap-2">
           <button
             type="button"
             disabled={busy}
-            onClick={() => void choose('keep-planning')}
-            className="rounded border border-border px-3 py-1.5 text-xs disabled:opacity-50"
+            onClick={() => void choose('implement')}
+            className="rounded bg-agent px-3 py-1.5 text-xs font-medium text-agent-contrast disabled:opacity-50"
           >
-            Keep planning
+            {review.phase === 'resume' ? 'Retry implementation' : 'Implement'}
           </button>
-        )}
+          {review.phase === 'pending' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void choose('keep-planning')}
+              className="rounded border border-border px-3 py-1.5 text-xs disabled:opacity-50"
+            >
+              Keep planning
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -46,7 +46,7 @@ export function PromptHistorySearch({
   return (
     <div
       data-testid="chat-prompt-history-search"
-      className="absolute bottom-full left-0 right-0 mb-2 z-20 rounded-md border border-border bg-popover text-popover-foreground shadow-md overflow-hidden"
+      className="absolute bottom-full left-0 right-0 mb-2 z-20 rounded-2xl border border-border bg-popover text-popover-foreground shadow-md overflow-hidden"
     >
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
         <input

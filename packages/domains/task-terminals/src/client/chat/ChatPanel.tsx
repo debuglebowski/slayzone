@@ -860,6 +860,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       )}
                       <ChatComposer
                         compact={props.isThread}
+                        hasPlanReview={!!codexPlanReview}
                         appearance={appearance}
                         finalOnly={finalOnly}
                         inFlight={inFlight}

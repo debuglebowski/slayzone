@@ -148,13 +148,13 @@ export function ChatQueueList(props: ChatQueueListProps): React.JSX.Element | nu
       {editable ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={items.map((m) => m.id)} strategy={verticalListSortingStrategy}>
-            <ul className="divide-y divide-border/40 rounded-md border border-border/40 overflow-hidden">
+            <ul className="divide-y divide-border/40 rounded-2xl border border-border/40 overflow-hidden">
               {rows}
             </ul>
           </SortableContext>
         </DndContext>
       ) : (
-        <ul className="divide-y divide-border/40 rounded-md border border-border/40 overflow-hidden">
+        <ul className="divide-y divide-border/40 rounded-2xl border border-border/40 overflow-hidden">
           {rows}
         </ul>
       )}

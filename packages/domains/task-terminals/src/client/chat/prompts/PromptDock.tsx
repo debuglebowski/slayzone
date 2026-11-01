@@ -69,7 +69,8 @@ export function PromptDock({
 
   if (!current) return null
 
-  const isCompactPrompt = current.toolName !== 'AskUserQuestion' && current.toolName !== 'ExitPlanMode'
+  const isCompactPrompt =
+    current.toolName !== 'AskUserQuestion' && current.toolName !== 'ExitPlanMode'
   const submitting = submittingPrompts?.has(current.requestId) ?? false
   const answer = (optionId: string, decision: PermissionDecision): Promise<boolean> => {
     if (!respondPermission) return Promise.resolve(false)
@@ -141,7 +142,7 @@ export function PromptDock({
       tabIndex={-1}
       aria-label={`${provider.agent} is waiting for your answer`}
       className={cn(
-        'mb-2 max-h-[55vh] overflow-y-auto rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        'mb-2 max-h-[55vh] overflow-y-auto rounded-2xl border border-border bg-card px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
         isCompactPrompt ? 'mx-auto w-[calc(100%-1.5rem)] max-w-3xl' : 'mx-3'
       )}
     >
