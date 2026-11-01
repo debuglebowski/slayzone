@@ -299,6 +299,18 @@ describe('useChatDisplay scroll anchors', () => {
 })
 
 describe('display preferences', () => {
+  it('keeps stderr in activity even after the final reply, without hiding turn failures', () => {
+    const user: TimelineItem = { kind: 'user-text', text: 'edit', timestamp: 0 }
+    const final = text('Done', 1)
+    const diagnostic: TimelineItem = { kind: 'stderr', text: 'apply_patch failed', timestamp: 2 }
+    const failure: TimelineItem = { kind: 'turn-error', text: 'API unavailable', timestamp: 3 }
+    const result = { kind: 'result', timestamp: 4 } as TimelineItem
+    const view = activityView([user, final, diagnostic, failure, result], false)
+    expect(view.rows).toEqual([user, final, failure])
+    expect(view.turns.get(final)?.items).toEqual([diagnostic])
+    expect(view.hosts.get(diagnostic)).toBe(final)
+  })
+
   it('groups progress, thinking and tools in order below the final message', () => {
     const user = { kind: 'user-text', text: 'hello', timestamp: 0 } as TimelineItem
     const progress = text('Checking', 1)

@@ -313,6 +313,37 @@ describe('Codex chat on the virtualized timeline', () => {
     expect(document.querySelector('[data-testid="chat-working-indicator"]')).toBeNull()
   })
 
+  it('puts recoverable CLI diagnostics under Activities and keeps turn failures visible', async () => {
+    const events = codexSession(1)
+    const result = events.pop()!
+    events.push(
+      { kind: 'stderr', text: '\x1b[31mapply_patch verification failed\x1b[0m' },
+      { kind: 'error', message: 'API unavailable' },
+      result
+    )
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness events={events} grouped />
+      </QueryClientProvider>
+    )
+    await settle()
+    expect(document.body.textContent).toContain('done with turn 0')
+    expect(document.body.textContent).toContain('API unavailable')
+    expect(document.body.textContent).not.toContain('apply_patch verification failed')
+    const activity = document.querySelector('[data-testid="chat-activity"]')!
+    fireEvent.click(activity.querySelector('button')!)
+    const diagnostics = Array.from(activity.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Agent diagnostics'
+    )!
+    expect(diagnostics.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(diagnostics)
+    expect(activity.querySelector('pre')?.textContent).toBe('apply_patch verification failed')
+    act(() => display!.search.setQuery('verification failed'))
+    await settle()
+    expect(display!.search.matchCount).toBe(1)
+    expect(document.body.textContent).toContain('apply_patch verification failed')
+  })
+
   it('places Activities and file changes together after the answer', async () => {
     const events = codexSession(1)
     const client = new QueryClient()

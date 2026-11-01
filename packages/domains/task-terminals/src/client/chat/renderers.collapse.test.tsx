@@ -16,6 +16,7 @@ vi.mock('@slayzone/markdown/client', () => ({
 import { ChatViewContext, type ChatViewState } from './ChatViewContext'
 import {
   ResultFooter,
+  renderTimelineItem,
   SubAgentRow,
   ThinkingBlock,
   ToolCallAskUserQuestion,
@@ -45,6 +46,39 @@ function View({
 }
 
 afterEach(cleanup)
+
+describe('stderr diagnostics', () => {
+  const item: TimelineItem = {
+    kind: 'stderr',
+    text: '\x1b[2m2026-11-01T00:30:25Z\x1b[0m \x1b[31mERROR\x1b[0m apply_patch verification failed',
+    timestamp: 0
+  }
+
+  it('starts collapsed, strips ANSI when opened, and respects collapse all', () => {
+    const ui = (signal: number) => <View signal={signal}>{renderTimelineItem(item, 'stderr')}</View>
+    const { rerender } = render(ui(0))
+    expect(screen.queryByText(/apply_patch verification failed/)).toBeNull()
+    const disclosure = screen.getByRole('button', { name: 'Agent diagnostics' })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(disclosure)
+    expect(screen.getByText(/apply_patch verification failed/).textContent).toBe(
+      '2026-11-01T00:30:25Z ERROR apply_patch verification failed'
+    )
+    rerender(ui(1))
+    expect(screen.queryByText(/apply_patch verification failed/)).toBeNull()
+  })
+
+  it('keeps actual turn errors visible, with clean text', () => {
+    render(
+      renderTimelineItem(
+        { ...item, kind: 'turn-error', text: '\x1b[31mAPI unavailable\x1b[0m' },
+        'error'
+      )
+    )
+    expect(screen.getByText('API unavailable')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Agent diagnostics' })).toBeNull()
+  })
+})
 
 describe('ThinkingBlock collapse', () => {
   const item = {

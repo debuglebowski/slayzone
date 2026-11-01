@@ -1,6 +1,6 @@
 import type { TimelineItem } from '@slayzone/terminal/client'
 
-export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' }>
+export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
 export interface ActivityTurn {
   items: ActivityItem[]
   files: Array<Extract<TimelineItem, { kind: 'files-changed' }>>
@@ -31,11 +31,13 @@ export function activityView(
       (item): item is ActivityItem =>
         item.kind === 'text' ||
         item.kind === 'thinking' ||
+        item.kind === 'stderr' ||
         (item.kind === 'tool' &&
           item.invocation.name !== 'ExitPlanMode' &&
           item.invocation.name !== 'AskUserQuestion')
     )
-    const last = activity[activity.length - 1]
+    // Process diagnostics can arrive after the reply; they don't make it progress text.
+    const last = activity.findLast((item) => item.kind !== 'stderr')
     // The last text stays visible while streaming and after it settles. If the
     // agent emits more activity, it moves into that turn's activity history.
     const final = last?.kind === 'text' ? last : null

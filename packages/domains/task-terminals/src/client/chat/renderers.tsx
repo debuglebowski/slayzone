@@ -1,5 +1,6 @@
 import { MessageDetails } from './MessageDetails'
-import { useContext, useDeferredValue, useEffect, useMemo } from 'react'
+import { useContext, useDeferredValue, useEffect, useId, useMemo } from 'react'
+import { stripAnsi } from '@slayzone/terminal-contracts'
 import { useChatProvider, useChatView } from './ChatViewContext'
 import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
 import { useToolFocusRequest } from './tool-cards/tool-focus'
@@ -40,6 +41,7 @@ import {
   HoverTimestamp,
   LinkText,
   ToolShell,
+  ToolInActivityContext,
   StatusIcon,
   shortenPath,
   type ToolProps
@@ -254,9 +256,48 @@ export function ApiRetryBanner({ item }: { item: Extract<TimelineItem, { kind: '
 }
 
 export function StderrBlock({ item }: { item: Extract<TimelineItem, { kind: 'stderr' }> }) {
+  const inActivity = useContext(ToolInActivityContext)
+  const { search } = useChatView()
+  const text = stripAnsi(item.text)
+  const matches =
+    Boolean(search.query) &&
+    (search.caseSensitive
+      ? text.includes(search.query)
+      : text.toLowerCase().includes(search.query.toLowerCase()))
+  const [open, setOpen] = useRowUiState('diagnostics', false, false)
+  const expanded = open || matches
+  const id = useId()
+  if (!text.trim()) return null
+  return (
+    <div className={cn(!inActivity && `${CHAT_CARD_INDENT} pr-4`, 'py-1')}>
+      <div className="w-fit max-w-full rounded-md border border-border/50 bg-card/40 text-xs text-muted-foreground overflow-hidden">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/40"
+        >
+          <FileText className="size-3 shrink-0" />
+          <span>Agent diagnostics</span>
+          <ChevronRight className={cn('size-3 shrink-0', expanded && 'rotate-90')} />
+        </button>
+        <div id={id} hidden={!expanded}>
+          {expanded && (
+            <pre className="border-t border-border/40 px-3 py-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono">
+              <HighlightedText text={text} />
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TurnErrorBlock({ item }: { item: Extract<TimelineItem, { kind: 'turn-error' }> }) {
   return (
     <pre className="mx-4 my-1 px-3 py-1.5 text-xs rounded-md border border-destructive/40 bg-destructive/5 text-destructive whitespace-pre-wrap font-mono">
-      <HighlightedText text={item.text} />
+      <HighlightedText text={stripAnsi(item.text)} />
     </pre>
   )
 }
@@ -954,7 +995,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
         </div>
       )
     case 'turn-error':
-      return <StderrBlock key={key} item={{ ...item, kind: 'stderr' }} />
+      return <TurnErrorBlock key={key} item={item} />
     case 'agent-problem':
       return <AgentProblemCard key={key} item={item} />
     case 'text':
@@ -1015,4 +1056,6 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
     case 'history-gap':
       return <HistoryGapRow key={key} item={item} />
   }
+  const exhaustive: never = item
+  return exhaustive
 }

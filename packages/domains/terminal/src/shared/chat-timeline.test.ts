@@ -2360,6 +2360,36 @@ describe('transport notices', () => {
 })
 
 describe('turn errors are visible', () => {
+  test('Codex account-switch auth failure remains visible when result has no text', () => {
+    const message =
+      'Your access token could not be refreshed because you signed in to another account.'
+    const s = run([
+      { kind: 'user-message', text: 'Hello?' },
+      { kind: 'error', message },
+      {
+        kind: 'result',
+        subtype: 'error',
+        isError: true,
+        durationMs: 0,
+        durationApiMs: 0,
+        numTurns: 1,
+        totalCostUsd: 0,
+        stopReason: null,
+        terminalReason: null,
+        text: null,
+        modelUsage: {},
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0
+        },
+        permissionDenials: []
+      }
+    ])
+    expect(rowsOf(s).some((i) => i.kind === 'turn-error' && i.text === message)).toBe(true)
+  })
+
   const errorResult = (text: string | null): AgentEvent => ({
     kind: 'result',
     subtype: 'success',

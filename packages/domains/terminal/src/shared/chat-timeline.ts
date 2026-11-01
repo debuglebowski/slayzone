@@ -2081,7 +2081,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       }
       return {
         ...state,
-        timeline: appended(state.timeline, { kind: 'stderr', text: event.message, timestamp: ts })
+        timeline: appended(state.timeline, {
+          kind: 'turn-error',
+          text: event.message,
+          timestamp: ts
+        })
       }
     }
     case 'unknown':

@@ -99,11 +99,13 @@ function ActivityEntry({
     streamKeyOf(item) ??
     (item.kind === 'tool'
       ? `tool:${item.invocation.id}`
-      : `${item.kind}:${item.messageId}:${item.blockOrdinal ?? 0}`)
+      : item.kind === 'stderr'
+        ? `stderr:${row ?? item.timestamp}`
+        : `${item.kind}:${item.messageId}:${item.blockOrdinal ?? 0}`)
   return (
     <TimelineRowKeyContext.Provider value={key}>
       <TimelineRowIndexContext.Provider value={row}>
-        {item.kind === 'tool' ? (
+        {item.kind === 'tool' || item.kind === 'stderr' ? (
           <ToolInActivityContext.Provider value>
             {renderTimelineItem(item, key)}
           </ToolInActivityContext.Provider>
@@ -165,11 +167,13 @@ export function ActivityTurn({
     return () => cleanups.forEach((cleanup) => cleanup())
   }, [focus, turn.items, setExpanded])
   const filtered = turn.items.filter((item) =>
-    item.kind === 'text'
-      ? appearance.chatShowActivityMessages
-      : item.kind === 'thinking'
-        ? appearance.chatShowThinking
-        : appearance.chatShowActivityTools
+    item.kind === 'stderr'
+      ? true
+      : item.kind === 'text'
+        ? appearance.chatShowActivityMessages
+        : item.kind === 'thinking'
+          ? appearance.chatShowThinking
+          : appearance.chatShowActivityTools
   )
   const items = forced ? turn.items : filtered
   const showSummary = appearance.chatShowActivities || forced
@@ -215,7 +219,9 @@ export function ActivityTurn({
                     streamKeyOf(item) ??
                     (item.kind === 'tool'
                       ? item.invocation.id
-                      : `${item.messageId}:${item.blockOrdinal ?? index}`)
+                      : item.kind === 'stderr'
+                        ? `stderr:${rowOf?.(item) ?? index}`
+                        : `${item.messageId}:${item.blockOrdinal ?? index}`)
                   }
                   item={item}
                   row={rowOf?.(item)}
