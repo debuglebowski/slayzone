@@ -2,11 +2,14 @@ import {
   useContext,
   useMemo,
   useCallback,
+  useId,
+  useEffect,
+  useRef,
   type Dispatch,
   type Key,
   type SetStateAction
 } from 'react'
-import { ArrowDown, Sparkles } from 'lucide-react'
+import { ArrowDown, ChevronRight, Sparkles, Wrench } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import {
@@ -33,14 +36,23 @@ import {
   type TimelineItem,
   type ChatTimelineState
 } from '@slayzone/terminal/client'
+import { toolActivityByRow, type TurnToolActivity } from './tool-activity'
 import { ActivityTurn, AgentAvatar } from './ActivityTurn'
 import { AssistantAnswer } from './AssistantAnswer'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
+import { FilesChangedRow } from './files-changed/FilesChangedRow'
+import { ToolAutoOpenContext } from './tool-cards/card-shell'
 import { ChatSearchBar } from './ChatSearchBar'
 import { ChatTurnOutline } from './ChatTurnOutline'
 import { renderTimelineItem } from './renderers'
 import { useChatProvider } from './ChatViewContext'
-import { RowUiStateContext, collapseAllRows } from './row-ui-state'
+import {
+  TimelineRowKeyContext,
+  TimelineRowIndexContext,
+  RowUiStateContext,
+  useRowUiState,
+  collapseAllRows
+} from './row-ui-state'
 import { useCommandTaskActions } from './tool-cards/command-task-hooks'
 import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
@@ -65,7 +77,9 @@ export interface ChatTimelineProps {
   awaitingUser: boolean
   appearance: AppearanceSettings
   /** Every displayed row; only those in view are mounted (`virtual`). */
+  hiddenTools?: ChatTimelineState['timeline']
   activityTurns?: ReadonlyMap<TimelineItem, ActivityTurnData>
+  folded?: ReadonlySet<number>
   items: TimelineItem[]
   virtual: VirtualTimelineController
   /** `virtual.bindScroller`, as its own prop: what goes to `ref` must not be read off `virtual`. */
@@ -107,7 +121,9 @@ export function ChatTimeline({
   awaitingUser,
   appearance,
   items,
+  hiddenTools,
   activityTurns,
+  folded,
   rowOf,
   virtual,
   scrollRef,
@@ -155,6 +171,15 @@ export function ChatTimeline({
       appearance.chatShowActivityTools
     ]
   )
+  const showToolSummary = appearance.chatShowToolCallSummary !== false
+  const showLatestTool = appearance.chatShowLatestToolCall !== false
+  const activities = useMemo(
+    () =>
+      hiddenTools
+        ? toolActivityByRow(hiddenTools, items, folded)
+        : new Map<TimelineItem, TurnToolActivity>(),
+    [hiddenTools, items, folded]
+  )
   const renderRow = useCallback(
     (item: TimelineItem, index: number) => {
       const turn = activityTurns?.get(item)
@@ -163,7 +188,12 @@ export function ChatTimeline({
         if (turn.final && item.kind === 'text') {
           return (
             <>
-              <AssistantAnswer item={item} turn={turn} appearance={activityAppearance} rowOf={rowOf} />
+              <AssistantAnswer
+                item={item}
+                turn={turn}
+                appearance={activityAppearance}
+                rowOf={rowOf}
+              />
               {showWorking && <TypingIndicator label={loadingLabel} />}
             </>
           )
@@ -188,9 +218,41 @@ export function ChatTimeline({
           </>
         )
       }
-      return renderTimelineItem(item, index)
+      const activity = activities.get(item)
+      if (!activity) return renderTimelineItem(item, index)
+      const pending = activity.tools.filter(({ item }) => item.invocation.status === 'pending')
+      const latest = pending[pending.length - 1]?.item.invocation.name
+      const running = pending.length
+      const files = item.kind === 'files-changed'
+      return (
+        <>
+          {!files && renderTimelineItem(item, index)}
+          <div className="ml-14 mr-4 my-1 flex min-w-0 flex-wrap items-start gap-x-2">
+            <ToolActivityDisclosure
+              key={activity.key}
+              tools={activity.tools}
+              inFlight={inFlight && activity.latestTurn}
+              latest={latest}
+              running={running}
+              showSummary={showToolSummary}
+              showLatest={showLatestTool}
+            />
+            {files && <FilesChangedRow item={item} embedded />}
+          </div>
+        </>
+      )
     },
-    [activityTurns, awaitingUser, loadingLabel, rowOf, activityAppearance]
+    [
+      activityTurns,
+      awaitingUser,
+      loadingLabel,
+      rowOf,
+      activityAppearance,
+      activities,
+      inFlight,
+      showToolSummary,
+      showLatestTool
+    ]
   )
   const hasActiveTurn = activityTurns && [...activityTurns.values()].some((turn) => turn.active)
   return (
@@ -399,6 +461,114 @@ function TypingIndicator({ label }: { label?: string | null }) {
       {label && (
         <span className="text-xs text-muted-foreground truncate max-w-[60ch]">{label}</span>
       )}
+    </div>
+  )
+}
+
+function ToolActivityDisclosure({
+  tools,
+  inFlight,
+  latest,
+  running,
+  showSummary,
+  showLatest
+}: {
+  tools: Array<{ item: Extract<TimelineItem, { kind: 'tool' }>; row: number }>
+  inFlight: boolean
+  latest: string | undefined
+  running: number
+  showSummary: boolean
+  showLatest: boolean
+}) {
+  const [expanded, setExpanded] = useRowUiState('tool-activity', false, false)
+  const id = useId()
+  const latestTool =
+    inFlight && showLatest
+      ? tools.findLast(({ item }) => item.invocation.status === 'pending')
+      : undefined
+  const history = latestTool ? tools.filter((tool) => tool !== latestTool) : tools
+  return (
+    <div className="contents text-xs text-muted-foreground" data-testid="chat-tool-activity">
+      {showSummary && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setExpanded(!expanded)}
+          className="my-1 flex w-fit max-w-full items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-left shadow-sm hover:bg-muted/50"
+        >
+          <Wrench className="size-3 shrink-0" />
+          <span className="shrink-0 font-medium text-foreground">
+            {tools.length} {tools.length === 1 ? 'tool call' : 'tool calls'}
+          </span>
+          {inFlight && running > 0 && (
+            <span className="min-w-0 truncate">
+              {running} running: {latest}
+            </span>
+          )}
+          <ChevronRight
+            className={cn(
+              'size-3 transition-transform duration-300 motion-reduce:transition-none',
+              expanded && 'rotate-90'
+            )}
+          />
+        </button>
+      )}
+      {showSummary && (
+        <div
+          id={id}
+          inert={!expanded}
+          className={cn(
+            'order-1 basis-full min-w-0 grid transition-[grid-template-rows,opacity] duration-300 ease-in-out motion-reduce:transition-none',
+            expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+          )}
+        >
+          <div className="min-h-0 overflow-hidden">
+            {history.map(({ item, row }) => (
+              <ActivityTool key={item.invocation.id} item={item} row={row} autoOpen={false} />
+            ))}
+          </div>
+        </div>
+      )}
+      {latestTool && (
+        <div className="order-2 min-w-0 basis-full">
+          <ActivityTool key={latestTool.item.invocation.id} {...latestTool} autoOpen />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ActivityTool({
+  item,
+  row,
+  autoOpen
+}: {
+  item: Extract<TimelineItem, { kind: 'tool' }>
+  row: number
+  autoOpen: boolean
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!autoOpen || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const animation = ref.current?.animate(
+      [
+        { opacity: 0, transform: 'translateY(6px)' },
+        { opacity: 1, transform: 'translateY(0)' }
+      ],
+      { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+    )
+    return () => animation?.cancel()
+  }, [autoOpen])
+  return (
+    <div ref={ref}>
+      <ToolAutoOpenContext.Provider value={autoOpen}>
+        <TimelineRowKeyContext.Provider value={`tool:${item.invocation.id}`}>
+          <TimelineRowIndexContext.Provider value={row}>
+            {renderTimelineItem(item, item.invocation.id)}
+          </TimelineRowIndexContext.Provider>
+        </TimelineRowKeyContext.Provider>
+      </ToolAutoOpenContext.Provider>
     </div>
   )
 }

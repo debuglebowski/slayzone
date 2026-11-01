@@ -105,6 +105,7 @@ function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy
   )
 }
 
+export const ToolAutoOpenContext = createContext<boolean | undefined>(undefined)
 export const ToolInActivityContext = createContext(false)
 
 function ToolShell({
@@ -124,17 +125,19 @@ function ToolShell({
   defaultOpen?: boolean
   timestamp?: number
 }) {
+  const autoOpen = useContext(ToolAutoOpenContext)
   const inActivity = useContext(ToolInActivityContext)
   const status = invocation.status
   // Kept while scrolled away; "Collapse all" closes it (the default holds on mount).
   const [open, setOpen] = useRowUiState(
     'card',
-    inActivity ? false : (defaultOpen ?? status === 'error'),
+    inActivity ? false : (autoOpen ?? defaultOpen ?? status === 'error'),
     false
   )
   useEffect(() => {
     if (inActivity) setOpen(false)
-  }, [inActivity, setOpen])
+    else if (autoOpen !== undefined) setOpen(autoOpen)
+  }, [inActivity, autoOpen, setOpen])
   // "Show this card" (files-changed row) opens it, also when it mounts after the
   // request (the timeline scrolled it in first).
   const focusRequested = useToolFocusRequest(invocation.id)
@@ -159,7 +162,7 @@ function ToolShell({
   return (
     <div
       className={cn(
-        inActivity ? 'pl-0 pr-0' : `${CHAT_CARD_INDENT} pr-4`,
+        autoOpen === undefined && !inActivity ? `${CHAT_CARD_INDENT} pr-4` : 'pl-0 pr-0',
         'py-1 group flex items-start gap-2'
       )}
     >

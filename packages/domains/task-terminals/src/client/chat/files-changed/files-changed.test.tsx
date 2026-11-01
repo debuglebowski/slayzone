@@ -145,6 +145,15 @@ describe('files-changed row', () => {
     expect(files[1].textContent).toContain('New')
   })
 
+  it('opens the side panel directly from the file count without expanding inline', () => {
+    const r = row([{ path: '/repo/src/a.ts', ids: ['e1'] }])
+    const { openPanel, reveal } = setup([e1], r)
+    fireEvent.click(screen.getByRole('button', { name: /1 file changed/ }))
+    expect(openPanel).toHaveBeenCalledExactlyOnceWith()
+    expect(reveal).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('chat-files-changed-file')).toBeNull()
+  })
+
   it("a file reveals its first edit's card (the timeline's key for that row) and opens it", () => {
     const r = row([{ path: '/repo/src/a.ts', ids: ['e1', 'e2'] }])
     const { reveal, request } = setup([e1, e2], r)
@@ -216,7 +225,7 @@ describe('files-changed row', () => {
     expect(openPanel).toHaveBeenCalledWith('/repo/src/a.ts')
   })
 
-  it('"View changes" opens the panel; shell commands are said to be untracked', () => {
+  it('file count opens the panel; shell commands are said to be untracked', () => {
     const r = row([{ path: '/repo/src/a.ts', ids: ['e1'] }], 2)
     const { openPanel } = setup([e1], r)
     const summary = screen.getByTestId('chat-files-changed')
@@ -224,7 +233,7 @@ describe('files-changed row', () => {
     expect(within(summary).getByTestId('chat-files-changed-shell-note').textContent).toMatch(
       /2 shell commands/
     )
-    fireEvent.click(within(summary).getByTestId('chat-files-changed-view'))
+    fireEvent.click(within(summary).getByTestId('chat-files-changed-open'))
     expect(openPanel).toHaveBeenCalledTimes(1)
     expect(openPanel.mock.calls[0][0]).toBeUndefined()
   })

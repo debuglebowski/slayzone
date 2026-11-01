@@ -134,6 +134,7 @@ let display: ReturnType<typeof useChatDisplay> | null = null
 function Harness({
   events,
   hidden = false,
+  compactTools = false,
   inFlight = false,
   showSummary = true,
   showLatest = true,
@@ -142,6 +143,7 @@ function Harness({
 }: {
   events: AgentEvent[]
   hidden?: boolean
+  compactTools?: boolean
   inFlight?: boolean
   showSummary?: boolean
   showLatest?: boolean
@@ -153,7 +155,7 @@ function Harness({
   const follow = useFollowBottom()
   const d = useChatDisplay({
     timeline: state.timeline,
-    finalOnly: false,
+    finalOnly: compactTools,
     showLastMessageTools: false,
     groupActivity: grouped,
     inFlight,
@@ -196,6 +198,7 @@ function Harness({
                 ...appearanceOverrides
               }}
               items={d.displayedTimeline}
+              hiddenTools={compactTools && !grouped ? state.timeline : undefined}
               activityTurns={d.activityTurns}
               virtual={d.virtual}
               scrollRef={d.virtual.bindScroller}
@@ -360,7 +363,9 @@ describe('Codex chat on the virtualized timeline', () => {
     const files = activity.querySelector('[data-testid="chat-files-changed"]')
     expect(summary).toBeDefined()
     expect(files).not.toBeNull()
-    expect(activity.closest('[data-testid="chat-answer-footer"]')?.classList.contains('flex')).toBe(true)
+    expect(activity.closest('[data-testid="chat-answer-footer"]')?.classList.contains('flex')).toBe(
+      true
+    )
     expect(document.querySelectorAll('[data-testid="chat-files-changed"]')).toHaveLength(1)
     expect(document.body.textContent!.indexOf('done with turn 0')).toBeLessThan(
       document.body.textContent!.indexOf('Activities')
@@ -590,6 +595,90 @@ describe('Codex chat on the virtualized timeline', () => {
     const activity = document.querySelector('[data-testid="chat-activity"]')!
     expect(activity.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
     expect(activity.textContent).toContain('git status')
+  })
+
+  it('shows a running tool outside history and folds it when it finishes', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    const start: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', text: 'Check status' },
+      {
+        kind: 'tool-call',
+        id: 'cmd',
+        name: 'codex/commandExecution',
+        input: { command: 'git status' }
+      }
+    ]
+    const client = new QueryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Harness key="running" events={start} compactTools inFlight />
+      </QueryClientProvider>
+    )
+    await settle()
+    let activity = document.querySelector('[data-testid="chat-tool-activity"]')!
+    expect(activity.textContent).toContain('1 running: codex/commandExecution')
+    expect(activity.querySelector('.order-2')).not.toBeNull()
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness key="running" events={start} compactTools inFlight showSummary={false} />
+      </QueryClientProvider>
+    )
+    await settle()
+    activity = document.querySelector('[data-testid="chat-tool-activity"]')!
+    expect(activity.querySelector(':scope > button')).toBeNull()
+    expect(activity.querySelector('.order-2')).not.toBeNull()
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness key="running" events={start} compactTools inFlight showLatest={false} />
+      </QueryClientProvider>
+    )
+    await settle()
+    activity = document.querySelector('[data-testid="chat-tool-activity"]')!
+    expect(activity.querySelector(':scope > button')?.textContent).toContain('1 tool call')
+    expect(activity.querySelector('.order-2')).toBeNull()
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness
+          key="running"
+          events={start}
+          compactTools
+          inFlight
+          showSummary={false}
+          showLatest={false}
+        />
+      </QueryClientProvider>
+    )
+    await settle()
+    activity = document.querySelector('[data-testid="chat-tool-activity"]')!
+    expect(activity.querySelector(':scope > button')).toBeNull()
+    expect(activity.querySelector('.order-2')).toBeNull()
+
+    const finished: AgentEvent[] = [
+      ...start,
+      {
+        kind: 'tool-result',
+        toolUseId: 'cmd',
+        isError: false,
+        rawContent: '',
+        structured: null
+      }
+    ]
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness key="finished" events={finished} compactTools inFlight />
+      </QueryClientProvider>
+    )
+    await settle()
+    activity = document.querySelector('[data-testid="chat-tool-activity"]')!
+    expect(activity.textContent).not.toContain('running:')
+    expect(activity.querySelector('.order-2')).toBeNull()
+    expect(document.querySelector('[data-testid="chat-working-indicator"]')?.textContent).toContain(
+      'Waiting for agent…'
+    )
   })
 
   it('renders a long Codex session at the bottom, mounting only the rows in view', async () => {

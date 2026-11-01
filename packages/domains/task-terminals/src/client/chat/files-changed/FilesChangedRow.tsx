@@ -84,7 +84,7 @@ function subAgentsAround(
 }
 
 /**
- * The end of a turn that changed files: "N files changed", opening to the list.
+ * The turn summary opens the changes panel; its disclosure shows the inline list.
  * A file shows the card that made its first change in the turn (scrolled to and
  * opened) — for a sub-agent's change, inside its sub-agent row (revealed and
  * opened down to the card). One whose card is hidden (final replies only), or
@@ -143,9 +143,9 @@ export function FilesChangedRow({
         >
           <button
             type="button"
-            data-testid="chat-files-changed-toggle"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
+            data-testid="chat-files-changed-open"
+            title="Open changes panel"
+            onClick={() => (filesPanel ? filesPanel.open() : setOpen(!open))}
             className="flex min-w-0 items-center gap-2 text-left hover:text-foreground"
           >
             <FileDiff className="size-3 shrink-0 text-muted-foreground" />
@@ -153,22 +153,21 @@ export function FilesChangedRow({
               {count} file{count === 1 ? '' : 's'} changed
             </span>
             <LineCounts additions={additions} deletions={deletions} />
+          </button>
+          <button
+            type="button"
+            data-testid="chat-files-changed-toggle"
+            aria-label="Toggle changed file list"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+            className="shrink-0 rounded text-muted-foreground hover:text-foreground"
+          >
             {open ? (
               <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
             ) : (
               <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
             )}
           </button>
-          {filesPanel && (
-            <button
-              type="button"
-              data-testid="chat-files-changed-view"
-              onClick={() => filesPanel.open()}
-              className="shrink-0 text-[11px] text-primary hover:underline"
-            >
-              View changes
-            </button>
-          )}
         </div>
         {open && (
           <ul

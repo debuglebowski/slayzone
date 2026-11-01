@@ -772,6 +772,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         appearance={appearance}
                         items={display.displayedTimeline}
                         activityTurns={display.activityTurns}
+                        folded={display.folded}
                         virtual={display.virtual}
                         scrollRef={display.virtual.bindScroller}
                         itemKey={display.itemKey}
