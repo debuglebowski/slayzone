@@ -28,6 +28,8 @@ export interface UseChatPanelKeyboardOpts {
   composerRef?: RefObject<HTMLTextAreaElement | null>
   /** The composer holds nothing (no text, no files). */
   draftEmpty?: boolean
+  /** Esc Esc with a nonempty composer clears its text and attachments. */
+  onClearDraft?: () => void
   /**
    * Esc Esc with no turn running and an empty composer — the TUI's double-Esc,
    * which opens rewind. Absent: Esc Esc means nothing (no rewind).
@@ -52,8 +54,8 @@ export interface UseChatPanelKeyboardOpts {
  *     while in flight or while autocomplete owns Tab)
  *   - Esc → stop the in-flight turn (defers to autocomplete's own Esc)
  *   - Esc Esc (within 800 ms, no turn running, empty composer, from the composer
- *     or no field) → rewind (`onDoubleEscape`), like the TUI. With text in the
- *     composer it does nothing: typed text is never lost.
+ *     or no field) → rewind (`onDoubleEscape`), like the TUI. A nonempty
+ *     composer instead clears its draft (`onClearDraft`).
  *   - a pending prompt's keys (1/2/3, ↑/↓, Enter, Esc, Tab) go to the prompt
  *     dock first
  *
@@ -77,6 +79,7 @@ export function useChatPanelKeyboard({
   promptKeysRef,
   composerRef,
   draftEmpty = false,
+  onClearDraft,
   onDoubleEscape,
   jumpTurn,
   scrollToBottom,
@@ -115,6 +118,7 @@ export function useChatPanelKeyboard({
       // A key a field already handled (the prompt's feedback Enter / Esc) is
       // not the prompt's.
       if (!e.defaultPrevented && !autocomplete.show && promptKeysRef?.current?.(e)) {
+        armedAt = 0
         e.preventDefault()
         return
       }
@@ -177,7 +181,11 @@ export function useChatPanelKeyboard({
       // Esc stops the in-flight turn — Claude CLI parity. Defers to autocomplete
       // (which uses Esc to close itself). No-op when nothing is in flight.
       if (e.key === 'Escape' && !mod && !e.altKey && !e.shiftKey) {
-        if (autocomplete.show) return
+        if (e.repeat) return
+        if (autocomplete.show) {
+          armedAt = 0
+          return
+        }
         if (inFlight) {
           armedAt = 0
           e.preventDefault()
@@ -186,7 +194,8 @@ export function useChatPanelKeyboard({
         }
         const active = document.activeElement
         const fromComposer = active === composerRef?.current || !isTypingTarget(active)
-        if (!onDoubleEscape || e.defaultPrevented || !draftEmpty || !fromComposer) {
+        const action = draftEmpty ? onDoubleEscape : onClearDraft
+        if (!action || e.defaultPrevented || !fromComposer) {
           armedAt = 0
           return
         }
@@ -194,7 +203,7 @@ export function useChatPanelKeyboard({
         if (armedAt > 0 && now - armedAt <= DOUBLE_ESC_MS) {
           armedAt = 0
           e.preventDefault()
-          onDoubleEscape()
+          action()
         } else {
           armedAt = now
         }
@@ -216,6 +225,7 @@ export function useChatPanelKeyboard({
     promptKeysRef,
     composerRef,
     draftEmpty,
+    onClearDraft,
     onDoubleEscape,
     jumpTurn,
     scrollToBottom,

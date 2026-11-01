@@ -191,6 +191,20 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+describe('useChatComposer clearDraft', () => {
+  it('clears text and attachments without sending or changing the queue', () => {
+    setup()
+    type('unfinished message')
+    attach([IMG_A])
+    act(() => composer.clearDraft())
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([])
+    expect(mocks.persistence.calls.at(-1)?.text).toBe('')
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(mocks.queue.clear).not.toHaveBeenCalled()
+  })
+})
+
 describe('useChatComposer handleSend guards', () => {
   it('does nothing once the session has ended', async () => {
     setup({ sessionEnded: true })

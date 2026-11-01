@@ -106,6 +106,7 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
     document.body.appendChild(root)
     ;(over.focus === 'other-input' ? other : composer).focus()
     const onDoubleEscape = vi.fn()
+    const onClearDraft = vi.fn()
     const handleStop = vi.fn()
     renderHook(() =>
       useChatPanelKeyboard({
@@ -122,10 +123,11 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
         composerRef: { current: composer },
         draftEmpty: true,
         onDoubleEscape,
+        onClearDraft,
         ...over
       })
     )
-    return { onDoubleEscape, handleStop }
+    return { onDoubleEscape, onClearDraft, handleStop }
   }
   const esc = () => {
     const e = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
@@ -165,10 +167,12 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
     expect(onDoubleEscape).not.toHaveBeenCalled()
   })
 
-  it('text in the composer: Esc Esc does nothing (typed text is never lost)', () => {
-    const { onDoubleEscape, handleStop } = setup({ draftEmpty: false })
+  it('nonempty composer: Esc Esc clears the draft instead of rewinding', () => {
+    const { onDoubleEscape, onClearDraft, handleStop } = setup({ draftEmpty: false })
     esc()
+    expect(onClearDraft).not.toHaveBeenCalled()
     esc()
+    expect(onClearDraft).toHaveBeenCalledOnce()
     expect(onDoubleEscape).not.toHaveBeenCalled()
     expect(handleStop).not.toHaveBeenCalled()
   })
@@ -179,6 +183,27 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
     esc()
     expect(handleStop).toHaveBeenCalledTimes(2)
     expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('clears drafts even when rewind is unavailable', () => {
+    const { onClearDraft } = setup({ draftEmpty: false, onDoubleEscape: undefined })
+    esc()
+    esc()
+    expect(onClearDraft).toHaveBeenCalledOnce()
+  })
+
+  it('holding Escape does not clear the draft', () => {
+    const { onClearDraft } = setup({ draftEmpty: false })
+    esc()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true }))
+    expect(onClearDraft).not.toHaveBeenCalled()
+  })
+
+  it('another focused field cannot clear the composer', () => {
+    const { onClearDraft } = setup({ draftEmpty: false, focus: 'other-input' })
+    esc()
+    esc()
+    expect(onClearDraft).not.toHaveBeenCalled()
   })
 
   it('from another field (search, a queue edit): no rewind', () => {

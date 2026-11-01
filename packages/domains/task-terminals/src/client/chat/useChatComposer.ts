@@ -177,6 +177,13 @@ export function useChatComposer({
     setAttachmentsState(next)
   })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const clearDraft = useStableCallback(() => {
+    setHistoryNav(HISTORY_IDLE)
+    setDraft('')
+    setAttachments([])
+    setCursorPos(0)
+    textareaRef.current?.focus()
+  })
 
   // The tab's draft survives remounts and reloads (`restoreComposerState`).
   const persistence = useChatDraftPersistence({
@@ -627,6 +634,7 @@ export function useChatComposer({
   return {
     draft,
     setDraft,
+    clearDraft,
     setCursorPos,
     attachments,
     setAttachments,
