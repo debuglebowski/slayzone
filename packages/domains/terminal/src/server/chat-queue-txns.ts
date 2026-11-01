@@ -22,8 +22,20 @@ import {
 export const chatQueueTxns = {
   'chat-queue:push': (
     db: Database,
-    p: { tabId: string; send: string; original: string; id?: string; content?: UserContentBlock[] }
-  ) => pushChatQueue(db, p.tabId, p.send, p.original, { id: p.id, content: p.content }),
+    p: {
+      tabId: string
+      send: string
+      original: string
+      id?: string
+      content?: UserContentBlock[]
+      expectedConversationId?: string
+    }
+  ) =>
+    pushChatQueue(db, p.tabId, p.send, p.original, {
+      id: p.id,
+      content: p.content,
+      expectedConversationId: p.expectedConversationId
+    }),
   'chat-queue:pop': (db: Database, p: { tabId: string; heldIds?: string[] }) =>
     popChatQueueHead(db, p.tabId, p.heldIds),
   'chat-queue:move': (db: Database, p: { id: string; toIndex: number }) =>

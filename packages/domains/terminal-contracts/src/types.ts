@@ -543,6 +543,8 @@ export interface FileMatch {
  * raw composer input retained so usage bumps see the user's `/cmd` token.
  */
 export interface QueuedChatMessage {
+  /** Side-thread conclusions may only be delivered to their source conversation. */
+  expectedConversationId?: string
   /** Also the message's outbox id once it is sent (the CLI's message `uuid`). */
   id: string
   tabId: string

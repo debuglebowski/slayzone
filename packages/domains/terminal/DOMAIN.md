@@ -4,6 +4,18 @@ Manages PTY sessions for task execution. Supports multiple terminal modes (Claud
 
 ## Architecture
 
+### Chat side threads
+
+`chat.threads` persists answer discussions in `chat_threads` (migration 180).
+`threadForkSource` resolves a completed answer's provider fork point without
+interrupting its parent, including history outside the in-memory event cache.
+The child resumes its own conversation ID; it never writes the main task's
+`provider_config` conversation ID. An unconfirmed child forks from its saved
+source on start; a refused fork fails the child instead of resuming its parent.
+Child events, drafts, queue entries, and processes use the ordinary chat runtime.
+Returned conclusions bind queue entries to their source conversation (migration
+181); draining rechecks this scope after popping and preserves a mismatched entry.
+
 ### Data Flow
 
 ```

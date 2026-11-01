@@ -170,6 +170,30 @@ export const chatRouter = router({
   fork: publicProcedure
     .input(chatCreateOpts.extend({ messageId: z.string().min(1).max(200) }))
     .mutation(({ input }) => ops().fork(input)),
+  threads: router({
+    onChanged: publicProcedure.input(z.object({ tabId: z.string() })).subscription(({ input }) =>
+      observable<void>((emit) => {
+        const handler = (tabId: string) => {
+          if (tabId === input.tabId) emit.next()
+        }
+        getChatDeps().events.on('threads-changed', handler)
+        return () => getChatDeps().events.off('threads-changed', handler)
+      })
+    ),
+    list: publicProcedure
+      .input(chatCreateOpts.extend({ conversationId: z.string().nullish() }))
+      .query(({ input }) => ops().listThreads(input)),
+    create: publicProcedure
+      .input(
+        chatCreateOpts.extend({
+          messageId: z.string().min(1).max(200),
+          answerId: z.string().min(1).max(500),
+          title: z.string().trim().min(1).max(120),
+          text: z.string().trim().min(1).max(1_000_000)
+        })
+      )
+      .mutation(({ input }) => ops().createThread(input))
+  }),
   // Sessions picker: run another conversation of this task (this chat's, or the
   // terminal's — a hand-off) in the tab.
   switchConversation: publicProcedure
@@ -337,6 +361,7 @@ export const chatRouter = router({
           tabId: z.string(),
           send: z.string(),
           original: z.string(),
+          expectedConversationId: z.string().min(1).max(200).optional(),
           // Client-minted: the queued message's id becomes its outbox id when sent.
           id: z.string().min(1).max(200).optional(),
           content: z.array(userContentBlock).min(1).optional()
@@ -345,6 +370,9 @@ export const chatRouter = router({
       .mutation(({ input }) =>
         queueOps().push(input.tabId, input.send, input.original, {
           ...(input.id ? { id: input.id } : {}),
+          ...(input.expectedConversationId
+            ? { expectedConversationId: input.expectedConversationId }
+            : {}),
           ...(input.content ? { content: input.content } : {})
         })
       ),

@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { createChatThreadStore, type ChatThreadStore } from '../chat-threads-store'
 import { recordedProjectRoot } from '@slayzone/computers/server'
 import type { RecordConversationInput, TaskSessionStore } from './task-session-store'
 import {
@@ -83,6 +84,7 @@ export type { RecordConversationInput }
  * zero handler changes.
  */
 export interface ChatDataOps {
+  threads?: ChatThreadStore
   /** Read `provider_config.{mode}` off the task row. `{}` on missing/corrupt. */
   readProviderConfig(taskId: string, mode: string): Promise<ProviderConfigEntry>
   writeChatMode(taskId: string, mode: string, chatMode: string): Promise<void>
@@ -266,6 +268,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       .run(modePath, modePath, modePath, `${modePath}.${key}`, JSON.stringify(value), taskId)
   }
   return {
+    threads: createChatThreadStore(db),
     readProviderConfig: async (taskId, mode) => {
       const row = (await db
         .prepare('SELECT provider_config FROM tasks WHERE id = ?')

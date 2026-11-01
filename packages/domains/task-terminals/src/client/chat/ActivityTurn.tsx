@@ -129,7 +129,8 @@ export function AgentAvatar() {
 export function ActivityTurn({
   turn,
   appearance,
-  rowOf
+  rowOf,
+  embedded = false
 }: {
   turn: ActivityTurnData
   appearance: Pick<
@@ -141,6 +142,7 @@ export function ActivityTurn({
     | 'chatShowActivityTools'
   >
   rowOf?: (item: ActivityItem) => number | undefined
+  embedded?: boolean
 }) {
   const [expanded, setExpanded] = useRowUiState('activity', false, false)
   const [forced, setForced] = useState(false)
@@ -177,7 +179,10 @@ export function ActivityTurn({
       : undefined
   if ((!showSummary || !turn.items.length) && !latest && !turn.files.length) return null
   return (
-    <div className="flex flex-wrap items-start gap-x-2 pl-14 pr-4" data-testid="chat-activity">
+    <div
+      className={embedded ? 'contents' : 'flex flex-wrap items-start gap-x-2 pl-14 pr-4'}
+      data-testid="chat-activity"
+    >
       {showSummary && turn.items.length > 0 && (
         <>
           <button

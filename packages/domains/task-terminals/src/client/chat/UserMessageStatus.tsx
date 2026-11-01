@@ -1,10 +1,10 @@
-import { AlertCircle, Check, Clock } from 'lucide-react'
+import { AlertCircle, Clock } from 'lucide-react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { useChatView } from './ChatViewContext'
 
 /**
  * Where a sent message is on its way to the agent, under its bubble. Quiet
- * once it is answered; a failure says why and offers Retry (same message id, so
+ * once it is received; a failure says why and offers Retry (same message id, so
  * it can never arrive twice).
  */
 export function UserMessageStatus({
@@ -14,7 +14,7 @@ export function UserMessageStatus({
 }): React.JSX.Element | null {
   const { retryMessage } = useChatView()
   const state = item.delivery
-  if (!state || state === 'answered' || state === 'cancelled') return null
+  if (!state || state === 'delivered' || state === 'answered' || state === 'cancelled') return null
   if (state === 'failed') {
     return (
       <div
@@ -38,15 +38,14 @@ export function UserMessageStatus({
       </div>
     )
   }
-  const label =
-    state === 'delivered' ? 'Received' : state === 'sending' ? 'Sending…' : 'Waiting for the agent…'
+  const label = state === 'sending' ? 'Sending…' : 'Waiting for the agent…'
   return (
     <div
       data-delivery={state}
       role="status"
       className="px-4 -mt-1 pb-1 flex justify-end items-center gap-1 text-[11px] text-muted-foreground"
     >
-      {state === 'delivered' ? <Check className="size-3" /> : <Clock className="size-3" />}
+      <Clock className="size-3" />
       <span>{label}</span>
     </div>
   )

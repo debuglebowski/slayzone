@@ -25,7 +25,7 @@ export interface ChatQueueData {
     tabId: string,
     send: string,
     original: string,
-    opts?: { id?: string; content?: UserContentBlock[] }
+    opts?: { id?: string; content?: UserContentBlock[]; expectedConversationId?: string }
   ): Promise<QueuedChatMessage>
   /** Atomic pop of the queue head (select+delete in one txn); null when empty or the head is held. */
   pop(tabId: string, heldIds?: string[]): Promise<QueuedChatMessage | null>

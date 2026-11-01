@@ -8,12 +8,24 @@ import {
   useRef,
   useState
 } from 'react'
+import { CornerDownLeft } from 'lucide-react'
+import { useTRPCClient } from '../trpc'
+import { useAnswerThreads } from './useAnswerThreads'
+import { ChatThreadsPanel } from './ChatThreadsPanel'
 import {
   toast,
   useAppearance,
   safeClipboardWriteText,
   useStableCallback,
-  usePaletteContribution
+  usePaletteContribution,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
 } from '@slayzone/ui'
 import {
   hasPendingPrompt,
@@ -71,6 +83,9 @@ export interface ChatPanelHandle {
 }
 
 export interface ChatPanelProps {
+  isThread?: boolean
+  onReturnAnswer?: (text: string) => void
+  onQuoteReply?: (text: string) => void
   tabId: string
   taskId: string
   mode: string
@@ -100,7 +115,8 @@ export interface ChatPanelProps {
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  function ChatPanel(props, ref) {
+  function ChatPanelView(props, ref) {
+    const trpcClient = useTRPCClient()
     const {
       tabId,
       taskId,
@@ -508,6 +524,66 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [onOpenFile])
 
+    const quoteReply = useStableCallback((text: string): void => {
+      if (props.onQuoteReply) {
+        props.onQuoteReply(text)
+        return
+      }
+      composer.setDraft((prev) =>
+        appendToDraft(
+          prev,
+          text
+            .split('\n')
+            .map((line) => `> ${line}`)
+            .join('\n')
+        )
+      )
+      requestAnimationFrame(() => {
+        const el = composer.textareaRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(el.value.length, el.value.length)
+        composer.setCursorPos(el.value.length)
+      })
+    })
+
+    const threadApi = useAnswerThreads(
+      { tabId, taskId, mode, cwd, providerFlagsOverride },
+      !props.isThread && chatCapabilitiesForMode(mode).fork,
+      state.sessionId
+    )
+    const [returnDraft, setReturnDraft] = useState<{ threadId: string; text: string } | null>(null)
+    const [returnSending, setReturnSending] = useState(false)
+    const sendThreadAnswer = useStableCallback(async (): Promise<void> => {
+      const thread = threadApi.threads.find((thread) => thread.id === returnDraft?.threadId)
+      if (!returnDraft?.text.trim() || !thread || returnSending) return
+      if (thread.parentConversationId !== state.sessionId) {
+        toast('Return to the source conversation before sending this answer.')
+        return
+      }
+      setReturnSending(true)
+      const text = `Answer from thread “${thread.title}”:\n\n${returnDraft.text.trim()}\n\n[Open thread](#chat-thread:${thread.id})`
+      await trpcClient.chat.queue.push
+        .mutate({
+          tabId,
+          send: text,
+          original: text,
+          expectedConversationId: thread.parentConversationId
+        })
+        .then(
+          () => {
+            setReturnDraft(null)
+            toast(
+              inFlight ? 'Thread answer queued for main chat' : 'Thread answer sent to main chat'
+            )
+          },
+          (err: unknown) => {
+            toast(`Couldn't send answer: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        )
+        .then(() => setReturnSending(false))
+    })
+
     const chatView = useMemo(
       () => ({
         collapseSignal,
@@ -531,6 +607,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             toast(`Couldn't continue here: ${err instanceof Error ? err.message : String(err)}`)
           )
         },
+        quoteReply,
+        threads: threadApi.view,
         sendToolResult,
         promptCards,
         prompts,
@@ -562,6 +640,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         retryMessage,
         handleRestart,
         takeOver,
+        quoteReply,
+        threadApi.view,
         sendToolResult,
         promptCards,
         prompts,
@@ -605,7 +685,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <CommandTaskContext.Provider value={commandTaskScope}>
                 <ToolFocusContext.Provider value={toolFocus}>
                   {/* The files-changed panel sits beside the chat; in a narrow pane it covers it. */}
-                  <div className="@container relative flex h-full">
+                  <div className="@container relative flex h-full min-w-0 flex-1">
                     <div
                       ref={panelRef}
                       data-chat-panel
@@ -646,6 +726,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         if (!anchor) return
                         if (anchor.dataset.linkified === 'true') return
                         const href = anchor.getAttribute('href') ?? ''
+                        if (href.startsWith('#chat-thread:')) {
+                          e.preventDefault()
+                          const id = href.slice('#chat-thread:'.length)
+                          const thread = threadApi.threads.find((thread) => thread.id === id)
+                          if (thread) threadApi.view?.open(thread)
+                          return
+                        }
                         if (!/^https?:\/\//i.test(href)) return
                         e.preventDefault()
                         const mod = e.metaKey || e.ctrlKey
@@ -711,7 +798,28 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         onClose={() => setPickerKind(null)}
                       />
 
+                      {props.onReturnAnswer && !inFlight && (
+                        <div className="px-4 pt-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              for (let i = timeline.length - 1; i >= 0; i--) {
+                                const item = timeline[i]
+                                if (item?.kind === 'text' && item.parentToolUseId == null) {
+                                  props.onReturnAnswer?.(item.text)
+                                  return
+                                }
+                              }
+                            }}
+                          >
+                            <CornerDownLeft className="size-3" />
+                            Send to main
+                          </button>
+                        </div>
+                      )}
                       <ChatComposer
+                        compact={props.isThread}
                         appearance={appearance}
                         finalOnly={finalOnly}
                         inFlight={inFlight}
@@ -781,6 +889,80 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         className="absolute inset-0 z-30 @min-[56rem]:static @min-[56rem]:w-[45%] @min-[56rem]:max-w-[720px] @min-[56rem]:shrink-0 @min-[56rem]:border-l @min-[56rem]:border-border"
                       />
                     )}
+                    {threadApi.panel && (
+                      <ChatThreadsPanel
+                        key={`${threadApi.panel.conversationId}:${threadApi.panel.sourceMessageId}:${threadApi.panel.answerId}`}
+                        threads={threadApi.threads.filter(
+                          (thread) =>
+                            thread.answerId === threadApi.panel?.answerId &&
+                            thread.sourceMessageId === threadApi.panel?.sourceMessageId
+                        )}
+                        activeId={threadApi.panel.activeId}
+                        creating={threadApi.creating}
+                        onSelect={threadApi.select}
+                        onCreate={threadApi.create}
+                        onClose={threadApi.close}
+                        renderThread={(thread, active) => (
+                          <ChatPanel
+                            tabId={thread.id}
+                            taskId={taskId}
+                            mode={mode}
+                            cwd={cwd}
+                            providerFlagsOverride={providerFlagsOverride}
+                            isThread
+                            isActive={isActive && active}
+                            onOpenUrl={onOpenUrl}
+                            onOpenFile={onOpenFile}
+                            onQuoteReply={quoteReply}
+                            onReturnAnswer={(text) => setReturnDraft({ threadId: thread.id, text })}
+                          />
+                        )}
+                      />
+                    )}
+                    <AlertDialog
+                      open={returnDraft !== null}
+                      onOpenChange={(open) => {
+                        if (!open && !returnSending) setReturnDraft(null)
+                      }}
+                    >
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Send answer to main</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Review the conclusion. A link to the thread is included.{' '}
+                            {inFlight
+                              ? 'Main is working; the answer will be queued.'
+                              : 'The answer will be sent as the next message.'}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <textarea
+                          aria-label="Thread conclusion"
+                          value={returnDraft?.text ?? ''}
+                          onChange={(e) =>
+                            setReturnDraft((prev) =>
+                              prev ? { ...prev, text: e.target.value } : null
+                            )
+                          }
+                          className="min-h-36 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={returnSending}>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            disabled={returnSending || !returnDraft?.text.trim()}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              void sendThreadAnswer()
+                            }}
+                          >
+                            {returnSending
+                              ? 'Sending…'
+                              : inFlight
+                                ? 'Queue for main'
+                                : 'Send to main'}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 </ToolFocusContext.Provider>
               </CommandTaskContext.Provider>

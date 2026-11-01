@@ -42,6 +42,7 @@ type CollaborationApi = ReturnType<typeof useChatCollaboration>
 type FastModeApi = ReturnType<typeof useChatFastMode>
 
 export interface ChatComposerProps {
+  compact?: boolean
   appearance: AppearanceSettings
   finalOnly: boolean
   inFlight: boolean
@@ -113,6 +114,7 @@ export interface ChatComposerProps {
  * Purely presentational — all state + handlers are threaded in from ChatPanel.
  */
 export function ChatComposer({
+  compact = false,
   appearance,
   finalOnly,
   inFlight,
@@ -307,7 +309,13 @@ export function ChatComposer({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-3 mt-1.5 px-1 text-[10px] text-muted-foreground/60">
+        <div
+          className={
+            compact && !displaySessionEnded
+              ? 'hidden'
+              : 'flex items-center gap-3 mt-1.5 px-1 text-[10px] text-muted-foreground/60'
+          }
+        >
           {displaySessionEnded ? (
             <button
               type="button"

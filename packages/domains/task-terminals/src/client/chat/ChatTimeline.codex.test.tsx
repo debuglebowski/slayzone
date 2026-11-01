@@ -261,7 +261,7 @@ describe('Codex chat on the virtualized timeline', () => {
     const files = activity.querySelector('[data-testid="chat-files-changed"]')
     expect(summary).toBeDefined()
     expect(files).not.toBeNull()
-    expect(activity.classList.contains('flex')).toBe(true)
+    expect(activity.closest('[data-testid="chat-answer-footer"]')?.classList.contains('flex')).toBe(true)
     expect(document.querySelectorAll('[data-testid="chat-files-changed"]')).toHaveLength(1)
     expect(document.body.textContent!.indexOf('done with turn 0')).toBeLessThan(
       document.body.textContent!.indexOf('Activities')

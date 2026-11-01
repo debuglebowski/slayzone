@@ -31,6 +31,44 @@ const flag = (args: string[], name: string): string | undefined => {
   return at >= 0 ? args[at + 1] : undefined
 }
 
+test('a side-thread fork point never stops or changes its parent', async () => {
+  const s = await twoTurns()
+  mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'm3',
+    content: [{ type: 'text', text: 'Keep working' }]
+  })
+  await until(() => mgr.getSessionTerminalState(TAB_OPTS.tabId) === 'running')
+  const point = await mgr.threadForkSource(TAB_OPTS.tabId, 'm1')
+  expect(point).toEqual({ fromSessionId: s.source, atMessageUuid: 'a1' })
+  expect(s.h.fakes[0].kills).toEqual([])
+  expect(mgr.getSessionInfo(TAB_OPTS.tabId)?.sessionId).toBe(s.source)
+  expect(mgr.getSessionTerminalState(TAB_OPTS.tabId)).toBe('running')
+  await expect(mgr.threadForkSource(TAB_OPTS.tabId, 'm3')).rejects.toThrow(/Wait for the answer/)
+  await expect(mgr.threadForkSource(TAB_OPTS.tabId, 'missing')).rejects.toThrow()
+})
+
+test('a refused side fork fails its child without resuming or killing the parent', async () => {
+  const s = await twoTurns({
+    onFake: (f, i) => {
+      if (i === 1) f.emitter.once('spawn', () => setImmediate(() => f.exit(1)))
+    }
+  })
+  const point = await mgr.threadForkSource(TAB_OPTS.tabId, 'm1')
+  await mgr.hydrateSession({
+    ...TAB_OPTS,
+    tabId: 'side-thread',
+    conversationId: null,
+    isolatedConversation: true,
+    initialFork: point
+  })
+  await mgr.ensureSpawned('side-thread')
+  await until(() => mgr.getSessionTerminalState('side-thread') === 'dead')
+  expect(s.spawns).toHaveLength(2)
+  expect(s.h.fakes[0].kills).toEqual([])
+  expect(mgr.getSessionInfo(TAB_OPTS.tabId)?.sessionId).toBe(s.source)
+  expect(s.spawns[1]).toContain('--fork-session')
+})
+
 interface Setup {
   h: TransportHarness
   spawns: string[][]

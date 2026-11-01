@@ -316,7 +316,7 @@ describe('display preferences', () => {
     const final = text('Done', 4)
     const result = { kind: 'result', timestamp: 5 } as TimelineItem
     const view = activityView([user, progress, thinking, tool, final, result], false)
-    expect(view.rows).toEqual([user, final, result])
+    expect(view.rows).toEqual([user, final])
     expect(view.turns.get(final)?.items).toEqual([progress, thinking, tool])
     expect(view.hosts.get(tool)).toBe(final)
   })
@@ -332,7 +332,7 @@ describe('display preferences', () => {
     } as unknown as TimelineItem
     const result = { kind: 'result', timestamp: 3 } as TimelineItem
     const view = activityView([user, final, files, result], false)
-    expect(view.rows).toEqual([user, final, result])
+    expect(view.rows).toEqual([user, final])
     expect(view.turns.get(final)?.files).toEqual([files])
     expect(view.hosts.get(files)).toBe(final)
   })

@@ -30,6 +30,7 @@ import {
   previewRewind,
   rewindTab,
   forkTab,
+  threadForkSource,
   confirmedConversation,
   releaseChatConversation,
   switchTabConversation,
@@ -337,6 +338,9 @@ async function buildHydrateOpts(
     chatFastModeOverride?: boolean
   }
 ): Promise<Parameters<typeof hydrateSession>[0]> {
+  const thread = await data.threads?.get(opts.tabId)
+  if (thread && (thread.taskId !== opts.taskId || thread.mode !== opts.mode))
+    throw new Error('Thread does not belong to this task and provider')
   const providerCfg = await data.readProviderConfig(opts.taskId, opts.mode)
   // Flag-resolution priority for chat (non-Claude chat modes; Claude below):
   //   1. per-call override (`providerFlagsOverride`)
@@ -462,7 +466,25 @@ async function buildHydrateOpts(
     mode: opts.mode,
     cwd,
     projectId,
-    conversationId: fresh ? null : (providerCfg.chatConversationId ?? null),
+    conversationId: thread
+      ? thread.conversationId
+      : fresh
+        ? null
+        : (providerCfg.chatConversationId ?? null),
+    ...(thread
+      ? {
+          isolatedConversation: true,
+          autoRetryOnInvalidResume: false,
+          ...(!thread.conversationId
+            ? {
+                initialFork: {
+                  fromSessionId: thread.parentConversationId,
+                  atMessageUuid: thread.sourceUuid
+                }
+              }
+            : {})
+        }
+      : {}),
     providerFlags,
     computerId,
     env: subprocessEnv,
@@ -473,6 +495,15 @@ async function buildHydrateOpts(
     chatFastMode: resolvedChatFastMode,
     cliVersion,
     onPersistSessionId: ({ conversationId, origin }) => {
+      if (thread) {
+        if (origin !== 'foreign-observed')
+          void data
+            .threads!.setConversation(thread.id, conversationId)
+            .catch((err: unknown) =>
+              console.error('[chat-thread] saving conversation failed:', err)
+            )
+        return
+      }
       // Fire-and-forget DB append — the transport invokes this without awaiting
       // (same as before the async-DB lift). The transport already classified
       // the observation: `slay-spawned-*` when the discovered id matches what
@@ -492,6 +523,14 @@ async function buildHydrateOpts(
         .catch((err) => console.error('[chat-handlers] recordConversation failed:', err))
     },
     onInvalidResume: () => {
+      if (thread) {
+        void data
+          .threads!.setConversation(thread.id, null)
+          .catch((err: unknown) =>
+            console.error('[chat-thread] clearing conversation failed:', err)
+          )
+        return
+      }
       data
         .clearChatConversationId(opts.taskId, opts.mode)
         .catch((err) => console.error('[chat-handlers] clearChatConversationId failed:', err))
@@ -1059,6 +1098,48 @@ export function createChatOps(opts: ChatHandlerOpts) {
       })
     },
 
+    listThreads: async (o: ChatCreateOpts) => {
+      const parent = await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      return data.threads ? data.threads.list(o.tabId, parent.sessionId) : []
+    },
+
+    createThread: async (
+      o: ChatCreateOpts & { messageId: string; answerId: string; title: string; text: string }
+    ) => {
+      assertCapability(o.mode, 'fork')
+      if (!data.threads) throw new Error('Thread storage is unavailable')
+      await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      const parent = getSessionInfo(o.tabId)
+      if (!parent || parent.taskId !== o.taskId || parent.mode !== o.mode)
+        throw new Error('Source conversation does not belong to this task')
+      if (await data.threads.get(o.tabId))
+        throw new Error('Start threads from the main conversation')
+      const source = await threadForkSource(o.tabId, o.messageId)
+      const thread = {
+        id: randomUUID(),
+        parentTabId: o.tabId,
+        taskId: o.taskId,
+        mode: o.mode,
+        parentConversationId: source.fromSessionId,
+        answerId: o.answerId,
+        sourceMessageId: o.messageId,
+        sourceUuid: source.atMessageUuid,
+        title: o.title,
+        conversationId: null,
+        createdAt: Date.now()
+      }
+      await data.threads.create(thread)
+      chatEvents.emit('threads-changed', o.tabId)
+      await hydrateSession(
+        await buildHydrateOpts(data, { ...o, tabId: thread.id }, { fresh: false })
+      )
+      dispatchUserMessage(thread.id, {
+        id: randomUUID(),
+        content: [{ type: 'text', text: o.text }]
+      })
+      return thread
+    },
+
     /**
      * Sessions picker (plan 3.6): run another conversation of this task in the
      * tab — one of this chat's, or (a hand-off) one the terminal ran. The
@@ -1194,6 +1275,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
     },
 
     remove: async (tabId: string): Promise<void> => {
+      for (const thread of (await data.threads?.listForParent(tabId)) ?? [])
+        await removeSession(thread.id)
       // Awaited: its last events must be written BEFORE the rows are cleared, or
       // a late insert would resurrect them.
       await removeSession(tabId)
@@ -1222,6 +1305,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * "Session ended" in the renderer.
      */
     reset: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      if (await data.threads?.get(o.tabId))
+        throw new Error('Start another thread to begin a new side discussion.')
       // Awaited for the same reason as `remove`.
       await removeSession(o.tabId)
       try {

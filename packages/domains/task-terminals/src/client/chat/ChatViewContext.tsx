@@ -4,7 +4,8 @@ import type { ChatPrompt, TimelineRows } from '@slayzone/terminal/client'
 import {
   chatProviderForMode,
   type ChatProviderInfo,
-  type PermissionDecision
+  type PermissionDecision,
+  type ChatThread
 } from '@slayzone/terminal-contracts'
 import type { ConversationActionsView } from './useConversationActions'
 import type { DiffLineComment } from './diff-comments/format'
@@ -48,6 +49,13 @@ export interface ChatViewState {
    * this feedback" sends the feedback this way).
    */
   sendMessage?: (text: string) => void
+  /** Append a quoted answer to the composer without sending it. */
+  quoteReply?: (text: string) => void
+  threads?: {
+    threads: ChatThread[]
+    start: (answerId: string, sourceMessageId: string) => void
+    open: (thread: ChatThread) => void
+  }
   /** Send a failed user message again (same id). */
   retryMessage?: (id: string) => void
   /** Start the agent again (the start-failure card's Retry). */

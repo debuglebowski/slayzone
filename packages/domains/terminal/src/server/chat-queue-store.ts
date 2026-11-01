@@ -11,6 +11,7 @@ interface Row {
   position: number
   created_at: string
   content: string | null
+  conversation_id: string | null
 }
 
 function parseContent(raw: string | null): UserContentBlock[] | undefined {
@@ -32,7 +33,8 @@ function rowToMessage(row: Row): QueuedChatMessage {
     original: row.original,
     position: row.position,
     createdAt: row.created_at,
-    ...(content ? { content } : {})
+    ...(content ? { content } : {}),
+    ...(row.conversation_id ? { expectedConversationId: row.conversation_id } : {})
   }
 }
 
@@ -48,7 +50,7 @@ export function pushChatQueue(
   tabId: string,
   send: string,
   original: string,
-  opts: { id?: string; content?: UserContentBlock[] } = {}
+  opts: { id?: string; content?: UserContentBlock[]; expectedConversationId?: string } = {}
 ): QueuedChatMessage {
   // The client may mint the id (it becomes the message's outbox id when sent).
   const id = opts.id ?? randomUUID()
@@ -58,8 +60,16 @@ export function pushChatQueue(
       .get(tabId) as { max_pos: number | null } | undefined
     const nextPos = (max?.max_pos ?? -1) + 1
     db.prepare(
-      'INSERT INTO chat_queue (id, tab_id, send, original, position, content) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, tabId, send, original, nextPos, opts.content ? JSON.stringify(opts.content) : null)
+      'INSERT INTO chat_queue (id, tab_id, send, original, position, content, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      id,
+      tabId,
+      send,
+      original,
+      nextPos,
+      opts.content ? JSON.stringify(opts.content) : null,
+      opts.expectedConversationId ?? null
+    )
     return nextPos
   })
   insert()
@@ -154,13 +164,14 @@ export function requeueAtHead(db: Database, msg: QueuedChatMessage): void {
   const tx = db.transaction(() => {
     db.prepare('UPDATE chat_queue SET position = position + 1 WHERE tab_id = ?').run(msg.tabId)
     db.prepare(
-      'INSERT INTO chat_queue (id, tab_id, send, original, position, content) VALUES (?, ?, ?, ?, 0, ?)'
+      'INSERT INTO chat_queue (id, tab_id, send, original, position, content, conversation_id) VALUES (?, ?, ?, ?, 0, ?, ?)'
     ).run(
       msg.id,
       msg.tabId,
       msg.send,
       msg.original,
-      msg.content ? JSON.stringify(msg.content) : null
+      msg.content ? JSON.stringify(msg.content) : null,
+      msg.expectedConversationId ?? null
     )
   })
   tx()

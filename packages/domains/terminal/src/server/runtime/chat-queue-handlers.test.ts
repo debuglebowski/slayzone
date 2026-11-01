@@ -15,10 +15,12 @@ import type {
 
 const transport = vi.hoisted(() => ({
   ready: true,
+  conversationId: 'source',
   dispatched: [] as Array<{ tabId: string; message: OutgoingUserMessage }>
 }))
 vi.mock('./chat-transport-manager', () => ({
   getSessionTerminalState: () => 'idle',
+  getSessionInfo: () => ({ sessionId: transport.conversationId }),
   isReadyForQueuedMessage: () => transport.ready,
   ensureSpawned: async () => undefined,
   registerChatQueueDrainer: () => undefined,
@@ -48,7 +50,10 @@ function memoryQueue(): ChatQueueData {
         original,
         position: rows.length,
         createdAt: 'now',
-        ...(opts?.content ? { content: opts.content } : {})
+        ...(opts?.content ? { content: opts.content } : {}),
+        ...(opts?.expectedConversationId
+          ? { expectedConversationId: opts.expectedConversationId }
+          : {})
       }
       rows.push(row)
       return row
@@ -106,6 +111,7 @@ const sentTexts = (): string[] =>
 beforeEach(() => {
   vi.useFakeTimers()
   transport.ready = true
+  transport.conversationId = 'source'
   transport.dispatched = []
 })
 afterEach(() => {
@@ -214,4 +220,21 @@ describe('queue: move and edit', () => {
       attachment: { contentHash: 'h-a1' }
     })
   })
+})
+
+test('a returned thread answer waits for its source conversation after a session switch', async () => {
+  const data = memoryQueue()
+  const ops = createChatQueueOps(db, data, lookup)
+  transport.ready = false
+  await ops.push('tab-1', 'thread conclusion', 'thread conclusion', {
+    expectedConversationId: 'source'
+  })
+  transport.conversationId = 'another-conversation'
+  transport.ready = true
+  await drainChatQueue(db, 'tab-1', data)
+  expect(sentTexts()).toEqual([])
+  expect(await data.list('tab-1')).toHaveLength(1)
+  transport.conversationId = 'source'
+  await drainChatQueue(db, 'tab-1', data)
+  expect(sentTexts()).toEqual(['thread conclusion'])
 })

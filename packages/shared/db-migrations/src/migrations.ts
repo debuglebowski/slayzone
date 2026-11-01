@@ -4282,6 +4282,36 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 180,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE chat_threads (
+          id TEXT PRIMARY KEY REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          parent_tab_id TEXT NOT NULL REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          mode TEXT NOT NULL,
+          parent_conversation_id TEXT NOT NULL,
+          answer_id TEXT NOT NULL,
+          source_message_id TEXT NOT NULL,
+          source_uuid TEXT NOT NULL,
+          title TEXT NOT NULL,
+          conversation_id TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX chat_threads_parent ON chat_threads(parent_tab_id, parent_conversation_id, created_at);
+        CREATE TRIGGER chat_threads_delete_tab AFTER DELETE ON chat_threads BEGIN
+          DELETE FROM terminal_tabs WHERE id = OLD.id;
+        END;
+      `)
+    }
+  },
+  {
+    version: 181,
+    up: (db) => {
+      db.exec('ALTER TABLE chat_queue ADD COLUMN conversation_id TEXT')
+    }
   }
 ]
 

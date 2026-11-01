@@ -6,6 +6,7 @@ import {
   ensureSpawned,
   getEventBufferSince,
   getSessionTerminalState,
+  getSessionInfo,
   isReadyForQueuedMessage,
   registerChatQueueDrainer
 } from './chat-transport-manager'
@@ -154,7 +155,11 @@ async function drainOnce(tabId: string, data: ChatQueueData): Promise<void> {
   if (!head) return
   // Re-check: a direct send (or a turn the agent started itself) may have
   // claimed the tab while the pop was in flight.
-  if (!isReadyForQueuedMessage(tabId)) {
+  if (
+    !isReadyForQueuedMessage(tabId) ||
+    (head.expectedConversationId !== undefined &&
+      head.expectedConversationId !== getSessionInfo(tabId)?.sessionId)
+  ) {
     try {
       await data.requeue(head)
     } catch (err) {
@@ -221,11 +226,14 @@ export function createChatQueueOps(
       tabId: string,
       send: string,
       original: string,
-      opts?: { id?: string; content?: UserContentBlock[] }
+      opts?: { id?: string; content?: UserContentBlock[]; expectedConversationId?: string }
     ): Promise<QueuedChatMessage> => {
       const content = opts?.content ? await admit(tabId, opts.content) : undefined
       const msg = await data.push(tabId, send, original, {
         ...(opts?.id ? { id: opts.id } : {}),
+        ...(opts?.expectedConversationId
+          ? { expectedConversationId: opts.expectedConversationId }
+          : {}),
         ...(content ? { content } : {})
       })
       broadcast('chat:queue-changed', tabId)

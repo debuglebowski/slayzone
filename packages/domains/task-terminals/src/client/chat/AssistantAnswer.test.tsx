@@ -1,0 +1,164 @@
+// @vitest-environment jsdom
+import type React from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import type { TimelineItem } from '@slayzone/terminal/client'
+vi.mock('@slayzone/markdown/client', () => ({
+  GhMarkdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>
+}))
+vi.mock('@slayzone/diff-view', () => ({ DiffView: () => null }))
+import { ChatViewContext, defaultChatView } from './ChatViewContext'
+import { AssistantAnswer } from './AssistantAnswer'
+import { activityView } from './activity-view'
+
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    disconnect() {}
+  }
+)
+afterEach(cleanup)
+const reply: Extract<TimelineItem, { kind: 'text' }> = {
+  kind: 'text',
+  role: 'assistant',
+  messageId: 'answer',
+  text: 'Yes.',
+  timestamp: 1000
+}
+const result: Extract<TimelineItem, { kind: 'result' }> = {
+  kind: 'result',
+  model: 'gpt-6.1',
+  tokenUsage: { inputTokens: 1800, outputTokens: 640 },
+  subtype: 'success',
+  isError: false,
+  durationMs: 12800,
+  totalCostUsd: 0.01,
+  turnCostUsd: 0.01,
+  numTurns: 3,
+  text: null,
+  copyText: 'Yes.',
+  timestamp: 2000
+}
+
+describe('assistant answer presentation', () => {
+  it('offers Copy directly in the hover toolbar for short and long answers', () => {
+    for (const text of ['Yes.', 'A longer answer. '.repeat(100)]) {
+      const mounted = render(<AssistantAnswer item={{ ...reply, text }} />)
+      const toolbar = screen.getByRole('toolbar', { name: 'Answer actions' })
+      expect(
+        within(toolbar).getByRole('button', { name: 'Copy response', exact: true })
+      ).toBeDefined()
+      mounted.unmount()
+    }
+  })
+
+  it('does not attach another question’s threads when a provider reuses an answer id', () => {
+    const view = {
+      ...defaultChatView,
+      threads: {
+        threads: [
+          {
+            id: 'side',
+            answerId: 'answer:0',
+            sourceMessageId: 'other-question',
+            title: 'Other question',
+            taskId: 'task',
+            mode: 'claude-chat',
+            parentTabId: 'parent',
+            parentConversationId: 'conversation',
+            sourceUuid: 'record',
+            conversationId: 'side-conversation',
+            createdAt: 0
+          }
+        ],
+        start: vi.fn(),
+        open: vi.fn()
+      }
+    }
+    render(
+      <ChatViewContext.Provider value={view}>
+        <AssistantAnswer
+          item={reply}
+          turn={{
+            items: [],
+            files: [],
+            final: reply,
+            result,
+            userMessageId: 'question',
+            active: false,
+            hostIsActivity: false
+          }}
+        />
+      </ChatViewContext.Provider>
+    )
+    expect(screen.queryByRole('button', { name: /Threads/ })).toBeNull()
+  })
+  it('keeps details beside activity and associates the result with the answer once', () => {
+    const user: TimelineItem = {
+      kind: 'user-text',
+      id: 'question',
+      text: 'Can I reopen it?',
+      timestamp: 0
+    }
+    const view = activityView([user, reply, result], false)
+    expect(view.rows).toEqual([user, reply])
+    const turn = view.turns.get(reply)!
+    expect(turn.result).toBe(result)
+    expect(turn.userMessageId).toBe('question')
+    render(
+      <AssistantAnswer
+        item={reply}
+        turn={turn}
+        appearance={{
+          chatShowActivities: true,
+          chatPreviewLatestActivity: true,
+          chatShowActivityMessages: true,
+          chatShowThinking: true,
+          chatShowActivityTools: true
+        }}
+      />
+    )
+    const footer = screen.getByTestId('chat-answer-footer')
+    expect(footer.textContent).toContain('gpt-6.1')
+    expect(footer.textContent).toContain('2.4k tokens')
+    expect(footer.textContent).toContain('12.8s')
+    expect(footer.textContent).toContain('3 turns')
+  })
+
+  it('quotes only the selected answer into the composer and keeps More keyboard-accessible', () => {
+    const quoteReply = vi.fn()
+    render(
+      <ChatViewContext.Provider value={{ ...defaultChatView, quoteReply }}>
+        <AssistantAnswer item={reply} />
+      </ChatViewContext.Provider>
+    )
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More answer actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Quote in main chat' }))
+    expect(quoteReply).toHaveBeenCalledWith('Yes.')
+  })
+
+  it('hides details when the existing preference is off', () => {
+    render(
+      <ChatViewContext.Provider value={{ ...defaultChatView, showMessageMeta: false }}>
+        <AssistantAnswer
+          item={reply}
+          turn={{
+            items: [],
+            files: [],
+            final: reply,
+            result,
+            active: false,
+            hostIsActivity: false,
+            userMessageId: 'question'
+          }}
+        />
+      </ChatViewContext.Provider>
+    )
+    expect(screen.queryByText('gpt-6.1')).toBeNull()
+    expect(screen.getByText('Yes.')).toBeDefined()
+  })
+})

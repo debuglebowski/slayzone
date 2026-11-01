@@ -199,6 +199,7 @@ function electronBroadcast(
  * live-only events (see `TransportDeps.broadcastEvent`).
  */
 export type ChatEventMap = {
+  'threads-changed': [parentTabId: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   exit: [tabId: string, sessionId: string, code: number | null, signal: string | null]
 }
@@ -1234,6 +1235,15 @@ function handleProcessExit(
  * marker is answered by `fork-failed`, which unfolds it.
  */
 function onForkFailure(tab: ChatTab, proc: ChatProcess): void {
+  if (tab.respawnOpts.isolatedConversation) {
+    failStart(
+      tab,
+      new Error(
+        `${tab.backend.displayName} could not create this thread. Retry to fork again; the main conversation was left unchanged.`
+      )
+    )
+    return
+  }
   const from = proc.fork!.fromSessionId
   clearWatchdog(tab)
   tab.pendingFork = null
@@ -1282,6 +1292,9 @@ function failStart(tab: ChatTab, err: unknown): void {
 }
 
 export interface CreateChatOpts {
+  /** A side discussion must never fall back to resuming its parent's session. */
+  isolatedConversation?: boolean
+  initialFork?: { fromSessionId: string; atMessageUuid: string }
   tabId: string
   /** Task id — required so `pty:state-change` broadcasts use `${taskId}:${tabId}` keys. */
   taskId: string
@@ -1490,7 +1503,7 @@ async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
     optionalFlagsRefused: false,
     sessionConfirmed: Boolean(opts.conversationId),
     pendingHistoryImport: false,
-    pendingFork: null,
+    pendingFork: opts.initialFork ?? null,
     closed: false
   } as Omit<ChatTab, 'log' | 'outbox'> as ChatTab
   rearmPendingFork(tab, history)
@@ -2520,11 +2533,14 @@ const REWIND_TIMEOUT_MS = 30_000
  * fork left behind, and everything before a switch. A failed message never
  * reached it.
  */
-function activeUserMessages(tab: ChatTab): Array<{ id: string; text: string }> {
+function activeUserMessages(
+  tab: ChatTab,
+  events: readonly BufferedEvent[] = tab.log.events
+): Array<{ id: string; text: string }> {
   const active: Array<{ id: string; text: string }> = []
   // What the conversation held before the last fork (a refused fork restores it).
   let beforeFork: Array<{ id: string; text: string }> | null = null
-  for (const { event: e } of tab.log.events) {
+  for (const { event: e } of events) {
     if (e.kind === 'user-message' && e.id) {
       if (tab.outbox.state(e.id) !== 'failed') active.push({ id: e.id, text: e.text })
     } else if (e.kind === 'user-message-popped' && e.id) {
@@ -2566,12 +2582,35 @@ function rewindTarget(tab: ChatTab, messageId: string, scope: RewindScope): stri
  * Where a fork from `messageId` ends: the last main-chain assistant record of
  * that message's turn (`--resume-session-at`). Null: the turn has no answer.
  */
+/** Validate a side discussion's branch point without interrupting its parent. */
+export async function threadForkSource(
+  tabId: string,
+  messageId: string
+): Promise<{ fromSessionId: string; atMessageUuid: string }> {
+  const tab = requireTab(tabId)
+  const conversationId = tab.sessionId
+  const events = await tab.log.readSince(-1)
+  if (requireTab(tabId) !== tab || tab.sessionId !== conversationId)
+    throw new ChatTransportError('The source conversation changed. Select the answer again.')
+  if (!tab.sessionConfirmed || tab.pendingFork)
+    throw new ChatTransportError('The source conversation is not ready to fork.')
+  if (!activeUserMessages(tab, events).some((message) => message.id === messageId))
+    throw new ChatTransportError('That message is not in the current conversation.')
+  const answer = forkPoint(tab, messageId, { anyAnswer: tab.backend.forkAt === 'message' }, events)
+  if (!answer) throw new ChatTransportError('Wait for the answer before starting a thread.')
+  return {
+    fromSessionId: tab.sessionId,
+    atMessageUuid: tab.backend.forkAt === 'message' ? messageId : answer
+  }
+}
+
 function forkPoint(
   tab: ChatTab,
   messageId: string,
-  opts: { anyAnswer?: boolean } = {}
+  opts: { anyAnswer?: boolean } = {},
+  history?: readonly BufferedEvent[]
 ): string | null {
-  const events = tab.log.events
+  const events = history ?? tab.log.events
   let start = -1
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i].event

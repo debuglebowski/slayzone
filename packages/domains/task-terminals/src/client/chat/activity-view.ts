@@ -5,6 +5,8 @@ export interface ActivityTurn {
   items: ActivityItem[]
   files: Array<Extract<TimelineItem, { kind: 'files-changed' }>>
   final: Extract<TimelineItem, { kind: 'text' }> | null
+  result?: Extract<TimelineItem, { kind: 'result' }>
+  userMessageId?: string
   active: boolean
   /** When no other visible row exists, the host itself is an activity item. */
   hostIsActivity: boolean
@@ -43,15 +45,27 @@ export function activityView(
         item.kind === 'files-changed'
     )
     const hidden = new Set<TimelineItem>([...entries, ...files])
+    const result = segment.find((item) => item.kind === 'result')
+    const user = segment.find((item) => item.kind === 'user-text')
+    if (final && result) hidden.add(result)
     const kept = segment.filter((item) => !hidden.has(item))
     // Preserve a row as an anchor for assistant-initiated turns with no final reply.
     const host = final ?? kept[kept.length - 1] ?? entries[0] ?? files[0]
     if (host && (entries.length || files.length || active || final)) {
       const hostIsActivity = hidden.has(host)
       if (hostIsActivity) kept.push(host)
-      turns.set(host, { items: entries, files, final, active, hostIsActivity })
+      turns.set(host, {
+        items: entries,
+        files,
+        final,
+        result,
+        userMessageId: user?.id,
+        active,
+        hostIsActivity
+      })
       for (const item of entries) hosts.set(item, host)
       for (const item of files) hosts.set(item, host)
+      if (final && result) hosts.set(result, host)
     }
     output.push(...kept)
     segment = []

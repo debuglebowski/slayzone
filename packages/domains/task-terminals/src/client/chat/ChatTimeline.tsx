@@ -34,6 +34,7 @@ import {
   type ChatTimelineState
 } from '@slayzone/terminal/client'
 import { ActivityTurn, AgentAvatar } from './ActivityTurn'
+import { AssistantAnswer } from './AssistantAnswer'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { ChatSearchBar } from './ChatSearchBar'
 import { ChatTurnOutline } from './ChatTurnOutline'
@@ -157,6 +158,9 @@ export function ChatTimeline({
   const renderRow = useCallback(
     (item: TimelineItem, index: number) => {
       const turn = activityTurns?.get(item)
+      if (turn?.final && item.kind === 'text') {
+        return <AssistantAnswer item={item} turn={turn} appearance={activityAppearance} rowOf={rowOf} />
+      }
       if (turn) {
         const showWorking = turn.active && !awaitingUser && turn.final?.stream !== 'open'
         const showOwner =

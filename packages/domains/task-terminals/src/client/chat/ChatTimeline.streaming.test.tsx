@@ -44,7 +44,7 @@ const rendered = vi.hoisted(() => {
         const name = nameOf(f.type)
         if (name) {
           counts.set(name, (counts.get(name) ?? 0) + 1)
-          if (name === 'AssistantText') {
+          if (name === 'AssistantMessageBody') {
             const id = f.memoizedProps?.item?.messageId ?? '?'
             textRows.set(id, (textRows.get(id) ?? 0) + 1)
           }

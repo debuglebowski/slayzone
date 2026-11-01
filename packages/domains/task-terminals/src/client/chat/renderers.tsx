@@ -1,4 +1,5 @@
-import { useContext, useDeferredValue, useEffect, useState, useMemo } from 'react'
+import { MessageDetails } from './MessageDetails'
+import { useContext, useDeferredValue, useEffect, useMemo } from 'react'
 import { useChatProvider, useChatView } from './ChatViewContext'
 import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
 import { useToolFocusRequest } from './tool-cards/tool-focus'
@@ -17,12 +18,10 @@ import {
   ClipboardList,
   HelpCircle,
   Sparkles,
-  Copy,
-  Check as CheckIcon,
   User,
   Bot
 } from 'lucide-react'
-import { cn, safeClipboardWriteText, useDepsChanged, useNow, useAppearance } from '@slayzone/ui'
+import { cn, useDepsChanged, useNow, useAppearance } from '@slayzone/ui'
 import { ChatDiffView } from './diff-comments/ChatDiffView'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import {
@@ -76,28 +75,20 @@ import { ConversationBranchRow } from './ConversationBranchRow'
 import { UserMessageAttachments } from './UserMessageAttachments'
 import { AgentProblemCard } from './AgentProblemCard'
 
-// --- Helpers ---
-
-function useCopy(text: string): { copied: boolean; copy: () => void } {
-  const [copied, setCopied] = useState(false)
-  const copy = (): void => {
-    void safeClipboardWriteText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-  return { copied, copy }
-}
-
 // --- Turn-scoped wrappers ---
 
 /** User prompt — right-aligned card. */
 export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user-text' }> }) {
   const appearance = useAppearance()
+  const { threads } = useChatView()
+  const returned = /\n\n\[Open thread\]\(#chat-thread:([a-zA-Z0-9-]+)\)$/.exec(item.text)
+  const thread = returned && threads?.threads.find((thread) => thread.id === returned[1])
+  const displayText = thread && returned ? item.text.slice(0, returned.index) : item.text
   return (
     <div
       className={cn(
         'group px-4 flex justify-end items-center gap-2',
-        appearance.chatCompactSpacing ? 'py-0.5' : 'py-2'
+        appearance.chatCompactSpacing ? 'mb-2 py-0.5' : 'mb-4 py-2'
       )}
     >
       <UserMessageActions item={item} />
@@ -106,7 +97,16 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
       </span>
       <div className="max-w-[85%] min-w-0 rounded-lg border border-primary/25 bg-primary/5 shadow-sm px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
         <UserMessageAttachments attachments={item.attachments} />
-        {item.text && <HighlightedText text={item.text} />}
+        {displayText && <HighlightedText text={displayText} />}
+        {thread && (
+          <button
+            type="button"
+            className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => threads?.open(thread)}
+          >
+            Open thread: {thread.title}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -118,28 +118,36 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
  * delta; the markdown re-parse is deferred, so a long reply never blocks input).
  * The saved block then finalizes the same row: same element, same text.
  */
-export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
-  const appearance = useAppearance()
+export function AssistantMessageBody({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
   const streaming = item.stream === 'open'
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
   const text = useDeferredValue(live?.text ?? item.text)
   return (
+    <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 shadow-sm px-3 py-2">
+      <div
+        data-chat-text
+        data-streaming={streaming ? 'true' : undefined}
+        className="text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]"
+      >
+        <GhMarkdown>{text}</GhMarkdown>
+        {streaming && <StreamCaret />}
+      </div>
+    </div>
+  )
+}
+
+export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
+  const appearance = useAppearance()
+  return (
     <div className={cn('pl-4 pr-[10%]', appearance.chatCompactSpacing ? 'py-0.5' : 'py-2')}>
       <div className="group flex gap-3 items-start">
         <AssistantAvatar />
-        <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 shadow-sm px-3 py-2">
-          <div
-            data-chat-text
-            data-streaming={streaming ? 'true' : undefined}
-            className="text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]"
-          >
-            <GhMarkdown>{text}</GhMarkdown>
-            {streaming && <StreamCaret />}
-          </div>
-        </div>
-        <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
-          {appearance.chatShowMessageMeta && formatTime(item.timestamp)}
-        </span>
+        <AssistantMessageBody item={item} />
+        {appearance.chatShowMessageMeta && (
+          <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+            {formatTime(item.timestamp)}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -157,7 +165,10 @@ function StreamCaret() {
 
 function AssistantAvatar() {
   return (
-    <div data-testid="chat-agent-avatar" className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm">
+    <div
+      data-testid="chat-agent-avatar"
+      className="shrink-0 size-7 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-sm"
+    >
       <Sparkles className="size-3.5" />
     </div>
   )
@@ -226,68 +237,9 @@ export function SystemInit({ item }: { item: Extract<TimelineItem, { kind: 'sess
 }
 
 export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 'result' }> }) {
-  // Kept while scrolled away; "Collapse all" closes it.
-  const [expanded, setExpanded] = useRowUiState('meta', false, false)
-  const { showMessageMeta } = useChatView()
-  const { copied, copy } = useCopy(item.copyText ?? '')
-  if (!showMessageMeta) return null
   return (
-    <div className="group px-4 pl-[4.25rem] pb-2 flex items-center gap-2 flex-wrap">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={cn(
-          'inline-flex items-center gap-2 text-[11px] rounded-md px-2 py-1 text-muted-foreground/80 hover:text-foreground hover:bg-muted/60 transition-colors',
-          item.isError && 'text-destructive'
-        )}
-      >
-        {item.isError ? (
-          <CircleX className="size-3" />
-        ) : (
-          <CircleCheck className="size-3 text-success" />
-        )}
-        {item.model && <span>{item.model}</span>}
-        {item.tokenUsage && (
-          <span>
-            {item.tokenUsage.inputTokens.toLocaleString()} in ·{' '}
-            {item.tokenUsage.outputTokens.toLocaleString()} out
-          </span>
-        )}
-        <span>{(item.durationMs / 1000).toFixed(1)}s</span>
-        <span>·</span>
-        {item.turnCostUsd !== undefined && (
-          <>
-            <span data-testid="chat-turn-cost">${item.turnCostUsd.toFixed(4)}</span>
-            <span>·</span>
-          </>
-        )}
-        <span>
-          {item.numTurns} turn{item.numTurns === 1 ? '' : 's'}
-        </span>
-        {item.isError && (
-          <>
-            <span>·</span>
-            <span>{item.subtype}</span>
-          </>
-        )}
-      </button>
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span>{formatTime(item.timestamp)}</span>
-        {item.copyText && (
-          <button
-            onClick={copy}
-            className="inline-flex items-center gap-1 hover:text-foreground"
-            aria-label="Copy assistant reply"
-          >
-            {copied ? <CheckIcon className="size-3" /> : <Copy className="size-3" />}
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-        )}
-      </div>
-      {expanded && item.text && (
-        <div className="basis-full mt-1.5 text-xs text-foreground/80 whitespace-pre-wrap pl-2 border-l border-border/40">
-          {item.text}
-        </div>
-      )}
+    <div className="pl-14 pr-4 pb-2 flex flex-wrap items-center gap-3">
+      <MessageDetails item={item} standalone />
     </div>
   )
 }
