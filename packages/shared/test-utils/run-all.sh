@@ -1044,6 +1044,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/ui/src/agent-pills.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
+  packages/domains/task-terminals/src/client/chat/renderers.final-plan.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/BashCard.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/codex-cards.test.tsx \

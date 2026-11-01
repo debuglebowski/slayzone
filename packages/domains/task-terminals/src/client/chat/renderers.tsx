@@ -17,7 +17,6 @@ import {
   Search,
   CheckSquare,
   ListChecks,
-  ClipboardList,
   HelpCircle,
   User,
   Bot
@@ -77,6 +76,7 @@ import { UserMessageActions } from './UserMessageActions'
 import { ConversationBranchRow } from './ConversationBranchRow'
 import { UserMessageContent } from './UserMessageAttachments'
 import { AgentProblemCard } from './AgentProblemCard'
+import { FinalPlanCard } from './FinalPlanCard'
 
 // --- Turn-scoped wrappers ---
 
@@ -823,33 +823,30 @@ export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
   return (
     <div className="pl-4 pr-4 py-3">
       <div className="group flex gap-3 items-start">
-        <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-warning to-warning-emphasis flex items-center justify-center text-warning-contrast shadow-sm">
-          <ClipboardList className="size-3.5" />
-        </div>
-        <div className="min-w-0 flex-1 rounded-lg border border-warning/40 bg-warning/5 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-warning-foreground">
-            <ClipboardList className="size-3" />
-            <span>Plan</span>
-            {/* No status icon while the plan waits: a pending prompt is not a failure. */}
-            {prompt?.status !== 'pending' && (
-              <span className="ml-auto">
-                <StatusIcon status={invocation.status} />
-              </span>
-            )}
-          </div>
-          {plan && (
-            <div className="px-3 py-2 text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]">
-              <GhMarkdown>{plan}</GhMarkdown>
-            </div>
-          )}
-          {prompt && (
-            <div className="border-t border-warning/20 bg-warning/10 px-3 py-2">
-              <PlanStatus prompt={prompt} />
-            </div>
-          )}
-        </div>
+        <FinalPlanCard
+          text={plan}
+          // A pending approval is not a failure.
+          status={prompt?.status !== 'pending' && <StatusIcon status={invocation.status} />}
+          footer={prompt && <PlanStatus prompt={prompt} />}
+        />
         <HoverTimestamp timestamp={timestamp} />
       </div>
+    </div>
+  )
+}
+
+function CodexFinalPlan({ item }: { item: Extract<TimelineItem, { kind: 'codex-plan' }> }) {
+  const appearance = useAppearance()
+  const text = useDeferredValue(item.text)
+  return (
+    <div
+      className={cn(
+        'group flex min-w-0 items-start gap-3',
+        appearance.chatCompactSpacing ? 'mb-4 py-0.5' : 'mb-8 py-2'
+      )}
+    >
+      <FinalPlanCard text={text} streaming={item.phase === 'streaming'} />
+      {appearance.chatShowMessageMeta && <HoverTimestamp timestamp={item.timestamp} />}
     </div>
   )
 }
@@ -1017,18 +1014,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
     case 'plan':
       return <PlanBlock key={key} item={item} />
     case 'codex-plan':
-      return (
-        <AssistantText
-          key={key}
-          item={{
-            kind: 'text',
-            role: 'assistant',
-            messageId: item.planId,
-            text: item.text,
-            timestamp: item.timestamp
-          }}
-        />
-      )
+      return <CodexFinalPlan key={key} item={item} />
     case 'codex-plan-decision':
       return null
     case 'compaction':
