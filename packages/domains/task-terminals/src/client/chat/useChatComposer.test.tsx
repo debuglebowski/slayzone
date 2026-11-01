@@ -695,6 +695,22 @@ describe('useChatComposer argument hint (ghost text after `/name `)', () => {
 })
 
 describe('useChatComposer draft restore (per tab, survives remount + reload)', () => {
+  it.each(['claude-chat', 'codex-chat'])('%s recalls prompts and restores the draft', (mode) => {
+    mocks.history.entries = ['newer prompt', 'older prompt']
+    setup({ mode })
+    type('unfinished draft')
+    textarea().setSelectionRange(0, 0)
+    fireEvent.keyDown(textarea(), { key: 'ArrowUp' })
+    expect(composer.draft).toBe('newer prompt')
+    fireEvent.keyDown(textarea(), { key: 'ArrowUp' })
+    expect(composer.draft).toBe('older prompt')
+    fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
+    expect(composer.draft).toBe('newer prompt')
+    fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
+    expect(composer.draft).toBe('unfinished draft')
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
   it('restores the saved draft (text + files) once, without snapping the timeline down', async () => {
     mocks.persistence.saved = { text: 'half a thought', attachments: [IMG_A] }
     setup()

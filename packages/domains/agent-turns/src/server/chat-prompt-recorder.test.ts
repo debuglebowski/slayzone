@@ -8,7 +8,7 @@ import { runMigrations } from '../../../../shared/db-migrations/src/migrations.j
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import { createChatPromptRecorder } from './chat-prompt-recorder.js'
-import { listPromptsForTask } from './prompt-db.js'
+import { listPromptsForTask, MAX_PROMPTS_PER_AGENT } from './prompt-db.js'
 import { agentPromptsEvents } from './events.js'
 
 const raw = new Database(':memory:')
@@ -27,6 +27,21 @@ beforeEach(() => {
 })
 
 describe('createChatPromptRecorder', () => {
+  test.each(['claude-chat', 'codex-chat'])(
+    '%s retains prompts used by session counts',
+    async (mode) => {
+      const insert = raw.prepare(
+        `INSERT INTO agent_prompts (id, task_id, agent_id, cli_session_id, text, created_at)
+       VALUES (?, ?, ?, 'conv-1', 'earlier prompt', ?)`
+      )
+      for (let i = 0; i < MAX_PROMPTS_PER_AGENT; i++) {
+        insert.run(`prompt-${i}`, taskId, mode, i)
+      }
+      await record('tab-1', { kind: 'user-message', text: 'latest prompt' }, { ...ctx, mode })
+      expect(await listPromptsForTask(db, taskId, mode)).toHaveLength(MAX_PROMPTS_PER_AGENT + 1)
+    }
+  )
+
   test('records a user message as a prompt of the chat mode + conversation', async () => {
     await record('tab-1', { kind: 'user-message', text: 'fix the bug' }, ctx)
     const rows = await listPromptsForTask(db, taskId, 'claude-chat')

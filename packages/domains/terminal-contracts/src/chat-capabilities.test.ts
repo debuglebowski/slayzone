@@ -31,7 +31,7 @@ test('Claude Code chat: every capability', () => {
 test('Codex chat: prompt cards, live Stop + effort, rewind, fork, sessions, compact, files changed', () => {
   expect(chatCapabilitiesForMode('codex-chat')).toEqual({
     nativeSlashCommands: false,
-    promptHistory: false,
+    promptHistory: true,
     promptCards: true,
     liveInterrupt: true,
     liveEffort: true,
@@ -75,6 +75,12 @@ test('unknown / non-chat modes get nothing', () => {
 test('every chat-capable mode has an explicit entry', () => {
   for (const mode of CHAT_SUPPORTED_MODES) {
     expect(() => chatCapabilitiesForMode(mode)).not.toThrow()
+  }
+})
+
+test('every chat-capable mode supports task prompt history', () => {
+  for (const mode of CHAT_SUPPORTED_MODES) {
+    expect(chatCapabilitiesForMode(mode).promptHistory, mode).toBe(true)
   }
 })
 

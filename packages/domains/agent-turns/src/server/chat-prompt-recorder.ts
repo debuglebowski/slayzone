@@ -43,9 +43,9 @@ export function createChatPromptRecorder(
         text,
         created_at: Date.now()
       })
-      // Session counts use these rows. Codex has no composer prompt history to
-      // bound, so retain its full per-session count across chat resets.
-      if (capabilities.promptHistory) await prunePrompts(db, ctx.taskId, ctx.mode)
+      // Session counts use these rows too; enabling composer history must not
+      // discard the records that keep those counts accurate across chat resets.
+      if (!capabilities.sessions) await prunePrompts(db, ctx.taskId, ctx.mode)
       agentPromptsEvents.emit('agent-prompts:changed', ctx.taskId)
     } catch (err) {
       console.error('[chat-prompt-recorder] record failed:', err)

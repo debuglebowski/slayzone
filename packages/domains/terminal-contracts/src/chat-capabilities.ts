@@ -112,6 +112,7 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
   },
   'codex-chat': {
     ...NONE,
+    promptHistory: true,
     // Approvals, questions, permission and MCP input requests (app-server server requests).
     promptCards: true,
     // `turn/interrupt` in place; a Stop before the turn has an id waits for it.
