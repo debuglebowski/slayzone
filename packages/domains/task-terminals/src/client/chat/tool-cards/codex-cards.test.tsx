@@ -199,6 +199,26 @@ describe('Codex command card', () => {
 })
 
 describe('Codex file change card', () => {
+  it('shows a failed patch diagnostic alongside the proposed diff, without ANSI', () => {
+    const { started, completed } = recorded('file-change', 'fileChange', 1)
+    const invocation = invocationOf(started, { ...completed, status: 'failed' })
+    invocation.result!.rawContent = '\x1b[31mFailed to find expected lines in notes.txt\x1b[0m'
+    show(invocation)
+    expect(screen.getByText('Failed to find expected lines in notes.txt')).toBeTruthy()
+    expect(diffLines()).toEqual(['delete:hello world', 'add:hello codex'])
+  })
+
+  it('shows a failed patch diagnostic when no file changes were reported', () => {
+    show({
+      id: 'failed-patch',
+      name: 'codex/fileChange',
+      input: { changes: [] },
+      status: 'error',
+      result: { isError: true, rawContent: 'apply_patch verification failed', structured: null }
+    })
+    expect(screen.getByText('apply_patch verification failed')).toBeTruthy()
+  })
+
   it('a new file: its content as added lines', () => {
     const { started, completed } = recorded('file-change', 'fileChange', 0)
     show(invocationOf(started, completed))

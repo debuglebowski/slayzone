@@ -252,6 +252,7 @@ interface CodexHistoryTurn {
 
 /** Last part of a command's output kept for `commandTaskOutput` (8 KiB, like Claude's). */
 const COMMAND_OUTPUT_TAIL = 8192
+const PATCH_OUTPUT_TAIL = 64 * 1024
 
 interface CommandOutput {
   output: string
@@ -447,6 +448,8 @@ class CodexChatSession implements ChatSessionDriver {
   private threadModel: string | null = null
   /** Output of the turn's commands, by item id (live output, polled). */
   private readonly commands = new Map<string, CommandOutput>()
+  /** Patch diagnostics arrive as deltas, not in the completed fileChange item. */
+  private readonly patchOutput = new Map<string, string>()
   /** Last context-usage emitted (only a change is emitted again). */
   private lastContext: { tokens: number; window: number | null } | null = null
 
@@ -1111,6 +1114,7 @@ class CodexChatSession implements ChatSessionDriver {
     for (const wake of this.turnEndWaiters.splice(0)) wake()
     this.client?.dispose()
     this.pendingRequests.clear()
+    this.patchOutput.clear()
   }
 
   // ---- notification handling ----
@@ -1168,6 +1172,7 @@ class CodexChatSession implements ChatSessionDriver {
         if (p.turn?.id) this.endedTurns.add(p.turn.id)
         this.closeStream(ctx)
         this.emitTurnResult(ctx, p.turn?.status ?? 'completed', p.turn?.durationMs ?? 0)
+        this.patchOutput.clear()
         return
       }
       case 'serverRequest/resolved': {
@@ -1192,6 +1197,15 @@ class CodexChatSession implements ChatSessionDriver {
         if (!out || out.ended || typeof p.delta !== 'string') return
         out.totalBytes += Buffer.byteLength(p.delta)
         out.output = (out.output + p.delta).slice(-COMMAND_OUTPUT_TAIL)
+        return
+      }
+      case 'item/fileChange/outputDelta': {
+        const p = params as CodexDeltaNotification
+        if (!p?.itemId || typeof p.delta !== 'string' || !this.patchOutput.has(p.itemId)) return
+        this.patchOutput.set(
+          p.itemId,
+          (this.patchOutput.get(p.itemId)! + p.delta).slice(-PATCH_OUTPUT_TAIL)
+        )
         return
       }
       default:
@@ -1219,6 +1233,9 @@ class CodexChatSession implements ChatSessionDriver {
     }
     const toolCall = this.toToolCall(item)
     if (toolCall) this.emit(ctx, toolCall)
+    if (item.type === 'fileChange' && !this.patchOutput.has(item.id)) {
+      this.patchOutput.set(item.id, '')
+    }
     if (item.type === 'commandExecution' && !this.commands.has(item.id)) {
       // Live output (plan 3.9's command-task path): its card polls `commandTaskOutput`.
       this.commands.set(item.id, { output: '', totalBytes: 0, ended: false })
@@ -1363,7 +1380,13 @@ class CodexChatSession implements ChatSessionDriver {
     if (!toolTypes.includes(item.type)) return null
     const status = typeof item.status === 'string' ? item.status : ''
     const isError = status === 'failed' || status === 'declined' || item.success === false
-    const rawContent = typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : ''
+    const rawContent =
+      typeof item.aggregatedOutput === 'string'
+        ? item.aggregatedOutput
+        : item.type === 'fileChange'
+          ? (this.patchOutput.get(item.id) ?? '')
+          : ''
+    if (item.type === 'fileChange') this.patchOutput.delete(item.id)
     return {
       kind: 'tool-result',
       toolUseId: item.id,

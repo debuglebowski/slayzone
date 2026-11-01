@@ -61,13 +61,15 @@ const HANDLED_NOTIFICATIONS = new Set([
   'turn/completed',
   'error',
   'serverRequest/resolved',
-  'item/commandExecution/outputDelta'
+  'item/commandExecution/outputDelta',
+  'item/fileChange/outputDelta'
 ])
 
 /** Handled, but on their own they emit nothing (state the driver keeps). */
 const HANDLED_SILENT: Record<string, string> = {
   'turn/started': 'stores the turn id `turn/interrupt` needs',
   'item/commandExecution/outputDelta': 'kept for the command card to poll (`commandTaskOutput`)',
+  'item/fileChange/outputDelta': 'kept as the patch tool result text when the item completes',
   'serverRequest/resolved': 'closes a card only while its request is still pending'
 }
 
@@ -77,7 +79,6 @@ const HANDLED_SILENT: Record<string, string> = {
  */
 const KNOWN_UNHANDLED: Record<string, string> = {
   'item/commandExecution/terminalInteraction': 'input written to an interactive command',
-  'item/fileChange/outputDelta': 'live progress of a patch being applied',
   'item/fileChange/patchUpdated': 'a patch changed while it was being applied',
   'item/mcpToolCall/progress': 'progress of a running MCP tool',
   'item/reasoning/summaryPartAdded':

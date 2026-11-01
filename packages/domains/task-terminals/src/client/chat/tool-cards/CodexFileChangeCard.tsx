@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { FilePlus, FileMinus, Pencil } from 'lucide-react'
+import { stripAnsi } from '@slayzone/terminal-contracts'
 import {
   codexChangeCounts,
   codexFileChanges,
@@ -7,7 +8,8 @@ import {
 } from '@slayzone/terminal/client'
 import { useChatView } from '../ChatViewContext'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
-import { ToolShell, shortenPath, type ToolProps } from './card-shell'
+import { ToolShell, shortenPath, resultTextOf, type ToolProps } from './card-shell'
+import { HighlightedText } from '../HighlightedText'
 import { FileLink } from './links'
 import { relativeToCwd } from '../files-changed/relative-path'
 import { codexChangeFileDiff } from './file-diffs'
@@ -25,6 +27,7 @@ const KIND_LABEL: Record<CodexFileChange['kind'], string> = {
  */
 export function CodexFileChangeCard({ invocation, timestamp }: ToolProps) {
   const { fileEditsOpenByDefault, cwd } = useChatView()
+  const errorText = invocation.status === 'error' ? stripAnsi(resultTextOf(invocation)) : ''
   const files = useMemo(
     () =>
       codexFileChanges(invocation).map((change) => ({
@@ -63,6 +66,11 @@ export function CodexFileChangeCard({ invocation, timestamp }: ToolProps) {
         summary={summary}
         defaultOpen={fileEditsOpenByDefault}
       >
+        {errorText && (
+          <pre className="px-3 py-2 text-xs text-destructive whitespace-pre-wrap break-words font-mono max-h-64 overflow-auto">
+            <HighlightedText text={errorText} />
+          </pre>
+        )}
         {files.length > 0 && (
           <div className="grid gap-1 p-1">
             {files.map(({ change, diff, counts }, i) => (

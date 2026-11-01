@@ -548,6 +548,34 @@ describe('CodexChatSession', () => {
 
   // ---- tool items ----
 
+  test('file-change output deltas stay on their own failed tool result', async () => {
+    const h = makeHarness()
+    await handshake(h)
+    const notify = (method: string, params: Record<string, unknown>) =>
+      h.driver.handleLine(
+        JSON.stringify({ method, params: { threadId: 'thread-1', turnId: 'tn', ...params } })
+      )
+    for (const id of ['patch-a', 'patch-b']) {
+      notify('item/started', { item: { type: 'fileChange', id, changes: [] } })
+    }
+    notify('item/fileChange/outputDelta', { itemId: 'patch-a', delta: 'apply_patch verification ' })
+    notify('item/fileChange/outputDelta', { itemId: 'patch-b', delta: 'other failure' })
+    notify('item/fileChange/outputDelta', { itemId: 'patch-a', delta: 'failed' })
+    notify('item/completed', {
+      item: { type: 'fileChange', id: 'patch-a', changes: [], status: 'failed' }
+    })
+    notify('item/completed', {
+      item: { type: 'fileChange', id: 'patch-b', changes: [], status: 'failed' }
+    })
+    const results = h.emitted.filter((e) => e.kind === 'tool-result')
+    expect(results.map((e) => [e.toolUseId, e.rawContent, e.isError])).toEqual([
+      ['patch-a', 'apply_patch verification failed', true],
+      ['patch-b', 'other failure', true]
+    ])
+    expect(h.emitted.some((e) => e.kind === 'stderr' || e.kind === 'error')).toBe(false)
+    h.driver.dispose()
+  })
+
   test('tool-ish item/started events become tool-call events', async () => {
     const h = makeHarness()
     await handshake(h)
