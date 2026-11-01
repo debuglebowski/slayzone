@@ -21,6 +21,70 @@ test.describe('Codex chat turn', () => {
     await resetApp(mainWindow)
   })
 
+  test('native image upload previews, sends without Markdown, and survives reload', async ({
+    codexChat
+  }) => {
+    const image = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==',
+      'base64'
+    )
+    const t = await codexChat.openTask({
+      title: 'Codex native image',
+      scenario: { processes: [{ defaultTurn: codexEchoTurn() }, { defaultTurn: codexEchoTurn() }] }
+    })
+    await t.panel
+      .getByTestId('chat-attach-input')
+      .setInputFiles([{ name: 'red.png', mimeType: 'image/png', buffer: image }])
+    await expect(t.panel.getByTestId('chat-attachment-chip')).toHaveCount(1)
+    await t.panel.getByRole('button', { name: 'Open red.png' }).click()
+    const preview = t.page.locator('[data-panel-id="artifacts"]').locator('canvas')
+    await expect(preview).toBeVisible()
+    await expect
+      .poll(() => preview.evaluate((canvas: HTMLCanvasElement) => canvas.width))
+      .toBeGreaterThan(0)
+    await t.send('describe the image')
+    await expect(t.panel.getByText('echo: describe the image')).toBeVisible()
+    const run = await t.run(0, (r) => r.requests('turn/start').length === 1)
+    expect(run.requests('turn/start')[0].params).toMatchObject({
+      input: [
+        { type: 'image', url: `data:image/png;base64,${image.toString('base64')}` },
+        { type: 'text', text: 'describe the image' }
+      ]
+    })
+    const events = await t.events()
+    const user = events.find((e) => e.event.kind === 'user-message')?.event
+    expect(user).toMatchObject({
+      text: 'describe the image',
+      content: [
+        { type: 'attachment', attachment: { name: 'red.png', contentHash: expect.any(String) } },
+        { type: 'text', text: 'describe the image' }
+      ]
+    })
+    expect(JSON.stringify(events)).not.toContain('data:image')
+    await t.reload()
+    await expect(
+      t.panel.getByTestId('chat-message-attachments').getByRole('button', { name: 'Open red.png' })
+    ).toBeVisible()
+    await expect(
+      t.panel.getByTestId('chat-user-message-card').getByRole('button', { name: 'Open red.png' })
+    ).toHaveCount(0)
+    await expect(t.panel.getByTestId('chat-message-attachments').locator('img')).toHaveCount(0)
+    await t.panel.getByRole('button', { name: 'Open red.png' }).click()
+    await expect(preview).toBeVisible()
+    // Reset removes the tab's event cache; selecting the old thread imports its history.
+    await t.page.evaluate(
+      async (o) => {
+        const client = window.getTrpcVanillaClient()
+        await client.chat.reset.mutate(o)
+        await client.chat.switchConversation.mutate({ ...o, sourceMode: 'codex-chat' })
+      },
+      { ...t.opts(), conversationId: run.threadId! }
+    )
+    await expect(
+      t.panel.getByTestId('chat-message-attachments').getByRole('button', { name: 'Open red.png' })
+    ).toBeVisible()
+  })
+
   test('a reply streams in and is saved once; one process serves every turn', async ({
     codexChat
   }) => {

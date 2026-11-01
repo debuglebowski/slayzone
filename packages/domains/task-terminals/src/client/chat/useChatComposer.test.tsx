@@ -323,56 +323,26 @@ describe('useChatComposer send', () => {
     expect(mocks.autocomplete.bumpUsageFromMessage).toHaveBeenCalledWith('/cmd arg')
   })
 
-  it('Codex (paths): prepends resolved image attachments as markdown, then a blank line, then the text', async () => {
+  it('Codex sends image references and clean text, without resolving paths', async () => {
     setup({ mode: 'codex-chat' })
     attach([IMG_A, IMG_B])
     type('look at these')
     await send()
-    expect(sendMessage).toHaveBeenCalledWith(
-      '![a.png](/abs/a.png)\n![b.png](/abs/b.png)\n\nlook at these'
-    )
+    expect(sendMessage).toHaveBeenCalledWith([
+      { type: 'attachment', attachment: IMG_A },
+      { type: 'attachment', attachment: IMG_B },
+      { type: 'text', text: 'look at these' }
+    ])
     expect(composer.attachments).toEqual([])
   })
 
-  it('Codex (paths): sends attachments alone when the draft is empty', async () => {
+  it('Codex sends image-only messages without dropping missing artifact references', async () => {
     setup({ mode: 'codex-chat' })
-    attach([IMG_A])
+    const missing = img('gone', 'gone.png')
+    attach([missing])
     await send()
-    expect(sendMessage).toHaveBeenCalledWith('![a.png](/abs/a.png)')
-  })
-
-  it('Codex (paths): skips attachments that no longer resolve, with a singular toast', async () => {
-    setup({ mode: 'codex-chat' })
-    attach([IMG_A, img('gone', 'gone.png')])
-    type('hi')
-    await send()
-    expect(mocks.toast).toHaveBeenCalledWith('1 image no longer available — skipping')
-    expect(sendMessage).toHaveBeenCalledWith('![a.png](/abs/a.png)\n\nhi')
-  })
-
-  it('Codex (paths): pluralizes the missing-attachments toast', async () => {
-    setup({ mode: 'codex-chat' })
-    attach([img('gone1', 'x.png'), img('gone2', 'y.png')])
-    type('hi')
-    await send()
-    expect(mocks.toast).toHaveBeenCalledWith('2 images no longer available — skipping')
-  })
-
-  it('Codex (paths): when every attachment is gone, sends just the text', async () => {
-    setup({ mode: 'codex-chat' })
-    attach([img('gone', 'x.png')])
-    type('hi')
-    await send()
-    expect(sendMessage).toHaveBeenCalledTimes(1)
-    expect(sendMessage).toHaveBeenCalledWith('hi')
-  })
-
-  it('Codex (paths): sends nothing when every attachment is gone and there is no text', async () => {
-    setup({ mode: 'codex-chat' })
-    attach([img('gone', 'x.png')])
-    await send()
-    expect(sendMessage).not.toHaveBeenCalled()
-    expect(composer.attachments).toEqual([])
+    expect(sendMessage).toHaveBeenCalledWith([{ type: 'attachment', attachment: missing }])
+    expect(mocks.toast).not.toHaveBeenCalled()
   })
 })
 

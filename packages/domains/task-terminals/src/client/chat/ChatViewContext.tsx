@@ -114,6 +114,7 @@ export interface ChatViewState {
    * Cmd+Click on file path → editor pane. Falls back to `shell.openPath`.
    */
   onOpenFile?: (filePath: string, line?: number, col?: number) => void
+  onOpenArtifact?: (artifactId: string) => void
   /** Edit & resend / rewind / fork on past user messages (absent: the provider can't). */
   conversation?: ConversationActionsView
   /** Folds of `conversation-branch` items: open (shown) or not. */

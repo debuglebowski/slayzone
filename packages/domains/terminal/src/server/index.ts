@@ -284,7 +284,7 @@ export { setChatDeps, getChatDeps, type ChatDeps } from './chat-router-deps'
 export {
   setChatAttachmentReader,
   type ChatAttachmentReader
-} from './agents/claude-content'
+} from './agents/chat-attachment-reader'
 // `app.usage` (provider usage limits), mounted by `@slayzone/api` under `app`.
 export { appUsageRouter, type AppUsageRouter, type AppUsageMounts } from './usage-router'
 export {

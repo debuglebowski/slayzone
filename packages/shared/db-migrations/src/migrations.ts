@@ -4312,6 +4312,43 @@ export const migrations: Migration[] = [
     up: (db) => {
       db.exec('ALTER TABLE chat_queue ADD COLUMN conversation_id TEXT')
     }
+  },
+  {
+    version: 182,
+    up: (db) => {
+      // Artifact references outlive a tab's event cache (Reset / closing a tab).
+      // Store references only: prompt text and image bytes stay in their existing stores.
+      db.exec(`
+        CREATE TABLE chat_attachment_messages (
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          message_id TEXT NOT NULL,
+          attachments TEXT NOT NULL,
+          PRIMARY KEY (task_id, message_id)
+        );
+      `)
+      const rows = db
+        .prepare(`SELECT t.task_id, e.event FROM chat_events e
+        JOIN terminal_tabs t ON t.id = e.tab_id WHERE json_valid(e.event)
+        AND json_extract(e.event, '$.kind') = 'user-message'
+        ORDER BY COALESCE(json_extract(e.event, '$.history'), 0), e.seq`)
+        .all() as { task_id: string; event: string }[]
+      const insert = db.prepare(
+        'INSERT OR IGNORE INTO chat_attachment_messages (task_id, message_id, attachments) VALUES (?, ?, ?)'
+      )
+      for (const row of rows) {
+        const event = JSON.parse(row.event) as {
+          id?: string
+          content?: { type?: string; attachment?: unknown }[]
+        }
+        const attachments = Array.isArray(event.content)
+          ? event.content
+              .filter((b) => b?.type === 'attachment' && b.attachment)
+              .map((b) => b.attachment)
+          : []
+        if (event.id && attachments.length)
+          insert.run(row.task_id, event.id, JSON.stringify(attachments))
+      }
+    }
   }
 ]
 

@@ -74,7 +74,7 @@ import {
 import { UserMessageStatus } from './UserMessageStatus'
 import { UserMessageActions } from './UserMessageActions'
 import { ConversationBranchRow } from './ConversationBranchRow'
-import { UserMessageAttachments } from './UserMessageAttachments'
+import { UserMessageContent } from './UserMessageAttachments'
 import { AgentProblemCard } from './AgentProblemCard'
 
 // --- Turn-scoped wrappers ---
@@ -97,9 +97,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
       <span className="shrink-0 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
         {appearance.chatShowMessageMeta && formatTime(item.timestamp)}
       </span>
-      <div className="max-w-[85%] min-w-0 rounded-lg border border-primary/25 bg-primary/5 shadow-sm px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
-        <UserMessageAttachments attachments={item.attachments} />
-        {displayText && <HighlightedText text={displayText} />}
+      <UserMessageContent text={displayText} attachments={item.attachments}>
         {thread && (
           <button
             type="button"
@@ -109,7 +107,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
             Open thread: {thread.title}
           </button>
         )}
-      </div>
+      </UserMessageContent>
     </div>
   )
 }

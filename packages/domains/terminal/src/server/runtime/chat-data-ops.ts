@@ -118,6 +118,8 @@ export interface ChatDataOps {
     at?: number
   ): Promise<'inserted' | 'clash'>
   loadChatEvents(tabId: string): Promise<BufferedEvent[]>
+  /** Original artifact references across this task’s tabs and forks, including reset tabs. */
+  loadUserMessageContent?(taskId: string, ids: string[]): Promise<Map<string, UserContentBlock[]>>
   /** Saved events with `afterSeq < seq < beforeSeq` (history older than the in-memory cache). */
   loadChatEventsRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
   getNextSeqForTab(tabId: string): Promise<number>
@@ -355,9 +357,36 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       return res.changes > 0
     },
 
-    persistChatEvent: (tabId, seq, event, at) => persistChatEvent(db, tabId, seq, event, at),
+    persistChatEvent: async (tabId, seq, event, at) => {
+      if (event.kind === 'user-message' && event.id) {
+        const attachments = userMessageAttachments(event.content ?? [])
+        if (attachments.length) {
+          await db
+            .prepare(`INSERT OR IGNORE INTO chat_attachment_messages (task_id, message_id, attachments)
+            SELECT task_id, ?, ? FROM terminal_tabs WHERE id = ?`)
+            .run(event.id, JSON.stringify(attachments), tabId)
+        }
+      }
+      return persistChatEvent(db, tabId, seq, event, at)
+    },
 
     loadChatEvents: (tabId) => loadChatEvents(db, tabId),
+    loadUserMessageContent: async (taskId, ids) => {
+      const result = new Map<string, UserContentBlock[]>()
+      if (ids.length === 0) return result
+      const archived = (await db
+        .prepare(`SELECT message_id, attachments FROM chat_attachment_messages
+        WHERE task_id = ? AND message_id IN (${ids.map(() => '?').join(',')})`)
+        .all(taskId, ...ids)) as { message_id: string; attachments: string }[]
+      for (const row of archived) {
+        const attachments = JSON.parse(row.attachments) as ChatAttachment[]
+        result.set(
+          row.message_id,
+          attachments.map((attachment) => ({ type: 'attachment', attachment }))
+        )
+      }
+      return result
+    },
     loadChatEventsRange: (tabId, afterSeq, beforeSeq) =>
       loadChatEventsRange(db, tabId, afterSeq, beforeSeq),
 

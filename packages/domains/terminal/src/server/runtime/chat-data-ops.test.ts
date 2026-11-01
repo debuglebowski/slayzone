@@ -11,6 +11,7 @@
 import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { UserContentBlock } from '@slayzone/terminal-contracts'
 import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 
@@ -29,6 +30,8 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       provider_config TEXT,
       last_interaction_at INTEGER
     );
+    CREATE TABLE terminal_tabs (id TEXT PRIMARY KEY, task_id TEXT);
+    CREATE TABLE chat_attachment_messages (task_id TEXT, message_id TEXT, attachments TEXT, PRIMARY KEY(task_id, message_id));
     CREATE TABLE terminal_modes (
       id TEXT PRIMARY KEY,
       default_flags TEXT
@@ -480,4 +483,89 @@ test('timeline projection: pages + checkpoint saved together, read back, searche
   await ops.clearChatEventsForTab('tab-1')
   expect(await ops.loadTimelineCheckpoint('tab-1')).toBeNull()
   expect(await ops.loadTimelineSummaries('tab-1')).toEqual([])
+})
+
+test('recover original user attachment refs across task tabs; ignore foreign tasks and history echoes', async () => {
+  const { raw, db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  raw.exec(
+    "INSERT INTO terminal_tabs VALUES ('source', 'task'), ('fork', 'task'), ('foreign', 'other')"
+  )
+  const content: UserContentBlock[] = [
+    {
+      type: 'attachment',
+      attachment: {
+        artifactId: 'image',
+        contentHash: 'sealed',
+        name: 'shot.png',
+        kind: 'image',
+        mediaType: 'image/png',
+        size: 9
+      }
+    },
+    { type: 'text', text: 'describe' }
+  ]
+  const insert = raw.prepare('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)')
+  await ops.persistChatEvent('source', 5, {
+    kind: 'user-message',
+    id: 'm',
+    text: 'describe',
+    content
+  })
+  insert.run(
+    'fork',
+    1,
+    JSON.stringify({
+      kind: 'user-message',
+      id: 'm',
+      text: 'describe',
+      content: [{ type: 'text', text: 'describe' }],
+      history: true
+    })
+  )
+  await ops.persistChatEvent('foreign', 1, {
+    kind: 'user-message',
+    id: 'secret',
+    text: 'describe',
+    content
+  })
+  insert.run('source', 7, '{invalid json')
+  expect(await ops.loadUserMessageContent!('task', ['m', 'secret'])).toEqual(
+    new Map([['m', [content[0]]]])
+  )
+  expect(await ops.loadUserMessageContent!('task', [])).toEqual(new Map())
+  raw.close()
+})
+
+test('attachment refs survive reset and closing their original tab without retaining message text', async () => {
+  const { raw, db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  raw.exec("INSERT INTO terminal_tabs VALUES ('source', 'task')")
+  const attachment = {
+    artifactId: 'image',
+    contentHash: 'sealed',
+    name: 'shot.png',
+    kind: 'image' as const,
+    mediaType: 'image/png' as const,
+    size: 9
+  }
+  await ops.persistChatEvent('source', 0, {
+    kind: 'user-message',
+    id: 'm',
+    text: 'private prompt',
+    content: [
+      { type: 'attachment', attachment },
+      { type: 'text', text: 'private prompt' }
+    ]
+  })
+  await ops.clearChatEventsForTab('source')
+  raw.exec("DELETE FROM terminal_tabs WHERE id = 'source'")
+  expect(await ops.loadUserMessageContent!('task', ['m'])).toEqual(
+    new Map([['m', [{ type: 'attachment', attachment }]]])
+  )
+  const stored = raw.prepare('SELECT attachments FROM chat_attachment_messages').get() as {
+    attachments: string
+  }
+  expect(stored.attachments).not.toContain('private prompt')
+  raw.close()
 })

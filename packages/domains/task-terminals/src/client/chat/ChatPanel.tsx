@@ -97,6 +97,7 @@ export interface ChatPanelProps {
   onOpenUrl?: (url: string) => void
   /** Cmd+Click on a file:line:col reference → editor pane. */
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
+  onOpenArtifact?: (artifactId: string) => void
   /**
    * From `terminal_tabs.agent_state`: how this tab's agent last ended. With the
    * startup mode it decides whether chat.start runs after hydrate (see
@@ -127,6 +128,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       permissionNotice: overrideNotice,
       onOpenUrl,
       onOpenFile,
+      onOpenArtifact,
       agentState,
       isMain,
       isTemporary,
@@ -362,7 +364,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       rewindPreview,
       rewind,
       fork,
-      prefill: (text: string) => {
+      prefill: (text, attachments) => {
+        composer.setAttachments(attachments ?? [])
         composer.setDraft(text)
         composer.textareaRef.current?.focus()
       }
@@ -631,6 +634,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         childIndex: state.childIndex,
         onOpenUrl,
         onOpenFile: handleOpenFile,
+        onOpenArtifact,
         conversation: conversation.view,
         branches: display.branches,
         history: display.history,
@@ -664,6 +668,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         state.childIndex,
         onOpenUrl,
         handleOpenFile,
+        onOpenArtifact,
         conversation.view,
         display.branches,
         display.history,
@@ -954,6 +959,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                             isActive={isActive && active}
                             onOpenUrl={onOpenUrl}
                             onOpenFile={onOpenFile}
+                            onOpenArtifact={onOpenArtifact}
                             onQuoteReply={quoteReply}
                             onReturnAnswer={(text) => setReturnDraft({ threadId: thread.id, text })}
                           />

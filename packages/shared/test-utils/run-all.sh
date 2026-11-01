@@ -387,6 +387,7 @@ run_harness packages/shared/db-migrations/src/v177-chat-composer-migration.test.
 run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.test.ts
 # v179 (paged chat history, chat F): saved_at + timeline checkpoints/pages.
 run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
+run_harness packages/shared/db-migrations/src/v182-chat-attachment-messages-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -823,6 +824,7 @@ run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-optio
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/history-summary.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/activity-view.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.codex.test.ts

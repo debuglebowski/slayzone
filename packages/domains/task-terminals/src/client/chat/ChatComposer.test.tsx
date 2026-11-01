@@ -238,9 +238,10 @@ describe('ChatComposer attachments', () => {
     expect(button('Attach files')).toBeDefined()
   })
 
-  it('Codex: no file picker (images by paste/drop only, as before)', () => {
+  it('Codex: image picker accepts images only', () => {
     setup({ mode: 'codex-chat' })
-    expect(queryButton('Attach files')).toBeNull()
+    expect(button('Attach files')).toBeDefined()
+    expect(screen.getByTestId('chat-attach-input').getAttribute('accept')).toBe('image/*')
   })
 })
 

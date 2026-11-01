@@ -4,9 +4,11 @@
  * a turn sends, readable errors (the CLI's refusals included), live command
  * output through the command-task path, and the context meter's data.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { ChatDriverContext, ChatSessionDriver } from '../types'
+import { buildCodexContent } from './codex-content'
+import { setChatAttachmentReader } from '../chat-attachment-reader'
 import { codexChatBackend } from './codex-chat-session'
 
 type Json = Record<string, unknown>
@@ -67,11 +69,11 @@ interface H {
 
 async function harness(
   ctx: Partial<ChatDriverContext> = {},
-  opts: { userAgent?: string; models?: unknown[] | null } = {}
+  opts: { userAgent?: string; models?: unknown[] | null; history?: unknown[]; driver?: Driver } = {}
 ): Promise<H> {
   const sent: Json[] = []
   const emitted: AgentEvent[] = []
-  const driver = codexChatBackend.createDriver() as Driver
+  const driver = opts.driver ?? (codexChatBackend.createDriver() as Driver)
   void driver.start({
     write: (line) => sent.push(JSON.parse(line) as Json),
     emit: (e) => emitted.push(e),
@@ -108,6 +110,9 @@ async function harness(
     }
   })
   await h.feed({ id: 2, result: { thread: { id: 'th' }, model: 'gpt-6.1-sol', cwd: '/work' } })
+  const history = h.request('thread/turns/list')
+  if (history)
+    await h.feed({ id: history.id, result: { data: opts.history ?? [], nextCursor: null } })
   const list = h.request('model/list')
   if (list && opts.models !== null) {
     await h.feed({
@@ -435,4 +440,182 @@ describe('live settings', () => {
     ).resolves.toBeDefined()
     expect((await turn(h)).effort).toBe('ultra')
   })
+})
+
+describe('native Codex images', () => {
+  afterEach(() => setChatAttachmentReader(undefined))
+
+  it('prepares sealed bytes as native image input and preserves the client message id', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
+    const read = vi.fn(async () => png)
+    setChatAttachmentReader({ read })
+    const h = await harness()
+    const message = {
+      id: 'image-message',
+      content: [
+        {
+          type: 'attachment' as const,
+          attachment: {
+            artifactId: 'image',
+            contentHash: 'sealed',
+            name: 'shot.png',
+            kind: 'image' as const,
+            mediaType: 'image/png' as const,
+            size: png.length
+          }
+        },
+        { type: 'text' as const, text: 'describe this' }
+      ]
+    }
+    const prepared = await h.driver.prepareUserTurn!(message)
+    await h.driver.sendUserTurn!(message, prepared)
+    expect(read).toHaveBeenCalledWith({ artifactId: 'image', contentHash: 'sealed' })
+    expect(h.turnStarts()[0]).toMatchObject({
+      clientUserMessageId: message.id,
+      input: [
+        { type: 'image', url: `data:image/png;base64,${png.toString('base64')}` },
+        { type: 'text', text: 'describe this', text_elements: [] }
+      ]
+    })
+    h.driver.dispose()
+  })
+
+  it('retains image-only inputs sent before the handshake finishes', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
+    setChatAttachmentReader({ read: async () => png })
+    const driver = codexChatBackend.createDriver() as Driver
+    const message = {
+      id: 'early-image',
+      content: [
+        {
+          type: 'attachment' as const,
+          attachment: {
+            artifactId: 'image',
+            name: 'shot.png',
+            kind: 'image' as const,
+            mediaType: 'image/png' as const,
+            size: png.length
+          }
+        }
+      ]
+    }
+    const prepared = await driver.prepareUserTurn!(message)
+    await driver.sendUserTurn!(message, prepared)
+    const h = await harness({}, { driver })
+    expect(h.turnStarts()[0]).toMatchObject({
+      clientUserMessageId: 'early-image',
+      input: [{ type: 'image', url: `data:image/png;base64,${png.toString('base64')}` }]
+    })
+    driver.dispose()
+  })
+
+  it('refuses unreadable files before starting a turn', async () => {
+    setChatAttachmentReader({
+      read: async () => {
+        throw new Error('gone')
+      }
+    })
+    const h = await harness()
+    await expect(
+      h.driver.prepareUserTurn!({
+        id: 'missing',
+        content: [
+          {
+            type: 'attachment',
+            attachment: {
+              artifactId: 'gone',
+              name: 'gone.png',
+              kind: 'image',
+              mediaType: 'image/png',
+              size: 10
+            }
+          }
+        ]
+      })
+    ).rejects.toThrow(/gone.png.*no longer available/)
+    expect(h.turnStarts()).toEqual([])
+    h.driver.dispose()
+  })
+})
+
+describe('native image history', () => {
+  it('recovers sealed refs by client id when importing a switched-to or forked thread', async () => {
+    const addHistory = vi.fn()
+    const content = [
+      {
+        type: 'attachment' as const,
+        attachment: {
+          artifactId: 'image',
+          contentHash: 'sealed',
+          name: 'shot.png',
+          kind: 'image' as const,
+          mediaType: 'image/png' as const,
+          size: 9
+        }
+      },
+      { type: 'text' as const, text: 'describe' }
+    ]
+    const lookupUserMessages = vi.fn(async () => new Map([['m', content]]))
+    const h = await harness(
+      { importHistory: true, addHistory, lookupUserMessages },
+      {
+        history: [
+          {
+            id: 'turn',
+            items: [
+              {
+                type: 'userMessage',
+                id: 'provider-id',
+                clientId: 'm',
+                content: [
+                  { type: 'image', url: 'data:image/png;base64,ignored' },
+                  { type: 'text', text: 'describe' }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    )
+    expect(lookupUserMessages).toHaveBeenCalledWith(['m'])
+    expect(addHistory).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: 'user-message',
+        id: 'm',
+        text: 'describe',
+        content,
+        history: true
+      })
+    ])
+    expect(JSON.stringify(addHistory.mock.calls)).not.toContain('data:image')
+    h.driver.dispose()
+  })
+})
+
+it('Codex image-only input uses sniffed media type; refuses spoofed documents and oversize bytes', async () => {
+  const attachment = {
+    type: 'attachment' as const,
+    attachment: {
+      artifactId: 'image',
+      name: 'shot.png',
+      kind: 'image' as const,
+      mediaType: 'image/png' as const,
+      size: 9
+    }
+  }
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 1, 2, 3])
+  expect(await buildCodexContent([attachment], { read: async () => jpeg })).toEqual([
+    { type: 'image', url: `data:image/jpeg;base64,${jpeg.toString('base64')}` }
+  ])
+  await expect(buildCodexContent([attachment], undefined)).rejects.toThrow(
+    /cannot read attached files/
+  )
+  await expect(
+    buildCodexContent([attachment], { read: async () => Buffer.from('%PDF-1.7') })
+  ).rejects.toThrow(/not a supported image/)
+  const huge = Buffer.alloc(6 * 1024 * 1024)
+  jpeg.copy(huge)
+  await expect(buildCodexContent([attachment], { read: async () => huge })).rejects.toThrow(
+    /too large|maximum|limit|MB/i
+  )
 })

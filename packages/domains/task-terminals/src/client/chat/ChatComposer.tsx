@@ -164,7 +164,7 @@ export function ChatComposer({
   fastModeChanging,
   filesChanged
 }: ChatComposerProps) {
-  // Only providers that take files as content blocks get a picker (Codex: paste/drop images).
+  // Structured providers share the picker; accepted kinds come from capabilities.
   const canPickFiles = chatCapabilitiesForMode(mode).attachments === 'blocks'
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attaching = attachmentsApi.pending.length > 0
@@ -224,7 +224,11 @@ export function ChatComposer({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={displaySessionEnded}
                 className="shrink-0 -ml-1 rounded-full p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors disabled:opacity-50"
-                title="Attach files (images, PDFs, text)"
+                title={
+                  chatCapabilitiesForMode(mode).attachmentKinds.length === 1
+                    ? 'Attach images'
+                    : 'Attach files (images, PDFs, text)'
+                }
                 aria-label="Attach files"
               >
                 <Paperclip className="size-4" />
@@ -232,6 +236,9 @@ export function ChatComposer({
               <input
                 ref={fileInputRef}
                 type="file"
+                accept={
+                  chatCapabilitiesForMode(mode).attachmentKinds.length === 1 ? 'image/*' : undefined
+                }
                 multiple
                 hidden
                 data-testid="chat-attach-input"

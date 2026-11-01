@@ -918,6 +918,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
   const browserPanelRef = useRef<BrowserPanelHandle>(null)
   const artifactsPanelRef = useRef<ArtifactsPanelHandle>(null)
+  const pendingArtifactRef = useRef<string | null>(null)
+  const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
+    artifactsPanelRef.current = handle
+    if (handle && pendingArtifactRef.current) {
+      handle.selectArtifact(pendingArtifactRef.current)
+      pendingArtifactRef.current = null
+    }
+  }, [])
   const pendingEditorFileRef = useRef<string | null>(null)
   const pendingSearchToggleRef = useRef(false)
   const fileEditorRefCallback = useCallback((handle: FileEditorViewHandle | null) => {
@@ -1317,9 +1325,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     ({ taskId: targetTaskId, artifactId }: { taskId: string; artifactId: string }) => {
       if (!task || targetTaskId !== task.id) return
       if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-      artifactsPanelRef.current?.selectArtifact(artifactId)
+      if (artifactsPanelRef.current) artifactsPanelRef.current.selectArtifact(artifactId)
+      else pendingArtifactRef.current = artifactId
     }
   )
+  const handleChatOpenArtifact = useStableCallback((artifactId: string) => {
+    handleOpenArtifact({ taskId, artifactId })
+  })
   useSubscription(
     trpc.menu.onOpenArtifact.subscriptionOptions(undefined, { onData: handleOpenArtifact })
   )
@@ -3064,6 +3076,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onMainTabActiveChange={setIsMainTabActive}
                           onOpenUrl={openDevServerInBrowser}
                           onOpenFile={handleQuickOpenFile}
+                          onOpenArtifact={handleChatOpenArtifact}
                           onMainReset={handleResetTerminal}
                           onSwitchSession={handleSwitchSession}
                           {...(handoffMode ? { onMainHandoff: () => void handleHandoff() } : {})}
@@ -3578,7 +3591,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   <Suspense fallback={<PanelLoadingSkeleton />}>
                     <Activity mode={isActive ? 'visible' : 'hidden'}>
                       <ArtifactsPanel
-                        ref={artifactsPanelRef}
+                        ref={artifactsPanelRefCallback}
                         taskId={task.id}
                         isResizing={isResizing}
                         initialActiveArtifactId={task.active_artifact_id}

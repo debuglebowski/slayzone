@@ -18,6 +18,14 @@ Returned conclusions bind queue entries to their source conversation (migration
 
 ### Data Flow
 
+Chat attachments stay as sealed artifact references through admission, queueing,
+retry and history. Drivers read their bytes during outbox preparation: Claude
+builds image/document blocks; Codex builds native image data URLs (images only).
+Native payloads remain transient. `chat_attachment_messages` (migration 182)
+keeps artifact references by task and client message ID across Reset and tab
+closure; history import joins them back to Codex user items. The table contains
+neither prompt text nor image bytes and is deleted with its task.
+
 ```
 PTY Process (node-pty)
         ↓

@@ -105,11 +105,20 @@ describe('useChatAttachments (Claude: images, PDFs, text)', () => {
   })
 })
 
-describe('useChatAttachments (Codex: images only, as before)', () => {
-  it('non-images are ignored silently; images upload unchecked', async () => {
+describe('useChatAttachments (Codex: validated images only)', () => {
+  it('refuses non-images; validates and uploads images', async () => {
     const { hook, added } = setup('codex-chat')
     await act(() => hook.result.current.addFiles([png(), text()]))
-    expect(mocks.toast).not.toHaveBeenCalled()
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/notes.md.*supported: image/))
     expect(added.flat().map((a) => a.name)).toEqual(['shot.png'])
   })
+})
+
+it('Codex checks actual bytes before accepting a file named as an image', async () => {
+  const { hook, added } = setup('codex-chat')
+  await act(() =>
+    hook.result.current.addFiles([new File(['plain text'], 'fake.png', { type: 'image/png' })])
+  )
+  expect(added).toEqual([])
+  expect(mocks.uploadFiles).not.toHaveBeenCalled()
 })

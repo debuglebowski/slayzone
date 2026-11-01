@@ -7,7 +7,8 @@
  */
 import { describe, expect, test } from 'vitest'
 import type { ChatAttachment, UserContentBlock } from '@slayzone/terminal-contracts'
-import { buildClaudeContent, type ChatAttachmentReader } from './claude-content'
+import { buildClaudeContent } from './claude-content'
+import type { ChatAttachmentReader } from './chat-attachment-reader'
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
 const PDF = Buffer.from('%PDF-1.7\nsecret')

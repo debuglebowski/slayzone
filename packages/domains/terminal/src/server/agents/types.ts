@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   CommandTaskOutput,
   OutgoingUserMessage,
+  UserContentBlock,
   PermissionDecision
 } from '@slayzone/terminal-contracts'
 import type { ChatWriteOptions } from '../runtime/chat-proc-handle'
@@ -195,6 +196,8 @@ export interface ChatDriverContext {
    * `history: true`), in order, before anything the process says next.
    */
   addHistory?(events: AgentEvent[]): void
+  /** Recover original artifact references by provider client message ids (task-scoped). */
+  lookupUserMessages?(ids: string[]): Promise<Map<string, UserContentBlock[]>>
 }
 
 /**

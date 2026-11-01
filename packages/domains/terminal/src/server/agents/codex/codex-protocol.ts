@@ -51,7 +51,10 @@ export interface CodexTurnStartParams {
   /** Comes back as the user item's `clientId` (chat: the outbox message id). */
   clientUserMessageId?: string
 }
-export type CodexUserInput = { type: 'text'; text: string; text_elements: [] }
+export type CodexUserInput =
+  | { type: 'text'; text: string; text_elements: [] }
+  | { type: 'image'; url: string }
+  | { type: 'localImage'; path: string }
 
 /** Codex collaboration mode kind — the behavioral axis (`turn/start`). */
 export type CodexModeKind = 'plan' | 'default'

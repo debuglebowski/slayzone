@@ -77,6 +77,7 @@ interface TerminalContainerProps {
   onMainTabActiveChange?: (isMainActive: boolean) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
+  onOpenArtifact?: (artifactId: string) => void
   onMainReset?: () => void
   /**
    * The main agent's conversation moves to its chat ↔ terminal partner
@@ -119,6 +120,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onMainTabActiveChange,
       onOpenUrl,
       onOpenFile,
+      onOpenArtifact,
       onMainReset,
       onMainHandoff,
       onSwitchSession,
@@ -558,6 +560,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
               onAttached={handlePaneAttached}
               onOpenUrl={onOpenUrl}
               onOpenFile={onOpenFile}
+              onOpenArtifact={onOpenArtifact}
             />
             {overlay}
           </div>

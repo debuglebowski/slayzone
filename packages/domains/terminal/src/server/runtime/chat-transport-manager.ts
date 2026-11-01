@@ -150,6 +150,7 @@ export interface TransportDeps {
   persistEvent: (tabId: string, seq: number, event: AgentEvent) => void
   /** The tabs' saved history. chat-handlers wires the SQLite store. */
   eventStore: ChatEventStore
+  lookupUserMessages?(taskId: string, ids: string[]): Promise<Map<string, UserContentBlock[]>>
   /**
    * Where a tab's timeline projection persists (paged history: what a client
    * opens from without replaying every event). Unset: no projection — clients
@@ -1777,7 +1778,10 @@ async function startProcess(tab: ChatTab): Promise<ChatProcess> {
       chatCollaboration: tab.chatCollaboration,
       chatFastMode: tab.chatFastMode,
       ...(fork ? { fork } : {}),
-      ...(importHistory ? { importHistory } : {})
+      ...(importHistory ? { importHistory } : {}),
+      ...(deps.lookupUserMessages
+        ? { lookupUserMessages: (ids: string[]) => deps.lookupUserMessages!(tab.taskId, ids) }
+        : {})
     },
     hooks: {
       onHistory: (p, events) => {

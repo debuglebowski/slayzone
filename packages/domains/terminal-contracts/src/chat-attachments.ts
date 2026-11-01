@@ -243,5 +243,5 @@ export function conversationBudgetError(
   let adding = 0
   for (const a of attachments) adding += attachmentEncodedBytes(a)
   if (adding === 0 || usedBytes + adding <= L.conversationMaxEncodedBytes) return null
-  return `This conversation already carries ${formatAttachmentSize(usedBytes)} of attachments; this message would take it past ${formatAttachmentSize(L.conversationMaxEncodedBytes)}, which Claude can't take in one request. Run /compact or start a new chat to attach more.`
+  return `This conversation already carries ${formatAttachmentSize(usedBytes)} of attachments; this message would take it past ${formatAttachmentSize(L.conversationMaxEncodedBytes)}, which this chat can't take in one request. Run /compact or start a new chat to attach more.`
 }

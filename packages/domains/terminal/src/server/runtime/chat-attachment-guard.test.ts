@@ -106,7 +106,7 @@ describe('admitAttachments', () => {
     ).rejects.toThrow(/gone\.pdf/)
   })
 
-  test('a chat that takes no files (Codex) refuses them', async () => {
+  test('Codex refuses non-image attachment kinds', async () => {
     await expect(
       admitAttachments({
         tabId: 't',
@@ -114,7 +114,24 @@ describe('admitAttachments', () => {
         lookup: lookup({ tab: async () => ({ taskId: 'task-1', mode: 'codex-chat' }) }),
         events: []
       })
-    ).rejects.toThrow(/can't take attached files/)
+    ).rejects.toThrow(/supported: image/)
+  })
+
+  test('Codex admits and seals image references', async () => {
+    const image = {
+      ...file('a'),
+      name: 'a.png',
+      kind: 'image' as const,
+      mediaType: 'image/png' as const
+    }
+    expect(
+      await admitAttachments({
+        tabId: 't',
+        content: [block(image)],
+        lookup: lookup({ tab: async () => ({ taskId: 'task-1', mode: 'codex-chat' }) }),
+        events: []
+      })
+    ).toEqual([block({ ...image, contentHash: 'h-a' })])
   })
 
   test('the conversation budget counts sent and queued files since the last compaction', async () => {

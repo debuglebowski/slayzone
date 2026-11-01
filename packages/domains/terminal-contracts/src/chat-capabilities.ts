@@ -1,3 +1,5 @@
+import type { ChatAttachmentKind } from './chat-attachments'
+
 /**
  * What a chat provider can do, asked by the chat UI instead of checking
  * "is this Claude?". One entry per chat mode; a mode not listed gets nothing.
@@ -41,11 +43,12 @@ export interface ChatCapabilities {
   /** The conversation can move between this chat and the provider's terminal UI. */
   handoff: boolean
   /**
-   * How attached files reach the agent: `blocks` — images, PDFs and text files
-   * as content blocks built from artifact references at write time; `paths` —
+   * How attached files reach the agent: `blocks` — supported attachment kinds
+   * as native inputs built from artifact references at write time; `paths` —
    * images only, as `![name](/abs/path)` lines in the text (the agent reads them).
    */
   attachments: 'blocks' | 'paths'
+  attachmentKinds: readonly ChatAttachmentKind[]
   /** The composer's draft (text + attachments) and the timeline's scroll position survive remounts and reloads, per tab. */
   restoreComposerState: boolean
   /** Queued messages can be edited (held while editing) and reordered. */
@@ -81,6 +84,7 @@ const NONE: ChatCapabilities = {
   sessions: false,
   handoff: false,
   attachments: 'paths',
+  attachmentKinds: ['image'],
   restoreComposerState: false,
   editableQueue: false,
   filesChanged: false,
@@ -102,6 +106,7 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     sessions: true,
     handoff: true,
     attachments: 'blocks',
+    attachmentKinds: ['image', 'pdf', 'text'],
     restoreComposerState: true,
     editableQueue: true,
     filesChanged: true,
@@ -112,6 +117,7 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
   },
   'codex-chat': {
     ...NONE,
+    attachments: 'blocks',
     promptHistory: true,
     // Approvals, questions, permission and MCP input requests (app-server server requests).
     promptCards: true,

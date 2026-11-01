@@ -24,11 +24,8 @@ import type {
 } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
 import { ClaudeCommandTasks } from './claude-command-tasks'
-import {
-  buildClaudeContent,
-  getChatAttachmentReader,
-  type ChatAttachmentReader
-} from './claude-content'
+import { buildClaudeContent } from './claude-content'
+import { getChatAttachmentReader, type ChatAttachmentReader } from './chat-attachment-reader'
 import type { AgentBackend, ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from './types'
 
 /**

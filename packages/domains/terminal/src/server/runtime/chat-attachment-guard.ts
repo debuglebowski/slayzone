@@ -3,7 +3,7 @@
  * enters: `chat.send` and the queue's push/update. The composer checks the same
  * things first; this is the check that counts.
  *
- *   - the tab's chat must take files (`attachments: 'blocks'`; Codex doesn't);
+ *   - the tab's chat must take files (`attachments: 'blocks'`);
  *   - every file must be an artifact of the tab's OWN task — a message can
  *     never make the hub read another task's (or user's) files;
  *   - the conversation must stay within its attachment budget (sent since the
@@ -83,10 +83,19 @@ export async function admitAttachments(args: {
 
   const tab = await args.lookup.tab(args.tabId)
   if (!tab) throw new ChatAttachmentError('This chat tab no longer exists.')
-  if (chatCapabilitiesForMode(tab.mode).attachments !== 'blocks') {
+  const capabilities = chatCapabilitiesForMode(tab.mode)
+  if (capabilities.attachments !== 'blocks') {
     throw new ChatAttachmentError(
       "This chat can't take attached files. Send the message without them."
     )
+  }
+
+  for (const file of files) {
+    if (!capabilities.attachmentKinds.includes(file.kind)) {
+      throw new ChatAttachmentError(
+        `${file.name} can't be attached to this chat; supported: ${capabilities.attachmentKinds.join(', ')}.`
+      )
+    }
   }
 
   const owners = await args.lookup.artifacts([...new Set(files.map((f) => f.artifactId))])

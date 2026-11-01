@@ -49,10 +49,10 @@ function imageMediaType(type: string): ChatImageMediaType {
  * Attaching files to a chat message: file picker, paste and drop. Each file is
  * uploaded to the task's "Uploads" folder and added as a reference.
  *
- * `attachments: 'blocks'` (Claude): any file is checked by content first
+ * `attachments: 'blocks'` (Claude and Codex): any file is checked by content first
  * (`prepareAttachmentFile`: images converted/shrunk, PDFs and text checked
  * against the limits) and a file that can't be sent is refused with its reason.
- * `'paths'` (Codex): images only, unchecked — exactly as before.
+ * `'paths'` (legacy providers): images only, unchecked.
  */
 export function useChatAttachments({
   taskId,
@@ -60,7 +60,8 @@ export function useChatAttachments({
   onAdded,
   codec = browserImageCodec
 }: UseChatAttachmentsOpts): UseChatAttachmentsResult {
-  const policy = chatCapabilitiesForMode(mode).attachments
+  const capabilities = chatCapabilitiesForMode(mode)
+  const policy = capabilities.attachments
   const { uploadFiles } = useArtifactUpload(taskId, { folderName: 'Uploads' })
   const [pending, setPending] = useState<PendingAttachment[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -82,6 +83,12 @@ export function useChatAttachments({
     const prepared = await prepareAttachmentFile(file, codec)
     if (!prepared.ok) {
       toast(prepared.reason)
+      return null
+    }
+    if (!capabilities.attachmentKinds.includes(prepared.kind)) {
+      toast(
+        `${file.name} can't be attached to this chat; supported: ${capabilities.attachmentKinds.join(', ')}.`
+      )
       return null
     }
     const [ref] = await uploadFiles([prepared.file])

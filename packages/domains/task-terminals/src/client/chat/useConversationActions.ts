@@ -4,6 +4,7 @@ import type { TimelinePageSummary } from '@slayzone/terminal/client'
 import {
   chatCapabilitiesForMode,
   type RewindFilesPreview,
+  type ChatAttachment,
   type RewindResult,
   type RewindScope
 } from '@slayzone/terminal-contracts'
@@ -18,6 +19,7 @@ export interface PendingConversationAction {
   kind: ConversationActionKind
   messageId: string
   text: string
+  attachments?: ChatAttachment[]
 }
 
 export type FilesPreviewState =
@@ -75,7 +77,7 @@ export function useConversationActions(opts: {
   }) => Promise<RewindResult>
   fork?: (messageId: string) => Promise<void>
   /** Put text into the composer to edit (and focus it). */
-  prefill: (text: string) => void
+  prefill: (text: string, attachments?: ChatAttachment[]) => void
 }): { view: ConversationActionsView; dialog: ConversationActionsDialog } {
   const caps = chatCapabilitiesForMode(opts.mode)
   const active = useMemo(
@@ -93,7 +95,13 @@ export function useConversationActions(opts: {
   const begin = useStableCallback(
     (kind: ConversationActionKind, message: { id: string; text: string }): void => {
       if (busy) return
-      setPending({ kind, messageId: message.id, text: message.text })
+      const attachments = opts.activeUsers.find((u) => u.item.id === message.id)?.item.attachments
+      setPending({
+        kind,
+        messageId: message.id,
+        text: message.text,
+        ...(attachments?.length ? { attachments } : {})
+      })
       const seq = ++previewSeq.current
       if (kind === 'fork') {
         setPreview({ status: 'idle' })
@@ -139,7 +147,7 @@ export function useConversationActions(opts: {
             toast(`Code not restored: ${result.files.error ?? 'no checkpoint'}`)
           }
           if (action.kind === 'edit' && choice !== 'code') {
-            opts.prefill(result?.prefillText ?? action.text)
+            opts.prefill(result?.prefillText ?? action.text, action.attachments)
           }
           previewSeq.current++
           setPending(null)

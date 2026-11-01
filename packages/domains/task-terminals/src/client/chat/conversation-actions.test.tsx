@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { ChatViewContext, type ChatViewState } from './ChatViewContext'
 import { RewindDialog } from './RewindDialog'
 import { UserMessageActions } from './UserMessageActions'
 import { ConversationBranchRow } from './ConversationBranchRow'
-import type { ConversationActionsDialog, ConversationActionsView } from './useConversationActions'
+import {
+  useConversationActions,
+  type ConversationActionsDialog,
+  type ConversationActionsView
+} from './useConversationActions'
 
 afterEach(cleanup)
 
@@ -147,4 +151,35 @@ describe('ConversationBranchRow', () => {
     fireEvent.click(screen.getByTestId('chat-branch-toggle'))
     expect(toggle).toHaveBeenCalledWith('branch-4')
   })
+})
+
+it('Codex edit/resend restores sealed image refs with the text', async () => {
+  const attachment = {
+    artifactId: 'image',
+    contentHash: 'sealed',
+    name: 'shot.png',
+    kind: 'image' as const,
+    mediaType: 'image/png' as const,
+    size: 9
+  }
+  const prefill = vi.fn()
+  const { result } = renderHook(() =>
+    useConversationActions({
+      mode: 'codex-chat',
+      activeUsers: [
+        { index: 0, item: { ...user('describe', 'm'), attachments: [attachment] } }
+      ] as never,
+      rewindPreview: async () => ({
+        canRewind: false,
+        filesChanged: [],
+        insertions: 0,
+        deletions: 0
+      }),
+      rewind: async () => ({ prefillText: 'describe', files: null }),
+      prefill
+    })
+  )
+  await act(async () => result.current.view.begin('edit', { id: 'm', text: 'describe' }))
+  await act(async () => result.current.dialog.confirm('conversation'))
+  expect(prefill).toHaveBeenCalledWith('describe', [attachment])
 })

@@ -5,6 +5,7 @@ import { cn } from '@slayzone/ui'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { formatAttachmentSize, type ChatAttachment } from '@slayzone/terminal-contracts'
+import { useChatView } from '../ChatViewContext'
 
 /** The attachment's file on disk (an artifact of the task), resolved once and cached. */
 export function useAttachmentPath(attachment: ChatAttachment): string | null {
@@ -47,8 +48,21 @@ export function AttachmentChip({
   attachment: ChatAttachment
   onRemove: () => void
 }): React.JSX.Element {
+  const { onOpenFile, onOpenArtifact } = useChatView()
+  const { getFilePath } = useArtifactUpload(null)
+  const path = useAttachmentPath(attachment)
   const preview = useAttachmentPreviewUrl(attachment)
   const [broken, setBroken] = useState(false)
+  const open = (): void => {
+    if (onOpenArtifact) {
+      onOpenArtifact(attachment.artifactId)
+      return
+    }
+    if (!onOpenFile) return
+    void (path ? Promise.resolve(path) : getFilePath(attachment.artifactId)).then((p) => {
+      if (p) onOpenFile(p)
+    })
+  }
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 py-0.5 pl-0.5 pr-1 text-[11px] text-muted-foreground"
@@ -56,22 +70,30 @@ export function AttachmentChip({
       data-testid="chat-attachment-chip"
       data-kind={attachment.kind}
     >
-      {preview && !broken ? (
-        <img
-          src={preview}
-          alt=""
-          className="size-6 rounded-sm object-cover"
-          onError={() => setBroken(true)}
-        />
-      ) : (
-        <span className="flex size-6 items-center justify-center rounded-sm bg-muted">
-          <AttachmentKindIcon kind={attachment.kind} className="size-3.5" />
+      <button
+        type="button"
+        onClick={open}
+        disabled={!onOpenFile && !onOpenArtifact}
+        aria-label={`Open ${attachment.name}`}
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm transition-colors hover:bg-muted/60 disabled:pointer-events-none"
+      >
+        {preview && !broken ? (
+          <img
+            src={preview}
+            alt=""
+            className="size-6 rounded-sm object-cover"
+            onError={() => setBroken(true)}
+          />
+        ) : (
+          <span className="flex size-6 items-center justify-center rounded-sm bg-muted">
+            <AttachmentKindIcon kind={attachment.kind} className="size-3.5" />
+          </span>
+        )}
+        <span className="max-w-[160px] truncate text-foreground/80">{attachment.name}</span>
+        <span className="tabular-nums text-muted-foreground/70">
+          {formatAttachmentSize(attachment.size)}
         </span>
-      )}
-      <span className="max-w-[160px] truncate text-foreground/80">{attachment.name}</span>
-      <span className="tabular-nums text-muted-foreground/70">
-        {formatAttachmentSize(attachment.size)}
-      </span>
+      </button>
       <button
         type="button"
         onClick={onRemove}

@@ -77,10 +77,14 @@ interface TerminalSplitGroupProps {
   onAttached?: (api: { sessionId: string; focus: () => void }) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
+  onOpenArtifact?: (artifactId: string) => void
 }
 
 export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalSplitGroupProps>(
-  function TerminalSplitGroup({ panes, isActive, paused, onAttached, onOpenUrl, onOpenFile }, ref) {
+  function TerminalSplitGroup(
+    { panes, isActive, paused, onAttached, onOpenUrl, onOpenFile, onOpenArtifact },
+    ref
+  ) {
     const [sizes, setSizes] = useState<number[]>(() => panes.map(() => 100 / panes.length))
     const containerRef = useRef<HTMLDivElement>(null)
     const draggingRef = useRef<{ index: number; startX: number; startSizes: number[] } | null>(null)
@@ -177,6 +181,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
               permissionNotice={pane.permissionNotice ?? null}
               onOpenUrl={onOpenUrl}
               onOpenFile={onOpenFile}
+              onOpenArtifact={onOpenArtifact}
               agentState={pane.tab.agentState}
               isMain={pane.tab.isMain}
               isTemporary={pane.isTemporary}

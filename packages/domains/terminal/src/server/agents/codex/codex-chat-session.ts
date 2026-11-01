@@ -23,14 +23,18 @@ import {
   type CommandTaskOutput,
   type OutgoingUserMessage,
   type PermissionRequestEvent,
+  type UserContentBlock,
   type TokenUsage
 } from '@slayzone/terminal-contracts'
 import type {
   AgentBackend,
   ChatDriverContext,
   ChatSessionDriver,
+  PreparedUserTurn,
   PermissionDecision
 } from '../types'
+import { getChatAttachmentReader } from '../chat-attachment-reader'
+import { buildCodexContent } from './codex-content'
 import { CodexAppServerClient, CodexRpcError, type JsonRpcId } from './codex-app-server-client'
 import { CODEX_FAST_SERVICE_TIER } from '@slayzone/terminal-contracts'
 import {
@@ -56,7 +60,8 @@ import type {
   CodexTokenUsageNotification,
   CodexTurnNotification,
   CodexTurnsListResponse,
-  CodexTurnStartResponse
+  CodexTurnStartResponse,
+  CodexUserInput
 } from './codex-protocol'
 
 const CLIENT_INFO = { name: 'slayzone', title: 'SlayZone', version: '1.0' } as const
@@ -90,6 +95,7 @@ interface PendingRequest {
 /** A message waiting for the handshake. */
 interface QueuedTurn {
   text: string
+  input?: CodexUserInput[]
   /** The outbox id, when the message came through the outbox. */
   messageId?: string
 }
@@ -574,7 +580,7 @@ class CodexChatSession implements ChatSessionDriver {
     void this.loadModels(ctx)
     // Flush any messages the user sent before the handshake completed.
     const pending = this.queued.splice(0)
-    for (const turn of pending) this.startTurn(turn.text, turn.messageId)
+    for (const turn of pending) this.startTurn(turn.text, turn.messageId, turn.input)
   }
 
   /**
@@ -671,16 +677,26 @@ class CodexChatSession implements ChatSessionDriver {
         text: `Only the latest ${HISTORY_MAX_TURNS} turns of this conversation are shown.`
       })
     }
-    for (const turn of kept) events.push(...this.historyOfTurn(turn))
+    const ids = kept.flatMap((turn) =>
+      (turn.items ?? []).flatMap((item) =>
+        item.type === 'userMessage' && item.clientId ? [item.clientId] : []
+      )
+    )
+    const saved = await this.ctx?.lookupUserMessages?.(ids)
+    for (const turn of kept) events.push(...this.historyOfTurn(turn, saved))
     addHistory(events)
   }
 
   /** One past turn as history events: its message, replies, reasoning and tool calls. */
-  private historyOfTurn(turn: CodexHistoryTurn): AgentEvent[] {
+  private historyOfTurn(
+    turn: CodexHistoryTurn,
+    savedMessages?: Map<string, UserContentBlock[]>
+  ): AgentEvent[] {
     const out: AgentEvent[] = []
     for (const item of turn.items ?? []) {
       switch (item.type) {
         case 'userMessage': {
+          const saved = item.clientId ? savedMessages?.get(item.clientId) : undefined
           const text = (item.content ?? [])
             .map((c) => {
               const t = (c as { text?: unknown } | null)?.text
@@ -691,7 +707,12 @@ class CodexChatSession implements ChatSessionDriver {
             kind: 'user-message',
             text,
             id: item.clientId ?? item.id,
-            content: [{ type: 'text', text }],
+            content: saved
+              ? [
+                  ...saved.filter((b) => b.type === 'attachment'),
+                  ...(text ? [{ type: 'text' as const, text }] : [])
+                ]
+              : [{ type: 'text', text }],
             history: true
           })
           break
@@ -815,15 +836,26 @@ class CodexChatSession implements ChatSessionDriver {
   /**
    * An outbox message: its id goes to Codex as `clientUserMessageId` (it comes
    * back as the user item's `clientId`), so the turn can be found again to
-   * rewind or fork at. Text only (`attachments: 'paths'`).
+   * rewind or fork at. Attached bytes were prepared before the outbox starts sending.
    */
-  sendUserTurn(message: OutgoingUserMessage): Promise<void> {
-    if (message.content.some((b) => b.type !== 'text')) {
-      return Promise.reject(new Error('Codex chat takes text only; attached files are not sent.'))
-    }
+  async prepareUserTurn(message: OutgoingUserMessage): Promise<PreparedUserTurn> {
+    const input = await buildCodexContent(message.content, getChatAttachmentReader())
+    return { id: message.id, line: JSON.stringify(input) }
+  }
+
+  sendUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
+    let input: CodexUserInput[]
+    if (prepared?.id === message.id) input = JSON.parse(prepared.line) as CodexUserInput[]
+    else if (message.content.every((b) => b.type === 'text')) {
+      input = message.content.map((b) => ({
+        type: 'text',
+        text: b.type === 'text' ? b.text : '',
+        text_elements: []
+      }))
+    } else return Promise.reject(new Error('attachments were not prepared for this message'))
     const text = userMessageText(message.content)
-    if (!this.handshakeDone) this.queued.push({ text, messageId: message.id })
-    else this.startTurn(text, message.id)
+    if (!this.handshakeDone) this.queued.push({ text, messageId: message.id, input })
+    else this.startTurn(text, message.id, input)
     return Promise.resolve()
   }
 
@@ -848,11 +880,15 @@ class CodexChatSession implements ChatSessionDriver {
     }
   }
 
-  private startTurn(text: string, messageId?: string): void {
+  private startTurn(
+    text: string,
+    messageId?: string,
+    input: CodexUserInput[] = [{ type: 'text', text, text_elements: [] }]
+  ): void {
     const client = this.client
     const ctx = this.ctx
     if (!client || !ctx || !this.threadId) return
-    if (text.trim() === '/compact') {
+    if (text.trim() === '/compact' && input.every((b) => b.type === 'text')) {
       this.startCompaction(ctx, client)
       return
     }
@@ -866,7 +902,7 @@ class CodexChatSession implements ChatSessionDriver {
         'turn/start',
         {
           threadId: this.threadId,
-          input: [{ type: 'text', text, text_elements: [] }],
+          input,
           approvalPolicy: policy.approvalPolicy,
           sandboxPolicy: policy.sandboxPolicy,
           ...(model ? { model } : {}),
@@ -1113,6 +1149,7 @@ class CodexChatSession implements ChatSessionDriver {
     this.settlePendingInterrupt(undefined)
     for (const wake of this.turnEndWaiters.splice(0)) wake()
     this.client?.dispose()
+    this.queued.length = 0
     this.pendingRequests.clear()
     this.patchOutput.clear()
   }
