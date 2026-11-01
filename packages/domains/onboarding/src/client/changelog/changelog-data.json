@@ -6,8 +6,8 @@
     "items": [
       {
         "category": "feature",
-        "title": "Codex chat",
-        "description": "Use Codex in chat with live tool output, file diffs, CLI-provided models, approvals, and a handoff from planning to implementation."
+        "title": "Chat improvements",
+        "description": "Chat improvements include full Codex support, with live tool output, file diffs, model selection, approvals, and a handoff from planning to implementation."
       },
       {
         "category": "feature",

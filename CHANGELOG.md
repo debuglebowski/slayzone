@@ -5,6 +5,8 @@
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.3...v0.36.4)
 
+Chat improvements, including full Codex support.
+
 ### 🚀 Enhancements
 
 - **chat:** Codex UI — tool cards, approval cards, provider wording ([dcf74a40e](https://github.com/debuglebowski/slayzone/commit/dcf74a40e))
