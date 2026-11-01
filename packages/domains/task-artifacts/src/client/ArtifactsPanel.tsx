@@ -699,21 +699,27 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             )}
             {/* Top-right: action buttons + artifact controls */}
             <div className="flex items-center gap-1.5 px-3 py-1.5 flex-1">
-              <button
-                className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                onClick={() => setSidebarVisible((v) => !v)}
-                aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
-                title={withShortcut(
-                  sidebarVisible ? 'Hide sidebar' : 'Show sidebar',
-                  sidebarShortcut
-                )}
-              >
-                {sidebarVisible ? (
-                  <PanelLeftClose className="size-4" />
-                ) : (
-                  <PanelLeft className="size-4" />
-                )}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                    onClick={() => setSidebarVisible((v) => !v)}
+                    aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+                  >
+                    {sidebarVisible ? (
+                      <PanelLeftClose className="size-4" />
+                    ) : (
+                      <PanelLeft className="size-4" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {withShortcut(
+                    sidebarVisible ? 'Hide sidebar' : 'Show sidebar',
+                    sidebarShortcut
+                  )}
+                </TooltipContent>
+              </Tooltip>
               <div className="flex-1" />
               {selectedArtifact && selectedRenderMode && (
                 <div className="flex items-center gap-1.5">
