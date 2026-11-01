@@ -299,7 +299,7 @@ export function InterruptedBlock({
     <div
       data-testid="chat-interrupted"
       data-reason={item.reason}
-      className="flex items-start gap-2 py-2 text-sm leading-5 text-muted-foreground"
+      className="flex items-start gap-2 py-2 text-sm leading-5 text-warning-foreground/70"
     >
       <CircleStop aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>
