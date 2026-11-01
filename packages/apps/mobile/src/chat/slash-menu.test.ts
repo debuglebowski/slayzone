@@ -4,6 +4,7 @@ import {
   type CliCommandList,
   type CommandInfo,
   chatCapabilitiesForMode,
+  chatModelsView,
   type SkillInfo
 } from '@slayzone/terminal-contracts'
 import {
@@ -18,6 +19,23 @@ import {
 
 const CLAUDE: ChatCapabilities = chatCapabilitiesForMode('claude-chat')
 const CODEX: ChatCapabilities = chatCapabilitiesForMode('codex-chat')
+/** The pickers' models and the chat's current one (`chat.getModels`, `chat.getModel`). */
+const CLAUDE_MODELS = { view: chatModelsView('claude-chat', undefined), current: 'opus' }
+const CODEX_MODELS = {
+  view: chatModelsView('codex-chat', [
+    {
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
+      supportsEffort: true,
+      efforts: [
+        { id: 'low', label: 'Low' },
+        { id: 'ultra', label: 'Ultra' }
+      ]
+    },
+    { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', supportsEffort: false }
+  ]),
+  current: 'gpt-6-luna'
+}
 
 const cliList = {
   slashCommands: ['compact', 'init', 'my-skill', 'deploy', 'statusline'],
@@ -163,32 +181,50 @@ describe('enterSlash (Send while the menu is open)', () => {
 
 describe('planSend', () => {
   it("handles /effort and /model in the app (the pills' path), like desktop", () => {
-    expect(planSend('/effort high', 'claude-chat', CLAUDE, [])).toEqual({
+    expect(planSend('/effort high', CLAUDE_MODELS, CLAUDE, [])).toEqual({
       type: 'effort',
       level: 'high'
     })
-    expect(planSend('/effort warp', 'claude-chat', CLAUDE, []).type).toBe('invalid')
-    expect(planSend('/model sonnet', 'claude-chat', CLAUDE, [])).toEqual({
+    expect(planSend('/effort warp', CLAUDE_MODELS, CLAUDE, []).type).toBe('invalid')
+    expect(planSend('/model sonnet', CLAUDE_MODELS, CLAUDE, [])).toEqual({
       type: 'model',
       id: 'sonnet'
     })
-    expect(planSend('/model nope', 'claude-chat', CLAUDE, []).type).toBe('invalid')
+    expect(planSend('/model nope', CLAUDE_MODELS, CLAUDE, []).type).toBe('invalid')
+  })
+
+  it("/effort takes the current model's own levels (Codex: what its CLI listed)", () => {
+    expect(planSend('/effort ultra', CODEX_MODELS, CODEX, [])).toEqual({
+      type: 'effort',
+      level: 'ultra'
+    })
+    expect(planSend('/effort max', CODEX_MODELS, CODEX, [])).toEqual({
+      type: 'invalid',
+      message: 'Invalid effort level "max". Use: low, ultra'
+    })
+    // A Codex model that lists no levels: refused, Claude's levels are no fallback.
+    expect(planSend('/effort low', { ...CODEX_MODELS, current: 'gpt-6.1-sol' }, CODEX, [])).toEqual(
+      {
+        type: 'invalid',
+        message: 'GPT-6.1 Sol has no effort levels.'
+      }
+    )
   })
 
   it('expands command files where the provider does not run them, else sends as typed', () => {
     expect(
-      planSend('/hello world', 'codex-chat', CODEX, [command('hello', 'Hi $ARGUMENTS')])
+      planSend('/hello world', CODEX_MODELS, CODEX, [command('hello', 'Hi $ARGUMENTS')])
     ).toEqual({
       type: 'send',
       text: 'Hi world'
     })
     expect(
-      planSend('/hello world', 'claude-chat', CLAUDE, [command('hello', 'Hi $ARGUMENTS')])
+      planSend('/hello world', CLAUDE_MODELS, CLAUDE, [command('hello', 'Hi $ARGUMENTS')])
     ).toEqual({
       type: 'send',
       text: '/hello world'
     })
-    expect(planSend('  ', 'claude-chat', CLAUDE, [])).toEqual({ type: 'empty' })
+    expect(planSend('  ', CLAUDE_MODELS, CLAUDE, [])).toEqual({ type: 'empty' })
   })
 })
 

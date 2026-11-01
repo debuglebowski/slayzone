@@ -48,6 +48,7 @@ import { useChatComposer } from './useChatComposer'
 import { useChatCwd } from './useChatCwd'
 import { useChatQueue } from './useChatQueue'
 import { type ChatTarget, useChatSession } from './useChatSession'
+import { useChatModels } from './useChatModels'
 import { useChatSettings } from './useChatSettings'
 import { useSlashCommands } from './useSlashCommands'
 
@@ -143,6 +144,11 @@ function ChatView({ target }: { target: ChatTarget }) {
         : null,
     [target.mode, state.timeline, settings.collaboration]
   )
+  const models = useChatModels({
+    taskId: target.taskId,
+    mode: target.mode,
+    sessionKey: state.sessionId
+  })
 
   const [restarting, setRestarting] = useState(false)
   const ended = state.sessionEnded && !state.notStarted && !restarting
@@ -152,6 +158,7 @@ function ChatView({ target }: { target: ChatTarget }) {
     session,
     queue,
     settings,
+    models,
     slash,
     notify,
     sessionEnded: ended
@@ -237,7 +244,7 @@ function ChatView({ target }: { target: ChatTarget }) {
           testID="chat-session"
         >
           <View ref={rootRef} onLayout={measure} style={s.probe} />
-          <ChatControls mode={target.mode} settings={settings} />
+          <ChatControls mode={target.mode} settings={settings} models={models} />
           <BackgroundJobs state={state} tabId={target.tabId} onError={notify} />
           <ChatTimeline
             state={state}
