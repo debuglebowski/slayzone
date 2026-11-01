@@ -46,9 +46,7 @@ describe('assistant answer presentation', () => {
     for (const text of ['Yes.', 'A longer answer. '.repeat(100)]) {
       const mounted = render(<AssistantAnswer item={{ ...reply, text }} />)
       const toolbar = screen.getByRole('toolbar', { name: 'Answer actions' })
-      expect(
-        within(toolbar).getByRole('button', { name: 'Copy response', exact: true })
-      ).toBeDefined()
+      expect(within(toolbar).getByRole('button', { name: 'Copy response' })).toBeDefined()
       mounted.unmount()
     }
   })

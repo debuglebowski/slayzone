@@ -845,6 +845,7 @@ run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
+run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts
 # Replay guards: batch = one by one (both providers), never changes its input, linear,
 # indexes = scans after every event.
 run_harness packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
