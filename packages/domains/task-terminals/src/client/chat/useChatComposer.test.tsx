@@ -700,11 +700,11 @@ describe('useChatComposer draft restore (per tab, survives remount + reload)', (
     expect(composer.draft).toBe('typed first')
   })
 
-  it('Codex: nothing is restored (persistence off)', () => {
+  it('Codex restores its saved draft', () => {
     mocks.persistence.saved = { text: 'x', attachments: [] }
     setup({ mode: 'codex-chat' })
-    expect(composer.draft).toBe('')
-    expect(mocks.persistence.calls.at(-1)?.enabled).toBe(false)
+    expect(composer.draft).toBe('x')
+    expect(mocks.persistence.calls.at(-1)?.enabled).toBe(true)
   })
 
   it('browsing prompt history pauses saving', () => {
