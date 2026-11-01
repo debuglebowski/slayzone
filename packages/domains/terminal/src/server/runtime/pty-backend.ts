@@ -49,6 +49,8 @@ export interface PtySpawnSpec {
   /** docker/ssh transport spawn — skip the ulimit wrap (the remote side owns
    *  its own env). Mirrors the former `spawnWrappedShell(..., transport)` flag. */
   transport: boolean
+  /** Command to run inside the computer's own login shell. Undefined for a plain shell. */
+  computerShellCommand?: string
   /**
    * How long the session may stay silent after it starts before it counts as hung
    * (no output at all ⇒ killed, and pty-manager's normal exit path decides on a

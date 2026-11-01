@@ -84,6 +84,7 @@ import {
   gitRemoveWorktreeResultSchema,
   gitRunWorktreeSetupScriptResultSchema,
   HubToComputerMethods,
+  pickHubPtyEnv,
   procGetBufferSinceResultSchema,
   procListResultSchema,
   ProcRefusalReasons,
@@ -258,7 +259,10 @@ export class NoComputerAvailableError extends Error {
  * or `null` when a caller names a computer directly with nothing behind it (the
  * directory picker, the file editor) — then it is that caller's own request.
  */
-export type ComputerWork = { readonly kind: 'task' | 'session'; readonly id: string } | null
+export type ComputerWork = {
+  readonly kind: 'task' | 'session'
+  readonly id: string
+} | null
 
 /**
  * Asked before every request that starts work on, or reads from, a computer: a spawn,
@@ -950,7 +954,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     /** The gate's answer for a spawn still being decided: input waits behind it (so it
      *  never overtakes the spawn request) and is dropped when it refused. */
     admitted: Promise<void> | null = null
-  ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number | null) => void } {
+  ): {
+    entry: PtyEntry
+    handle: PtyHandle
+    setPid: (pid: number | null) => void
+  } {
     const key = sessionKey(computerId, sessionId)
     // Leak diagnostics: a second live entry for the same key silently takes over
     // its routing (the first's consumers stop receiving data). Should never happen.
@@ -1009,7 +1017,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         void send(HubToComputerMethods.ptyWrite, { sessionId, data }).catch(noop)
       },
       resize: (cols: number, rows: number): void => {
-        void send(HubToComputerMethods.ptyResize, { sessionId, cols, rows }).catch(noop)
+        void send(HubToComputerMethods.ptyResize, {
+          sessionId,
+          cols,
+          rows
+        }).catch(noop)
       },
       kill: (signal?: string): void => {
         if (entry.detached) {
@@ -1054,7 +1066,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       // agent is starting (its admission queue's `warm` lane), which after a
       // workspace restore can take a while. A timeout would abandon a warm agent
       // the computer is about to start; a lost connection still rejects.
-      const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmSpawn, spec, 0)
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.ptyWarmSpawn,
+        {
+          ...spec,
+          env: pickHubPtyEnv(spec.env),
+          computerShell: true
+        },
+        0
+      )
       return ptyWarmSpawnResultSchema.parse(res)
     },
 
@@ -1101,7 +1122,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     async warmKill(computerId: string, warmId: string) {
-      await gateway.request(computerId, HubToComputerMethods.ptyWarmKill, { warmId })
+      await gateway.request(computerId, HubToComputerMethods.ptyWarmKill, {
+        warmId
+      })
     },
 
     async warmList(computerId: string) {
@@ -1176,13 +1199,19 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         ...(spec.admission ? { admission: spec.admission } : {}),
         command: spec.file,
         args: spec.args,
+        ...(!spec.transport
+          ? {
+              computerShell: true,
+              computerShellCommand: spec.computerShellCommand
+            }
+          : {}),
         // Send cwd only when there IS one — an empty string used to travel as a
         // "path" and land the agent in the computer's launch directory. Absent,
         // the computer resolves the project's own checkout from `projectId`,
         // which is the only side that knows where it is.
         ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
         ...(spec.projectId ? { projectId: spec.projectId } : {}),
-        env: spec.options.env,
+        env: pickHubPtyEnv(spec.options.env),
         cols: spec.options.cols,
         rows: spec.options.rows
       }
@@ -1339,7 +1368,10 @@ interface RoutedProc extends ProcHandle {
 
 /** Same shape `chatWriteError` (terminal chat-proc-handle) builds; duck-typed across the seam. */
 function writeError(code: ChatWriteFailureCode, message: string): ChatWriteError {
-  return Object.assign(new Error(message), { name: 'ChatWriteError', code }) as ChatWriteError
+  return Object.assign(new Error(message), {
+    name: 'ChatWriteError',
+    code
+  }) as ChatWriteError
 }
 
 /** Same shape `chatSpawnError` builds. */
@@ -1409,7 +1441,10 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     for (const seq of [...entry.pending.keys()].sort((a, b) => a - b)) {
       if (seq <= entry.lastSeq) continue
       entry.lastSeq = seq
-      entry.dataEmitter.emit({ chunk: entry.pending.get(seq)!, stream: 'stdout' })
+      entry.dataEmitter.emit({
+        chunk: entry.pending.get(seq)!,
+        stream: 'stdout'
+      })
     }
     entry.pending.clear()
   }
@@ -1526,8 +1561,14 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     if (computerId == null) throw new NoComputerAvailableError(`process ${spec.id}`)
 
     const key = sessionKey(computerId, spec.id)
-    const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
-    const exitEmitter = new BufferingEmitter<{ code: number | null; signal: string | null }>()
+    const dataEmitter = new BufferingEmitter<{
+      chunk: string
+      stream: 'stdout' | 'stderr'
+    }>()
+    const exitEmitter = new BufferingEmitter<{
+      code: number | null
+      signal: string | null
+    }>()
     const spawned = new Latch<{ pid: number }>()
     const entry: ProcEntry = {
       key,
@@ -2287,12 +2328,17 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       // stop is never sent either: nothing reaches a computer the gate refused.
       const admitted = gate ? gate(computerId, null) : null
       const start = () =>
-        gateway.request(computerId, HubToComputerMethods.fsWatchStart, { watchId, rootPath })
+        gateway.request(computerId, HubToComputerMethods.fsWatchStart, {
+          watchId,
+          rootPath
+        })
       void (admitted ? admitted.then(start) : start())
         .then(() => {
           if (stopped) {
             void gateway
-              .request(computerId, HubToComputerMethods.fsWatchStop, { watchId })
+              .request(computerId, HubToComputerMethods.fsWatchStop, {
+                watchId
+              })
               .catch(() => {
                 /* computer gone — its watcher died with the connection */
               })
@@ -2315,7 +2361,9 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         gateway.events.off('computer-disconnected', onDisconnected)
         gateway.events.off('computer-lost', onDisconnected)
         const sendStop = () =>
-          gateway.request(computerId!, HubToComputerMethods.fsWatchStop, { watchId })
+          gateway.request(computerId!, HubToComputerMethods.fsWatchStop, {
+            watchId
+          })
         void (admitted ? admitted.then(sendStop) : sendStop()).catch(() => {
           /* already gone, or never admitted */
         })

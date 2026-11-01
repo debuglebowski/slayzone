@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { buildBaseEnv, maybeReinstallHooksForSpawn } from './pty-manager'
+import { maybeReinstallHooksForSpawn } from './pty-manager'
 import { getPtyBackend } from './pty-backend'
 import { buildMcpEnv } from '../mcp-env'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell } from '../shell-env'
@@ -213,7 +213,12 @@ export function setProjectTabCounts(windowId: number, counts: Record<string, num
     level: 'info',
     source: 'pty',
     event: 'warm.tab_counts',
-    payload: { windowId, counts, enabled: deps ? deps.isEnabled() : null, hasDeps: !!deps }
+    payload: {
+      windowId,
+      counts,
+      enabled: deps ? deps.isEnabled() : null,
+      hasDeps: !!deps
+    }
   })
   scheduleReconcile()
 }
@@ -359,7 +364,11 @@ export function claimWarmShell(criteria: {
     event: 'warm.adopted',
     sessionId: handle.sessionId,
     taskId: criteria.taskId,
-    payload: { projectId: handle.projectId, cwd: criteria.cwd, computerId: handle.computerId }
+    payload: {
+      projectId: handle.projectId,
+      cwd: criteria.cwd,
+      computerId: handle.computerId
+    }
   })
   return {
     warmId: handle.warmId,
@@ -395,7 +404,11 @@ export function unadoptedWarmAgent(
 ): { sessionId: string; projectId: string; computerId: string } | null {
   const handle = reserved.get(taskId)?.handle ?? [...warm.values()].find((h) => h.taskId === taskId)
   if (!handle) return null
-  return { sessionId: handle.sessionId, projectId: handle.projectId, computerId: handle.computerId }
+  return {
+    sessionId: handle.sessionId,
+    projectId: handle.projectId,
+    computerId: handle.computerId
+  }
 }
 
 /** Test/diagnostic hook: current warm state per project. */
@@ -437,7 +450,11 @@ async function reconcile(): Promise<void> {
   if (!deps.isEnabled()) {
     // Diagnostic (d6efb204): disabled → skip. Distinguishes "off" from "on but
     // never triggered".
-    recordDiagnosticEvent({ level: 'info', source: 'pty', event: 'warm.reconcile_skip_disabled' })
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'warm.reconcile_skip_disabled'
+    })
     for (const projectId of [...warm.keys()]) killWarm(projectId)
     for (const taskId of [...reserved.keys()]) killReserved(taskId)
     return
@@ -586,7 +603,7 @@ async function spawnWarm(projectId: string): Promise<void> {
         command: shell,
         args: getShellStartupArgs(shell),
         cwd,
-        env: { ...buildBaseEnv(), ...extraEnv },
+        env: extraEnv,
         ...(postSpawnCommand ? { postSpawnCommand } : {})
       })
     } catch (err) {
@@ -613,7 +630,12 @@ async function spawnWarm(projectId: string): Promise<void> {
       event: 'warm.agent_spawned',
       sessionId,
       taskId,
-      payload: { projectId, cwd, computerId, hasConversationId: !!conversationId }
+      payload: {
+        projectId,
+        cwd,
+        computerId,
+        hasConversationId: !!conversationId
+      }
     })
   } catch (err) {
     recordDiagnosticEvent({

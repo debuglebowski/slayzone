@@ -872,7 +872,10 @@ function checkInactiveSessions(): void {
 /** Evaluate the full hibernation gate against this session's live signals.
  *  Delegates to the pure `shouldHibernate`; fails safe (default config OFF). */
 function isHibernateEligible(session: PtySession): boolean {
-  const cfg = idleCloseConfigGetter?.() ?? { enabled: false, idleMs: 30 * 60_000 }
+  const cfg = idleCloseConfigGetter?.() ?? {
+    enabled: false,
+    idleMs: 30 * 60_000
+  }
   return shouldHibernate({
     enabled: cfg.enabled,
     isMainTab: isMainTabSession(session.sessionId),
@@ -991,7 +994,10 @@ export function interruptPty(sessionId: string): boolean {
   if (!session) return false
   if (session.state !== 'running') return false
   session.activity = 'unknown'
-  session.pendingTransitionTrigger = { source: 'user-interrupt', preview: 'Esc/Ctrl+C' }
+  session.pendingTransitionTrigger = {
+    source: 'user-interrupt',
+    preview: 'Esc/Ctrl+C'
+  }
   transitionState(sessionId, 'idle')
   return true
 }
@@ -1336,7 +1342,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     patternError
   } = opts
   if (isShuttingDown) {
-    return { success: false, error: 'Cannot create PTY while app is shutting down.' }
+    return {
+      success: false,
+      error: 'Cannot create PTY while app is shutting down.'
+    }
   }
   // Dynamic window lookup: allows redirectSessionWindow() to reroute events at runtime.
   const getWin = (): PtySessionWindow => sessions.get(sessionId)?.win ?? originalWin
@@ -1356,8 +1365,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
   // hub-local, today's only path). Threaded into every PtySpawnSpec below.
   const computerId = opts.computerId ?? null
   const createStartedAt = Date.now()
-  let spawnAttempt: { shell: string; shellArgs: string[]; hasPostSpawnCommand: boolean } | null =
-    null
+  let spawnAttempt: {
+    shell: string
+    shellArgs: string[]
+    hasPostSpawnCommand: boolean
+  } | null = null
   recordDiagnosticEvent({
     level: 'info',
     source: 'pty',
@@ -1436,7 +1448,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // id (no rows) costs at most ~300ms of retry on the cold spawn path.
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          ledgerConversationId = await conversationResolver({ taskId, mode: terminalMode })
+          ledgerConversationId = await conversationResolver({
+            taskId,
+            mode: terminalMode
+          })
         } catch {
           ledgerConversationId = null
         }
@@ -1610,7 +1625,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       }
     }
 
-    const baseEnv = buildBaseEnv()
+    const baseEnv = computerId != null ? {} : buildBaseEnv()
 
     // Check for docker/ssh transport wrapping
     const transport = buildTransportSpawn(
@@ -1748,6 +1763,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       args: rawArgs,
       options: spawnOptions,
       transport: !!transport,
+      ...(computerId != null && !transport
+        ? {
+            computerShellCommand:
+              directExec && rawArgs.includes('-c') ? spawnConfig.postSpawnCommand : undefined
+          }
+        : {}),
       ...(deadlineMs !== undefined ? { startupTimeoutMs: deadlineMs } : {}),
       ...(admission ? { admission } : {})
     })
@@ -2360,7 +2381,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
                 session.workingDetections = gate.history
                 if (gate.shouldPromote) {
                   session.workingDetections = []
-                  session.pendingTransitionTrigger = { source: 'detect-activity:working', preview }
+                  session.pendingTransitionTrigger = {
+                    source: 'detect-activity:working',
+                    preview
+                  }
                   transitionState(sessionId, newState)
                 }
               } else {
@@ -2975,7 +2999,11 @@ export function writePty(sessionId: string, data: string): boolean {
       sessionId,
       taskId: session.taskId,
       message: 'esc-key-written',
-      payload: { currentState: session.state, mode: session.mode, bytes: data.length }
+      payload: {
+        currentState: session.state,
+        mode: session.mode,
+        bytes: data.length
+      }
     })
   }
 
@@ -3251,7 +3279,10 @@ export function getBuffer(sessionId: string): string | null {
   return session?.buffer.toString() ?? null
 }
 
-export function clearBuffer(sessionId: string): { success: boolean; clearedSeq: number | null } {
+export function clearBuffer(sessionId: string): {
+  success: boolean
+  clearedSeq: number | null
+} {
   const session = sessions.get(sessionId)
   if (!session) return { success: false, clearedSeq: null }
 

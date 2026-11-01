@@ -19,7 +19,10 @@ function makeCtx({ online = true }: { online?: boolean } = {}) {
   const notifies: Notify[] = []
   const dialer: ComputerDialer = {
     notify: (method, params) => {
-      notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
+      notifies.push({
+        method,
+        params: (params ?? {}) as Record<string, unknown>
+      })
       return online
     }
   }
@@ -44,7 +47,10 @@ async function waitFor(pred: () => boolean, timeoutMs = 8000): Promise<void> {
 function dataParams(notifies: Notify[]): Array<{ seq: number; data: string }> {
   return notifies
     .filter((n) => n.method === 'pty.data')
-    .map((n) => ({ seq: n.params.seq as number, data: n.params.data as string }))
+    .map((n) => ({
+      seq: n.params.seq as number,
+      data: n.params.data as string
+    }))
 }
 
 describe('createPtyHandlers', () => {
@@ -84,7 +90,10 @@ describe('createPtyHandlers', () => {
 
     // Gap replay: the hub says "I have up to seq N, give me the rest".
     const sinceSeq = frames[0].seq
-    const replay = (await pty.handlers['pty.getBufferSince']({ sessionId, seq: sinceSeq })) as {
+    const replay = (await pty.handlers['pty.getBufferSince']({
+      sessionId,
+      seq: sinceSeq
+    })) as {
       frames: Array<{ seq: number; data: string }>
     }
     const expected = frames.filter((f) => f.seq > sinceSeq)
@@ -97,7 +106,10 @@ describe('createPtyHandlers', () => {
     const exit = notifies.find((n) => n.method === 'pty.exit')!.params
     expect(exit.sessionId).toBe(sessionId)
 
-    const afterExit = (await pty.handlers['pty.getBufferSince']({ sessionId, seq: 0 })) as {
+    const afterExit = (await pty.handlers['pty.getBufferSince']({
+      sessionId,
+      seq: 0
+    })) as {
       frames: unknown[]
     }
     expect(afterExit.frames).toEqual([])
@@ -135,7 +147,10 @@ describe('createPtyHandlers', () => {
         .includes('three')
     )
 
-    const replay = (await pty.handlers['pty.getBufferSince']({ sessionId, seq: 0 })) as {
+    const replay = (await pty.handlers['pty.getBufferSince']({
+      sessionId,
+      seq: 0
+    })) as {
       frames: Array<{ seq: number; data: string }>
     }
     const bufferedBySeq = new Map(replay.frames.map((f) => [f.seq, f.data]))
@@ -186,7 +201,10 @@ describe('createPtyHandlers', () => {
 
     // No longer warm, and now streaming under the REAL session id.
     expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toEqual([])
-    await pty.handlers['pty.write']({ sessionId: 'sess-warm', data: 'after\n' })
+    await pty.handlers['pty.write']({
+      sessionId: 'sess-warm',
+      data: 'after\n'
+    })
     await waitFor(() =>
       dataParams(notifies)
         .map((f) => f.data)
@@ -207,6 +225,44 @@ describe('createPtyHandlers', () => {
     })) as { frames: Array<{ seq: number; data: string }> }
     expect(replay.frames.map((f) => f.data).join('')).toContain('preboot')
 
+    pty.disposeAll()
+  })
+
+  it('uses computer login shell for normal and warm PTYs; kill reaches adopted agent', async () => {
+    const { ctx, notifies } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const cold = (await pty.handlers['pty.spawn']({
+      sessionId: 'local-shell',
+      command: '/usr/sbin/nologin',
+      args: [],
+      computerShell: true,
+      computerShellCommand: 'printf COMPUTER_SHELL_OK',
+      cwd: process.cwd()
+    })) as SpawnResult
+    expect(cold.pid).toBeGreaterThan(0)
+    await waitFor(() => dataParams(notifies).some((f) => f.data.includes('COMPUTER_SHELL_OK')))
+
+    const warm = (await pty.handlers['pty.warmSpawn']({
+      warmId: 'warm-kill',
+      command: '/usr/sbin/nologin',
+      computerShell: true,
+      cwd: process.cwd()
+    })) as SpawnResult
+    const adopted = (await pty.handlers['pty.warmAdopt']({
+      warmId: 'warm-kill',
+      sessionId: 'adopt-kill'
+    })) as SpawnResult
+    expect(adopted.pid).toBe(warm.pid)
+    await pty.handlers['pty.kill']({
+      sessionId: 'adopt-kill',
+      spawnId: 'warm-kill'
+    })
+    await waitFor(() =>
+      notifies.some((n) => n.method === 'pty.exit' && n.params.sessionId === 'adopt-kill')
+    )
+    expect((pty.handlers['pty.list']({}) as ListResult).sessions).not.toContainEqual(
+      expect.objectContaining({ sessionId: 'adopt-kill' })
+    )
     pty.disposeAll()
   })
 
@@ -273,9 +329,17 @@ describe('createPtyHandlers', () => {
     const pty = createPtyHandlers(ctx)
     const sessionId = 'dup'
 
-    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'cat',
+      cwd: process.cwd()
+    })
     // Replace it with a fresh pty under the SAME id (kills the first).
-    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'cat',
+      cwd: process.cwd()
+    })
     // Give the killed original time to fire its (now-superseded) exit.
     await new Promise((r) => setTimeout(r, 250))
     expect(notifies.some((n) => n.method === 'pty.exit')).toBe(false)
@@ -303,7 +367,11 @@ describe('createPtyHandlers', () => {
     const pty = createPtyHandlers(ctx)
     const sessionId = 'sess-from-start'
 
-    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'cat',
+      cwd: process.cwd()
+    })
     await pty.handlers['pty.write']({ sessionId, data: 'first\n' })
     await waitFor(() =>
       dataParams(notifies)
@@ -316,7 +384,10 @@ describe('createPtyHandlers', () => {
     // gap detector starts at lastSeq = -1. Rejecting it (the old `nonnegative()`
     // bound) made the caller's best-effort catch swallow the failure and the
     // session lose its opening output permanently.
-    const replay = (await pty.handlers['pty.getBufferSince']({ sessionId, seq: -1 })) as {
+    const replay = (await pty.handlers['pty.getBufferSince']({
+      sessionId,
+      seq: -1
+    })) as {
       frames: Array<{ seq: number; data: string }>
     }
     expect(replay.frames[0]?.seq).toBe(0)
@@ -329,7 +400,10 @@ describe('createPtyHandlers', () => {
   it('getBufferSince on an unknown session returns no frames', async () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
-    const res = (await pty.handlers['pty.getBufferSince']({ sessionId: 'nope', seq: 0 })) as {
+    const res = (await pty.handlers['pty.getBufferSince']({
+      sessionId: 'nope',
+      seq: 0
+    })) as {
       frames: unknown[]
     }
     expect(res.frames).toEqual([])
@@ -387,13 +461,20 @@ describe('createPtyHandlers', () => {
         return true
       }
     }
-    const pty = createPtyHandlers({ ...ctx, dialer, hubAddress: '127.0.0.1:51101' })
+    const pty = createPtyHandlers({
+      ...ctx,
+      dialer,
+      hubAddress: '127.0.0.1:51101'
+    })
     await pty.handlers['pty.spawn']({
       sessionId: 'hub-address',
       command: 'sh',
       args: ['-c', 'echo ADDR=[$SLAYZONE_HUB_ADDRESS]'],
       cwd: process.cwd(),
-      env: { SLAYZONE_HUB_ADDRESS: 'hub-view.example:9', SLAYZONE_TASK_ID: 'task-1' }
+      env: {
+        SLAYZONE_HUB_ADDRESS: 'hub-view.example:9',
+        SLAYZONE_TASK_ID: 'task-1'
+      }
     })
     await waitFor(() => out.includes('ADDR='))
     expect(out).toContain('ADDR=[127.0.0.1:51101]')
@@ -460,10 +541,7 @@ describe('createPtyHandlers', () => {
     }
   })
 
-  it('WITHOUT agentHookUrl, passes env through byte-identically (no overlay, no strip)', async () => {
-    // Pre-init / tests: the relay port is not yet bound → no agentHookUrl. The
-    // env must be passed through UNCHANGED so this stays a no-op seam (behavior
-    // identical to before the split existed).
+  it('WITHOUT agentHookUrl, still rejects hub secret and hook URL', async () => {
     const { ctx } = makeCtx()
     let out = ''
     const dialer: ComputerDialer = {
@@ -486,9 +564,9 @@ describe('createPtyHandlers', () => {
       }
     })
     await waitFor(() => out.includes('HOOK=') && out.includes('TOKEN='))
-    // Untouched: whatever the hub sent survives verbatim.
-    expect(out).toContain('HOOK=https://hub.example:8443/api/agent-hook')
-    expect(out).toContain('TOKEN=[kept-as-is]')
+    expect(out).toContain('HOOK=')
+    expect(out).not.toContain('https://hub.example')
+    expect(out).toContain('TOKEN=[]')
     pty.disposeAll()
   })
 })
@@ -507,7 +585,12 @@ describe('createPtyHandlers', () => {
 
 type SpawnResult = { pid: number; startupDeadline?: true }
 type ListResult = {
-  sessions: Array<{ sessionId: string; spawnId?: string; pid: number; seq: number }>
+  sessions: Array<{
+    sessionId: string
+    spawnId?: string
+    pid: number
+    seq: number
+  }>
   exited?: Array<{
     sessionId: string
     spawnId?: string
@@ -584,7 +667,12 @@ describe('computer-owned session lifecycle', () => {
   it('a repeated spawn of the SAME attempt returns the running process instead of a second one', async () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
-    const params = { sessionId: 'dup', spawnId: 'attempt-1', command: 'cat', cwd: process.cwd() }
+    const params = {
+      sessionId: 'dup',
+      spawnId: 'attempt-1',
+      command: 'cat',
+      cwd: process.cwd()
+    }
 
     const first = (await pty.handlers['pty.spawn'](params)) as SpawnResult
     const again = (await pty.handlers['pty.spawn'](params)) as SpawnResult
@@ -592,7 +680,12 @@ describe('computer-owned session lifecycle', () => {
     expect(again.pid).toBe(first.pid)
     const listed = (await pty.handlers['pty.list']({})) as ListResult
     expect(listed.sessions).toEqual([
-      { sessionId: 'dup', spawnId: 'attempt-1', pid: first.pid, seq: expect.any(Number) }
+      {
+        sessionId: 'dup',
+        spawnId: 'attempt-1',
+        pid: first.pid,
+        seq: expect.any(Number)
+      }
     ])
     pty.disposeAll()
   })
@@ -694,7 +787,10 @@ describe('computer-owned session lifecycle', () => {
     })) as { frames: Array<{ seq: number; data: string }> }
     expect(replay.frames.map((f) => f.data).join('')).toContain('bye from the agent')
     const listed = (await pty.handlers['pty.list']({})) as ListResult
-    expect(listed.exited?.[0]).toMatchObject({ sessionId: 'offline', exitCode: 4 })
+    expect(listed.exited?.[0]).toMatchObject({
+      sessionId: 'offline',
+      exitCode: 4
+    })
     pty.disposeAll()
   })
 
@@ -733,7 +829,11 @@ describe('agent-start admission', () => {
   const cwd = process.cwd()
   /** One slot, held until first output (no cap in test time), quick warm quiet. */
   const oneSlot = () =>
-    createSpawnAdmission({ concurrency: 1, startCapMs: 60_000, warmQuietMs: 50 })
+    createSpawnAdmission({
+      concurrency: 1,
+      startCapMs: 60_000,
+      warmQuietMs: 50
+    })
   const outputOf = (notifies: Notify[], sessionId: string): string =>
     notifies
       .filter((n) => n.method === 'pty.data' && n.params.sessionId === sessionId)
@@ -748,7 +848,11 @@ describe('agent-start admission', () => {
     cwd
   })
   const settled = (p: Promise<unknown>) => {
-    const state = { done: false, value: undefined as unknown, error: undefined as unknown }
+    const state = {
+      done: false,
+      value: undefined as unknown,
+      error: undefined as unknown
+    }
     p.then(
       (v) => Object.assign(state, { done: true, value: v }),
       (e) => Object.assign(state, { done: true, error: e })
@@ -773,7 +877,10 @@ describe('agent-start admission', () => {
     expect((first.value as SpawnResult).pid).toBeGreaterThan(0)
 
     // Waiting: no process, not listed, but input is kept rather than dropped.
-    await pty.handlers['pty.write']({ sessionId: 'second', data: 'typed-while-queued\n' })
+    await pty.handlers['pty.write']({
+      sessionId: 'second',
+      data: 'typed-while-queued\n'
+    })
     await new Promise((r) => setTimeout(r, 100))
     expect(second.done).toBe(false)
     const listed = (await pty.handlers['pty.list']({})) as ListResult
@@ -821,7 +928,11 @@ describe('agent-start admission', () => {
       cols: 80,
       rows: 24
     }) as Promise<SpawnResult>
-    await pty.handlers['pty.resize']({ sessionId: 'sized', cols: 133, rows: 41 })
+    await pty.handlers['pty.resize']({
+      sessionId: 'sized',
+      cols: 133,
+      rows: 41
+    })
     await sized
     await waitFor(() => outputOf(notifies, 'sized').includes('41 133'))
     pty.disposeAll()
@@ -896,7 +1007,13 @@ describe('agent-start admission', () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
     void pty.handlers['pty.spawn'](holder('holder'))
-    const spec = { sessionId: 'dup', spawnId: 'a1', admission: 'background', command: 'cat', cwd }
+    const spec = {
+      sessionId: 'dup',
+      spawnId: 'a1',
+      admission: 'background',
+      command: 'cat',
+      cwd
+    }
     const a = pty.handlers['pty.spawn'](spec) as Promise<SpawnResult>
     const b = pty.handlers['pty.spawn'](spec) as Promise<SpawnResult>
     const [ra, rb] = await Promise.all([a, b])
@@ -930,7 +1047,11 @@ describe('agent-start admission', () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
     void pty.handlers['pty.spawn'](holder('holder'))
-    const shell = pty.handlers['pty.spawn']({ sessionId: 'shell', command: 'cat', cwd })
+    const shell = pty.handlers['pty.spawn']({
+      sessionId: 'shell',
+      command: 'cat',
+      cwd
+    })
     expect((shell as SpawnResult).pid).toBeGreaterThan(0)
     pty.disposeAll()
   })
@@ -940,7 +1061,11 @@ describe('agent-start admission', () => {
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
     void pty.handlers['pty.spawn'](holder('agent', 0.3))
     const warm = settled(
-      pty.handlers['pty.warmSpawn']({ warmId: 'warm-1', command: 'cat', cwd }) as Promise<unknown>
+      pty.handlers['pty.warmSpawn']({
+        warmId: 'warm-1',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
     )
     await new Promise((r) => setTimeout(r, 150))
     expect(warm.done).toBe(false)
@@ -956,7 +1081,11 @@ describe('agent-start admission', () => {
     // The shell prints first; the agent it execs boots after that. Releasing on
     // that first output would let the whole pool boot at once.
     const { ctx } = makeCtx()
-    const admission = createSpawnAdmission({ concurrency: 4, startCapMs: 400, warmQuietMs: 0 })
+    const admission = createSpawnAdmission({
+      concurrency: 4,
+      startCapMs: 400,
+      warmQuietMs: 0
+    })
     const pty = createPtyHandlers(ctx, undefined, { admission })
     const spec = (warmId: string) => ({
       warmId,
@@ -976,7 +1105,11 @@ describe('agent-start admission', () => {
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
     void pty.handlers['pty.spawn'](holder('agent', 0.2))
     const warm = settled(
-      pty.handlers['pty.warmSpawn']({ warmId: 'warm-x', command: 'cat', cwd }) as Promise<unknown>
+      pty.handlers['pty.warmSpawn']({
+        warmId: 'warm-x',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
     )
     await pty.handlers['pty.warmKill']({ warmId: 'warm-x' })
     await waitFor(() => warm.done)
@@ -1008,7 +1141,11 @@ describe('a spawn node-pty cannot start', () => {
     })
     let message = ''
     try {
-      pty.handlers['pty.spawn']({ sessionId: 's-refused', command: 'cat', cwd: process.cwd() })
+      pty.handlers['pty.spawn']({
+        sessionId: 's-refused',
+        command: 'cat',
+        cwd: process.cwd()
+      })
     } catch (err) {
       message = (err as Error).message
     }
@@ -1022,7 +1159,11 @@ describe('a spawn node-pty cannot start', () => {
       nodePtyInstallProblems: () => []
     })
     expect(() =>
-      pty.handlers['pty.spawn']({ sessionId: 's-refused', command: 'cat', cwd: process.cwd() })
+      pty.handlers['pty.spawn']({
+        sessionId: 's-refused',
+        command: 'cat',
+        cwd: process.cwd()
+      })
     ).toThrow(/^posix_spawnp failed\.$/)
   })
 
@@ -1033,19 +1174,28 @@ describe('a spawn node-pty cannot start', () => {
       nodePtyInstallProblems: () => [helperProblem]
     })
     await expect(
-      pty.handlers['pty.warmSpawn']({ warmId: 'w-refused', command: 'cat', cwd: process.cwd() })
+      pty.handlers['pty.warmSpawn']({
+        warmId: 'w-refused',
+        command: 'cat',
+        cwd: process.cwd()
+      })
     ).rejects.toThrow(/Fix: chmod \+x/)
   })
 })
 
 describe('pty.doctor', () => {
   // Doctor's facts about THIS computer: the agent starts here, so its binary must
-  // be on this PATH and the shell the hub asks for must exist here — the hub's own
-  // disk says nothing about either.
+  // be on this PATH and its own resolved shell must exist here.
   it('reports the install problems, the shell and each binary on this PATH', async () => {
     const { ctx } = makeCtx()
-    const problem = { check: 'Install scripts ran', detail: 'pnpm skipped …', fix: 'pnpm rebuild' }
-    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [problem] })
+    const problem = {
+      check: 'Install scripts ran',
+      detail: 'pnpm skipped …',
+      fix: 'pnpm rebuild'
+    }
+    const pty = createPtyHandlers(ctx, undefined, {
+      nodePtyInstallProblems: () => [problem]
+    })
     const res = await pty.handlers['pty.doctor']({
       shell: '/bin/sh',
       binaries: ['sh', 'slz-no-such-binary']
@@ -1073,7 +1223,10 @@ describe('pty.doctor', () => {
         undefined,
         { nodePtyInstallProblems: () => [] }
       )
-      const res = (await pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: ['sh'] })) as {
+      const res = (await pty.handlers['pty.doctor']({
+        shell: '/bin/sh',
+        binaries: ['sh']
+      })) as {
         binaries: { binary: string; path: string | null }[]
       }
       expect(res.binaries).toEqual([{ binary: 'sh', path: fake }])
@@ -1082,14 +1235,16 @@ describe('pty.doctor', () => {
     }
   })
 
-  it('a shell that is not on this computer is reported missing', async () => {
+  it('ignores hub shell when checking the computer shell', async () => {
     const { ctx } = makeCtx()
-    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [] })
+    const pty = createPtyHandlers(ctx, undefined, {
+      nodePtyInstallProblems: () => []
+    })
     const res = (await pty.handlers['pty.doctor']({
       shell: '/slz/no/such/shell',
       binaries: []
     })) as { shellExists: boolean }
-    expect(res.shellExists).toBe(false)
+    expect(res.shellExists).toBe(true)
   })
 
   it('looks binaries up only once the login-shell PATH is adopted', async () => {
@@ -1098,7 +1253,10 @@ describe('pty.doctor', () => {
     const pathReady = new Promise<void>((r) => {
       adopt = r
     })
-    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [], pathReady })
+    const pty = createPtyHandlers(ctx, undefined, {
+      nodePtyInstallProblems: () => [],
+      pathReady
+    })
     let done = false
     const res = Promise.resolve(
       pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: ['sh'] })
@@ -1114,10 +1272,15 @@ describe('pty.doctor', () => {
 
   it('refuses a binary name that is not a plain name', async () => {
     const { ctx } = makeCtx()
-    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [] })
+    const pty = createPtyHandlers(ctx, undefined, {
+      nodePtyInstallProblems: () => []
+    })
     await expect(
       Promise.resolve().then(() =>
-        pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: ['../bin/sh'] })
+        pty.handlers['pty.doctor']({
+          shell: '/bin/sh',
+          binaries: ['../bin/sh']
+        })
       )
     ).rejects.toThrow()
   })
@@ -1125,7 +1288,10 @@ describe('pty.doctor', () => {
   it('finds the node-pty this computer loads: this checkout is healthy', async () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
-    const res = (await pty.handlers['pty.doctor']({ shell: '/bin/sh', binaries: [] })) as {
+    const res = (await pty.handlers['pty.doctor']({
+      shell: '/bin/sh',
+      binaries: []
+    })) as {
       problems: unknown[]
     }
     expect(res.problems).toEqual([])
@@ -1140,7 +1306,11 @@ describe('pty.spawn for a project this computer has no folder for', () => {
     const pty = createPtyHandlers(ctx, () => ({ get: () => null }))
     const err = await Promise.resolve()
       .then(() =>
-        pty.handlers['pty.spawn']({ sessionId: 's-np', command: 'cat', projectId: 'p-x' })
+        pty.handlers['pty.spawn']({
+          sessionId: 's-np',
+          command: 'cat',
+          projectId: 'p-x'
+        })
       )
       .then(
         () => null,

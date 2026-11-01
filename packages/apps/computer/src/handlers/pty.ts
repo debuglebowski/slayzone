@@ -51,7 +51,7 @@ import {
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
 import * as pty from 'node-pty'
-import { findOnPath, shellExists } from '@slayzone/platform'
+import { findOnPath, getShellStartupArgs, resolveUserShell, shellExists } from '@slayzone/platform'
 import {
   nodePtyInstallProblems as readNodePtyInstallProblems,
   type NodePtyInstallProblem
@@ -68,7 +68,7 @@ import {
   type AdmissionTicket,
   type SpawnAdmission
 } from '../spawn-admission'
-import { buildSpawnEnv } from './spawn-env'
+import { buildPtySpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Matches the terminal domain's per-session buffer cap (750 KiB). */
@@ -190,7 +190,9 @@ const installProblemsOnDisk = (): NodePtyInstallProblem[] =>
  */
 export function createPtyHandlers(
   ctx: HandlerContext,
-  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null,
+  getProjectPaths?: () => {
+    get(projectId: string): { path: string } | null
+  } | null,
   options: PtyHandlerOptions = {}
 ): PtyHandlers {
   const sessions = new Map<string, PtySession>()
@@ -263,7 +265,7 @@ export function createPtyHandlers(
       proc = spawnPty(opts.command, opts.args ?? [], {
         name: 'xterm-color',
         cwd,
-        env: buildSpawnEnv(ctx, opts.env, capability),
+        env: buildPtySpawnEnv(ctx, opts.env, capability),
         cols: opts.cols ?? 80,
         rows: opts.rows ?? 24
       })
@@ -423,11 +425,22 @@ export function createPtyHandlers(
   type SpawnReply = { pid: number; startupDeadline?: true }
 
   function startSession(params: PtySpawnParams): SpawnReply {
-    const session = spawnSession(params.sessionId, params)
+    const shell = params.computerShell ? resolveUserShell() : params.command
+    const args = params.computerShell
+      ? [
+          ...getShellStartupArgs(shell),
+          ...(params.computerShellCommand ? ['-c', params.computerShellCommand] : [])
+        ]
+      : params.args
+    const session = spawnSession(params.sessionId, {
+      ...params,
+      command: shell,
+      args
+    })
     ctx.log('pty spawned', {
       sessionId: params.sessionId,
       pid: session.proc.pid,
-      command: params.command
+      command: shell
     })
     return {
       pid: session.proc.pid,
@@ -506,7 +519,10 @@ export function createPtyHandlers(
       if (live && !live.warm && live.spawnId === params.spawnId) {
         // The hub re-sent an attempt whose reply it lost. This process IS that
         // attempt — answer with it rather than killing it to start a twin.
-        return { pid: live.proc.pid, ...(live.deadline ? { startupDeadline: true as const } : {}) }
+        return {
+          pid: live.proc.pid,
+          ...(live.deadline ? { startupDeadline: true as const } : {})
+        }
       }
       if (tombstones.ran(params.sessionId, params.spawnId)) {
         // Unreachable by the hub's reconcile order (it reads `pty.list` first and
@@ -545,8 +561,11 @@ export function createPtyHandlers(
   }
 
   function startWarm(params: PtyWarmSpawnParams, cols?: number, rows?: number): PtySession {
+    const shell = params.computerShell ? resolveUserShell() : params.command
     const session = spawnSession(params.warmId, {
       ...params,
+      command: shell,
+      args: params.computerShell ? getShellStartupArgs(shell) : params.args,
       ...(cols !== undefined ? { cols } : {}),
       ...(rows !== undefined ? { rows } : {}),
       warm: { cwd: params.cwd, startedAt: Date.now() }
@@ -555,7 +574,10 @@ export function createPtyHandlers(
     // spawned directly so the shell's rc init (PATH, toolchain shims) has already
     // run — the whole point of warming.
     if (params.postSpawnCommand) session.proc.write(`${params.postSpawnCommand}\r`)
-    ctx.log('warm pty spawned', { warmId: params.warmId, pid: session.proc.pid })
+    ctx.log('warm pty spawned', {
+      warmId: params.warmId,
+      pid: session.proc.pid
+    })
     return session
   }
 
@@ -587,7 +609,10 @@ export function createPtyHandlers(
   function prioritize(rawParams: unknown): { ok: true; queued: boolean } {
     const params = ptyPrioritizeParamsSchema.parse(rawParams)
     const item = queued.get(params.sessionId)
-    return { ok: true, queued: item ? admission.prioritize(item.ticket) : false }
+    return {
+      ok: true,
+      queued: item ? admission.prioritize(item.ticket) : false
+    }
   }
 
   /** Which of claude's background jobs still run under this session's process
@@ -609,14 +634,17 @@ export function createPtyHandlers(
     await options.pathReady
     // The env a spawn gets (bin override dir first), so the answer is the binary
     // an agent started here would run.
-    const env = buildSpawnEnv(ctx)
+    const env = buildPtySpawnEnv(ctx)
     const binaries = await Promise.all(
-      params.binaries.map(async (binary) => ({ binary, path: await findOnPath(binary, env) }))
+      params.binaries.map(async (binary) => ({
+        binary,
+        path: await findOnPath(binary, env)
+      }))
     )
     return {
       ok: true,
       problems: installProblems(),
-      shellExists: shellExists(params.shell),
+      shellExists: shellExists(resolveUserShell()),
       binaries
     }
   }
@@ -625,7 +653,11 @@ export function createPtyHandlers(
     for (const id of [...queued.keys()]) cancelQueued(id, reason)
   }
 
-  function warmAdopt(rawParams: unknown): { pid: number; data: string; seq: number } {
+  function warmAdopt(rawParams: unknown): {
+    pid: number
+    data: string
+    seq: number
+  } {
     const params = ptyWarmAdoptParamsSchema.parse(rawParams)
     const session = sessions.get(params.warmId)
     if (!session || !session.warm) {
@@ -683,9 +715,19 @@ export function createPtyHandlers(
   }
 
   function warmList(): {
-    warms: Array<{ warmId: string; cwd: string; pid: number; startedAt: number }>
+    warms: Array<{
+      warmId: string
+      cwd: string
+      pid: number
+      startedAt: number
+    }>
   } {
-    const warms: Array<{ warmId: string; cwd: string; pid: number; startedAt: number }> = []
+    const warms: Array<{
+      warmId: string
+      cwd: string
+      pid: number
+      startedAt: number
+    }> = []
     for (const [id, session] of sessions) {
       if (!session.warm) continue
       warms.push({
@@ -719,7 +761,9 @@ export function createPtyHandlers(
         reason: 'killed-before-start'
       })
       if (!delivered)
-        ctx.log('kill of a queued start not delivered', { sessionId: params.sessionId })
+        ctx.log('kill of a queued start not delivered', {
+          sessionId: params.sessionId
+        })
       cancelQueued(params.sessionId, 'killed')
       // An older process still filed under this id was due to be replaced by the
       // queued start; end it silently, as that replacement would have.
@@ -745,7 +789,10 @@ export function createPtyHandlers(
     try {
       session.proc.kill(params.signal)
     } catch (err) {
-      ctx.log('pty kill failed', { sessionId: params.sessionId, error: String(err) })
+      ctx.log('pty kill failed', {
+        sessionId: params.sessionId,
+        error: String(err)
+      })
     }
     return { ok: true }
   }
@@ -813,7 +860,9 @@ export function createPtyHandlers(
     return { sessions: live, exited: tombstones.list() }
   }
 
-  function getBufferSince(rawParams: unknown): { frames: Array<{ seq: number; data: string }> } {
+  function getBufferSince(rawParams: unknown): {
+    frames: Array<{ seq: number; data: string }>
+  } {
     const params = ptyGetBufferSinceParamsSchema.parse(rawParams)
     // A reaped session's output is still served when its exit never reached the
     // hub — the tail it missed while away (see exit-tombstones.ts).

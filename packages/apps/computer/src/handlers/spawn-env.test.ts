@@ -1,7 +1,8 @@
 import { delimiter } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ComputerConfig } from '../config'
-import { buildSpawnEnv } from './spawn-env'
+import { userInfo } from 'node:os'
+import { buildPtySpawnEnv, buildSpawnEnv } from './spawn-env'
 import type { HandlerContext } from './types'
 
 function ctxWith(config: Partial<ComputerConfig> = {}): HandlerContext {
@@ -24,6 +25,34 @@ let savedOverride: string | undefined
 beforeEach(() => {
   savedPath = process.env.PATH
   savedOverride = process.env.SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR
+})
+
+describe('remote pty environment', () => {
+  it('keeps computer identity and PATH; admits only task identity from hub', () => {
+    process.env.PATH = '/computer/bin:/usr/bin'
+    const env = buildPtySpawnEnv(ctxWith(), {
+      HOME: '/tmp',
+      USER: 'slayzone',
+      LOGNAME: 'slayzone',
+      SHELL: '/usr/sbin/nologin',
+      PATH: '/app/node_modules/.bin:/usr/bin',
+      NODE_ENV: 'production',
+      SLAYZONE_ROOT: '/data',
+      SLAYZONE_TASK_ID: 'task-1',
+      SLAYZONE_AGENT_HOOK_CONTEXT: '{"taskId":"task-1"}'
+    })
+    expect(env).toMatchObject({
+      HOME: userInfo().homedir,
+      USER: userInfo().username,
+      LOGNAME: userInfo().username,
+      PATH: '/computer/bin:/usr/bin',
+      SLAYZONE_TASK_ID: 'task-1',
+      SLAYZONE_AGENT_HOOK_CONTEXT: '{"taskId":"task-1"}'
+    })
+    expect(env.SHELL).not.toBe('/usr/sbin/nologin')
+    expect(env.SLAYZONE_ROOT).not.toBe('/data')
+    expect(env.NODE_ENV).not.toBe('production')
+  })
 })
 
 afterEach(() => {
