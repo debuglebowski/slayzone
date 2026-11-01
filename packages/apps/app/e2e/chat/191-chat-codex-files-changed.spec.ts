@@ -1,10 +1,5 @@
-/**
- * Codex file changes in the files-changed row and panel (the `filesChanged` +
- * `diffComments` capabilities), against the fake `codex app-server`: a turn
- * that creates a file, edits it and runs a command gets a row (one file,
- * created, counts summed, the shell note); the panel shows ONE combined diff
- * from nothing to the file's last content; a diff line takes a comment.
- */
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { resetApp } from '../fixtures/electron'
 import { codexEchoTurn, codexReply, cstep, cx, expect, test } from '../fixtures/chat-codex'
 
@@ -43,7 +38,8 @@ test.describe('Codex files changed', () => {
                 cstep.emit(cx.fileChangeStarted(ADD), cx.fileChangeCompleted(ADD)),
                 cstep.emit(cx.commandStarted(CMD), cx.commandCompleted(CMD)),
                 cstep.emit(cx.fileChangeStarted(EDIT), cx.fileChangeCompleted(EDIT)),
-                ...codexReply('Wrote the note.')
+                ...codexReply('Wrote the note.'),
+                cstep.hang()
               ]
             ],
             defaultTurn: codexEchoTurn()
@@ -54,24 +50,18 @@ test.describe('Codex files changed', () => {
     await t.send('write a note')
     await expect(t.panel.getByText('Wrote the note.')).toBeVisible()
 
-    // The turn's row: one file, created, both changes counted, the shell note.
+    writeFileSync(join(t.cwd, 'notes.txt'), 'hello codex\nsecond line\n')
+    await t.stopButton.click()
     const row = t.panel.getByTestId('chat-files-changed')
+    await expect(row).toHaveCount(1)
     await expect(row).toContainText('1 file changed')
-    await row.getByTestId('chat-files-changed-toggle').click()
-    const file = row.getByTestId('chat-files-changed-file')
-    await expect(file).toHaveCount(1)
-    await expect(file).toContainText('notes.txt')
-    await expect(row.getByTestId('chat-files-changed-shell-note')).toBeVisible()
-
-    // The panel: one combined diff (created → last content).
-    await t.panel.getByTestId('chat-files-changed-button').click()
+    await row.getByRole('button', { name: /1 file changed/ }).click()
     const panel = t.page.getByTestId('chat-files-panel')
-    const note = panel.locator('[data-testid="chat-files-panel-file"][data-path$="/notes.txt"]')
-    await expect(note).toContainText('New')
-    await expect(note).toContainText('2 edits')
+    const note = panel.locator('[data-testid="chat-files-panel-file"][data-path="notes.txt"]')
+    await note.getByRole('button', { name: /notes.txt/ }).click()
     await expect(note.getByText('hello codex', { exact: true }).first()).toBeVisible()
     await expect(note.getByText('hello world', { exact: true })).toHaveCount(0)
-    await expect(panel.getByTestId('chat-files-panel-separate-note')).toHaveCount(0)
+    await expect(note.getByRole('button', { name: 'View recorded edits' })).toBeVisible()
 
     // A comment on a line of it goes into the composer.
     const line = note.locator('.group\\/line').filter({ hasText: 'hello codex' }).first()

@@ -17,6 +17,7 @@ import { useVirtualTimeline } from './useVirtualTimeline'
 import type { FollowBottomApi } from './useFollowBottom'
 import { getFollowBottomOffset } from './useFollowBottom'
 import { activityView } from './activity-view'
+import { unifiedChangeRows } from './files-changed/turn-changes'
 
 export interface UseChatDisplayOpts {
   /** The rows (`undefined`: not loaded here — not shown). */
@@ -354,7 +355,7 @@ export function useChatDisplay({
       }
     }
     flushPending()
-    return withoutFoldedHooks(out.filter(isRenderable))
+    return unifiedChangeRows(withoutFoldedHooks(out.filter(isRenderable)))
   }, [
     timeline,
     finalOnly,

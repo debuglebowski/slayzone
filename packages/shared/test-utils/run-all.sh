@@ -827,6 +827,7 @@ run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/history-summary.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/activity-view.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/files-changed/turn-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.codex.test.ts
@@ -992,6 +993,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/hooks/useTabLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatPanelKeyboard.test.tsx \
   packages/domains/task-terminals/src/client/chat/files-changed/files-changed.test.tsx \
+  packages/domains/task-terminals/src/client/chat/files-changed/WorkspaceChangesRow.test.tsx \
   packages/shared/diff-view/src/DiffView.line-action.test.tsx \
   packages/domains/task-terminals/src/client/chat/diff-comments/diff-comments.test.tsx \
   packages/domains/task-terminals/src/client/chat/RewindPicker.test.tsx \

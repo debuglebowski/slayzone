@@ -1,12 +1,5 @@
-/**
- * Claude Code chat: files changed (chat E, plan 4.3). A turn that changed files
- * ends with "N files changed"; a file in it shows the card that changed it
- * (scrolled to and opened); the panel shows every file of the conversation with
- * ONE combined diff (before the first edit → after the last). Shell commands are
- * named, not guessed. Survives a reload (the row is rebuilt from the saved
- * events). In a narrow pane the panel covers the chat instead of squeezing it.
- * Against the scripted fake CLI.
- */
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { resetApp } from '../fixtures/electron'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
 
@@ -71,9 +64,9 @@ const CHANGE_TURN = [
         originalFile: null
       }
     }),
-    ev.text(LONG),
-    ev.result({ text: 'done' })
-  )
+    ev.text(LONG)
+  ),
+  step.hang()
 ]
 
 test.describe('Chat files changed', () => {
@@ -81,58 +74,47 @@ test.describe('Chat files changed', () => {
     await resetApp(mainWindow)
   })
 
-  test('summary row, card reveal, combined diff, shell note, reload, narrow overlay', async ({
+  test('net summary, tool reveal, saved diff, shell changes, reload, narrow overlay', async ({
     chat
   }) => {
     const t = await chat.openTask({
       title: 'Files changed',
+      repoFiles: { 'src/app.ts': V1 },
       scenario: { processes: [{ turns: [CHANGE_TURN], defaultTurn: echoTurn() }] }
     })
     await t.send('change the files')
     await expect(t.panel.getByText('Paragraph 59 of the summary.')).toBeVisible()
 
-    // The turn's summary: two files (a.ts twice, new.ts created), one shell command.
+    // Real writes match the scripted tools, plus a shell-only file.
+    writeFileSync(join(t.cwd, 'src/app.ts'), V2.replace('const c = 3', 'const c = 33'))
+    writeFileSync(join(t.cwd, 'src/new.ts'), 'export const x = 1\n')
+    writeFileSync(join(t.cwd, 'scratch.txt'), 'shell output\n')
+    await t.stopButton.click()
     const summary = t.panel.getByTestId('chat-files-changed')
-    await expect(summary).toContainText('2 files changed')
-    await summary.getByTestId('chat-files-changed-toggle').click()
-    const files = summary.getByTestId('chat-files-changed-file')
-    await expect(files).toHaveCount(2)
-    await expect(files.nth(0)).toContainText('src/app.ts')
-    await expect(files.nth(0)).toContainText('2 edits')
-    await expect(files.nth(1)).toContainText('src/new.ts')
-    await expect(files.nth(1)).toContainText('New')
-    await expect(summary.getByTestId('chat-files-changed-shell-note')).toContainText(
-      '1 shell command'
-    )
-
-    // A file shows the card of its first edit: scrolled to, and opened.
-    const card = t.panel.locator('[data-item-key="tool:toolu_e1"]')
-    await t.panel.getByText('Paragraph 30 of the summary.').click({ button: 'right' })
-    await t.page.getByText('Collapse all expanded blocks').click()
-    await expect(card.getByText('const b = 22').first()).toBeHidden()
-    await expect(card).not.toBeInViewport()
-    // "Collapse all" folded the summary too.
-    await expect(files).toHaveCount(0)
-    await summary.getByTestId('chat-files-changed-toggle').click()
-    await files.nth(0).click()
-    await expect(card).toBeInViewport()
-    await expect(card.getByText('const b = 22').first()).toBeVisible()
-
-    // The panel: one combined diff for app.ts (both edits), the shell note.
-    await t.panel.getByTestId('chat-files-changed-button').click()
+    await expect(summary).toHaveCount(1)
+    await expect(summary).toContainText('3 files changed')
+    await summary.getByRole('button', { name: /3 files changed/ }).click()
     const panel = t.page.getByTestId('chat-files-panel')
     await expect(panel).toBeVisible()
-    await expect(panel.getByTestId('chat-files-panel-shell-note')).toContainText(
-      "can't be seen here"
-    )
-    const app = panel.locator('[data-testid="chat-files-panel-file"][data-path$="/src/app.ts"]')
-    await expect(app).toContainText('2 edits')
+    await expect(panel.getByTestId('chat-files-panel-file')).toHaveCount(3)
+    await expect(panel.getByText('Net changes during this turn', { exact: false })).toBeVisible()
+    const app = panel.locator('[data-testid="chat-files-panel-file"][data-path="src/app.ts"]')
+    await app.getByRole('button', { name: /src\/app.ts/ }).click()
     await expect(app.getByText('const b = 22').first()).toBeVisible()
     await expect(app.getByText('const c = 33').first()).toBeVisible()
     await expect(app.getByText('const c = 3', { exact: true }).first()).toBeVisible()
-    const created = panel.locator('[data-testid="chat-files-panel-file"][data-path$="/src/new.ts"]')
-    await expect(created).toContainText('New')
+    // Known file-tool attribution still reveals its first edit.
+    await app.getByRole('button', { name: 'View recorded edits' }).click()
+    const card = t.panel.getByRole('button', { name: /^Edit .*src\/app.ts/ }).first()
+    await expect(card).toBeInViewport()
+    await expect(card).toHaveAttribute('aria-expanded', 'true')
+    await expect(
+      t.panel.getByTestId('chat-timeline-scroller').getByText('const b = 22').first()
+    ).toBeVisible()
+    const created = panel.locator('[data-testid="chat-files-panel-file"][data-path="src/new.ts"]')
+    await created.getByRole('button', { name: /src\/new.ts/ }).click()
     await expect(created.getByText('export const x = 1').first()).toBeVisible()
+    await expect(panel.getByRole('button', { name: /scratch.txt/ })).toBeVisible()
 
     // Wide pane: beside the chat. Narrow pane: over it.
     expect(await panel.evaluate((el) => getComputedStyle(el).position)).toBe('static')
@@ -148,7 +130,7 @@ test.describe('Chat files changed', () => {
 
     // A reload rebuilds the row from the saved events.
     await t.reload()
-    await expect(t.panel.getByTestId('chat-files-changed')).toContainText('2 files changed')
-    await expect(t.panel.getByTestId('chat-files-changed-button')).toContainText('2 files')
+    await expect(t.panel.getByTestId('chat-files-changed')).toContainText('3 files changed')
+    await expect(t.panel.getByTestId('chat-files-changed-button')).toContainText('Files changed')
   })
 })

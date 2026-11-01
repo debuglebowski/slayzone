@@ -83,6 +83,29 @@ function subAgentsAround(
   return chain
 }
 
+export function useShowFileChange(captureId?: string) {
+  const { timeline, finalOnly, filesPanel } = useChatView()
+  const reveal = useRevealTimelineItem()
+  const focus = useContext(ToolFocusContext)
+  return (file: TurnFileChange): void => {
+    const id = file.toolUseIds[0]
+    const tool = timeline.find((it) => it?.kind === 'tool' && it.invocation.id === id)
+    const around = tool && !finalOnly ? subAgentsAround(timeline, tool.parentToolUseId) : null
+    // The timeline row the card is in: its own, or its outermost sub-agent's.
+    const host = around ? (around[0] ?? tool) : undefined
+    const key = host ? stableAnchorKey(host) : null
+    if (!around || !key) {
+      if (captureId) filesPanel?.open(file.path, captureId)
+      else filesPanel?.open(file.path)
+      return
+    }
+    for (const agent of around) focus?.request(agent.toolUseId)
+    focus?.request(id)
+    reveal(key, { align: 'center' })
+    flashRow(key)
+  }
+}
+
 /**
  * The turn summary opens the changes panel; its disclosure shows the inline list.
  * A file shows the card that made its first change in the turn (scrolled to and
@@ -92,36 +115,21 @@ function subAgentsAround(
  */
 export function FilesChangedRow({
   item,
-  embedded = false
+  embedded = false,
+  captureId
 }: {
   item: FilesChangedItem
   embedded?: boolean
+  captureId?: string
 }) {
-  const { cwd, timeline, finalOnly, filesPanel, collapseSignal } = useChatView()
-  const reveal = useRevealTimelineItem()
-  const focus = useContext(ToolFocusContext)
+  const { cwd, filesPanel, collapseSignal } = useChatView()
   const [open, setOpen] = useState(false)
   if (useDepsChanged([collapseSignal])) setOpen(false)
   const additions = sum(item.files.map((f) => f.additions))
   const deletions = sum(item.files.map((f) => f.deletions))
   const count = item.files.length
 
-  const show = (file: TurnFileChange): void => {
-    const id = file.toolUseIds[0]
-    const tool = timeline.find((it) => it?.kind === 'tool' && it.invocation.id === id)
-    const around = tool && !finalOnly ? subAgentsAround(timeline, tool.parentToolUseId) : null
-    // The timeline row the card is in: its own, or its outermost sub-agent's.
-    const host = around ? (around[0] ?? tool) : undefined
-    const key = host ? stableAnchorKey(host) : null
-    if (!around || !key) {
-      filesPanel?.open(file.path)
-      return
-    }
-    for (const agent of around) focus?.request(agent.toolUseId)
-    focus?.request(id)
-    reveal(key, { align: 'center' })
-    flashRow(key)
-  }
+  const show = useShowFileChange(captureId)
 
   return (
     <div
@@ -145,7 +153,13 @@ export function FilesChangedRow({
             type="button"
             data-testid="chat-files-changed-open"
             title="Open changes panel"
-            onClick={() => (filesPanel ? filesPanel.open() : setOpen(!open))}
+            onClick={() =>
+              filesPanel
+                ? captureId
+                  ? filesPanel.open(undefined, captureId)
+                  : filesPanel.open()
+                : setOpen(!open)
+            }
             className="flex min-w-0 items-center gap-2 text-left hover:text-foreground"
           >
             <FileDiff className="size-3 shrink-0 text-muted-foreground" />
@@ -153,6 +167,7 @@ export function FilesChangedRow({
               {count} file{count === 1 ? '' : 's'} changed
             </span>
             <LineCounts additions={additions} deletions={deletions} />
+            <span className="text-muted-foreground">Recorded edits only</span>
           </button>
           <button
             type="button"

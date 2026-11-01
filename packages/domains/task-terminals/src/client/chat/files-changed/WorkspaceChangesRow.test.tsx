@@ -2,8 +2,11 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { TimelineItem } from '@slayzone/terminal/client'
 import type { FileDiff } from '@slayzone/diff-view'
 import { WorkspaceChangesRow } from './WorkspaceChangesRow'
+import { FilesChangedPanel } from './FilesChangedPanel'
+import { ChatViewContext, defaultChatView } from '../ChatViewContext'
 
 const queries = vi.hoisted(() => ({ get: vi.fn(), diff: vi.fn() }))
 vi.mock('../../trpc', () => ({
@@ -59,9 +62,12 @@ it('opens saved workspace diffs independently of native edit tools', async () =>
     </QueryClientProvider>
   )
   expect(queries.get).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button', { name: /Workspace changes during this turn/ }))
+  fireEvent.click(screen.getByRole('button', { name: /1 file changed/ }))
   expect(
-    await screen.findByText('Other tasks or manual edits may contribute.', { exact: false })
+    await screen.findByText(
+      'Net changes during this turn may include manual edits or other agents.',
+      { exact: false }
+    )
   ).toBeTruthy()
   fireEvent.click(await screen.findByRole('button', { name: /shell.ts/ }))
   expect((await screen.findByTestId('saved-diff')).textContent).toContain('after')
@@ -90,6 +96,109 @@ it('never labels unavailable tracking as zero changed files', () => {
       />
     </QueryClientProvider>
   )
-  expect(screen.getByText('Unavailable')).toBeTruthy()
+  expect(screen.getByText('Changes unavailable')).toBeTruthy()
   expect(screen.queryByText('0 files')).toBeNull()
+})
+
+const workspace = {
+  kind: 'workspace-changes' as const,
+  tabId: 'tab',
+  captureId: 'capture',
+  messageId: 'u',
+  id: 'workspace:capture',
+  status: 'complete' as const,
+  fileCount: 5,
+  timestamp: 3
+}
+
+it('opens existing review panel for this capture without loading a second inline surface', () => {
+  const open = vi.fn()
+  render(
+    <ChatViewContext.Provider value={{ ...defaultChatView, filesPanel: { open } }}>
+      <WorkspaceChangesRow item={workspace} embedded />
+    </ChatViewContext.Provider>
+  )
+  fireEvent.click(screen.getByRole('button', { name: /5 files changed/ }))
+  expect(open).toHaveBeenCalledWith(undefined, 'capture')
+  expect(queries.get).not.toHaveBeenCalled()
+})
+
+it('falls back to explicitly labelled recorded edits when capture unavailable', () => {
+  const recorded = {
+    kind: 'files-changed' as const,
+    id: 'files:t',
+    timestamp: 2,
+    shellCommands: 1,
+    files: [{ path: '/repo/a.ts', additions: 1, deletions: 0, created: true, toolUseIds: ['t'] }]
+  }
+  const unavailable = { ...workspace, status: 'unavailable' as const, fileCount: 0 }
+  const open = vi.fn()
+  render(
+    <ChatViewContext.Provider
+      value={{
+        ...defaultChatView,
+        filesPanel: { open },
+        timeline: [
+          { kind: 'user-text', id: 'u', text: 'edit', timestamp: 0 },
+          recorded,
+          { kind: 'result', isError: false, timestamp: 2 } as TimelineItem,
+          unavailable
+        ]
+      }}
+    >
+      <WorkspaceChangesRow item={unavailable} embedded />
+    </ChatViewContext.Provider>
+  )
+  expect(screen.getByText('Recorded edits only')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /1 file changed/ }))
+  expect(open).toHaveBeenCalledWith(undefined, 'capture')
+  expect(screen.queryByText('0 files changed')).toBeNull()
+})
+
+it('reviews shell changes in the same panel and preserves tool attribution', async () => {
+  queries.diff.mockResolvedValue('')
+  const recorded = {
+    kind: 'files-changed' as const,
+    id: 'files:t',
+    timestamp: 2,
+    shellCommands: 1,
+    files: [
+      { path: '/repo/shell.ts', additions: 1, deletions: 1, created: false, toolUseIds: ['t'] }
+    ]
+  }
+  queries.get.mockResolvedValue({
+    status: 'complete',
+    files: [
+      {
+        path: 'shell.ts',
+        kind: 'modified',
+        additions: 1,
+        deletions: 1,
+        binary: false,
+        hasDiff: true
+      }
+    ]
+  })
+  const timeline: TimelineItem[] = [
+    { kind: 'user-text', id: 'u', text: 'edit', timestamp: 0 },
+    recorded,
+    workspace
+  ]
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <ChatViewContext.Provider value={{ ...defaultChatView, cwd: '/repo', timeline }}>
+        <FilesChangedPanel timeline={timeline} cwd="/repo" captureId="capture" onClose={() => {}} />
+      </ChatViewContext.Provider>
+    </QueryClientProvider>
+  )
+  fireEvent.click(await screen.findByRole('button', { name: /shell.ts/ }))
+  expect(screen.getByRole('button', { name: 'View recorded edits' })).toBeTruthy()
+  expect(screen.queryByText(/shell commands can't be seen here/)).toBeNull()
+  expect(screen.queryByText(/Workspace changes during this turn/)).toBeNull()
+})
+
+it('retains a true zero count when recorded edits were reverted', () => {
+  render(<WorkspaceChangesRow item={{ ...workspace, fileCount: 0 }} />)
+  expect(screen.getByRole('button', { name: /0 files changed/ })).toBeTruthy()
 })

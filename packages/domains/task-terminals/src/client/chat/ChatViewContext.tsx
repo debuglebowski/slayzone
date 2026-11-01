@@ -120,7 +120,7 @@ export interface ChatViewState {
   /** Folds of `conversation-branch` items: open (shown) or not. */
   branches?: { isOpen: (id: string) => boolean; toggle: (id: string) => void }
   /** The files-changed panel (absent: the provider has none); `path` = the file to show. */
-  filesPanel?: { open: (path?: string) => void }
+  filesPanel?: { open: (path?: string, captureId?: string) => void }
   /** A comment on a diff line goes into the composer (absent: the provider takes none). */
   addDiffComment?: (comment: DiffLineComment) => void
   /** The newest AskUserQuestion call of the whole history (it stays open; older ones fold). */

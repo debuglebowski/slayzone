@@ -1,9 +1,10 @@
 import type { TimelineItem } from '@slayzone/terminal/client'
+import { unifiedChangeRows } from './files-changed/turn-changes'
 
 export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
 export interface ActivityTurn {
   items: ActivityItem[]
-  files: Array<Extract<TimelineItem, { kind: 'files-changed' }>>
+  files: Array<Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }>>
   final: Extract<TimelineItem, { kind: 'text' }> | null
   result?: Extract<TimelineItem, { kind: 'result' }>
   userMessageId?: string
@@ -21,6 +22,23 @@ export function activityView(
   turns: Map<TimelineItem, ActivityTurn>
   hosts: Map<TimelineItem, TimelineItem>
 } {
+  rows = unifiedChangeRows(rows)
+  // Captures may finish after the result, even after the next user message.
+  // Attach by message identity; a gap ends the association window.
+  const attached = new Map<TimelineItem, TimelineItem[]>()
+  const consumed = new Set<TimelineItem>()
+  let users = new Map<string, TimelineItem>()
+  for (const item of rows) {
+    if (item.kind === 'history-gap' || item.kind === 'conversation-branch') users = new Map()
+    if (item.kind === 'user-text' && item.id) users.set(item.id, item)
+    if (item.kind === 'workspace-changes') {
+      const user = users.get(item.messageId)
+      if (user) {
+        attached.set(user, [...(attached.get(user) ?? []), item])
+        consumed.add(item)
+      }
+    }
+  }
   const output: TimelineItem[] = []
   const turns = new Map<TimelineItem, ActivityTurn>()
   const hosts = new Map<TimelineItem, TimelineItem>()
@@ -43,13 +61,11 @@ export function activityView(
     // A completed text block may still be progress. Only turn completion confirms
     // an answer; pauses, interruptions and history gaps must not promote it.
     const final =
-      result && !result.isError && last?.kind === 'text' && last.stream !== 'open'
-        ? last
-        : null
+      result && !result.isError && last?.kind === 'text' && last.stream !== 'open' ? last : null
     const entries = final ? activity.filter((item) => item !== final) : activity
     const files = segment.filter(
-      (item): item is Extract<TimelineItem, { kind: 'files-changed' }> =>
-        item.kind === 'files-changed'
+      (item): item is Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }> =>
+        item.kind === 'files-changed' || item.kind === 'workspace-changes'
     )
     const hidden = new Set<TimelineItem>([...entries, ...files])
     const user = segment.find((item) => item.kind === 'user-text')
@@ -78,6 +94,7 @@ export function activityView(
     completed = false
   }
   for (const item of rows) {
+    if (consumed.has(item)) continue
     // CLI process diagnostics can arrive after turn completion. Keep consecutive
     // diagnostics with that turn, stopping at any new content or history boundary.
     if (completed && item.kind !== 'stderr') flush(false)
@@ -86,7 +103,7 @@ export function activityView(
       output.push(item)
     } else if (item.kind === 'user-text') {
       flush(false)
-      segment.push(item)
+      segment.push(item, ...(attached.get(item) ?? []))
     } else {
       segment.push(item)
       if (item.kind === 'result' || item.kind === 'interrupted') completed = true

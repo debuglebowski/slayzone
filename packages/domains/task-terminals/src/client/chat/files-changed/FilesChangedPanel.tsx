@@ -6,6 +6,9 @@ import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { CardBadge, FileLink } from '../tool-cards/links'
 import { LineCounts } from './FilesChangedRow'
 import { relativeToCwd } from './relative-path'
+import { turnChangeSources, type RecordedChanges, type WorkspaceChanges } from './turn-changes'
+import { WorkspaceChangesContent } from './WorkspaceChangesRow'
+
 import {
   collectSessionFileChanges,
   combinedFileDiff,
@@ -28,16 +31,13 @@ function combinedOf(change: SessionFileChange): CombinedFileDiff {
   return value
 }
 
-/**
- * Every file the agent's file tools changed in this conversation, each with one
- * diff from before its first change to after its last. Shell commands are
- * named, not guessed at: what they changed is not in the agent's stream.
- */
+/** Review a turn's saved net changes, or browse captured turns and legacy recorded edits. */
 export function FilesChangedPanel({
   timeline,
   cwd,
   focusPath,
   focusSeq,
+  captureId,
   onClose,
   className
 }: {
@@ -47,10 +47,25 @@ export function FilesChangedPanel({
   focusPath?: string
   /** Bumped on every request, so asking for the same file again scrolls to it again. */
   focusSeq?: number
+  captureId?: string
   onClose: () => void
   className?: string
 }) {
-  const { files, shellCommands } = useMemo(() => collectSessionFileChanges(timeline), [timeline])
+  const sources = useMemo(() => turnChangeSources(timeline), [timeline])
+  const selected = [...sources.keys()].find((item) => item.captureId === captureId)
+  const recorded = selected ? sources.get(selected) : undefined
+  const { files, shellCommands } = useMemo(() => {
+    if (selected) return recordedFileChanges(timeline, recorded)
+    // Captured turns already have their own net diff; don't repeat their tool edits.
+    const covered = new Set(
+      [...sources.values()].flatMap(
+        (source) => source?.files.flatMap((file) => file.toolUseIds) ?? []
+      )
+    )
+    return collectSessionFileChanges(
+      timeline.filter((item) => item?.kind !== 'tool' || !covered.has(item.invocation.id))
+    )
+  }, [timeline, selected, recorded, sources])
   const listRef = useRef<HTMLDivElement>(null)
 
   // Bring the asked-for file into view (each time a file is asked for).
@@ -78,7 +93,21 @@ export function FilesChangedPanel({
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs">
         <FileDiffIcon className="size-3.5 text-muted-foreground" />
         <span className="font-medium">Files changed</span>
-        <span className="text-muted-foreground">{files.length}</span>
+        {selected || !sources.size ? (
+          <span className="text-muted-foreground">
+            {selected?.status === 'pending'
+              ? 'Checking…'
+              : selected?.status === 'unavailable'
+                ? recorded
+                  ? recorded.files.length
+                  : 'Unavailable'
+                : selected
+                  ? selected.fileCount
+                  : files.length}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">By turn</span>
+        )}
         <div className="flex-1" />
         <IconButton
           variant="ghost"
@@ -91,37 +120,160 @@ export function FilesChangedPanel({
         </IconButton>
       </header>
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
-        <p className="px-3 pt-2 text-[11px] text-muted-foreground">
-          What the agent's file tools changed in this conversation, one diff per file.
-        </p>
-        {shellCommands > 0 && (
-          <p
-            data-testid="chat-files-panel-shell-note"
-            className="px-3 pt-1 text-[11px] text-muted-foreground"
-          >
-            {shellCommands} shell command{shellCommands === 1 ? '' : 's'} ran too: files changed by
-            shell commands can't be seen here.
-          </p>
-        )}
-        {files.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No file-tool edits recorded.
-          </p>
-        ) : (
-          <div className="py-2">
-            {files.map((change) => (
-              <FileSection
-                key={change.path}
-                change={change}
+        {selected ? (
+          <WorkspaceChangesContent
+            item={selected}
+            recorded={recorded}
+            focusPath={focusPath}
+            renderRecordedFile={(path) => (
+              <RecordedFileSections
+                files={files.filter((file) => file.path === path)}
                 cwd={cwd}
-                defaultOpen={focusPath ? focusPath === change.path : files.length <= OPEN_ALL_UP_TO}
-                focused={focusPath === change.path}
+                focusPath={path}
+              />
+            )}
+            renderRecorded={() => (
+              <RecordedFileSections files={files} cwd={cwd} focusPath={focusPath} />
+            )}
+          />
+        ) : (
+          <>
+            {[...sources].map(([item, source], index) => (
+              <SavedTurnSection
+                key={item.captureId}
+                item={item}
+                index={index}
+                recorded={source}
+                timeline={timeline}
+                cwd={cwd}
               />
             ))}
-          </div>
+            {files.length > 0 || !sources.size ? (
+              <>
+                <p className="px-3 pt-2 text-[11px] text-muted-foreground">
+                  Recorded edits only. What the agent's file tools changed in this conversation, one
+                  diff per file.
+                </p>
+                {shellCommands > 0 && !sources.size && (
+                  <p
+                    data-testid="chat-files-panel-shell-note"
+                    className="px-3 pt-1 text-[11px] text-muted-foreground"
+                  >
+                    {shellCommands} shell command{shellCommands === 1 ? '' : 's'} ran too: files
+                    changed by shell commands can't be seen here.
+                  </p>
+                )}
+                {files.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                    No file-tool edits recorded.
+                  </p>
+                ) : (
+                  <div className="py-2">
+                    {files.map((change) => (
+                      <FileSection
+                        key={change.path}
+                        change={change}
+                        cwd={cwd}
+                        defaultOpen={
+                          focusPath ? focusPath === change.path : files.length <= OPEN_ALL_UP_TO
+                        }
+                        focused={focusPath === change.path}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : null}
+          </>
         )}
       </div>
     </aside>
+  )
+}
+
+function SavedTurnSection({
+  item,
+  index,
+  recorded,
+  timeline,
+  cwd
+}: {
+  item: WorkspaceChanges
+  index: number
+  recorded?: RecordedChanges
+  timeline: Readonly<TimelineRows>
+  cwd: string
+}) {
+  const [open, setOpen] = useState(false)
+  const { files } = useMemo(() => recordedFileChanges(timeline, recorded), [timeline, recorded])
+  const label =
+    item.status === 'unavailable'
+      ? recorded
+        ? `${recorded.files.length} file${recorded.files.length === 1 ? '' : 's'} · recorded edits only`
+        : 'Changes unavailable'
+      : item.status === 'pending'
+        ? 'Checking changes…'
+        : `${item.fileCount} file${item.fileCount === 1 ? '' : 's'} changed${item.status === 'partial' ? ' · partial' : ''}`
+  return (
+    <section className="border-b border-border/40">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs"
+      >
+        <ChevronRight className={cn('size-3 shrink-0', open && 'rotate-90')} />
+        <span>Turn {index + 1}</span>
+        <span className="text-muted-foreground">{label}</span>
+      </button>
+      {open && (
+        <WorkspaceChangesContent
+          item={item}
+          recorded={recorded}
+          renderRecordedFile={(path) => (
+            <RecordedFileSections
+              files={files.filter((file) => file.path === path)}
+              cwd={cwd}
+              focusPath={path}
+            />
+          )}
+          renderRecorded={() => <RecordedFileSections files={files} cwd={cwd} />}
+        />
+      )}
+    </section>
+  )
+}
+
+function recordedFileChanges(timeline: Readonly<TimelineRows>, recorded?: RecordedChanges) {
+  const ids = new Set(recorded?.files.flatMap((file) => file.toolUseIds) ?? [])
+  return collectSessionFileChanges(
+    timeline.filter((item) => item?.kind === 'tool' && ids.has(item.invocation.id))
+  )
+}
+
+function RecordedFileSections({
+  files,
+  cwd,
+  focusPath
+}: {
+  files: SessionFileChange[]
+  cwd: string
+  focusPath?: string
+}) {
+  if (!files.length)
+    return <p className="px-3 py-3 text-xs text-muted-foreground">No file-tool edits recorded.</p>
+  return (
+    <>
+      {files.map((change) => (
+        <FileSection
+          key={change.path}
+          change={change}
+          cwd={cwd}
+          defaultOpen={focusPath ? focusPath === change.path : files.length <= OPEN_ALL_UP_TO}
+          focused={focusPath === change.path}
+        />
+      ))}
+    </>
   )
 }
 

@@ -107,7 +107,7 @@ export interface ChatComposerProps {
   handleFastModeChange: FastModeApi['handleFastModeChange']
   fastModeChanging: FastModeApi['fastModeChanging']
   /** The files-changed panel's button (absent: the provider has none). */
-  filesChanged?: { count: number; open: boolean; toggle: () => void }
+  filesChanged?: { count: number; byTurn?: boolean; open: boolean; toggle: () => void }
 }
 
 /**
@@ -398,7 +398,7 @@ export function ChatComposer({
             </>
           )}
           <div className="flex-1" />
-          {filesChanged && filesChanged.count > 0 && (
+          {filesChanged && (filesChanged.count > 0 || filesChanged.byTurn) && (
             <button
               type="button"
               data-testid="chat-files-changed-button"
@@ -413,7 +413,9 @@ export function ChatComposer({
               title="Files changed in this conversation"
             >
               <FileDiff className="size-3" />
-              {filesChanged.count} file{filesChanged.count === 1 ? '' : 's'}
+              {filesChanged.byTurn
+                ? 'Files changed'
+                : `${filesChanged.count} file${filesChanged.count === 1 ? '' : 's'}`}
             </button>
           )}
           <ContextMeter summary={usage} />

@@ -10,6 +10,7 @@ import { TimelineRowIndexContext, TimelineRowKeyContext, useRowUiState } from '.
 import { ToolInActivityContext } from './tool-cards/card-shell'
 import { ToolFocusContext } from './tool-cards/tool-focus'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
+import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
 
 function ActivityNarrative({
   item,
@@ -219,9 +220,13 @@ export function ActivityTurn({
           </div>
         </>
       )}
-      {turn.files.map((item) => (
-        <FilesChangedRow key={item.id} item={item} embedded />
-      ))}
+      {turn.files.map((item) =>
+        item.kind === 'workspace-changes' ? (
+          <WorkspaceChangesRow key={item.id} item={item} embedded />
+        ) : (
+          <FilesChangedRow key={item.id} item={item} embedded />
+        )
+      )}
       {latest && (
         <div className="order-2 min-w-0 basis-full">
           <ActivityEntry item={latest} row={rowOf?.(latest)} preview />

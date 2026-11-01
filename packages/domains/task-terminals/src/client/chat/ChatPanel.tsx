@@ -316,13 +316,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // Files changed (chat E, plan 4.3): the panel beside the chat, opened at a file
     // or at the top; `seq` re-scrolls when the same file is asked for again.
     const filesCapable = chatCapabilitiesForMode(mode).filesChanged
-    const [filesPanel, setFilesPanel] = useState<{ path?: string; seq: number } | null>(null)
-    const openFilesPanel = useStableCallback((path?: string): void => {
-      setFilesPanel((prev) => ({ ...(path ? { path } : {}), seq: (prev?.seq ?? 0) + 1 }))
+    const [filesPanel, setFilesPanel] = useState<{
+      path?: string
+      captureId?: string
+      seq: number
+    } | null>(null)
+    const openFilesPanel = useStableCallback((path?: string, captureId?: string): void => {
+      setFilesPanel((prev) => ({
+        ...(path ? { path } : {}),
+        ...(captureId ? { captureId } : {}),
+        seq: (prev?.seq ?? 0) + 1
+      }))
     })
     const filesCount = useMemo(
       () => (filesCapable ? sessionFileCount(display.summary, display.conversationFolded) : 0),
       [filesCapable, display.summary, display.conversationFolded]
+    )
+    const changesByTurn = timeline.some(
+      (item, row) => item?.kind === 'workspace-changes' && !display.conversationFolded.has(row)
     )
     // Paged history: the panel shows every file change — the pages holding
     // them load (held while it is open).
@@ -922,6 +933,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           ? {
                               filesChanged: {
                                 count: filesCount,
+                                byTurn: changesByTurn,
                                 open: filesPanel !== null,
                                 toggle: () => {
                                   if (filesPanel) setFilesPanel(null)
@@ -938,6 +950,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         cwd={cwd}
                         {...(filesPanel.path ? { focusPath: filesPanel.path } : {})}
                         focusSeq={filesPanel.seq}
+                        captureId={filesPanel.captureId}
                         onClose={() => {
                           setFilesPanel(null)
                           composer.textareaRef.current?.focus()
