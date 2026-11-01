@@ -28,7 +28,7 @@ function ActivityNarrative({
   const Icon = thinking ? Brain : MessageSquare
   if (preview) {
     return (
-      <div className="my-1 max-w-[620px] rounded-md bg-card/40 text-xs">
+      <div className="my-1 max-w-[620px] rounded-md border border-border/50 bg-card/40 text-xs">
         <button
           type="button"
           aria-label={thinking ? 'Thinking' : 'Message'}
@@ -70,16 +70,18 @@ function ActivityNarrative({
   }
   return (
     <div
-      className="my-1 flex max-w-[620px] gap-2 rounded-md bg-card/40 px-3 py-2 text-xs"
+      className="my-1 flex max-w-[620px] items-start gap-2 rounded-md border border-border/50 bg-card/40 px-3 py-2 text-xs leading-relaxed"
       aria-label={thinking ? 'Thinking' : 'Message'}
     >
-      <Icon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+      <span className="flex h-lh shrink-0 items-center text-muted-foreground">
+        <Icon className="size-3" />
+      </span>
       {thinking ? (
         <div className="whitespace-pre-wrap italic text-muted-foreground">
           <HighlightedText text={text || 'Thinking…'} />
         </div>
       ) : (
-        <div className="min-w-0 leading-relaxed [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+        <div className="min-w-0 [&_.prose]:text-xs [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
           <GhMarkdown>{text}</GhMarkdown>
         </div>
       )}
