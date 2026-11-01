@@ -90,7 +90,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
     <div
       className={cn(
         'group px-0 flex justify-end items-center gap-2',
-        appearance.chatCompactSpacing ? 'mb-2 py-0.5' : 'mb-4 py-2'
+        appearance.chatCompactSpacing ? 'mb-6 py-0.5' : 'mb-12 py-2'
       )}
     >
       <UserMessageActions item={item} />
@@ -139,7 +139,7 @@ export function AssistantMessageBody({ item }: { item: Extract<TimelineItem, { k
 export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
   const appearance = useAppearance()
   return (
-    <div className={cn('px-0', appearance.chatCompactSpacing ? 'py-0.5' : 'py-2')}>
+    <div className={cn('px-0', appearance.chatCompactSpacing ? 'mb-4 py-0.5' : 'mb-8 py-2')}>
       <div className="group flex gap-3 items-start">
         <AssistantMessageBody item={item} />
         {appearance.chatShowMessageMeta && (

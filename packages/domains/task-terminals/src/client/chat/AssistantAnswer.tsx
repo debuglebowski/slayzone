@@ -59,7 +59,7 @@ export function AssistantAnswer({
     <div
       className={cn(
         'group/answer relative rounded-md transition-colors hover:bg-muted/50 focus-within:bg-muted/50',
-        compact ? '-mx-0.5 p-0.5' : '-mx-5 p-5',
+        compact ? '-mx-0.5 mb-4 p-0.5' : '-mx-5 mb-8 p-5',
         menuOpen && 'bg-muted/50'
       )}
       data-testid="chat-assistant-answer"
