@@ -16,12 +16,36 @@ const eventually = <T>(check: () => T, options: { timeout?: number; interval?: n
 const require = createRequire(import.meta.url)
 const cleanups: Array<() => Promise<unknown> | unknown> = []
 afterEach(async () => {
-  while (cleanups.length) await cleanups.pop()!()
+  const errors: unknown[] = []
+  while (cleanups.length) {
+    try {
+      await cleanups.pop()!()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  if (errors.length) throw new AggregateError(errors, 'upgrade fixture cleanup failed')
 }, 30_000)
+
+it('native release probe completes through terminal readiness, input and exit', async () => {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [resolve(import.meta.dirname, '../dist/bin.cjs'), '--upgrade-probe'],
+    { timeout: 15_000 }
+  )
+  const { version } = JSON.parse(
+    readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')
+  )
+  expect(stdout.trim()).toBe(version)
+}, 20_000)
 
 it('hub protocol upgrade → fatal old hello → exact release → same enrollment reconnect; failed candidate retries', async () => {
   const root = mkdtempSync(join(tmpdir(), 'computer-upgrade-integration-'))
-  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  cleanups.push(() =>
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  )
   symlinkSync(
     dirname(dirname(require.resolve('node-pty/package.json'))),
     join(root, 'node_modules'),
@@ -168,7 +192,9 @@ it('hub protocol upgrade → fatal old hello → exact release → same enrollme
 
 it('supervisor discovers hub release, persists progress and resumes the upgraded runtime after restart', async () => {
   const root = mkdtempSync(join(tmpdir(), 'computer-upgrade-supervisor-'))
-  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  cleanups.push(() =>
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  )
   symlinkSync(
     dirname(dirname(require.resolve('node-pty/package.json'))),
     join(root, 'node_modules'),
@@ -250,7 +276,9 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
 
 it('hub upgrade, failed candidate, retry and supervisor restart preserve active work', async () => {
   const root = mkdtempSync(join(tmpdir(), 'computer-live-upgrade-'))
-  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  cleanups.push(() =>
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  )
   symlinkSync(
     dirname(dirname(require.resolve('node-pty/package.json'))),
     join(root, 'node_modules'),
@@ -386,7 +414,9 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   const { spawn } = await import('node:child_process')
   const { hostControl } = await import('./session-host')
   const root = mkdtempSync(join(tmpdir(), 'computer-launcher-integration-'))
-  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  cleanups.push(() =>
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  )
   symlinkSync(
     dirname(dirname(require.resolve('node-pty/package.json'))),
     join(root, 'node_modules'),
@@ -414,6 +444,10 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())))
   const hub = await startLoopbackHub({ floodLimits: false }, { server })
   cleanups.push(() => hub.close())
+  let upgradedConnections = 0
+  hub.gateway.events.on('computer-connected', ({ computer }) => {
+    if (computer.version === '2.0.0') upgradedConnections++
+  })
   const { port } = server.address() as AddressInfo
   writeFileSync(
     join(root, 'computer.config.json'),
@@ -443,7 +477,18 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   const stopForeground = async () => {
     if (child.exitCode !== null) return
     const exit = once(child, 'exit')
-    child.kill('SIGTERM')
+    if (process.platform === 'win32') {
+      // Windows has no graceful POSIX signals. Stop the fixture's entire
+      // process tree, including its detached host, rather than orphaning it.
+      const { promisify } = await import('node:util')
+      const { execFile } = await import('node:child_process')
+      // taskkill may report a descendant that exited during tree enumeration.
+      await promisify(execFile)('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        timeout: 10_000
+      }).catch(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      })
+    } else child.kill('SIGTERM')
     const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
     await exit
     clearTimeout(timer)
@@ -473,6 +518,9 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   await eventually(
     () => {
       expect(hub.gateway.listComputers()[0]?.version, output).toBe('2.0.0')
+      // The first v2 connector precedes the supervisor handoff. Wait for its
+      // replacement, otherwise the next RPC races the intentional disconnect.
+      expect(upgradedConnections, output).toBeGreaterThanOrEqual(2)
       expect(
         JSON.parse(readFileSync(join(root, 'computer-runtime', 'supervisor.json'), 'utf8')).current
           .version
@@ -523,7 +571,9 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
   const { spawn } = await import('node:child_process')
   const { hostControl } = await import('./session-host')
   const root = mkdtempSync(join(tmpdir(), 'computer-config-maintenance-'))
-  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  cleanups.push(() =>
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  )
   symlinkSync(
     dirname(dirname(require.resolve('node-pty/package.json'))),
     join(root, 'node_modules'),

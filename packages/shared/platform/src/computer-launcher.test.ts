@@ -113,7 +113,7 @@ it('startup watchdog treats a slow supervisor as a crash, preserving host work',
   }
 })
 
-it('host startup watchdog permits cleanup and retries a clean timeout exit', async () => {
+it('host startup watchdog retries after timeout and permits POSIX cleanup', async () => {
   const root = mkdtempSync(join(tmpdir(), 'computer-host-watchdog-'))
   const good = join(root, 'good.cjs'),
     bad = join(root, 'bad.cjs')
@@ -147,7 +147,8 @@ it('host startup watchdog permits cleanup and retries a clean timeout exit', asy
         (err) => (err ? reject(err) : resolve())
       )
     )
-    expect(readFileSync(cleaned, 'utf8')).toBe('yes')
+    // Node terminates forcibly on Windows; SIGTERM handlers only run on POSIX.
+    if (process.platform !== 'win32') expect(readFileSync(cleaned, 'utf8')).toBe('yes')
     expect(JSON.parse(readFileSync(pointer, 'utf8')).current.version).toBe('1')
   } finally {
     rmSync(root, { recursive: true, force: true })

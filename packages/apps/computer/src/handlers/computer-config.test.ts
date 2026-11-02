@@ -5,7 +5,9 @@ import {
   realpathSync,
   rmSync,
   writeFileSync,
-  unlinkSync
+  unlinkSync,
+  statSync,
+  watchFile
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +24,11 @@ import { startComputer } from '../main'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './computer-config'
 import type { ComputerDialer } from './types'
 
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>()
+  return { ...fs, watchFile: vi.fn(fs.watchFile) }
+})
+
 const dialer: ComputerDialer = { notify: () => true }
 
 let dir: string
@@ -30,7 +37,7 @@ let home: string
 // `updateComputerConfigFile` resolves its path from the computer ROOT, which derives
 // from HOME. Point both at a tmpdir so the test never writes the real config.
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), 'computer-cfg-')))
+  dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'computer-cfg-')))
   home = join(dir, 'home')
   mkdirSync(home, { recursive: true })
   vi.stubEnv('HOME', home)
@@ -162,7 +169,7 @@ describe('standalone live folder policy', () => {
     (file) => {
       const { root, wide, path, config } = fixture()
       writeFileSync(path, JSON.stringify(file))
-      expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync(root)])
+      expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync.native(root)])
       const fs = createFsHandlers({ config, dialer, log: () => {} }).handlers
       expect(() => fs[HubToComputerMethods.fsPathExists]({ path: wide })).toThrow(/allowedRoots/)
       expect(fs[HubToComputerMethods.fsPathExists]({ path: root })).toEqual({ exists: true })
@@ -173,7 +180,7 @@ describe('standalone live folder policy', () => {
     const { root, path, config } = fixture()
     writeFileSync(path, JSON.stringify({ allowedRoots: config.allowedRoots }))
     unlinkSync(path)
-    expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync(root)])
+    expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync.native(root)])
   })
 
   it('live adoption prevents legacy policy revival on the next boot', () => {
@@ -234,7 +241,7 @@ describe('standalone live folder policy', () => {
         { userId: null, route: null }
       )) as { pid: number }
       writeFileSync(path, '{}')
-      await vi.waitFor(() => expect(config.allowedRoots).toEqual([realpathSync(root)]), {
+      await vi.waitFor(() => expect(config.allowedRoots).toEqual([realpathSync.native(root)]), {
         timeout: 6000
       })
       expect(() => process.kill(result.pid, 0)).not.toThrow()
@@ -242,7 +249,7 @@ describe('standalone live folder policy', () => {
         dispatch('fs.pathExists', { path: wide }, { userId: null, route: null })
       ).rejects.toThrow(/allowedRoots/)
       expect(log).toHaveBeenCalledWith('allowedRoots reloaded from local config', {
-        applied: [realpathSync(root)]
+        applied: [realpathSync.native(root)]
       })
     } finally {
       await handle.stop()
@@ -271,6 +278,18 @@ describe('standalone live folder policy', () => {
   it('logs corrupt live policy and retains current roots instead of legacy roots', async () => {
     const { root, wide, path, config } = fixture()
     writeFileSync(path, JSON.stringify({ allowedRoots: [wide] }))
+    // Drive the watcher callback directly: writing synchronously after watchFile
+    // can beat its asynchronous initial stat and produce no change event.
+    // Actual polling is covered by the live-removal test above.
+    const before = statSync(path)
+    let changed!: (
+      current: ReturnType<typeof statSync>,
+      previous: ReturnType<typeof statSync>
+    ) => void
+    vi.mocked(watchFile).mockImplementationOnce((...args: unknown[]) => {
+      changed = args[2] as typeof changed
+      return {} as ReturnType<typeof watchFile>
+    })
     const log = vi.fn()
     const handle = startComputer(config, {
       stateDir: root,
@@ -283,13 +302,10 @@ describe('standalone live folder policy', () => {
     })
     try {
       writeFileSync(path, '{')
-      await vi.waitFor(
-        () =>
-          expect(log).toHaveBeenCalledWith(
-            'allowedRoots reload failed; keeping current folder policy',
-            expect.objectContaining({ error: expect.any(String) })
-          ),
-        { timeout: 6000 }
+      changed(statSync(path), before)
+      expect(log).toHaveBeenCalledWith(
+        'allowedRoots reload failed; keeping current folder policy',
+        expect.objectContaining({ error: expect.any(String) })
       )
       expect(config.allowedRoots).toEqual([wide])
     } finally {
