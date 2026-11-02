@@ -78,6 +78,7 @@ const remoteHubClientMock = {
 // The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
 vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
+  hubAllows: vi.fn(async () => true),
   getTrpcClient: () => trpcClientMock,
   getHubClient: (id: string) =>
     id === 'remote-b' ? { id, url: '', client: remoteHubClientMock, wsClient: {} } : null
@@ -86,9 +87,11 @@ vi.mock('@slayzone/transport/client', () => ({
 const { fetchTaskDetail, buildTaskDetailSnapshot, TASK_DETAIL_FETCH_TIMEOUT_MS } = await import(
   './taskDetailCache'
 )
+const { hubAllows } = await import('@slayzone/transport/client')
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(hubAllows).mockResolvedValue(true)
   trpcClientMock.task.get.query.mockResolvedValue(makeTask())
   trpcClientMock.task.getSubTasks.query.mockResolvedValue([])
   trpcClientMock.task.getAll.query.mockResolvedValue([])
@@ -105,6 +108,35 @@ beforeEach(() => {
 })
 
 describe('fetchTaskDetail', () => {
+  it('renders an unavailable task without querying its related resources', async () => {
+    trpcClientMock.task.get.query.mockRejectedValue({ data: { code: 'NOT_FOUND' } })
+    await expect(fetchTaskDetail('missing')).resolves.toBeNull()
+    expect(trpcClientMock.tags.getForTask.query).not.toHaveBeenCalled()
+    expect(trpcClientMock.task.getSubTasks.query).not.toHaveBeenCalled()
+  })
+
+  it('preserves unexpected task lookup failures', async () => {
+    trpcClientMock.task.get.query.mockRejectedValue(new Error('hub unavailable'))
+    await expect(fetchTaskDetail('task-1')).rejects.toThrow('hub unavailable')
+  })
+
+  it('skips workspace probes refused by the selected hub', async () => {
+    vi.mocked(hubAllows).mockResolvedValue(false)
+    const result = await fetchTaskDetail('task-1')
+    expect(result!.projectPathMissing).toBe(false)
+    expect(hubAllows).toHaveBeenCalledWith(trpcClientMock, 'workspace.pathExists')
+    expect(trpcClientMock.workspace.pathExists.query).not.toHaveBeenCalled()
+  })
+
+  it('keeps a task visible when its parent is inaccessible', async () => {
+    trpcClientMock.task.get.query
+      .mockResolvedValueOnce(makeTask({ parent_id: 'missing-parent' }))
+      .mockRejectedValueOnce({ data: { code: 'NOT_FOUND' } })
+    const result = await fetchTaskDetail('task-1')
+    expect(result!.task.id).toBe('task-1')
+    expect(result!.parentTask).toBeNull()
+  })
+
   it('returns null when task not found', async () => {
     trpcClientMock.task.get.query.mockResolvedValue(null)
     const result = await fetchTaskDetail('missing')

@@ -1,4 +1,5 @@
 import { createSuspenseCache } from '@slayzone/suspense'
+import { hubAllows } from '@slayzone/transport/client'
 import { getTrpcClient, getHubClient, type TaskTrpcClient } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
@@ -51,6 +52,7 @@ async function checkProjectPathMissing(
   path: string
 ): Promise<boolean> {
   try {
+    if (!(await hubAllows(client, 'workspace.pathExists'))) return false
     const res = await client.workspace.pathExists.query({ taskId, path })
     return res.reachable && !res.exists
   } catch {
@@ -110,16 +112,17 @@ async function fetchTaskDetailUncapped(
   hubId?: string
 ): Promise<TaskDetailData | null> {
   const trpc = (hubId ? getHubClient(hubId)?.client : null) ?? getTrpcClient()
-  // Task fetch is critical — let it throw. Secondary data uses defaults on failure.
-  const [loadedTask, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
-    trpc.task.get.query({ id: taskId }),
+  // A scoped hub returns NOT_FOUND for missing and inaccessible tasks alike.
+  // Resolve that before requesting related resources for an unavailable task.
+  const loadedTask = await getTaskOrNull(trpc, taskId)
+  if (!loadedTask) return null
+
+  const [loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
     trpc.tags.list.query().catch(() => [] as Tag[]),
     trpc.tags.getForTask.query({ taskId }).catch(() => [] as Tag[]),
     trpc.projects.list.query().catch(() => [] as Project[]),
     trpc.task.getSubTasks.query({ parentId: taskId }).catch(() => [] as Task[])
   ])
-
-  if (!loadedTask) return null
 
   // Resolve project + path validation
   const project = projects.find((p) => p.id === loadedTask.project_id) ?? null
@@ -134,7 +137,7 @@ async function fetchTaskDetailUncapped(
   // Resolve parent task
   let parentTask: Task | null = null
   if (loadedTask.parent_id) {
-    parentTask = await trpc.task.get.query({ id: loadedTask.parent_id })
+    parentTask = await getTaskOrNull(trpc, loadedTask.parent_id)
   }
 
   // Browser tabs. Fallback URLs come from sibling tasks in the SAME project
@@ -163,6 +166,25 @@ async function fetchTaskDetailUncapped(
     // per-task overrides.
     panelSizes: normalizeOverrides(loadedTask.panel_sizes),
     browserTabs
+  }
+}
+
+async function getTaskOrNull(client: TaskTrpcClient, id: string): Promise<Task | null> {
+  try {
+    return await client.task.get.query({ id })
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'data' in error &&
+      typeof error.data === 'object' &&
+      error.data !== null &&
+      'code' in error.data &&
+      error.data.code === 'NOT_FOUND'
+    ) {
+      return null
+    }
+    throw error
   }
 }
 

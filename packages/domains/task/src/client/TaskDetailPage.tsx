@@ -30,7 +30,7 @@ import {
   Expand
 } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { hubAllows, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
@@ -945,6 +945,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const probeWorkspacePath = useCallback(
     async (path: string): Promise<void> => {
       if (!probeTaskId) return
+      if (!(await hubAllows(trpcClient, 'workspace.pathExists'))) return
       const res = await trpcClient.workspace.pathExists
         .query({ taskId: probeTaskId, path })
         .catch(() => null)
