@@ -126,7 +126,8 @@ import {
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
-import { initAiConfigOps } from '@slayzone/ai-config/server'
+import { initAiConfigOps, getAiConfigOps, setSlayExecutor } from '@slayzone/ai-config/server'
+import { createRoutingSlayExecutor } from './slay-routing'
 import { createChatPromptRecorder } from '@slayzone/agent-turns/server'
 import {
   AutomationEngine,
@@ -1645,6 +1646,15 @@ export function composeServer(opts: {
       )
       return claudeSessionReadResultSchema.parse(res)
     })
+
+    setSlayExecutor(
+      createRoutingSlayExecutor({
+        resolveComputer: (target) => placement.forTarget(target),
+        gateway: computerGateway,
+        gate: placement.gate ? (computerId) => placement.gate!(computerId, null) : undefined,
+        local: getAiConfigOps()
+      })
+    )
 
     // Workspace filesystem — the directory picker, the project-path probe, and
     // (later) the editor panel. Same resolution as the exec backends above, which

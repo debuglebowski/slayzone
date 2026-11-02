@@ -116,6 +116,11 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
     event: 'computer.fs.rename',
     detail: (p) => ({ rootPath: p.rootPath, from: p.oldPath, path: p.newPath })
   },
+  'slay.checkConfigured': null,
+  'slay.setup': {
+    event: 'computer.proc.spawn',
+    detail: (p) => ({ program: 'slay', projectId: p.projectId, path: p.projectPath })
+  },
   'fs.pathExists': null,
   'fs.listRoots': null,
   'fs.listDir': null,

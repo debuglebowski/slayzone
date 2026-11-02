@@ -879,6 +879,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     dismiss: dismissSlayNudge,
     recheck: recheckSlayNudge
   } = useSlayNudge({
+    computerId: workComputerId(task, project),
+    taskId: task?.id ?? null,
     projectId: task?.project_id ?? null,
     projectPath: effectiveRepoPath ?? projectRoot
   })
@@ -3043,6 +3045,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     )}
                     {showSlayNudge && (
                       <SlayNudgeBanner
+                        taskId={task.id}
                         projectPath={effectiveRepoPath ?? projectRoot ?? ''}
                         projectId={task?.project_id ?? project?.id}
                         onDismiss={dismissSlayNudge}

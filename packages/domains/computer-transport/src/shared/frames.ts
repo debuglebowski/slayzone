@@ -375,6 +375,8 @@ export const HubToComputerMethods = {
   gitRunWorktreeSetupScript: 'git.runWorktreeSetupScript',
   gitCopyIgnoredFiles: 'git.copyIgnoredFiles',
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
+  slayCheckConfigured: 'slay.checkConfigured',
+  slaySetup: 'slay.setup',
   fsPathExists: 'fs.pathExists',
   fsRemoveDir: 'fs.removeDir',
   // workspace browse ops — ABSOLUTE paths inside the computer's allowedRoots, used
@@ -1455,3 +1457,11 @@ export const procListResultSchema = z.object({
   exited: z.array(exitedSessionSchema).optional()
 })
 export type ProcListResult = z.infer<typeof procListResultSchema>
+
+// Machine-local Slay CLI setup.
+export const slayParamsSchema = z.object({
+  projectPath: z.string().min(1),
+  projectId: z.string().optional()
+})
+export const slayCheckResultSchema = z.object({ configured: z.boolean() })
+export const slaySetupResultSchema = z.object({ ok: z.boolean(), error: z.string().optional() })

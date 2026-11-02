@@ -1226,6 +1226,10 @@ run_jest_package_tests packages/apps/mobile @slayzone/mobile
 
 # Security headers on every hub response (T-25): the header logic, and the built hub
 # through each handler (shell, assets, better-auth, REST, 404, /trpc, /health).
+run_harness packages/apps/cli/src/commands/init-path.test.ts
+run_harness packages/apps/hub/src/slay-routing.test.ts
+run_harness packages/apps/computer/src/handlers/slay.test.ts
+run_harness packages/domains/terminal/src/client/useSlayNudge.test.tsx
 run_harness packages/apps/hub/src/security-headers.test.ts
 run_harness packages/apps/hub/src/security-headers-served.test.ts
 

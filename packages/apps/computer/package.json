@@ -23,7 +23,8 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/computer-transport": "workspace:*",
     "node-pty": "^1.1.0",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "@slayzone/ai-config": "workspace:*"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",

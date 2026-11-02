@@ -1,5 +1,6 @@
 import * as fs from 'node:fs'
 import { homedir } from 'node:os'
+import { checkSlayConfigured } from './slay-setup'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
 // eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: `slay init` (setupSlay) can block the hub up to 10s; convert to async.
@@ -57,8 +58,6 @@ import {
   stripCanonicalSkillMetadata,
   writeSkillValidationMetadata
 } from './skill-normalize'
-
-const SLAY_NUDGE_KEYWORD = 'slay'
 
 const KNOWN_CONTEXT_FILES: Array<{
   relative: string
@@ -2622,28 +2621,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
       removeMcpServerFromSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey)
     },
     checkSlayConfigured: (projectPath: string): boolean => {
-      const keywordPattern = new RegExp(`\\b${SLAY_NUDGE_KEYWORD}\\b`, 'i')
-      const resolvedProject = path.resolve(projectPath)
-
-      for (const mapping of Object.values(PROVIDER_PATHS)) {
-        if (mapping.rootInstructions) {
-          const filePath = path.join(resolvedProject, mapping.rootInstructions)
-          if (fs.existsSync(filePath) && keywordPattern.test(fs.readFileSync(filePath, 'utf-8'))) {
-            return true
-          }
-        }
-      }
-
-      for (const spec of Object.values(COMPUTER_PROVIDER_PATHS)) {
-        if (spec.instructions) {
-          const filePath = path.join(homeDir, spec.baseDir, spec.instructions)
-          if (fs.existsSync(filePath) && keywordPattern.test(fs.readFileSync(filePath, 'utf-8'))) {
-            return true
-          }
-        }
-      }
-
-      return false
+      return checkSlayConfigured(projectPath, homeDir)
     },
     setupSlay: (projectPath: string, projectId?: string): { ok: boolean; error?: string } => {
       // Runs `slay init` in a project directory on THIS machine: refused on a hub with

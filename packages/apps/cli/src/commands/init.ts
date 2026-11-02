@@ -128,7 +128,15 @@ async function resolveTargetProject(
  *    remote hub those branches simply don't fire; the skill records are still
  *    installed, and they are what the hub reads from anyway.
  */
-async function runInstall(opts: { writeInstructions: boolean; project?: string }): Promise<void> {
+async function runInstall(opts: {
+  writeInstructions: boolean
+  project?: string
+  path?: string
+}): Promise<void> {
+  const explicitPath = opts.path ? path.resolve(opts.path) : null
+  if (explicitPath && !fs.statSync(explicitPath).isDirectory()) {
+    throw new Error(`Not a directory: ${explicitPath}`)
+  }
   const { ref: projectRef, localFolder } = await resolveTargetProject(opts.project)
 
   const { data } = await apiPost<{ ok: true; data: InstallSkillsResponse }>(
@@ -137,10 +145,11 @@ async function runInstall(opts: { writeInstructions: boolean; project?: string }
   )
   const { project, providers, stats, skills } = data
 
+  // An explicit local path wins over the project folder on another computer.
   // A path only means something if it exists HERE: the folder that contains $PWD
   // when that is how the project was found, else the hub's answer — which may be a
   // folder on another computer, and is then skipped.
-  const candidate = localFolder ?? project.path
+  const candidate = explicitPath ?? localFolder ?? project.path
   const localPath = candidate && fs.existsSync(candidate) ? candidate : null
 
   if (opts.writeInstructions && localPath) {
@@ -171,18 +180,20 @@ async function runInstall(opts: { writeInstructions: boolean; project?: string }
  * silently ignored the project and fell back to cwd inference. `optsWithGlobals()`
  * merges the ancestor values in, so the flag resolves wherever it was captured.
  */
-function projectOpt(command: Command): string | undefined {
-  return command.optsWithGlobals<{ project?: string }>().project
+function installOpts(command: Command): { project?: string; path?: string } {
+  const { project, path } = command.optsWithGlobals<{ project?: string; path?: string }>()
+  return { project, path }
 }
 
 export function initCommand(): Command {
   const cmd = new Command('init')
     .description('Bootstrap SlayZone agent config (instructions + skills) for the current project')
     .option('-p, --project <name|id>', 'Project name or ID (defaults to project resolved from cwd)')
+    .option('--path <directory>', 'Local directory for instructions and skills')
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
     .action((_opts, command: Command) =>
-      runInstall({ writeInstructions: true, project: projectOpt(command) })
+      runInstall({ writeInstructions: true, ...installOpts(command) })
     )
 
   cmd
@@ -196,8 +207,9 @@ export function initCommand(): Command {
     .command('skills')
     .description('Install all built-in slay skills for the current project')
     .option('-p, --project <name|id>', 'Project name or ID (defaults to project resolved from cwd)')
+    .option('--path <directory>', 'Local directory for instructions and skills')
     .action((_opts, command: Command) =>
-      runInstall({ writeInstructions: false, project: projectOpt(command) })
+      runInstall({ writeInstructions: false, ...installOpts(command) })
     )
 
   return cmd

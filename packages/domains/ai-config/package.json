@@ -12,7 +12,8 @@
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
-    "./client/hooks": "./src/client/hooks.ts"
+    "./client/hooks": "./src/client/hooks.ts",
+    "./slay-setup": "./src/server/slay-setup.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

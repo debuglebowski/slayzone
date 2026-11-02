@@ -21,3 +21,12 @@ Centralized management for AI configuration:
 
 - `ContextManagerPage` / `ContextManagerShell` - Full-page Context Manager
 - `ContextItemEditor` - Inline editor for skills/commands
+
+## Slay setup
+
+The task banner sends `taskId`, `projectId`, and the effective workspace path.
+The hub injects a `SlayExecutor` resolving the same computer as workspace browsing;
+checks and setup execute there, never falling back to hub files after a remote
+failure. Standalone hosts retain the local ops. Computer handlers enforce allowed
+roots, run `slay init --path` with a temporary CLI relay capability, and share the
+instruction-file check through `@slayzone/ai-config/slay-setup`.

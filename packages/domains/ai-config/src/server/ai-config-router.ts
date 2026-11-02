@@ -1,3 +1,4 @@
+import { getSlayExecutor } from './slay-executor'
 import { z } from 'zod'
 import { getAiConfigOps, getMarketplaceOps } from './ai-config-ops'
 import type {
@@ -308,11 +309,23 @@ export const aiConfigRouter = router({
 
   // Slay
   checkSlayConfigured: publicProcedure
-    .input(z.object({ projectPath: z.string() }))
-    .query(({ input }) => getAiConfigOps().checkSlayConfigured(input.projectPath)),
+    .input(
+      z.object({
+        projectPath: z.string(),
+        projectId: z.string().optional(),
+        taskId: z.string().optional()
+      })
+    )
+    .query(({ input }) => getSlayExecutor().checkConfigured(input)),
   setupSlay: publicProcedure
-    .input(z.object({ projectPath: z.string(), projectId: z.string().optional() }))
-    .mutation(({ input }) => getAiConfigOps().setupSlay(input.projectPath, input.projectId)),
+    .input(
+      z.object({
+        projectPath: z.string(),
+        projectId: z.string().optional(),
+        taskId: z.string().optional()
+      })
+    )
+    .mutation(({ input }) => getSlayExecutor().setup(input)),
 
   // Marketplace
   marketplace: router({

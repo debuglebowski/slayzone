@@ -5,6 +5,7 @@ import { useTRPC } from './trpc'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 
 interface SlayNudgeBannerProps {
+  taskId: string
   projectPath: string
   projectId?: string
   onDismiss: () => void
@@ -14,6 +15,7 @@ interface SlayNudgeBannerProps {
 type RunState = 'idle' | 'running' | 'done' | 'error'
 
 export function SlayNudgeBanner({
+  taskId,
   projectPath,
   projectId,
   onDismiss,
@@ -28,12 +30,17 @@ export function SlayNudgeBanner({
   const runSetup = async () => {
     setSetupState('running')
     setError(null)
-    const result = await setupSlayMutation.mutateAsync({ projectPath, projectId })
-    if (result.ok) {
-      setSetupState('done')
-    } else {
+    try {
+      const result = await setupSlayMutation.mutateAsync({ taskId, projectPath, projectId })
+      if (result.ok) {
+        setSetupState('done')
+      } else {
+        setSetupState('error')
+        setError(result.error ?? 'Unknown error')
+      }
+    } catch (err) {
       setSetupState('error')
-      setError(result.error ?? 'Unknown error')
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 

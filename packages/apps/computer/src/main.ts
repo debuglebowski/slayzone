@@ -48,6 +48,7 @@ import { startHostIdReconciler } from './host-id'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createComputerCliRelay, type ComputerCliRelay } from './cli-relay'
 import { createFsHandlers } from './handlers/fs'
+import { createSlayHandlers } from './handlers/slay'
 import { createGhHandlers } from './handlers/gh'
 import { createClaudeSessionHandlers } from './handlers/claude-session'
 import { createGitHandlers } from './handlers/git'
@@ -199,6 +200,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...fs.handlers,
     ...createComputerConfigHandlers(ctx),
     ...createGhHandlers(ctx),
+    ...createSlayHandlers(ctx),
     ...createClaudeSessionHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
@@ -244,7 +246,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       if (
         method === HubToComputerMethods.ptySpawn ||
         method === HubToComputerMethods.ptyWarmSpawn ||
-        method === HubToComputerMethods.procSpawn
+        method === HubToComputerMethods.procSpawn ||
+        method === HubToComputerMethods.slaySetup
       )
         await cliReady
       if (deps.pathReady && !ptyMethods.has(method)) await deps.pathReady

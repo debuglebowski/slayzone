@@ -12,3 +12,10 @@ export {
 
 // `aiConfig.*` tRPC router (reads the ops registry above). Composed by `@slayzone/api`.
 export { aiConfigRouter, type AiConfigRouter, type AiConfigMounts } from './ai-config-router'
+
+export {
+  setSlayExecutor,
+  getSlayExecutor,
+  type SlayExecutor,
+  type SlayTarget
+} from './slay-executor'
