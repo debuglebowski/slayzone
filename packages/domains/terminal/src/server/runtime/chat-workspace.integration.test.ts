@@ -13,7 +13,8 @@ import {
   sendAndStart,
   emitLine,
   sj,
-  until
+  until,
+  wait
 } from './chat-transport-testkit'
 
 afterEach(() => mgr.__resetForTests())
@@ -47,6 +48,33 @@ it('does not take a late final snapshot after an exit without confirmation', asy
   ).toMatchObject({ status: 'unavailable' })
 })
 
+// A baseline (real git under a loaded machine) can take longer than any poll window:
+// sending a message waits for the agent to actually be handed it, however long that is.
+it('a message waits for a slow workspace baseline before the agent gets it', async () => {
+  const h = transportHarness()
+  let release!: () => void
+  const baseline = new Promise<void>((r) => (release = r))
+  mgr.configureTransport({
+    workspaceCapture: {
+      begin: async () => {
+        await baseline
+        return { status: 'ready' }
+      },
+      finish: async () => ({ status: 'complete', files: [] }),
+      discard: async () => {}
+    },
+    workspaceStore: { begin: async () => {}, save: async () => {}, get: async () => null }
+  })
+  await startTab()
+  const f = h.fakes[0]
+  const sent = sendAndStart(f, 'slow')
+  await wait(2500)
+  expect(f.stdin.some((m) => m.type === 'user')).toBe(false)
+  release()
+  await sent
+  expect(f.stdin.some((m) => m.type === 'user' && m.uuid === 'slow')).toBe(true)
+})
+
 it('saves shell changes through the real chat transport, and a second turn gets a fresh baseline', async () => {
   const root = mkdtempSync(join(tmpdir(), 'chat-workspace-integration-'))
   const db = await createTestHarness()
@@ -78,15 +106,9 @@ it('saves shell changes through the real chat transport, and a second turn gets 
     execFileSync('python3', ['-c', "open('file.ts','w').write('from shell\\n')"], { cwd: root })
     emitLine(f, sj.text('Done'))
     emitLine(f, sj.success('Done'))
-    await until(
-      () =>
-        h
-          .saved()
-          .some(
-            (e) =>
-              e.kind === 'workspace-changes' && e.messageId === 'first' && e.status === 'complete'
-          ),
-      15000
+    // On the saved event itself: the final snapshot is real git, no poll window fits it.
+    await h.savedWhen(
+      (e) => e.kind === 'workspace-changes' && e.messageId === 'first' && e.status === 'complete'
     )
     const event = h.saved().find((e) => e.kind === 'workspace-changes' && e.status === 'complete')
     if (event?.kind !== 'workspace-changes') throw new Error('Missing saved observation')
@@ -99,15 +121,9 @@ it('saves shell changes through the real chat transport, and a second turn gets 
     git('commit', '-qm', 'land')
     await sendAndStart(f, 'second')
     emitLine(f, sj.success('No edits'))
-    await until(
-      () =>
-        h
-          .saved()
-          .some(
-            (e) =>
-              e.kind === 'workspace-changes' && e.messageId === 'second' && e.status === 'complete'
-          ),
-      15000
+    // On the saved event itself: the final snapshot is real git, no poll window fits it.
+    await h.savedWhen(
+      (e) => e.kind === 'workspace-changes' && e.messageId === 'second' && e.status === 'complete'
     )
     expect(
       h

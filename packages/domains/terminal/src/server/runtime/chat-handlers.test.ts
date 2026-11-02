@@ -27,25 +27,55 @@ import {
   createTestHarness
 } from '../../../../../shared/test-utils/ipc-harness.js'
 
-function makeFakeChild(): ChildProcess {
+function makeFakeChild(
+  opts: {
+    /** Control requests (by subtype) this CLI answers with an error, as a CLI without them does. */
+    refuseControl?: string[]
+    /** Exit once killed, as a real child does (else `stop()` waits out its grace periods). */
+    exitOnKill?: boolean
+  } = {}
+): ChildProcess {
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
   // Like a real pipe: the callback reports the chunk reached the process.
   const stdin = {
-    write: (_s: string, cb?: (err?: Error | null) => void) => {
+    write: (s: string, cb?: (err?: Error | null) => void) => {
       cb?.()
+      for (const line of s.split('\n')) {
+        if (!line.trim()) continue
+        const msg = JSON.parse(line) as {
+          type?: string
+          request_id?: string
+          request?: { subtype?: string }
+        }
+        const subtype = msg.request?.subtype
+        if (msg.type === 'control_request' && subtype && opts.refuseControl?.includes(subtype)) {
+          const reply = {
+            type: 'control_response',
+            response: { subtype: 'error', request_id: msg.request_id, error: `no ${subtype}` }
+          }
+          setImmediate(() => stdout.write(`${JSON.stringify(reply)}\n`))
+        }
+      }
       return true
     }
   }
   // Like a real child: `spawn` fires once the OS started it (a later tick).
   setImmediate(() => emitter.emit('spawn'))
+  let killed = false
   return Object.assign(emitter, {
     stdout,
     stderr,
     stdin,
     pid: 12345,
-    kill: () => true
+    kill: (signal?: NodeJS.Signals) => {
+      if (opts.exitOnKill && !killed) {
+        killed = true
+        setImmediate(() => emitter.emit('exit', null, signal ?? 'SIGTERM'))
+      }
+      return true
+    }
   }) as unknown as ChildProcess
 }
 
@@ -481,7 +511,9 @@ test('chat:setModel persists to provider_config + respawns with --model flag', a
     whichBinary: async () => '/fake/claude',
     spawn: (_cmd, args) => {
       spawnArgsLog.push(args)
-      return makeFakeChild()
+      // A CLI that refuses `set_model`, so setModel takes its kill + respawn path —
+      // on the CLI's answer, and the killed process exits like a real one.
+      return makeFakeChild({ refuseControl: ['set_model'], exitOnKill: true })
     },
     broadcastEvent: () => {},
     broadcastExit: () => {},
@@ -529,7 +561,9 @@ test('chat:setModel persists to provider_config + respawns with --model flag', a
     | undefined
   const cfg = JSON.parse(cfgRow!.provider_config) as Record<string, { chatModel?: string }>
   expect(cfg[mode]?.chatModel).toBe('sonnet')
-})
+  // Far under the 30 s control-request timeout: the respawn follows the CLI's answer,
+  // never a timer running out (it used to: ~37 s per run, and 120 s+ under load).
+}, 15_000)
 
 test('chat:setModel rejects invalid model id', async () => {
   mgr.__resetForTests()

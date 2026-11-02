@@ -40,6 +40,8 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
     enableTelemetry: true
   })
   expect(d.label).toBeNull()
+  // This hub reads compact (base64) bytes in inputs, so a client may send them so.
+  expect(d.wire).toEqual({ compactBytes: true })
 })
 
 test('hub.setLabel persists a label that describe then reports', async () => {

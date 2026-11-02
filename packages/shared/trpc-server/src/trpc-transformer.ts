@@ -1,5 +1,6 @@
 import superjson from 'superjson'
 import type { SuperJSONResult } from 'superjson'
+import { wireSuperjson } from './wire-bytes'
 
 /**
  * The hub's tRPC transformer: superjson on the wire, with a fast path for the
@@ -30,7 +31,10 @@ import type { SuperJSONResult } from 'superjson'
  *   the fallback keeps that refusal);
  * - an array with holes or extra non-index keys (superjson walks them).
  *
- * Inputs (client → hub) keep plain superjson both ways.
+ * Inputs (client → hub) are superjson plus one custom transformer: bytes a client
+ * sent compactly (`bytes:base64`, see wire-bytes.ts) decode to a `Uint8Array`, and
+ * every other input — an older client's number-array bytes included — decodes
+ * exactly as plain superjson.
  */
 
 const OBJECT_PROTO = Object.prototype
@@ -82,7 +86,7 @@ export function serializeOutput(value: unknown): SuperJSONResult {
 }
 
 export const trpcTransformer = {
-  input: superjson,
+  input: wireSuperjson,
   output: {
     serialize: serializeOutput,
     deserialize: superjson.deserialize

@@ -34,6 +34,12 @@ export interface FakeChild {
    */
   controlSubtypes(): string[]
   controlRequests(subtype: string): Array<Record<string, unknown>>
+  /**
+   * The first stdin line matching `pred` — already written, or once it is. Event-driven,
+   * no deadline: what precedes a write (a workspace baseline is real git) takes as long
+   * as it takes; the test's own timeout is the bound.
+   */
+  written(pred: (msg: Record<string, unknown>) => boolean): Promise<Record<string, unknown>>
   exit(code: number | null, signal?: string | null): void
 }
 
@@ -44,8 +50,17 @@ export function fakeChild(opts: { exitOnKill?: boolean } = {}): FakeChild {
   const stdin: Array<Record<string, unknown>> = []
   const kills: string[] = []
   const answers = new Map<string, (request: Record<string, unknown>) => ControlAnswer>()
+  const waiters = new Set<{
+    pred: (msg: Record<string, unknown>) => boolean
+    resolve: (msg: Record<string, unknown>) => void
+  }>()
   let buf = ''
   const onLine = (msg: Record<string, unknown>): void => {
+    for (const w of waiters) {
+      if (!w.pred(msg)) continue
+      waiters.delete(w)
+      w.resolve(msg)
+    }
     if (msg.type !== 'control_request') return
     const request = (msg.request ?? {}) as Record<string, unknown>
     const fn = answers.get(String(request.subtype))
@@ -103,6 +118,11 @@ export function fakeChild(opts: { exitOnKill?: boolean } = {}): FakeChild {
         .map((r) => String(r.subtype))
         .filter((t) => t !== 'initialize'),
     controlRequests: (subtype) => controls().filter((r) => r.subtype === subtype),
+    written: (pred) => {
+      const seen = stdin.find(pred)
+      if (seen) return Promise.resolve(seen)
+      return new Promise((resolve) => waiters.add({ pred, resolve }))
+    },
     exit: (code, signal = null) => emitter.emit('exit', code, signal)
   }
 }
@@ -197,6 +217,8 @@ export interface TransportHarness {
   /** Every SAVED event, in order. */
   saved(): AgentEvent[]
   savedKinds(): string[]
+  /** The first SAVED event matching `pred` — already broadcast, or once it is. No deadline (see `FakeChild.written`). */
+  savedWhen(pred: (event: AgentEvent) => boolean): Promise<AgentEvent>
 }
 
 export function transportHarness(
@@ -212,13 +234,22 @@ export function transportHarness(
   } = {}
 ): TransportHarness {
   mgr.__resetForTests()
+  const savedWaiters = new Set<{
+    pred: (event: AgentEvent) => boolean
+    resolve: (event: AgentEvent) => void
+  }>()
   const h: TransportHarness = {
     fakes: [],
     broadcasts: [],
     rows: [],
     states: [],
     saved: () => h.broadcasts.filter((b) => b.live === undefined).map((b) => b.event),
-    savedKinds: () => h.saved().map((e) => e.kind)
+    savedKinds: () => h.saved().map((e) => e.kind),
+    savedWhen: (pred) => {
+      const seen = h.saved().find(pred)
+      if (seen) return Promise.resolve(seen)
+      return new Promise((resolve) => savedWaiters.add({ pred, resolve }))
+    }
   }
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
@@ -230,14 +261,21 @@ export function transportHarness(
       setImmediate(() => f.emitter.emit('spawn'))
       return f.child
     },
-    broadcastEvent: (_tab, event, seq, live, at) =>
+    broadcastEvent: (_tab, event, seq, live, at) => {
       h.broadcasts.push({
         kind: event.kind,
         seq,
         ...(live !== undefined ? { live } : {}),
         ...(at !== undefined ? { at } : {}),
         event
-      }),
+      })
+      if (live !== undefined) return
+      for (const w of savedWaiters) {
+        if (!w.pred(event)) continue
+        savedWaiters.delete(w)
+        w.resolve(event)
+      }
+    },
     broadcastExit: () => undefined,
     broadcastStateChange: (_id, state) => h.states.push(state),
     eventStore: {
@@ -274,7 +312,9 @@ export async function startTab(over: Partial<typeof TAB_OPTS> = {}): Promise<voi
 /** Send a user message through the outbox and let the fake take it (lifecycle queued + started). */
 export async function sendAndStart(f: FakeChild, id: string, text = 'hello'): Promise<void> {
   mgr.dispatchUserMessage(TAB_OPTS.tabId, { id, content: [{ type: 'text', text }] })
-  await until(() => f.stdin.some((m) => m.type === 'user' && m.uuid === id))
+  // On the write itself, not a poll window: the outbox writes only after the turn's
+  // workspace baseline, which is real git in the integration suite.
+  await f.written((m) => m.type === 'user' && m.uuid === id)
   emitLine(f, sj.lifecycle(id, 'queued'))
   emitLine(f, sj.lifecycle(id, 'started'))
   await wait(10)

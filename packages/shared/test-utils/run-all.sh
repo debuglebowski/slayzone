@@ -702,6 +702,9 @@ run_harness packages/apps/app/e2e/fixtures/stale-runtime-dirs.test.ts
 run_harness packages/shared/platform/src/node-pty-install.test.ts
 # e2e install-health gate: such an install must stop the run with the fix named.
 run_harness packages/apps/app/e2e/fixtures/install-health.test.ts
+# e2e chat_events seeding: batched by size, so a session of any size seeds (row-count
+# batches made one round trip as big as its 10,000 events).
+run_harness packages/apps/app/e2e/fixtures/chat-seed.test.ts
 
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
 run_harness packages/domains/task/src/server/events.test.ts
@@ -944,6 +947,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
   packages/shared/transport/src/client/runtime.test.ts \
+  packages/shared/transport/src/client/compactBytes.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
@@ -1129,6 +1133,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/api/src/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \
   packages/shared/trpc-server/src/trpc-transformer.test.ts \
+  packages/shared/trpc-server/src/wire-bytes.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

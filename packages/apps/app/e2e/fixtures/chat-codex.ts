@@ -12,7 +12,6 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Locator, Page } from '@playwright/test'
 import {
   createFakeCodex,
   type CodexScenario,
@@ -20,52 +19,33 @@ import {
   type FakeCodexEpoch,
   type FakeCodexRun
 } from '@slayzone/test-utils/fake-codex'
-import { knownBug, type ChatEventRow } from './chat'
-import {
-  createIsolatedGitRepo,
-  expect,
-  newRuntimeDir,
-  openTaskById,
-  seed,
-  test as base
-} from './electron'
+import { knownBug } from './chat'
+import { expect, newRuntimeDir, test as base } from './electron'
 import { closeAllTaskTabs } from './terminal'
-import { seedChatEvents } from './chat-seed'
+import {
+  chatDb,
+  openChatTaskCore,
+  setChatWatchdogTimings,
+  type ChatEventRow,
+  type ChatTaskCore
+} from './chat-task-core'
 
 export { expect, knownBug, type ChatEventRow }
 export * from '@slayzone/test-utils/fake-codex'
 
-export interface CodexChatTask {
-  taskId: string
-  tabId: string
-  /** The task's repo (the agent's cwd). */
-  cwd: string
+export interface CodexChatTask extends ChatTaskCore<'codex-chat'> {
   /** Every spawn of the fake for this task's scenario. */
   epoch: FakeCodexEpoch
-  page: Page
-  /** The visible chat panel of this task. */
-  panel: Locator
-  composer: Locator
-  stopButton: Locator
-  sendButton: Locator
-  /** Type into the composer and press Enter. */
-  send(text: string): Promise<void>
   /** Poll until spawn `index` exists and `pred` holds (default 15 s). */
   run(
     index: number,
     pred?: (run: FakeCodexRun) => boolean,
     timeoutMs?: number
   ): Promise<FakeCodexRun>
-  /** The tab's persisted chat events, ordered by seq. */
-  events(): Promise<ChatEventRow[]>
   /** The task's stored Codex thread id (`provider_config` mirror of the honored row), or null. */
   storedThread(): Promise<string | null>
   /** The task's conversation ledger (`task_conversations`) for codex-chat, oldest first. */
   conversations(): Promise<Array<{ conversationId: string | null; origin: string }>>
-  /** Reload the renderer (the hub and the agent keep running) and reopen this task. */
-  reload(): Promise<void>
-  /** `chat.<op>` input naming this tab. */
-  opts(): { tabId: string; taskId: string; mode: 'codex-chat'; cwd: string }
 }
 
 export interface OpenCodexChatTaskOpts {
@@ -112,28 +92,7 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   codexChat: async ({ mainWindow: page, electronApp, fakeCodex }, use) => {
     let watchdogChanged = false
     const orphansBefore = fakeCodex.orphans().length
-    const db = {
-      all: <T>(sql: string, params: unknown[] = []) =>
-        electronApp.evaluate(
-          async ({}, { q, p }) => {
-            const d = (globalThis as Record<string, unknown>).__db as {
-              all: (sql: string, params?: unknown[]) => Promise<unknown[]>
-            }
-            return d.all(q, p)
-          },
-          { q: sql, p: params }
-        ) as Promise<T[]>,
-      run: (sql: string, params: unknown[] = []) =>
-        electronApp.evaluate(
-          async ({}, { q, p }) => {
-            const d = (globalThis as Record<string, unknown>).__db as {
-              run: (sql: string, params?: unknown[]) => Promise<unknown>
-            }
-            await d.run(q, p)
-          },
-          { q: sql, p: params }
-        )
-    }
+    const db = chatDb(electronApp)
 
     const harness: CodexChatHarness = {
       fake: fakeCodex,
@@ -142,81 +101,28 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
         await closeAllTaskTabs(page)
         const epoch = fakeCodex.setScenario(opts.scenario)
         projectSeq += 1
-        const repo = createIsolatedGitRepo(`codex-chat-${projectSeq}-${Date.now()}`)
-        const s = seed(page)
-        const project = await s.createProject({
-          name: `Codex chat ${projectSeq}`,
-          color: '#a78bfa',
-          path: repo
-        })
-        const task = await s.createTask({
-          projectId: project.id,
-          title: opts.title,
-          status: 'todo',
-          terminalMode: 'codex-chat'
-        })
-        const tabId = await page.evaluate(async (id) => {
-          const tab = await window
-            .getTrpcVanillaClient()
-            .taskTerminals.ensureMain.mutate({ taskId: id, mode: 'codex-chat' })
-          return tab.id
-        }, task.id)
-        if (opts.conversationId) {
-          await db.run(
-            `UPDATE tasks SET provider_config =
-               json_set(COALESCE(provider_config, '{}'), '$."codex-chat".chatConversationId', ?)
-             WHERE id = ?`,
-            [opts.conversationId, task.id]
-          )
-        }
-        await seedChatEvents(electronApp, tabId, opts.seedEvents ?? [])
-        await s.refreshData()
-        await openTaskById(page, task.id)
-        const panel = page.locator('[data-chat-panel]:visible')
-        await expect(panel).toBeVisible({ timeout: 10_000 })
-        const composer = panel.locator('textarea')
-        if ((opts.spawn ?? 'on-open') === 'on-open') {
-          // As fixtures/chat.ts: pre-spawn the way the Restart button does, so a
-          // test can rely on its first message arriving.
-          await page.evaluate((o) => window.getTrpcVanillaClient().chat.start.mutate(o), {
-            tabId,
-            taskId: task.id,
-            mode: 'codex-chat',
-            cwd: repo
-          })
-          await epoch.waitForRun(0)
-        }
-        return {
-          taskId: task.id,
-          tabId,
-          cwd: repo,
-          epoch,
+        const core = await openChatTaskCore({
           page,
-          panel,
-          composer,
-          stopButton: panel.getByRole('button', { name: 'Stop generation' }),
-          sendButton: panel.getByRole('button', { name: 'Send', exact: true }),
-          async send(text) {
-            await expect(composer).toBeEnabled()
-            await composer.fill(text)
-            await composer.press('Enter')
-          },
+          electronApp,
+          db,
+          mode: 'codex-chat',
+          repoName: `codex-chat-${projectSeq}-${Date.now()}`,
+          project: { name: `Codex chat ${projectSeq}`, color: '#a78bfa' },
+          title: opts.title,
+          conversationId: opts.conversationId,
+          seedEvents: opts.seedEvents,
+          spawn: opts.spawn,
+          waitForFirstRun: () => epoch.waitForRun(0)
+        })
+        return {
+          ...core,
+          epoch,
           run: (index, pred, timeoutMs) => epoch.waitForRun(index, pred, timeoutMs),
-          async events() {
-            const rows = await db.all<{ seq: number; event: string }>(
-              'SELECT seq, event FROM chat_events WHERE tab_id = ? ORDER BY seq',
-              [tabId]
-            )
-            return rows.map((r) => ({
-              seq: r.seq,
-              event: JSON.parse(r.event) as ChatEventRow['event']
-            }))
-          },
           async storedThread() {
             const rows = await db.all<{ id: string | null }>(
               `SELECT json_extract(provider_config, '$."codex-chat".chatConversationId') AS id
                  FROM tasks WHERE id = ?`,
-              [task.id]
+              [core.taskId]
             )
             return rows[0]?.id ?? null
           },
@@ -224,24 +130,15 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
             return db.all<{ conversationId: string | null; origin: string }>(
               `SELECT conversation_id AS conversationId, origin FROM task_conversations
                  WHERE task_id = ? AND mode = 'codex-chat' ORDER BY created_at, rowid`,
-              [task.id]
+              [core.taskId]
             )
-          },
-          async reload() {
-            await page.reload({ waitUntil: 'domcontentloaded' })
-            await openTaskById(page, task.id)
-            await expect(panel).toBeVisible({ timeout: 10_000 })
-          },
-          opts: () => ({ tabId, taskId: task.id, mode: 'codex-chat', cwd: repo })
+          }
         }
       },
 
       async setWatchdogTimings(timings) {
         watchdogChanged = timings !== null
-        await page.evaluate(
-          (t) => window.getTrpcVanillaClient().chat.testSetWatchdogTimings.mutate({ timings: t }),
-          timings
-        )
+        await setChatWatchdogTimings(page, timings)
       }
     }
 

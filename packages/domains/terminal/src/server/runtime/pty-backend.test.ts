@@ -11,7 +11,7 @@
  *     seq — proving the dark default path is byte-identical.
  *
  */
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import type { PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -614,18 +614,28 @@ test("a computer that OWNS the startup deadline is never second-guessed by the h
 
   const ownedSid = 'deadlineOwned:deadlineOwned'
   const legacySid = 'deadlineLegacy:deadlineLegacy'
-  for (const sid of [ownedSid, legacySid]) {
-    await createPty({
-      win: fakeWin,
-      sessionId: sid,
-      cwd: '/tmp',
-      mode: 'terminal',
-      type: 'terminal',
-      computerId: 'computer-1'
-    })
+  // The deadlines run on a clock this test drives. On the wall clock a loaded machine
+  // could wake with the 10 s deadline AND the test's own 10.7 s sleep both due: the
+  // sleep's continuation then asserts before the deadline's verdict (delivered by a
+  // setImmediate, see startup-deadline.ts) has run. setImmediate stays real.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    for (const sid of [ownedSid, legacySid]) {
+      await createPty({
+        win: fakeWin,
+        sessionId: sid,
+        cwd: '/tmp',
+        mode: 'terminal',
+        type: 'terminal',
+        computerId: 'computer-1'
+      })
+    }
+    // Past the 10 s deadline, then one real check phase: the verdict was queued first.
+    await vi.advanceTimersByTimeAsync(10_700)
+    await new Promise((r) => setImmediate(r))
+  } finally {
+    vi.useRealTimers()
   }
-
-  await new Promise((r) => setTimeout(r, 10_700))
 
   expect(
     owned.killed.length,
@@ -645,7 +655,8 @@ test("a computer that OWNS the startup deadline is never second-guessed by the h
   killPty(legacySid)
   legacy.emitExit(-2)
   setPtyBackend(null)
-})
+  // On a clock the test drives: never a wall-clock race with the 10 s deadline.
+}, 5_000)
 
 test('an exit the owner attributes to its startup deadline goes through the normal exit path', async () => {
   const handle = makeFakeHandle({

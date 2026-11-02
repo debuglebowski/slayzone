@@ -7,13 +7,14 @@
  * `hub.describe`; the client asks once and skips what the scope gate would refuse.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
+import { hubAllows, hubPermitsTelemetry, hubReadsCompactBytes } from './hubCapabilities'
 import type { RuntimeClient } from './runtime'
 
 function fakeClient(
   describe: () => Promise<{
     scopes?: string[] | null
     switches?: { enableTelemetry?: boolean }
+    wire?: { compactBytes?: boolean }
   }>
 ) {
   const query = vi.fn(describe)
@@ -102,5 +103,30 @@ describe('hubPermitsTelemetry', () => {
     expect(await hubAllows(client, 'settings.get')).toBe(true)
     expect(await hubPermitsTelemetry(client)).toBe(false)
     expect(query).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** `hubReadsCompactBytes` — may an input's bytes go as base64 (`compactBytesLink`)? Fails to plain superjson. */
+describe('hubReadsCompactBytes', () => {
+  it('a hub that says so reads them', async () => {
+    const { client } = fakeClient(async () => ({ wire: { compactBytes: true } }))
+    expect(await hubReadsCompactBytes(client)).toBe(true)
+  })
+
+  it('a hub older than the field does not', async () => {
+    const { client } = fakeClient(async () => ({ scopes: null }))
+    expect(await hubReadsCompactBytes(client)).toBe(false)
+  })
+
+  it('a hub that cannot be asked gets plain superjson, and is asked again next time', async () => {
+    let calls = 0
+    const { client, query } = fakeClient(async () => {
+      calls += 1
+      if (calls === 1) throw new Error('hub down')
+      return { wire: { compactBytes: true } }
+    })
+    expect(await hubReadsCompactBytes(client)).toBe(false)
+    expect(await hubReadsCompactBytes(client)).toBe(true)
+    expect(query).toHaveBeenCalledTimes(2)
   })
 })

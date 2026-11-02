@@ -7,8 +7,10 @@ import {
   type TRPCLink
 } from '@trpc/client'
 import type { AnyTRPCRouter } from '@trpc/server'
-import superjson from 'superjson'
+import { wireSuperjson } from '@slayzone/trpc-server/wire'
+import { compactBytesLink } from './compactBytesLink'
 import { connectDeadlineLink } from './connectDeadlineLink'
+import { hubReadsCompactBytes } from './hubCapabilities'
 import { createConnectPacer } from './connectPacing'
 
 /**
@@ -72,24 +74,33 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
     // keeps the connect frame identical to the untokened (local) path.
     ...(opts.token ? { connectionParams: async () => ({ token: opts.token as string }) } : {})
   })
-  return {
-    wsClient,
-    client: createTRPCClient<AnyTRPCRouter>({
-      links: [
-        ...(opts.links ?? []),
-        // AFTER the caller's links (the fork's mojo link resolves browser ops
-        // locally and must not be gated on a WS that isn't part of its path),
-        // and immediately BEFORE the terminating wsLink — everything it guards
-        // is an operation actually bound for this socket.
-        connectDeadlineLink({
-          connectionState: wsClient.connectionState,
-          deadlineMs: opts.connectDeadlineMs,
-          hubUrl: opts.url
-        }),
-        wsLink({ client: wsClient, transformer: superjson })
-      ]
-    })
-  }
+  // The link asks THIS client's hub (`hub.describe`) — the client exists by the time
+  // any operation runs, so the late binding never reads null.
+  let self: RuntimeClient | null = null
+  const client = createTRPCClient<AnyTRPCRouter>({
+    links: [
+      ...(opts.links ?? []),
+      // Bytes in an input go as base64 to a hub that reads it (see compactBytesLink).
+      // Before the deadline link: its `hub.describe` question is itself guarded.
+      compactBytesLink({
+        hubReadsCompactBytes: () => (self ? hubReadsCompactBytes(self) : Promise.resolve(false))
+      }),
+      // AFTER the caller's links (the fork's mojo link resolves browser ops
+      // locally and must not be gated on a WS that isn't part of its path),
+      // and immediately BEFORE the terminating wsLink — everything it guards
+      // is an operation actually bound for this socket.
+      connectDeadlineLink({
+        connectionState: wsClient.connectionState,
+        deadlineMs: opts.connectDeadlineMs,
+        hubUrl: opts.url
+      }),
+      // superjson plus the compact-bytes transformer: serializes an unmarked value
+      // byte-for-byte like plain superjson (`@slayzone/trpc-server/wire`).
+      wsLink({ client: wsClient, transformer: wireSuperjson })
+    ]
+  })
+  self = client
+  return { wsClient, client }
 }
 
 export type RuntimeWsClient = ReturnType<typeof createTrpcWsClient>['wsClient']

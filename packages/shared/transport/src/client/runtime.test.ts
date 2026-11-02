@@ -31,8 +31,9 @@ vi.mock('@trpc/client', () => ({
 vi.mock('@trpc/tanstack-react-query', () => ({
   createTRPCContext: () => ({ TRPCProvider: null, useTRPC: null, useTRPCClient: null })
 }))
-vi.mock('superjson', () => ({ default: {} }))
+vi.mock('@slayzone/trpc-server/wire', () => ({ wireSuperjson: {} }))
 vi.mock('./connectDeadlineLink', () => ({ connectDeadlineLink: vi.fn(() => ({})) }))
+vi.mock('./compactBytesLink', () => ({ compactBytesLink: vi.fn(() => ({})) }))
 
 const { initTrpcClient, _setTrpcClientSingleton } = await import('./runtime')
 

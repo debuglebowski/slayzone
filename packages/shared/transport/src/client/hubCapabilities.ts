@@ -5,6 +5,7 @@ import type { RuntimeClient } from './runtime'
 type HubDescribe = {
   scopes?: readonly Scope[] | null
   switches?: { enableTelemetry?: boolean }
+  wire?: { compactBytes?: boolean }
 }
 
 /**
@@ -68,6 +69,20 @@ export async function hubAllows(client: RuntimeClient, path: string): Promise<bo
 export async function hubPermitsTelemetry(client: RuntimeClient): Promise<boolean> {
   return describeOf(client).then(
     (d) => d.switches?.enableTelemetry !== false,
+    () => false
+  )
+}
+
+/**
+ * Does the hub behind `client` read compact (base64) bytes in inputs —
+ * `hub.describe`'s `wire.compactBytes` (`compactBytesLink`)?
+ *
+ * False for a hub older than the field, and when the hub cannot be asked: the client
+ * then sends plain superjson, which every hub reads. Not remembered on failure.
+ */
+export async function hubReadsCompactBytes(client: RuntimeClient): Promise<boolean> {
+  return describeOf(client).then(
+    (d) => d.wire?.compactBytes === true,
     () => false
   )
 }

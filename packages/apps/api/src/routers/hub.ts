@@ -41,6 +41,11 @@ export const hubRouter = router({
    * `scopes` are what the scope gate checks for THIS caller (`scopes.ts`): null when
    * the gate is off (a hub without login) or there is no principal — nothing to check. A client checks them before a call the
    * scope gate would only refuse (`hubAllows`, #164) — the gate stays the boundary.
+   *
+   * `wire` lists the wire encodings this hub READS beyond plain superjson, so a
+   * client sends them only to a hub that can: `compactBytes` = a `Uint8Array` in an
+   * input may come as base64 (`bytes:base64`, `@slayzone/trpc-server/wire`). A hub
+   * older than the field sends none, and the client keeps plain superjson for it.
    */
   describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
@@ -50,7 +55,8 @@ export const hubRouter = router({
       version: getAppDeps().appGetVersion(),
       authRequired: deps?.getAuthRequired() ?? false,
       switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS },
-      scopes: getAuthGate() ? (ctx.principal?.scopes ?? null) : null
+      scopes: getAuthGate() ? (ctx.principal?.scopes ?? null) : null,
+      wire: { compactBytes: true as const }
     }
   }),
 
