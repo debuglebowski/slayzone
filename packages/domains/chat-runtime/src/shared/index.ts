@@ -1,0 +1,51 @@
+import type { AgentEvent } from '@slayzone/terminal-contracts'
+
+/** Storage identity is independent of a provider session id, which may not exist yet. */
+export interface ConversationIdentity {
+  id: string
+  taskId: string
+  tabId: string
+  mode: string
+  epoch: number
+}
+export interface StoredChatEvent {
+  seq: number
+  at: number
+  event: AgentEvent
+}
+export type ChatRecordKind =
+  | 'draft'
+  | 'queue'
+  | 'prompt'
+  | 'thread'
+  | 'workspace'
+  | 'attachment'
+  | 'settings'
+  | 'timeline'
+export interface ChatRecord {
+  kind: ChatRecordKind
+  id: string
+  value: unknown
+  at: number
+}
+export interface CommandReceipt {
+  id: string
+  hash: string
+  state: 'accepted' | 'delivered'
+  result: unknown
+}
+export interface ChatMigrationSnapshot {
+  version: 1
+  migrationId: string
+  identity: ConversationIdentity
+  events: StoredChatEvent[]
+  records: ChatRecord[]
+  receipts: CommandReceipt[]
+  hash: string
+}
+export interface ChatOwnership {
+  identity: ConversationIdentity
+  state: 'active' | 'frozen' | 'prepared' | 'deleted'
+  migrationId: string | null
+  migrationHash: string | null
+}

@@ -1633,3 +1633,28 @@ test('picking a terminal session in the chat releases the terminal running it fi
   expect(order).toEqual([`release task ${PICKED}`])
   setClaudeSessionReader(null)
 })
+
+test('chat ops use their injected transport without replacing another hub runtime', async () => {
+  const db = await setupDb()
+  seedTask(db, 'isolated-task', '{}', 'isolated-tab')
+  const a = mgr.createChatTransport(),
+    b = mgr.createChatTransport()
+  const oa = createChatOps({ ...localChatOpts(db), transport: a })
+  const ob = createChatOps({ ...localChatOpts(db), transport: b })
+  const opts = { taskId: 'isolated-task', tabId: 'isolated-tab', mode: 'claude-chat', cwd: '/tmp' }
+  try {
+    await oa.hydrate(opts)
+    expect(a.getSessionInfo(opts.tabId)).not.toBeNull()
+    expect(b.getSessionInfo(opts.tabId)).toBeNull()
+    await ob.hydrate(opts)
+    await oa.remove(opts.tabId)
+    expect(a.getSessionInfo(opts.tabId)).toBeNull()
+    expect(b.getSessionInfo(opts.tabId)).not.toBeNull()
+  } finally {
+    await a.removeSession('isolated-tab')
+    await b.removeSession('isolated-tab')
+    a.__resetForTests()
+    b.__resetForTests()
+    db.close()
+  }
+})

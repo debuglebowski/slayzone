@@ -854,3 +854,50 @@ function eqMethod(msg: Record<string, unknown> | undefined, method: string): voi
   expect(msg, `expected a message with method ${method}`).not.toBe(undefined)
   expect(msg!.method, 'method mismatch').toEqual(method)
 }
+
+test('attachment reads are scoped to the driver context, not another hub reader', async () => {
+  const calls: string[] = []
+  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
+  const a = makeHarness({
+    attachmentReader: {
+      read: async () => {
+        calls.push('a')
+        return png
+      }
+    }
+  })
+  const b = makeHarness({
+    attachmentReader: {
+      read: async () => {
+        calls.push('b')
+        return png
+      }
+    }
+  })
+  await handshake(a)
+  await handshake(b)
+  const message = {
+    id: 'image-message',
+    content: [
+      {
+        type: 'attachment' as const,
+        attachment: {
+          artifactId: 'same-id',
+          contentHash: 'hash',
+          name: 'a.png',
+          kind: 'image' as const,
+          mediaType: 'image/png' as const,
+          size: png.length
+        }
+      }
+    ]
+  }
+  try {
+    await a.driver.prepareUserTurn!(message)
+    await b.driver.prepareUserTurn!(message)
+    expect(calls).toEqual(['a', 'b'])
+  } finally {
+    a.driver.dispose()
+    b.driver.dispose()
+  }
+})

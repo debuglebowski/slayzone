@@ -193,3 +193,47 @@ test('every appended event is stamped with the time it was saved: kept, written,
     vi.useRealTimers()
   }
 })
+
+test('synchronous persistence finishes before an event enters the visible log', () => {
+  const writes: number[] = []
+  const log = new ChatEventLog(
+    'local-tab',
+    {
+      insert: async () => {
+        throw new Error('async path must not run')
+      },
+      insertSync: (_tab, seq) => {
+        writes.push(seq)
+        return 'inserted'
+      },
+      readRange: async () => []
+    },
+    { events: [], nextSeq: 0 }
+  )
+  log.append({ kind: 'assistant-text', messageId: 'm', text: 'saved' })
+  expect(writes).toEqual([0])
+  expect(log.events).toHaveLength(1)
+})
+
+test('a failed synchronous save does not publish or consume an event sequence', () => {
+  let full = true
+  const log = new ChatEventLog(
+    'local-tab',
+    {
+      insert: async () => 'inserted',
+      insertSync: () => {
+        if (full) throw new Error('disk full')
+        return 'inserted'
+      },
+      readRange: async () => []
+    },
+    { events: [], nextSeq: 0 }
+  )
+  expect(() => log.append({ kind: 'assistant-text', messageId: 'm', text: 'not saved' })).toThrow(
+    'disk full'
+  )
+  expect(log.events).toEqual([])
+  expect(log.lastSeq).toBe(-1)
+  full = false
+  expect(log.append({ kind: 'assistant-text', messageId: 'm', text: 'saved' }).seq).toBe(0)
+})

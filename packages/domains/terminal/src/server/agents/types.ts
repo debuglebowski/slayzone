@@ -1,3 +1,4 @@
+import type { ChatAttachmentReader } from './chat-attachment-reader'
 import type {
   AgentEvent,
   CommandTaskOutput,
@@ -160,6 +161,8 @@ export type { PermissionDecision }
  * touches those directly.
  */
 export interface ChatDriverContext {
+  /** Per-runtime reader; content must never cross hub namespaces. */
+  attachmentReader?: ChatAttachmentReader
   /** Write one protocol line to child stdin. The transport appends the newline. */
   write(line: string): void
   /**

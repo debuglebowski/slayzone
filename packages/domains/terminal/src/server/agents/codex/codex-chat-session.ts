@@ -912,7 +912,10 @@ class CodexChatSession implements ChatSessionDriver {
    * rewind or fork at. Attached bytes were prepared before the outbox starts sending.
    */
   async prepareUserTurn(message: OutgoingUserMessage): Promise<PreparedUserTurn> {
-    const input = await buildCodexContent(message.content, getChatAttachmentReader())
+    const input = await buildCodexContent(
+      message.content,
+      this.ctx?.attachmentReader ?? getChatAttachmentReader()
+    )
     return { id: message.id, line: JSON.stringify(input) }
   }
 

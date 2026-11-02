@@ -648,6 +648,10 @@ run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
+run_harness packages/domains/chat-runtime/src/server/storage.test.ts
+run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 # Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts

@@ -153,7 +153,7 @@ function endsCauseWindow(ev: AgentEvent): boolean {
 export class ClaudeSessionDriver implements ChatSessionDriver {
   /** Claude reports delivery itself: `command_lifecycle` + the replay of the message `uuid`. */
   readonly confirmsDelivery = true
-  private readonly readAttachment: ChatAttachmentReader | undefined
+  private readAttachment: ChatAttachmentReader | undefined
 
   constructor(opts: { readAttachment?: ChatAttachmentReader } = {}) {
     this.readAttachment = opts.readAttachment
@@ -189,6 +189,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
       emit: (ev) => this.ctx?.emit(ev),
       startedAt: Date.now()
     })
+    this.readAttachment = ctx.attachmentReader ?? this.readAttachment
     const { written, response } = this.issueControl(
       { subtype: 'initialize' },
       INITIALIZE_TIMEOUT_MS

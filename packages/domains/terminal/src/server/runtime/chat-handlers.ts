@@ -1,3 +1,4 @@
+import { defaultChatTransport, type ChatTransport } from './chat-transport-manager'
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
@@ -53,12 +54,12 @@ import {
 } from './chat-transport-manager'
 import { resolveAgentFolder } from './spawn-target'
 import type { ChatDataOps } from './chat-data-ops'
-import { releaseConversation } from './live-conversations'
+import { releaseConversation as defaultConversationRelease } from './live-conversations'
 import { admitAttachments } from './chat-attachment-guard'
 import {
   registerChatQueueHandlers,
   createChatQueueOps,
-  notifyChatQueueChanged
+  notifyChatQueueChanged as defaultNotifyChatQueueChanged
 } from './chat-queue-handlers'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../adapters/flag-parser'
@@ -149,6 +150,11 @@ export interface ChatHandlerOpts {
    * impl (`createDbChatDataOps(db, taskStore)`), which runs the same SQL the
    * handlers always ran. */
   dataOps: ChatDataOps
+  transport?: ChatTransport
+  onStateChange?: TransportDeps['onStateChange']
+  conversations?: import('./live-conversations').ConversationRegistry
+  sessionReader?: ClaudeSessionReader
+  notifyQueueChanged?: (tabId: string) => void
 }
 
 interface ChatCreateOpts {
@@ -555,7 +561,8 @@ const HISTORY_MAX_BYTES = 4 * 1024 * 1024
 async function loadConversationHistory(
   data: ChatDataOps,
   o: { taskId: string; cwd: string },
-  sessionId: string
+  sessionId: string,
+  reader: ClaudeSessionReader | null = claudeSessionReader
 ): Promise<{ history: ChatAgentEvent[]; notices: ChatAgentEvent[]; title?: string }> {
   const notice = (
     code: 'history-truncated' | 'history-unavailable',
@@ -567,7 +574,7 @@ async function loadConversationHistory(
     code,
     text
   })
-  if (!claudeSessionReader) {
+  if (!reader) {
     return {
       history: [],
       notices: [
@@ -579,7 +586,7 @@ async function loadConversationHistory(
     }
   }
   try {
-    const res = await claudeSessionReader({
+    const res = await reader({
       taskId: o.taskId,
       computerId: await data.resolveComputerId(o.taskId),
       projectId: await data.getTaskProjectId(o.taskId),
@@ -657,9 +664,57 @@ function assertCapability(
  * transport once on creation; the IPC and tRPC layers are thin delegators.
  */
 /** The live listener of the latest `createChatOps` (replaced, never stacked). */
-let cliDetailsListener: ((tabId: string, event: AgentEvent) => void) | null = null
+const cliDetailsListeners = new WeakMap<ChatTransport, (tabId: string, event: AgentEvent) => void>()
 
 export function createChatOps(opts: ChatHandlerOpts) {
+  const transport = opts.transport ?? defaultChatTransport
+  const {
+    hydrateSession,
+    ensureSpawned,
+    dispatchUserMessage,
+    recordCodexPlanDecision,
+    respawn,
+    getReplay,
+    openTimeline,
+    timelinePages,
+    searchTimeline,
+    getCommandTaskOutput,
+    stopCommandTask,
+    backgroundCommandTask,
+    sendToolResult,
+    sendControlRequest,
+    respondToPermissionRequest,
+    updateSessionChatMode,
+    changeCodexPermissionsAndResume,
+    updateSessionChatModel,
+    updateSessionChatEffort,
+    updateSessionChatCollaboration,
+    updateSessionChatFastMode,
+    kill: killChat,
+    removeSession,
+    recordInterrupted,
+    stopTurn,
+    previewRewind,
+    rewindTab,
+    forkTab,
+    threadForkSource,
+    confirmedConversation,
+    releaseChatConversation,
+    switchTabConversation,
+    getEventBufferSince,
+    readEventsSince,
+    getSessionInfo,
+    getSessionTerminalState,
+    killAll,
+    shutdownAll,
+    configureTransport,
+    chatEvents
+  } = transport
+  const releaseConversation = opts.conversations?.releaseConversation ?? defaultConversationRelease
+  const notifyChatQueueChanged = opts.notifyQueueChanged ?? defaultNotifyChatQueueChanged
+  const previousCliDetailsListener = cliDetailsListeners.get(transport)
+  let cliDetailsListener: (tabId: string, event: AgentEvent) => void
+
   // Data seam: all tasks/chat_events/autocomplete access goes through this.
   // The local-DB impl (same SQL as before the hub/computer split) is built by
   // the composition root, which owns the task-side `taskStore` it needs.
@@ -691,7 +746,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
   // The models the CLI offers (Codex `model/list`, live-only like the details):
   // stored per project + mode for `getModels`; only a change is written.
   const storedCliModels = new Map<string, string>()
-  if (cliDetailsListener) chatEvents.off('event', cliDetailsListener)
+  if (previousCliDetailsListener) chatEvents.off('event', previousCliDetailsListener)
   cliDetailsListener = (tabId, event) => {
     if (event.kind === 'cli-models') {
       const info = getSessionInfo(tabId)
@@ -718,6 +773,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       console.error('[chat-handlers] saveCliCommandDetails failed:', err)
     })
   }
+  cliDetailsListeners.set(transport, cliDetailsListener)
   chatEvents.on('event', cliDetailsListener)
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
@@ -729,12 +785,14 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // onStateChange fires both endpoints are real terminal states — cast
       // narrows them down for the global listener.
       if (newState === 'not-spawned' || oldState === 'not-spawned') return
-      notifyGlobalStateListeners(sessionId, newState, oldState)
+      if (opts.onStateChange) opts.onStateChange(sessionId, newState, oldState)
+      else notifyGlobalStateListeners(sessionId, newState, oldState)
     },
     // The tabs' saved history: the transport loads it (after any previous
     // instance of the tab finished writing) and writes it insert-only, in order.
     eventStore: {
       load: (tabId) => data.loadChatEvents(tabId),
+      insertSync: data.persistChatEventSync?.bind(data),
       insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
       readRange: (tabId, afterSeq, beforeSeq) =>
         data.loadChatEventsRange(tabId, afterSeq, beforeSeq)
@@ -1157,7 +1215,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       const fromAgent = o.mode === 'codex-chat'
       const loaded: Awaited<ReturnType<typeof loadConversationHistory>> = fromAgent
         ? { history: [], notices: [] }
-        : await loadConversationHistory(data, o, o.conversationId)
+        : await loadConversationHistory(data, o, o.conversationId, opts.sessionReader)
       await data.recordConversation({
         taskId: o.taskId,
         mode: o.mode,
@@ -1222,7 +1280,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       const conversationId = await data.getCurrentConversationId(o.taskId, terminalMode)
       if (!conversationId) throw new Error('The terminal has no conversation to continue yet.')
       await releaseConversation('terminal', o.taskId, conversationId)
-      const loaded = await loadConversationHistory(data, o, conversationId)
+      const loaded = await loadConversationHistory(data, o, conversationId, opts.sessionReader)
       await data.recordConversation({
         taskId: o.taskId,
         mode: o.mode,

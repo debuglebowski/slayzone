@@ -125,6 +125,12 @@ export interface ChatDataOps {
     event: AgentEvent,
     at?: number
   ): Promise<'inserted' | 'clash'>
+  persistChatEventSync?(
+    tabId: string,
+    seq: number,
+    event: AgentEvent,
+    at: number
+  ): 'inserted' | 'clash'
   loadChatEvents(tabId: string): Promise<BufferedEvent[]>
   /** Original artifact references across this task’s tabs and forks, including reset tabs. */
   loadUserMessageContent?(taskId: string, ids: string[]): Promise<Map<string, UserContentBlock[]>>

@@ -22,31 +22,36 @@ export interface ConversationHolder {
   release(taskId: string, conversationId: string): Promise<void>
 }
 
-const holders = new Map<ConversationSide, ConversationHolder>()
+export function createConversationRegistry() {
+  const holders = new Map<ConversationSide, ConversationHolder>()
 
-/** Register a side (once, at module load; a later call replaces it). */
-export function registerConversationHolder(
-  side: ConversationSide,
-  holder: ConversationHolder
-): void {
-  holders.set(side, holder)
-}
+  /** Register a side (once, at module load; a later call replaces it). */
+  function registerConversationHolder(side: ConversationSide, holder: ConversationHolder): void {
+    holders.set(side, holder)
+  }
 
-export function isConversationLive(
-  side: ConversationSide,
-  taskId: string,
-  conversationId: string
-): boolean {
-  return holders.get(side)?.isLive(taskId, conversationId) ?? false
-}
+  function isConversationLive(
+    side: ConversationSide,
+    taskId: string,
+    conversationId: string
+  ): boolean {
+    return holders.get(side)?.isLive(taskId, conversationId) ?? false
+  }
 
-export async function releaseConversation(
-  side: ConversationSide,
-  taskId: string,
-  conversationId: string
-): Promise<void> {
-  await holders.get(side)?.release(taskId, conversationId)
+  async function releaseConversation(
+    side: ConversationSide,
+    taskId: string,
+    conversationId: string
+  ): Promise<void> {
+    await holders.get(side)?.release(taskId, conversationId)
+  }
+
+  return { registerConversationHolder, isConversationLive, releaseConversation }
 }
+export type ConversationRegistry = ReturnType<typeof createConversationRegistry>
+export const defaultConversationRegistry = createConversationRegistry()
+export const { registerConversationHolder, isConversationLive, releaseConversation } =
+  defaultConversationRegistry
 
 /** What a refused start says: the other side runs this conversation. */
 export function conversationInUseMessage(runningIn: ConversationSide): string {

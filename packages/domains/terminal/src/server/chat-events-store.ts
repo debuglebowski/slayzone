@@ -46,6 +46,8 @@ export async function persistChatEvent(
 /** Where a {@link ChatEventLog} writes its rows, and reads back what left its cache. */
 export interface ChatEventPersistence {
   insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
+  /** Local SQLite can commit before an event becomes visible. */
+  insertSync?(tabId: string, seq: number, event: AgentEvent, at: number): 'inserted' | 'clash'
   /** Saved events with `afterSeq < seq < beforeSeq`, in seq order. */
   readRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
 }
@@ -105,20 +107,33 @@ export class ChatEventLog {
 
   /** Assign the next seq and the time it is saved, keep it in memory, and queue its write. */
   append(event: AgentEvent): BufferedEvent & { at: number } {
-    const entry = { seq: this.nextSeq++, event, at: Date.now() }
+    const entry = { seq: this.nextSeq, event, at: Date.now() }
+    if (this.persistence.insertSync) {
+      try {
+        if (this.persistence.insertSync(this.tabId, entry.seq, event, entry.at) === 'clash') {
+          this.opts.onClash?.(entry.seq, event)
+          throw new Error(`Chat event sequence ${entry.seq} already exists`)
+        }
+      } catch (err) {
+        this.opts.onWriteError?.(entry.seq, err)
+        throw err
+      }
+    }
+    this.nextSeq++
     this.ring.push(entry)
     if (this.ring.length > this.cap) {
       const evicted = this.ring.splice(0, this.ring.length - this.cap)
       this.evictedThrough = evicted[evicted.length - 1].seq
     }
-    this.chain = this.chain.then(async () => {
-      try {
-        const outcome = await this.persistence.insert(this.tabId, entry.seq, event, entry.at)
-        if (outcome === 'clash') this.opts.onClash?.(entry.seq, event)
-      } catch (err) {
-        this.opts.onWriteError?.(entry.seq, err)
-      }
-    })
+    if (!this.persistence.insertSync)
+      this.chain = this.chain.then(async () => {
+        try {
+          const outcome = await this.persistence.insert(this.tabId, entry.seq, event, entry.at)
+          if (outcome === 'clash') this.opts.onClash?.(entry.seq, event)
+        } catch (err) {
+          this.opts.onWriteError?.(entry.seq, err)
+        }
+      })
     return entry
   }
 
