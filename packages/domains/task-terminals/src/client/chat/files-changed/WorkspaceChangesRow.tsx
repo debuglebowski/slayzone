@@ -137,11 +137,21 @@ function SavedFile({
   )
 }
 
+/** A recorded edit touched a file inside `cwd` (unknown cwd: assume yes). */
+function editedInside(recorded: RecordedChanges | undefined, cwd: string | undefined): boolean {
+  if (!recorded) return false
+  if (!cwd) return true
+  // A relative path is relative to the agent's cwd: inside.
+  return recorded.files.some(
+    (f) => !/^([/\\]|[A-Za-z]:)/.test(f.path) || relativeToCwd(f.path, cwd) !== f.path
+  )
+}
+
 /** One turn summary: filesystem result takes precedence over tool activity. */
 export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; embedded?: boolean }) {
   const [open, setOpen] = useRowUiState('workspace-changes', false, false)
   const id = useId()
-  const { filesPanel, timeline } = useChatView()
+  const { filesPanel, timeline, cwd } = useChatView()
   const recorded = [...turnChangeSources(timeline)].find(
     ([row]) => row.captureId === item.captureId
   )?.[1]
@@ -151,8 +161,10 @@ export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; emb
   // Failed capture + no recorded edits = nothing to show. An agent-cut turn keeps its card:
   // it is that turn's only "Turn interrupted" signal.
   if (item.status === 'unavailable' && !item.interrupted) return null
-  // Nothing changed and nothing was edited: no card. Reverted edits keep their true zero.
-  if (item.status === 'complete' && item.fileCount === 0 && !recorded) return null
+  // Nothing changed in the workspace: no card, unless an edit inside it was reverted (true zero).
+  // Edits outside the workspace (e.g. artifacts) can't show up in its diff, so they don't count.
+  if (item.status === 'complete' && item.fileCount === 0 && !editedInside(recorded, cwd))
+    return null
   const label =
     item.status === 'pending'
       ? 'Checking changes…'

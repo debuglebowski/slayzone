@@ -233,6 +233,7 @@ it('retains a true zero count when recorded edits were reverted', () => {
     <ChatViewContext.Provider
       value={{
         ...defaultChatView,
+        cwd: '/repo',
         timeline: [
           { kind: 'user-text', id: 'u', text: 'edit', timestamp: 0 },
           {
@@ -253,4 +254,39 @@ it('retains a true zero count when recorded edits were reverted', () => {
     </ChatViewContext.Provider>
   )
   expect(screen.getByRole('button', { name: /0 files changed/ })).toBeTruthy()
+})
+
+it('hides a zero-change turn whose recorded edits are all outside the workspace', () => {
+  const zero = { ...workspace, fileCount: 0 }
+  render(
+    <ChatViewContext.Provider
+      value={{
+        ...defaultChatView,
+        cwd: '/repo',
+        timeline: [
+          { kind: 'user-text', id: 'u', text: 'edit artifact', timestamp: 0 },
+          {
+            kind: 'files-changed',
+            id: 'files:t',
+            timestamp: 2,
+            shellCommands: 0,
+            files: [
+              {
+                path: '/home/me/.slayzone/artifacts/report.html',
+                additions: 1,
+                deletions: 0,
+                created: false,
+                toolUseIds: ['t']
+              }
+            ]
+          },
+          { kind: 'result', isError: false, timestamp: 2 } as TimelineItem,
+          zero
+        ]
+      }}
+    >
+      <WorkspaceChangesRow item={zero} />
+    </ChatViewContext.Provider>
+  )
+  expect(screen.queryByTestId('chat-files-changed')).toBeNull()
 })
