@@ -102,6 +102,7 @@ export async function connectorHost(
 
 class SessionTransport extends HubDialer {
   peer?: LocalPeer
+  hubOnline = false
   private eventsQueue: Array<{ id: string; params: unknown }> = []
   private delivering = false
   private closed = false
@@ -123,10 +124,22 @@ class SessionTransport extends HubDialer {
     }
   }
   async deliverEvents(): Promise<void> {
-    if (this.delivering || this.closed || !this.peer || this.peer.socket.destroyed) return
+    if (
+      this.delivering ||
+      this.closed ||
+      !this.hubOnline ||
+      !this.peer ||
+      this.peer.socket.destroyed
+    )
+      return
     this.delivering = true
     try {
-      while (this.eventsQueue.length && this.peer && !this.peer.socket.destroyed) {
+      while (
+        this.eventsQueue.length &&
+        this.hubOnline &&
+        this.peer &&
+        !this.peer.socket.destroyed
+      ) {
         const next = this.eventsQueue[0]
         await this.peer.rpc.request('event-deliver', next)
         if (this.eventsQueue[0]?.id === next.id) this.eventsQueue.shift()
@@ -145,6 +158,7 @@ class SessionTransport extends HubDialer {
   }
   override async stop(): Promise<void> {
     this.closed = true
+    this.hubOnline = false
     this.peer?.close()
   }
   override notify(method: string, params?: unknown): boolean {
@@ -166,16 +180,18 @@ class SessionTransport extends HubDialer {
       void this.deliverEvents()
       return true
     }
-    if (!this.peer || this.peer.socket.destroyed) return false
+    if (!this.hubOnline || !this.peer || this.peer.socket.destroyed) return false
     try {
       this.peer.rpc.notify('event', { method, params })
-      return true
+      // Notification writes are not delivery acknowledgements. Keep bounded exit
+      // buffers even when a socket closes before its disconnect reaches the host.
+      return method !== 'pty.exit' && method !== 'proc.exit'
     } catch {
       return false
     }
   }
   override request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
-    if (!this.peer) return Promise.reject(new Error('hub connector unavailable'))
+    if (!this.hubOnline || !this.peer) return Promise.reject(new Error('hub connector unavailable'))
     return this.peer.rpc.request<T>('upstream', { method, params, timeoutMs }, timeoutMs)
   }
 }
@@ -254,6 +270,7 @@ export async function startSessionHost(
             auth = params as unknown as Auth
             const transport = transports.get(auth.hubUrl!)!
             transport.peer?.close()
+            transport.hubOnline = false
             transport.peer = peer
           } else {
             socket.destroy()
@@ -280,6 +297,7 @@ export async function startSessionHost(
             const transport = transports.get(hub)!
             transport.peer?.close()
             transport.peer = undefined
+            transport.hubOnline = false
             return { generation, token: credential(hub, generation), health: inspect() }
           }
           if (method === 'stop') {
@@ -317,6 +335,7 @@ export async function startSessionHost(
           return { ok: true }
         }
         if (method === 'connected') {
+          transport.hubOnline = true
           void transport.deliverEvents()
           transport.events.emit('connected', {
             computerId: String(params.computerId),
@@ -325,6 +344,7 @@ export async function startSessionHost(
           return { ok: true }
         }
         if (method === 'disconnected') {
+          transport.hubOnline = false
           transport.events.emit('disconnected', {
             reason: String(params.reason ?? 'connector disconnected')
           })
@@ -347,6 +367,7 @@ export async function startSessionHost(
         const transport = transports.get(auth.hubUrl!)!
         if (transport.peer === peer) {
           transport.peer = undefined
+          transport.hubOnline = false
           transport.events.emit('disconnected', { reason: 'connector detached' })
         }
       }

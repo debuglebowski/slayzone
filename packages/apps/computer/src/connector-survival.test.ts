@@ -5,12 +5,21 @@ import { expect, it, vi } from 'vitest'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { startSessionHost, hostControl, type ConnectorGrant } from './session-host'
 import { startConnector } from './connector'
+import { RpcError, ComputerTransportErrorCodes } from '@slayzone/computer-transport/shared'
 
 it('replaces connector while idle terminal and running job keep their PIDs', async () => {
   const root = mkdtempSync(join(tmpdir(), 'connector-survival-'))
   const previousRoot = process.env.SLAYZONE_ROOT
   process.env.SLAYZONE_ROOT = root
-  const hub = await startLoopbackHub({ floodLimits: false })
+  let rejectHello = false
+  const hub = await startLoopbackHub({
+    floodLimits: false,
+    verifyApiKey: async (key) => {
+      if (rejectHello)
+        throw new RpcError(ComputerTransportErrorCodes.protocolMismatch, 'upgrade computer')
+      return hub.auth.verifyApiKey(key)
+    }
+  })
   const config = {
     hubUrl: hub.url,
     name: 'survivor',
@@ -57,8 +66,12 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
     hub.gateway.events.on('event', (event) => {
       hooks.push(event)
     })
-    await connector.stop()
-    // Both hook delivery and stdout/exit occur with no connector attached.
+    const rejected = connector.dialer.events.once('error')
+    rejectHello = true
+    hub.gateway.disconnect(id, 'hub upgrade')
+    await rejected
+    // Keep local IPC attached while the hub protocol is unavailable.
+    // Both hook delivery and stdout/exit occur while the hub connection is unavailable.
     for (const index of [1, 2]) {
       expect(
         (
@@ -71,6 +84,8 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
     }
     writeFileSync(join(root, 'finish'), '')
     await new Promise((resolve) => setTimeout(resolve, 250))
+    await connector.stop()
+    rejectHello = false
     connector = await launch()
     expect(hub.gateway.listComputers()[0].epoch).toBe(epoch)
     const sessionPids = (value: unknown) =>
