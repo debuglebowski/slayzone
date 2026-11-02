@@ -5,10 +5,47 @@ hub metadata and transient relay only. General task artifact originals and exist
 hub backups remain documented exceptions. Provider transcripts stay provider-managed;
 backup restore guarantees readable history, not agent resumability.
 
+Legacy diagnostics without provable ownership remain held on the original hub.
+
 ## Worktree
 
 Branch `feat/computer-owned-chat`, based on local main. Preserve unrelated main
 edits. Integrate latest main and validate before fast-forwarding it. No remote push.
+
+## Completion — 2026-11-02
+
+Implementation integrated into local main at code checkpoint `3b4bb92af`.
+Includes upstream test isolation `927a5b1d9`; existing mobile app configuration
+edits preserved byte-for-byte. Timeline projection version 10; computer protocol 5.
+
+Validation:
+
+- 14,173 registered unit cases covered by broad runs and focused reruns, including
+  3,707 client cases and 666 mobile Jest cases. Final broad run's isolation-sentinel
+  collision was corrected; its suite and a load-sensitive line-split timing test
+  both passed focused reruns (37 tests).
+- 167 desktop chat cases and 57 computer/native/artifact E2E cases pass across the
+  full runs and corrected-fixture reruns. Real Codex CLI test remains opt-in/skipped.
+  Final handoff round-trip passes three isolated repeats.
+- Disk markers verify history, drafts and uploads remain computer-owned across
+  restart. Custom/removed modes, reset cutoffs and shared native IDs survive recovery.
+- Full repository typechecks, lint/registration/compiler checks and production
+  app/hub/computer/CLI builds pass. Existing compiler skips remain 72.
+- Absolute replay, scale, paging and UI budgets pass. Boot: 897 ms. Claude/Codex
+  100k opens: 317/251 ms; retained heaps after GC: 50.4/56.8 MB.
+
+The old relative replay baseline reports the same 12 failures on unchanged main
+`aeadea021` and this implementation. Across 18 fixtures, median difference versus
+main is +0.21%; maximum +17.49%, within its 25% threshold. Baseline left unchanged.
+
+Activation requires matching hub/computer binaries and restarting the app and
+computer workers. Migration defers live tasks and retains source content until
+verified activation. Old hub backups, original hub task artifacts and unattributed
+legacy diagnostics retain their documented exceptions. No release/push performed.
+
+The following checkpoints retain implementation history.
+
+Unresolved questions: none.
 
 ## Required implementation
 
@@ -27,9 +64,9 @@ edits. Integrate latest main and validate before fast-forwarding it. No remote p
 - [x] Task delete/undo, offline tombstones, retention policy.
 - [x] Resumable migration, fenced cutover, cleanup and old-backup reconciliation.
 - [x] Desktop/mobile availability and migration-state UI.
-- [ ] Packaging, full parity/failure/performance validation and main integration.
+- [x] Production bundling, parity/failure/performance validation and local main integration.
 
-## Active checkpoint: diagnostics privacy
+## Diagnostics privacy checkpoint (historical)
 
 Chat transport diagnostics persist in the owning computer's per-hub database.
 Hub/desktop chat, renderer and crash diagnostics retain metadata only, before
@@ -74,7 +111,7 @@ Verify no content markers in live hub DB, new backups or logs after cleanup exce
 the explicit artifact/old-backup exceptions. Run affected tests, typechecks, builds,
 desktop/mobile E2E and existing long-session budgets. Re-estimate after packaging.
 
-## Current checkpoint
+## Foundation checkpoint (historical)
 
 Hub chat factories replaced by computer relay. Legacy JSONL transfer streams in
 256 KiB resumable chunks; verified cutover recovers forward and waits for activation
