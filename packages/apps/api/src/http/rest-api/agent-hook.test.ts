@@ -112,7 +112,7 @@ function startServer(deps?: {
 }): Promise<ServerHandle> {
   const app = express()
   registerAgentHookRoute(app, {
-    db: {} as never,
+    db: { get: async () => undefined } as never,
     notifyRenderer: deps?.notifyRenderer ?? (() => {}),
     agentLifecycle: {
       emit: (_channel: string, event: unknown) => {

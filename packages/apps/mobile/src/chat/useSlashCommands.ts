@@ -49,11 +49,11 @@ export function useSlashCommands({
   const client = useTRPCClient()
   const queryClient = useQueryClient()
   const native = caps.nativeSlashCommands
-  const skills = useQuery(trpc.chat.listSkills.queryOptions({ cwd }))
+  const skills = useQuery(trpc.chat.listSkills.queryOptions({ cwd, taskId }))
   const commands = useQuery(
-    trpc.chat.listCommands.queryOptions({ cwd, ...(native ? { nested: true } : {}) })
+    trpc.chat.listCommands.queryOptions({ cwd, taskId, ...(native ? { nested: true } : {}) })
   )
-  const agents = useQuery(trpc.chat.listAgents.queryOptions({ cwd }))
+  const agents = useQuery(trpc.chat.listAgents.queryOptions({ cwd, taskId }))
   const snapshot = useQuery(
     trpc.chat.getCliSnapshot.queryOptions({ taskId, mode }, { enabled: native && !liveCliList })
   )
@@ -63,7 +63,7 @@ export function useSlashCommands({
       { enabled: native && !liveCliDetails }
     )
   )
-  const usage = useQuery(trpc.chat.getAutocompleteUsage.queryOptions())
+  const usage = useQuery(trpc.chat.getAutocompleteUsage.queryOptions({ taskId }))
   const list = native ? (liveCliList ?? snapshot.data ?? null) : null
   const details = liveCliDetails ?? storedDetails.data ?? null
   const cliList = useMemo(
@@ -83,7 +83,7 @@ export function useSlashCommands({
   const bump = useCallback(
     (entry: { source: string; name: string }) => {
       void client.chat.bumpAutocompleteUsage
-        .mutate(entry)
+        .mutate({ ...entry, taskId })
         .then(() => queryClient.invalidateQueries(trpc.chat.getAutocompleteUsage.queryFilter()))
         .catch(() => undefined)
     },

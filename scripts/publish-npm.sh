@@ -116,7 +116,7 @@ publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub ./dist/bin.cjs \
   better-sqlite3 --optional node-pty bufferutil
 publish_manifest packages/apps/computer "@slayzone/computer" slayzone-computer ./dist/bin.cjs \
   "SlayZone computer — remote execution node (pty, git, fs, processes)" \
-  node-pty bufferutil
+  better-sqlite3 node-pty bufferutil
 # The CLI has NO native deps: build.mjs inlines every workspace dep and leaves only
 # the `node:sqlite` builtin external, so there is nothing to rebuild at install
 # time (unlike hub/computer). Zero dependencies is therefore correct, not an omission.

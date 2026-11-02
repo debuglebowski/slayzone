@@ -85,7 +85,7 @@ const lifecycleSpy = vi.fn()
 
 function makeDeps(): RestApiDeps {
   return {
-    db: {} as never,
+    db: { get: async () => undefined } as never,
     notifyRenderer: () => {},
     agentLifecycle: {
       emit: (_c: string, e: unknown) => {

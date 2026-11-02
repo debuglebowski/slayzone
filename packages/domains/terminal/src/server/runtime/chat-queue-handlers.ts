@@ -106,6 +106,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
 
   /** One drain at a time per tab: concurrent triggers queue up behind it. */
   const draining = new Map<string, Promise<void>>()
+  let closing = false
 
   /**
    * How long an edit holds a queued message. The editor renews it while open, so
@@ -171,6 +172,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
     tabId: string,
     data: ChatQueueData = createDbChatQueueData(db)
   ): Promise<void> {
+    if (closing) return Promise.resolve()
     const previous = draining.get(tabId) ?? Promise.resolve()
     const run = previous
       .then(() => drainOnce(tabId, data))
@@ -377,7 +379,19 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       }
     }
   }
-  return { chatQueueEvents, notifyChatQueueChanged, HOLD_MS, drainChatQueue, createChatQueueOps }
+  async function close() {
+    closing = true
+    for (const tabId of holds.keys()) dropHolds(tabId)
+    await Promise.allSettled(draining.values())
+  }
+  return {
+    chatQueueEvents,
+    notifyChatQueueChanged,
+    HOLD_MS,
+    drainChatQueue,
+    createChatQueueOps,
+    close
+  }
 }
 export type ChatQueueRuntime = ReturnType<typeof createChatQueueRuntime>
 const defaultQueueRuntime = createChatQueueRuntime()

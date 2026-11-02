@@ -1,29 +1,10 @@
-/**
- * Computer-side agent-hook loopback relay.
- *
- * Hub/computer split: a task's PTY that spawns on a computer must post its lifecycle
- * hook to the SAME place a local spawn does — loopback. There is no hub on the
- * computer machine, so this hosts `/api/agent-hook` on the COMPUTER's own loopback
- * and relays each envelope to the hub OVER THE EXISTING authenticated ws channel
- * (a generic `event` notification, `name: 'agent-hook'`). The hub's composition
- * root consumes that event and feeds it to the shared `processAgentHook`.
- *
- * Why this exists (the sustainable topology):
- *   - The agent env is BYTE-IDENTICAL local vs remote — the computer overlays
- *     SLAYZONE_AGENT_HOOK_URL to this loopback URL at pty spawn (see pty.ts), so
- *     `buildMcpEnv` never needs a remote branch for the hook and no per-agent hub
- *     bearer is ever placed in a subprocess env.
- *   - The computer reuses its ONE authed hub link (no second auth path invented).
- *   - This is where a computer could later filter/batch/retry hook traffic.
- *
- * This module is a DUMB PIPE: it does NOT parse or name any field of the hook
- * payload. It reads the raw body, forwards it opaquely, and always answers a
- * fast `{}` (fire-and-forget — the hook must never block the agent TUI).
- *
- * @module computer/handlers/agent-hook
- */
-
+/** Computer-local hook capture. Only lifecycle facts cross the authenticated hub link. */
 import http from 'node:http'
+import {
+  resolveAgentHook,
+  sanitizeAgentHook,
+  type ResolvedAgentHook
+} from '@slayzone/terminal-contracts'
 import {
   AGENT_HOOK_EVENT_NAME,
   ComputerNotificationMethods
@@ -49,7 +30,10 @@ export interface AgentHookServer {
  * Start the computer's loopback agent-hook relay. Binds `127.0.0.1:0` (ephemeral
  * port) so it never collides, and resolves once the port is bound.
  */
-export function createAgentHookServer(ctx: HandlerContext): Promise<AgentHookServer> {
+export function createAgentHookServer(
+  ctx: HandlerContext,
+  onHook?: (hook: ResolvedAgentHook) => void
+): Promise<AgentHookServer> {
   const server = http.createServer((req, res) => {
     // Only the hook path + POST are meaningful; everything else is a fast 404.
     if (req.method !== 'POST' || (req.url ?? '').split('?')[0] !== AGENT_HOOK_PATH) {
@@ -74,27 +58,36 @@ export function createAgentHookServer(ctx: HandlerContext): Promise<AgentHookSer
     })
     req.on('end', () => {
       if (aborted) return
-      // Answer FIRST — the hook is fire-and-forget and must never block on the
-      // hub round-trip. Then relay opaquely.
-      res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
 
       const bodyText = Buffer.concat(chunks).toString('utf8')
-      // Forward the payload as parsed JSON when possible (the common path — the
-      // hub's schema validates an object), else forward the raw string so the
-      // hub still sees SOMETHING (it is the single authority that judges shape).
+      // Parse locally; malformed bodies never cross the hub link.
       let payload: unknown
       try {
         payload = bodyText.length > 0 ? JSON.parse(bodyText) : {}
       } catch {
         payload = bodyText
       }
+      const hook = resolveAgentHook(payload)
+      if (!hook) {
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+        return
+      }
+      try {
+        onHook?.(hook)
+      } catch {
+        res
+          .writeHead(503, { 'content-type': 'application/json' })
+          .end('{"error":"Local prompt storage unavailable"}')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
       try {
         ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: AGENT_HOOK_EVENT_NAME,
-          payload
+          payload: sanitizeAgentHook(hook)
         })
-      } catch (err) {
-        ctx.log('agent-hook relay failed', { error: String(err) })
+      } catch {
+        ctx.log('agent-hook relay failed')
       }
     })
     req.on('error', () => {

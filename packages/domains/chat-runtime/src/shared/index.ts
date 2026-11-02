@@ -49,3 +49,18 @@ export interface ChatOwnership {
   migrationId: string | null
   migrationHash: string | null
 }
+export * from './protocol'
+export interface ChatTransferHeader {
+  format: 'slayzone-chat'
+  version: 1
+  migrationId: string
+  identity: ConversationIdentity
+  events: number
+  records: number
+  receipts: number
+}
+export interface ChatTransferManifest {
+  header: ChatTransferHeader
+  hash: string
+  bytes: number
+}

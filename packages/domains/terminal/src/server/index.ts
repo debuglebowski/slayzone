@@ -298,3 +298,5 @@ export type {
   WorkspaceCaptureBackend,
   WorkspaceCaptureContext
 } from './runtime/chat-workspace-tracker'
+
+export { setChatSessionSource } from './runtime/session-registry'

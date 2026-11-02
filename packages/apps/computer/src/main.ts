@@ -1,3 +1,4 @@
+import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
  * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
@@ -104,6 +105,9 @@ interface HubConnection {
 
 export interface HubRequestHandlerDeps {
   hookDirectory?: string
+  stateDir?: string
+  hubScope?: string
+  getComputerId?: () => string | null
   cliRelayReady?: Promise<ComputerCliRelay>
   /** Trigger a graceful stop (after the ack flushes). */
   shutdown: (reason: string) => void
@@ -148,12 +152,13 @@ export interface HubRequestDispatch {
    */
   handle(method: string, params: unknown, actor: unknown): Promise<unknown>
   /** Tear down live sessions/processes/fs watches (computer shutdown). */
-  dispose(): void
+  dispose(): Promise<void>
   isIdle(): boolean
   setHookDirectory(directory: string): void
   /** Late-bind the computer loopback agent-hook URL once its listener has bound
    *  (the port is ephemeral, resolved async after the dispatch is built). The
    *  ctx is shared by reference, so pty spawns issued after this see the URL. */
+  captureAgentHook(hook: import('@slayzone/terminal-contracts').ResolvedAgentHook): void
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
@@ -194,6 +199,14 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     deps.admission ? { admission: deps.admission } : {}
   )
   const fs = createFsHandlers(ctx)
+  const chat = createChatRuntimeHandlers({
+    ctx,
+    stateDir: deps.stateDir ?? dirname(getComputerConfigFilePath()),
+    hubScope: deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? '',
+    computerId: deps.getComputerId ?? (() => null),
+    getProjectPaths: deps.getProjectPaths ?? (() => null),
+    admission: deps.admission
+  })
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
     const parsed = computerShutdownParamsSchema.safeParse(params ?? {})
@@ -204,6 +217,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const table: HubMethodTable = {
+    [HubToComputerMethods.chatRequest]: chat.request,
     [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,
     ...proc.handlers,
@@ -259,6 +273,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
         method === HubToComputerMethods.ptySpawn ||
         method === HubToComputerMethods.ptyWarmSpawn ||
         method === HubToComputerMethods.procSpawn ||
+        method === HubToComputerMethods.chatRequest ||
         method === HubToComputerMethods.slaySetup
       )
         await cliReady
@@ -284,10 +299,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     }
   }
 
-  const dispose = (): void => {
+  const dispose = async (): Promise<void> => {
     pty.disposeAll()
     proc.disposeAll()
     fs.disposeAll()
+    await chat.close()
   }
 
   const setAgentHookUrl = (url: string): void => {
@@ -315,7 +331,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     dispose,
     setAgentHookUrl,
     hubDisconnected,
-    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork()
+    captureAgentHook: chat.captureHook,
+    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork()
   }
 }
 
@@ -470,6 +487,9 @@ export function startComputer(
     // Observe startup failures even before the first spawn arrives.
     void cliRelayReady.catch(() => log('CLI relay failed to start', { hubUrl }))
     dispatch = createHubRequestHandler({
+      stateDir,
+      hubScope: hubHostFromUrl(hubUrl),
+      getComputerId: () => dialer.computerId,
       cliRelayReady,
       hookDirectory: deps.hookDirectory?.(hubUrl),
       shutdown: (reason) => {
@@ -528,7 +548,7 @@ export function startComputer(
     // Its ephemeral port binds async; feed the URL into the dispatch so ptys
     // spawned after the bind overlay it into the agent env. Best-effort — a bind
     // failure only degrades remote hooks, it does not stop exec.
-    const agentHookReady = createAgentHookServer({ dialer, config, log })
+    const agentHookReady = createAgentHookServer({ dialer, config, log }, dispatch.captureAgentHook)
       .then((srv) => {
         dispatch.setAgentHookUrl(srv.url)
         return srv
@@ -547,7 +567,7 @@ export function startComputer(
       dispose: async () => {
         // Kill live ptys/processes and close fs watches before the socket drops, so
         // nothing is orphaned and no handle keeps the stopped process alive.
-        dispatch.dispose()
+        await dispatch.dispose()
         await cliRelayReady.then(
           (relay) => relay.close(),
           () => {

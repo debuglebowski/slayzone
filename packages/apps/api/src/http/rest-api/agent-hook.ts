@@ -1,7 +1,12 @@
 import type { Express } from 'express'
 import { z } from 'zod'
 import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal-contracts'
-import { mapEventType } from '@slayzone/terminal-contracts'
+import {
+  resolveAgentHook as resolveHookIdentity,
+  sanitizeAgentHook,
+  type HookAgentId,
+  mapEventType
+} from '@slayzone/terminal-contracts'
 import {
   isHookDrivenMode,
   applyAgentHook,
@@ -21,7 +26,7 @@ import {
   markSessionFirstTurn,
   getTaskOp
 } from '@slayzone/task/server'
-import { capturePrompt } from '@slayzone/agent-turns/server'
+import { agentPromptsEvents, capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task-contracts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { RestApiDeps, TerminalStateBridge } from './types'
@@ -340,12 +345,6 @@ function truncateForDiag(value: unknown, maxChars: number): string {
   return s.length <= maxChars ? s : s.slice(0, maxChars) + '…[truncated]'
 }
 
-const AGENT_IDS = ['claude-code', 'codex', 'gemini', 'antigravity', 'opencode'] as const
-type HookAgentId = (typeof AGENT_IDS)[number]
-function isAgentId(v: unknown): v is HookAgentId {
-  return typeof v === 'string' && (AGENT_IDS as readonly string[]).includes(v)
-}
-
 /**
  * The hook envelope — INTENTIONALLY loose. It admits BOTH shapes, and the real
  * validation happens in `resolveHookIdentity` so back-compat never depends on
@@ -381,109 +380,6 @@ const PayloadSchema = z.object({
   /** NEW envelope: argv $1 forwarded opaquely (event name OR JSON payload). */
   arg: z.string().nullable().optional()
 })
-
-/** The fully-resolved hook identity — the server-side result of the field
- *  extraction that the benign notify.sh no longer does. Downstream consumers
- *  (state machine, prompt capture, conversation-id persist) read ONLY this. */
-interface ResolvedHook {
-  agentId: HookAgentId
-  /**
-   * The terminal MODE this hook belongs to — the key of the conversation ledger
-   * and the PTY registry. Equals `agentId` for a built-in; a user-defined provider
-   * has its own mode id while running a built-in agent, and only the agent may
-   * travel in `agentId` (`isAgentId`). Carried as `ctx.mode` (see `buildMcpEnv`),
-   * absent when equal — so every built-in and legacy payload resolves unchanged.
-   */
-  mode: string
-  hookEvent: string
-  taskId?: string
-  /** CLI session UUID (claude/codex `session_id`, antigravity `conversationId`). */
-  sessionId?: string
-  /** Per-launch proof from SlayZone's hook context. */
-  spawnToken?: string
-  /**
-   * `SessionStart.source` — WHY the agent started this session. Claude Code
-   * emits: `startup` | `resume` | `clear` | `compact` | `fork`. Load-bearing for
-   * exactly one case: `clear` is the agent rotating its own session id in place,
-   * which the id-match provenance gate would otherwise read as a hijack (see
-   * `persistConversationId`). Absent on every other hook event.
-   */
-  source?: string
-  cwd?: string
-  raw?: unknown
-  /** Attribution only — which release channel fired the hook (from the blob). */
-  releaseChannel?: string
-}
-
-function asRecord(v: unknown): Record<string, unknown> | undefined {
-  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined
-}
-
-/**
- * Resolve the hook identity from EITHER envelope shape. This is where the field
- * logic that used to live in notify.sh now lives — in TypeScript, on the server,
- * so a stale shell copy can never strip it. Returns `null` when the payload
- * carries no usable identity (no agent id, or no event signal at all) → 400.
- *
- * Precedence per field: explicit legacy top-level > ctx blob > derived from the
- * raw/arg payload. This keeps OLD flat payloads byte-identical while letting the
- * NEW opaque envelope resolve everything server-side.
- */
-function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook | null {
-  const ctx = asRecord(body.ctx)
-
-  // agentId: top-level (both shapes set it) → ctx blob. Must be a known agent.
-  const agentIdRaw = body.agentId ?? ctx?.agentId
-  if (!isAgentId(agentIdRaw)) return null
-
-  // Effective raw payload for downstream + event derivation:
-  //   - stdin `raw` when it is an object (Claude/Codex/Gemini/Antigravity), else
-  //   - the argv payload parsed as JSON when `arg` is a JSON string (OpenCode
-  //     plugin shells `bash notify.sh '<json>'` with no stdin).
-  let effRaw = asRecord(body.raw)
-  const arg = body.arg ?? undefined
-  const argIsJson = typeof arg === 'string' && arg.trimStart().startsWith('{')
-  if (!effRaw && argIsJson) {
-    try {
-      effRaw = asRecord(JSON.parse(arg!))
-    } catch {
-      /* not JSON after all — leave effRaw undefined */
-    }
-  }
-
-  // hookEvent: explicit legacy field → argv-as-event-name (Antigravity: `arg` is
-  // a plain event name, not JSON) → payload `hook_event_name` → payload `type`.
-  // This is the exact priority the old notify.sh applied, moved server-side.
-  const argAsEventName = typeof arg === 'string' && !argIsJson && arg.length > 0 ? arg : undefined
-  const hookEvent =
-    body.hookEvent ??
-    argAsEventName ??
-    (typeof effRaw?.hook_event_name === 'string' ? effRaw.hook_event_name : undefined) ??
-    (typeof effRaw?.type === 'string' ? (effRaw.type as string) : undefined)
-
-  // No event signal at all (no explicit event, no argv, no parseable payload) →
-  // malformed. Distinguishes a genuinely-empty ping from an unknown-but-present
-  // event (the latter derives a name and is dropped as 204 downstream).
-  if (!hookEvent) return null
-
-  const cliSessionId =
-    body.sessionId ??
-    (typeof effRaw?.session_id === 'string' ? effRaw.session_id : undefined) ??
-    (typeof effRaw?.conversationId === 'string' ? effRaw.conversationId : undefined)
-
-  return {
-    agentId: agentIdRaw,
-    mode: typeof ctx?.mode === 'string' && ctx.mode ? ctx.mode : agentIdRaw,
-    hookEvent,
-    source: typeof effRaw?.source === 'string' ? effRaw.source : undefined,
-    taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
-    sessionId: cliSessionId,
-    spawnToken: typeof ctx?.spawnToken === 'string' ? ctx.spawnToken : undefined,
-    cwd: body.cwd ?? (typeof effRaw?.cwd === 'string' ? effRaw.cwd : undefined),
-    raw: effRaw ?? body.raw,
-    releaseChannel: typeof ctx?.releaseChannel === 'string' ? ctx.releaseChannel : undefined
-  }
-}
 
 /**
  * Persist a CLI's session_id (carried by its `SessionStart` hook) to the task's
@@ -727,7 +623,7 @@ export async function processAgentHook(
     hookEvent: hook.hookEvent,
     sessionId: hook.sessionId,
     cwd: hook.cwd,
-    raw: hook.raw,
+    raw: sanitizeAgentHook(hook).raw,
     taskId: hook.taskId,
     type,
     timestamp: Date.now()
@@ -739,7 +635,13 @@ export async function processAgentHook(
   // capture-capable modes + the UserPromptSubmit event (once per turn → off
   // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
   // never blocks the hook ack.
-  if (hook.taskId) {
+  if (
+    hook.taskId &&
+    !(await deps.db.get(
+      "SELECT 1 FROM chat_ownership WHERE task_id=? AND state<>'legacy' LIMIT 1",
+      [hook.taskId]
+    ))
+  ) {
     void capturePrompt(deps.db, {
       agentId: hook.agentId,
       hookEvent: hook.hookEvent,
@@ -750,6 +652,9 @@ export async function processAgentHook(
       /* best-effort — never block the hook */
     })
   }
+
+  if (hook.taskId && hook.hookEvent === 'UserPromptSubmit')
+    agentPromptsEvents.emit('agent-prompts:changed', hook.taskId)
 
   // Resumability proof (v158) — this is the moment `--resume <id>` starts
   // working, so it is the moment the id may be handed out as a resume target.
@@ -831,7 +736,7 @@ export async function processAgentHook(
                 activeSubagents: agentTrees.get(sessionId)!.subagents.size
               }
             : undefined,
-          raw: truncateForDiag(hook.raw, 4096)
+          raw: '[computer-local lifecycle payload]'
         }
       })
       if (newState) {

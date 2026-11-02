@@ -14,6 +14,7 @@ import { resolveEnter } from './resolve-enter'
 export type EnterPolicy = 'accept-selected' | 'native-commands'
 
 export interface UseAutocompleteOptions {
+  context?: { taskId: string; tabId: string }
   sources: AutocompleteSource[]
   draft: string
   setDraft: (v: string) => void
@@ -35,10 +36,11 @@ type UsageMap = Record<string, Record<string, number>>
  */
 async function refreshUsage(
   trpcClient: ReturnType<typeof useTRPCClient>,
-  setUsage: (m: UsageMap) => void
+  setUsage: (m: UsageMap) => void,
+  context?: { taskId: string; tabId: string }
 ): Promise<void> {
   try {
-    const m = await trpcClient.chat.getAutocompleteUsage.query()
+    const m = await trpcClient.chat.getAutocompleteUsage.query(context)
     setUsage(m ?? {})
   } catch {
     /* best-effort */
@@ -87,6 +89,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
     cursorPos,
     acceptCtx,
     fetchCtx,
+    context,
     enterPolicy = 'accept-selected',
     submit,
     suppressed = false
@@ -105,7 +108,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   // each bump.
   const loadUsage = useStableCallback((isCancelled: () => boolean) => {
     void trpcClient.chat.getAutocompleteUsage
-      .query()
+      .query(context)
       .then((m) => {
         if (!isCancelled()) setUsage(m ?? {})
       })
@@ -381,7 +384,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
         bumped.add(key)
         bumps.push(
           trpcClient.chat.bumpAutocompleteUsage
-            .mutate({ source: resolved.sourceId, name: resolved.name })
+            .mutate({ source: resolved.sourceId, name: resolved.name, ...context })
             .catch(() => undefined)
         )
       }
@@ -389,7 +392,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
       if (bumps.length === 0) return
       await Promise.all(bumps)
       // Refresh usage map so the next ranking sees the new counts.
-      await refreshUsage(trpcClient, setUsage)
+      await refreshUsage(trpcClient, setUsage, context)
     },
     [sources, itemsBySource, trpcClient]
   )

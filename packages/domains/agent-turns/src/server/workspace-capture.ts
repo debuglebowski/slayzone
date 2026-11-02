@@ -67,7 +67,7 @@ function runner(rootPath: string, timeoutMs: number) {
         ['-c', 'core.fsmonitor=false', ...args],
         {
           cwd: rootPath,
-          env: workspaceGitEnv(env),
+          env: workspaceGitEnv(env) as NodeJS.ProcessEnv,
           encoding: 'utf8',
           timeout: remaining,
           killSignal: 'SIGKILL',

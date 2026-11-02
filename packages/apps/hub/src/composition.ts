@@ -1,4 +1,8 @@
 import { acceptComputerGeneration } from '@slayzone/computers/server'
+import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
+import { setChatSessionSource } from '@slayzone/terminal/server'
+import { setAgentPromptReader } from '@slayzone/agent-turns/server'
+import { createComputerChatServices } from './computer-chat'
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -82,6 +86,7 @@ import {
   subscribeToPtyData,
   subscribeToStateChange,
   onSessionChange,
+  notifyGlobalStateListeners,
   getState,
   findSessionByTaskIdAndMode,
   transitionStateFromHook,
@@ -709,7 +714,7 @@ export function composeServer(opts: {
   const dbLookups = createDbPtySpawnLookups(db)
   setPtySpawnLookups({
     ...dbLookups,
-    resolveComputerId: (taskId) => resolveComputerForTask(taskId),
+    resolveComputerId: (taskId, context) => computerChat.resolvePtyComputer(taskId, context),
     resolveProjectComputerId: (projectId) => resolveComputerForProject(projectId)
   })
   // `taskSessionStore`: task's ledger writes (task_conversations / agent_sessions),
@@ -768,28 +773,29 @@ export function composeServer(opts: {
     // agent is never booted on a machine no task will land on.
     resolveComputerId: (projectId) => resolveComputerForProject(projectId)
   })
-  // Files attached to chat messages are task artifacts; the agent gets their
-  // bytes at write time through this reader (terminal can't import the store).
-  setChatAttachmentReader(createChatAttachmentReader(db, dataRoot))
-  setChatDeps({
-    // Override ONLY the computer resolution over the db defaults, so a chat spawn
-    // resolves the same computer the exec backend will route it to. If chat resolved
-    // just the explicit binding while the backend applied the connected default,
-    // an unbound task would build a hub-shaped agent env (loopback agent-hook URL)
-    // and then run that agent on the computer, where the URL points nowhere.
-    ops: createChatOps({
-      dataOps: {
-        ...createDbChatDataOps(db, taskSessionStore),
-        resolveComputerId: (taskId) => resolveComputerForTask(taskId)
-      },
-      // Chat CLIs fire no UserPromptSubmit hook, so chat sends are recorded into
-      // `agent_prompts` here — one prompt history per task across chat + TUI.
-      onChatEvent: createChatPromptRecorder(db)
-    }),
-    queueOps: createChatQueueOps(db),
-    events: chatEvents,
-    queueEvents: chatQueueEvents
+  // Chat content and provider processes belong to the owning computer.
+  const computerChat = createComputerChatServices({
+    db,
+    legacyData: createDbChatDataOps(db, taskSessionStore),
+    attachments: createChatAttachmentReader(db, dataRoot),
+    request: async (computerId, request) => {
+      if (!execGateway) throw new Error('Chat computer gateway is starting')
+      return execGateway.request(computerId, HubToComputerMethods.chatRequest, request)
+    },
+    resolveComputer: resolveComputerForTask,
+    defaultComputer: () => placement.forCaller(),
+    gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
+    hasLiveTask: async (taskId) =>
+      (await listPtys()).some((p) => p.taskId === taskId && hasLivePty(p.sessionId)),
+    onState: (sessionId, state, previous) => {
+      if (state !== 'not-spawned' && previous !== 'not-spawned')
+        notifyGlobalStateListeners(sessionId, state, previous)
+    }
   })
+  setChatDeps(computerChat.relay)
+  setChatSessionSource(computerChat.relay.sessions)
+  defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
+  setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
 
   // --- AI config / context manager --------------------------------------------
   // Build the ai-config + marketplace ops singletons that back the tRPC
@@ -1554,6 +1560,10 @@ export function composeServer(opts: {
     // reconcile against the computer's own list on every (re)connect and reap
     // whatever this hub is no longer tracking.
     computerGateway.events.on('computer-connected', ({ computer }) => {
+      void computerChat.relay
+        .drainMetadata(computer.computerId)
+        .then(() => computerChat.relay.refreshSessions(computer.computerId))
+        .catch(() => console.error('[chat] computer metadata reconciliation pending'))
       void reapOrphanWarms(computer.computerId)
       // Project folders: one ordered sequence per computer (computer-project-sync.ts).
       void syncComputerProjects(computer.computerId)
@@ -1567,17 +1577,20 @@ export function composeServer(opts: {
     //
     // The routing backend stays available for when they become async and routable
     // (a separate change); until then the in-process default stands.
-    // Chat agents route the same way terminal agents do (the computerId is baked
-    // into the spec by chat-handlers' resolveComputerId). Before this, chat was the
-    // one agent kind the hub always ran in its OWN process, so a chat session
-    // could never reach a remote workspace.
-    configureTransport({
-      workspaceCapture: createRoutingWorkspaceCaptureBackend(computerGateway),
-      workspaceStore: createWorkspaceChangesStore(db),
-      backend: createRoutingChatBackend({
-        gateway: computerGateway,
-        resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
-        gate: placement.gate
+    // Only normalized, computer-persisted chat events cross this channel.
+    const chatNotificationChains = new Map<string, Promise<void>>()
+    computerGateway.events.on('event', ({ computerId, name, payload }) => {
+      if (name !== 'chat-runtime') return
+      const previous = chatNotificationChains.get(computerId) ?? Promise.resolve()
+      const next = previous
+        .then(() => computerChat.relay.receive(computerId, payload))
+        .catch(() => {
+          console.error('[chat] rejected computer notification')
+        })
+      chatNotificationChains.set(computerId, next)
+      void next.finally(() => {
+        if (chatNotificationChains.get(computerId) === next)
+          chatNotificationChains.delete(computerId)
       })
     })
     // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply

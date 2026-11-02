@@ -41,7 +41,11 @@ let loads: Array<{
   hydrate: Deferred<void>
   buffer: Deferred<Buffered | Replay>
 }> = []
-const sent: Array<{ tabId: string; message: { id: string; content: unknown } }> = []
+const sent: Array<{
+  tabId: string
+  operationId?: string
+  message: { id: string; content: unknown }
+}> = []
 let sendFails: Error | null = null
 // The load whose hydrate the test just resolved — its buffer fetch follows.
 let bufferLoad = -1
@@ -520,6 +524,9 @@ describe('useChatSession — outbox', () => {
     sendFails = null
     const id = sent[0].message.id
     await act(() => result.current.retryMessage(id))
+    expect(sent[0].operationId).toBeTypeOf('string')
+    expect(sent[1].operationId).toBeTypeOf('string')
+    expect(sent[1].operationId).not.toBe(sent[0].operationId)
     expect(sent.map((s) => s.message.id)).toEqual([id, id])
     expect(result.current.timeline.find((it) => it?.kind === 'user-text')).toMatchObject({
       delivery: 'queued'

@@ -38,3 +38,49 @@ test('independent runtime instances do not share tabs, event logs or emitters', 
   await a.removeSession('tab')
   expect(b.getSessionInfo('tab')).not.toBeNull()
 })
+
+test('a failed durable event save stops the process and reports a live storage error', async () => {
+  const { fakeChild, sj, emitLine, until } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  const broadcast: Array<{
+    event: import('@slayzone/terminal-contracts').AgentEvent
+    live?: number
+  }> = []
+  const r = createChatTransport({
+    spawn: () => {
+      setImmediate(() => f.child.emit('spawn'))
+      return f.child
+    },
+    whichBinary: async () => '/fake/claude',
+    broadcastEvent: (_tab, event, _seq, live) => broadcast.push({ event, live }),
+    eventStore: {
+      load: async () => [],
+      readRange: async () => [],
+      insert: async () => 'inserted',
+      insertSync: (_tab, _seq, event) => {
+        if (event.kind === 'assistant-text') throw new Error('disk full')
+        return 'inserted'
+      }
+    }
+  })
+  runtimes.push(r)
+  await r.hydrateSession({
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  })
+  await r.ensureSpawned('tab')
+  emitLine(f, sj.init('session'))
+  emitLine(f, sj.text('must not look saved'))
+  await until(() =>
+    broadcast.some((x) => x.event.kind === 'error' && /storage/i.test(x.event.message))
+  )
+  expect(broadcast.some((x) => x.event.kind === 'assistant-text')).toBe(false)
+  expect(f.kills).toContain('SIGTERM')
+  expect(
+    broadcast.find((x) => x.event.kind === 'error' && /storage/i.test(x.event.message))?.live
+  ).toBeDefined()
+})

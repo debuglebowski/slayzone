@@ -419,7 +419,8 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   template: viaProjectColumn('task_templates'),
   testCategory: viaProjectColumn('test_categories'),
   testLabel: viaProjectColumn('test_labels'),
-  chatQueueItem: viaQuery(`SELECT p.owner_user_id FROM chat_queue q
+  chatQueueItem:
+    viaQuery(`SELECT p.owner_user_id FROM (SELECT id,tab_id FROM chat_queue UNION SELECT id,tab_id FROM chat_queue_routes) q
     JOIN terminal_tabs tt ON tt.id = q.tab_id JOIN tasks t ON t.id = tt.task_id
     JOIN projects p ON p.id = t.project_id WHERE q.id = ?`),
   automationRun: viaQuery(`SELECT p.owner_user_id FROM automation_runs r

@@ -350,6 +350,8 @@ export type ComputerNotificationMethod = keyof typeof computerNotificationSchema
 // ---------------------------------------------------------------------------
 
 export const HubToComputerMethods = {
+  /** Computer-owned structured chat runtime and history. */
+  chatRequest: 'chat.request',
   workspaceChangesBegin: 'workspaceChanges.begin',
   workspaceChangesFinish: 'workspaceChanges.finish',
   workspaceChangesDiscard: 'workspaceChanges.discard',

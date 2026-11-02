@@ -973,7 +973,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
      */
     send: (
       tabId: string,
-      message: OutgoingUserMessage
+      message: OutgoingUserMessage,
+      _operationId?: string
     ): { id: string; state: string } | Promise<{ id: string; state: string }> => {
       // Text is taken at once, as always; attached files are checked and sealed first.
       if (message.content.every((b) => b.type === 'text'))

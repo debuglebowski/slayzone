@@ -16,6 +16,7 @@ export { listPromptsForTask, insertPrompt, prunePrompts } from './prompt-db'
 export { createChatPromptRecorder, type ChatPromptContext } from './chat-prompt-recorder'
 export {
   agentPromptsRouter,
+  setAgentPromptReader,
   type AgentPromptsRouter,
   type AgentPromptsMounts
 } from './agent-prompts-router'

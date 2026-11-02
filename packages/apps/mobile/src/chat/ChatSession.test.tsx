@@ -142,6 +142,9 @@ describe('ChatSession: sending', () => {
     await waitFor(() => expect(hub.callsTo('chat.send')).toHaveLength(2))
     const [first, second] = hub.callsTo('chat.send')
     expect(second.message.id).toBe(first.message.id)
+    expect(first.operationId).toEqual(expect.any(String))
+    expect(second.operationId).toEqual(expect.any(String))
+    expect(second.operationId).not.toBe(first.operationId)
     await waitFor(() => expect(screen.queryByText(/Not sent/)).toBeNull())
   })
 
@@ -171,7 +174,7 @@ describe('ChatSession: sending', () => {
       { type: 'text', text: '/compact' }
     ])
     expect(hub.callsTo('chat.bumpAutocompleteUsage')).toEqual([
-      { source: 'cli-commands', name: 'compact' }
+      { source: 'cli-commands', name: 'compact', taskId: TASK }
     ])
   })
 

@@ -56,7 +56,7 @@ function post(url: string, body: string): Promise<{ status: number; body: string
 }
 
 describe('createAgentHookServer (computer loopback relay)', () => {
-  it('binds a loopback /api/agent-hook URL and relays the raw envelope to the hub as an `event`', async () => {
+  it('binds a loopback /api/agent-hook URL and captures locally and relays sanitized lifecycle facts', async () => {
     const { notifies, ctx } = makeCtx()
     const server = await createAgentHookServer(ctx)
     try {
@@ -65,7 +65,7 @@ describe('createAgentHookServer (computer loopback relay)', () => {
 
       const envelope = {
         ctx: { v: 1, taskId: 'task-1', agentId: 'claude-code', releaseChannel: 'stable' },
-        raw: { hook_event_name: 'UserPromptSubmit' },
+        raw: { hook_event_name: 'UserPromptSubmit', prompt: 'private prompt marker' },
         arg: null,
         agentId: 'claude-code'
       }
@@ -74,26 +74,29 @@ describe('createAgentHookServer (computer loopback relay)', () => {
       // Fire-and-forget contract: always a fast 200 so the hook never blocks.
       expect(res.status).toBe(200)
 
-      // The computer does NO field extraction — it relays the whole envelope opaquely
-      // over its existing ws channel as a generic `event` (name: 'agent-hook').
+      // Lifecycle facts preserve the hook state machine; prompt text stays local.
       const relayed = notifies.find((n) => n.method === 'event')
       expect(relayed).toBeDefined()
       expect(relayed!.params.name).toBe('agent-hook')
-      expect(relayed!.params.payload).toEqual(envelope)
+      expect(relayed!.params.payload).toMatchObject({
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task-1'
+      })
+      expect(JSON.stringify(relayed)).not.toContain('private prompt marker')
     } finally {
       await server.close()
     }
   })
 
-  it('relays even a non-JSON / empty body (never rejects — the hub decides)', async () => {
+  it('acknowledges empty hooks without relaying arbitrary bodies', async () => {
     const { notifies, ctx } = makeCtx()
     const server = await createAgentHookServer(ctx)
     try {
       const res = await post(server.url, '')
       expect(res.status).toBe(200)
-      // An unparseable body still relays (as a string payload) — the computer is a
-      // dumb pipe; the hub's processAgentHook is the single authority that judges.
-      expect(notifies.some((n) => n.method === 'event')).toBe(true)
+      // Malformed bodies have no lifecycle facts to forward.
+      expect(notifies.some((n) => n.method === 'event')).toBe(false)
     } finally {
       await server.close()
     }
@@ -129,7 +132,10 @@ describe('createAgentHookServer (computer loopback relay)', () => {
       log: (m) => logs.push(m)
     })
     try {
-      const res = await post(server.url, JSON.stringify({ ctx: { v: 1 }, raw: null, arg: null }))
+      const res = await post(
+        server.url,
+        JSON.stringify({ agentId: 'claude-code', taskId: 'task', hookEvent: 'Stop' })
+      )
       expect(res.status).toBe(200)
       expect(logs.some((l) => l.includes('relay failed'))).toBe(true)
     } finally {

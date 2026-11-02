@@ -117,7 +117,7 @@ export function useChatSettings(
       { enabled: terminalMode === 'codex-chat' && info.isSuccess && !live?.chatCollaboration }
     )
   )
-  const auto = useQuery(trpc.chat.getAutoEligibility.queryOptions())
+  const auto = useQuery(trpc.chat.getAutoEligibility.queryOptions({ taskId }))
 
   const loaded: Record<Kind, string | null> = {
     mode: live?.chatMode ?? (storedMode.data as string | undefined) ?? null,

@@ -4416,6 +4416,88 @@ export const migrations: Migration[] = [
     version: 186,
     // Artifacts panel sidebar visibility + width, per task (JSON ArtifactsSidebarState)
     up: (db) => db.exec(`ALTER TABLE tasks ADD COLUMN artifacts_sidebar TEXT DEFAULT NULL`)
+  },
+  {
+    version: 187,
+    up: (db) => {
+      // Metadata only. These rows must survive task/tab deletion so offline
+      // computers can receive tombstones before accepting another command.
+      db.exec(`
+        CREATE TABLE chat_ownership (
+          id TEXT PRIMARY KEY, task_id TEXT NOT NULL, tab_id TEXT NOT NULL,
+          mode TEXT NOT NULL, computer_id TEXT, epoch INTEGER NOT NULL CHECK(epoch > 0),
+          state TEXT NOT NULL CHECK(state IN ('legacy','active','copying','verified','deleted')),
+          migration_id TEXT, destination_computer_id TEXT, source_computer_id TEXT,
+          manifest_hash TEXT, cleanup_pending INTEGER NOT NULL DEFAULT 0,
+          settings_revision INTEGER NOT NULL DEFAULT 0, settings_hash TEXT
+        );
+        CREATE INDEX chat_ownership_task ON chat_ownership(task_id);
+        CREATE INDEX chat_ownership_computer ON chat_ownership(computer_id,state);
+        CREATE TABLE chat_tab_bindings (
+          tab_id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id),
+          revision INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE chat_provider_bindings (
+          provider_session_id TEXT NOT NULL, mode TEXT NOT NULL,
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id),
+          PRIMARY KEY(provider_session_id,mode)
+        );
+        CREATE TABLE chat_queue_routes (
+          id TEXT PRIMARY KEY, tab_id TEXT NOT NULL,
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id)
+        );
+        CREATE TABLE chat_metadata_progress (
+          conversation_id TEXT PRIMARY KEY REFERENCES chat_ownership(id),
+          sequence INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE chat_deletion_targets (
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id),
+          computer_id TEXT NOT NULL, epoch INTEGER NOT NULL,
+          acknowledged INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(conversation_id,computer_id)
+        );
+      `)
+      const exists = (table: string) =>
+        db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      // Fencing lives in SQLite too: an old in-flight handler or retention sweep
+      // cannot mutate the source after its durable migration gate closes.
+      for (const table of [
+        'chat_events',
+        'chat_queue',
+        'chat_tab_state',
+        'chat_timeline_pages',
+        'chat_timeline_checkpoints',
+        'chat_workspace_changes'
+      ]) {
+        if (!exists(table)) continue
+        for (const action of ['INSERT', 'UPDATE', 'DELETE']) {
+          const row = action === 'DELETE' ? 'OLD' : 'NEW'
+          const states =
+            action === 'DELETE' ? "'copying','verified'" : "'copying','verified','active','deleted'"
+          db.exec(`CREATE TRIGGER ${table}_ownership_${action.toLowerCase()} BEFORE ${action} ON ${table}
+            WHEN EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id WHERE b.tab_id=${row}.tab_id AND o.state IN (${states}))
+            BEGIN SELECT RAISE(ABORT,'Chat history is computer-owned or migrating'); END;`)
+        }
+      }
+      for (const table of ['agent_prompts', 'chat_attachment_messages']) {
+        if (!exists(table)) continue
+        for (const action of ['INSERT', 'UPDATE', 'DELETE']) {
+          const row = action === 'DELETE' ? 'OLD' : 'NEW'
+          const states =
+            action === 'DELETE' ? "'copying','verified'" : "'copying','verified','active','deleted'"
+          db.exec(`CREATE TRIGGER ${table}_ownership_${action.toLowerCase()} BEFORE ${action} ON ${table}
+            WHEN EXISTS(SELECT 1 FROM chat_ownership o WHERE o.task_id=${row}.task_id AND o.state IN (${states}))
+            BEGIN SELECT RAISE(ABORT,'Chat history is computer-owned or migrating'); END;`)
+        }
+      }
+      if (exists('agent_turns'))
+        for (const action of ['INSERT', 'UPDATE']) {
+          db.exec(`CREATE TRIGGER agent_turns_ownership_${action.toLowerCase()} BEFORE ${action} ON agent_turns
+          WHEN NEW.prompt_preview<>'' AND EXISTS(SELECT 1 FROM chat_ownership o WHERE o.task_id=NEW.task_id AND o.state<>'legacy')
+          BEGIN SELECT RAISE(ABORT,'Prompt previews are computer-owned'); END;`)
+        }
+    }
   }
 ]
 

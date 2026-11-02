@@ -46,3 +46,11 @@ export const GLOBAL_AGENT_PANEL_SESSION_OWNER = '__global-agent-panel'
 export function globalAgentPanelSessionId(projectId: string, index: number): string {
   return `${GLOBAL_AGENT_PANEL_SESSION_OWNER}:${projectId}:${index}`
 }
+
+export {
+  resolveAgentHook,
+  sanitizeAgentHook,
+  agentHookPrompt,
+  type ResolvedAgentHook,
+  type HookAgentId
+} from './agent-hook'

@@ -28,7 +28,7 @@ import {
   takePtyKillCalls,
   type PtyCreateResult
 } from './pty-manager'
-import { listSessions, getSessionState } from './session-registry'
+import { listSessions, getSessionState, listChatSessionEntries } from './session-registry'
 import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty-data-ops'
 import type { TaskSessionStore } from './task-session-store'
 import { listChatSessions } from './chat-transport-manager'
@@ -335,7 +335,14 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     const { taskId, projectId, computerId, cwd } = await resolveSpawnTarget(
       opts.sessionId,
       opts.cwd,
-      lookups
+      {
+        ...lookups,
+        resolveComputerId: (taskId) =>
+          lookups.resolveComputerId(taskId, {
+            mode: modeId,
+            conversationId: opts.existingConversationId
+          })
+      }
     )
     if (taskId) {
       if (computerId != null) {
@@ -397,7 +404,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptyGetBufferSince = (sessionId: string, afterSeq: number) =>
     getBufferSince(sessionId, afterSeq)
   const ptyList = () => listPtys()
-  const chatList = () => listChatSessions()
+  const chatList = () => listChatSessionEntries()
   const ptyGetState = (sessionId: string) => getState(sessionId)
   const sessionList = () => listSessions()
   const sessionGetState = (sessionId: string) => getSessionState(sessionId)

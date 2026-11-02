@@ -17,8 +17,10 @@ edits. Integrate latest main and validate before fast-forwarding it. No remote p
       deletion tombstones, verified staged migration.
 - [x] Computer-local data adapter and injectable chat handlers.
 - [x] Local save-before-display path and driver-context attachment readers.
-- [ ] Computer protocol handlers and local process backend.
-- [ ] Hub metadata ownership registry, routing facade, and owner-policy integration.
+- [x] Computer protocol handlers and local process backend.
+- [x] Shared invocation validation, durable command receipts, attachment CAS,
+      local workspace store, atomic queue handoff and cache writes.
+- [x] Hub metadata ownership registry, routing facade, and owner-policy integration.
 - [ ] Attachment upload/read forwarding, artifact compatibility, and blob GC.
 - [ ] Prompt hooks/history, workspace diffs, and metadata reconciliation.
 - [ ] Consistent history/blob backups, export and safe restore.
@@ -49,3 +51,27 @@ forks, reset, rewind, handoff, queue, drafts, attachments, search and workspace 
 Verify no content markers in live hub DB, new backups or logs after cleanup except
 the explicit artifact/old-backup exceptions. Run affected tests, typechecks, builds,
 desktop/mobile E2E and existing long-session budgets. Re-estimate after packaging.
+
+## Current checkpoint
+
+Hub chat factories replaced by computer relay. Legacy JSONL transfer streams in
+256 KiB resumable chunks; verified cutover recovers forward and waits for activation
+before deleting source rows. SQLite triggers fence late hub writers and retention.
+Drafts, queue, timelines, prompts and workspace diffs persist on computers. Existing
+task artifact attachments get sealed copies before draft/send. Computer hooks capture
+prompts before acknowledging; only sanitized lifecycle data reaches the hub.
+Metadata has durable sequence numbers and replay guards. Session overview and Claude
+terminal handoff use computer state. Desktop/mobile send attempt IDs are separate
+from message IDs, preserving intentional Retry.
+
+Remaining before release/merge: computer-only new attachment uploads and full artifact
+panel/REST/native preview compatibility; consistent history/blob backups and archive
+restore; hard-delete tombstones/reconnect barrier, undo/retention and GC; restored-hub
+ownership/metadata reconciliation; legacy diagnostic content cleanup; explicit
+availability/migration UI; protocol rollout bump; complete parity/E2E/performance
+validation; rebase onto latest main and safe merge. Feature branch is not deployable.
+
+Checkpoint validation: 34 chat-runtime tests; 88 hook tests; 35 desktop send/router
+tests; 26 mobile session tests (20s test deadline); 1,093 service/owner-policy tests.
+Hub/computer bundles build; hub/computer/task-terminals typechecks pass. Mobile
+shared-node environment typing corrected; rerun its full typecheck.

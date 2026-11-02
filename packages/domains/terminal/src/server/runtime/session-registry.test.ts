@@ -68,3 +68,30 @@ test('mergeSessions: preserves all chat states unchanged', () => {
     expect(out[0].state).toBe(s)
   }
 })
+
+test('session overview uses the computer chat mirror after hub restart', async () => {
+  const registry = await import('./session-registry')
+  const chats = [
+    {
+      sessionId: 'task:chat-tab',
+      taskId: 'task',
+      mode: 'claude-chat',
+      state: 'idle' as const,
+      lastOutputTime: 123
+    }
+  ]
+  registry.setChatSessionSource({
+    list: () => chats,
+    get: (id) => chats.find((c) => c.sessionId === id)?.state ?? null
+  })
+  try {
+    expect(await registry.listSessions()).toContainEqual({
+      sessionId: 'task:chat-tab',
+      state: 'idle',
+      kind: 'chat'
+    })
+    expect(registry.getSessionState('task:chat-tab')).toBe('idle')
+  } finally {
+    registry.setChatSessionSource(null)
+  }
+})

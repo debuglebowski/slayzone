@@ -221,7 +221,11 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
       const content = messageContent(text, files)
       dispatch({ type: 'user-sent', id, text, content })
       try {
-        await trpcClient.chat.send.mutate({ tabId, message: { id, content } })
+        await trpcClient.chat.send.mutate({
+          tabId,
+          message: { id, content },
+          operationId: newMessageId()
+        })
       } catch (err) {
         dispatch({ type: 'user-send-failed', id, error: message(err) })
         throw err
@@ -239,6 +243,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         // The whole message: its files too (attached on desktop).
         await trpcClient.chat.send.mutate({
           tabId,
+          operationId: newMessageId(),
           message: { id, content: messageContent(item.text, item.attachments ?? []) }
         })
       } catch (err) {

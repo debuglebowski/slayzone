@@ -230,12 +230,14 @@ export function useChatComposer({
   // context singleton, so this object identity is fixed across renders.
   const listApi = useMemo<ChatListApi>(
     () => ({
-      listSkills: (cwd) => trpcClient.chat.listSkills.query({ cwd }),
-      listCommands: (cwd, opts) => trpcClient.chat.listCommands.query({ cwd, ...opts }),
-      listAgents: (cwd) => trpcClient.chat.listAgents.query({ cwd }),
-      listFiles: (cwd, query, limit) => trpcClient.chat.listFiles.query({ cwd, query, limit })
+      listSkills: (cwd) => trpcClient.chat.listSkills.query({ cwd, taskId, tabId }),
+      listCommands: (cwd, opts) =>
+        trpcClient.chat.listCommands.query({ cwd, taskId, tabId, ...opts }),
+      listAgents: (cwd) => trpcClient.chat.listAgents.query({ cwd, taskId, tabId }),
+      listFiles: (cwd, query, limit) =>
+        trpcClient.chat.listFiles.query({ cwd, taskId, tabId, query, limit })
     }),
-    [trpcClient]
+    [trpcClient, taskId, tabId]
   )
 
   // Send a prompt the way the composer does: behind a running turn it waits in
@@ -292,6 +294,7 @@ export function useChatComposer({
     setDraft,
     cursorPos,
     fetchCtx: { cwd },
+    context: { taskId, tabId },
     acceptCtx: {
       session: { tabId, taskId, mode, cwd, providerFlagsOverride: providerFlagsOverride ?? null },
       chat: chatApi,

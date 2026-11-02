@@ -58,6 +58,8 @@ const spawn: AuditRule['detail'] = (p) => ({
 })
 
 export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
+  // Chat bodies are conversation content; never include them in the hub audit.
+  'chat.request': null,
   // Observations only; no source bytes, diffs, or per-turn read noise in the audit log.
   'workspaceChanges.begin': null,
   'workspaceChanges.finish': null,

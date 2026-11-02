@@ -199,12 +199,20 @@ export async function sweepSessionContent(
   // frees content without zeroing it, whoever calls it.
   await db.exec('PRAGMA secure_delete = ON')
 
+  const hasOwnership = await db.get(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_ownership'"
+  )
   for (const [i, rule] of RULES.entries()) {
     // Between tables too: a table's last scan and the next one's first are two statements.
     if (i > 0 && !(await pause())) break
     const cutoff = rule.clock === 'ms' ? cutoffMs : sqliteDatetime(cutoffMs)
     try {
-      const n = await sweepTable(db, rule, cutoff, batch, pause)
+      const taskScoped = rule.table === 'agent_prompts' || rule.table === 'agent_turns'
+      const gate = taskScoped
+        ? `NOT EXISTS(SELECT 1 FROM chat_ownership o WHERE o.task_id=${rule.table}.task_id AND o.state IN ('copying','verified'))`
+        : `NOT EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id WHERE b.tab_id=${rule.table}.tab_id AND o.state IN ('copying','verified'))`
+      const guarded = hasOwnership ? { ...rule, expired: `(${rule.expired}) AND ${gate}` } : rule
+      const n = await sweepTable(db, guarded, cutoff, batch, pause)
       if (rule.redact) report.redacted[rule.table] = n
       else report.deleted[rule.table] = n
     } catch (err) {

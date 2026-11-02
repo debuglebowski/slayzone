@@ -6,6 +6,8 @@ import { CHAT_IMAGE_MEDIA_TYPES, SIDE_QUESTION_MAX_CHARS } from '@slayzone/termi
 import { getChatDeps } from './chat-router-deps'
 
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
+const chatContext = z.object({ taskId: z.string().optional(), tabId: z.string().optional() })
+const catalog = () => getChatDeps().catalog
 const queueOps = (): ReturnType<typeof getChatDeps>['queueOps'] => getChatDeps().queueOps
 
 // Structural input schemas. Value-level validation (which chatMode/effort/model/
@@ -106,12 +108,17 @@ const userContentBlock = z.discriminatedUnion('type', [
 const sendInput = z.union([
   z.object({
     tabId: z.string(),
+    operationId: z.string().min(1).max(200).optional(),
     message: z.object({
       id: z.string().min(1).max(200),
       content: z.array(userContentBlock).min(1)
     })
   }),
-  z.object({ tabId: z.string(), text: z.string() })
+  z.object({
+    tabId: z.string(),
+    text: z.string(),
+    operationId: z.string().min(1).max(200).optional()
+  })
 ])
 
 /** A past user message + which side of it a rewind keeps (chat A, plan 3.3). */
@@ -139,9 +146,9 @@ export const chatRouter = router({
   // the defaults. Same gate as pty-router's test procedures.
   testSetWatchdogTimings: publicProcedure
     .input(z.object({ timings: watchdogTimings.nullable() }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
-      ops().testSetWatchdogTimings(input.timings)
+      await ops().testSetWatchdogTimings(input.timings)
       return { ok: true }
     }),
   // Core session ops
@@ -153,16 +160,15 @@ export const chatRouter = router({
     .input(chatCreateOpts.extend({ reason: z.enum(['user', 'restore']).optional() }))
     .mutation(({ input }) => ops().start(input)),
   restart: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().restart(input)),
-  send: publicProcedure
-    .input(sendInput)
-    .mutation(({ input }) =>
-      ops().send(
-        input.tabId,
-        'message' in input
-          ? input.message
-          : { id: randomUUID(), content: [{ type: 'text', text: input.text }] }
-      )
-    ),
+  send: publicProcedure.input(sendInput).mutation(({ input }) => {
+    const message =
+      'message' in input
+        ? input.message
+        : { id: randomUUID(), content: [{ type: 'text' as const, text: input.text }] }
+    return input.operationId
+      ? ops().send(input.tabId, message, input.operationId)
+      : ops().send(input.tabId, message)
+  }),
   sendToolResult: publicProcedure
     .input(z.object({ tabId: z.string(), args: toolResultArgs }))
     .mutation(({ input }) => ops().sendToolResult(input.tabId, input.args)),
@@ -304,7 +310,9 @@ export const chatRouter = router({
   getMode: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getMode(input.taskId, input.mode)),
-  getAutoEligibility: publicProcedure.query(() => ops().getAutoEligibility()),
+  getAutoEligibility: publicProcedure
+    .input(chatContext.optional())
+    .query(({ input }) => catalog()?.getAutoEligibility(input ?? {}) ?? ops().getAutoEligibility()),
   setMode: publicProcedure
     .input(chatCreateOpts.extend({ chatMode: z.string(), stopAndResume: z.boolean().optional() }))
     .mutation(({ input }) => ops().setMode(input)),
@@ -344,22 +352,45 @@ export const chatRouter = router({
 
   // Project metadata
   listSkills: publicProcedure
-    .input(z.object({ cwd: z.string() }))
-    .query(({ input }) => ops().listSkills(input.cwd)),
+    .input(z.object({ cwd: z.string(), ...chatContext.shape }))
+    .query(({ input }) => catalog()?.listSkills(input, input.cwd) ?? ops().listSkills(input.cwd)),
   listCommands: publicProcedure
     // `nested` adds sub-folder commands (`sub/z.md` → `/sub:z`) — Claude chat only.
-    .input(z.object({ cwd: z.string(), nested: z.boolean().optional() }))
-    .query(({ input }) => ops().listCommands(input.cwd, { nested: input.nested })),
+    .input(z.object({ cwd: z.string(), nested: z.boolean().optional(), ...chatContext.shape }))
+    .query(
+      ({ input }) =>
+        catalog()?.listCommands(input, input.cwd, { nested: input.nested }) ??
+        ops().listCommands(input.cwd, { nested: input.nested })
+    ),
   listAgents: publicProcedure
-    .input(z.object({ cwd: z.string() }))
-    .query(({ input }) => ops().listAgents(input.cwd)),
+    .input(z.object({ cwd: z.string(), ...chatContext.shape }))
+    .query(({ input }) => catalog()?.listAgents(input, input.cwd) ?? ops().listAgents(input.cwd)),
   listFiles: publicProcedure
-    .input(z.object({ cwd: z.string(), query: z.string(), limit: z.number().optional() }))
-    .query(({ input }) => ops().listFiles(input.cwd, input.query, input.limit)),
+    .input(
+      z.object({
+        cwd: z.string(),
+        query: z.string(),
+        limit: z.number().optional(),
+        ...chatContext.shape
+      })
+    )
+    .query(
+      ({ input }) =>
+        catalog()?.listFiles(input, input.cwd, input.query, input.limit) ??
+        ops().listFiles(input.cwd, input.query, input.limit)
+    ),
   bumpAutocompleteUsage: publicProcedure
-    .input(z.object({ source: z.string(), name: z.string() }))
-    .mutation(({ input }) => ops().bumpAutocompleteUsage(input.source, input.name)),
-  getAutocompleteUsage: publicProcedure.query(() => ops().getAutocompleteUsage()),
+    .input(z.object({ source: z.string(), name: z.string(), ...chatContext.shape }))
+    .mutation(
+      ({ input }) =>
+        catalog()?.bumpAutocompleteUsage(input, input.source, input.name) ??
+        ops().bumpAutocompleteUsage(input.source, input.name)
+    ),
+  getAutocompleteUsage: publicProcedure
+    .input(chatContext.optional())
+    .query(
+      ({ input }) => catalog()?.getAutocompleteUsage(input ?? {}) ?? ops().getAutocompleteUsage()
+    ),
   /** Last slash-command list the mode's CLI advertised in the task's project (null = none yet). */
   getCliSnapshot: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))

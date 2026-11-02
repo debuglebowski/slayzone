@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import Database from 'better-sqlite3'
 import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
@@ -5,6 +6,7 @@ import { join } from 'node:path'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type {
   ChatMigrationSnapshot,
+  ChatTransferManifest,
   ChatOwnership,
   ChatRecord,
   CommandReceipt,
@@ -330,7 +332,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           .prepare(
             "UPDATE receipts SET state='delivered',result=? WHERE conversation_id=? AND id=?"
           )
-          .run(JSON.stringify(result), id, operationId)
+          .run(JSON.stringify(result ?? null), id, operationId)
         if (!changed.changes) throw new Error('Unknown operation')
       })()
     },
@@ -371,6 +373,121 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           receipts: receipts(id)
         }
         return { ...body, hash: digest(body) }
+      })()
+    },
+    stageTransfer(manifest: ChatTransferManifest, lines: Iterable<string>): void {
+      const h = manifest.header
+      requireEpoch(h.identity.epoch + 1)
+      if (
+        h.format !== 'slayzone-chat' ||
+        h.version !== 1 ||
+        !h.migrationId ||
+        ![h.events, h.records, h.receipts].every((n) => Number.isSafeInteger(n) && n >= 0)
+      )
+        throw new Error('Invalid transfer header')
+      db.transaction(() => {
+        const previous = row(h.identity.id)
+        if (previous) {
+          if (
+            previous.migration_id === h.migrationId &&
+            previous.migration_hash === manifest.hash &&
+            ['active', 'prepared'].includes(previous.state)
+          )
+            return
+          throw new Error('Transfer would overwrite existing ownership')
+        }
+        const i = h.identity,
+          hash = createHash('sha256')
+        let first = true,
+          events = 0,
+          records = 0,
+          receipts = 0,
+          lastSeq = -1
+        db.prepare("INSERT INTO conversations VALUES(?,?,?,?,?,'prepared',?,?)").run(
+          i.id,
+          i.taskId,
+          i.tabId,
+          i.mode,
+          i.epoch + 1,
+          h.migrationId,
+          manifest.hash
+        )
+        for (const line of lines) {
+          hash.update(line + '\n')
+          const entry = JSON.parse(line)
+          if (first) {
+            first = false
+            if (!isDeepStrictEqual(entry, h)) throw new Error('Transfer header integrity mismatch')
+            continue
+          }
+          if (entry.kind === 'event') {
+            const e = entry.value as StoredChatEvent
+            if (
+              !Number.isSafeInteger(e.seq) ||
+              e.seq <= lastSeq ||
+              !Number.isSafeInteger(e.at) ||
+              !e.event?.kind
+            )
+              throw new Error('Transfer event integrity mismatch')
+            db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(
+              i.id,
+              e.seq,
+              e.at,
+              JSON.stringify(e.event)
+            )
+            lastSeq = e.seq
+            events++
+          } else if (entry.kind === 'record') {
+            const r = entry.value as ChatRecord
+            if (
+              ![
+                'draft',
+                'queue',
+                'prompt',
+                'thread',
+                'workspace',
+                'attachment',
+                'settings',
+                'timeline'
+              ].includes(r.kind) ||
+              typeof r.id !== 'string' ||
+              !Number.isSafeInteger(r.at)
+            )
+              throw new Error('Transfer record integrity mismatch')
+            db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').run(
+              i.id,
+              r.kind,
+              r.id,
+              JSON.stringify(r.value),
+              r.at
+            )
+            records++
+          } else if (entry.kind === 'receipt') {
+            const r = entry.value as CommandReceipt
+            if (
+              typeof r.id !== 'string' ||
+              typeof r.hash !== 'string' ||
+              !['accepted', 'delivered'].includes(r.state)
+            )
+              throw new Error('Transfer receipt integrity mismatch')
+            db.prepare('INSERT INTO receipts VALUES(?,?,?,?,?)').run(
+              i.id,
+              r.id,
+              r.hash,
+              r.state,
+              JSON.stringify(r.result ?? null)
+            )
+            receipts++
+          } else throw new Error('Transfer record kind integrity mismatch')
+        }
+        if (
+          first ||
+          events !== h.events ||
+          records !== h.records ||
+          receipts !== h.receipts ||
+          hash.digest('hex') !== manifest.hash
+        )
+          throw new Error('Transfer hash/count integrity mismatch')
       })()
     },
     stage(snapshot: ChatMigrationSnapshot): void {

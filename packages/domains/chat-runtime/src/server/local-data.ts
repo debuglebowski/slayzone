@@ -18,7 +18,12 @@ import type {
   CliCommandDetails,
   ChatModelInfo
 } from '@slayzone/terminal-contracts'
-import { userMessageAttachments } from '@slayzone/terminal-contracts'
+import {
+  userMessageAttachments,
+  chatModeForTerminal,
+  isSyntheticChatPrompt,
+  chatCapabilitiesForMode
+} from '@slayzone/terminal-contracts'
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import type { ChatStorage } from './storage'
 
@@ -30,14 +35,23 @@ export interface ChatBootstrap {
   providerConfig: ProviderConfigEntry
   defaultFlags: string | null
   env: Record<string, string>
+  terminalProviderConfig?: ProviderConfigEntry
+  honoredConversations?: string[]
 }
 export interface ChatMetadataUpdate {
   operationId: string
+  sequence: number
   conversationId: string
   taskId: string
   tabId: string
   epoch: number
-  kind: 'provider-config' | 'conversation' | 'activity' | 'thread-created' | 'queue-item'
+  kind:
+    | 'provider-config'
+    | 'conversation'
+    | 'activity'
+    | 'thread-created'
+    | 'queue-item'
+    | 'agent-state'
   value: unknown
 }
 
@@ -66,7 +80,12 @@ export function createLocalChatData(
   function taskTab(taskId: string, mode?: string) {
     const choices = store
       .listForTask(taskId)
-      .filter((r) => r.state !== 'deleted' && (!mode || r.identity.mode === mode))
+      .filter(
+        (r) =>
+          r.state !== 'deleted' &&
+          !store.getRecord(r.identity.id, 'settings', 'inbox') &&
+          (!mode || r.identity.mode === (chatModeForTerminal(mode) ?? mode))
+      )
     const root =
       choices.find((r) => !store.getRecord(r.identity.id, 'settings', 'thread-parent')) ??
       choices[0]
@@ -74,29 +93,49 @@ export function createLocalChatData(
     return root.identity.tabId
   }
   function metadata(tabId: string, kind: ChatMetadataUpdate['kind'], value: unknown) {
-    const i = owner(tabId),
-      operationId = randomUUID()
-    const update = {
-      operationId,
-      conversationId: i.id,
-      taskId: i.taskId,
-      tabId,
-      epoch: i.epoch,
-      kind,
-      value
-    }
-    // Retain until acknowledged: hub disconnect must not lose resume bindings.
-    set(tabId, 'settings', `metadata:${operationId}`, update)
-    queueMicrotask(() => {
-      try {
-        if (get(tabId, 'settings', `metadata:${operationId}`)) notify(update)
-      } catch {
-        /* Runtime may have shut down before this notification. */
+    return store.transaction(() => {
+      const i = owner(tabId),
+        operationId = randomUUID()
+      const sequence = (get<number>(tabId, 'settings', 'metadata-counter') ?? 0) + 1
+      set(tabId, 'settings', 'metadata-counter', sequence)
+      const update = {
+        operationId,
+        sequence,
+        conversationId: i.id,
+        taskId: i.taskId,
+        tabId,
+        epoch: i.epoch,
+        kind,
+        value
       }
+      // Retain until acknowledged: hub disconnect must not lose resume bindings.
+      set(tabId, 'settings', `metadata:${operationId}`, update)
+      queueMicrotask(() => {
+        try {
+          if (get(tabId, 'settings', `metadata:${operationId}`)) notify(update)
+        } catch {
+          /* Runtime may have shut down before this notification. */
+        }
+      })
     })
   }
   function provider(taskId: string, mode: string): ProviderConfigEntry {
-    return get<ProviderConfigEntry>(taskTab(taskId, mode), 'settings', 'provider') ?? {}
+    const tabId = taskTab(taskId, mode)
+    return (
+      get<ProviderConfigEntry>(
+        tabId,
+        'settings',
+        owner(tabId).mode === mode ? 'provider' : `provider:${mode}`
+      ) ?? {}
+    )
+  }
+  function patchSync(taskId: string, mode: string, key: keyof ProviderConfigEntry, value: unknown) {
+    store.transaction(() => {
+      const tabId = taskTab(taskId, mode),
+        next = { ...provider(taskId, mode), [key]: value }
+      set(tabId, 'settings', owner(tabId).mode === mode ? 'provider' : `provider:${mode}`, next)
+      metadata(tabId, 'provider-config', { mode, key, value })
+    })
   }
   async function patch(
     taskId: string,
@@ -104,11 +143,9 @@ export function createLocalChatData(
     key: keyof ProviderConfigEntry,
     value: unknown
   ) {
-    const tabId = taskTab(taskId, mode)
-    const next = { ...provider(taskId, mode), [key]: value }
-    set(tabId, 'settings', 'provider', next)
-    metadata(tabId, 'provider-config', { mode, key, value })
+    patchSync(taskId, mode, key, value)
   }
+
   function bootstrap(value: ChatBootstrap) {
     const existing = store.conversation(value.identity.id)
     store.createConversation(value.identity)
@@ -124,6 +161,14 @@ export function createLocalChatData(
         })
       }
     }
+    if (value.terminalProviderConfig) {
+      const mode = value.identity.mode === 'claude-chat' ? 'claude-code' : 'codex'
+      if (!previous || value.revision > previous.revision)
+        set(value.identity.tabId, 'settings', `provider:${mode}`, value.terminalProviderConfig)
+    }
+    for (const id of value.honoredConversations ?? [])
+      if (!get(value.identity.tabId, 'settings', `session:${id}`))
+        set(value.identity.tabId, 'settings', `session:${id}`, { conversationId: id })
   }
   const queued = (tabId: string): QueuedChatMessage[] =>
     store
@@ -135,9 +180,14 @@ export function createLocalChatData(
     const r = store.findRecords('queue').find((r) => r.id === id)
     return r ? (r.value as QueuedChatMessage) : null
   }
-  const queue: ChatQueueData = {
-    list: async (tabId) => queued(tabId),
-    push: async (tabId, send, original, opts) => {
+  type SyncQueueData = {
+    [K in keyof ChatQueueData]: (
+      ...args: Parameters<ChatQueueData[K]>
+    ) => Awaited<ReturnType<ChatQueueData[K]>>
+  }
+  const queueSync: SyncQueueData = {
+    list: (tabId) => queued(tabId),
+    push: (tabId, send, original, opts) => {
       const id = opts?.id ?? randomUUID(),
         previous = queueItem(id)
       if (previous) {
@@ -166,19 +216,19 @@ export function createLocalChatData(
       metadata(tabId, 'queue-item', { id, removed: false })
       return item
     },
-    pop: async (tabId, held = []) => {
+    pop: (tabId, held = []) => {
       const item = queued(tabId)[0]
       if (!item || held.includes(item.id)) return null
-      remove(tabId, 'queue', item.id)
+      // Keep the row until its user-message event commits in the same transaction.
       return item
     },
-    update: async (id, next) => {
+    update: (id, next) => {
       const item = queueItem(id)
       if (!item) return false
       set(item.tabId, 'queue', id, { ...item, ...next })
       return true
     },
-    move: async (id, toIndex) => {
+    move: (id, toIndex) => {
       const item = queueItem(id)
       if (!item) return false
       const list = queued(item.tabId).filter((i) => i.id !== id)
@@ -187,25 +237,42 @@ export function createLocalChatData(
         set(item.tabId, 'queue', list[n].id, { ...list[n], position: n })
       return true
     },
-    requeue: async (item) => {
+    requeue: (item) => {
       set(item.tabId, 'queue', item.id, {
         ...item,
         position: (queued(item.tabId)[0]?.position ?? 0) - 1
       })
     },
-    remove: async (id) => {
+    remove: (id) => {
       const item = queueItem(id)
       if (!item) return false
       remove(item.tabId, 'queue', id)
       metadata(item.tabId, 'queue-item', { id, removed: true })
       return true
     },
-    clear: async (tabId) => {
+    clear: (tabId) => {
       const list = queued(tabId)
-      for (const item of list) remove(tabId, 'queue', item.id)
+      for (const item of list) {
+        remove(tabId, 'queue', item.id)
+        metadata(tabId, 'queue-item', { id: item.id, removed: true })
+      }
       return list.length
     },
-    getTabIdForItem: async (id) => queueItem(id)?.tabId ?? null
+    getTabIdForItem: (id) => queueItem(id)?.tabId ?? null
+  }
+  function atomic<A extends unknown[], R>(action: (...args: A) => R): (...args: A) => Promise<R> {
+    return async (...args) => store.transaction(() => action(...args))
+  }
+  const queue: ChatQueueData = {
+    list: atomic(queueSync.list),
+    push: atomic(queueSync.push),
+    pop: atomic(queueSync.pop),
+    update: atomic(queueSync.update),
+    move: atomic(queueSync.move),
+    requeue: atomic(queueSync.requeue),
+    remove: atomic(queueSync.remove),
+    clear: atomic(queueSync.clear),
+    getTabIdForItem: atomic(queueSync.getTabIdForItem)
   }
   const threads: ChatThreadStore = {
     get: async (id) =>
@@ -227,7 +294,15 @@ export function createLocalChatData(
       })
       set(thread.id, 'settings', 'thread-parent', thread.parentTabId)
       set(thread.parentTabId, 'thread', thread.id, thread)
-      metadata(thread.id, 'thread-created', { parentTabId: thread.parentTabId, mode: thread.mode })
+      metadata(thread.id, 'thread-created', {
+        parentTabId: thread.parentTabId,
+        mode: thread.mode,
+        parentConversationId: thread.parentConversationId,
+        answerId: thread.answerId,
+        sourceMessageId: thread.sourceMessageId,
+        sourceUuid: thread.sourceUuid,
+        createdAt: thread.createdAt
+      })
     },
     setConversation: async (id, conversationId) => {
       const thread = await threads.get(id)
@@ -264,23 +339,73 @@ export function createLocalChatData(
       return (tab?.value as ChatBootstrap | undefined)?.defaultFlags ?? null
     },
     recordConversation: async (input) => {
-      const tabId = taskTab(input.taskId, input.mode)
-      set(tabId, 'settings', `session:${input.conversationId ?? 'reset'}`, input)
-      await patch(input.taskId, input.mode, 'chatConversationId', input.conversationId)
-      metadata(tabId, 'conversation', input)
+      store.transaction(() => {
+        const tabId = taskTab(input.taskId, input.mode)
+        set(tabId, 'settings', `session:${input.conversationId ?? 'reset'}`, input)
+        patchSync(
+          input.taskId,
+          input.mode,
+          input.legacyJsonField ?? 'conversationId',
+          input.conversationId
+        )
+        metadata(tabId, 'conversation', input)
+      })
     },
     isHonoredConversation: async (t, m, id) =>
       Boolean(get(taskTab(t, m), 'settings', `session:${id}`)) ||
-      provider(t, m).chatConversationId === id,
-    getCurrentConversationId: async (t, m) => provider(t, m).chatConversationId ?? null,
+      [provider(t, m).chatConversationId, provider(t, m).conversationId].includes(id),
+    getCurrentConversationId: async (t, m) =>
+      (chatModeForTerminal(m)
+        ? provider(t, m).conversationId
+        : provider(t, m).chatConversationId) ?? null,
     bumpLastInteraction: async (taskId, now) => {
       metadata(taskTab(taskId), 'activity', { at: now })
       return true
     },
-    persistChatEventSync: (tabId, seq, event, at) => {
-      const i = owner(tabId)
-      return store.appendAt(i.id, i.epoch, seq, event, at)
-    },
+    persistChatEventSync: (tabId, seq, event, at) =>
+      store.transaction(() => {
+        const i = owner(tabId)
+        const outcome = store.appendAt(i.id, i.epoch, seq, event, at)
+        if (
+          outcome === 'inserted' &&
+          event.kind === 'user-message' &&
+          !event.history &&
+          event.id &&
+          store.getRecord(i.id, 'queue', event.id)
+        ) {
+          remove(tabId, 'queue', event.id)
+          metadata(tabId, 'queue-item', { id: event.id, removed: true })
+        }
+        if (
+          outcome === 'inserted' &&
+          event.kind === 'user-message' &&
+          !event.history &&
+          event.id &&
+          event.text.trim() &&
+          !isSyntheticChatPrompt(event.text)
+        ) {
+          const cap = chatCapabilitiesForMode(i.mode)
+          if (cap.promptHistory || cap.sessions)
+            set(tabId, 'prompt', event.id, {
+              id: event.id,
+              taskId: i.taskId,
+              agentId: i.mode,
+              cliSessionId: provider(i.taskId, i.mode).chatConversationId ?? null,
+              text: event.text,
+              createdAt: at
+            })
+        }
+        if (outcome === 'inserted' && event.kind === 'workspace-changes') {
+          const record = store.getRecord<{ needsRecoveryEvent?: boolean }>(
+            i.id,
+            'workspace',
+            event.captureId
+          )
+          if (record?.needsRecoveryEvent)
+            set(tabId, 'workspace', event.captureId, { ...record, needsRecoveryEvent: false })
+        }
+        return outcome
+      }),
     persistChatEvent: async (tabId, seq, event, at) =>
       data.persistChatEventSync!(tabId, seq, event, at ?? Date.now()),
     loadChatEvents: async (tabId) => store.read(owner(tabId).id, -1),
@@ -296,6 +421,12 @@ export function createLocalChatData(
         for (const e of store.read(o.identity.id, -1))
           if (e.event.kind === 'user-message' && e.event.id && ids.includes(e.event.id))
             found.set(e.event.id, e.event.content ?? [])
+      for (const r of store.findRecords('settings', taskId))
+        if (r.id.startsWith('attachment-message:') && ids.includes(r.id.slice(19)))
+          found.set(
+            r.id.slice(19),
+            (r.value as ChatAttachment[]).map((attachment) => ({ type: 'attachment', attachment }))
+          )
       return found
     },
     loadTimelineCheckpoint: async (tabId) => get(tabId, 'timeline', 'checkpoint'),
@@ -313,19 +444,20 @@ export function createLocalChatData(
           summary: (r.value as { summary: string }).summary
         }))
         .sort((a, b) => a.page - b.page),
-    saveTimeline: async (tabId, write: TimelineWrite) => {
-      if (write.dropPagesFrom !== null)
-        for (const r of store.records(owner(tabId).id))
-          if (
-            r.kind === 'timeline' &&
-            r.id.startsWith('page:') &&
-            Number(r.id.slice(5)) >= write.dropPagesFrom
-          )
-            remove(tabId, 'timeline', r.id)
-      for (const p of write.pages) set(tabId, 'timeline', `page:${p.page}`, p)
-      if (write.checkpoint) set(tabId, 'timeline', 'checkpoint', write.checkpoint)
-      else remove(tabId, 'timeline', 'checkpoint')
-    },
+    saveTimeline: async (tabId, write: TimelineWrite) =>
+      store.transaction(() => {
+        if (write.dropPagesFrom !== null)
+          for (const r of store.records(owner(tabId).id))
+            if (
+              r.kind === 'timeline' &&
+              r.id.startsWith('page:') &&
+              Number(r.id.slice(5)) >= write.dropPagesFrom
+            )
+              remove(tabId, 'timeline', r.id)
+        for (const p of write.pages) set(tabId, 'timeline', `page:${p.page}`, p)
+        if (write.checkpoint) set(tabId, 'timeline', 'checkpoint', write.checkpoint)
+        else remove(tabId, 'timeline', 'checkpoint')
+      }),
     searchTimelinePages: async (tabId, needle) =>
       store
         .records(owner(tabId).id)

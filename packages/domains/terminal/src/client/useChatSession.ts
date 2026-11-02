@@ -755,7 +755,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // `user-sent` is renderer-only; never persisted.
       dispatchLocal({ type: 'user-sent', id, text: userMessageText(content), content })
       try {
-        await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
+        await trpcClient.chat.send.mutate({
+          tabId: opts.tabId,
+          message: { id, content },
+          operationId: safeRandomUUID()
+        })
       } catch (err) {
         dispatchLocal({
           type: 'user-send-failed',
@@ -786,7 +790,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     ]
     try {
       // Same id: the server retries it (or takes it, if it never got it).
-      await trpcClient.chat.send.mutate({ tabId: opts.tabId, message: { id, content } })
+      await trpcClient.chat.send.mutate({
+        tabId: opts.tabId,
+        message: { id, content },
+        operationId: safeRandomUUID()
+      })
     } catch (err) {
       dispatchLocal({
         type: 'user-send-failed',

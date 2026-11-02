@@ -224,7 +224,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
   // Mount-only; reads the latest trpcClient.
   const loadAutoEligibility = useStableCallback((isCancelled: () => boolean) => {
     void trpcClient.chat.getAutoEligibility
-      .query()
+      .query({ taskId, tabId })
       .then((cap) => {
         if (!isCancelled()) setAutoCapability(cap)
       })

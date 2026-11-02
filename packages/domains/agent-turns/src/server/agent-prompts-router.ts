@@ -4,6 +4,11 @@ import { agentPromptsEvents } from './events'
 import { listPromptsForTask } from './prompt-db'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
+let promptReader: typeof listPromptsForTask = listPromptsForTask
+export function setAgentPromptReader(reader: typeof listPromptsForTask): void {
+  promptReader = reader
+}
+
 export const agentPromptsRouter = router({
   /**
    * All prompts the user sent to a task's agent of `agentId` (the main agent's
@@ -12,7 +17,7 @@ export const agentPromptsRouter = router({
    */
   list: publicProcedure
     .input(z.object({ taskId: z.string(), agentId: z.string().optional() }))
-    .query(({ ctx, input }) => listPromptsForTask(ctx.db, input.taskId, input.agentId)),
+    .query(({ ctx, input }) => promptReader(ctx.db, input.taskId, input.agentId)),
 
   /**
    * Fires whenever a prompt is captured for any task. Emits the task id so each

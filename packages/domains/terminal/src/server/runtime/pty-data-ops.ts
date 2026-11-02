@@ -87,7 +87,10 @@ export interface PtySpawnLookups {
    * null; a later wave injects a computer-aware impl via `setPtySpawnLookups` so
    * `ptyCreate` can route the spawn (and gate warm-pool adoption to local).
    */
-  resolveComputerId(taskId: string): Promise<string | null>
+  resolveComputerId(
+    taskId: string,
+    context?: { mode?: string; conversationId?: string | null }
+  ): Promise<string | null>
   /**
    * The computer a project's work runs on when no task says otherwise (the
    * project-wide agent panel): its default computer, else — with the hub's

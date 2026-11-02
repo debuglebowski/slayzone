@@ -22,3 +22,17 @@ export type {
   WorkspaceCaptureBackend,
   WorkspaceChangesStore
 } from './runtime/chat-workspace-tracker'
+
+export type { ChatEventMap } from './runtime/chat-transport-manager'
+export type { ChatQueueEventMap } from './runtime/chat-queue-handlers'
+export type {
+  ChatDeps,
+  ChatCatalog,
+  ChatCatalogOperation,
+  ChatCatalogContext
+} from './chat-router-deps'
+
+export { supportsChatMode } from './agents/registry'
+export type { ChatTerminalState } from './runtime/chat-transport-manager'
+
+export { defaultConversationRegistry } from './runtime/live-conversations'

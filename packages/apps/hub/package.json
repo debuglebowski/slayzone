@@ -47,7 +47,8 @@
     "bufferutil": "^4.1.0",
     "node-pty": "^1.1.0",
     "superjson": "^2.2.1",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "@slayzone/chat-runtime": "workspace:*"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",

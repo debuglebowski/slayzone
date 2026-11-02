@@ -26,7 +26,10 @@
     "node-pty": "^1.1.0",
     "zod": "^4.3.5",
     "@slayzone/ai-config": "workspace:*",
-    "@slayzone/computer-runtime": "workspace:*"
+    "@slayzone/computer-runtime": "workspace:*",
+    "@slayzone/chat-runtime": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
+    "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",

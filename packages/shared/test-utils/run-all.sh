@@ -650,8 +650,18 @@ run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
+run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
+run_harness packages/domains/chat-runtime/src/server/migration.test.ts
+run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
+run_harness packages/apps/hub/src/computer-chat.test.ts
+run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
+run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-ownership.test.ts
+run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
+run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
 # Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts

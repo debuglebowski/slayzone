@@ -222,6 +222,7 @@ export interface TransportShutdownResult {
 }
 
 export interface ChatSessionInfo {
+  storageUnavailable?: boolean
   sessionId: string
   tabId: string
   taskId: string
@@ -352,6 +353,7 @@ interface ChatTab {
    */
   pendingFork: { fromSessionId: string; atMessageUuid: string } | null
   /** Removed (tab closed / reset): nothing may touch it any more. */
+  storageFailed?: boolean
   closed: boolean
 }
 
@@ -951,6 +953,7 @@ export function createChatTransport(
 
   /** An event the transport itself produces (user message, marker, notice, error…). */
   function routeHostEvent(tab: ChatTab, event: AgentEvent): void {
+    if (tab.storageFailed) return
     const split = tab.splitter.route(event)
     for (const live of split.live) broadcastLive(tab, live)
     for (const saved of split.saved) commitEvent(tab, saved)
@@ -1120,7 +1123,7 @@ export function createChatTransport(
 
   /** An event from a process — already through the generation gate. */
   function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent): void {
-    if (tab.closed || tab.proc !== proc) return
+    if (tab.closed || tab.storageFailed || tab.proc !== proc) return
 
     // Transport-internal: they move the outbox / watchdog, never the timeline.
     switch (event.kind) {
@@ -1514,7 +1517,7 @@ export function createChatTransport(
       text: `${tab.backend.displayName} could not fork from that message, so this chat stays in the original conversation.`
     })
     setImmediate(() => {
-      if (tab.closed || tab.proc !== proc) return
+      if (tab.closed || tab.storageFailed || tab.proc !== proc) return
       void respawnTab(tab, { ...tab.respawnOpts }).catch((err) => {
         console.error('[chat-transport] resume after a refused fork failed:', err)
       })
@@ -1700,8 +1703,19 @@ export function createChatTransport(
               kind: event.kind
             }
           ),
-        onWriteError: (seq, err) =>
+        onWriteError: (seq, err) => {
           console.error(`[chat-transport] saving event ${seq} of ${opts.tabId} failed:`, err)
+          if (deps.eventStore.insertSync && !tab.storageFailed) {
+            tab.storageFailed = true
+            broadcastLive(tab, {
+              kind: 'error',
+              message: 'Chat storage is unavailable. Fix storage and restart chat.',
+              detail: { code: 'storage-unavailable' }
+            })
+            transitionState(tab, 'error')
+            kill(tab.tabId)
+          }
+        }
       }
     )
     if (deps.workspaceCapture && deps.workspaceStore) {
@@ -1823,6 +1837,10 @@ export function createChatTransport(
         `ensureSpawned: no hydrated session for tabId=${tabId} — call hydrateSession first`
       )
     }
+    if (tab.storageFailed)
+      throw new ChatTransportError(
+        'Chat storage is unavailable. Restart chat after fixing storage.'
+      )
     while (tab.respawning) await tab.respawning.catch(() => undefined)
     const proc = tab.proc
     if (proc && !proc.ended && !proc.replaced) {
@@ -2108,6 +2126,7 @@ export function createChatTransport(
 
   /** Take a respawn's spawn settings; the tab's identity and history stay. */
   function applyRespawnOpts(tab: ChatTab, next: CreateChatOpts, fresh: boolean): void {
+    tab.storageFailed = false
     // Which conversation the next process runs:
     //   - `fresh` (a failed resume): a new one, new id;
     //   - the caller's stored id, when it has one;
@@ -3350,6 +3369,7 @@ export function createChatTransport(
       pid: tab.proc && !tab.proc.ended ? tab.proc.pid : null,
       startedAt: tab.startedAt,
       ended: tab.ended,
+      ...(tab.storageFailed ? { storageUnavailable: true } : {}),
       chatMode: tab.chatMode,
       chatModel: tab.chatModel,
       chatEffort: tab.chatEffort,
@@ -3447,6 +3467,15 @@ export function createChatTransport(
     }
     const targets = Array.from(tabs.values()).filter((tab) => !tab.ended)
     const results = await Promise.all(targets.map((tab) => shutdownSession(tab, opts)))
+    // Captures and derived pages can still be writing after the child exits.
+    await Promise.all(
+      Array.from(tabs.values()).map((tab) =>
+        tab.workspaceTracker?.finish(tab.gen, 'Computer shut down before the turn completed.')
+      )
+    )
+    await Promise.all(
+      Array.from(tabs.values()).map((tab) => tab.projection.then((p) => p?.close()))
+    )
     // Everything said before quitting is on disk before the process goes.
     await Promise.all([
       ...Array.from(tabs.values()).map((tab) => tab.log.flush()),

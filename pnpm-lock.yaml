@@ -780,6 +780,9 @@ importers:
       '@slayzone/computer-runtime':
         specifier: workspace:*
         version: link:../../domains/computer-runtime
+      '@slayzone/chat-runtime':
+        specifier: workspace:*
+        version: link:../../domains/chat-runtime
       '@slayzone/computer-transport':
         specifier: workspace:*
         version: link:../../domains/computer-transport
@@ -792,6 +795,12 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
@@ -832,6 +841,9 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/chat-runtime':
+        specifier: workspace:*
+        version: link:../../domains/chat-runtime
       '@slayzone/computer-transport':
         specifier: workspace:*
         version: link:../../domains/computer-transport
