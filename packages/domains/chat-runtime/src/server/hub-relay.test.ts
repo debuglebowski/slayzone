@@ -4,8 +4,90 @@ import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createComputerChatRuntime } from './computer-runtime'
-import { createChatOwnershipStore } from './hub-ownership'
+import { createChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
+import type { ChatComputerRequest } from './migration'
 import { createHubChatRelay } from './hub-relay'
+
+test.each([false, true])(
+  'history reads initialize new storage once and avoid repeated setup, existing=%s',
+  async (existing) => {
+    const h = await createTestHarness()
+    try {
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      const ownership = createChatOwnershipStore(h.slayDb)
+      if (existing)
+        await ownership.register({
+          id: 'store',
+          taskId: 'task',
+          tabId: 'tab',
+          mode: 'claude-chat',
+          computerId: 'pc',
+          epoch: 1
+        })
+      const bootstrap = vi.fn(async (owner: HubChatOwnership) => ({
+        identity: {
+          id: owner.id,
+          taskId: owner.taskId,
+          tabId: owner.tabId,
+          mode: owner.mode,
+          epoch: owner.epoch
+        },
+        projectId: 'p',
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }))
+      const replay = { events: [], live: { afterSeq: -1, liveSeq: 0, events: [] } }
+      const request = vi.fn<ChatComputerRequest>(async (_pc, raw) => {
+        const p = raw as { kind: string; value: { identity: unknown; method: string } }
+        if (p.kind === 'bootstrap') return { ok: true, identity: p.value.identity }
+        if (p.kind === 'pendingMetadata') return []
+        if (p.kind === 'invoke') {
+          if (p.value.method === 'getReplay') return replay
+          if (p.value.method === 'openTimeline') return { kind: 'full' }
+          if (p.value.method === 'getMode') return 'auto'
+        }
+        throw new Error('Unexpected request')
+      })
+      const gate = vi.fn(async () => {})
+      const relay = createHubChatRelay({
+        db: h.slayDb,
+        ownership,
+        bootstrap,
+        request,
+        gate,
+        resolveComputer: async () => 'pc',
+        defaultComputer: async () => 'pc',
+        migrate: async () => {
+          throw new Error('No legacy content to migrate')
+        },
+        recordConversation: async () => {}
+      })
+      await expect(relay.ops.getReplay('tab', -1)).resolves.toEqual(replay)
+      await expect(relay.ops.openTimeline('tab', 'test-version')).resolves.toEqual({ kind: 'full' })
+      // No spawn configuration or extra bootstrap RPC is needed to read saved history.
+      expect(bootstrap).toHaveBeenCalledTimes(existing ? 0 : 1)
+      expect(gate).toHaveBeenCalledWith('pc', 'task')
+      const owner = await ownership.forTab('tab')
+      expect(owner).toMatchObject({ state: 'active', computerId: 'pc', epoch: 1 })
+
+      // Configuration reads retain their fresh bootstrap rather than using a stale cache.
+      await expect(relay.ops.getMode('task', 'claude-chat')).resolves.toBe('auto')
+      expect(bootstrap).toHaveBeenCalledTimes(existing ? 1 : 2)
+
+      await ownership.deleteConversation(owner!.id)
+      const beforeDeletedRead = request.mock.calls.length
+      await expect(relay.ops.getReplay('tab', -1)).rejects.toThrow(/deleted/i)
+      expect(request.mock.calls).toHaveLength(beforeDeletedRead)
+    } finally {
+      h.cleanup()
+    }
+  }
+)
 
 test('metadata recovery preserves custom, removed and other native provider modes', async () => {
   const h = await createTestHarness()

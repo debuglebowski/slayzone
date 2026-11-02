@@ -1,32 +1,12 @@
-import {
-  useState,
-  useCallback,
-  useRef,
-  forwardRef,
-  useImperativeHandle,
-  lazy,
-  Suspense
-} from 'react'
+import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/LazyTerminal'
 import { useHubId } from '@slayzone/transport/client'
 import type { TerminalTab } from '../shared/types'
 import { isChatSupported } from '../shared/chat-modes'
 import { TerminalContextMenu } from './TerminalContextMenu'
-import type { ChatPanelHandle } from './chat/ChatPanel'
-import { Skeleton } from '@slayzone/ui'
-
-const ChatPanel = lazy(() => import('./chat/ChatPanel').then((m) => ({ default: m.ChatPanel })))
-
-function ChatPanelSkeleton() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1" />
-      <div className="border-t border-border p-2">
-        <Skeleton className="h-9 w-full rounded-md" />
-      </div>
-    </div>
-  )
-}
+// Task detail already loads lazily. Keep its primary chat content in that load;
+// a second Suspense boundary adds a visible fallback pause on the first open.
+import { ChatPanel, type ChatPanelHandle } from './chat/ChatPanel'
 import { TerminalStarter } from './TerminalStarter'
 import { createHandleRefRegistry, handleRefFor } from './handle-ref-registry'
 
@@ -170,28 +150,26 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     const renderPane = (pane: PaneProps) => {
       if (isChatPane(pane)) {
         return (
-          <Suspense fallback={<ChatPanelSkeleton />}>
-            <ChatPanel
-              ref={handleRefFor(chatRefs, pane.tab.id)}
-              key={JSON.stringify([hubId, pane.taskId, pane.tab.id])}
-              tabId={pane.tab.id}
-              taskId={pane.taskId}
-              mode={pane.tab.mode}
-              cwd={pane.cwd}
-              isActive={isActive}
-              providerFlagsOverride={pane.providerFlags ?? null}
-              permissionNotice={pane.permissionNotice ?? null}
-              onOpenUrl={onOpenUrl}
-              onOpenFile={onOpenFile}
-              onOpenArtifact={onOpenArtifact}
-              agentState={pane.tab.agentState}
-              isMain={pane.tab.isMain}
-              isTemporary={pane.isTemporary}
-              {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
-              {...(pane.onShowSessions ? { onShowSessions: pane.onShowSessions } : {})}
-              {...(pane.onReady ? { onReady: pane.onReady } : {})}
-            />
-          </Suspense>
+          <ChatPanel
+            ref={handleRefFor(chatRefs, pane.tab.id)}
+            key={JSON.stringify([hubId, pane.taskId, pane.tab.id])}
+            tabId={pane.tab.id}
+            taskId={pane.taskId}
+            mode={pane.tab.mode}
+            cwd={pane.cwd}
+            isActive={isActive}
+            providerFlagsOverride={pane.providerFlags ?? null}
+            permissionNotice={pane.permissionNotice ?? null}
+            onOpenUrl={onOpenUrl}
+            onOpenFile={onOpenFile}
+            onOpenArtifact={onOpenArtifact}
+            agentState={pane.tab.agentState}
+            isMain={pane.tab.isMain}
+            isTemporary={pane.isTemporary}
+            {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
+            {...(pane.onShowSessions ? { onShowSessions: pane.onShowSessions } : {})}
+            {...(pane.onReady ? { onReady: pane.onReady } : {})}
+          />
         )
       }
 

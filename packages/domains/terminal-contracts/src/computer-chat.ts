@@ -122,6 +122,9 @@ export function chatAvailabilityMessage(
   const name = status.computer?.name ?? 'its computer'
   switch (status.state) {
     case 'ready':
+    // Computer initialization is part of the client's normal chat load. Only
+    // exceptional states need a separate explanation or recovery action.
+    case 'preparing':
       return null
     case 'offline':
       return {
@@ -138,11 +141,6 @@ export function chatAvailabilityMessage(
         title: `${name} update waiting`,
         detail:
           'Finish or stop its running work to complete the update. Stopping for this update keeps the current message in history. Chat opens after the computer updates.'
-      }
-    case 'preparing':
-      return {
-        title: `Opening chat on ${name}`,
-        detail: 'Preparing its storage. This usually takes a moment.'
       }
     case 'migrating':
       return status.waitingForAgents

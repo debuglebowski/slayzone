@@ -73,7 +73,7 @@ export function ChatTimeline({
   if (hydrating) {
     return (
       <View style={s.center} testID="chat-loading">
-        <ActivityIndicator color={theme.foreground} />
+        <ActivityIndicator accessibilityLabel="Loading chat" color={theme.foreground} />
       </View>
     )
   }

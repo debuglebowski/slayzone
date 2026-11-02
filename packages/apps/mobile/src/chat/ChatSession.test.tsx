@@ -25,6 +25,50 @@ async function hubSends(hub: FakeHub, events: AgentEvent[], from = 0) {
 }
 
 describe('ChatSession: computer availability', () => {
+  it('uses one loader through computer setup and history loading without a separate storage banner', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    let finishSetup!: () => void
+    const setup = new Promise<void>((resolve) => {
+      finishSetup = resolve
+    })
+    const saved = {
+      events: [
+        { seq: 0, event: { kind: 'assistant-text', messageId: 'saved', text: 'Saved answer' } }
+      ],
+      live: { afterSeq: -1, liveSeq: 0, events: [] }
+    }
+    let finishHistory!: (value: typeof saved) => void
+    const history = new Promise<typeof saved>((resolve) => {
+      finishHistory = resolve
+    })
+    hub.on('chat.hydrate', () => setup)
+    hub.on('chat.getReplay', () => history)
+    hub.on('chat.availability', () => ({
+      state: 'preparing',
+      computer: { id: 'pc', name: 'Laptop' }
+    }))
+    try {
+      await open(hub)
+      await screen.findByTestId('chat-loading')
+      await waitFor(() => expect(hub.callsTo('chat.availability')).toHaveLength(1))
+      expect(screen.getAllByLabelText('Loading chat')).toHaveLength(1)
+      expect(screen.queryByText(/Opening chat on|Preparing its storage/)).toBeNull()
+      expect(screen.queryByText('Send a message to start.')).toBeNull()
+      await act(async () => finishSetup())
+      await waitFor(() => expect(hub.callsTo('chat.getReplay')).toHaveLength(1))
+      expect(screen.getAllByLabelText('Loading chat')).toHaveLength(1)
+      await act(async () => finishHistory(saved))
+      expect(await screen.findByText('Saved answer')).toBeOnTheScreen()
+      expect(screen.queryByTestId('chat-loading')).toBeNull()
+      expect(screen.queryByText(/Opening chat on|Preparing its storage/)).toBeNull()
+      expect(hub.callsTo('chat.hydrate')).toHaveLength(1)
+      expect(hub.callsTo('chat.send')).toEqual([])
+    } finally {
+      finishSetup()
+      finishHistory(saved)
+    }
+  })
+
   it('names an offline computer and reloads on Retry without resending or losing draft text', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
     let offline = true

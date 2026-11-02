@@ -64,6 +64,15 @@ const catalogMethods = new Set([
   'bumpAutocompleteUsage',
   'getAutocompleteUsage'
 ])
+// These reads consume stored events/projections, not subprocess configuration.
+// Routing still recovers ownership and applies lifecycle/deletion fences first.
+const historyReadMethods = new Set([
+  'getBufferSince',
+  'getReplay',
+  'openTimeline',
+  'timelinePages',
+  'searchTimeline'
+])
 
 /** Metadata routing only. This facade never instantiates a chat process or content store. */
 export function createHubChatRelay(opts: {
@@ -888,7 +897,7 @@ export function createHubChatRelay(opts: {
         }
       }
       owner = await route(target, method, args)
-      await sync(owner)
+      if (target !== 'ops' || !historyReadMethods.has(method)) await sync(owner)
       if (target === 'queue' && method === 'push') {
         // Reserve order before transferring files. Later requests can commit
         // behind this slot, but the computer cannot drain past its pending head.

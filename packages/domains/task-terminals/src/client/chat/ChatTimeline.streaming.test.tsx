@@ -108,6 +108,7 @@ const { afterEach, describe, expect, it } = await import('vitest')
 const terminal = await import('@slayzone/terminal/client')
 const { reducer, initialState } = await import('@slayzone/terminal/reducer')
 const { ChatTimeline } = await import('./ChatTimeline')
+const { ChatStorageNotice } = await import('./ChatStorageNotice')
 const { useFollowBottom } = await import('./useFollowBottom')
 const { useVirtualTimeline } = await import('./useVirtualTimeline')
 const { installTimelineLayout } = await import('./__tests__/timeline-layout')
@@ -115,7 +116,7 @@ const { ChatViewContext } = await import('./ChatViewContext')
 const { CommandTaskContext } = await import('./tool-cards')
 const { activityView } = await import('./activity-view')
 const { appearanceDefaults } = await import('@slayzone/ui')
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { AgentEvent, ChatAvailability } from '@slayzone/terminal-contracts'
 import type { ChatTimelineState, TimelineItem } from '@slayzone/terminal/client'
 
 type Dispatch = (events: AgentEvent[]) => void
@@ -140,11 +141,15 @@ const turnResult = (): AgentEvent => ({
 function Harness({
   initial,
   onReady,
-  grouped = false
+  grouped = false,
+  hydrating = false,
+  availability = null
 }: {
   initial: ChatTimelineState
   onReady: (d: Dispatch) => void
   grouped?: boolean
+  hydrating?: boolean
+  availability?: ChatAvailability | null
 }) {
   const [state, dispatch] = useReducer(reducer, initial)
   const inFlight = terminal.isTurnOpen(state)
@@ -212,10 +217,11 @@ function Harness({
     <ChatViewContext.Provider value={view}>
       <terminal.LiveBlockStoreContext.Provider value={store}>
         <CommandTaskContext.Provider value={scope}>
+          <ChatStorageNotice status={availability} onRetry={noop} />
           <ChatTimeline
             search={search as never}
             state={state}
-            hydrating={false}
+            hydrating={hydrating}
             isEmpty={false}
             inFlight={inFlight}
             awaitingUser={false}
@@ -274,6 +280,32 @@ afterEach(() => {
   rendered.reset()
   layout.restore()
   layout = installTimelineLayout({ viewport: 100_000, rowHeight: () => 40 })
+})
+
+it('shows one generic loader through computer setup and history loading, then reveals history', () => {
+  const client = new QueryClient()
+  const initial = longSession(1)
+  const onReady = () => {}
+  const availability: ChatAvailability = {
+    state: 'preparing',
+    computer: { id: 'pc', name: 'Laptop' }
+  }
+  const view = (hydrating: boolean) => (
+    <QueryClientProvider client={client}>
+      <Harness {...{ initial, onReady, availability, hydrating }} />
+    </QueryClientProvider>
+  )
+  const { rerender } = render(view(true))
+  expect(screen.getAllByRole('status')).toHaveLength(1)
+  expect(screen.getByRole('status', { name: 'Loading chat' })).toBeTruthy()
+  expect(screen.queryByText(/Opening chat on|Preparing its storage/)).toBeNull()
+  expect(screen.queryByText('answer 0')).toBeNull()
+
+  // A successful history read already includes computer setup. Stale polled
+  // metadata must not add a second wait after that read completes.
+  rerender(view(false))
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.getByText('answer 0')).toBeTruthy()
 })
 
 describe('a stream delta re-renders only the row that streams', () => {

@@ -389,7 +389,7 @@ export function ChatTimeline({
 
 function HydratingState() {
   return (
-    <div className="absolute inset-0">
+    <div role="status" aria-label="Loading chat" className="absolute inset-0">
       <PulseGrid />
     </div>
   )

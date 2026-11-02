@@ -298,6 +298,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const storage = useChatAvailability({
       tabId,
       active: isActive,
+      historyReady: !hydrating && !loadError,
       onReady: useStableCallback(() => {
         reload()
         composer.retryDraftSave()

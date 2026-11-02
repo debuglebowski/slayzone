@@ -11,7 +11,7 @@ export function ChatStorageNotice({
 }) {
   const message = status ? chatAvailabilityMessage(status) : null
   if (!message && !error) return null
-  const pending = !error && (status?.state === 'preparing' || status?.state === 'migrating')
+  const pending = !error && status?.state === 'migrating'
   return (
     <div role="status" className="flex items-start gap-2 border-b bg-muted/40 px-3 py-2 text-xs">
       {pending ? (

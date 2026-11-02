@@ -79,7 +79,7 @@ export function ChatSession({
     case 'loading':
       return (
         <View style={s.center} testID="chat-resolving">
-          <ActivityIndicator color={theme.foreground} />
+          <ActivityIndicator accessibilityLabel="Loading chat" color={theme.foreground} />
         </View>
       )
     case 'none':
@@ -127,6 +127,7 @@ function ChatView({ target }: { target: ChatTarget }) {
   const storage = useChatAvailability({
     tabId: target.tabId,
     active: true,
+    historyReady: !session.hydrating && !session.loadError,
     onReady: session.reload
   })
   const storageMessage = storage.status ? chatAvailabilityMessage(storage.status) : null
