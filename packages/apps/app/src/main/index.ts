@@ -2255,7 +2255,7 @@ app
     // gone from `warmCache` above: they govern agents running on a computer and
     // belong to the hub.
     logBoot('terminal tab runtime wired')
-    // Chat ops, the chat/pty turn subscribers and the `chatMode` backfill all run
+    // Chat ops and the chat/pty turn subscribers run
     // in the SIDE-CAR, which owns the pty + chat runtime. The host's copies were
     // constructed against the shared DB and read by nothing.
     logBoot('ai-config tRPC-only')

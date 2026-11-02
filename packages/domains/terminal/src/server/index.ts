@@ -220,10 +220,6 @@ export {
 } from './runtime/pty-manager'
 export {
   createChatOps,
-  // One-shot backfill for pre-chat-mode tasks. Electron-free (it lives right
-  // here in runtime/), but was exported only from the electron barrel — so only
-  // the Electron host could run it, and a standalone hub silently never did.
-  backfillChatModes,
   setClaudeSessionReader,
   type ClaudeSessionReader,
   type ChatOps,
@@ -298,4 +294,7 @@ export {
   type AgentLifecycleEventMap
 } from './agent-lifecycle-events'
 export { createWorkspaceChangesStore } from './workspace-changes-store'
-export type { WorkspaceCaptureBackend, WorkspaceCaptureContext } from './runtime/chat-workspace-tracker'
+export type {
+  WorkspaceCaptureBackend,
+  WorkspaceCaptureContext
+} from './runtime/chat-workspace-tracker'

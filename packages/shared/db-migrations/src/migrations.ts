@@ -4384,6 +4384,33 @@ export const migrations: Migration[] = [
       upgrade_status_json TEXT,
       reported_at INTEGER
     );`)
+  },
+  {
+    version: 185,
+    up: (db) => {
+      // Codex chat tasks follow the user's default permission mode (Settings →
+      // Providers). A boot backfill (now removed) tagged every Codex chat entry
+      // without a `chatMode` 'bypass' on EVERY start — not a mode the Codex picker
+      // offers, so no user chose it, and it beat the default for any task that
+      // never picked one. Those tags go; picked modes and other providers stay.
+      const MODE = 'codex-chat'
+      const update = db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+      const tasks = db
+        .prepare(`SELECT id, provider_config FROM tasks WHERE provider_config LIKE '%codex-chat%'`)
+        .all() as { id: string; provider_config: string }[]
+      for (const task of tasks) {
+        let cfg: Record<string, Record<string, unknown>>
+        try {
+          cfg = JSON.parse(task.provider_config)
+        } catch {
+          continue
+        }
+        const entry = cfg?.[MODE]
+        if (!entry || typeof entry !== 'object' || entry.chatMode !== 'bypass') continue
+        const { chatMode: _dropped, ...next } = entry
+        update.run(JSON.stringify({ ...cfg, [MODE]: next }), task.id)
+      }
+    }
   }
 ]
 

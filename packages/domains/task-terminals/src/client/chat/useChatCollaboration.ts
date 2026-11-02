@@ -29,7 +29,7 @@ async function hydrateChatCollaboration(
   setChatCollaborationState: (v: ChatCollaborationMode) => void
 ): Promise<void> {
   try {
-    const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
+    const info = (await trpcClient.chat.getInfo.query({ tabId, mode })) as SessionInfoLite | null
     if (isCancelled()) return
     if (info && info.chatCollaboration) {
       setChatCollaborationState(info.chatCollaboration)

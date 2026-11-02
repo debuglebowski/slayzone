@@ -268,9 +268,11 @@ export const chatRouter = router({
   backgroundCommandTask: publicProcedure
     .input(z.object({ tabId: z.string(), toolUseId: z.string() }))
     .mutation(({ input }) => ops().backgroundCommandTask(input.tabId, input.toolUseId)),
+  // `mode`: only a session of that provider counts — a tab switching provider
+  // keeps its old session until the new one spawns.
   getInfo: publicProcedure
-    .input(z.object({ tabId: z.string() }))
-    .query(({ input }) => ops().getInfo(input.tabId)),
+    .input(z.object({ tabId: z.string(), mode: z.string().optional() }))
+    .query(({ input }) => ops().getInfo(input.tabId, input.mode)),
   inspectPermissions: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().inspectPermissions(input.taskId, input.mode)),

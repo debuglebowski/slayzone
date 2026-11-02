@@ -73,7 +73,6 @@ export {
   shutdownChatTransports,
   killAllChatTransports,
   inspectPermissionFlags,
-  backfillChatModes,
   chatModeToFlags,
   type ChatMode,
   type ChatOps

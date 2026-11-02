@@ -25,7 +25,7 @@ type Info = { chatMode?: string | null } | null
 type Capability = { eligible: boolean; optedIn: boolean }
 
 const m = vi.hoisted(() => {
-  const getInfo = vi.fn<(input: { tabId: string }) => Promise<unknown>>()
+  const getInfo = vi.fn<(input: { tabId: string; mode?: string }) => Promise<unknown>>()
   const getMode = vi.fn<(input: { taskId: string; mode: string }) => Promise<unknown>>()
   const setMode = vi.fn<(input: Record<string, unknown>) => Promise<unknown>>()
   const getAutoEligibility = vi.fn<() => Promise<unknown>>()
@@ -102,7 +102,7 @@ describe('useChatMode hydration', () => {
     m.getInfo.mockResolvedValue({ chatMode: 'plan' } satisfies Info)
     const { result } = await setup()
     expect(result.current.chatMode).toBe('plan')
-    expect(m.getInfo).toHaveBeenCalledWith({ tabId: 'tab1' })
+    expect(m.getInfo).toHaveBeenCalledWith({ tabId: 'tab1', mode: 'claude-chat' })
     expect(m.getMode).not.toHaveBeenCalled()
   })
 
@@ -132,7 +132,24 @@ describe('useChatMode hydration', () => {
     rerender({ ...base, tabId: 'tab2' })
     await flush()
     expect(m.getInfo).toHaveBeenCalledTimes(2)
-    expect(m.getInfo).toHaveBeenLastCalledWith({ tabId: 'tab2' })
+    expect(m.getInfo).toHaveBeenLastCalledWith({ tabId: 'tab2', mode: 'claude-chat' })
+  })
+
+  // Switching provider keeps the tab: the still-live Claude session must not
+  // paint its mode onto the Codex pill (`getInfo` filters by provider).
+  it('re-hydrates from the new provider, not the old session, on provider switch', async () => {
+    m.getInfo.mockImplementation(async (input) =>
+      input.mode === undefined || input.mode === 'claude-chat' ? { chatMode: 'bypass' } : null
+    )
+    m.getMode.mockImplementation(async (input) =>
+      input.mode === 'codex-chat' ? 'full-access' : 'bypass'
+    )
+    const { result, rerender } = await setup()
+    expect(result.current.chatMode).toBe('bypass')
+    rerender({ ...base, mode: 'codex-chat' })
+    await flush()
+    expect(m.getInfo).toHaveBeenLastCalledWith({ tabId: 'tab1', mode: 'codex-chat' })
+    expect(result.current.chatMode).toBe('full-access')
   })
 
   it('drops a session read that lands after the tab changed', async () => {

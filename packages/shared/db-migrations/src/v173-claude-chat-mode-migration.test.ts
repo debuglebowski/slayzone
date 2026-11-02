@@ -13,7 +13,7 @@
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
-import { migrations, runMigrations } from './index'
+import { migrations } from './index'
 
 function dbUpTo(maxVersion: number): Database.Database {
   const db = new Database(':memory:')
@@ -26,6 +26,16 @@ function dbUpTo(maxVersion: number): Database.Database {
     })()
   }
   return db
+}
+
+/** Apply v173 alone — later migrations (v185 drops Codex 'bypass' tags) are out of scope. */
+function runV173(db: Database.Database): void {
+  const m = migrations.find((x) => x.version === 173)
+  if (!m) throw new Error('v173 missing')
+  db.transaction(() => {
+    m.up(db)
+    db.pragma('user_version = 173')
+  })()
 }
 
 function seed(db: Database.Database, rows: Record<string, string>): void {
@@ -65,7 +75,7 @@ describe('v173 Claude chat mode migration', () => {
       empty: '{}',
       broken: '{not json'
     })
-    runMigrations(db)
+    runV173(db)
     expect(cfgOf(db, 'seeded')).toEqual({
       'claude-chat': { chatMode: 'auto-accept', chatModel: 'sonnet' },
       'claude-code': { flags: '--allow-dangerously-skip-permissions' },
@@ -93,7 +103,7 @@ describe('v173 Claude chat mode migration', () => {
        VALUES ('claude-chat', 'Claude Chat', 'claude-code', '--verbose', 1)`
     ).run()
     seed(db, { custom: JSON.stringify({ 'claude-chat': { flags: '--verbose' } }) })
-    runMigrations(db)
+    runV173(db)
     expect(cfgOf(db, 'custom')).toEqual({ 'claude-chat': {} })
   })
 })

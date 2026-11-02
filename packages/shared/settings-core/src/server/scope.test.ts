@@ -7,7 +7,7 @@
  *   packages/shared/settings-core/src/server/scope.test.ts
  */
 import { describe, expect, it } from 'vitest'
-import { settingScope } from './scope'
+import { settingProjectId, settingScope } from './scope'
 
 describe('settingScope', () => {
   it('per user: one person’s UI state, including the G-09 key', () => {
@@ -46,7 +46,10 @@ describe('settingScope', () => {
       'backup_names',
       'ai_providers:p1',
       'ai_instruction_variant:p1',
-      'default_claude_flags'
+      'default_claude_flags',
+      'chat_default_mode:claude-chat',
+      'chat_default_model:codex-chat',
+      'chat_default_effort:claude-chat'
     ]) {
       expect(settingScope(key), key).toBe('hub')
     }
@@ -59,5 +62,9 @@ describe('settingScope', () => {
   it('matches prefixes, not substrings', () => {
     expect(settingScope('my_ai_providers:p1')).toBe('user')
     expect(settingScope('x:integration:credential:abc')).toBe('user')
+  })
+
+  it('chat defaults are not project-keyed', () => {
+    expect(settingProjectId('chat_default_mode:claude-chat')).toBeNull()
   })
 })

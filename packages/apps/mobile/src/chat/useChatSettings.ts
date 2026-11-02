@@ -91,7 +91,7 @@ export function useChatSettings(
   const trpc = useTRPC()
   const client = useTRPCClient()
   const { tabId, taskId, mode: terminalMode } = target
-  const info = useQuery(trpc.chat.getInfo.queryOptions({ tabId }))
+  const info = useQuery(trpc.chat.getInfo.queryOptions({ tabId, mode: terminalMode }))
   const live = (info.data ?? null) as SessionInfoLite | null
   const storedMode = useQuery(
     trpc.chat.getMode.queryOptions(

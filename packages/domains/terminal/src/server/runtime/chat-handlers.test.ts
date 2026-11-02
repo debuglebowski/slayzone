@@ -15,12 +15,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type Database from 'better-sqlite3'
-import {
-  backfillChatModes,
-  createChatOps,
-  registerChatHandlers,
-  setClaudeSessionReader
-} from './chat-handlers'
+import { createChatOps, registerChatHandlers, setClaudeSessionReader } from './chat-handlers'
 import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
@@ -1095,27 +1090,18 @@ test('a mode switch the CLI reports mid-session (plan approval) reaches the sess
   expect((await ops.getInfo('tab-mode-1'))?.chatMode).toBe('auto-accept')
 })
 
-// The boot backfill ran on EVERY start and tagged any entry without a chatMode
-// 'bypass' — so a new Claude task (default Auto-accept) silently became Bypass
-// after the next restart. Claude's default now covers a missing chatMode;
-// Codex keeps today's behavior.
-test('boot backfill leaves Claude chat entries to the default mode; Codex unchanged', async () => {
+// Codex chat: a task that never picked a mode reports the user's Codex default
+// (Settings → Providers), not the old boot backfill's 'bypass' tag.
+test('user default chat mode applies to Codex chat tasks without a stored mode', async () => {
   const db = await setupDb()
-  seedTask(db, 'task-bf-claude', JSON.stringify({ 'claude-chat': { chatModel: 'sonnet' } }))
-  seedTask(db, 'task-bf-codex', JSON.stringify({ 'codex-chat': {} }))
-  await backfillChatModes(createSlayzoneDbAdapter(db))
-  const read = (id: string) =>
-    JSON.parse(
-      (
-        db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
-          provider_config: string
-        }
-      ).provider_config
-    )
-  expect(read('task-bf-claude')).toEqual({ 'claude-chat': { chatModel: 'sonnet' } })
-  expect(read('task-bf-codex')).toEqual({ 'codex-chat': { chatMode: 'bypass' } })
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('chat_default_mode:codex-chat', 'full-access')"
+  ).run()
+  seedTask(db, 'task-cx-1', JSON.stringify({ 'codex-chat': { flags: '' } }))
+  seedTask(db, 'task-cx-2', JSON.stringify({ 'codex-chat': { chatMode: 'approval-required' } }))
   const ops = createChatOps(localChatOpts(db))
-  expect(await ops.getMode('task-bf-claude', 'claude-chat')).toBe('auto-accept')
+  expect(await ops.getMode('task-cx-1', 'codex-chat')).toBe('full-access')
+  expect(await ops.getMode('task-cx-2', 'codex-chat')).toBe('approval-required')
 })
 
 // Settings → Providers → default permission mode: a task that never picked a

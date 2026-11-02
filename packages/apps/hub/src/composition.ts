@@ -103,7 +103,6 @@ import {
   hasSessionUserInput,
   configureTransport,
   createDbChatDataOps,
-  backfillChatModes,
   setPtyEnricher,
   resetTerminalRuntimeForTest,
   setAgentLifecycleEvents,
@@ -635,17 +634,6 @@ export function composeServer(opts: {
   // a domain txn (`artifact-txns.ts`), so `domainTxnRegistry` dispatches it here
   // unchanged. Ran on the Electron host before — which is why a STANDALONE hub
   // never seeded at all, leaving pre-history artifacts permanently version-less.
-  // One-shot: backfill `chatMode` for tasks predating the chat-mode UI, so
-  // upgraded users keep their `--allow-dangerously-skip-permissions` behavior
-  // instead of suddenly hitting denials. Was host-only; standalone never ran it.
-  bootBestEffort('chat-mode-backfill', async () => {
-    const stats = await backfillChatModes(db)
-    if (stats.updated > 0) {
-      console.log(
-        `[chat-handlers] backfillChatModes: ${stats.updated}/${stats.scanned} tasks tagged 'bypass' (Codex chat only)`
-      )
-    }
-  })
   bootBestEffort('artifact-version-seed', async () => {
     const report = await db.namedTxn('artifacts:seed-initial-versions', {
       dataDir: dataRoot,

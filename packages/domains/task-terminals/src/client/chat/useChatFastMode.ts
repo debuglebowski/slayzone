@@ -26,7 +26,7 @@ async function hydrateChatFastMode(
   setChatFastModeState: (v: boolean) => void
 ): Promise<void> {
   try {
-    const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
+    const info = (await trpcClient.chat.getInfo.query({ tabId, mode })) as SessionInfoLite | null
     if (isCancelled()) return
     if (info && typeof info.chatFastMode === 'boolean') {
       setChatFastModeState(info.chatFastMode)

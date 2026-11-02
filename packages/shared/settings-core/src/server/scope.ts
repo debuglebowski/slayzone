@@ -76,12 +76,24 @@ const HUB_KEYS: ReadonlySet<string> = new Set([
 /** Project-keyed config read by hub server code (ai-config handlers-store.ts, REST skills). */
 const HUB_PREFIXES: readonly string[] = ['ai_providers:', 'ai_instruction_variant:']
 
+/**
+ * Per-provider chat defaults (`chat_default_mode:<terminalMode>` …) read by the
+ * chat spawn (terminal chat-data-ops.ts) for tasks that never picked one. Not
+ * project-keyed, so kept out of `HUB_PREFIXES` (`settingProjectId`).
+ */
+const HUB_CHAT_DEFAULT_PREFIXES: readonly string[] = [
+  'chat_default_mode:',
+  'chat_default_model:',
+  'chat_default_effort:'
+]
+
 /** Server-only secrets (integrations credentials.ts). */
 const INTERNAL_PREFIXES: readonly string[] = ['integration:credential:']
 
 export function settingScope(key: string): SettingScope {
   if (INTERNAL_PREFIXES.some((p) => key.startsWith(p))) return 'internal'
   if (HUB_KEYS.has(key) || HUB_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
+  if (HUB_CHAT_DEFAULT_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
   return 'user'
 }
 

@@ -50,7 +50,7 @@ import {
   type TransportShutdownResult
 } from './chat-transport-manager'
 import { resolveAgentFolder } from './spawn-target'
-import type { ChatDataOps, ProviderConfigEntry } from './chat-data-ops'
+import type { ChatDataOps } from './chat-data-ops'
 import { releaseConversation } from './live-conversations'
 import { admitAttachments } from './chat-attachment-guard'
 import {
@@ -176,8 +176,6 @@ export type ChatStartReason = 'user' | 'restore'
 export type ChatMode = ChatModeShared
 
 export const DEFAULT_CHAT_MODE_NEW_TASK: ChatMode = 'auto-accept'
-/** Pre-existing tasks (no chatMode) keep current behavior on first upgrade. */
-export const DEFAULT_CHAT_MODE_LEGACY: ChatMode = 'bypass'
 
 export const chatModeToFlags = chatModeToFlagsShared
 
@@ -203,80 +201,6 @@ async function resolveSafeChatMode(stored: string): Promise<string> {
 //  legacyJsonField:'chatConversationId' in task-conversations.ts. The dual-write
 //  to provider_config.{mode}.chatConversationId still happens, but provenance
 //  is checked first.)
-
-/**
- * One-shot backfill: every chat-capable task gets `chatMode='bypass'` set on
- * its terminal_mode entry — preserving current default behavior
- * (`--allow-dangerously-skip-permissions`) for pre-upgrade tasks. New tasks
- * created after this migration runs get `auto-accept` by default via
- * `buildHydrateOpts`.
- *
- * Claude chat is skipped: this runs on every start, so it tagged every NEW
- * Claude task 'bypass' at the next restart — and Claude's 'bypass' now really
- * bypasses. A missing chatMode resolves to the default (`auto-accept`);
- * migration v173 moved the tags it had written to that default.
- *
- * Two categories of pre-existing tasks are covered:
- *   1. Existing provider_config entry but no `chatMode` field — patched.
- *   2. NULL provider_config (or missing entry for the task's terminal_mode) —
- *      a fresh entry with `chatMode='bypass'` is created.
- *
- * Idempotent: skips entries that already have `chatMode` set. Safe to call
- * on every app start. Only chat-capable modes (per `supportsChatMode`) are
- * touched, leaving non-chat modes alone.
- */
-export async function backfillChatModes(
-  db: SlayzoneDb
-): Promise<{ scanned: number; updated: number }> {
-  const rows = (await db.prepare('SELECT id, terminal_mode, provider_config FROM tasks').all()) as {
-    id: string
-    terminal_mode: string | null
-    provider_config: string | null
-  }[]
-  let scanned = 0
-  let updated = 0
-  for (const row of rows) {
-    scanned++
-    let cfg: Record<string, ProviderConfigEntry> = {}
-    if (row.provider_config) {
-      try {
-        cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-      } catch {
-        continue
-      }
-    }
-    let dirty = false
-    // Patch existing entries — only chat-capable modes. Non-chat modes (PTY-only
-    // like 'claude-code' after the chat split) don't carry chatMode semantics.
-    for (const mode of Object.keys(cfg)) {
-      const entry = cfg[mode]
-      if (!entry || entry.chatMode != null) continue
-      if (!supportsChatMode(mode) || chatOwnsSpawnFlags(mode)) continue
-      cfg[mode] = { ...entry, chatMode: DEFAULT_CHAT_MODE_LEGACY }
-      dirty = true
-    }
-    // Ensure the task's primary terminal_mode has an entry if it's chat-capable.
-    if (
-      row.terminal_mode &&
-      supportsChatMode(row.terminal_mode) &&
-      !chatOwnsSpawnFlags(row.terminal_mode) &&
-      cfg[row.terminal_mode]?.chatMode == null
-    ) {
-      cfg[row.terminal_mode] = {
-        ...(cfg[row.terminal_mode] ?? {}),
-        chatMode: DEFAULT_CHAT_MODE_LEGACY
-      }
-      dirty = true
-    }
-    if (dirty) {
-      await db
-        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-        .run(JSON.stringify(cfg), row.id)
-      updated++
-    }
-  }
-  return { scanned, updated }
-}
 
 /**
  * Check whether effective flags contain a non-interactive permission mode.
@@ -1375,7 +1299,15 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // The whole saved history after `afterSeq` (not just the in-memory cache).
     getBufferSince: (tabId: string, afterSeq: number) => readEventsSince(tabId, afterSeq),
 
-    getInfo: (tabId: string) => getSessionInfo(tabId),
+    /**
+     * The tab's live session. With `mode`, null unless that session runs this
+     * provider: a tab switching provider (Claude Chat → Codex Chat) keeps the old
+     * session until the new one spawns, and its mode/model are not the new one's.
+     */
+    getInfo: (tabId: string, mode?: string): ChatSessionInfo | null => {
+      const info = getSessionInfo(tabId)
+      return info && (mode === undefined || info.mode === mode) ? info : null
+    },
     getWorkspaceChanges,
     getWorkspaceFileDiff,
 
