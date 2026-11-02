@@ -34,6 +34,12 @@ export interface ChatCapabilities {
   liveInterrupt: boolean
   /** Reasoning effort changes on the running process (no restart). */
   liveEffort: boolean
+  /**
+   * Permission mode, model and effort change while a turn runs: applied live
+   * over the control channel, the turn keeps going (a refusal is reported, never
+   * a restart). Without it those pills lock until the turn ends.
+   */
+  liveSettingsMidTurn: boolean
   /** A past message can be edited & resent, or the conversation (and code) rewound to it. */
   rewind: boolean
   /** A new conversation can branch off a past message; the original stays as it is. */
@@ -79,6 +85,7 @@ const NONE: ChatCapabilities = {
   promptCards: false,
   liveInterrupt: false,
   liveEffort: false,
+  liveSettingsMidTurn: false,
   rewind: false,
   fork: false,
   sessions: false,
@@ -101,6 +108,7 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     promptCards: true,
     liveInterrupt: true,
     liveEffort: true,
+    liveSettingsMidTurn: true,
     rewind: true,
     fork: true,
     sessions: true,
@@ -125,6 +133,9 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     liveInterrupt: true,
     // Effort is a `turn/start` param: the next turn takes it, no restart.
     liveEffort: true,
+    // Mode changes mid-turn ask when to apply (ChatPermissionMode); model and
+    // effort wait for the turn to end.
+    liveSettingsMidTurn: false,
     // `thread/revert` (history only: Codex keeps no file checkpoints).
     rewind: true,
     // `thread/fork {lastTurnId}` through the message's turn.

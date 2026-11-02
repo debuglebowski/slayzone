@@ -13,7 +13,7 @@ import {
   type AgentMode,
   type AutoModeCapability
 } from '@slayzone/ui'
-import { chatModesForMode } from '@slayzone/terminal-contracts'
+import { chatCapabilitiesForMode, chatModesForMode } from '@slayzone/terminal-contracts'
 import type { useChatMode } from './useChatMode'
 
 export function ChatPermissionMode({
@@ -62,7 +62,10 @@ export function ChatPermissionMode({
           if (mode === 'codex-chat' && inFlight) setRequested(next)
           else apply(next)
         }}
-        disabled={applying || (inFlight && mode !== 'codex-chat')}
+        disabled={
+          applying ||
+          (inFlight && mode !== 'codex-chat' && !chatCapabilitiesForMode(mode).liveSettingsMidTurn)
+        }
         compact
         variant="text"
         autoCapability={autoCapability}

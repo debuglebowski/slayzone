@@ -25,7 +25,7 @@ import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
 import { persistChatEvent } from '../chat-events-store'
-import { fakeChild, type FakeChild, until } from './chat-transport-testkit'
+import { emitLine, fakeChild, type FakeChild, until } from './chat-transport-testkit'
 import { registerConversationHolder } from './live-conversations'
 import {
   createSlayzoneDbAdapter,
@@ -1274,6 +1274,118 @@ test('chat:setEffort falls back to a respawn with --effort when the CLI refuses 
   const args = spawns[1].args
   expect(args[args.indexOf('--effort') + 1]).toBe('low')
   expect(storedEffort()).toBe('low')
+})
+
+// ---- live settings mid-turn: a refused change must not cut the turn ----
+
+async function midTurnSetup(refuse: string, opts: { parkOnPrompt?: boolean } = {}) {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  const taskId = `task-midturn-${refuse}-${opts.parkOnPrompt ? 'parked' : 'live'}`
+  const tabId = `tab-${taskId}`
+  seedTask(db, taskId, null, tabId)
+  const spawns: Array<{ args: string[]; child: FakeChild }> = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: (_cmd, args) => {
+      const child = fakeChild({ exitOnKill: true })
+      child.answer(refuse, () => ({ error: 'refused' }))
+      spawns.push({ args, child })
+      setImmediate(() => child.emitter.emit('spawn'))
+      return child.child
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  const o = { tabId, taskId, mode: 'claude-chat', cwd: '/tmp', providerFlagsOverride: null }
+  await ipc.invoke('chat:start', o)
+  await until(() => mgr.getSessionTerminalState(tabId) === 'idle')
+  await ipc.invoke('chat:send', tabId, {
+    id: 'msg-midturn',
+    content: [{ type: 'text', text: 'work' }]
+  })
+  await until(() => mgr.getSessionTerminalState(tabId) === 'running')
+  if (opts.parkOnPrompt) {
+    // The turn waits on a permission card: the transport reads it as `idle`,
+    // yet the turn is still open and a respawn would kill it.
+    emitLine(spawns[0].child, {
+      type: 'control_request',
+      request_id: 'cu_midturn',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'Bash',
+        tool_use_id: 'tu_midturn',
+        input: { command: 'ls' }
+      }
+    })
+    await until(() => mgr.isSessionAwaitingUserInput(tabId))
+  }
+  const stored = () => {
+    const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as {
+      provider_config: string | null
+    }
+    return (JSON.parse(row.provider_config ?? '{}') as Record<string, Record<string, unknown>>)[
+      'claude-chat'
+    ]
+  }
+  return { ipc, o, spawns, stored, tabId }
+}
+
+test('mid-turn: a refused live mode change rejects and keeps the running process', async () => {
+  const { ipc, o, spawns, stored, tabId } = await midTurnSetup('set_permission_mode')
+  await expect(ipc.invoke('chat:setMode', { ...o, chatMode: 'plan' })).rejects.toThrow()
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0].child.kills).toEqual([])
+  expect(stored()?.chatMode).not.toBe('plan')
+  expect(mgr.getSessionTerminalState(tabId)).toBe('running')
+})
+
+test('mid-turn: a refused live model change rejects and keeps the running process', async () => {
+  const { ipc, o, spawns, stored, tabId } = await midTurnSetup('set_model')
+  await expect(ipc.invoke('chat:setModel', { ...o, chatModel: 'sonnet' })).rejects.toThrow()
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0].child.kills).toEqual([])
+  expect(stored()?.chatModel).not.toBe('sonnet')
+  expect(mgr.getSessionTerminalState(tabId)).toBe('running')
+})
+
+test('mid-turn: a refused live effort change rejects and keeps the running process', async () => {
+  const { ipc, o, spawns, stored, tabId } = await midTurnSetup('apply_flag_settings')
+  await expect(ipc.invoke('chat:setEffort', { ...o, chatEffort: 'low' })).rejects.toThrow()
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0].child.kills).toEqual([])
+  expect(stored()?.chatEffort).not.toBe('low')
+  expect(mgr.getSessionTerminalState(tabId)).toBe('running')
+})
+
+test('mid-turn: a turn parked on a prompt keeps its process when a live change is refused', async () => {
+  const { ipc, o, spawns, stored, tabId } = await midTurnSetup('set_model', { parkOnPrompt: true })
+  await expect(ipc.invoke('chat:setModel', { ...o, chatModel: 'sonnet' })).rejects.toThrow()
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0].child.kills).toEqual([])
+  expect(stored()?.chatModel).not.toBe('sonnet')
+  expect(mgr.isSessionAwaitingUserInput(tabId)).toBe(true)
+})
+
+test('mid-turn: an accepted live model change applies without a respawn', async () => {
+  const { ipc, o, spawns, stored } = await midTurnSetup('none')
+  const info = (await ipc.invoke('chat:setModel', { ...o, chatModel: 'sonnet' })) as {
+    chatModel: string
+  }
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0].child.controlRequests('set_model')).toEqual([
+    { subtype: 'set_model', model: 'sonnet' }
+  ])
+  expect(info.chatModel).toBe('sonnet')
+  expect(stored()?.chatModel).toBe('sonnet')
 })
 
 // ---- chat A: switching conversations (Sessions picker, plan 3.6) ----

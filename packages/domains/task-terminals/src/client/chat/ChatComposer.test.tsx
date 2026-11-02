@@ -427,11 +427,25 @@ describe('ChatComposer pills', () => {
     expect(button(/^Reasoning effort:/).disabled).toBe(false)
   })
 
-  it('mode, model and effort pills are disabled while a turn runs', () => {
+  it('Claude running: mode, model and effort stay switchable (applied live)', () => {
     setup({ inFlight: true })
-    expect(button(/^Agent mode:/).disabled).toBe(true)
+    expect(button(/^Agent mode:/).disabled).toBe(false)
+    expect(button(/^Chat model:/).disabled).toBe(false)
+    expect(button(/^Reasoning effort:/).disabled).toBe(false)
+  })
+
+  it('Claude running: choosing a mode applies it at once, without stopping', () => {
+    setup({ inFlight: true, chatMode: 'auto-accept' })
+    fireEvent.keyDown(button(/^Agent mode:/), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /Plan/ }))
+    expect(props.handleModeChange).toHaveBeenCalledWith('plan')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(props.handleStop).not.toHaveBeenCalled()
+  })
+
+  it('Codex running: the model is disabled while a turn runs', () => {
+    setup({ mode: 'codex-chat', chatModel: 'gpt-5.5', inFlight: true })
     expect(button(/^Chat model:/).disabled).toBe(true)
-    expect(button(/^Reasoning effort:/).disabled).toBe(true)
   })
 
   it('the model pill is disabled while a model change is applied', () => {

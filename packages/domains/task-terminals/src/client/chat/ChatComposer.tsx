@@ -171,6 +171,8 @@ export function ChatComposer({
 }: ChatComposerProps) {
   // Structured providers share the picker; accepted kinds come from capabilities.
   const canPickFiles = chatCapabilitiesForMode(mode).attachments === 'blocks'
+  // Mid-turn the setting pills lock unless the provider applies them live.
+  const settingsLocked = inFlight && !chatCapabilitiesForMode(mode).liveSettingsMidTurn
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attaching = attachmentsApi.pending.length > 0
   return (
@@ -367,7 +369,7 @@ export function ChatComposer({
                   onChange={(next) => {
                     void handleModelChange(next)
                   }}
-                  disabled={modelChanging || inFlight}
+                  disabled={modelChanging || settingsLocked}
                   variant="text"
                   defaultModel={chatDefaults?.defaultModel}
                   onSetDefault={chatDefaults?.setDefaultModel}
@@ -382,7 +384,7 @@ export function ChatComposer({
                   onChange={(next) => {
                     void handleEffortChange(next)
                   }}
-                  disabled={effortChanging || fastModeChanging || inFlight}
+                  disabled={effortChanging || fastModeChanging || settingsLocked}
                   compact
                   variant="text"
                   showFastMode={modeSupportsFastMode(mode)}
@@ -400,7 +402,7 @@ export function ChatComposer({
                   onChange={(next) => {
                     void handleCollaborationChange(next)
                   }}
-                  disabled={collaborationChanging || inFlight}
+                  disabled={collaborationChanging || settingsLocked}
                   compact
                   variant="text"
                 />

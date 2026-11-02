@@ -39,6 +39,7 @@ import {
   readEventsSince,
   getSessionInfo,
   getSessionTerminalState,
+  isTurnOpen,
   killAll,
   shutdownAll,
   configureTransport,
@@ -697,6 +698,18 @@ async function loadConversationHistory(
       ]
     }
   }
+}
+
+/**
+ * A setting the live process refused (`set_model` etc.) normally falls back to
+ * a kill+respawn — but with a turn open (running, parked on a prompt, or a
+ * message on its way) that would cut the turn. Refuse the change instead; the
+ * old value stays, the turn keeps going.
+ */
+function refuseRespawnMidTurn(tabId: string, setting: string, cause: unknown): void {
+  if (!isTurnOpen(tabId)) return
+  const reason = cause instanceof Error ? cause.message : String(cause)
+  throw new Error(`Can't change ${setting} during this turn (${reason}). Try again when it ends.`)
 }
 
 /** Refuse an operation the mode's provider can't do (`ChatCapabilities`). */
@@ -1449,6 +1462,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
             '[chat-handlers] set_permission_mode control_request failed, falling back to kill+respawn:',
             err
           )
+          refuseRespawnMidTurn(o.tabId, 'permission mode', err)
           // fall through to respawn path below
         }
       }
@@ -1529,6 +1543,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
             '[chat-handlers] set_model control_request failed, falling back to kill+respawn:',
             err
           )
+          refuseRespawnMidTurn(o.tabId, 'model', err)
           // fall through
         }
       }
@@ -1598,6 +1613,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
             '[chat-handlers] apply_flag_settings failed, falling back to kill+respawn:',
             err
           )
+          refuseRespawnMidTurn(o.tabId, 'effort', err)
           // fall through
         }
       }

@@ -772,6 +772,20 @@ export function isSessionAwaitingUserInput(tabId: string): boolean {
 }
 
 /**
+ * Is a turn open on this tab — running, parked on a prompt (which reads as
+ * `idle`), or a message on its way to the agent? Replacing the process now
+ * would cut that turn.
+ */
+export function isTurnOpen(tabId: string): boolean {
+  const tab = tabs.get(tabId)
+  return tab ? turnOpen(tab) : false
+}
+
+function turnOpen(tab: ChatTab): boolean {
+  return tab.terminalState === 'running' || tab.pendingPrompts.size > 0 || tab.outbox.inFlight() > 0
+}
+
+/**
  * May the queue send its next message to this tab now? Idle, not parked on a
  * prompt, and no earlier message still on its way (accepted, being written, or
  * not yet answered) — the state the drainer re-checks after popping.
@@ -2119,8 +2133,7 @@ export async function changeCodexPermissionsAndResume(
   if (!tab || tab.mode !== 'codex-chat' || !proc)
     throw new ChatTransportError('No running Codex session')
   if (permissionChanges.has(tabId)) throw new ChatTransportError('Permissions are already changing')
-  const shouldResume =
-    tab.terminalState === 'running' || tab.pendingPrompts.size > 0 || tab.outbox.inFlight() > 0
+  const shouldResume = turnOpen(tab)
   let release!: () => void
   const paused = new Promise<void>((resolve) => {
     release = resolve
