@@ -38,7 +38,7 @@ import {
 import { toolActivityByRow, type TurnToolActivity } from './tool-activity'
 import { ActivityTurn } from './ActivityTurn'
 import { AssistantAnswer } from './AssistantAnswer'
-import { chatColumnClass } from './chat-layout'
+import { CHAT_SCROLLER_BLEED_CLASS, chatColumnClass } from './chat-layout'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { ToolAutoOpenContext } from './tool-cards/card-shell'
@@ -273,8 +273,10 @@ export function ChatTimeline({
               ref={scrollRef}
               // The virtualizer keeps the view in place as rows above it get
               // measured; the browser's own scroll anchoring would fight it.
-              // Reserve room for answer hover padding outside the text column.
-              className="-mx-5 h-full overflow-y-auto px-5 [container-type:size] [overflow-anchor:none]"
+              className={cn(
+                CHAT_SCROLLER_BLEED_CLASS,
+                'h-full overflow-y-auto [container-type:size] [overflow-anchor:none]'
+              )}
               data-testid="chat-timeline-scroller"
               data-chat-scroller
               // What the renderer holds (paged history): diagnostics, e2e.

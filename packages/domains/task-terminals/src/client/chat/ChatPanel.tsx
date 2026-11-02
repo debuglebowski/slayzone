@@ -25,8 +25,10 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogTitle
+  AlertDialogTitle,
+  cn
 } from '@slayzone/ui'
+import { CHAT_PANEL_GUTTER_CLASS } from './chat-layout'
 import {
   hasPendingPrompt,
   isAwaitingUserQuestion,
@@ -722,7 +724,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     <div
                       ref={panelRef}
                       data-chat-panel
-                      className="relative flex flex-col h-full min-w-0 flex-1 bg-background px-14"
+                      className={cn(
+                        'relative flex flex-col h-full min-w-0 flex-1 bg-background',
+                        CHAT_PANEL_GUTTER_CLASS
+                      )}
                       style={{ fontSize: `${appearance.terminalFontSize}px` }}
                       onFocus={palette.claim}
                       onDragEnter={attachmentsApi.onDragEnter}
