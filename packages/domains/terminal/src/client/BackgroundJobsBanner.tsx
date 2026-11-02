@@ -102,7 +102,7 @@ export function BackgroundJobsBanner({
   return (
     <div
       data-testid="background-jobs-banner"
-      className="mb-2 w-fit min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/10 text-xs"
+      className={`mb-2 ${collapsed ? 'w-fit max-w-full' : 'w-full'} min-w-0 overflow-hidden rounded-md border border-border/50 bg-muted/10 text-xs`}
     >
       <button
         type="button"
@@ -121,10 +121,7 @@ export function BackgroundJobsBanner({
         />
       </button>
       {!collapsed && (
-        <div
-          id={id}
-          className="max-h-56 w-75 max-w-full overflow-y-auto border-t border-border/40 bg-muted/20"
-        >
+        <div id={id} className="max-h-56 overflow-y-auto border-t border-border/40 bg-muted/20">
           <ul className="divide-y divide-border/40">{rows(active)}</ul>
         </div>
       )}
