@@ -19,7 +19,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import { useTheme } from '@slayzone/ui'
 import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
-import { MODE_ICONS } from './TerminalTabBar'
+import { MODE_ICONS } from './mode-icons'
 import { getModeLabel } from './get-tab-label'
 
 // Sessions whose next TerminalStarter mount should skip the Start gate

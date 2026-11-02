@@ -8,12 +8,6 @@ import {
   Fragment
 } from 'react'
 import { Plus, X, Columns2, Terminal as TerminalIcon } from 'lucide-react'
-import ClaudeColor from '@lobehub/icons/es/Claude/components/Color'
-import CodexColor from '@lobehub/icons/es/Codex/components/Color'
-import GeminiColor from '@lobehub/icons/es/Gemini/components/Color'
-import CopilotColor from '@lobehub/icons/es/Copilot/components/Color'
-import CursorMono from '@lobehub/icons/es/Cursor/components/Mono'
-import OpenCodeMono from '@lobehub/icons/es/OpenCode/components/Mono'
 import {
   cn,
   useShortcutDisplay,
@@ -23,9 +17,7 @@ import {
   ContextMenuContent
 } from '@slayzone/ui'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
-
-type IconComponent = React.ComponentType<{ className?: string }>
+import { MODE_ICONS } from './mode-icons'
 
 interface TerminalTabBarProps {
   groups: TerminalGroup[]
@@ -46,18 +38,6 @@ interface TerminalTabBarProps {
   /** Right-click context menu items for the main tab group. ContextMenuItem
    *  nodes rendered inside a Radix ContextMenuContent. */
   mainTabContextMenu?: React.ReactNode
-}
-
-export const MODE_ICONS: Partial<Record<TerminalMode, IconComponent>> = {
-  'claude-code': ClaudeColor as IconComponent,
-  'claude-chat': ClaudeColor as IconComponent,
-  codex: CodexColor as IconComponent,
-  'codex-chat': CodexColor as IconComponent,
-  'cursor-agent': CursorMono as IconComponent,
-  gemini: GeminiColor as IconComponent,
-  opencode: OpenCodeMono as IconComponent,
-  copilot: CopilotColor as IconComponent,
-  terminal: TerminalIcon
 }
 
 import { getTabLabel, numberDuplicateLabels } from './get-tab-label'

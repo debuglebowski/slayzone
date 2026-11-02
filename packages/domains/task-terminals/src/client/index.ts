@@ -1,6 +1,7 @@
 export { TerminalContainer } from './TerminalContainer'
 export type { TerminalContainerHandle } from './TerminalContainer'
-export { TerminalTabBar, MODE_ICONS } from './TerminalTabBar'
+export { TerminalTabBar } from './TerminalTabBar'
+export { MODE_ICONS } from './mode-icons'
 export type { TerminalTabBarHandle } from './TerminalTabBar'
 export { TerminalSplitGroup } from './TerminalSplitGroup'
 export { markForceStart, requestAgentStart } from './TerminalStarter'

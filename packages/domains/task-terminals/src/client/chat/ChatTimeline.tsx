@@ -46,6 +46,8 @@ import { ChatSearchBar } from './ChatSearchBar'
 import { ChatTurnOutline } from './ChatTurnOutline'
 import { renderTimelineItem } from './renderers'
 import { useChatProvider } from './ChatViewContext'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
+import { MODE_ICONS } from '../mode-icons'
 import {
   TimelineRowKeyContext,
   TimelineRowIndexContext,
@@ -397,12 +399,19 @@ function HydratingState() {
 
 export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   const provider = useChatProvider()
+  const ProviderIcon = MODE_ICONS[provider.type as TerminalMode]
   return (
     <div className="absolute inset-0 flex flex-col items-center px-6 text-center">
       <div className="h-[30%] shrink-0" />
-      <div className="size-12 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-lg mb-4">
-        <Sparkles className="size-5" />
-      </div>
+      {ProviderIcon ? (
+        <div data-testid="chat-empty-provider-logo" data-provider={provider.type} className="mb-4">
+          <ProviderIcon className="size-12" />
+        </div>
+      ) : (
+        <div className="size-12 rounded-full bg-gradient-to-br from-agent to-agent-emphasis flex items-center justify-center text-agent-contrast shadow-lg mb-4">
+          <Sparkles className="size-5" />
+        </div>
+      )}
       <div className="text-base font-medium">Chat with {provider.product}</div>
       <div className="text-sm text-muted-foreground mt-1 mb-6">
         Structured responses. Diffs, file reads, and tool calls rendered inline.
