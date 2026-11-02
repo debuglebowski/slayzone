@@ -179,8 +179,9 @@ retry behavior remain. Tests cover rollback on disk failure and shutdown during 
 failed sweep. Operator behavior documented in `docs/backup-and-restore.md`.
 
 Remaining before merge: availability UI, archive/artifact edge cases, lifecycle
-command barrier audit, full desktop/mobile E2E and performance validation. Main has
-advanced four commits; refresh rebase after saving this checkpoint.
+command barrier audit, full desktop/mobile E2E and performance validation.
+Rebased again onto main `fbf691341`; preserved main's plan-decision agent scope
+and removed duplicate scope/admin/owner-policy entries introduced by replay.
 
 Unresolved questions: none.
 
@@ -188,3 +189,6 @@ Retention validation: 245 targeted tests pass (including 50 native PTY tests), f
 affected package typechecks and hub/computer builds pass. Changed-file Biome lint
 passes. Worktree dependency lifecycle scripts initialized with Electron rebuilding
 skipped; node-pty helper execute bit restored.
+
+Post-rebase: 1,464 targeted tests pass, including owner/admin policy coverage.
+Rebased verification: all four affected typechecks, both bundles and changed-file lint pass.
