@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { MessageCircleQuestion } from 'lucide-react'
-import { cn, toast } from '@slayzone/ui'
+import { toast } from '@slayzone/ui'
 import type { ChatPrompt, TimelineItem, TimelineRows } from '@slayzone/terminal/client'
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import { useChatProvider, useChatView } from '../ChatViewContext'
@@ -69,8 +69,6 @@ export function PromptDock({
 
   if (!current) return null
 
-  const isCompactPrompt =
-    current.toolName !== 'AskUserQuestion' && current.toolName !== 'ExitPlanMode'
   const submitting = submittingPrompts?.has(current.requestId) ?? false
   const answer = (optionId: string, decision: PermissionDecision): Promise<boolean> => {
     if (!respondPermission) return Promise.resolve(false)
@@ -141,10 +139,7 @@ export function PromptDock({
       data-prompt-dock
       tabIndex={-1}
       aria-label={`${provider.agent} is waiting for your answer`}
-      className={cn(
-        'mb-2 max-h-[55vh] overflow-y-auto rounded-2xl border border-border bg-card px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-        isCompactPrompt ? 'mx-auto w-[calc(100%-1.5rem)] max-w-3xl' : 'mx-3'
-      )}
+      className="mx-auto mb-2 max-h-[55vh] w-[calc(100%-1.5rem)] max-w-3xl overflow-y-auto rounded-2xl border border-border bg-card px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <MessageCircleQuestion className="size-3" />
