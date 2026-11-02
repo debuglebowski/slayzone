@@ -264,6 +264,17 @@ export type TimelineItem =
       parentToolUseId?: string
     }
   | {
+      /**
+       * The agent opened the turn that follows because these background
+       * sub-agents ended (Claude Code answers a finished background agent with
+       * a turn of its own): the reply below is about them.
+       */
+      kind: 'turn-trigger'
+      subAgents: TurnTriggerSubAgent[]
+      timestamp: number
+      parentToolUseId?: undefined
+    }
+  | {
       kind: 'interrupted'
       timestamp: number
       parentToolUseId?: string
@@ -630,9 +641,22 @@ export interface ChatTimelineState {
    * session's turn-init.
    */
   importingHistory: boolean
+  /**
+   * Background sub-agents that ended since the last turn closed: the next
+   * agent-started turn answers them (its `turn-trigger` row names them). A
+   * user message, a result, a Stop or the process ending clears them.
+   */
+  turnTriggers: readonly TurnTriggerSubAgent[]
+}
+
+/** A background sub-agent that ended (what a `turn-trigger` row names). */
+export interface TurnTriggerSubAgent {
+  toolUseId: string
+  description?: string
 }
 
 const EMPTY_LIVE: LiveBlocks = Object.freeze([])
+const NO_TRIGGERS: readonly TurnTriggerSubAgent[] = Object.freeze([])
 /** No blocks counted (shared; written only through `writableMap`, which copies it). */
 const EMPTY_ORDINALS: ReadonlyMap<string, number> = new Map()
 
@@ -680,6 +704,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     freshStartPending: false,
     agentStartedTurns: opts.agentStartedTurns ?? false,
     agentTurnOpen: false,
+    turnTriggers: NO_TRIGGERS,
     turnsClosed: 0,
     importingHistory: false
   }
@@ -833,11 +858,12 @@ function reduceSingle(state: ChatTimelineState, action: SingleAction): ChatTimel
   // A turn's end (or its process's) ends every stream it left open: those rows
   // keep the text they got. The splitter saved them first, so this only heals.
   const kind = action.type === 'event' ? action.event.kind : null
-  const base =
+  const settled =
     kind === 'result' || kind === 'interrupted' || kind === 'process-exit'
       ? settleStreams(state)
       : state
-  const next = applyAction(base, action)
+  const base = action.type === 'event' ? withTurnTrigger(settled, action.event, action.at) : settled
+  const next = clearTurnTriggers(applyAction(base, action), action)
   // Bg-shell tracking is a pure derived view over the same event stream, kept
   // alongside the timeline so it replays from buffered history without a second
   // subscription. We post-process AgentEvents here so the timeline pass stays
@@ -1949,13 +1975,15 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           // Don't regress a terminal state. Late notification after tool-result
           // is rare but possible (out-of-order delivery).
           const isTerminal = target.phase === 'completed' || target.phase === 'failed'
+          const backgrounded = target.backgrounded ?? event.backgrounded
           const next: TimelineItem = {
             ...target,
+            ...(backgrounded ? { backgrounded } : {}),
             // A background run's end is its notification; a foreground run's
             // is its tool-result (`case 'tool-result'`).
             phase: isTerminal
               ? target.phase
-              : target.backgrounded
+              : backgrounded
                 ? (endedPhase(event.status) ?? incomingPhase)
                 : incomingPhase,
             description: event.description ?? target.description,
@@ -1967,9 +1995,18 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           }
           const t = writable(state.timeline)
           t[existingIdx] = next
+          // A background sub-agent ended: the agent may open a turn to answer it.
+          const endedInBackground =
+            !isTerminal && backgrounded && next.kind === 'sub-agent' && next.phase !== 'in-flight'
           return {
             ...state,
             timeline: t,
+            turnTriggers: endedInBackground
+              ? [
+                  ...state.turnTriggers,
+                  { toolUseId: id, ...(next.description ? { description: next.description } : {}) }
+                ]
+              : state.turnTriggers,
             inFlightSubAgents:
               next.phase === 'in-flight'
                 ? withRowIn(state.inFlightSubAgents, existingIdx)
@@ -1988,7 +2025,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         toolUses: event.usage?.toolUses,
         totalTokens: event.usage?.totalTokens,
         timestamp: ts,
-        parentToolUseId: event.parentToolUseId
+        parentToolUseId: event.parentToolUseId,
+        ...(event.backgrounded ? { backgrounded: event.backgrounded } : {})
       }
       const at = state.timeline.length
       const nextIdx = writableMap(state.subAgentIndex)
@@ -2747,6 +2785,60 @@ export function isTurnOpen(state: ChatTimelineState): boolean {
 }
 
 /**
+ * The output that opens an agent-started turn answering background sub-agents
+ * that ended: a `turn-trigger` row naming them goes first.
+ */
+function withTurnTrigger(
+  state: ChatTimelineState,
+  event: AgentEvent,
+  at: number | undefined
+): ChatTimelineState {
+  if (state.turnTriggers.length === 0 || !opensAgentTurn(state, event)) return state
+  const item: TimelineItem = {
+    kind: 'turn-trigger',
+    subAgents: [...state.turnTriggers],
+    timestamp: at ?? Date.now()
+  }
+  return { ...state, timeline: appended(state.timeline, item), turnTriggers: NO_TRIGGERS }
+}
+
+/** A user message, a turn's end or the process's: no sub-agent end is pending an answer. */
+function clearTurnTriggers(state: ChatTimelineState, action: SingleAction): ChatTimelineState {
+  if (state.turnTriggers.length === 0) return state
+  const clears =
+    action.type === 'event'
+      ? action.event.kind === 'result' ||
+        action.event.kind === 'process-exit' ||
+        (action.event.kind === 'user-message' && action.event.history !== true)
+      : action.type === 'user-sent' ||
+        action.type === 'turn-interrupted' ||
+        action.type === 'process-exit'
+  return clears ? { ...state, turnTriggers: NO_TRIGGERS } : state
+}
+
+/** `event` is the first output no user turn accounts for: it opens an agent-started turn. */
+function opensAgentTurn(state: ChatTimelineState, event: AgentEvent): boolean {
+  if (!state.agentStartedTurns) return false
+  switch (event.kind) {
+    case 'assistant-text':
+    case 'assistant-thinking':
+    case 'tool-call':
+    case 'stream-message-start':
+    case 'stream-block-start':
+    case 'stream-block-delta':
+      return !(
+        state.agentTurnOpen ||
+        state.importingHistory ||
+        event.parentToolUseId != null ||
+        isInFlight(state) ||
+        hasPendingPrompt(state)
+      )
+    default:
+      return false
+  }
+}
+
+/**
  * Post-pass of every event: opens an agent-started turn on the first output no
  * user turn accounts for — not a turn-init (Codex's handshake), not while a
  * prompt waits (the turn is parked, not over), not a sub-agent's output, not an
@@ -2768,24 +2860,8 @@ function applyAgentTurn(state: ChatTimelineState, event: AgentEvent): ChatTimeli
     case 'turn-init':
     case 'result':
       return state.importingHistory ? { ...state, importingHistory: false } : state
-    case 'assistant-text':
-    case 'assistant-thinking':
-    case 'tool-call':
-    case 'stream-message-start':
-    case 'stream-block-start':
-    case 'stream-block-delta':
-      if (
-        state.agentTurnOpen ||
-        state.importingHistory ||
-        event.parentToolUseId != null ||
-        isInFlight(state) ||
-        hasPendingPrompt(state)
-      ) {
-        return state
-      }
-      return { ...state, agentTurnOpen: true }
     default:
-      return state
+      return opensAgentTurn(state, event) ? { ...state, agentTurnOpen: true } : state
   }
 }
 

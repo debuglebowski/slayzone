@@ -297,3 +297,34 @@ describe('Codex MCP and web search cards', () => {
     expect(screen.getByText('codex/README.md at main · openai/codex · GitHub')).toBeTruthy()
   })
 })
+
+describe('Codex agent tool card', () => {
+  it('a wait: named for what it does, the sub-agents it waits for, and how they ended', () => {
+    show({
+      id: 'call_wait',
+      name: 'codex/agent/wait',
+      input: { agents: ['pong'] },
+      status: 'done',
+      result: { isError: false, rawContent: 'pong: completed — PONG', structured: {} }
+    })
+    const text = document.body.textContent ?? ''
+    expect(text).toContain('Wait for sub-agents')
+    expect(text).toContain('pong')
+    expect(text).not.toContain('codex/agent/wait')
+    fireEvent.click(screen.getByRole('button', { name: /Wait for sub-agents/ }))
+    expect(document.body.textContent).toContain('pong: completed — PONG')
+  })
+
+  it('a message to a sub-agent shows what was sent', () => {
+    show({
+      id: 'call_send',
+      name: 'codex/agent/sendInput',
+      input: { agents: ['scout'], prompt: 'Also count the tests.' },
+      status: 'done',
+      result: { isError: false, rawContent: '', structured: {} }
+    })
+    expect(document.body.textContent).toContain('Message sub-agent')
+    fireEvent.click(screen.getByRole('button', { name: /Message sub-agent/ }))
+    expect(document.body.textContent).toContain('Also count the tests.')
+  })
+})

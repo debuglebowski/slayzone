@@ -1,7 +1,10 @@
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { unifiedChangeRows } from './files-changed/turn-changes'
 
-export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
+export type ActivityItem = Extract<
+  TimelineItem,
+  { kind: 'text' | 'thinking' | 'tool' | 'stderr' | 'sub-agent' }
+>
 export interface ActivityTurn {
   items: ActivityItem[]
   files: Array<Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }>>
@@ -51,12 +54,15 @@ export function activityView(
         item.kind === 'text' ||
         item.kind === 'thinking' ||
         item.kind === 'stderr' ||
+        // A sub-agent shows on its own while it runs; once it ended, it is
+        // part of the turn's activity like a tool call.
+        (item.kind === 'sub-agent' && item.phase !== 'in-flight') ||
         (item.kind === 'tool' &&
           item.invocation.name !== 'ExitPlanMode' &&
           item.invocation.name !== 'AskUserQuestion')
     )
     // Process diagnostics can arrive after the reply; they don't make it progress text.
-    const last = activity.findLast((item) => item.kind !== 'stderr')
+    const last = activity.findLast((item) => item.kind !== 'stderr' && item.kind !== 'sub-agent')
     const result = segment.find((item) => item.kind === 'result')
     const user = segment.find((item) => item.kind === 'user-text')
     // Session-file imports have answered user messages, but no live result events.

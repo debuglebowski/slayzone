@@ -161,6 +161,47 @@ export interface CodexFileChangeItem extends CodexThreadItemBase {
   status: 'inProgress' | 'completed' | 'failed' | 'declined'
 }
 
+/**
+ * `subAgentActivity` thread item (`multi_agent`): a sub-agent the thread
+ * spawned (`started`), talked to (`interacted`), or that ended. The sub-agent
+ * is its own thread (`agentThreadId`); its notifications carry that id.
+ */
+export interface CodexSubAgentActivityItem extends CodexThreadItemBase {
+  type: 'subAgentActivity'
+  kind: 'started' | 'interacted' | 'interrupted' | 'completed'
+  agentThreadId: string
+  /** `/root/<nickname>[/<nickname>…]`. */
+  agentPath: string
+  model: string | null
+  reasoningEffort: string | null
+}
+/** Last known state of a sub-agent, as a `collabAgentToolCall` reports it. */
+export interface CodexCollabAgentState {
+  status:
+    | 'pendingInit'
+    | 'running'
+    | 'interrupted'
+    | 'completed'
+    | 'errored'
+    | 'shutdown'
+    | 'notFound'
+  message: string | null
+}
+/** `collabAgentToolCall` thread item: the thread used one of its agent tools. */
+export interface CodexCollabAgentToolCallItem extends CodexThreadItemBase {
+  type: 'collabAgentToolCall'
+  /** `spawnAgent`, `wait`, `sendInput`, `closeAgent`, `interruptAgent`, … */
+  tool: string
+  status: 'inProgress' | 'completed' | 'failed' | 'interrupted'
+  senderThreadId: string
+  /** On `spawnAgent`: the spawned agent's thread (may be empty until completed). */
+  receiverThreadIds: string[]
+  prompt: string | null
+  model: string | null
+  reasoningEffort: string | null
+  agentsStates: Record<string, CodexCollabAgentState | undefined>
+}
+
 export type CodexThreadItem = CodexThreadItemBase &
   Record<string, unknown> & { type: string; id: string }
 

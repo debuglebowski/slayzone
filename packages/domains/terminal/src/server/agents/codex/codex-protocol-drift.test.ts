@@ -191,8 +191,14 @@ const HANDLED_ITEMS = new Set([
   'dynamicToolCall',
   'webSearch',
   'userMessage',
-  'contextCompaction'
+  'contextCompaction',
+  'collabAgentToolCall',
+  'subAgentActivity'
 ])
+/** Fields an item type needs to show at all (a sub-agent activity names its thread). */
+const ITEM_FIELDS: Record<string, Json> = {
+  subAgentActivity: { kind: 'started', agentThreadId: 'child', agentPath: '/root/a' }
+}
 const HANDLED_SILENT_ITEMS: Record<string, string> = {
   userMessage: 'echo of the message chat already recorded'
 }
@@ -201,8 +207,6 @@ const KNOWN_UNHANDLED_ITEMS: Record<string, string> = {
   plan: 'plan-mode proposed plan',
   imageView: 'an image the agent looked at',
   imageGeneration: 'an image the agent generated',
-  collabAgentToolCall: 'a call to a collaborating agent',
-  subAgentActivity: 'sub-agent activity',
   enteredReviewMode: 'review mode started',
   exitedReviewMode: 'review mode ended (carries the review)',
   hookPrompt: 'a hook injected a prompt',
@@ -409,7 +413,10 @@ describe('codex protocol drift: classification is complete and true', () => {
     for (const type of surface.threadItemTypes) {
       const h = await harness()
       const started = await h.feed(
-        JSON.stringify({ method: 'item/started', params: { item: { type, id: 'x' } } })
+        JSON.stringify({
+          method: 'item/started',
+          params: { item: { type, id: 'x', ...ITEM_FIELDS[type] } }
+        })
       )
       const delta =
         type === 'agentMessage' || type === 'reasoning'
@@ -424,7 +431,7 @@ describe('codex protocol drift: classification is complete and true', () => {
       const done = await h.feed(
         JSON.stringify({
           method: 'item/completed',
-          params: { item: { type, id: 'x', status: 'completed' } }
+          params: { item: { type, id: 'x', status: 'completed', ...ITEM_FIELDS[type] } }
         })
       )
       const n = started.length + delta.length + done.length
@@ -638,7 +645,10 @@ describe('codex protocol drift: recorded runs through the driver', () => {
           problems.push(`notification ${method} not in the surface`)
         if (method && msg.id !== undefined && !(method in surface.serverRequests))
           problems.push(`request ${method} not in the surface`)
-        if (method === 'turn/completed') turnsCompleted += 1
+        // A sub-agent's turn is its own: only the chat's thread ends in a result.
+        const thread = (msg.params as Json | undefined)?.threadId
+        if (method === 'turn/completed' && (thread === undefined || thread === '{{threadId}}'))
+          turnsCompleted += 1
         let line = r.line
         if (method === undefined && msg.id !== undefined) {
           const id = driverIdFor(msg.id)

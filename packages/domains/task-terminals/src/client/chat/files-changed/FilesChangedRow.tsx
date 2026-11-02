@@ -6,7 +6,7 @@ import { useChatView } from '../ChatViewContext'
 import { CHAT_CARD_INDENT } from '../tool-cards/card-shell'
 import { CardBadge } from '../tool-cards/links'
 import { ToolFocusContext } from '../tool-cards/tool-focus'
-import { useRevealTimelineItem } from '../timeline-reveal'
+import { flashRow, useRevealTimelineItem } from '../timeline-reveal'
 import { stableAnchorKey } from '../useChatDisplay'
 import { relativeToCwd } from './relative-path'
 import { TurnFooterPanel } from '../turn-footer'
@@ -38,29 +38,6 @@ function sum(values: Array<number | null>): number | null {
     total += v
   }
   return total
-}
-
-/** Highlights a timeline row briefly once it is on screen (it may mount after the reveal). */
-function flashRow(key: string): void {
-  const selector = `[data-item-key="${key.replace(/["\\]/g, '\\$&')}"]`
-  let frames = 0
-  const tick = (): void => {
-    const row = Array.from(document.querySelectorAll<HTMLElement>(selector)).find(
-      (el) => el.offsetParent !== null
-    )
-    if (row) {
-      row.animate?.(
-        [
-          { backgroundColor: 'color-mix(in oklab, var(--color-ring) 22%, transparent)' },
-          { backgroundColor: 'transparent' }
-        ],
-        { duration: 1400, easing: 'ease-out' }
-      )
-      return
-    }
-    if (++frames < 60) requestAnimationFrame(tick)
-  }
-  requestAnimationFrame(tick)
 }
 
 /**

@@ -638,6 +638,8 @@ run_harness packages/domains/terminal/src/server/agents/codex/codex-chat-session
 run_harness packages/domains/terminal/src/server/agents/codex/codex-server-requests.test.ts
 # Codex turn data: CLI version, model/list, model + effort per turn, readable errors, live command output, context usage (X1).
 run_harness packages/domains/terminal/src/server/agents/codex/codex-driver-turns.test.ts
+# Codex sub-agents (multi_agent): child threads → nested sub-agent rows, Stop stops them (recorded runs).
+run_harness packages/domains/terminal/src/server/agents/codex/codex-sub-agents.test.ts
 # The Codex driver against the fake app-server as a child process + its open bugs (expectKnownBug).
 run_harness packages/domains/terminal/src/server/agents/codex/codex-chat-session.fake.test.ts
 # Codex protocol drift check: driver vs the pinned CLI's protocol surface + recorded runs.

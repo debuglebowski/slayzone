@@ -262,7 +262,7 @@ describe('CodexChatSession', () => {
       JSON.stringify({
         method: 'turn/plan/updated',
         params: {
-          threadId: 't',
+          threadId: 'thread-1',
           turnId: 'turn-1',
           explanation: 'breaking it down',
           plan: [
@@ -293,13 +293,13 @@ describe('CodexChatSession', () => {
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/started',
-        params: { item: { type: 'reasoning', id: 'r1' }, threadId: 't', turnId: 'turn-1' }
+        params: { item: { type: 'reasoning', id: 'r1' }, threadId: 'thread-1', turnId: 'turn-1' }
       })
     )
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/completed',
-        params: { item: { type: 'reasoning', id: 'r1' }, threadId: 't', turnId: 'turn-1' }
+        params: { item: { type: 'reasoning', id: 'r1' }, threadId: 'thread-1', turnId: 'turn-1' }
       })
     )
     const streamEvents = h.emitted.slice(before).filter((e) => e.kind.startsWith('stream-'))
@@ -312,13 +312,19 @@ describe('CodexChatSession', () => {
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/started',
-        params: { item: { type: 'reasoning', id: 'r2' }, threadId: 't', turnId: 'turn-1' }
+        params: { item: { type: 'reasoning', id: 'r2' }, threadId: 'thread-1', turnId: 'turn-1' }
       })
     )
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/reasoning/textDelta',
-        params: { threadId: 't', turnId: 'turn-1', itemId: 'r2', delta: 'hmm', contentIndex: 0 }
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'r2',
+          delta: 'hmm',
+          contentIndex: 0
+        }
       })
     )
     const kinds = h.emitted.map((e) => e.kind)
@@ -621,7 +627,10 @@ describe('CodexChatSession', () => {
     await handshake(h)
     const started = (item: Record<string, unknown>): void =>
       h.driver.handleLine(
-        JSON.stringify({ method: 'item/started', params: { item, threadId: 't', turnId: 'tn' } })
+        JSON.stringify({
+          method: 'item/started',
+          params: { item, threadId: 'thread-1', turnId: 'tn' }
+        })
       )
     started({ type: 'commandExecution', id: 'c1', command: 'ls -la', cwd: '/work' })
     started({ type: 'fileChange', id: 'f1', changes: [{ path: 'a.ts' }] })
@@ -645,7 +654,10 @@ describe('CodexChatSession', () => {
     await handshake(h)
     const completed = (item: Record<string, unknown>): void =>
       h.driver.handleLine(
-        JSON.stringify({ method: 'item/completed', params: { item, threadId: 't', turnId: 'tn' } })
+        JSON.stringify({
+          method: 'item/completed',
+          params: { item, threadId: 'thread-1', turnId: 'tn' }
+        })
       )
     completed({
       type: 'commandExecution',
@@ -678,7 +690,7 @@ describe('CodexChatSession', () => {
       JSON.stringify({
         method: 'turn/completed',
         params: {
-          threadId: 't',
+          threadId: 'thread-1',
           turn: { id: 'tn', status: 'interrupted', error: null, durationMs: 5 }
         }
       })
@@ -698,7 +710,7 @@ describe('CodexChatSession', () => {
       JSON.stringify({
         method: 'turn/completed',
         params: {
-          threadId: 't',
+          threadId: 'thread-1',
           turn: { id: 'tn', status: 'failed', error: { message: 'x' }, durationMs: 1 }
         }
       })
@@ -720,7 +732,7 @@ describe('CodexChatSession', () => {
         params: {
           error: { message: 'rate limited' },
           willRetry: false,
-          threadId: 't',
+          threadId: 'thread-1',
           turnId: 'tn'
         }
       })
@@ -760,7 +772,7 @@ describe('CodexChatSession', () => {
     h.driver.handleLine(
       JSON.stringify({
         method: 'turn/started',
-        params: { threadId: 't', turn: { id: 'turn-streamed' } }
+        params: { threadId: 'thread-s', turn: { id: 'turn-streamed' } }
       })
     )
     void h.driver.applyControl({ subtype: 'interrupt' }, CONTROL_TIMEOUT_MS)
@@ -779,7 +791,7 @@ describe('CodexChatSession', () => {
     h.driver.handleLine(
       JSON.stringify({
         method: 'error',
-        params: { error: { message: 'late' }, willRetry: false, threadId: 't', turnId: 'tn' }
+        params: { error: { message: 'late' }, willRetry: false, threadId: 'thread-1', turnId: 'tn' }
       })
     )
     expect(h.emitted.length, 'no events should emit after dispose').toEqual(before)
@@ -791,14 +803,14 @@ describe('CodexChatSession', () => {
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/agentMessage/delta',
-        params: { threadId: 't', turnId: 'tn', itemId: 'a1', delta: 'hi' }
+        params: { threadId: 'thread-1', turnId: 'tn', itemId: 'a1', delta: 'hi' }
       })
     )
     h.driver.handleLine(
       JSON.stringify({
         method: 'turn/completed',
         params: {
-          threadId: 't',
+          threadId: 'thread-1',
           turn: { id: 'tn', status: 'completed', error: null, durationMs: 1 }
         }
       })
@@ -818,13 +830,13 @@ describe('CodexChatSession', () => {
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/agentMessage/delta',
-        params: { threadId: 't', turnId: 'tn', itemId: 'a1', delta: 'text' }
+        params: { threadId: 'thread-1', turnId: 'tn', itemId: 'a1', delta: 'text' }
       })
     )
     h.driver.handleLine(
       JSON.stringify({
         method: 'item/reasoning/textDelta',
-        params: { threadId: 't', turnId: 'tn', itemId: 'r1', delta: 'think' }
+        params: { threadId: 'thread-1', turnId: 'tn', itemId: 'r1', delta: 'think' }
       })
     )
     const kinds = h.emitted.map((e) => e.kind)

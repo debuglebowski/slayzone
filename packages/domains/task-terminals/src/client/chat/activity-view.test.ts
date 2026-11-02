@@ -107,3 +107,24 @@ describe('activity view late diagnostics', () => {
     })
   })
 })
+
+describe('activity view: sub-agents', () => {
+  const user = { kind: 'user-text', id: 'u1', text: 'Spawn two', timestamp: 0 } as TimelineItem
+  const agent = (toolUseId: string, phase: 'in-flight' | 'completed' | 'failed') =>
+    ({ kind: 'sub-agent', toolUseId, phase, backgrounded: true, timestamp: 0 }) as TimelineItem
+
+  it('a running sub-agent shows on its own; an ended one folds into the Activities', () => {
+    const running = agent('a1', 'in-flight')
+    const done = agent('a2', 'completed')
+    const view = activityView([user, running, done, reply, result], false)
+    expect(view.rows).toEqual([user, running, reply])
+    expect(view.turns.get(reply)).toMatchObject({ final: reply, items: [done] })
+    expect(view.hosts.get(done)).toBe(reply)
+  })
+
+  it('an ended sub-agent is never the reply', () => {
+    const done = agent('a1', 'failed')
+    const view = activityView([user, reply, done, result], false)
+    expect(view.turns.get(reply)).toMatchObject({ final: reply, items: [done] })
+  })
+})

@@ -127,13 +127,15 @@ function ActivityEntry({
     streamKeyOf(item) ??
     (item.kind === 'tool'
       ? `tool:${item.invocation.id}`
-      : item.kind === 'stderr'
-        ? `stderr:${row ?? item.timestamp}`
-        : `${item.kind}:${item.messageId}:${item.blockOrdinal ?? 0}`)
+      : item.kind === 'sub-agent'
+        ? `sub-agent:${item.toolUseId}`
+        : item.kind === 'stderr'
+          ? `stderr:${row ?? item.timestamp}`
+          : `${item.kind}:${item.messageId}:${item.blockOrdinal ?? 0}`)
   return (
     <TimelineRowKeyContext.Provider value={key}>
       <TimelineRowIndexContext.Provider value={row}>
-        {item.kind === 'tool' || item.kind === 'stderr' ? (
+        {item.kind === 'tool' || item.kind === 'stderr' || item.kind === 'sub-agent' ? (
           <ToolInActivityContext.Provider value>
             {renderTimelineItem(item, key)}
           </ToolInActivityContext.Provider>
@@ -170,9 +172,14 @@ export function ActivityTurn({
   // A file summary can request a tool hidden inside this disclosure.
   useEffect(() => {
     if (!focus) return
-    const tools = turn.items
-      .filter((item) => item.kind === 'tool')
-      .map((item) => item.invocation.id)
+    // A sub-agent inside: its row, or a card inside it, may be asked for too.
+    const tools = turn.items.flatMap((item) =>
+      item.kind === 'tool'
+        ? [item.invocation.id]
+        : item.kind === 'sub-agent'
+          ? [item.toolUseId]
+          : []
+    )
     const check = (): void => {
       if (tools.some((tool) => focus.isPending(tool))) {
         setForced(true)
@@ -234,9 +241,11 @@ export function ActivityTurn({
                       streamKeyOf(item) ??
                       (item.kind === 'tool'
                         ? item.invocation.id
-                        : item.kind === 'stderr'
-                          ? `stderr:${rowOf?.(item) ?? index}`
-                          : `${item.messageId}:${item.blockOrdinal ?? index}`)
+                        : item.kind === 'sub-agent'
+                          ? `sub-agent:${item.toolUseId}`
+                          : item.kind === 'stderr'
+                            ? `stderr:${rowOf?.(item) ?? index}`
+                            : `${item.messageId}:${item.blockOrdinal ?? index}`)
                     }
                     item={item}
                     row={rowOf?.(item)}

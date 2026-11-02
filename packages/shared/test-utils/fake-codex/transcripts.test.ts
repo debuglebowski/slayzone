@@ -57,7 +57,9 @@ describe('recorded codex app-server transcripts', () => {
       it('stores thread and turn ids as {{threadId}} / {{turnId}}, so a replay echoes the live ones', () => {
         for (const { msg } of lines) {
           const params = msg.params as Record<string, unknown> | undefined
-          if (typeof params?.threadId === 'string') expect(params.threadId).toBe('{{threadId}}')
+          // A sub-agent's thread keeps its own placeholder ({{subThread1}}, …).
+          if (typeof params?.threadId === 'string')
+            expect(params.threadId).toMatch(/^\{\{(?:threadId|subThread\d+)\}\}$/)
           if (typeof params?.turnId === 'string') expect(params.turnId).toBe('{{turnId}}')
           const thread = (msg.result as { thread?: { id?: string } } | undefined)?.thread
           if (thread?.id) expect(thread.id).not.toMatch(UUID)

@@ -3082,7 +3082,7 @@ describe('a new conversation starting with a message already sent to it', () => 
 })
 
 describe('background sub-agents (Agent run in the background)', () => {
-  const started = (toolUseId: string): AgentEvent => ({
+  const started = (toolUseId: string): Extract<AgentEvent, { kind: 'sub-agent' }> => ({
     kind: 'sub-agent',
     phase: 'in-flight',
     toolUseId,
@@ -3170,6 +3170,85 @@ describe('background sub-agents (Agent run in the background)', () => {
     s = reducer(s, { type: 'event', event: started('tu_FG') })
     s = reducer(s, { type: 'event', event: ev.result('tu_FG') })
     expect(subAgent(s, 'tu_FG').phase).toBe('completed')
+  })
+
+  describe('the turn the agent opens to answer it names it (turn-trigger)', () => {
+    const claudeRunning = (): ChatTimelineState => {
+      let s = initialState({ agentStartedTurns: true })
+      s = reducer(s, { type: 'event', event: ev.turnInit() })
+      s = reducer(s, { type: 'user-sent', id: 'u1', text: 'go' })
+      s = reducer(s, { type: 'event', event: userMsg('go', 'u1') })
+      s = reducer(s, { type: 'event', event: ev.call('tu_A', 'Agent') })
+      s = reducer(s, { type: 'event', event: started('tu_A') })
+      s = reducer(s, { type: 'event', event: launched('tu_A') })
+      s = reducer(s, { type: 'event', event: ev.call('tu_B', 'Agent') })
+      s = reducer(s, { type: 'event', event: { ...started('tu_B'), description: 'second' } })
+      return reducer(s, { type: 'event', event: launched('tu_B') })
+    }
+    const triggers = (s: ChatTimelineState) =>
+      rowsOf(s).flatMap((r) => (r.kind === 'turn-trigger' ? [r.subAgents] : []))
+
+    test('ended between turns: a turn-trigger row goes before the reply it opened', () => {
+      let s = reducer(claudeRunning(), { type: 'event', event: ev.turnResult() })
+      s = reducer(s, { type: 'event', event: notified('tu_A', 'completed') })
+      s = reducer(s, { type: 'event', event: ev.text('m-2', 'A finished') })
+      const kinds = rowsOf(s).map((r) => r.kind)
+      expect(kinds.slice(-2)).toEqual(['turn-trigger', 'text'])
+      expect(triggers(s)).toEqual([[{ toolUseId: 'tu_A', description: 'bg' }]])
+      expect(s.turnTriggers).toEqual([])
+    })
+
+    test('two ended before the turn opened: one row names both', () => {
+      let s = reducer(claudeRunning(), { type: 'event', event: ev.turnResult() })
+      s = reducer(s, { type: 'event', event: notified('tu_A', 'completed') })
+      s = reducer(s, { type: 'event', event: notified('tu_B', 'failed') })
+      s = reducer(s, { type: 'event', event: ev.text('m-2', 'both done') })
+      expect(triggers(s)).toEqual([
+        [
+          { toolUseId: 'tu_A', description: 'bg' },
+          { toolUseId: 'tu_B', description: 'second' }
+        ]
+      ])
+    })
+
+    test('ended while the turn still ran: its result answers it, no later turn names it', () => {
+      let s = reducer(claudeRunning(), { type: 'event', event: notified('tu_A', 'completed') })
+      s = reducer(s, { type: 'event', event: ev.turnResult() })
+      s = reducer(s, { type: 'event', event: ev.text('m-2', 'something else') })
+      expect(triggers(s)).toEqual([])
+    })
+
+    test('the user writing first: their message is what the next turn answers', () => {
+      let s = reducer(claudeRunning(), { type: 'event', event: ev.turnResult() })
+      s = reducer(s, { type: 'event', event: notified('tu_A', 'completed') })
+      s = reducer(s, { type: 'user-sent', id: 'u2', text: 'next' })
+      s = reducer(s, { type: 'event', event: userMsg('next', 'u2') })
+      s = reducer(s, { type: 'event', event: ev.text('m-2', 'answer') })
+      expect(triggers(s)).toEqual([])
+    })
+
+    test('a provider that never opens turns (Codex) gets no trigger rows', () => {
+      let s = initialState()
+      s = reducer(s, { type: 'event', event: ev.turnInit() })
+      s = reducer(s, { type: 'user-sent', id: 'u1', text: 'go' })
+      s = reducer(s, {
+        type: 'event',
+        event: { ...started('tu_C'), backgrounded: true }
+      })
+      s = reducer(s, { type: 'event', event: ev.turnResult() })
+      s = reducer(s, {
+        type: 'event',
+        event: {
+          kind: 'sub-agent',
+          phase: 'completed',
+          toolUseId: 'tu_C',
+          status: 'completed',
+          raw: null
+        }
+      })
+      s = reducer(s, { type: 'event', event: ev.text('m-2', 'late') })
+      expect(triggers(s)).toEqual([])
+    })
   })
 })
 

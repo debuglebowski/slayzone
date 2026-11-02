@@ -120,6 +120,12 @@ const itemStartedOf =
     msg.method === 'item/started' &&
     (msg.params as { item?: { type?: string } })?.item?.type === type
 
+/** A line about `threadId` (lines that name no thread count as the main one). */
+function isThread(msg: Json, threadId: string | null): boolean {
+  const id = (msg.params as { threadId?: unknown } | undefined)?.threadId
+  return id === undefined || id === threadId
+}
+
 /** Interrupt after the Nth agent-message delta (a turn cut mid-reply). */
 function afterDeltas(n: number) {
   let seen = 0
@@ -157,6 +163,35 @@ const RECIPES: Record<string, Recipe> = {
     note: 'One short reply in auto-accept-edits, then stdin closed (the clean exit).',
     processes: [
       { policy: 'auto-accept-edits', turns: [{ say: 'Reply with exactly the word: OK' }] }
+    ]
+  },
+  'sub-agent': {
+    note: 'full-access, multi_agent: spawn one sub-agent, wait for it, relay its answer (collabAgentToolCall items, a child thread).',
+    processes: [
+      {
+        policy: 'full-access',
+        turns: [
+          {
+            say: 'Use your spawn_agent tool to start exactly one sub-agent with the task: "Reply with exactly the word PONG." Then use your wait tool until it finishes. Then reply with only the word it answered.'
+          }
+        ]
+      }
+    ]
+  },
+  'sub-agent-interrupt': {
+    note: 'full-access, multi_agent: Stop while a spawned sub-agent is still running (does the child end with the turn?).',
+    processes: [
+      {
+        policy: 'full-access',
+        turns: [
+          {
+            say: 'Use your spawn_agent tool to start exactly one sub-agent with the task: "Run the shell command: sleep 20. Then reply with exactly the word DONE." Then use your wait tool until it finishes. Then reply with only the word it answered.',
+            interruptWhen: (msg) =>
+              msg.method === 'item/started' &&
+              (msg.params as { item?: { type?: string } })?.item?.type === 'commandExecution'
+          }
+        ]
+      }
     ]
   },
   'stream-long': {
@@ -428,6 +463,8 @@ async function gitInit(cwd: string): Promise<void> {
 
 interface RedactCtx {
   threadIds: Set<string>
+  /** A sub-agent's thread → its own placeholder (`{{subThread1}}`, …): never the main one's. */
+  subThreadIds: Map<string, string>
   turnIds: Set<string>
   cwds: string[]
 }
@@ -442,6 +479,7 @@ const SCRUB_NUMBERS = new Set(['usedPercent', 'resetsAt', 'balance', 'windowDura
 function redactString(s: string, ctx: RedactCtx): string {
   let out = s
   for (const id of ctx.threadIds) out = out.split(id).join('{{threadId}}')
+  for (const [id, placeholder] of ctx.subThreadIds) out = out.split(id).join(placeholder)
   for (const id of ctx.turnIds) out = out.split(id).join('{{turnId}}')
   for (const cwd of ctx.cwds) out = out.split(cwd).join('{{cwd}}')
   out = out.replace(MAC_TMP, '/tmp/')
@@ -453,6 +491,15 @@ function redactString(s: string, ctx: RedactCtx): string {
   if (host.length > 2) out = out.split(host).join('host.local')
   out = out.replace(JWT, '<jwt>')
   return out.replace(EMAIL, (m) => (m.endsWith('@example.com') ? m : 'user@example.com'))
+}
+
+/** The sub-agent threads a line names (`subAgentActivity`, `collabAgentToolCall` items). */
+function subAgentThreadIds(msg: Json): string[] {
+  const item = (msg.params as { item?: Json } | undefined)?.item
+  if (!item) return []
+  const ids: unknown[] = [item.agentThreadId]
+  if (Array.isArray(item.receiverThreadIds)) ids.push(...item.receiverThreadIds)
+  return ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
 }
 
 /** Field-level scrubbing for server lines, before the string pass. */
@@ -560,6 +607,10 @@ class Proc {
     const result = msg.result as Json | undefined
     const threadId = (result?.thread as Json | undefined)?.id
     if (typeof threadId === 'string') this.rec.redact.threadIds.add(threadId)
+    for (const id of subAgentThreadIds(msg)) {
+      const subs = this.rec.redact.subThreadIds
+      if (!subs.has(id)) subs.set(id, `{{subThread${subs.size + 1}}}`)
+    }
     const turnId =
       (result?.turn as Json | undefined)?.id ?? (msg.params as Json | undefined)?.turnId
     if (typeof turnId === 'string') this.rec.redact.turnIds.add(turnId)
@@ -684,7 +735,8 @@ async function runProcess(
     if (!threadId || ended) break
     proc.answer = turn.answer ?? accept
     const done = proc.waitFor(
-      (m) => m.method === 'turn/completed',
+      // A sub-agent's thread ends its own turns on the same connection.
+      (m) => m.method === 'turn/completed' && isThread(m, threadId),
       TURN_TIMEOUT_MS,
       `turn/completed of '${turn.say}'`
     )
@@ -754,7 +806,12 @@ async function record(name: string, recipe: Recipe, cliVersion: string): Promise
       }
     ],
     // Both spellings: the CLI reports the realpath (/private/var/… on macOS).
-    redact: { threadIds: new Set(), turnIds: new Set(), cwds: [fs.realpathSync(cwd), cwd] }
+    redact: {
+      threadIds: new Set(),
+      subThreadIds: new Map(),
+      turnIds: new Set(),
+      cwds: [fs.realpathSync(cwd), cwd]
+    }
   }
   let previous: string | null = null
   for (const [i, spec] of recipe.processes.entries()) {

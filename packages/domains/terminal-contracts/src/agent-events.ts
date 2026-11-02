@@ -511,6 +511,13 @@ export interface NoticeEvent {
   detail?: Record<string, unknown>
 }
 
+/**
+ * Tool-call name prefix of a Codex thread's agent tools (`codex/agent/wait`,
+ * `codex/agent/sendInput`, …). A `spawnAgent` is no tool card: it is the
+ * sub-agent's row.
+ */
+export const CODEX_AGENT_TOOL_PREFIX = 'codex/agent/'
+
 export interface SubAgentEvent {
   kind: 'sub-agent'
   /**
@@ -525,6 +532,12 @@ export interface SubAgentEvent {
   toolUseId: string
   /** Set when this sub-agent was spawned by another sub-agent (nested Task). */
   parentToolUseId?: string
+  /**
+   * Runs in the background from its start: it outlives the turn that spawned
+   * it (a Codex sub-agent is its own thread — a Stop of the parent's turn does
+   * not end it). Its own end event closes it, or its process ending.
+   */
+  backgrounded?: true
   /** Human-readable label from `task_started` (e.g. "Find chat history parsing logic"). */
   description?: string
   /** From `task_notification` — e.g. 'completed', 'failed'. */

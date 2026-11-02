@@ -39,6 +39,7 @@ import type {
 import { getChatAttachmentReader } from '../chat-attachment-reader'
 import { buildCodexContent } from './codex-content'
 import { CodexAppServerClient, CodexRpcError, type JsonRpcId } from './codex-app-server-client'
+import { CodexSubAgents, type CodexToolMapper } from './codex-sub-agents'
 import { CODEX_FAST_SERVICE_TIER } from '@slayzone/terminal-contracts'
 import {
   CODEX_DEFAULT_INSTRUCTIONS,
@@ -514,6 +515,14 @@ class CodexChatSession implements ChatSessionDriver {
    */
   private readonly sideThreads = new Set<string>()
 
+  /** The driver's tool mapping, for a sub-agent's items. */
+  private readonly toolMapper: CodexToolMapper = {
+    toolCall: (item) => this.toToolCall(item),
+    toolResult: (item) => this.toToolResult(item)
+  }
+  /** Sub-agents the main thread (or one of them) spawned: their threads → rows. */
+  private readonly subAgents = new CodexSubAgents(this.toolMapper)
+
   private model: string | null = null
   private effort: string | null = null
   private mode: string | null = null
@@ -737,17 +746,27 @@ class CodexChatSession implements ChatSessionDriver {
       )
     )
     const saved = await this.ctx?.lookupUserMessages?.(ids)
-    for (const turn of kept) events.push(...this.historyOfTurn(turn, saved))
+    // A past sub-agent: its row (no children — its thread's items are its own);
+    // one this process did not spawn is not running.
+    const subAgents = new CodexSubAgents(this.toolMapper)
+    for (const turn of kept) events.push(...this.historyOfTurn(turn, subAgents, saved))
+    events.push(...subAgents.endOpen('stopped'))
     addHistory(events)
   }
 
   /** One past turn as history events: its message, replies, reasoning and tool calls. */
   private historyOfTurn(
     turn: CodexHistoryTurn,
+    subAgents: CodexSubAgents,
     savedMessages?: Map<string, UserContentBlock[]>
   ): AgentEvent[] {
     const out: AgentEvent[] = []
     for (const item of turn.items ?? []) {
+      const subAgentEvents = subAgents.onItem('completed', item as CodexThreadItem)
+      if (subAgentEvents) {
+        out.push(...subAgentEvents)
+        continue
+      }
       switch (item.type) {
         case 'userMessage': {
           const saved = item.clientId ? savedMessages?.get(item.clientId) : undefined
@@ -1010,7 +1029,10 @@ class CodexChatSession implements ChatSessionDriver {
 
   applyControl(request: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
     const subtype = typeof request.subtype === 'string' ? request.subtype : ''
-    if (subtype === 'interrupt') return this.interrupt()
+    if (subtype === 'interrupt') {
+      this.interruptSubAgents()
+      return this.interrupt()
+    }
     if (subtype === 'interrupt_and_wait') return this.interruptAndWait(timeoutMs)
     if (subtype === 'rewind_files') {
       // Codex keeps no file checkpoints (`thread/revert` changes history only).
@@ -1100,6 +1122,20 @@ class CodexChatSession implements ChatSessionDriver {
     if (this.turnStartsInFlight === 0) return Promise.resolve()
     this.pendingInterrupt ??= deferred<unknown>()
     return this.pendingInterrupt.promise
+  }
+
+  /**
+   * A Stop stops the sub-agents' running turns too: a Codex sub-agent is its own
+   * thread, and the parent's `turn/interrupt` leaves it running (recorded).
+   */
+  private interruptSubAgents(): void {
+    const client = this.client
+    if (!client) return
+    for (const { threadId, turnId } of this.subAgents.runningTurns()) {
+      client
+        .request('turn/interrupt', { threadId, turnId })
+        .catch((err: unknown) => console.warn('[codex-chat] sub-agent interrupt failed:', err))
+    }
   }
 
   private async interruptAndWait(timeoutMs: number): Promise<void> {
@@ -1436,11 +1472,24 @@ class CodexChatSession implements ChatSessionDriver {
   private onNotification(method: string, params: unknown): void {
     const ctx = this.ctx
     if (!ctx || this.disposed) return
+    const thread = (params as { threadId?: unknown } | undefined)?.threadId
     // A side question's fork: its own thread id, never the main timeline.
-    const sideThread = (params as { threadId?: unknown } | undefined)?.threadId
-    if (typeof sideThread === 'string' && this.sideThreads.has(sideThread)) {
-      const run = this.sideByThread.get(sideThread)
+    if (typeof thread === 'string' && this.sideThreads.has(thread)) {
+      const run = this.sideByThread.get(thread)
       if (run) this.onSideNotification(run, method, params)
+      return
+    }
+    // Another thread on this connection: a sub-agent's (its turn ending is not
+    // ours, its text is not our reply, its tokens are not our context). A
+    // request withdrawn there still closes its card here.
+    if (
+      method !== 'serverRequest/resolved' &&
+      typeof thread === 'string' &&
+      this.threadId &&
+      thread !== this.threadId
+    ) {
+      for (const event of this.subAgents.onThreadNotification(thread, method, params))
+        this.emit(ctx, event)
       return
     }
     switch (method) {
@@ -1539,6 +1588,11 @@ class CodexChatSession implements ChatSessionDriver {
   private onItemStarted(ctx: ChatDriverContext, params: CodexItemNotification): void {
     const item = params?.item
     if (!item) return
+    const subAgentEvents = this.subAgents.onItem('started', item)
+    if (subAgentEvents) {
+      for (const event of subAgentEvents) this.emit(ctx, event)
+      return
+    }
     if (item.type === 'userMessage') {
       // Codex echoes the user message as an item; the transport already
       // emitted its own synthetic `user-message` — skip the echo.
@@ -1574,6 +1628,11 @@ class CodexChatSession implements ChatSessionDriver {
   private onItemCompleted(ctx: ChatDriverContext, params: CodexItemNotification): void {
     const item = params?.item
     if (!item) return
+    const subAgentEvents = this.subAgents.onItem('completed', item)
+    if (subAgentEvents) {
+      for (const event of subAgentEvents) this.emit(ctx, event)
+      return
+    }
     if (item.type === 'userMessage') return
     if (item.type === 'plan') {
       if (typeof item.text === 'string')

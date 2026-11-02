@@ -1,6 +1,6 @@
 import { MessageDetails } from './MessageDetails'
 import { useContext, useDeferredValue, useEffect, useId, useMemo } from 'react'
-import { stripAnsi } from '@slayzone/terminal-contracts'
+import { CODEX_AGENT_TOOL_PREFIX, stripAnsi } from '@slayzone/terminal-contracts'
 import { useChatProvider, useChatView } from './ChatViewContext'
 import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
 import { useToolFocusRequest } from './tool-cards/tool-focus'
@@ -55,6 +55,7 @@ import { HookOutputRow } from './HookOutputRow'
 import { NoticeRow } from './NoticeRow'
 import {
   BashCard,
+  CodexAgentToolCard,
   CodexCommandCard,
   CodexFileChangeCard,
   McpToolCard,
@@ -71,6 +72,7 @@ import { ConversationBranchRow } from './ConversationBranchRow'
 import { UserMessageContent } from './UserMessageAttachments'
 import { AgentProblemCard } from './AgentProblemCard'
 import { FinalPlanCard } from './FinalPlanCard'
+import { TurnTriggerRow } from './TurnTriggerRow'
 
 // --- Turn-scoped wrappers ---
 
@@ -935,7 +937,11 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
 export function renderTool(invocation: ToolInvocation, timestamp?: number): React.JSX.Element {
   const R =
     toolRenderers[invocation.name] ??
-    (parseMcpToolName(invocation.name) ? McpToolCard : ToolCallGeneric)
+    (invocation.name.startsWith(CODEX_AGENT_TOOL_PREFIX)
+      ? CodexAgentToolCard
+      : parseMcpToolName(invocation.name)
+        ? McpToolCard
+        : ToolCallGeneric)
   return <R invocation={invocation} timestamp={timestamp} />
 }
 
@@ -1018,6 +1024,8 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <WorkspaceChangesRow key={key} item={item} />
     case 'history-gap':
       return <HistoryGapRow key={key} item={item} />
+    case 'turn-trigger':
+      return <TurnTriggerRow key={key} item={item} />
   }
   const exhaustive: never = item
   return exhaustive
