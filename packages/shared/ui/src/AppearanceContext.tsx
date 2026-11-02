@@ -20,6 +20,16 @@ export function parseTerminalOptionAsMeta(value: string | undefined): TerminalOp
     : 'auto'
 }
 
+/** Answer-threads side panel width bounds, px. */
+export const CHAT_THREADS_DEFAULT_WIDTH = 410
+export const CHAT_THREADS_MIN_WIDTH = 280
+export const CHAT_THREADS_MAX_WIDTH = 1200
+
+export function clampChatThreadsWidth(value: number): number {
+  if (!Number.isFinite(value)) return CHAT_THREADS_DEFAULT_WIDTH
+  return Math.round(Math.min(CHAT_THREADS_MAX_WIDTH, Math.max(CHAT_THREADS_MIN_WIDTH, value)))
+}
+
 export interface AppearanceSettings {
   terminalFontSize: number
   editorFontSize: number
@@ -68,6 +78,8 @@ export interface AppearanceSettings {
   chatCompactSpacing: boolean
   chatAutoScroll: boolean
   chatWidth: 'narrow' | 'wide'
+  /** Answer-threads side panel width, px. */
+  chatThreadsWidth: number
   chatShowTools: boolean
   chatShowLastMessageTools: boolean
   chatShowToolCallSummary: boolean
@@ -119,6 +131,7 @@ export const appearanceDefaults: AppearanceSettings = {
   chatCompactSpacing: false,
   chatAutoScroll: true,
   chatWidth: 'narrow',
+  chatThreadsWidth: CHAT_THREADS_DEFAULT_WIDTH,
   chatShowTools: true,
   chatShowLastMessageTools: true,
   chatShowToolCallSummary: true,

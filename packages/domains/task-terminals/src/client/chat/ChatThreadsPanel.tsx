@@ -1,7 +1,20 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, MessageSquare, Plus, X } from 'lucide-react'
-import { cn } from '@slayzone/ui'
+import { useMutation } from '@tanstack/react-query'
+import {
+  cn,
+  clampChatThreadsWidth,
+  useAppearance,
+  CHAT_THREADS_DEFAULT_WIDTH,
+  CHAT_THREADS_MIN_WIDTH,
+  CHAT_THREADS_MAX_WIDTH
+} from '@slayzone/ui'
 import type { ChatThread } from '@slayzone/terminal-contracts'
+import { useTRPC } from '../trpc'
+
+/** Room always left for the main conversation beside the panel, px. */
+const MAIN_MIN_WIDTH = 320
+const KEY_STEP = 16
 
 export function ChatThreadsPanel({
   threads,
@@ -25,6 +38,24 @@ export function ChatThreadsPanel({
     () => new Set(activeId ? [activeId] : [])
   )
   if (activeId && !visited.has(activeId)) setVisited(new Set([...visited, activeId]))
+  const trpc = useTRPC()
+  const savedWidth = useAppearance().chatThreadsWidth
+  // Local width while dragging and until the saved setting catches up.
+  const [previewWidth, setPreviewWidth] = useState<number | null>(null)
+  const [pendingWidth, setPendingWidth] = useState<number | null>(null)
+  if (pendingWidth !== null && previewWidth === null && savedWidth === pendingWidth)
+    setPendingWidth(null)
+  const width = previewWidth ?? pendingWidth ?? savedWidth
+  const { mutate: saveSetting } = useMutation({
+    ...trpc.settings.set.mutationOptions(),
+    onSuccess: () => window.dispatchEvent(new CustomEvent('sz:settings-changed')),
+    onError: () => setPendingWidth(null)
+  })
+  const commitWidth = (next: number): void => {
+    setPreviewWidth(null)
+    setPendingWidth(next)
+    saveSetting({ key: 'chat_threads_width', value: String(next) })
+  }
   const send = (): void => {
     if (draft.trim() && !creating)
       void onCreate(draft).then((created) => {
@@ -34,8 +65,10 @@ export function ChatThreadsPanel({
   return (
     <aside
       aria-label="Answer threads"
-      className="flex h-full w-[410px] shrink-0 flex-col border-l border-border bg-background"
+      className="relative flex h-full shrink-0 flex-col border-l border-border bg-background"
+      style={{ width, maxWidth: `calc(100% - ${MAIN_MIN_WIDTH}px)` }}
     >
+      <ThreadsResizeHandle width={width} onPreview={setPreviewWidth} onCommit={commitWidth} />
       <header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
           role="tablist"
@@ -151,5 +184,83 @@ export function ChatThreadsPanel({
         </div>
       )}
     </aside>
+  )
+}
+
+/**
+ * Left-edge divider of the threads panel. Dragging left widens the panel.
+ * Pointer capture keeps the drag alive over the nested chat; arrows nudge;
+ * double-click resets to the default width.
+ */
+function ThreadsResizeHandle({
+  width,
+  onPreview,
+  onCommit
+}: {
+  width: number
+  onPreview: (width: number | null) => void
+  onCommit: (width: number) => void
+}) {
+  const drag = useRef<{ startX: number; startWidth: number; max: number; last: number } | null>(
+    null
+  )
+  const maxFor = (el: HTMLElement): number => {
+    const container = el.parentElement?.parentElement?.clientWidth ?? 0
+    return Math.max(
+      CHAT_THREADS_MIN_WIDTH,
+      Math.min(CHAT_THREADS_MAX_WIDTH, container - MAIN_MIN_WIDTH)
+    )
+  }
+  const fit = (value: number, max: number): number => Math.min(max, clampChatThreadsWidth(value))
+  return (
+    <div
+      role="separator"
+      aria-label="Resize threads"
+      aria-orientation="vertical"
+      aria-valuenow={width}
+      aria-valuemin={CHAT_THREADS_MIN_WIDTH}
+      aria-valuemax={CHAT_THREADS_MAX_WIDTH}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      className="absolute inset-y-0 left-0 z-20 w-2 -translate-x-1/2 cursor-col-resize touch-none select-none outline-none transition-colors hover:bg-primary/20 focus-visible:bg-primary/30 active:bg-primary/30"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        const startWidth = e.currentTarget.parentElement?.getBoundingClientRect().width ?? width
+        drag.current = {
+          startX: e.clientX,
+          startWidth,
+          max: maxFor(e.currentTarget),
+          last: startWidth
+        }
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current
+        if (!d) return
+        d.last = fit(d.startWidth + (d.startX - e.clientX), d.max)
+        onPreview(d.last)
+      }}
+      onPointerUp={(e) => {
+        const d = drag.current
+        if (!d) return
+        drag.current = null
+        e.currentTarget.releasePointerCapture(e.pointerId)
+        if (Math.round(d.last) === Math.round(d.startWidth)) onPreview(null)
+        else onCommit(d.last)
+      }}
+      onPointerCancel={() => {
+        drag.current = null
+        onPreview(null)
+      }}
+      onDoubleClick={() => onCommit(CHAT_THREADS_DEFAULT_WIDTH)}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+        e.preventDefault()
+        const current = e.currentTarget.parentElement?.getBoundingClientRect().width ?? width
+        const delta = e.key === 'ArrowLeft' ? KEY_STEP : -KEY_STEP
+        onCommit(fit(current + delta, maxFor(e.currentTarget)))
+      }}
+    />
   )
 }

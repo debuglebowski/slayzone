@@ -35,6 +35,10 @@ export {
   AppearanceContext,
   appearanceDefaults,
   parseTerminalOptionAsMeta,
+  clampChatThreadsWidth,
+  CHAT_THREADS_DEFAULT_WIDTH,
+  CHAT_THREADS_MIN_WIDTH,
+  CHAT_THREADS_MAX_WIDTH,
   type AppearanceSettings,
   type TerminalOptionAsMeta,
   type BrowserDeviceDefaults
