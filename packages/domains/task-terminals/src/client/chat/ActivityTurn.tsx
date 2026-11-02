@@ -1,5 +1,5 @@
 import { useContext, useEffect, useId, useState } from 'react'
-import { Brain, ChevronRight, MessageSquare, Wrench } from 'lucide-react'
+import { Bot, Brain, ChevronRight, Loader2, MessageSquare, Wrench } from 'lucide-react'
 import { cn, useNow, type AppearanceSettings } from '@slayzone/ui'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
@@ -146,30 +146,77 @@ function ActivityEntry({
 }
 
 /**
- * A turn's sub-agents: their own rows, beside (above) the turn's footer with
- * its Activities — never inside them.
+ * A turn's sub-agents: their own disclosure beside the Activities, never inside
+ * them. Its button says how many run; a sub-agent asked for (its "After …
+ * finished" row, a file it changed) opens it.
  */
-export function TurnSubAgents({
+function SubAgentsDisclosure({
   subAgents,
   rowOf
 }: {
   subAgents: readonly SubAgentItem[]
   rowOf?: (item: SubAgentItem) => number | undefined
 }) {
+  const [expanded, setExpanded] = useRowUiState('sub-agents', false, false)
+  const focus = useContext(ToolFocusContext)
+  const id = useId()
+  useEffect(() => {
+    if (!focus) return
+    const ids = subAgents.map((item) => item.toolUseId)
+    const check = (): void => {
+      if (ids.some((toolUseId) => focus.isPending(toolUseId))) setExpanded(true)
+    }
+    const cleanups = ids.map((toolUseId) => focus.subscribe(toolUseId, check))
+    check()
+    return () => cleanups.forEach((cleanup) => cleanup())
+  }, [focus, subAgents, setExpanded])
   if (subAgents.length === 0) return null
+  const running = subAgents.filter((item) => item.phase === 'in-flight').length
   return (
-    <div className="min-w-0" data-testid="chat-turn-sub-agents">
-      {subAgents.map((item) => {
-        const key = `sub-agent:${item.toolUseId}`
-        return (
-          <TimelineRowKeyContext.Provider key={key} value={key}>
-            <TimelineRowIndexContext.Provider value={rowOf?.(item)}>
-              {renderTimelineItem(item, key)}
-            </TimelineRowIndexContext.Provider>
-          </TimelineRowKeyContext.Provider>
-        )
-      })}
-    </div>
+    <>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={id}
+        onClick={() => setExpanded(!expanded)}
+        data-testid="chat-sub-agents-toggle"
+        className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-left text-xs text-muted-foreground shadow-sm hover:bg-muted/50"
+      >
+        {running > 0 ? (
+          <Loader2 className="size-3 shrink-0 animate-spin text-agent" />
+        ) : (
+          <Bot className="size-3 shrink-0" />
+        )}
+        <span className="font-medium text-foreground">Sub-agents</span>
+        <span>{running > 0 ? `${running} of ${subAgents.length} running` : subAgents.length}</span>
+        <ChevronRight
+          className={cn(
+            'size-3 transition-transform motion-reduce:transition-none',
+            expanded && 'rotate-90'
+          )}
+        />
+      </button>
+      <TurnFooterPanel>
+        <div
+          id={id}
+          hidden={!expanded}
+          className="order-1 min-w-0 basis-full"
+          data-testid="chat-turn-sub-agents"
+        >
+          {expanded &&
+            subAgents.map((item) => {
+              const key = `sub-agent:${item.toolUseId}`
+              return (
+                <TimelineRowKeyContext.Provider key={key} value={key}>
+                  <TimelineRowIndexContext.Provider value={rowOf?.(item)}>
+                    {renderTimelineItem(item, key)}
+                  </TimelineRowIndexContext.Provider>
+                </TimelineRowKeyContext.Provider>
+              )
+            })}
+        </div>
+      </TurnFooterPanel>
+    </>
   )
 }
 
@@ -226,10 +273,13 @@ export function ActivityTurn({
     turn.active && appearance.chatPreviewLatestActivity && !(showSummary && expanded)
       ? filtered[filtered.length - 1]
       : undefined
-  if ((!showSummary || !turn.items.length) && !latest && !turn.files.length) {
-    // Nothing for the footer: the turn's sub-agents still show (an answer shows its own).
-    return embedded ? null : <TurnSubAgents subAgents={turn.subAgents} rowOf={rowOf} />
-  }
+  if (
+    (!showSummary || !turn.items.length) &&
+    !latest &&
+    !turn.files.length &&
+    !turn.subAgents.length
+  )
+    return null
   const content = (
     <>
       {showSummary && turn.items.length > 0 && (
@@ -277,6 +327,7 @@ export function ActivityTurn({
           </TurnFooterPanel>
         </>
       )}
+      <SubAgentsDisclosure subAgents={turn.subAgents} rowOf={rowOf} />
       {turn.files.map((item) =>
         item.kind === 'workspace-changes' ? (
           <WorkspaceChangesRow key={item.id} item={item} embedded />
@@ -304,8 +355,6 @@ export function ActivityTurn({
   // A running turn (or one without a final answer): this block is its footer.
   return (
     <div data-testid="chat-activity">
-      {/* An answer shows its turn's sub-agents above its own footer. */}
-      <TurnSubAgents subAgents={turn.subAgents} rowOf={rowOf} />
       <TurnFooter className="items-start gap-x-2" testId="chat-activity-footer">
         {content}
       </TurnFooter>

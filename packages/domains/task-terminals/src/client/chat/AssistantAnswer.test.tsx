@@ -126,6 +126,60 @@ describe('assistant answer presentation', () => {
     expect(footer.textContent).toContain('3 turns')
   })
 
+  it("the turn's sub-agents are their own button beside Activities, expanding to their rows", () => {
+    const user: TimelineItem = { kind: 'user-text', id: 'q', text: 'Spawn two', timestamp: 0 }
+    const agent = (toolUseId: string, phase: 'in-flight' | 'completed', description: string) =>
+      ({
+        kind: 'sub-agent',
+        toolUseId,
+        phase,
+        description,
+        backgrounded: true,
+        timestamp: 0
+      }) as TimelineItem
+    const tool = {
+      kind: 'tool',
+      invocation: { id: 't1', name: 'Bash', input: { command: 'ls' }, status: 'done' },
+      timestamp: 0
+    } as TimelineItem
+    const view = activityView(
+      [
+        user,
+        tool,
+        agent('a1', 'completed', 'count files'),
+        agent('a2', 'in-flight', 'summarize'),
+        reply,
+        result
+      ],
+      false
+    )
+    render(
+      <AssistantAnswer
+        item={reply}
+        turn={view.turns.get(reply)!}
+        appearance={{
+          chatShowActivities: true,
+          chatPreviewLatestActivity: true,
+          chatShowActivityMessages: true,
+          chatShowThinking: true,
+          chatShowActivityTools: true
+        }}
+      />
+    )
+    const footer = screen.getByTestId('chat-answer-footer')
+    expect(within(footer).getByRole('button', { name: /Activities\s*1 item/ })).toBeDefined()
+    const toggle = within(footer).getByTestId('chat-sub-agents-toggle')
+    expect(toggle.textContent).toContain('Sub-agents')
+    expect(toggle.textContent).toContain('1 of 2 running')
+    expect(screen.queryAllByTestId('sub-agent-row')).toHaveLength(0)
+    fireEvent.click(toggle)
+    const rows = screen.getAllByTestId('sub-agent-row')
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining('count files'),
+      expect.stringContaining('summarize')
+    ])
+  })
+
   it('quotes only the selected answer into the composer and keeps More keyboard-accessible', () => {
     const quoteReply = vi.fn()
     render(
