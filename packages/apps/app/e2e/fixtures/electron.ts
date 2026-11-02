@@ -8,6 +8,7 @@ import {
 } from '@playwright/test'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
@@ -15,6 +16,7 @@ import { pressShortcut } from './shortcuts'
 import { E2E_OWNER_ENV } from './stale-processes'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
+import { TEST_ISOLATION_ENV } from '@slayzone/test-utils/caller-env'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -386,7 +388,8 @@ async function launchElectronWithRetry(args: {
       const launchEnv: Record<string, string> = {}
       for (const [key, value] of Object.entries(process.env)) {
         if (value == null) continue
-        if (/^(ELECTRON_|SLAYZONE_)/.test(key)) continue
+        // Bar the runner's own isolation (moved hub port block: caller-env.ts).
+        if (/^(ELECTRON_|SLAYZONE_)/.test(key) && !TEST_ISOLATION_ENV.has(key)) continue
         launchEnv[key] = value
       }
 
@@ -721,7 +724,7 @@ export function notifyScriptEnv(opts: {
 }): Record<string, string> {
   const scrubbed: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
-    if (value == null || key.startsWith('SLAYZONE_')) continue
+    if (value == null || (key.startsWith('SLAYZONE_') && !TEST_ISOLATION_ENV.has(key))) continue
     scrubbed[key] = value
   }
   const ctx: Record<string, unknown> = {
@@ -776,6 +779,16 @@ async function readSidecarPort(app: ElectronApplication): Promise<number> {
  * `SLAYZONE_DEV=1` is required, not decorative — the Playwright computer's own env
  * may not carry it. Callers overlay task/project identity on top.
  */
+let cliHomeDir = ''
+/** This worker's throwaway home for every `slay` a spec spawns (removed on exit). */
+function cliHome(): string {
+  if (!cliHomeDir) {
+    cliHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-e2e-cli-home-'))
+    process.once('exit', () => fs.rmSync(cliHomeDir, { recursive: true, force: true }))
+  }
+  return cliHomeDir
+}
+
 export function cliEnv(root: string): Record<string, string> {
   if (!sharedSidecarPort) {
     throw new Error(
@@ -788,6 +801,17 @@ export function cliEnv(root: string): Record<string, string> {
     // Parent task relays outrank HUB_ADDRESS in the CLI. Never let the test
     // subprocess escape to the developer's task/hub or inherit its credentials.
     ...sanitizeSpawnEnv(process.env),
+    // Nor read the hub target / break-glass session stored under the real home (the
+    // e2e runner keeps it for the app: caller-env.ts `keepHome`). A hub command
+    // reads a live break-glass session BEFORE the address below.
+    HOME: cliHome(),
+    USERPROFILE: cliHome(),
+    // The runner's moved hub port block (caller-env.ts), which sanitizeSpawnEnv strips.
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        (e): e is [string, string] => TEST_ISOLATION_ENV.has(e[0]) && e[1] !== undefined
+      )
+    ),
     SLAYZONE_HUB_ADDRESS: `127.0.0.1:${sharedSidecarPort}`,
     SLAYZONE_ROOT: supervisedHubRoot(root),
     SLAYZONE_DEV: '1'

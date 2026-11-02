@@ -17,6 +17,7 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/session-retention-boot.test.ts
  */
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -60,7 +61,7 @@ function ensureBuilt(): void {
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (v == null || /^(SLAYZONE_|ELECTRON_)/.test(k)) continue
+    if (v == null || (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k))) continue
     out[k] = v
   }
   return out

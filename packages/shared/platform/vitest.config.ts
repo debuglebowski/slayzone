@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { configDefaults, defineConfig } from 'vitest/config'
-import { stripCallerSlayzoneEnv } from '../test-utils/caller-env.ts'
+import { isolateFromCaller } from '../test-utils/caller-env.ts'
 
-// No suite here inherits the caller's SlayZone wiring (see caller-env.ts): vitest's
+// No suite here inherits the caller's SlayZone wiring, home or hub port block (see caller-env.ts): vitest's
 // main process, before any worker forks.
-stripCallerSlayzoneEnv()
+isolateFromCaller()
 
 /**
  * `pnpm test` here runs under PLAIN node — CI's `check-windows` job invokes it as the

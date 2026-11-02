@@ -27,6 +27,7 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/secrets-at-rest.test.ts
  */
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import {
@@ -86,7 +87,11 @@ function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue
-    if (/^(SLAYZONE_|ELECTRON_|BETTER_AUTH_)/.test(k) || k === 'PLAYWRIGHT') continue
+    if (
+      (/^(SLAYZONE_|ELECTRON_|BETTER_AUTH_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) ||
+      k === 'PLAYWRIGHT'
+    )
+      continue
     out[k] = v
   }
   return out

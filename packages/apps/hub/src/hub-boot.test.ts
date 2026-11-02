@@ -38,6 +38,7 @@
  *
  * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { spawn, spawnSync, execFileSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -92,7 +93,7 @@ function scrubbedEnv(): Record<string, string> {
   for (const [k, v] of Object.entries(process.env)) {
     if (VITEST_INJECTED.test(k)) continue
     if (v == null) continue
-    if (/^(SLAYZONE_|ELECTRON_)/.test(k)) continue
+    if (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) continue
     out[k] = v
   }
   return out

@@ -9,6 +9,7 @@
  * Split from sidecar-server-supervisor.test.ts (the supervisor against a fake
  * side-car) so these real deadlines run on their own worker.
  */
+import { TEST_ISOLATION_ENV } from '@slayzone/test-utils/caller-env'
 import { afterAll, expect, test } from 'vitest'
 import { spawn } from 'node:child_process'
 import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
@@ -164,7 +165,8 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
     const seedEnv: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) {
       if (v == null) continue
-      if (k === 'ELECTRON_RUN_AS_NODE' || /^SLAYZONE_/.test(k)) continue
+      if (k === 'ELECTRON_RUN_AS_NODE' || (/^SLAYZONE_/.test(k) && !TEST_ISOLATION_ENV.has(k)))
+        continue
       seedEnv[k] = v
     }
     const seeder = spawn(process.execPath, [binJs], {

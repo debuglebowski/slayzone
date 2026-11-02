@@ -1,3 +1,4 @@
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { afterAll, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
@@ -92,7 +93,8 @@ test('bundled remote CLI authenticates through a real hub connection, enforces o
   }
 
   const cliEnv = { ...process.env }
-  for (const key of Object.keys(cliEnv)) if (key.startsWith('SLAYZONE_')) delete cliEnv[key]
+  for (const key of Object.keys(cliEnv))
+    if (key.startsWith('SLAYZONE_') && !TEST_ISOLATION_ENV.has(key)) delete cliEnv[key]
   Object.assign(cliEnv, {
     SLAYZONE_TASK_ID: 'cli-a-task',
     SLAYZONE_HUB_ADDRESS: `127.0.0.1:${hub.port}`,

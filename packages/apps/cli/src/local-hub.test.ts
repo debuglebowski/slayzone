@@ -66,11 +66,11 @@ describe('fixedPortForChannel', () => {
 describe('isCoLocatedHub', () => {
   // No hub configured ⇒ the target was found by probing loopback, so it is this
   // machine by construction.
-  test('no env hub configured answers without throwing', async () => {
+  test('no hub configured is co-located', async () => {
     await withEnv({ SLAYZONE_HUB_ADDRESS: undefined, SLAYZONE_HUB_TOKEN: undefined }, async () => {
-      // NOTE: this reads the real hub-target file if the developer running the suite
-      // has one. Assert only the shape that holds either way — a boolean, no throw.
-      expect(typeof (await isCoLocatedHub())).toBe('boolean')
+      // The stored hub target lives under $HOME, which the runner made a throwaway
+      // (caller-env.ts): nothing is stored, so nothing is configured.
+      expect(await isCoLocatedHub()).toBe(true)
     })
   })
 

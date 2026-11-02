@@ -40,6 +40,61 @@ export function ensureDataRoot(): string {
 }
 
 /**
+ * The hub port block a SHIPPED build uses: 100 loopback ports in IANA's
+ * dynamic/private range (49152–65535 starts below it, so: no registered-service
+ * collision either way). {@link HUB_PORT_BLOCK} is this block unless a test run moved
+ * it (see {@link TEST_HUB_PORT_BLOCK_START_ENV}).
+ */
+export const DEFAULT_HUB_PORT_BLOCK = { start: 51100, end: 51199 } as const
+
+/**
+ * TEST-ONLY seam: the first port of the hub port block, for this process tree.
+ *
+ * Every port below derives from the block's start, so this one var moves all of
+ * them together: the desktop sidecar's fixed ports, the range standalone hubs bind
+ * in, and the range `slay` sweeps. A `slay` with no hub address falls back to
+ * exactly those ports (local-hub.ts `probeFixedPort`, hub-request.ts discovery) —
+ * which, unmoved, are where the developer's running app listens. The test runners
+ * (`isolateFromCaller`, packages/shared/test-utils/caller-env.ts) set it to a
+ * throwaway block before any suite loads, so no test can reach that app through a
+ * fallback, and a fallback test asserts against a stand-in on the moved port.
+ *
+ * Unset (every real install): the shipped block, byte-identical behaviour. Not a
+ * user knob: undocumented, `infra` in ENV_MANIFEST (stripped at every terminal/agent
+ * spawn), and refused when it overlaps the shipped block, so it can only ever point
+ * AWAY from where real hubs run. A malformed value throws at load rather than being
+ * read as unset: a test that meant to move the block must not silently run on it.
+ */
+export const TEST_HUB_PORT_BLOCK_START_ENV = 'SLAYZONE_TEST_HUB_PORT_BLOCK_START'
+
+/** Ports in the block. The layout inside it (head, dynamic range) is fixed. */
+const HUB_PORT_BLOCK_SIZE = DEFAULT_HUB_PORT_BLOCK.end - DEFAULT_HUB_PORT_BLOCK.start + 1
+
+/**
+ * The block start {@link TEST_HUB_PORT_BLOCK_START_ENV} names, or the shipped one when
+ * it is unset. Exported for its own test; everything else reads the constants below.
+ */
+export function resolveHubPortBlockStart(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return DEFAULT_HUB_PORT_BLOCK.start
+  const start = /^\d+$/.test(raw) ? Number(raw) : Number.NaN
+  const end = start + HUB_PORT_BLOCK_SIZE - 1
+  if (!Number.isInteger(start) || start < 1024 || end > 65535) {
+    throw new Error(
+      `[slayzone] ${TEST_HUB_PORT_BLOCK_START_ENV}=${raw}: expected a port 1024-${65536 - HUB_PORT_BLOCK_SIZE}`
+    )
+  }
+  if (end >= DEFAULT_HUB_PORT_BLOCK.start && start <= DEFAULT_HUB_PORT_BLOCK.end) {
+    throw new Error(
+      `[slayzone] ${TEST_HUB_PORT_BLOCK_START_ENV}=${raw} overlaps the shipped hub port block ` +
+        `${DEFAULT_HUB_PORT_BLOCK.start}-${DEFAULT_HUB_PORT_BLOCK.end}`
+    )
+  }
+  return start
+}
+
+const HUB_PORT_BLOCK_START = resolveHubPortBlockStart(process.env[TEST_HUB_PORT_BLOCK_START_ENV])
+
+/**
  * Fixed per-environment sidecar ports (plans/sidecar-staleness.md, Phase 4).
  *
  * One supervised sidecar per environment ever runs at a time (packaged app:
@@ -50,35 +105,41 @@ export function ensureDataRoot(): string {
  * instance into a loud `EADDRINUSE` at bind time instead of silent ambiguity
  * (unlike a lock FILE, a bound TCP port can't go stale — a dead process can't
  * hold it, so bind failure always means something else is genuinely alive).
- * IANA dynamic/private range (49152–65535) — no registered-service collision.
+ * The head of the hub block: 51100 / 51101 / 51102 shipped.
  */
 export const SIDECAR_FIXED_PORT = {
-  prod: 51100,
-  dev: 51101,
-  test: 51102
+  prod: HUB_PORT_BLOCK_START,
+  dev: HUB_PORT_BLOCK_START + 1,
+  test: HUB_PORT_BLOCK_START + 2
 } as const
 
 /**
  * The port range every SlayZone hub binds within
- * (plans/hub-lifecycle-and-discovery.md, Phase 3).
+ * (plans/hub-lifecycle-and-discovery.md, Phase 3). {@link DEFAULT_HUB_PORT_BLOCK}
+ * (51100–51199) in a shipped build.
  *
  * Multi-hub discovery (`slay hub ls`) works by probing loopback ports for a
  * `/health` answer — no pidfile, no registry, nothing that can go stale. That
  * only works if a hub is FINDABLE, so hubs draw from this known block instead of
- * letting the OS assign an arbitrary ephemeral port. Still inside IANA's
- * dynamic/private range (49152–65535).
+ * letting the OS assign an arbitrary ephemeral port.
  */
-export const HUB_PORT_BLOCK = { start: 51100, end: 51199 } as const
+export const HUB_PORT_BLOCK = {
+  start: HUB_PORT_BLOCK_START,
+  end: HUB_PORT_BLOCK_START + HUB_PORT_BLOCK_SIZE - 1
+} as const
 
 /**
- * The sub-range a hub picks from when no port was configured.
+ * The sub-range a hub picks from when no port was configured (51110–51199 shipped).
  *
  * Starts ABOVE {@link SIDECAR_FIXED_PORT} so a standalone hub can never squat
  * the port a supervised sidecar expects to bind — the supervised ports are fixed
  * precisely so a bind failure is loud and unambiguous, which a squatter would
- * turn back into a mystery. 51103–51109 stay spare for future fixed roles.
+ * turn back into a mystery. Head ports 3–9 stay spare for future fixed roles.
  */
-export const HUB_DYNAMIC_PORT_RANGE = { start: 51110, end: 51199 } as const
+export const HUB_DYNAMIC_PORT_RANGE = {
+  start: HUB_PORT_BLOCK_START + 10,
+  end: HUB_PORT_BLOCK.end
+} as const
 
 /**
  * Bind `server` to the first free port in the hub block, returning that port.

@@ -28,6 +28,7 @@
  * SIGKILLed, not when it quits without waiting, not when a leaked handle keeps the
  * computer's loop alive — while a standalone computer ignores its parent entirely.
  */
+import { TEST_ISOLATION_ENV } from '@slayzone/test-utils/caller-env'
 import { afterAll, expect, test } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -788,7 +789,12 @@ async function startSilentServer(): Promise<{ port: number; close: () => void }>
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (v == null || /^(SLAYZONE_|ELECTRON_)/.test(k) || k === 'NODE_OPTIONS') continue
+    if (
+      v == null ||
+      (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) ||
+      k === 'NODE_OPTIONS'
+    )
+      continue
     out[k] = v
   }
   return out

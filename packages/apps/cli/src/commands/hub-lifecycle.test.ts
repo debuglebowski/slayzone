@@ -22,14 +22,15 @@
  *   - every `SLAYZONE_*` / `ELECTRON_*` var is scrubbed from child envs (a
  *     supervised parent leaks SLAYZONE_ROOT → the real dev store);
  *   - each hub gets `SLAYZONE_ROOT` under one throwaway mkdtemp dir;
- *   - each hub is pinned to an explicit high port outside the hub block, so a
- *     developer's or CI's real hubs cannot be discovered, listed, or stopped by
- *     this test. The block sweep is exercised with a narrowed range instead.
+ *   - hubs bind, and `slay` sweeps, the run's own hub port block (moved off the
+ *     shipped one by the test runner), so a developer's or CI's real hubs cannot be
+ *     discovered, listed, or stopped by this test.
  *
  * Native ABI: the hub bundle needs better-sqlite3 built for Electron's ABI, so
  * hubs run under `ELECTRON_RUN_AS_NODE=1 electron` (as does this suite, under
  * vitest.harness.config.ts). The CLI bundle is plain node.
  */
+import { TEST_ISOLATION_ENV } from '../../../../shared/test-utils/caller-env.js'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
@@ -46,6 +47,7 @@ import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { HUB_DYNAMIC_PORT_RANGE } from '@slayzone/platform/paths'
 import { detectBackend } from '@slayzone/platform/service-unit'
 
 // Package roots are derived from the REPO root rather than this file's own URL:
@@ -86,8 +88,10 @@ const NODE_BIN = process.env.SLZ_TEST_NODE ?? 'node'
  * name-based lookup: `findHub('name')` has no port to probe directly, so it must
  * discover the hub. An out-of-block hub is unreachable by name BY DESIGN.
  *
- * The safety that would otherwise come from an out-of-block port comes from
- * process-unique NAMES instead: every assertion filters on this prefix, and
+ * The block is this run's own: the test runner moved it off the shipped one
+ * (caller-env.ts `isolateFromCaller`; `scrubbedEnv` keeps it), so the sweep never
+ * reaches the developer's app or real hubs. Process-unique NAMES remain the second
+ * line: every assertion filters on this prefix, and
  * `hub stop` is only ever called with one of these names or a port this test
  * recorded — so a developer's or CI's real hub can never be listed as ours, and
  * can never be stopped by us.
@@ -121,7 +125,7 @@ function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue
-    if (/^(SLAYZONE_|ELECTRON_)/.test(k)) continue
+    if (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) continue
     out[k] = v
   }
   return out
@@ -464,11 +468,11 @@ describe('slay hub — end-to-end against real hubs', () => {
       expect(
         h.port,
         `port ${h.port} inside the dynamic hub range (discovery only sweeps the block)`
-      ).toBeGreaterThanOrEqual(51110)
+      ).toBeGreaterThanOrEqual(HUB_DYNAMIC_PORT_RANGE.start)
       expect(
         h.port,
         `port ${h.port} inside the dynamic hub range (discovery only sweeps the block)`
-      ).toBeLessThanOrEqual(51199)
+      ).toBeLessThanOrEqual(HUB_DYNAMIC_PORT_RANGE.end)
     }
   })
 
