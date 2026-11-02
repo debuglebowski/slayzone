@@ -53,6 +53,10 @@ export interface ChatMetadataUpdate {
     | 'thread-created'
     | 'queue-item'
     | 'agent-state'
+    | 'artifact-changed'
+    | 'artifact-deleted'
+    | 'folder-changed'
+    | 'folder-deleted'
   value: unknown
 }
 
@@ -172,6 +176,8 @@ export function createLocalChatData(
   function bootstrap(value: ChatBootstrap) {
     const existing = store.conversation(value.identity.id)
     store.createConversation(value.identity)
+    if (value.identity.tabId.startsWith('artifact-store:'))
+      set(value.identity.tabId, 'settings', 'inbox', true)
     store.transaction(() => {
       const previous =
         get<Array<{ mode: string; conversationId: string }>>(
@@ -592,6 +598,7 @@ export function createLocalChatData(
         records = store.records(id),
         counter = store.getRecord<number>(id, 'settings', 'metadata-counter') ?? 0
       const updates: ChatMetadataUpdate[] = []
+      if (i.tabId.startsWith('artifact-store:')) return { identity: i, counter, updates }
       const add = (kind: ChatMetadataUpdate['kind'], key: string, value: unknown) =>
         updates.push({
           operationId: `snapshot:${id}:${key}`,

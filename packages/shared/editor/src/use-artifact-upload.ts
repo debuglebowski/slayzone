@@ -25,6 +25,7 @@ export interface ArtifactUploader {
     title: string
     bytes: Uint8Array
     folderId: string | null
+    chatTabId?: string
   }) => Promise<ArtifactRef | null>
   /** Absolute on-disk path of the artifact's file (null if unknown). */
   getFilePath: (artifactId: string) => Promise<string | null>
@@ -74,6 +75,7 @@ function extFromMime(mime: string): string {
 
 export interface UseArtifactUploadOptions {
   folderName?: string
+  chatTabId?: string
 }
 
 // Storage goes through the app-registered `ArtifactUploader` (tRPC's
@@ -90,6 +92,10 @@ export function useArtifactUpload(
   useEffect(() => {
     taskIdRef.current = taskId
   })
+  const chatTabRef = useRef(options?.chatTabId)
+  useEffect(() => {
+    chatTabRef.current = options?.chatTabId
+  })
   const folderNameRef = useRef(options?.folderName)
   useEffect(() => {
     folderNameRef.current = options?.folderName
@@ -101,7 +107,8 @@ export function useArtifactUpload(
       if (!tid) return []
       let folderId: string | null = null
       const folderName = folderNameRef.current
-      if (folderName) {
+      const chatTabId = chatTabRef.current
+      if (folderName && !chatTabId) {
         folderId = await uploader.getOrCreateFolder(tid, folderName)
       }
       const results = await Promise.all(
@@ -112,7 +119,13 @@ export function useArtifactUpload(
             file.name && file.name.length > 0
               ? file.name
               : `pasted-${tsSlug()}${extFromMime(file.type)}`
-          return uploader.uploadBlob({ taskId: tid, title: baseTitle, bytes, folderId })
+          return uploader.uploadBlob({
+            taskId: tid,
+            title: baseTitle,
+            bytes,
+            folderId,
+            ...(chatTabId ? { chatTabId } : {})
+          })
         })
       )
       return results.filter((a): a is ArtifactRef => a !== null)

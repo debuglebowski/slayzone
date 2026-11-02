@@ -1220,7 +1220,12 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   focusToken={findFocusToken}
                 />
               )}
-            {selectedArtifact ? (
+            {selectedArtifact?.storage?.available === false ? (
+              <div role="status" className="p-4 text-sm text-muted-foreground">
+                This file is stored on a computer that is unavailable. Reconnect its computer to
+                view or edit it.
+              </div>
+            ) : selectedArtifact ? (
               <>
                 <ArtifactContentEditor
                   key={selectedArtifact.id}

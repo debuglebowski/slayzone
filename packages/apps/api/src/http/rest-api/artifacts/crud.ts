@@ -1,5 +1,5 @@
 import type { Express, Response } from 'express'
-import { createArtifactStore } from '@slayzone/task-artifacts/server'
+import { getArtifactStorage } from '@slayzone/task-artifacts/server'
 import type { RenderMode } from '@slayzone/task-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
@@ -43,7 +43,7 @@ import { createArtifactFromStream } from './content'
  */
 
 function store() {
-  return createArtifactStore(getArtifactsDataRoot())
+  return getArtifactStorage(getArtifactsDataRoot())
 }
 
 /** Resolve an artifact-folder id prefix; writes the failure response itself. */
@@ -63,7 +63,13 @@ async function resolveFolderPrefix(
     res.status(resolved.status).json({ ok: false, error: resolved.error })
     return null
   }
-  return resolved.row
+  const row = await db.get<{ task_id: string }>('SELECT task_id FROM artifact_folders WHERE id=?', [
+    resolved.row.id
+  ])
+  const folder = row
+    ? (await store().listFoldersByTask(db, row.task_id)).find((f) => f.id === resolved.row.id)
+    : null
+  return folder ? { id: folder.id, name: folder.name } : resolved.row
 }
 
 export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): void {
@@ -101,12 +107,15 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       // path from the WRONG machine whenever the hub was remote. It is advertised
       // alongside `root` from `/health` so a caller can tell whether the path
       // refers to its own filesystem.
-      const row = resolved.row as Record<string, unknown> & { id: string }
+      const actual = await store().getArtifact(deps.db, resolved.row.id)
+      const row = { ...resolved.row, ...actual }
       res.json({
         ok: true,
         data: {
           ...row,
-          filePath: resolveArtifactFilePath(String(row.task_id), row.id, String(row.title ?? ''))
+          filePath: actual?.storage
+            ? null
+            : resolveArtifactFilePath(String(row.task_id), row.id, String(row.title ?? ''))
         }
       })
     } catch (err) {
@@ -232,7 +241,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         'SELECT * FROM task_artifacts WHERE id = ?',
         [resolved.row.id]
       )
-      res.json({ ok: true, data: { ...(raw ?? artifact), folderName } })
+      res.json({ ok: true, data: { ...(raw ?? {}), ...artifact, folderName } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
@@ -254,13 +263,17 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         res.status(resolved.status).json({ ok: false, error: resolved.error })
         return
       }
+      const actual = await store().getArtifact(db, resolved.row.id)
       const ok = await store().deleteArtifact(db, resolved.row.id)
       if (!ok) {
         res.status(404).json({ ok: false, error: `Artifact not found: ${req.params.id}` })
         return
       }
       deps.notifyRenderer()
-      res.json({ ok: true, data: { id: resolved.row.id, title: resolved.row.title } })
+      res.json({
+        ok: true,
+        data: { id: resolved.row.id, title: actual?.title ?? resolved.row.title }
+      })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

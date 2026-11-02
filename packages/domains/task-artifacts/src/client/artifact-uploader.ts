@@ -1,3 +1,4 @@
+import { safeRandomUUID } from '@slayzone/ui'
 import { useMemo } from 'react'
 import type { ArtifactUploader } from '@slayzone/editor/hooks'
 import { useTRPCClient } from './trpc'
@@ -17,12 +18,13 @@ export function useArtifactUploader(): ArtifactUploader {
         const folder = await trpcClient.artifacts.foldersGetOrCreateByName.mutate({ taskId, name })
         return folder?.id ?? null
       },
-      uploadBlob: async ({ taskId, title, bytes, folderId }) => {
+      uploadBlob: async ({ taskId, title, bytes, folderId, chatTabId }) => {
         const created = await trpcClient.artifacts.uploadBlob.mutate({
           taskId,
           title,
           bytes,
-          folderId
+          folderId,
+          ...(chatTabId ? { chatTabId, operationId: safeRandomUUID() } : {})
         })
         // Narrowed to the contract's public shape — the procedure returns the
         // full TaskArtifact row, but upload callers only ever consume {id, title}.

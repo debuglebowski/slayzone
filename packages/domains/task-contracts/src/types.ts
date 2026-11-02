@@ -619,6 +619,8 @@ export function getEffectiveRenderMode(title: string, override: RenderMode | nul
 }
 
 export interface TaskArtifact {
+  storage?: { computerId: string; available: boolean }
+
   id: string
   task_id: string
   folder_id: string | null
@@ -664,6 +666,8 @@ export interface UpdateArtifactInput {
 }
 
 export interface ArtifactFolder {
+  storage?: { computerId: string; available: boolean }
+
   id: string
   task_id: string
   parent_id: string | null

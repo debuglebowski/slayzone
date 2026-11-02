@@ -54,6 +54,8 @@ export function createHubChatRelay(opts: {
   db: SlayzoneDb
   ownership: ChatOwnershipStore
   request: ChatComputerRequest
+  hasLegacyTaskContent?(taskId: string): Promise<boolean>
+  resolveMigrationComputer?(owner: HubChatOwnership): Promise<string | null>
   resolveComputer(taskId: string): Promise<string | null>
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
@@ -61,6 +63,7 @@ export function createHubChatRelay(opts: {
   bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap>
   migrate(id: string, computerId: string): Promise<HubChatOwnership>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
+  onTasksChanged?(taskId: string): void
   onState?(sessionId: string, state: ChatTerminalState, previous: ChatTerminalState): void
 }) {
   const { db, ownership } = opts
@@ -71,18 +74,50 @@ export function createHubChatRelay(opts: {
     ChatSessionStateEntry & { computerId: string; providerSessionId?: string | null }
   >()
   const taskMigrations = new Map<string, Promise<void>>()
-  async function registerTab(tab: TabRow) {
-    return (
-      (await ownership.forTab(tab.id)) ??
-      ownership.register({
-        id: randomUUID(),
-        taskId: tab.task_id,
-        tabId: tab.id,
-        mode: chatModeForTerminal(tab.mode) ?? tab.mode,
-        computerId: null,
-        epoch: 1
-      })
-    )
+  const registrations = new Map<string, Promise<HubChatOwnership>>()
+  async function createTab(tab: TabRow) {
+    const existing = await ownership.forTab(tab.id)
+    if (existing) return existing
+    const legacy =
+      (await db.get(
+        `SELECT 1 WHERE EXISTS(SELECT 1 FROM chat_events WHERE tab_id=?) OR EXISTS(SELECT 1 FROM chat_tab_state WHERE tab_id=?) OR EXISTS(SELECT 1 FROM chat_queue WHERE tab_id=?) OR EXISTS(SELECT 1 FROM chat_threads WHERE id=? OR parent_tab_id=?) OR EXISTS(SELECT 1 FROM chat_workspace_changes WHERE tab_id=?) OR EXISTS(SELECT 1 FROM agent_prompts WHERE task_id=?) OR EXISTS(SELECT 1 FROM chat_cli_snapshots WHERE project_id=(SELECT project_id FROM tasks WHERE id=?) AND mode=?)`,
+        [tab.id, tab.id, tab.id, tab.id, tab.id, tab.id, tab.task_id, tab.task_id, tab.mode]
+      )) || (await opts.hasLegacyTaskContent?.(tab.task_id))
+    const pc = legacy ? null : await opts.resolveComputer(tab.task_id)
+    if (!legacy && !pc) throw new Error('Chat computer unavailable. Connect its computer.')
+    const value = {
+      id: randomUUID(),
+      taskId: tab.task_id,
+      tabId: tab.id,
+      mode: chatModeForTerminal(tab.mode) ?? tab.mode,
+      computerId: pc,
+      epoch: 1
+    }
+    if (pc) {
+      await opts.gate?.(pc, tab.task_id)
+      const provisional: HubChatOwnership = {
+        ...value,
+        state: 'active',
+        migrationId: null,
+        destinationComputerId: null,
+        sourceComputerId: null,
+        manifestHash: null,
+        cleanupPending: false,
+        settingsRevision: 0,
+        settingsHash: null
+      }
+      // Persist the new store before publishing an active hub locator. Recovery
+      // can adopt a computer commit if the hub disappears between these steps.
+      await opts.request(pc, { kind: 'bootstrap', value: await opts.bootstrap(provisional) })
+    }
+    return ownership.register(value)
+  }
+  function registerTab(tab: TabRow) {
+    const running = registrations.get(tab.id)
+    if (running) return running
+    const work = createTab(tab).finally(() => registrations.delete(tab.id))
+    registrations.set(tab.id, work)
+    return work
   }
   async function migrateTask(taskId: string) {
     const existing = taskMigrations.get(taskId)
@@ -96,7 +131,11 @@ export function createHubChatRelay(opts: {
       for (const owner of await ownership.forTask(taskId)) {
         if (owner.state === 'deleted') continue
         if (owner.state === 'active' && !owner.cleanupPending) continue
-        const pc = owner.destinationComputerId ?? (await opts.resolveComputer(taskId))
+        const pc =
+          owner.destinationComputerId ??
+          (await (opts.resolveMigrationComputer
+            ? opts.resolveMigrationComputer(owner)
+            : opts.resolveComputer(taskId)))
         if (!pc)
           throw new Error('Chat computer unavailable. Connect its computer to migrate history.')
         await opts.gate?.(pc, taskId)
@@ -166,7 +205,9 @@ export function createHubChatRelay(opts: {
     const computerId = await opts.resolveComputer(taskId)
     if (!computerId) throw new Error('Prompt history computer unavailable')
     await opts.gate?.(computerId, taskId)
-    const legacy = await db.get('SELECT 1 FROM agent_prompts WHERE task_id=? LIMIT 1', [taskId])
+    const legacy =
+      (await db.get('SELECT 1 FROM agent_prompts WHERE task_id=? LIMIT 1', [taskId])) ||
+      (await opts.hasLegacyTaskContent?.(taskId))
     const owner = await ownership.register({
       id: randomUUID(),
       taskId,
@@ -323,16 +364,67 @@ export function createHubChatRelay(opts: {
         value.state,
         current.tabId
       ])
+    } else if (
+      ['artifact-changed', 'artifact-deleted', 'folder-changed', 'folder-deleted'].includes(
+        raw.kind
+      )
+    ) {
+      const isFolder = raw.kind.startsWith('folder'),
+        id = String(value.id),
+        table = isFolder ? 'artifact_folders' : 'task_artifacts',
+        locations = isFolder ? 'chat_folder_locations' : 'chat_artifact_locations',
+        idColumn = isFolder ? 'folder_id' : 'artifact_id'
+      if (!id || id.length > 200) throw new Error('Invalid artifact locator')
+      const previous = await db.get<{ task_id: string; computer_id: string | null }>(
+        `SELECT a.task_id,o.computer_id FROM ${table} a LEFT JOIN ${locations} l ON l.${idColumn}=a.id LEFT JOIN chat_ownership o ON o.id=l.conversation_id WHERE a.id=?`,
+        [id]
+      )
+      if (previous && (previous.task_id !== current.taskId || previous.computer_id !== computerId))
+        throw new Error('Artifact locator belongs to another owner')
+      if (raw.kind.endsWith('deleted')) {
+        await db.run(`DELETE FROM ${table} WHERE id=?`, [id])
+      } else {
+        const parent = String((isFolder ? value.parentId : value.folderId) ?? '') || null
+        if (parent) {
+          const folder = await db.get<{ task_id: string }>(
+            'SELECT task_id FROM artifact_folders WHERE id=?',
+            [parent]
+          )
+          if (folder && folder.task_id !== current.taskId)
+            throw new Error('Folder locator task mismatch')
+          if (!folder)
+            await db.run("INSERT INTO artifact_folders(id,task_id,name) VALUES(?,?,'Chat files')", [
+              parent,
+              current.taskId
+            ])
+        }
+        if (isFolder)
+          await db.run(
+            `INSERT INTO artifact_folders(id,task_id,name,parent_id,"order") VALUES(?,?,'Chat files',?,?) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,"order"=excluded."order"`,
+            [id, current.taskId, parent, Number.isSafeInteger(value.order) ? value.order : 0]
+          )
+        else
+          await db.run(
+            `INSERT INTO task_artifacts(id,task_id,title,folder_id,"order") VALUES(?,?,'Chat attachment',?,?) ON CONFLICT(id) DO UPDATE SET folder_id=excluded.folder_id,"order"=excluded."order"`,
+            [id, current.taskId, parent, Number.isSafeInteger(value.order) ? value.order : 0]
+          )
+        await db.run(
+          `INSERT INTO ${locations}(${idColumn},conversation_id) VALUES(?,?) ON CONFLICT(${idColumn}) DO NOTHING`,
+          [id, current.id]
+        )
+      }
     } else if (raw.kind === 'queue-item') {
       await ownership.setQueueRoute(String(value.id), current.id, value.removed === true)
     } else if (raw.kind !== 'thread-created') throw new Error('Unknown chat metadata kind')
+    opts.onTasksChanged?.(current.taskId)
     if (advance)
       await db.run(
         'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
         [current.id, raw.sequence]
       )
   }
-  async function recoverMetadata(computerId: string, id: string) {
+  const metadataChains = new Map<string, Promise<void>>()
+  async function recoverMetadataNow(computerId: string, id: string) {
     const snapshot = (await opts.request(computerId, {
       kind: 'metadata.snapshot',
       id
@@ -372,12 +464,38 @@ export function createHubChatRelay(opts: {
         throw new Error('Invalid metadata snapshot entry')
       await applyMetadata(computerId, update, false)
     }
+    for (const [table, locations, column, kind] of [
+      ['task_artifacts', 'chat_artifact_locations', 'artifact_id', 'artifact-changed'],
+      ['artifact_folders', 'chat_folder_locations', 'folder_id', 'folder-changed']
+    ]) {
+      const ids = new Set(
+        snapshot.updates
+          .filter((u) => u.kind === kind)
+          .map((u) => String((u.value as { id: string }).id))
+      )
+      const previous = await db.all<{ id: string }>(
+        `SELECT ${column} AS id FROM ${locations} WHERE conversation_id=?`,
+        [id]
+      )
+      for (const row of previous)
+        if (!ids.has(row.id)) await db.run(`DELETE FROM ${table} WHERE id=?`, [row.id])
+    }
     await db.run(
       'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
       [id, snapshot.counter]
     )
   }
-  const metadataChains = new Map<string, Promise<void>>()
+  function recoverMetadata(computerId: string, id: string) {
+    const previous = metadataChains.get(id) ?? Promise.resolve()
+    const next = previous
+      .catch(() => {})
+      .then(() => recoverMetadataNow(computerId, id))
+      .finally(() => {
+        if (metadataChains.get(id) === next) metadataChains.delete(id)
+      })
+    metadataChains.set(id, next)
+    return next
+  }
   function reconcileMetadata(computerId: string, update: ChatMetadataUpdate) {
     const key = update.conversationId,
       previous = metadataChains.get(key) ?? Promise.resolve()
@@ -394,7 +512,7 @@ export function createHubChatRelay(opts: {
             )
           )?.sequence ?? 0
         if (update.sequence > consumed + 1) {
-          await recoverMetadata(computerId, key)
+          await recoverMetadataNow(computerId, key)
           consumed =
             (
               await db.get<{ sequence: number }>(
@@ -555,6 +673,11 @@ export function createHubChatRelay(opts: {
     sessions,
     conversations,
     refreshSessions,
+    async resetCaches() {
+      await Promise.allSettled([...taskMigrations.values(), ...metadataChains.values()])
+      sessionMirror.clear()
+      taskMigrations.clear()
+    },
     invoke,
     ensureTab,
     ensureTask,

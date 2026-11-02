@@ -44,3 +44,47 @@ test('reconnect barrier delivers lifecycle before commands and never acknowledge
     db.close()
   }
 })
+
+test('tab deletion keeps durable targets while other task conversations stay active', async () => {
+  const { createTestHarness } = await import('../../../../shared/test-utils/ipc-harness')
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    await owners.register({
+      id: 'files',
+      taskId: 't',
+      tabId: 'artifact-store:t:pc',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    h.db.prepare("DELETE FROM terminal_tabs WHERE id='tab'").run()
+    expect(await owners.get('c')).toMatchObject({ state: 'deleted', epoch: 2 })
+    expect(await owners.get('files')).toMatchObject({ state: 'active', epoch: 1 })
+    const calls: string[] = []
+    const lifecycle = createChatLifecycle({
+      db: h.slayDb,
+      request: async (_pc, raw) => {
+        const p = raw as { kind: string; state: string; revision: number }
+        calls.push(p.kind)
+        return p.kind === 'task.lifecycle' ? { state: p.state, revision: p.revision } : { ok: true }
+      }
+    })
+    await lifecycle.request('pc', { kind: 'inspect' })
+    expect(calls).toContain('conversation.delete')
+    expect(await owners.pendingDeletions('pc')).toEqual([])
+  } finally {
+    h.cleanup()
+  }
+})

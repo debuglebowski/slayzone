@@ -1,9 +1,11 @@
+import { getArtifactStorage } from '@slayzone/task-artifacts/server'
+import { getArtifactsDataRoot } from './shared'
 import type { Express } from 'express'
 import { dirname } from 'node:path'
-import { mkdirSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { getEffectiveRenderMode, canExportAsPdf } from '@slayzone/task-contracts'
 import type { RenderMode } from '@slayzone/task-contracts'
-import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 
@@ -20,9 +22,8 @@ export function registerArtifactsExportPdfRoute(app: Express, deps: RestApiDeps)
       return
     }
 
-    const existing = (await deps.db
-      .prepare('SELECT * FROM task_artifacts WHERE id = ?')
-      .get(req.params.id)) as Record<string, unknown> | undefined
+    const storage = getArtifactStorage(getArtifactsDataRoot()),
+      existing = await storage.getArtifact(deps.db, req.params.id)
     if (!existing) {
       res.status(404).json({ error: 'Artifact not found' })
       return
@@ -35,12 +36,18 @@ export function registerArtifactsExportPdfRoute(app: Express, deps: RestApiDeps)
       return
     }
 
-    const srcPath = getArtifactFilePath(existing.task_id as string, req.params.id, title)
-    if (!existsSync(srcPath)) {
+    const localPath = existing.storage
+      ? null
+      : await storage.getArtifactPath(deps.db, req.params.id)
+    if (!existing.storage && (!localPath || !existsSync(localPath))) {
       res.status(404).json({ error: 'Artifact file not found' })
       return
     }
-    const content = readFileSync(srcPath, 'utf-8')
+    const content = await storage.readArtifactContent(deps.db, req.params.id)
+    if (content === null) {
+      res.status(404).json({ error: 'Artifact file not found' })
+      return
+    }
 
     try {
       // The mermaid-vs-plain branch travels as `mode` and is resolved on the

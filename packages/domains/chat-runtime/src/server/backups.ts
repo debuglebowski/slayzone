@@ -444,7 +444,7 @@ export function createChatBackups(store: ChatStorage) {
           nextCursor = afterCursor
         for (const row of db
           .prepare(
-            "SELECT rowid AS cursor,kind,id,value FROM records WHERE conversation_id=? AND rowid>? AND kind IN ('draft','prompt','workspace','thread') ORDER BY rowid LIMIT 101"
+            "SELECT rowid AS cursor,kind,id,value FROM records WHERE conversation_id=? AND rowid>? AND (kind IN ('draft','prompt','workspace','thread') OR (kind='settings' AND id LIKE 'diagnostic:%')) ORDER BY rowid LIMIT 101"
           )
           .iterate(conversationId, afterCursor) as Iterable<{
           cursor: number

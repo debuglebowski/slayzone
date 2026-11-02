@@ -293,6 +293,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const attachmentsApi = useChatAttachments({
       taskId,
+      tabId,
       mode,
       onAdded: (added) => {
         composer.setAttachments((prev) => [...prev, ...added])

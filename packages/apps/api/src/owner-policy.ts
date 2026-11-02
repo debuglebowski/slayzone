@@ -646,6 +646,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.getMtime': checked(artifact('id')),
   'artifacts.upload': checked(task('taskId'), path('sourcePath')),
   'artifacts.uploadBlob': checked(task('taskId'), folder('folderId')),
+  'artifacts.copy': checked(artifact('artifactIds[]'), task('destTaskId'), folder('destFolderId')),
   'artifacts.pasteFiles': checked(
     task('destTaskId'),
     folder('destFolderId'),

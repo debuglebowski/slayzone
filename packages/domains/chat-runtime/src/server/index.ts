@@ -12,9 +12,11 @@ export {
   type ChatMigrationSource,
   type ChatComputerRequest
 } from './migration'
-export { createLegacyChatSource } from './legacy-source'
+export { createLegacyChatSource, type LegacyChatDiagnostics } from './legacy-source'
 export { createHubChatRelay } from './hub-relay'
 
 export { createChatLifecycle } from './hub-lifecycle'
 
 export { createChatRecovery } from './hub-recovery'
+
+export { computerArtifactRequestSchema } from './artifacts'

@@ -1,5 +1,14 @@
 import path from 'node:path'
-import { existsSync, readFileSync, unlinkSync, rmSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  unlinkSync,
+  rmSync,
+  statSync,
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync
+} from 'node:fs'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateArtifactInput,
@@ -247,6 +256,25 @@ export function createArtifactStore(dataDir: string) {
       return parseArtifact(row)
     },
 
+    async copyArtifacts(
+      db: SlayzoneDb,
+      data: { artifactIds: string[]; destTaskId: string; destFolderId: string | null }
+    ): Promise<TaskArtifact[]> {
+      const result: TaskArtifact[] = []
+      for (const id of data.artifactIds) {
+        const a = await this.getArtifact(db, id)
+        if (!a) throw new Error('Artifact not found')
+        const copy = await this.uploadArtifactBlob(db, {
+          taskId: data.destTaskId,
+          folderId: data.destFolderId,
+          title: a.title,
+          bytes: await this.readArtifactBytes(db, id)
+        })
+        if (copy) result.push(copy)
+      }
+      return result
+    },
+
     async pasteArtifactFiles(
       db: SlayzoneDb,
       data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }
@@ -262,7 +290,14 @@ export function createArtifactStore(dataDir: string) {
 
     async uploadArtifactBlob(
       db: SlayzoneDb,
-      data: { taskId: string; title: string; bytes: Uint8Array; folderId?: string | null }
+      data: {
+        taskId: string
+        title: string
+        bytes: Uint8Array
+        folderId?: string | null
+        chatTabId?: string
+        operationId?: string
+      }
     ): Promise<TaskArtifact | null> {
       const row = await db.namedTxn('task-artifacts:uploadBlob', {
         dataDir,
@@ -339,12 +374,26 @@ export function createArtifactStore(dataDir: string) {
     async resolveArtifactVersion(
       db: SlayzoneDb,
       data: { artifactId: string; versionRef: VersionRef }
-    ): Promise<{ version: ArtifactVersion; blobPath: string }> {
+    ): Promise<{ version: ArtifactVersion; blobPath: string | null; bytes?: Uint8Array }> {
       const version = (await db.namedTxn('task-artifacts:versions:resolve', {
         artifactId: data.artifactId,
         versionRef: data.versionRef
       })) as ArtifactVersion
       return { version, blobPath: new BlobStore(dataDir).blobPath(version.content_hash) }
+    },
+
+    async readArtifactBytes(
+      db: SlayzoneDb,
+      id: string,
+      versionRef: VersionRef = 'current'
+    ): Promise<Uint8Array> {
+      if (versionRef === 'current') {
+        const path = await this.getArtifactPath(db, id)
+        if (path && existsSync(path)) return readFileSync(path)
+      }
+      const { blobPath } = await this.resolveArtifactVersion(db, { artifactId: id, versionRef })
+      if (!blobPath) throw new Error('Artifact version path is unavailable')
+      return readFileSync(blobPath)
     },
 
     /** The current (HEAD) version row, or null when the artifact has none. */
@@ -380,13 +429,26 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: {
         artifactId: string
-        sourcePath: string
+        sourcePath?: string
+        bytes?: Uint8Array
         append?: boolean
         mutateCurrent?: boolean
         mutateRef?: VersionRef
         author?: AuthorContext
       }
     ): Promise<{ artifact: TaskArtifact | null; version: ArtifactVersion }> {
+      if (!data.sourcePath) {
+        if (!data.bytes) throw new Error('Artifact bytes or source path are required')
+        mkdirSync(artifactsDir, { recursive: true, mode: 0o700 })
+        const temp = mkdtempSync(path.join(artifactsDir, '.write-')),
+          sourcePath = path.join(temp, 'content')
+        try {
+          writeFileSync(sourcePath, data.bytes, { mode: 0o600 })
+          return await this.writeArtifactContent(db, { ...data, bytes: undefined, sourcePath })
+        } finally {
+          rmSync(temp, { recursive: true, force: true })
+        }
+      }
       const result = (await db.namedTxn('task-artifacts:versions:write', {
         dataDir,
         artifactId: data.artifactId,

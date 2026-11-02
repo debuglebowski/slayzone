@@ -13,13 +13,33 @@ export function createChatLifecycle(opts: { db: SlayzoneDb; request: ChatCompute
   const { db } = opts,
     ownership = createChatOwnershipStore(db),
     pending = new Map<string, Promise<void>>()
+  async function deliverDeletions(computerId: string) {
+    for (const target of await ownership.pendingDeletions(computerId)) {
+      const owner = await ownership.get(target.conversationId)
+      if (!owner || owner.state !== 'deleted') throw new Error('Deletion owner is unavailable')
+      await opts.request(computerId, {
+        kind: 'conversation.delete',
+        identity: {
+          id: owner.id,
+          taskId: owner.taskId,
+          tabId: owner.tabId,
+          mode: owner.mode,
+          epoch: target.epoch
+        }
+      })
+      await ownership.acknowledgeDeletion(owner.id, computerId, target.epoch)
+    }
+  }
   async function run(computerId: string) {
     for (;;) {
       const rows = await db.all<Lifecycle>(
         `SELECT l.task_id AS taskId,l.state,l.revision FROM chat_task_lifecycle l JOIN chat_task_computers c ON c.task_id=l.task_id LEFT JOIN chat_lifecycle_acks a ON a.task_id=l.task_id AND a.computer_id=c.computer_id WHERE c.computer_id=? AND COALESCE(a.revision,0)<l.revision ORDER BY l.task_id`,
         [computerId]
       )
-      if (!rows.length) return
+      if (!rows.length) {
+        await deliverDeletions(computerId)
+        return
+      }
       for (const row of rows) {
         const reply = (await opts.request(computerId, { kind: 'task.lifecycle', ...row })) as {
           state: State

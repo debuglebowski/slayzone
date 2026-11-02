@@ -23,7 +23,8 @@ import type {
 } from '@slayzone/task-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
-import { createArtifactStore, type ArtifactStore } from './artifact-store'
+import { type ArtifactStore } from './artifact-store'
+import { getArtifactStorage } from './artifact-storage'
 import { getArtifactsRouterDeps, signalTasksChanged } from './artifacts-router-deps'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
@@ -50,6 +51,8 @@ const uploadBlobInput = z.unknown() as unknown as z.ZodType<{
   title: string
   bytes: Uint8Array
   folderId?: string | null
+  chatTabId?: string
+  operationId?: string
 }>
 const pasteFilesInput = z.unknown() as unknown as z.ZodType<{
   sourcePaths: string[]
@@ -65,8 +68,7 @@ const createFolderInput = z.unknown() as unknown as z.ZodType<CreateArtifactFold
 const updateFolderInput = z.unknown() as unknown as z.ZodType<UpdateArtifactFolderInput>
 const versionRef = z.union([z.number(), z.string()])
 
-const store = (dataRoot: string): ReturnType<typeof createArtifactStore> =>
-  createArtifactStore(dataRoot)
+const store = getArtifactStorage
 
 // Every write tells the other clients when it changed what `getByTask` or
 // `foldersGetByTask` answers for a task — `notify.onTasksChanged` naming that task,
@@ -174,6 +176,31 @@ function assertPasteSourcesAreHubStorage(dataRoot: string, sources: unknown): vo
 // capability is a build error rather than a silent no-op.
 const downloadHost = () => getArtifactsRouterDeps().getDownloadHost()
 
+function downloadSource(
+  db: SlayzoneDb,
+  dataRoot: string
+): import('@slayzone/task/server').ArtifactDownloadSource {
+  const s = store(dataRoot)
+  return {
+    get: async (id) => {
+      const a = await s.getArtifact(db, id)
+      return a ? { ...a } : undefined
+    },
+    folder: async (id) => {
+      const row = await db.get<{ task_id: string }>(
+        'SELECT task_id FROM artifact_folders WHERE id=?',
+        [id]
+      )
+      if (!row) return undefined
+      const f = (await s.listFoldersByTask(db, row.task_id)).find((f) => f.id === id)
+      return f ? { ...f } : undefined
+    },
+    artifacts: async (taskId) => (await s.listArtifactsByTask(db, taskId)).map((a) => ({ ...a })),
+    folders: async (taskId) => (await s.listFoldersByTask(db, taskId)).map((f) => ({ ...f })),
+    read: (id) => s.readArtifactBytes(db, id)
+  }
+}
+
 export const artifactsRouter = router({
   // --- Artifact CRUD / read ---
   getByTask: publicProcedure
@@ -237,6 +264,20 @@ export const artifactsRouter = router({
     )
   ),
 
+  copy: publicProcedure
+    .input(
+      z.object({
+        artifactIds: z.array(z.string()).min(1).max(100),
+        destTaskId: z.string(),
+        destFolderId: z.string().nullable()
+      })
+    )
+    .mutation(({ ctx, input }) =>
+      creating(
+        () => store(ctx.dataRoot).copyArtifacts(ctx.db, input),
+        (rows) => rows.map((a) => a.task_id)
+      )
+    ),
   pasteFiles: publicProcedure.input(pasteFilesInput).mutation(({ ctx, input }) => {
     assertPasteSourcesAreHubStorage(ctx.dataRoot, input.sourcePaths)
     return creating(
@@ -376,37 +417,73 @@ export const artifactsRouter = router({
   downloadFile: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(({ ctx, input }) =>
-      downloadArtifactFile(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+      downloadArtifactFile(
+        downloadHost(),
+        ctx.db,
+        ctx.dataRoot,
+        input.id,
+        downloadSource(ctx.db, ctx.dataRoot)
+      )
     ),
 
   downloadFolder: publicProcedure
     .input(z.object({ folderId: z.string() }))
     .mutation(({ ctx, input }) =>
-      downloadArtifactFolder(downloadHost(), ctx.db, ctx.dataRoot, input.folderId)
+      downloadArtifactFolder(
+        downloadHost(),
+        ctx.db,
+        ctx.dataRoot,
+        input.folderId,
+        downloadSource(ctx.db, ctx.dataRoot)
+      )
     ),
 
   downloadAsPdf: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(({ ctx, input }) =>
-      downloadArtifactAsPdf(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+      downloadArtifactAsPdf(
+        downloadHost(),
+        ctx.db,
+        ctx.dataRoot,
+        input.id,
+        downloadSource(ctx.db, ctx.dataRoot)
+      )
     ),
 
   downloadAsPng: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(({ ctx, input }) =>
-      downloadArtifactAsPng(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+      downloadArtifactAsPng(
+        downloadHost(),
+        ctx.db,
+        ctx.dataRoot,
+        input.id,
+        downloadSource(ctx.db, ctx.dataRoot)
+      )
     ),
 
   downloadAsHtml: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(({ ctx, input }) =>
-      downloadArtifactAsHtml(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+      downloadArtifactAsHtml(
+        downloadHost(),
+        ctx.db,
+        ctx.dataRoot,
+        input.id,
+        downloadSource(ctx.db, ctx.dataRoot)
+      )
     ),
 
   downloadAllAsZip: publicProcedure
     .input(z.object({ taskId: z.string() }))
     .mutation(({ ctx, input }) =>
-      downloadAllArtifactsAsZip(downloadHost(), ctx.db, ctx.dataRoot, input.taskId)
+      downloadAllArtifactsAsZip(
+        downloadHost(),
+        ctx.db,
+        ctx.dataRoot,
+        input.taskId,
+        downloadSource(ctx.db, ctx.dataRoot)
+      )
     ),
 
   // --- Subscription ---

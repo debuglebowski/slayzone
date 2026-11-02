@@ -574,7 +574,7 @@ export async function processAgentHook(
   deps: RestApiDeps,
   bridge: TerminalStateBridge | undefined,
   reporter?: HookReporter
-): Promise<'ok' | 'unknown' | 'bad' | 'denied'> {
+): Promise<'ok' | 'unknown' | 'bad' | 'denied' | 'unavailable'> {
   const parsed = PayloadSchema.safeParse(body)
   if (!parsed.success) return 'bad'
 
@@ -635,22 +635,23 @@ export async function processAgentHook(
   // capture-capable modes + the UserPromptSubmit event (once per turn → off
   // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
   // never blocks the hook ack.
-  if (
-    hook.taskId &&
-    !(await deps.db.get(
-      "SELECT 1 FROM chat_ownership WHERE task_id=? AND state<>'legacy' LIMIT 1",
-      [hook.taskId]
-    ))
-  ) {
-    void capturePrompt(deps.db, {
-      agentId: hook.agentId,
-      hookEvent: hook.hookEvent,
-      taskId: hook.taskId,
-      sessionId: hook.sessionId,
-      raw: hook.raw
-    }).catch(() => {
-      /* best-effort — never block the hook */
-    })
+  if (hook.taskId) {
+    if (deps.captureAgentPrompt) {
+      try {
+        await deps.captureAgentPrompt(hook, reporter?.computerId)
+      } catch {
+        return 'unavailable'
+      }
+    } else {
+      // Legacy/test-only host. Production composition always supplies computer capture.
+      await capturePrompt(deps.db, {
+        agentId: hook.agentId,
+        hookEvent: hook.hookEvent,
+        taskId: hook.taskId,
+        sessionId: hook.sessionId,
+        raw: hook.raw
+      })
+    }
   }
 
   if (hook.taskId && hook.hookEvent === 'UserPromptSubmit')
@@ -813,6 +814,10 @@ export function registerAgentHookRoute(
       userId: principal?.userId ?? null,
       computerId: null
     })
+    if (result === 'unavailable') {
+      res.status(503).json({ ok: false, error: 'Prompt storage computer unavailable' })
+      return
+    }
     if (result === 'denied') {
       res.status(404).json({ ok: false, error: 'Not found' })
       return

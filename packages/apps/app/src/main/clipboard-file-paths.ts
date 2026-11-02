@@ -1,5 +1,14 @@
-import { existsSync } from 'fs'
-import { isAbsolute } from 'path'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  readdirSync,
+  statSync,
+  rmSync
+} from 'fs'
+import { tmpdir } from 'os'
+import { isAbsolute, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 
 // Electron 44 made the clipboard async and W3C-shaped. `text/uri-list` maps to the
@@ -50,6 +59,27 @@ async function readType(port: ClipboardPort, type: string): Promise<string | nul
   return null
 }
 
+/** Explicit clipboard export lives on the client, never in hub storage. */
+function materializeArtifactUrl(value: string): string {
+  if (!value.startsWith('data:')) return value
+  const match = /^data:[^;,]+;name=([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/.exec(value)
+  if (!match || match[2].length > 20_000_000) throw new Error('Invalid clipboard artifact')
+  const name = decodeURIComponent(match[1]).split(/[\\/]/).at(-1)
+  if (!name || name === '.' || name === '..' || name.includes('\0'))
+    throw new Error('Invalid clipboard filename')
+  const root = join(tmpdir(), 'slayzone-clipboard-files')
+  mkdirSync(root, { recursive: true, mode: 0o700 })
+  for (const child of readdirSync(root)) {
+    const path = join(root, child)
+    if (Date.now() - statSync(path).mtimeMs > 24 * 60 * 60 * 1000)
+      rmSync(path, { recursive: true, force: true })
+  }
+  const dir = mkdtempSync(join(root, 'export-')),
+    path = join(dir, name)
+  writeFileSync(path, Buffer.from(match[2], 'base64'), { mode: 0o600 })
+  return path
+}
+
 export function createFilePathClipboard(port: ClipboardPort) {
   async function readFilePaths(): Promise<string[]> {
     const uriList = await readType(port, URI_LIST)
@@ -67,6 +97,7 @@ export function createFilePathClipboard(port: ClipboardPort) {
         port.clear()
         return
       }
+      paths = paths.map(materializeArtifactUrl)
       await port.write({
         [URI_LIST]: paths.map((p) => pathToFileURL(p).href).join('\r\n'),
         [TEXT]: paths.join('\n')

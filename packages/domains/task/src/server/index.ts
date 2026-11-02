@@ -59,7 +59,7 @@ export {
   downloadArtifactAsHtml,
   downloadAllArtifactsAsZip
 } from './artifact-downloads'
-export type { ArtifactDownloadHost } from './artifact-downloads'
+export type { ArtifactDownloadHost, ArtifactDownloadSource } from './artifact-downloads'
 
 // Pure task ops + conversation ledger. The Electron host injects runtime adapters
 // at boot via configureTaskRuntimeAdapters (kill PTYs, data root, diagnostics…).

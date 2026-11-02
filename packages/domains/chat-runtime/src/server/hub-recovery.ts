@@ -62,7 +62,16 @@ export function createChatRecovery(opts: {
           ])
         }
       }
-      if (entry.inbox) continue
+      const artifactRoot = i.tabId.startsWith('artifact-store:')
+      if (entry.inbox && !artifactRoot) continue
+      if (entry.state === 'deleted') {
+        const current = await owners.forTab(i.tabId)
+        if (current && (current.taskId !== i.taskId || current.mode !== i.mode))
+          throw new Error('Deleted chat identity conflict')
+        const target = current ?? (await owners.register({ ...i, computerId: null }))
+        await owners.deleteConversation(target.id, i.epoch)
+        continue
+      }
       if (entry.state !== 'active') continue
       if (
         await db.get("SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'", [
@@ -92,7 +101,7 @@ export function createChatRecovery(opts: {
         [i.tabId]
       )
       if (tab && tab.task_id !== i.taskId) throw new Error('Chat tab task conflict')
-      if (!tab)
+      if (!tab && !artifactRoot)
         await db.run(
           "INSERT INTO terminal_tabs(id,task_id,label,mode,position) VALUES(?,?,'Chat',?,(SELECT COALESCE(MAX(position),-1)+1 FROM terminal_tabs WHERE task_id=?))",
           [i.tabId, i.taskId, i.mode, i.taskId]

@@ -1,7 +1,12 @@
 import type { ResolvedAgentHook } from '@slayzone/terminal-contracts'
+import { rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { createComputerChatRuntime, type ChatBootstrap } from '@slayzone/chat-runtime/server'
+import {
+  createComputerChatRuntime,
+  computerArtifactRequestSchema,
+  type ChatBootstrap
+} from '@slayzone/chat-runtime/server'
 import {
   chatIdentitySchema,
   chatBootstrapSchema,
@@ -34,6 +39,21 @@ import type { ProjectPathStore } from '../project-paths'
 import type { SpawnAdmission } from '../spawn-admission'
 
 const requestSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('conversation.delete'), identity: chatIdentitySchema }),
+  z.object({
+    kind: z.literal('hook.capture'),
+    hook: z.object({
+      agentId: z.enum(['claude-code', 'codex', 'gemini', 'antigravity', 'opencode']),
+      mode: z.string(),
+      hookEvent: z.string(),
+      taskId: z.string(),
+      sessionId: z.string().optional(),
+      cwd: z.string().optional(),
+      raw: z.unknown().optional()
+    })
+  }),
+  z.object({ kind: z.literal('test.reset') }),
+  z.object({ kind: z.literal('artifact.invoke'), value: computerArtifactRequestSchema }),
   z.object({ kind: z.literal('inventory') }),
   z.object({ kind: z.literal('metadata.snapshot'), id: z.string() }),
   z.object({ kind: z.literal('backup.list') }),
@@ -170,11 +190,12 @@ export function createChatRuntimeHandlers(opts: {
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
 }) {
-  let closed = false
+  let closed = false,
+    resetting = false
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
   function runtime() {
-    if (closed) throw new Error('Chat runtime is shutting down')
+    if (closed || resetting) throw new Error('Chat runtime is shutting down')
     if (instance) return instance
     const computerId = opts.computerId()
     if (!computerId) throw new Error('Computer identity is unavailable')
@@ -292,9 +313,32 @@ export function createChatRuntimeHandlers(opts: {
     return instance
   }
   async function request(raw: unknown): Promise<unknown> {
-    const req = requestSchema.parse(raw),
-      r = runtime()
+    const req = requestSchema.parse(raw)
+    if (req.kind === 'test.reset') {
+      if (!process.env.PLAYWRIGHT) throw new Error('Test reset is unavailable')
+      resetting = true
+      try {
+        if (instance) {
+          const path = instance.storage.dir
+          await instance.close()
+          instance = null
+          localProcs?.disposeAll()
+          localProcs = null
+          rmSync(path, { recursive: true, force: true })
+        }
+        return { ok: true }
+      } finally {
+        resetting = false
+      }
+    }
+    const r = runtime()
     switch (req.kind) {
+      case 'conversation.delete':
+        await r.deleteConversation(req.identity)
+        return { ok: true }
+      case 'hook.capture':
+        r.captureHook(req.hook)
+        return { ok: true }
       case 'inventory':
         return r.storage
           .inventory()
@@ -308,7 +352,9 @@ export function createChatRuntimeHandlers(opts: {
             lifecycle: r.storage.taskLifecycle(o.identity.taskId)
           }))
       case 'metadata.snapshot':
-        return r.local.metadataSnapshot(req.id)
+        return r.artifacts.metadata(req.id)
+      case 'artifact.invoke':
+        return r.artifacts.invoke(req.value)
       case 'backup.list':
         return r.backups.list()
       case 'backup.create':

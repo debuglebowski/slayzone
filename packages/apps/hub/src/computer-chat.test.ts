@@ -42,6 +42,7 @@ test('first chat read migrates legacy history then all writes stay on its comput
         "INSERT INTO chat_tab_state(tab_id,draft_text,rev,updated_at) VALUES('tab','legacy-private',3,123)"
       )
       .run()
+    let live = false
     const services = createComputerChatServices({
       db: h.slayDb,
       legacyData: {
@@ -52,7 +53,7 @@ test('first chat read migrates legacy history then all writes stay on its comput
       request: (_pc, request) => pc.request(request),
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
-      hasLiveTask: async () => false
+      hasLiveTask: async () => live
     })
     expect(await services.relay.ops.getTabState('tab')).toMatchObject({
       draft: { text: 'legacy-private', rev: 3 }
@@ -68,6 +69,21 @@ test('first chat read migrates legacy history then all writes stay on its comput
       state: 'active',
       epoch: 2,
       cleanupPending: false
+    })
+    h.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('second','task','claude-chat',1)"
+      )
+      .run()
+    live = true
+    await Promise.all([
+      services.relay.ops.getTabState('second'),
+      services.relay.ops.getTabState('second')
+    ])
+    expect(await services.ownership.forTab('second')).toMatchObject({
+      state: 'active',
+      epoch: 1,
+      computerId: 'pc'
     })
     expect(JSON.stringify(h.db.prepare('SELECT * FROM chat_ownership').all())).not.toContain(
       'private'

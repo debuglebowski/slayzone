@@ -26,6 +26,7 @@ export function toSlzFileUrl(
   version?: string | number,
   theme?: 'light' | 'dark'
 ): string {
+  if (absolutePath.startsWith('data:') || absolutePath.startsWith('blob:')) return absolutePath
   const path = absolutePath.startsWith('/') ? absolutePath : `/${absolutePath}`
   const params: string[] = []
   if (version !== undefined) params.push(`v=${encodeURIComponent(String(version))}`)

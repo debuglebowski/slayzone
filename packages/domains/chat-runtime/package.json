@@ -15,7 +15,8 @@
     "@slayzone/terminal-contracts": "workspace:*",
     "better-sqlite3": "^13.0.3",
     "zod": "^4.3.5",
-    "@slayzone/terminal": "workspace:*"
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/task-artifacts": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

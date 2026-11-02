@@ -1,3 +1,4 @@
+import { readRelayBytes } from './relay-bytes'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Express } from 'express'
-import { createArtifactStore } from '@slayzone/task-artifacts/server'
+import { getArtifactStorage } from '@slayzone/task-artifacts/server'
 import type { RenderMode } from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
@@ -111,15 +112,31 @@ export async function createArtifactFromStream(
       folderId = folder.row.id
     }
 
-    tmpPath = await stageRequestBody(req)
+    const storage = getArtifactStorage(getArtifactsDataRoot())
+    const folders = folderId ? await storage.listFoldersByTask(db, task.row.id) : []
+    const remote = folders.find((f) => f.id === folderId)?.storage
+    const bytes = remote ? await readRelayBytes(req) : undefined
+    if (!bytes) tmpPath = await stageRequestBody(req)
 
-    const artifact = await createArtifactStore(getArtifactsDataRoot()).createArtifact(db, {
-      taskId: task.row.id,
-      title: title.trim(),
-      folderId,
-      renderMode: queryString(req.query.renderMode) as RenderMode | undefined,
-      sourcePath: tmpPath
-    })
+    let artifact = bytes
+      ? await storage.uploadArtifactBlob(db, {
+          taskId: task.row.id,
+          title: title.trim(),
+          folderId,
+          bytes
+        })
+      : await storage.createArtifact(db, {
+          taskId: task.row.id,
+          title: title.trim(),
+          folderId,
+          renderMode: queryString(req.query.renderMode) as RenderMode | undefined,
+          sourcePath: tmpPath!
+        })
+    if (bytes && artifact && queryString(req.query.renderMode))
+      artifact = await storage.updateArtifact(db, {
+        id: artifact.id,
+        renderMode: queryString(req.query.renderMode) as RenderMode
+      })
     if (!artifact) {
       res.status(500).json({ ok: false, error: 'Failed to create artifact' })
       return
@@ -155,7 +172,20 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
         res.status(resolved.status).json({ ok: false, error: resolved.error })
         return
       }
-      const artifact = resolved.row
+      const storage = getArtifactStorage(getArtifactsDataRoot())
+      const artifact = (await storage.getArtifact(deps.db, resolved.row.id)) ?? resolved.row
+      if ('storage' in artifact && artifact.storage) {
+        const bytes = await storage.readArtifactBytes(deps.db, artifact.id)
+        res.setHeader('content-type', 'application/octet-stream')
+        res.setHeader('content-length', String(bytes.byteLength))
+        const asciiName = artifact.title.replace(/[^\x20-\x7e]|["\\]/g, '_')
+        res.setHeader(
+          'content-disposition',
+          `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(artifact.title)}`
+        )
+        res.end(Buffer.from(bytes))
+        return
+      }
       const filePath = resolveArtifactFilePath(artifact.task_id, artifact.id, artifact.title)
       if (!existsSync(filePath)) {
         // `code` distinguishes "the artifact row exists, its working copy does
@@ -217,7 +247,7 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
       // Stream the raw body to a temp staging file (constant memory).
       tmpPath = await stageRequestBody(req)
 
-      const store = createArtifactStore(getArtifactsDataRoot())
+      const store = getArtifactStorage(getArtifactsDataRoot())
       const artifact = await store.uploadArtifact(db, {
         taskId: task.row.id,
         sourcePath: tmpPath,

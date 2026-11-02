@@ -19,3 +19,5 @@ export {
   getArtifactsRouterDeps,
   type ArtifactsRouterDeps
 } from './artifacts-router-deps'
+
+export { setArtifactStorage, getArtifactStorage } from './artifact-storage'

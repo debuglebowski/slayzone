@@ -1,7 +1,10 @@
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
+  agentHookPrompt,
+  isPromptCaptureMode,
+  type ResolvedAgentHook,
   terminalModeForChat,
   type ChatComputerOps,
   type ChatAttachment,
@@ -16,7 +19,8 @@ import {
   createHubChatRelay,
   type ChatComputerRequest,
   type HubChatOwnership,
-  type ChatBootstrap
+  type ChatBootstrap,
+  type LegacyChatDiagnostics
 } from '@slayzone/chat-runtime/server'
 import {
   defaultConversationRegistry,
@@ -27,6 +31,7 @@ import {
 
 export function createComputerChatServices(opts: {
   db: SlayzoneDb
+  diagnostics?: LegacyChatDiagnostics
   legacyData: ChatDataOps
   attachments: ChatAttachmentReader
   request: ChatComputerRequest
@@ -36,6 +41,7 @@ export function createComputerChatServices(opts: {
   admitComputer?(computerId: string): Promise<void>
   hasLiveTask(taskId: string): Promise<boolean>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
+  onTasksChanged?(taskId: string): void
   onState?(sessionId: string, state: ChatTerminalState, previous: ChatTerminalState): void
 }) {
   const ownership = createChatOwnershipStore(opts.db)
@@ -64,6 +70,24 @@ export function createComputerChatServices(opts: {
       [owner.taskId]
     )
     if (!task) throw new Error('Chat task no longer exists')
+    if (owner.tabId.startsWith('artifact-store:'))
+      return {
+        identity: {
+          id: owner.id,
+          taskId: owner.taskId,
+          tabId: owner.tabId,
+          mode: owner.mode,
+          epoch: owner.epoch
+        },
+        projectId: null,
+        cwd: '',
+        providerConfig: {},
+        defaultFlags: null,
+        env: {},
+        revision: (await ownership.get(owner.id))
+          ? await ownership.settingsRevision(owner.id, 'artifact-store-v1')
+          : 0
+      }
     const computerId = owner.destinationComputerId ?? owner.computerId
     if (!computerId) throw new Error('Chat computer is unassigned')
     const terminalMode = terminalModeForChat(owner.mode) ?? owner.mode
@@ -96,9 +120,15 @@ export function createComputerChatServices(opts: {
       ).map((r) => r.conversation_id)
     }
     const hash = createHash('sha256').update(JSON.stringify(values)).digest('hex')
-    return { ...values, revision: await ownership.settingsRevision(owner.id, hash) }
+    return {
+      ...values,
+      revision: (await ownership.get(owner.id))
+        ? await ownership.settingsRevision(owner.id, hash)
+        : 0
+    }
   }
   const source = createLegacyChatSource({
+    diagnostics: opts.diagnostics,
     freezeMetadata: (owner, migrationId, candidate) =>
       request(owner.destinationComputerId!, {
         kind: 'migration.checkpoint',
@@ -131,6 +161,19 @@ export function createComputerChatServices(opts: {
           present: boolean
         }
         if (existing.present) return ref
+      }
+      const localArtifact = await opts.db.get<{ conversation_id: string }>(
+        'SELECT conversation_id FROM chat_artifact_locations WHERE artifact_id=?',
+        [ref.artifactId]
+      )
+      if (localArtifact) {
+        const original = await ownership.get(localArtifact.conversation_id)
+        if (!original || original.taskId !== owner.taskId || original.computerId !== pc)
+          throw new Error('Chat file belongs to another computer')
+        return request(pc, {
+          kind: 'artifact.invoke',
+          value: { route, method: 'seal', args: [ref], operationId: randomUUID() }
+        }) as Promise<ChatAttachment>
       }
       const artifact = (await opts.legacyData.attachments.artifacts([ref.artifactId])).get(
         ref.artifactId
@@ -168,6 +211,17 @@ export function createComputerChatServices(opts: {
     ...opts,
     request,
     ownership,
+    hasLegacyTaskContent: async (taskId) =>
+      opts.diagnostics?.hasTask
+        ? opts.diagnostics.hasTask(taskId)
+        : ((await opts.diagnostics?.tasks()) ?? []).includes(taskId),
+    resolveMigrationComputer: async (owner) => {
+      const recorded = await opts.db.get<{ computer_id: string }>(
+        'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+        [owner.tabId]
+      )
+      return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
+    },
     recoverComputer,
     bootstrap,
     migrate: migration.ensure,
@@ -280,6 +334,109 @@ export function createComputerChatServices(opts: {
   }
   return {
     computers,
+    async migrateIdleComputer(computerId: string) {
+      await recoverComputer(computerId)
+      const tasks = new Set(
+        (
+          await opts.db.all<{ task_id: string }>(
+            "SELECT DISTINCT t.task_id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE t.mode IN ('claude-chat','codex-chat') AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1) UNION SELECT DISTINCT task_id FROM agent_prompts"
+          )
+        ).map((t) => t.task_id)
+      )
+      for (const task of (await opts.diagnostics?.tasks()) ?? []) tasks.add(task)
+      for (const taskId of tasks) {
+        if (await opts.hasLiveTask(taskId)) continue
+        try {
+          const owners = await ownership.forTask(taskId)
+          const pc =
+            owners.find((o) => o.state !== 'deleted' && o.destinationComputerId)
+              ?.destinationComputerId ?? (await opts.resolveComputer(taskId))
+          if (pc !== computerId) continue
+          const tab = await opts.db.get<{ id: string }>(
+            "SELECT id FROM terminal_tabs WHERE task_id=? AND mode IN ('claude-chat','codex-chat') ORDER BY created_at,id LIMIT 1",
+            [taskId]
+          )
+          if (tab) await relay.ensureTab(tab.id)
+          else if (await opts.db.get('SELECT 1 FROM tasks WHERE id=?', [taskId]))
+            await relay.ensurePromptTask(taskId)
+        } catch {
+          /* A disconnected, active or unplaced task remains fenced and retries later. */
+        }
+      }
+    },
+    async captureHook(hook: ResolvedAgentHook, reportedComputer?: string | null) {
+      if (!hook.taskId || !agentHookPrompt(hook) || !isPromptCaptureMode(hook.agentId)) return
+      const owner = hook.sessionId
+        ? await ownership.forProviderSession(hook.sessionId, hook.mode)
+        : null
+      const pc = reportedComputer ?? owner?.computerId ?? (await opts.resolveComputer(hook.taskId))
+      if (!pc) throw new Error('Prompt storage computer is unavailable')
+      await opts.gate?.(pc, hook.taskId)
+      await recoverComputer(pc)
+      await lifecycle.track(hook.taskId, pc)
+      await request(pc, { kind: 'hook.capture', hook })
+    },
+    async stopTask(taskId: string) {
+      await Promise.all(
+        (await ownership.forTask(taskId))
+          .filter(
+            (o) => o.state === 'active' && o.computerId && !o.tabId.startsWith('artifact-store:')
+          )
+          .map(async (owner) => {
+            await request(owner.computerId!, {
+              kind: 'invoke',
+              value: {
+                route: { id: owner.id, epoch: owner.epoch },
+                target: 'ops',
+                method: 'kill',
+                args: [owner.tabId],
+                operationId: randomUUID()
+              }
+            })
+          })
+      )
+    },
+    async resetForTest() {
+      recovered.clear()
+      await relay.resetCaches()
+    },
+    async artifactOwner(taskId: string, preferredComputer?: string) {
+      const pc = preferredComputer ?? (await opts.resolveComputer(taskId))
+      if (!pc) throw new Error('Artifact computer is unavailable')
+      await opts.gate?.(pc, taskId)
+      await recoverComputer(pc)
+      const existing = (await ownership.forTask(taskId)).find(
+        (o) => o.state === 'active' && o.computerId === pc && o.tabId.startsWith('artifact-store:')
+      )
+      if (existing) return existing
+      const identity = {
+        id: `artifact-store:${createHash('sha256')
+          .update(JSON.stringify([taskId, pc]))
+          .digest('hex')}`,
+        taskId,
+        tabId: `artifact-store:${createHash('sha256')
+          .update(JSON.stringify([taskId, pc]))
+          .digest('hex')}`,
+        mode: 'claude-chat',
+        epoch: 1,
+        computerId: pc
+      }
+      const provisional: HubChatOwnership = {
+        ...identity,
+        state: 'active',
+        migrationId: null,
+        destinationComputerId: null,
+        sourceComputerId: null,
+        manifestHash: null,
+        cleanupPending: false,
+        settingsRevision: 0,
+        settingsHash: null
+      }
+      await lifecycle.track(taskId, pc)
+      await request(pc, { kind: 'bootstrap', value: await bootstrap(provisional) })
+      const owner = await ownership.register(identity)
+      return owner
+    },
     recoverComputer,
     ownership,
     migration,

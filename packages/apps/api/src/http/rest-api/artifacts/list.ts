@@ -1,3 +1,5 @@
+import { getArtifactStorage } from '@slayzone/task-artifacts/server'
+import { getArtifactsDataRoot } from './shared'
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
@@ -25,7 +27,22 @@ export function registerArtifactsListRoute(app: Express, deps: RestApiDeps): voi
         `SELECT * FROM artifact_folders WHERE task_id = ? ORDER BY "order" ASC, created_at ASC`,
         [task.row.id]
       )
-      res.json({ ok: true, data: { folders, artifacts } })
+      const storage = getArtifactStorage(getArtifactsDataRoot())
+      const currentArtifacts = await storage.listArtifactsByTask(db, task.row.id),
+        currentFolders = await storage.listFoldersByTask(db, task.row.id)
+      res.json({
+        ok: true,
+        data: {
+          folders: currentFolders.map((f) => ({
+            ...(folders.find((r: any) => r.id === f.id) as object),
+            ...f
+          })),
+          artifacts: currentArtifacts.map((a) => ({
+            ...(artifacts.find((r: any) => r.id === a.id) as object),
+            ...a
+          }))
+        }
+      })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

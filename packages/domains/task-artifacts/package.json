@@ -12,7 +12,8 @@
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./task-panels": "./src/client/task-panels.ts",
-    "./artifact-uploader": "./src/client/artifact-uploader.ts"
+    "./artifact-uploader": "./src/client/artifact-uploader.ts",
+    "./storage": "./src/server/storage.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

@@ -20,6 +20,7 @@ export interface PendingAttachment {
 
 export interface UseChatAttachmentsOpts {
   taskId: string
+  tabId?: string
   mode: string
   /** Files ready to send (uploaded task artifacts), in the order they were given. */
   onAdded: (attachments: ChatAttachment[]) => void
@@ -56,13 +57,17 @@ function imageMediaType(type: string): ChatImageMediaType {
  */
 export function useChatAttachments({
   taskId,
+  tabId,
   mode,
   onAdded,
   codec = browserImageCodec
 }: UseChatAttachmentsOpts): UseChatAttachmentsResult {
   const capabilities = chatCapabilitiesForMode(mode)
   const policy = capabilities.attachments
-  const { uploadFiles } = useArtifactUpload(taskId, { folderName: 'Uploads' })
+  const { uploadFiles } = useArtifactUpload(taskId, {
+    folderName: 'Uploads',
+    ...(policy === 'blocks' && tabId ? { chatTabId: tabId } : {})
+  })
   const [pending, setPending] = useState<PendingAttachment[]>([])
   const [isDragging, setIsDragging] = useState(false)
   // Nested dragenter/leave pairs (children of the panel): written in handlers only.

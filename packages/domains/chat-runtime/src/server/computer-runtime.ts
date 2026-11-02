@@ -1,3 +1,4 @@
+import { createLocalArtifacts } from './artifacts'
 import { createChatBackups } from './backups'
 import { createLocalPrompts } from './prompts'
 import { createChatTransfers } from './transfers'
@@ -29,6 +30,7 @@ export function createComputerChatRuntime(opts: {
   const local = createLocalChatData(storage, opts.onMetadata)
   const transfers = createChatTransfers(storage)
   const attachments = createLocalAttachments(storage, local)
+  const artifacts = createLocalArtifacts(storage, local, attachments)
   const backups = createChatBackups(storage)
   const workspaceStore = createLocalWorkspaceStore(storage, local)
   const conversations = createConversationRegistry()
@@ -77,6 +79,7 @@ export function createComputerChatRuntime(opts: {
     transfers,
     attachments,
     backups,
+    artifacts,
     workspaceStore,
     local,
     transport,
@@ -86,6 +89,13 @@ export function createComputerChatRuntime(opts: {
     events: transport.chatEvents,
     queueEvents: queueRuntime.chatQueueEvents,
     bootstrap: local.bootstrap,
+    async deleteConversation(identity: import('../shared').ConversationIdentity) {
+      const closing = transport.removeSession(identity.tabId)
+      storage.applyTombstone(identity)
+      await closing
+      attachments.collectGarbage()
+      storage.checkpoint()
+    },
     async applyTaskLifecycle(
       taskId: string,
       state: 'active' | 'paused' | 'deleted',
@@ -96,6 +106,7 @@ export function createComputerChatRuntime(opts: {
         const applied = storage.applyTaskLifecycle(taskId, state, revision)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
+        artifacts.collectGarbage()
         storage.checkpoint()
         return applied
       }
@@ -111,6 +122,7 @@ export function createComputerChatRuntime(opts: {
       if (applied.state === 'deleted') {
         transfers.removeTask(taskId)
         attachments.collectGarbage()
+        artifacts.collectGarbage()
         storage.checkpoint()
       }
       return applied

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
-import { useDepsChanged } from '@slayzone/ui'
+import { useDepsChanged, toast } from '@slayzone/ui'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 
 interface UseArtifactClipboardArgs {
@@ -36,12 +36,17 @@ export function useArtifactClipboard({
     trpc.app.clipboard.writeFilePaths.mutationOptions()
   )
   const { mutateAsync: pasteFiles } = useMutation(trpc.artifacts.pasteFiles.mutationOptions())
+  const { mutateAsync: copyArtifacts } = useMutation(trpc.artifacts.copy.mutationOptions())
+  const clipboardWrite = useRef<Promise<void>>(Promise.resolve())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const lastClickedRef = useRef<string | null>(null)
   const [clipboard, setClipboard] = useState<{
     ids: string[]
     mode: 'copy' | 'cut'
+    paths?: string[]
   } | null>(null)
+  const clipboardRef = useRef(clipboard)
+  clipboardRef.current = clipboard
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
     queryClient
@@ -106,15 +111,27 @@ export function useArtifactClipboard({
         (p): p is string => !!p
       )
       await writeFilePaths({ paths })
+      return queryClient.fetchQuery(trpc.app.clipboard.readFilePaths.queryOptions()) as Promise<
+        string[]
+      >
     },
-    [getFilePath, writeFilePaths]
+    [getFilePath, writeFilePaths, queryClient, trpc]
   )
 
   const handleArtifactCopy = useCallback(
     (ids: string[]) => {
       if (!ids.length) return
       setClipboard({ ids, mode: 'copy' })
-      void writeArtifactsToOsClipboard(ids)
+      clipboardWrite.current = clipboardWrite.current
+        .catch(() => {})
+        .then(async () => {
+          const paths = await writeArtifactsToOsClipboard(ids)
+          clipboardRef.current = { ids, mode: 'copy', paths }
+          setClipboard(clipboardRef.current)
+        })
+        .catch((e) => {
+          toast.error(String(e))
+        })
     },
     [writeArtifactsToOsClipboard]
   )
@@ -123,29 +140,45 @@ export function useArtifactClipboard({
     (ids: string[]) => {
       if (!ids.length) return
       setClipboard({ ids, mode: 'cut' })
-      void writeArtifactsToOsClipboard(ids)
+      clipboardWrite.current = clipboardWrite.current
+        .catch(() => {})
+        .then(async () => {
+          const paths = await writeArtifactsToOsClipboard(ids)
+          clipboardRef.current = { ids, mode: 'cut', paths }
+          setClipboard(clipboardRef.current)
+        })
+        .catch((e) => {
+          toast.error(String(e))
+        })
     },
     [writeArtifactsToOsClipboard]
   )
 
   const handleArtifactPaste = async (destFolderId: string | null) => {
+    await clipboardWrite.current
     const osPaths = await queryClient.fetchQuery(trpc.app.clipboard.readFilePaths.queryOptions())
     if (!osPaths.length) return
-    const created = await pasteFiles({
-      sourcePaths: osPaths,
-      destTaskId: taskId,
-      destFolderId
-    })
+    const currentClipboard = clipboardRef.current
+    const internalMatches =
+      !!currentClipboard?.paths &&
+      currentClipboard.paths.length === osPaths.length &&
+      currentClipboard.paths.every((p) => osPaths.includes(p))
+    const created = internalMatches
+      ? await copyArtifacts({
+          artifactIds: currentClipboard!.ids,
+          destTaskId: taskId,
+          destFolderId
+        })
+      : await pasteFiles({
+          sourcePaths: osPaths,
+          destTaskId: taskId,
+          destFolderId
+        })
     // Cut-mode source delete only if internal clipboard markers still match OS clipboard
-    if (clipboard?.mode === 'cut') {
-      const sourcePathSet = new Set(osPaths)
-      const internalPaths = (await Promise.all(clipboard.ids.map((id) => getFilePath(id)))).filter(
-        (p): p is string => !!p
-      )
-      const matchesInternal =
-        internalPaths.length === osPaths.length && internalPaths.every((p) => sourcePathSet.has(p))
+    if (currentClipboard?.mode === 'cut') {
+      const matchesInternal = internalMatches
       if (matchesInternal) {
-        for (const id of clipboard.ids) {
+        for (const id of currentClipboard.ids) {
           await deleteArtifact(id)
         }
         setClipboard(null)
@@ -161,19 +194,15 @@ export function useArtifactClipboard({
   const handleArtifactDuplicate = useCallback(
     async (ids: string[]) => {
       if (!ids.length) return
-      const paths = (await Promise.all(ids.map((id) => getFilePath(id)))).filter(
-        (p): p is string => !!p
-      )
-      if (!paths.length) return
       const sourceArtifact = artifacts.find((a) => a.id === ids[0])
       const destFolderId = sourceArtifact?.folder_id ?? null
-      await pasteFiles({
-        sourcePaths: paths,
+      await copyArtifacts({
+        artifactIds: ids,
         destTaskId: taskId,
         destFolderId
       })
     },
-    [getFilePath, artifacts, taskId, pasteFiles]
+    [artifacts, taskId, copyArtifacts]
   )
 
   const handleDeleteSelected = async (ids: string[]) => {

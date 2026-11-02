@@ -36,6 +36,8 @@ export function createChatMigration(opts: {
     let owner = await current(id)
     if (owner.state === 'active' && !owner.cleanupPending) return owner
     if (owner.state === 'legacy') {
+      // Deferral must not freeze a task whose existing agents are still running.
+      await opts.source.quiesce(owner)
       owner = await opts.ownership.beginMigration(id, {
         expectedComputerId: owner.computerId,
         expectedEpoch: owner.epoch,

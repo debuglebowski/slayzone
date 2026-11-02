@@ -53,6 +53,9 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 /**
  * Bump on any breaking change to the frames below.
  *
+ * v5: computers own chat processes, history, drafts, files and backups. The hub
+ * relays normalized events and metadata only. Both peers must upgrade together.
+ *
  * v4: the computer owns PTY shell/env and acknowledges kills only after exit.
  * PTY commands and notifications identify the spawn attempt so delayed frames
  * cannot affect a replacement. Both peers must upgrade together.
@@ -65,7 +68,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 4
+export const COMPUTER_PROTOCOL_VERSION = 5
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {

@@ -4447,6 +4447,14 @@ export const migrations: Migration[] = [
           id TEXT PRIMARY KEY, tab_id TEXT NOT NULL,
           conversation_id TEXT NOT NULL REFERENCES chat_ownership(id)
         );
+        CREATE TABLE chat_artifact_locations (
+          artifact_id TEXT PRIMARY KEY REFERENCES task_artifacts(id) ON DELETE CASCADE,
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id)
+        );
+        CREATE TABLE chat_folder_locations (
+          folder_id TEXT PRIMARY KEY REFERENCES artifact_folders(id) ON DELETE CASCADE,
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id)
+        );
         CREATE TABLE chat_task_lifecycle (
           task_id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('active','paused','deleted')),
           revision INTEGER NOT NULL DEFAULT 1
@@ -4496,6 +4504,13 @@ export const migrations: Migration[] = [
           END;
         `)
       }
+      if (exists('terminal_tabs'))
+        db.exec(`CREATE TRIGGER chat_tab_purge BEFORE DELETE ON terminal_tabs BEGIN
+        UPDATE chat_ownership SET state='deleted',epoch=epoch+1,cleanup_pending=1 WHERE id IN(SELECT conversation_id FROM chat_tab_bindings WHERE tab_id=OLD.id) AND state<>'deleted';
+        INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch)
+        SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE o.tab_id=OLD.id AND o.state='deleted'
+        ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END;
+      END;`)
       // Fencing lives in SQLite too: an old in-flight handler or retention sweep
       // cannot mutate the source after its durable migration gate closes.
       for (const table of [

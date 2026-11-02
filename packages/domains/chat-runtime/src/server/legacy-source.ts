@@ -23,9 +23,18 @@ const timestamp = (value: string) =>
 
 type Item = { kind: 'event'; value: StoredChatEvent } | { kind: 'record'; value: ChatRecord }
 
+export interface LegacyChatDiagnostics {
+  freeze(taskId: string): Promise<number>
+  records(taskId: string, cutoff: number): AsyncIterable<ChatRecord>
+  cleanup(taskId: string, cutoff: number): Promise<void>
+  tasks(): Promise<string[]>
+  hasTask?(taskId: string): Promise<boolean>
+}
+
 /** Reads existing hub history without creating another on-disk hub copy. */
 export function createLegacyChatSource(opts: {
   db: SlayzoneDb
+  diagnostics?: LegacyChatDiagnostics
   quiesce(owner: HubChatOwnership): Promise<void>
   bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap>
   freezeMetadata?(
@@ -66,6 +75,16 @@ export function createLegacyChatSource(opts: {
     owner: HubChatOwnership,
     bootstrap: ChatBootstrap
   ): AsyncGenerator<Item> {
+    if (
+      opts.diagnostics &&
+      (owner.tabId === (await leader(owner.taskId)) ||
+        owner.tabId === `prompt-history:${owner.taskId}`)
+    )
+      yield record(
+        'settings',
+        'legacy-diagnostics-cutoff',
+        await opts.diagnostics.freeze(owner.taskId)
+      )
     yield record('settings', 'bootstrap', bootstrap)
     yield record('settings', 'provider', bootstrap.providerConfig)
     const canonicalMode =
@@ -263,6 +282,12 @@ export function createLegacyChatSource(opts: {
       owner.tabId === (await leader(owner.taskId)) ||
       owner.tabId === `prompt-history:${owner.taskId}`
     ) {
+      const cutoff = metadata.find(
+        (r) => r.kind === 'settings' && r.id === 'legacy-diagnostics-cutoff'
+      )?.value
+      if (opts.diagnostics && typeof cutoff === 'number')
+        for await (const value of opts.diagnostics.records(owner.taskId, cutoff))
+          yield { kind: 'record', value }
       for await (const r of rows<{
         id: string
         agent_id: string
@@ -443,9 +468,21 @@ export function createLegacyChatSource(opts: {
           params: [owner.taskId]
         }
       )
+      for (const table of ['chat_cli_snapshots', 'chat_cli_models', 'chat_cli_command_details'])
+        ops.push({
+          type: 'run',
+          sql: `DELETE FROM ${table} WHERE project_id=(SELECT project_id FROM tasks WHERE id=?) AND mode=? AND NOT EXISTS(SELECT 1 FROM terminal_tabs t JOIN tasks task ON task.id=t.task_id LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE task.project_id=(SELECT project_id FROM tasks WHERE id=?) AND t.mode=? AND (o.state IS NULL OR o.state<>'active'))`,
+          params: [owner.taskId, owner.mode, owner.taskId, owner.mode]
+        })
       await db.batchTxn(ops)
       const checkpoint = await db.get<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
       if (checkpoint?.busy) throw new Error('Hub cleanup checkpoint is busy; retry cleanup')
+      if (
+        opts.diagnostics &&
+        (owner.tabId === (await leader(owner.taskId)) ||
+          owner.tabId === `prompt-history:${owner.taskId}`)
+      )
+        await opts.diagnostics.cleanup(owner.taskId, await opts.diagnostics.freeze(owner.taskId))
     }
   }
 }

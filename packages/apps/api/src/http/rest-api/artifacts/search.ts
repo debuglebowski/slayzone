@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { createArtifactStore } from '@slayzone/task-artifacts/server'
+import { getArtifactStorage } from '@slayzone/task-artifacts/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
@@ -98,7 +98,7 @@ export function registerArtifactsSearchRoute(app: Express, deps: RestApiDeps): v
       const limitRaw = queryString(req.query.limit)
       const maxMatchesRaw = queryString(req.query.maxMatches)
 
-      const report = await createArtifactStore(getArtifactsDataRoot()).searchArtifacts(deps.db, {
+      const report = await getArtifactStorage(getArtifactsDataRoot()).searchArtifacts(deps.db, {
         query,
         taskId,
         folderId,

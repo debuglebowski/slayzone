@@ -7,7 +7,10 @@ import {
   renameSync,
   rmSync,
   statSync,
-  writeFileSync
+  writeFileSync,
+  openSync,
+  closeSync,
+  fsyncSync
 } from 'node:fs'
 import path from 'node:path'
 import { containedPath } from '@slayzone/platform/safe-path'
@@ -75,13 +78,29 @@ export class BlobStore {
     if (existsSync(finalPath)) {
       return { hash, size: buf.length, created: false }
     }
-    mkdirSync(this.dirFor(hash), { recursive: true })
+    mkdirSync(this.dirFor(hash), { recursive: true, mode: 0o700 })
     const tmpDir = path.join(this.rootDir, '.tmp')
-    mkdirSync(tmpDir, { recursive: true })
+    mkdirSync(tmpDir, { recursive: true, mode: 0o700 })
     const tmpPath = path.join(tmpDir, randomUUID())
-    writeFileSync(tmpPath, buf)
+    const fd = openSync(tmpPath, 'wx', 0o600)
+    try {
+      writeFileSync(fd, buf)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
     try {
       renameSync(tmpPath, finalPath)
+      if (process.platform !== 'win32') {
+        for (const dir of [this.dirFor(hash), this.rootDir]) {
+          const fd = openSync(dir, 'r')
+          try {
+            fsyncSync(fd)
+          } finally {
+            closeSync(fd)
+          }
+        }
+      }
     } catch (err) {
       try {
         rmSync(tmpPath, { force: true })

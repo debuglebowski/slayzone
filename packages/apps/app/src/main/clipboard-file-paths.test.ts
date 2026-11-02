@@ -8,9 +8,9 @@
  * a real Electron 44 clipboard returned for a Finder copy and a plain-text copy.
  */
 import { afterAll, describe, expect, test } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createFilePathClipboard, type ClipboardPort } from './clipboard-file-paths'
 
@@ -124,4 +124,15 @@ describe('clipboard-file-paths', () => {
   afterAll(() => {
     rmSync(dir, { recursive: true, force: true })
   })
+})
+
+test('memory-only artifact URLs become client clipboard files with exact bytes', async () => {
+  const cb = fakeClipboard()
+  const fc = createFilePathClipboard(cb)
+  await fc.writeFilePaths(['data:application/pdf;name=notes.pdf;base64,AP+A'])
+  const paths = await fc.readFilePaths()
+  expect(paths).toHaveLength(1)
+  expect(basename(paths[0])).toBe('notes.pdf')
+  expect(readFileSync(paths[0])).toEqual(Buffer.from([0, 255, 128]))
+  rmSync(dirname(paths[0]), { recursive: true, force: true })
 })

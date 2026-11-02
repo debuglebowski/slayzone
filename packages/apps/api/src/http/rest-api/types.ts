@@ -185,6 +185,11 @@ export interface ArtifactExportAccess {
 }
 
 export interface RestApiDeps {
+  captureAgentPrompt?: (
+    hook: import('@slayzone/terminal-contracts').ResolvedAgentHook,
+    computerId?: string | null
+  ) => Promise<void>
+
   db: SlayzoneDb
   /** Cross-cutting "data changed" ping (tasks + settings refetch). A caller that
    *  touched only known task rows passes them (`TasksChange`): the renderer then

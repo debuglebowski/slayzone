@@ -92,6 +92,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       PRAGMA user_version = 2;
     `)
   })()
+  const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
   const row = (id: string) =>
     db.prepare('SELECT * FROM conversations WHERE id=?').get(id) as OwnerRow | undefined
@@ -190,6 +191,12 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             migrationHash: r.migration_hash
           }
         : null
+    },
+    compose<T>(factory: (db: Database.Database) => T): T {
+      return factory(db)
+    },
+    onTaskPurge(listener: (taskId: string) => void) {
+      purgeListeners.push(listener)
     },
     inventory(): ChatOwnership[] {
       return (
@@ -665,6 +672,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           "INSERT INTO conversations(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,?,?,'deleted') ON CONFLICT(id) DO UPDATE SET state='deleted',epoch=excluded.epoch"
         ).run(value.id, value.taskId, value.tabId, value.mode, epoch)
         if (taskDeleted) {
+          for (const listener of purgeListeners) listener(value.taskId)
           const id = `task-tombstone:${value.taskId}`
           db.prepare(
             "INSERT INTO conversations(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,'claude-chat',1,'deleted') ON CONFLICT(id) DO UPDATE SET state='deleted'"

@@ -1,3 +1,4 @@
+import { readRelayBytes } from './relay-bytes'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Express } from 'express'
-import { createArtifactStore } from '@slayzone/task-artifacts/server'
+import { getArtifactStorage } from '@slayzone/task-artifacts/server'
 import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
@@ -49,8 +50,8 @@ import { getArtifactsDataRoot } from './shared'
  * line, which the CLI prints verbatim.
  */
 
-function store(): ReturnType<typeof createArtifactStore> {
-  return createArtifactStore(getArtifactsDataRoot())
+function store(): ReturnType<typeof getArtifactStorage> {
+  return getArtifactStorage(getArtifactsDataRoot())
 }
 
 // Handler req/res derived from Express's own registration signature, matching the
@@ -79,7 +80,7 @@ async function resolveArtifact(
     res.status(resolved.status).json({ ok: false, error: resolved.error })
     return null
   }
-  return resolved.row
+  return (await store().getArtifact(db, resolved.row.id)) ?? resolved.row
 }
 
 /**
@@ -171,11 +172,13 @@ async function writeContent(
     const mutateCurrent = queryString(req.query.mutateVersion) != null
     const author = parseAuthor(queryString(req.query.authorType), queryString(req.query.authorId))
 
-    tmpPath = await stageRequestBody(req)
+    const remote = await store().getArtifact(deps.db, artifact.id)
+    const bytes = remote?.storage ? await readRelayBytes(req) : undefined
+    if (!bytes) tmpPath = await stageRequestBody(req)
 
     const { artifact: updated, version } = await store().writeArtifactContent(deps.db, {
       artifactId: artifact.id,
-      sourcePath: tmpPath,
+      ...(bytes ? { bytes } : { sourcePath: tmpPath! }),
       append,
       mutateCurrent,
       mutateRef,
@@ -242,11 +245,17 @@ export function registerArtifactsVersionsRoutes(app: Express, deps: RestApiDeps)
       // the worker: `readArtifactVersion` stringifies to utf-8, which corrupts a
       // binary version. The blob is content-addressed and immutable, so streaming
       // the file directly is safe.
-      const { version, blobPath } = await store().resolveArtifactVersion(deps.db, {
+      const { version, blobPath, bytes } = await store().resolveArtifactVersion(deps.db, {
         artifactId: artifact.id,
         versionRef: ref
       })
-      if (!existsSync(blobPath)) {
+      if (bytes) {
+        res.setHeader('content-type', 'application/octet-stream')
+        res.setHeader('content-length', String(bytes.byteLength))
+        res.end(Buffer.from(bytes))
+        return
+      }
+      if (!blobPath || !existsSync(blobPath)) {
         res.status(400).json({
           ok: false,
           code: 'BLOB_MISSING',

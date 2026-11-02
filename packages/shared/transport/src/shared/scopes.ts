@@ -425,6 +425,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'artifacts.getFilePath': 'tasks',
   'artifacts.getMtime': 'tasks',
   'artifacts.onContentChanged': 'tasks',
+  'artifacts.copy': 'tasks',
   'artifacts.pasteFiles': 'tasks',
   'artifacts.readContent': 'tasks',
   'artifacts.reorder': 'tasks',

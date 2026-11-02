@@ -2,7 +2,10 @@ import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
 import { setChatSessionSource } from '@slayzone/terminal/server'
 import { setAgentPromptReader } from '@slayzone/agent-turns/server'
+import { createLegacyChatDiagnostics } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
+import { createComputerArtifactStorage } from './computer-artifacts'
+import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -530,7 +533,10 @@ export function composeServer(opts: {
   // so both the task-ops adapter (onReachedTerminal, above) and server-pure
   // callers (integrations sync/pull) must tear them down here — the Electron
   // host's handler only sees its own (empty) session maps post-cutover.
-  setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
+  setOnTaskReachedTerminalHandler((taskId) => {
+    runtimeOnTaskReachedTerminal(taskId)
+    void computerChat.stopTask(taskId).catch(() => {})
+  })
   // The warm pool runs here (initWarmProcessManager below), so this is the one host
   // where a task created to be opened at once can take a warm agent's id.
   // Task ops write task data only — never settings — so they signal tasks-changed
@@ -776,6 +782,9 @@ export function composeServer(opts: {
   // Chat content and provider processes belong to the owning computer.
   const computerChat = createComputerChatServices({
     db,
+    diagnostics: opts.diagnostics
+      ? createLegacyChatDiagnostics({ db: opts.diagnostics.db, blobDir: opts.diagnostics.blobDir })
+      : undefined,
     legacyData: createDbChatDataOps(db, taskSessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request) => {
@@ -798,6 +807,7 @@ export function composeServer(opts: {
     resolveComputer: resolveComputerForTask,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
+    onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
     hasLiveTask: async (taskId) =>
       (await listPtys()).some((p) => p.taskId === taskId && hasLivePty(p.sessionId)),
     onState: (sessionId, state, previous) => {
@@ -805,6 +815,15 @@ export function composeServer(opts: {
         notifyGlobalStateListeners(sessionId, state, previous)
     }
   })
+  setArtifactStorage(
+    dataRoot,
+    createComputerArtifactStorage({
+      db,
+      local: createArtifactStore(dataRoot),
+      chat: computerChat,
+      request: computerChat.lifecycle.request
+    })
+  )
   setChatDeps({ ...computerChat.relay, computers: computerChat.computers })
   setChatSessionSource(computerChat.relay.sessions)
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
@@ -1286,6 +1305,7 @@ export function composeServer(opts: {
 
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {
+    captureAgentPrompt: computerChat.captureHook,
     db,
     notifyRenderer,
     automationEngine,
@@ -1819,6 +1839,11 @@ export function composeServer(opts: {
    * stop/start would double its listeners) and the gateway.
    */
   const resetForTest = async (): Promise<void> => {
+    await computerChat.resetForTest()
+    for (const pc of execGateway?.listUsableComputers() ?? [])
+      await execGateway!.request(pc.computerId, HubToComputerMethods.chatRequest, {
+        kind: 'test.reset'
+      })
     await resetTerminalRuntimeForTest()
     killAllProcesses()
     await db.namedTxn('db:reset-for-test', {})

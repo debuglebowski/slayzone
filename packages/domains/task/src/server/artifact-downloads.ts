@@ -58,6 +58,14 @@ export type ArtifactDownloadHost = {
   ) => Promise<boolean>
 }
 
+export interface ArtifactDownloadSource {
+  get(id: string): Promise<Record<string, unknown> | undefined>
+  folder(id: string): Promise<Record<string, unknown> | undefined>
+  artifacts(taskId: string): Promise<Record<string, unknown>[]>
+  folders(taskId: string): Promise<Record<string, unknown>[]>
+  read(id: string): Promise<Uint8Array>
+}
+
 async function getArtifactRow(
   db: SlayzoneDb,
   id: string
@@ -71,8 +79,13 @@ async function getArtifactRow(
 async function resolveSource(
   db: SlayzoneDb,
   dataDir: string,
-  id: string
-): Promise<{ row: Record<string, unknown>; srcPath: string } | null> {
+  id: string,
+  source?: ArtifactDownloadSource
+): Promise<{ row: Record<string, unknown>; srcPath?: string; bytes?: Uint8Array } | null> {
+  if (source) {
+    const row = await source.get(id)
+    return row ? { row, bytes: await source.read(id) } : null
+  }
   const artifactsDir = artifactsDirOf(dataDir)
   const row = await getArtifactRow(db, id)
   if (!row) return null
@@ -85,16 +98,18 @@ export async function downloadArtifactFile(
   host: ArtifactDownloadHost,
   db: SlayzoneDb,
   dataDir: string,
-  id: string
+  id: string,
+  source?: ArtifactDownloadSource
 ): Promise<boolean> {
-  const src = await resolveSource(db, dataDir, id)
+  const src = await resolveSource(db, dataDir, id, source)
   if (!src) return false
 
   const defaultPath = path.join(await host.getDownloadsDir(), src.row.title as string)
   const result = await host.showSaveDialog({ title: 'Download Artifact', defaultPath })
   if (result.canceled || !result.filePath) return false
 
-  copyFileSync(src.srcPath, result.filePath)
+  if (src.bytes) writeFileSync(result.filePath, src.bytes)
+  else if (src.srcPath) copyFileSync(src.srcPath, result.filePath)
   return true
 }
 
@@ -102,12 +117,15 @@ export async function downloadArtifactFolder(
   host: ArtifactDownloadHost,
   db: SlayzoneDb,
   dataDir: string,
-  folderId: string
+  folderId: string,
+  source?: ArtifactDownloadSource
 ): Promise<boolean> {
   const artifactsDir = artifactsDirOf(dataDir)
-  const folder = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(folderId)) as
-    | Record<string, unknown>
-    | undefined
+  const folder = (
+    source
+      ? await source.folder(folderId)
+      : await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(folderId)
+  ) as Record<string, unknown> | undefined
   if (!folder) return false
 
   const result = await host.showOpenDialog({
@@ -119,9 +137,11 @@ export async function downloadArtifactFolder(
   const destRoot = result.filePaths[0]
   const taskId = folder.task_id as string
 
-  const allFolders = (await db
-    .prepare('SELECT * FROM artifact_folders WHERE task_id = ?')
-    .all(taskId)) as Record<string, unknown>[]
+  const allFolders = (
+    source
+      ? await source.folders(taskId)
+      : await db.prepare('SELECT * FROM artifact_folders WHERE task_id = ?').all(taskId)
+  ) as Record<string, unknown>[]
   const folderPath = buildFolderPathResolver(allFolders)
   const targetIds = collectFolderAndDescendants(allFolders, folderId)
 
@@ -137,13 +157,17 @@ export async function downloadArtifactFolder(
     if (rel) mkdirSync(containedPath(destRoot, rel), { recursive: true })
   }
 
-  const artifacts = (await db
-    .prepare(
-      'SELECT * FROM task_artifacts WHERE task_id = ? AND folder_id IN (' +
-        [...targetIds].map(() => '?').join(',') +
-        ')'
-    )
-    .all(taskId, ...targetIds)) as Record<string, unknown>[]
+  const artifacts = (
+    source
+      ? (await source.artifacts(taskId)).filter((a) => targetIds.has(String(a.folder_id)))
+      : await db
+          .prepare(
+            'SELECT * FROM task_artifacts WHERE task_id = ? AND folder_id IN (' +
+              [...targetIds].map(() => '?').join(',') +
+              ')'
+          )
+          .all(taskId, ...targetIds)
+  ) as Record<string, unknown>[]
   for (const artifact of artifacts) {
     const srcPath = artifactFilePathIn(
       artifactsDir,
@@ -151,12 +175,14 @@ export async function downloadArtifactFolder(
       artifact.id as string,
       artifact.title as string
     )
-    if (!existsSync(srcPath)) continue
+    if (!source && !existsSync(srcPath)) continue
     const folderRel =
       rootParentPath === '.'
         ? folderPath(artifact.folder_id as string)
         : path.relative(rootParentPath, folderPath(artifact.folder_id as string))
-    copyFileSync(srcPath, containedPath(destRoot, folderRel, artifact.title as string))
+    const destination = containedPath(destRoot, folderRel, artifact.title as string)
+    if (source) writeFileSync(destination, await source.read(String(artifact.id)))
+    else copyFileSync(srcPath, destination)
   }
 
   return true
@@ -167,9 +193,10 @@ async function resolveExportable(
   db: SlayzoneDb,
   dataDir: string,
   id: string,
-  canExport: (mode: RenderMode) => boolean
+  canExport: (mode: RenderMode) => boolean,
+  source?: ArtifactDownloadSource
 ): Promise<{ content: string; mode: RenderMode; title: string; baseName: string } | null> {
-  const src = await resolveSource(db, dataDir, id)
+  const src = await resolveSource(db, dataDir, id, source)
   if (!src) return null
 
   const title = src.row.title as string
@@ -177,7 +204,9 @@ async function resolveExportable(
   if (!canExport(mode)) return null
 
   return {
-    content: readFileSync(src.srcPath, 'utf-8'),
+    content: src.bytes
+      ? Buffer.from(src.bytes).toString('utf8')
+      : readFileSync(src.srcPath!, 'utf-8'),
     mode,
     title,
     baseName: title.replace(/\.[^.]+$/, '') || title
@@ -188,9 +217,10 @@ export async function downloadArtifactAsPdf(
   host: ArtifactDownloadHost,
   db: SlayzoneDb,
   dataDir: string,
-  id: string
+  id: string,
+  source?: ArtifactDownloadSource
 ): Promise<boolean> {
-  const ex = await resolveExportable(db, dataDir, id, canExportAsPdf)
+  const ex = await resolveExportable(db, dataDir, id, canExportAsPdf, source)
   if (!ex) return false
 
   const result = await host.showSaveDialog({
@@ -209,9 +239,10 @@ export async function downloadArtifactAsPng(
   host: ArtifactDownloadHost,
   db: SlayzoneDb,
   dataDir: string,
-  id: string
+  id: string,
+  source?: ArtifactDownloadSource
 ): Promise<boolean> {
-  const ex = await resolveExportable(db, dataDir, id, canExportAsPng)
+  const ex = await resolveExportable(db, dataDir, id, canExportAsPng, source)
   if (!ex) return false
 
   const result = await host.showSaveDialog({
@@ -231,9 +262,10 @@ export async function downloadArtifactAsHtml(
   host: ArtifactDownloadHost,
   db: SlayzoneDb,
   dataDir: string,
-  id: string
+  id: string,
+  source?: ArtifactDownloadSource
 ): Promise<boolean> {
-  const ex = await resolveExportable(db, dataDir, id, canExportAsHtml)
+  const ex = await resolveExportable(db, dataDir, id, canExportAsHtml, source)
   if (!ex) return false
 
   const result = await host.showSaveDialog({
@@ -252,17 +284,22 @@ export async function downloadAllArtifactsAsZip(
   host: ArtifactDownloadHost,
   db: SlayzoneDb,
   dataDir: string,
-  taskId: string
+  taskId: string,
+  source?: ArtifactDownloadSource
 ): Promise<boolean> {
   const artifactsDir = artifactsDirOf(dataDir)
-  const allArtifacts = (await db
-    .prepare('SELECT * FROM task_artifacts WHERE task_id = ?')
-    .all(taskId)) as Record<string, unknown>[]
+  const allArtifacts = (
+    source
+      ? await source.artifacts(taskId)
+      : await db.prepare('SELECT * FROM task_artifacts WHERE task_id = ?').all(taskId)
+  ) as Record<string, unknown>[]
   if (allArtifacts.length === 0) return false
 
-  const allFolders = (await db
-    .prepare('SELECT * FROM artifact_folders WHERE task_id = ?')
-    .all(taskId)) as Record<string, unknown>[]
+  const allFolders = (
+    source
+      ? await source.folders(taskId)
+      : await db.prepare('SELECT * FROM artifact_folders WHERE task_id = ?').all(taskId)
+  ) as Record<string, unknown>[]
   const folderPath = buildFolderPathResolver(allFolders)
 
   const result = await host.showSaveDialog({
@@ -283,19 +320,22 @@ export async function downloadAllArtifactsAsZip(
       artifact.id as string,
       artifact.title as string
     )
-    if (!existsSync(srcPath)) continue
+    if (!source && !existsSync(srcPath)) continue
     const folderId = artifact.folder_id as string | null
     const rel = folderId
       ? path.join(folderPath(folderId), artifact.title as string)
       : (artifact.title as string)
-    archive.file(srcPath, { name: rel })
+    if (source) archive.append(Buffer.from(await source.read(String(artifact.id))), { name: rel })
+    else archive.file(srcPath, { name: rel })
   }
 
-  await archive.finalize()
-  await new Promise<void>((resolve, reject) => {
+  const done = new Promise<void>((resolve, reject) => {
     output.on('close', resolve)
     output.on('error', reject)
+    archive.on('error', reject)
   })
+  await archive.finalize()
+  await done
 
   host.showItemInFolder(result.filePath)
   return true

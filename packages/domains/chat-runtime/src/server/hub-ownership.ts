@@ -216,6 +216,20 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
         throw new Error('Cleanup ownership changed')
       return r
     },
+    async deleteConversation(id: string, minimumEpoch = 1) {
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: "UPDATE chat_ownership SET state='deleted',epoch=MAX(epoch+CASE WHEN state='deleted' THEN 0 ELSE 1 END,?),cleanup_pending=1 WHERE id=?",
+          params: [minimumEpoch, id]
+        },
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch) SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE o.id=? AND o.state='deleted' ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END`,
+          params: [id]
+        }
+      ])
+    },
     async deleteForTask(taskId: string) {
       await db.batchTxn([
         {

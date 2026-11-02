@@ -75,7 +75,7 @@ export async function relayAgentHook(
   payload: unknown,
   deps: RestApiDeps,
   bridge: TerminalStateBridge | undefined
-): Promise<'ok' | 'unknown' | 'bad' | 'denied'> {
+): ReturnType<typeof processAgentHook> {
   if (!getAuthGate()) return processAgentHook(payload, deps, bridge)
   const owner = await computerOwnerOf(deps.db, computerId)
   return runWithSecurityContext({ actor: owner, ip: null, route: 'computer agent-hook' }, () =>

@@ -347,6 +347,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'artifacts.getFilePath': 'user',
   'artifacts.getMtime': 'user',
   'artifacts.onContentChanged': 'user',
+  'artifacts.copy': 'user',
   'artifacts.pasteFiles': 'user',
   'artifacts.readContent': 'user',
   'artifacts.reorder': 'user',

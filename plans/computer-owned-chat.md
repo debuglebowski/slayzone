@@ -96,3 +96,26 @@ Validation: 60 storage/migration/relay/service/backup tests; hub, computer,
 chat-runtime and settings typechecks pass. Still incomplete: new upload forwarding,
 full artifact compatibility, diagnostics/cache cleanup, retention, background
 migration, availability UI, E2E reset/coverage and integration with latest main.
+
+
+## Upload / cleanup checkpoint (before main rebase)
+
+Computer-owned uploads reuse artifact folders, editing and version history.
+Hub keeps opaque artifact/folder locators; binary previews and REST reads relay
+bytes in memory. General artifact originals stay on hub. Explicit downloads,
+exports, clipboard copies and duplicate operations read from the owning store.
+Task files have separate storage roots so deleting a chat tab preserves files.
+Tab tombstones are durable and delivered before later chat commands.
+
+Legacy direct hook prompts forward to the computer. Diagnostic export freezes
+retention while copying, then redacts old hub payloads after verified cutover.
+New blank tabs initialize their computer store before publishing ownership;
+legacy migration defers active agents. Computer protocol is v5.
+
+This remains an implementation checkpoint, not release-ready. Next: wire idle
+migration sweep and final privacy compaction, computer retention, availability UI,
+complete restore/deletion edge cases, E2E reset/coverage, performance validation,
+and integrate main. Latest broad run had 230/231 passing; missing-file export
+regression fixed and focused rerun passed (10 tests). Upload/composer/clipboard
+suites passed (34 tests). Computer bundle builds; affected typechecks passed
+before latest cleanup edits and need rerun after rebase.

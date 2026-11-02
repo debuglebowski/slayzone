@@ -1540,6 +1540,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/task-artifacts':
+        specifier: workspace:*
+        version: link:../task-artifacts
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
