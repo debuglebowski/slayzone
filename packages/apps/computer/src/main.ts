@@ -33,10 +33,7 @@ import {
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
-import {
-  getComputerConfigFilePath,
-  loadComputerConfigFile
-} from '@slayzone/platform/slayzone-config'
+import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import {
   effectiveHubUrls,
   JailViolationError,
@@ -57,7 +54,7 @@ import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
 import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
-import { createComputerConfigHandlers, reloadLocalRoots } from './handlers/computer-config'
+import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 
@@ -396,18 +393,24 @@ export function startComputer(
   // which never reads the file (its loopback hub edits its roots instead).
   const watchLocalRoots = !config.hubMayEditRoots
   if (watchLocalRoots) {
-    watchFile(configFile, { interval: 2000, persistent: false }, () => {
-      const declared = loadComputerConfigFile(configFile).allowedRoots
-      const applied = reloadLocalRoots(config, declared)
-      if (!applied) return
-      log('allowedRoots reloaded from local config', { applied })
-      requestLog.record({
-        hub: 'local',
-        method: 'local.allowedRoots',
-        actor: null,
-        params: { roots: applied },
-        result: 'ok'
-      })
+    watchFile(configFile, { interval: 2000, persistent: false }, (current, previous) => {
+      // watchFile reports an initial missing file once. Preserve legitimate
+      // env-only / legacy-only boots until the device file actually changes.
+      if (current.nlink === 0 && previous.nlink === 0) return
+      try {
+        const applied = reloadLocalRootsFromFile(config, configFile, stateDir)
+        if (!applied) return
+        log('allowedRoots reloaded from local config', { applied })
+        requestLog.record({
+          hub: 'local',
+          method: 'local.allowedRoots',
+          actor: null,
+          params: { roots: applied },
+          result: 'ok'
+        })
+      } catch (err) {
+        log('allowedRoots reload failed; keeping current folder policy', { error: String(err) })
+      }
     })
   }
 

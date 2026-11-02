@@ -6,7 +6,7 @@
  * desktop app's own supervised computer dialing its loopback hub, where the hub
  * is the local app. Everywhere else the device's user sets the roots on the
  * device: `slay computer roots <name> --add <dir>` (or `computer.config.json`),
- * which a running computer picks up live via {@link reloadLocalRoots}.
+ * which a running computer picks up live via {@link reloadLocalRootsFromFile}.
  *
  * `allowedRoots` bounds every fs/git/proc path this computer will touch. Before
  * the filesystem ops were routed, the desktop app read and wrote the user's disk
@@ -25,9 +25,12 @@
  * @module computer/handlers/computer-config
  */
 
-import { realpathSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
-import { updateComputerConfigFile } from '@slayzone/platform/slayzone-config'
+import {
+  markCurrentComputerConfigFileSeen,
+  updateComputerConfigFile
+} from '@slayzone/platform/slayzone-config'
 import {
   ComputerTransportErrorCodes,
   HubToComputerMethods,
@@ -75,12 +78,61 @@ export function reloadLocalRoots(
   if (!declared || declared.length === 0) return null
   const { roots } = canonicalRoots(declared)
   if (roots.length === 0) return null
+  return applyLocalRoots(config, roots)
+}
+
+function applyLocalRoots(config: ComputerConfig, roots: string[]): string[] | null {
   const same =
     roots.length === config.allowedRoots.length &&
     roots.every((r, i) => r === config.allowedRoots[i])
   if (same) return null
   config.allowedRoots = roots
   return roots
+}
+
+/** Read only the current device file, once. Valid removal restores the standalone
+ * ROOT default; invalid policy throws before changing the last valid live jail.
+ * Never consult legacy config when the current file is deleted or malformed. */
+export function reloadLocalRootsFromFile(
+  config: ComputerConfig,
+  configFile: string,
+  defaultRoot: string
+): string[] | null {
+  let raw: unknown = {}
+  let text: string | undefined
+  try {
+    text = readFileSync(configFile, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT')
+      throw new Error(`cannot read computer configuration ${configFile}`, { cause: err })
+  }
+  if (text !== undefined) {
+    try {
+      raw = JSON.parse(text)
+    } catch (err) {
+      throw new Error(`invalid computer configuration JSON in ${configFile}`, { cause: err })
+    }
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    throw new Error(`computer configuration ${configFile} must be an object`)
+  const declared = (raw as Record<string, unknown>).allowedRoots
+  if (
+    declared !== undefined &&
+    (!Array.isArray(declared) ||
+      declared.some((root) => typeof root !== 'string' || root.length === 0))
+  )
+    throw new Error(
+      'invalid allowedRoots in computer configuration: expected an array of nonempty strings'
+    )
+  const selected =
+    Array.isArray(declared) && declared.length ? (declared as string[]) : [defaultRoot]
+  const { roots, rejected } = canonicalRoots(selected)
+  if (rejected.length || roots.length === 0)
+    throw new Error(
+      `invalid allowedRoots in computer configuration: ${rejected.map((root) => root.reason).join(', ')}`
+    )
+  if (text !== undefined) markCurrentComputerConfigFileSeen(configFile)
+  return applyLocalRoots(config, roots)
 }
 
 export function createComputerConfigHandlers(ctx: HandlerContext): HubMethodTable {

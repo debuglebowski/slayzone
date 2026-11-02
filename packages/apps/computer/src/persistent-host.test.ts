@@ -56,3 +56,67 @@ it('fences stale connectors and persists increasing generations across host rest
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('canceled maintenance resumes admission without replacing the host', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cancel-host-maintenance-')),
+    hubUrl = 'ws://localhost:1/computers'
+  const host = await startSessionHost(root, {
+    hubUrl,
+    name: 'test',
+    allowedRoots: [root],
+    capabilities: []
+  })
+  const control = await hostControl(root)
+  const grant = await control.rpc.request<ConnectorGrant>('reserve', { hubUrl })
+  const connector = await connectorHost(root, grant, hubUrl, {})
+  const request = {
+    method: 'fs.pathExists',
+    params: { path: root },
+    actor: { userId: null, route: null }
+  }
+  try {
+    await control.rpc.request('prepare-maintenance')
+    await expect(connector.rpc.request('dispatch', request)).rejects.toThrow('restarting')
+    await control.rpc.request('cancel-maintenance')
+    await expect(connector.rpc.request('dispatch', request)).resolves.toEqual({ exists: true })
+    expect((await control.rpc.request<{ epoch: string }>('health')).epoch).toBe(host.epoch)
+  } finally {
+    connector.close()
+    control.close()
+    await host.stop()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('a replacement supervisor resumes an abandoned maintenance drain', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'recover-host-drain-')),
+    hubUrl = 'ws://localhost:1/computers'
+  const host = await startSessionHost(root, {
+    hubUrl,
+    name: 'test',
+    allowedRoots: [root],
+    capabilities: []
+  })
+  let control = await hostControl(root)
+  const grant = await control.rpc.request<ConnectorGrant>('reserve', { hubUrl })
+  const connector = await connectorHost(root, grant, hubUrl, {})
+  const request = {
+    method: 'fs.pathExists',
+    params: { path: root },
+    actor: { userId: null, route: null }
+  }
+  try {
+    await control.rpc.request('prepare-maintenance')
+    await expect(connector.rpc.request('dispatch', request)).rejects.toThrow('restarting')
+    control.close()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    control = await hostControl(root)
+    await expect(connector.rpc.request('dispatch', request)).resolves.toEqual({ exists: true })
+    expect((await control.rpc.request<{ epoch: string }>('health')).epoch).toBe(host.epoch)
+  } finally {
+    connector.close()
+    control.close()
+    await host.stop()
+    rmSync(root, { recursive: true, force: true })
+  }
+})

@@ -19,32 +19,27 @@
  * <ROOT>/computer.config.json file.
  */
 
+import type { ComputerBootSeed } from './config'
 import { hostname } from 'node:os'
 import { delimiter } from 'node:path'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
 import {
   getComputerConfigFilePath,
-  loadComputerConfigFile
+  readComputerConfigSnapshot
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
-import {
-  ENV_VARS,
-  effectiveHubUrls,
-  ignoredCertPinNotices,
-  loadComputerConfig,
-  loadBootComputerConfig
-} from './config'
+import { ENV_VARS, effectiveHubUrls, ignoredCertPinNotices, loadBootComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
 import { COMPUTER_VERSION, startComputer } from './main'
 import { isUpgradeWorker, receiveUpgradeBoot, superviseUpgrades } from './upgrade-runtime'
 import { dirname, join } from 'node:path'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { fork } from 'node:child_process'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
-import { startSessionHost } from './session-host'
+import { atomicRuntimeJson, startSessionHost } from './session-host'
 import { startConnector } from './connector'
 import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 
@@ -67,10 +62,11 @@ import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 async function maybeInteractiveSetup(): Promise<{
   name?: string
   allowedRoots?: string[]
+  unsaved?: boolean
 }> {
   if (!canPrompt()) return {}
 
-  const cfg = loadComputerConfigFile()
+  const cfg = readComputerConfigSnapshot().config
   // A join token is self-sufficient (first contact) → nothing to ask.
   if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return {}
 
@@ -136,7 +132,9 @@ async function maybeInteractiveSetup(): Promise<{
   // layer them over the shared config even when the user declines persisting.
   const collectedName = result.collected.find((c) => c.field.configKey === 'computerName')
   const collectedRoots = result.collected.find((c) => c.field.configKey === 'allowedRoots')
-  const out: { name?: string; allowedRoots?: string[] } = {}
+  const out: { name?: string; allowedRoots?: string[]; unsaved?: boolean } = {
+    unsaved: !result.saved
+  }
   if (typeof collectedName?.config === 'string') out.name = collectedName.config
   if (Array.isArray(collectedRoots?.config)) out.allowedRoots = collectedRoots.config as string[]
   return out
@@ -214,35 +212,61 @@ async function main(): Promise<void> {
   const prompted = workerBoot ? {} : await maybeInteractiveSetup()
 
   let config
+  let bootSeed: ComputerBootSeed = {}
   try {
-    const supervisorConfig = process.argv.includes('--supervisor')
-      ? (() => {
-          try {
-            return JSON.parse(
-              readFileSync(
-                join(
-                  dirname(getComputerConfigFilePath()),
-                  'computer-runtime',
-                  'supervisor-config.json'
-                ),
-                'utf8'
+    const savedSeed: ComputerBootSeed | undefined =
+      !workerBoot && !supervised
+        ? (() => {
+            try {
+              return JSON.parse(
+                readFileSync(
+                  join(
+                    dirname(getComputerConfigFilePath()),
+                    'computer-runtime',
+                    'supervisor-config.json'
+                  ),
+                  'utf8'
+                )
               )
-            )
-          } catch {
-            return undefined
+            } catch {
+              return undefined
+            }
+          })()
+        : undefined
+    const snapshot =
+      !workerBoot && !supervised
+        ? readComputerConfigSnapshot(undefined, { allowLegacy: !savedSeed?.currentFileSeen })
+        : { config: {}, fingerprint: 'absent', currentFileSeen: false }
+    const candidateSeed: ComputerBootSeed = (process.argv.includes('--supervisor')
+      ? savedSeed
+      : undefined) ?? {
+      fileFingerprint: snapshot.fingerprint,
+      ...(prompted.unsaved
+        ? {
+            launchOverrides: {
+              ...(prompted.name !== undefined ? { computerName: prompted.name } : {}),
+              ...(prompted.allowedRoots !== undefined
+                ? { allowedRoots: prompted.allowedRoots }
+                : {})
+            }
           }
-        })()
-      : undefined
+        : {})
+    }
+    bootSeed = {
+      fileFingerprint: snapshot.fingerprint,
+      ...(snapshot.currentFileSeen ? { currentFileSeen: true } : {}),
+      ...(candidateSeed.fileFingerprint === snapshot.fingerprint && candidateSeed.launchOverrides
+        ? { launchOverrides: candidateSeed.launchOverrides }
+        : {})
+    }
     config =
       workerBoot?.config ??
-      (supervisorConfig ? loadBootComputerConfig(supervisorConfig) : undefined) ??
-      (prompted.name !== undefined || prompted.allowedRoots !== undefined
-        ? loadComputerConfig(process.env, {
-            ...loadComputerConfigFile(),
-            ...(prompted.name !== undefined ? { computerName: prompted.name } : {}),
-            ...(prompted.allowedRoots !== undefined ? { allowedRoots: prompted.allowedRoots } : {})
-          })
-        : loadComputerConfig())
+      loadBootComputerConfig(bootSeed, process.env, snapshot.config, snapshot.fingerprint)
+    if (!workerBoot && !supervised && process.argv.includes('--supervisor'))
+      atomicRuntimeJson(
+        join(dirname(getComputerConfigFilePath()), 'computer-runtime', 'supervisor-config.json'),
+        bootSeed
+      )
   } catch (err) {
     process.stderr.write(`slayzone-computer: ${err instanceof Error ? err.message : String(err)}\n`)
     process.stderr.write(
@@ -268,11 +292,7 @@ async function main(): Promise<void> {
       entry: process.argv[1],
       version: COMPUTER_VERSION
     })
-    writeFileSync(
-      join(root, 'computer-runtime', 'supervisor-config.json'),
-      JSON.stringify(config),
-      { mode: 0o600 }
-    )
+    atomicRuntimeJson(join(root, 'computer-runtime', 'supervisor-config.json'), bootSeed)
     const child = fork(launcher, [], {
       stdio: 'inherit',
       env: { ...process.env, SLAYZONE_NONINTERACTIVE: '1' }
@@ -335,7 +355,8 @@ async function main(): Promise<void> {
       config,
       { version: COMPUTER_VERSION, entry: process.argv[1] },
       dirname(getComputerConfigFilePath()),
-      log
+      log,
+      { bootSeed }
     )
     return
   }

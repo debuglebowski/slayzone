@@ -1,12 +1,25 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+  unlinkSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
-import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
+import {
+  getComputerConfigFilePath,
+  readComputerConfigSnapshot
+} from '@slayzone/platform/slayzone-config'
 import type { ComputerConfig } from '../config'
 import { createFsHandlers } from './fs'
-import { createComputerConfigHandlers } from './computer-config'
+import { HubDialer, type HubDialerOptions } from '@slayzone/computer-transport/client'
+import { startComputer } from '../main'
+import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './computer-config'
 import type { ComputerDialer } from './types'
 
 const dialer: ComputerDialer = { notify: () => true }
@@ -20,11 +33,13 @@ beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'computer-cfg-')))
   home = join(dir, 'home')
   mkdirSync(home, { recursive: true })
-  process.env.HOME = home
-  process.env.USERPROFILE = home
+  vi.stubEnv('HOME', home)
+  vi.stubEnv('USERPROFILE', home)
+  vi.stubEnv('SLAYZONE_ROOT', join(home, 'computer'))
 })
 
 afterEach(() => {
+  vi.unstubAllEnvs()
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -124,4 +139,161 @@ describe('computer.setAllowedRoots', () => {
     // The live jail is untouched by a refused edit.
     expect(ctx.config.allowedRoots).toEqual([real])
   })
+})
+
+describe('standalone live folder policy', () => {
+  function fixture() {
+    const root = join(dir, 'computer')
+    const wide = join(dir, 'wide')
+    mkdirSync(root)
+    mkdirSync(wide)
+    const path = join(root, 'computer.config.json')
+    writeFileSync(join(root, 'config.json'), JSON.stringify({ allowedRoots: [dir] }))
+    const config = {
+      ...ctxWith([wide]).config,
+      capabilities: ['fs', 'proc'],
+      hubMayEditRoots: false
+    }
+    return { root, wide, path, config }
+  }
+
+  it.each([{}, { allowedRoots: [] }])(
+    'restores ROOT default when valid file removes roots: %j',
+    (file) => {
+      const { root, wide, path, config } = fixture()
+      writeFileSync(path, JSON.stringify(file))
+      expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync(root)])
+      const fs = createFsHandlers({ config, dialer, log: () => {} }).handlers
+      expect(() => fs[HubToComputerMethods.fsPathExists]({ path: wide })).toThrow(/allowedRoots/)
+      expect(fs[HubToComputerMethods.fsPathExists]({ path: root })).toEqual({ exists: true })
+    }
+  )
+
+  it('does not revive legacy wider roots when current file is deleted', () => {
+    const { root, path, config } = fixture()
+    writeFileSync(path, JSON.stringify({ allowedRoots: config.allowedRoots }))
+    unlinkSync(path)
+    expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync(root)])
+  })
+
+  it('live adoption prevents legacy policy revival on the next boot', () => {
+    const { root, path, config } = fixture()
+    expect(readComputerConfigSnapshot(path).config.allowedRoots).toEqual([dir])
+    writeFileSync(path, JSON.stringify({ allowedRoots: [root] }))
+    reloadLocalRootsFromFile(config, path, root)
+    unlinkSync(path)
+    expect(readComputerConfigSnapshot(path).config).toEqual({})
+  })
+
+  it.each([
+    '{',
+    'null',
+    '[]',
+    '{"allowedRoots":null}',
+    '{"allowedRoots":"/broad"}',
+    '{"allowedRoots":[null]}',
+    '{"allowedRoots":["relative"]}'
+  ])('rejects corrupt/invalid policy without applying legacy fallback: %s', (text) => {
+    const { root, wide, path, config } = fixture()
+    writeFileSync(path, text)
+    expect(() => reloadLocalRootsFromFile(config, path, root)).toThrow(/configuration|allowedRoots/)
+    expect(config.allowedRoots).toEqual([wide])
+  })
+
+  it('retains current policy when config cannot be read', () => {
+    const { root, wide, path, config } = fixture()
+    mkdirSync(path)
+    expect(() => reloadLocalRootsFromFile(config, path, root)).toThrow(/read.*configuration/)
+    expect(config.allowedRoots).toEqual([wide])
+  })
+
+  it('live removal narrows future requests while running job survives', async () => {
+    const { root, wide, path, config } = fixture()
+    writeFileSync(path, JSON.stringify({ allowedRoots: [wide] }))
+    let dispatch!: NonNullable<HubDialerOptions['onHubRequest']>
+    const log = vi.fn()
+    const handle = startComputer(config, {
+      stateDir: root,
+      log,
+      createDialer: (options) => {
+        dispatch = options.onHubRequest!
+        const dialer = new HubDialer(options)
+        vi.spyOn(dialer, 'start').mockImplementation(() => {})
+        return dialer
+      }
+    })
+    try {
+      const result = (await dispatch(
+        'proc.spawn',
+        {
+          sessionId: 'survivor',
+          command: process.execPath,
+          args: ['-e', 'setInterval(()=>{},1000)'],
+          cwd: wide
+        },
+        { userId: null, route: null }
+      )) as { pid: number }
+      writeFileSync(path, '{}')
+      await vi.waitFor(() => expect(config.allowedRoots).toEqual([realpathSync(root)]), {
+        timeout: 6000
+      })
+      expect(() => process.kill(result.pid, 0)).not.toThrow()
+      await expect(
+        dispatch('fs.pathExists', { path: wide }, { userId: null, route: null })
+      ).rejects.toThrow(/allowedRoots/)
+      expect(log).toHaveBeenCalledWith('allowedRoots reloaded from local config', {
+        applied: [realpathSync(root)]
+      })
+    } finally {
+      await handle.stop()
+    }
+  }, 10000)
+
+  it('preserves legacy-only boot policy before the device file exists', async () => {
+    const { root, wide, config } = fixture()
+    writeFileSync(join(root, 'config.json'), JSON.stringify({ allowedRoots: [wide] }))
+    const handle = startComputer(config, {
+      stateDir: root,
+      createDialer: (options) => {
+        const dialer = new HubDialer(options)
+        vi.spyOn(dialer, 'start').mockImplementation(() => {})
+        return dialer
+      }
+    })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2200))
+      expect(config.allowedRoots).toEqual([wide])
+    } finally {
+      await handle.stop()
+    }
+  }, 10000)
+
+  it('logs corrupt live policy and retains current roots instead of legacy roots', async () => {
+    const { root, wide, path, config } = fixture()
+    writeFileSync(path, JSON.stringify({ allowedRoots: [wide] }))
+    const log = vi.fn()
+    const handle = startComputer(config, {
+      stateDir: root,
+      log,
+      createDialer: (options) => {
+        const dialer = new HubDialer(options)
+        vi.spyOn(dialer, 'start').mockImplementation(() => {})
+        return dialer
+      }
+    })
+    try {
+      writeFileSync(path, '{')
+      await vi.waitFor(
+        () =>
+          expect(log).toHaveBeenCalledWith(
+            'allowedRoots reload failed; keeping current folder policy',
+            expect.objectContaining({ error: expect.any(String) })
+          ),
+        { timeout: 6000 }
+      )
+      expect(config.allowedRoots).toEqual([wide])
+    } finally {
+      await handle.stop()
+    }
+  }, 10000)
 })
