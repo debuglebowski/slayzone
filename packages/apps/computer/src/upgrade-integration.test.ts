@@ -217,7 +217,7 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
   const log = vi.fn()
   const original = { version: '1.0.0', entry: oldEntry }
   const first = await superviseUpgrades(config, original, root, log, { probationMs: 0 })
-  cleanups.push(() => first.stop())
+  cleanups.push(() => first.stop(true))
   await eventually(
     () => {
       const status = JSON.parse(
@@ -440,13 +440,21 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   child.stderr.on('data', (chunk) => {
     output += chunk
   })
-  cleanups.push(async () => {
+  const stopForeground = async () => {
     if (child.exitCode !== null) return
     const exit = once(child, 'exit')
     child.kill('SIGTERM')
     const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
     await exit
     clearTimeout(timer)
+  }
+  cleanups.push(async () => {
+    await stopForeground()
+    const peer = await hostControl(root).catch(() => undefined)
+    if (peer) {
+      await peer.rpc.request('stop', { force: true }).catch(() => undefined)
+      peer.close()
+    }
   })
   await eventually(() => expect(hub.gateway.listComputers(), output).toHaveLength(1), {
     timeout: 15_000
@@ -493,4 +501,20 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
     { timeout: 15_000 }
   )
   expect(hub.auth.enrollCalls).toHaveLength(1)
+  const lastHost = await hostControl(root)
+  const { pid } = await lastHost.rpc.request<{ pid: number }>('health')
+  lastHost.close()
+  await stopForeground()
+  await eventually(
+    () => {
+      let alive = true
+      try {
+        process.kill(pid, 0)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ESRCH') alive = false
+      }
+      expect(alive).toBe(false)
+    },
+    { timeout: 3000 }
+  )
 }, 60_000)

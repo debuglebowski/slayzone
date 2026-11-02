@@ -49,3 +49,26 @@ describe('upgrade recovery discovery', () => {
     expect(() => loadComputerConfig({ ...env, SLAYZONE_COMPUTER_AUTO_UPGRADE: 'yes' })).toThrow()
   })
 })
+
+it('keeps slow status reports ordered and coalesces newer progress', async () => {
+  const { createStatusReporter } = await import('./upgrade-runtime')
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const delivered: string[] = []
+  const report = createStatusReporter(
+    async (status) => {
+      if (status.phase === 'checking') await gate
+      delivered.push(String(status.phase))
+    },
+    () => {}
+  )
+  report({ phase: 'checking' })
+  report({ phase: 'installing' })
+  report({ phase: 'failed' })
+  expect(delivered).toEqual([])
+  release()
+  const { vi } = await import('vitest')
+  await vi.waitFor(() => expect(delivered).toEqual(['checking', 'failed']))
+})

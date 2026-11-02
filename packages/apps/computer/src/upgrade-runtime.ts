@@ -153,6 +153,35 @@ export async function installComputerRelease(
 
 type Log = (message: string, meta?: Record<string, unknown>) => void
 
+/** One in-flight report plus the latest pending state; old phases cannot arrive last. */
+export function createStatusReporter(
+  send: (status: Record<string, unknown>) => Promise<void>,
+  onError: (error: unknown) => void
+): (status: Record<string, unknown>) => void {
+  let pending: Record<string, unknown> | undefined
+  let sending = false
+  return (status) => {
+    pending = status
+    if (sending) return
+    sending = true
+    void (async () => {
+      try {
+        while (pending) {
+          const next = pending
+          pending = undefined
+          try {
+            await send(next)
+          } catch (err) {
+            onError(err)
+          }
+        }
+      } finally {
+        sending = false
+      }
+    })().catch(() => undefined)
+  }
+}
+
 export function launchUpgradeWorker(
   entry: string,
   config: ComputerConfig,
@@ -390,8 +419,35 @@ export async function ensureSessionHost(
   throw new Error('session host did not start; inspect computer-runtime/host.log')
 }
 
+/** Remember explicit stops throughout boot, including reconnect probes and host startup. */
+export async function superviseUpgrades(...args: Parameters<typeof initializeUpgradeSupervisor>) {
+  let stopRequested = false
+  const requestStop = (): void => {
+    stopRequested = true
+  }
+  process.on('SIGINT', requestStop)
+  process.on('SIGTERM', requestStop)
+  try {
+    const supervisor = await initializeUpgradeSupervisor(...args)
+    if (stopRequested) await supervisor.stop(true)
+    return supervisor
+  } catch (err) {
+    if (stopRequested) {
+      const peer = await hostControl(args[2]).catch(() => undefined)
+      if (peer) {
+        await peer.rpc.request('stop', { force: true }).catch(() => undefined)
+        peer.close()
+      }
+    }
+    throw err
+  } finally {
+    process.off('SIGINT', requestStop)
+    process.off('SIGTERM', requestStop)
+  }
+}
+
 /** Supervises one connector per hub; stopping a connector never stops its host. */
-export async function superviseUpgrades(
+async function initializeUpgradeSupervisor(
   config: ComputerConfig,
   original: UpgradeRelease,
   root: string,
@@ -472,6 +528,10 @@ export async function superviseUpgrades(
     }
     committed.set(hubUrl, initial)
     let displayedVersion = initial.version
+    const reportStatus = createStatusReporter(
+      (status) => reportUpgradeStatus(root, hubUrl, status),
+      (err) => log('cannot report upgrade status', { hubUrl, error: String(err) })
+    )
     const scoped = {
       ...config,
       hubUrl,
@@ -577,9 +637,7 @@ export async function superviseUpgrades(
           } catch (err) {
             log('cannot persist upgrade status', { error: String(err) })
           }
-          void reportUpgradeStatus(root, hubUrl, status).catch((err) =>
-            log('cannot report upgrade status', { hubUrl, error: String(err) })
-          )
+          reportStatus(status)
         }
       }
     )
