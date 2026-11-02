@@ -776,3 +776,64 @@ describe('ClaudeSessionDriver — side questions (/btw)', () => {
     await expect(answer).rejects.toThrow('session ended')
   })
 })
+
+describe('ClaudeSessionDriver — what opened an agent-started turn', () => {
+  test("a Monitor event the CLI wrote to its session file after the turn's init is emitted", async () => {
+    const { mkdtempSync, mkdirSync, appendFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const configDir = mkdtempSync(join(tmpdir(), 'claude-config-'))
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = configDir
+    try {
+      const { driver, emitted } = setup()
+      const projectDir = join(configDir, 'projects', '-repo')
+      mkdirSync(projectDir, { recursive: true })
+      const file = join(projectDir, 'sid-live.jsonl')
+      appendFileSync(file, '')
+      driver.handleLine(
+        JSON.stringify({
+          type: 'system',
+          subtype: 'init',
+          session_id: 'sid-live',
+          cwd: '/repo',
+          model: 'opus',
+          tools: []
+        })
+      )
+      appendFileSync(
+        file,
+        JSON.stringify({
+          type: 'user',
+          isSidechain: false,
+          uuid: 'rec-1',
+          timestamp: new Date().toISOString(),
+          origin: { kind: 'task-notification', producer: 'session-task' },
+          message: {
+            role: 'user',
+            content:
+              '<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event: "watch"</summary>\n<event>status=done</event>\n</task-notification>'
+          }
+        }) + '\n'
+      )
+      const deadline = Date.now() + 2_000
+      while (!emitted.some((e) => e.kind === 'background-notification') && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20))
+      }
+      expect(emitted.filter((e) => e.kind === 'background-notification')).toEqual([
+        {
+          kind: 'background-notification',
+          uuid: 'rec-1',
+          taskId: 'b1',
+          summary: 'Monitor event: "watch"',
+          event: 'status=done'
+        }
+      ])
+      driver.dispose()
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = previous
+      rmSync(configDir, { recursive: true, force: true })
+    }
+  })
+})

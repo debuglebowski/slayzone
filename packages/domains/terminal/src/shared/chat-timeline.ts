@@ -2,6 +2,7 @@ import { PersistentIndex } from './persistent-index'
 import type {
   AgentEvent,
   AgentPlanStep,
+  BackgroundNotificationEvent,
   ChatAttachment,
   CliCommandDetails,
   CliCommandList,
@@ -265,12 +266,15 @@ export type TimelineItem =
     }
   | {
       /**
-       * The agent opened the turn that follows because these background
-       * sub-agents ended (Claude Code answers a finished background agent with
-       * a turn of its own): the reply below is about them.
+       * The agent opened the turn that follows because background work told it
+       * something (Claude Code answers it with a turn of its own): these
+       * background sub-agents ended, and / or these notifications arrived (a
+       * Monitor event, a background command's end). The reply below is about them.
        */
       kind: 'turn-trigger'
       subAgents: TurnTriggerSubAgent[]
+      /** Absent: none (or only the named sub-agents' own). */
+      notifications?: TurnTriggerNotification[]
       timestamp: number
       parentToolUseId?: undefined
     }
@@ -647,6 +651,12 @@ export interface ChatTimelineState {
    * user message, a result, a Stop or the process ending clears them.
    */
   turnTriggers: readonly TurnTriggerSubAgent[]
+  /**
+   * Background notifications (Monitor events, ended background commands) since
+   * the last turn closed: the next agent-started turn answers them (its
+   * `turn-trigger` row names them). Cleared like `turnTriggers`.
+   */
+  turnNotifications: readonly TurnTriggerNotification[]
 }
 
 /** A background sub-agent that ended (what a `turn-trigger` row names). */
@@ -655,8 +665,12 @@ export interface TurnTriggerSubAgent {
   description?: string
 }
 
+/** A background notification (what a `turn-trigger` row names). */
+export type TurnTriggerNotification = Omit<BackgroundNotificationEvent, 'kind'>
+
 const EMPTY_LIVE: LiveBlocks = Object.freeze([])
 const NO_TRIGGERS: readonly TurnTriggerSubAgent[] = Object.freeze([])
+const NO_NOTIFICATIONS: readonly TurnTriggerNotification[] = Object.freeze([])
 /** No blocks counted (shared; written only through `writableMap`, which copies it). */
 const EMPTY_ORDINALS: ReadonlyMap<string, number> = new Map()
 
@@ -705,6 +719,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     agentStartedTurns: opts.agentStartedTurns ?? false,
     agentTurnOpen: false,
     turnTriggers: NO_TRIGGERS,
+    turnNotifications: NO_NOTIFICATIONS,
     turnsClosed: 0,
     importingHistory: false
   }
@@ -2269,6 +2284,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       return state
     case 'command-task':
       return applyCommandTask(state, event)
+    case 'background-notification':
+      return withTurnNotification(state, event)
     case 'command-task-output': {
       const view = state.commandTasks.get(event.toolUseId)
       if (!view) return state
@@ -2785,26 +2802,49 @@ export function isTurnOpen(state: ChatTimelineState): boolean {
 }
 
 /**
- * The output that opens an agent-started turn answering background sub-agents
- * that ended: a `turn-trigger` row naming them goes first.
+ * The output that opens an agent-started turn answering background work (ended
+ * sub-agents, notifications): a `turn-trigger` row naming it goes first. A
+ * sub-agent's own notification is not named twice (its sub-agent is).
  */
 function withTurnTrigger(
   state: ChatTimelineState,
   event: AgentEvent,
   at: number | undefined
 ): ChatTimelineState {
-  if (state.turnTriggers.length === 0 || !opensAgentTurn(state, event)) return state
+  if (state.turnTriggers.length === 0 && state.turnNotifications.length === 0) return state
+  if (!opensAgentTurn(state, event)) return state
+  const named = new Set(state.turnTriggers.map((agent) => agent.toolUseId))
+  const notifications = state.turnNotifications.filter(
+    (n) => n.toolUseId === undefined || !named.has(n.toolUseId)
+  )
+  const cleared = { ...state, turnTriggers: NO_TRIGGERS, turnNotifications: NO_NOTIFICATIONS }
+  if (state.turnTriggers.length === 0 && notifications.length === 0) return cleared
   const item: TimelineItem = {
     kind: 'turn-trigger',
     subAgents: [...state.turnTriggers],
+    ...(notifications.length > 0 ? { notifications } : {}),
     timestamp: at ?? Date.now()
   }
-  return { ...state, timeline: appended(state.timeline, item), turnTriggers: NO_TRIGGERS }
+  return { ...cleared, timeline: appended(state.timeline, item) }
 }
 
-/** A user message, a turn's end or the process's: no sub-agent end is pending an answer. */
+/**
+ * A background notification: pending until the turn that answers it opens (or
+ * a user message / turn end shows nothing is waiting on it). Once per record.
+ */
+function withTurnNotification(
+  state: ChatTimelineState,
+  event: BackgroundNotificationEvent
+): ChatTimelineState {
+  if (!state.agentStartedTurns || state.importingHistory) return state
+  if (state.turnNotifications.some((n) => n.uuid === event.uuid)) return state
+  const { kind: _kind, ...notification } = event
+  return { ...state, turnNotifications: [...state.turnNotifications, notification] }
+}
+
+/** A user message, a turn's end or the process's: no background end is pending an answer. */
 function clearTurnTriggers(state: ChatTimelineState, action: SingleAction): ChatTimelineState {
-  if (state.turnTriggers.length === 0) return state
+  if (state.turnTriggers.length === 0 && state.turnNotifications.length === 0) return state
   const clears =
     action.type === 'event'
       ? action.event.kind === 'result' ||
@@ -2813,7 +2853,9 @@ function clearTurnTriggers(state: ChatTimelineState, action: SingleAction): Chat
       : action.type === 'user-sent' ||
         action.type === 'turn-interrupted' ||
         action.type === 'process-exit'
-  return clears ? { ...state, turnTriggers: NO_TRIGGERS } : state
+  return clears
+    ? { ...state, turnTriggers: NO_TRIGGERS, turnNotifications: NO_NOTIFICATIONS }
+    : state
 }
 
 /** `event` is the first output no user turn accounts for: it opens an agent-started turn. */

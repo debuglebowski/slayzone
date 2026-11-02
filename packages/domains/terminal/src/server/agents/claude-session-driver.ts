@@ -26,6 +26,7 @@ import type {
 } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
 import { ClaudeCommandTasks } from './claude-command-tasks'
+import { ClaudeTaskNotifications } from './claude-task-notifications'
 import { buildClaudeContent } from './claude-content'
 import { getChatAttachmentReader, type ChatAttachmentReader } from './chat-attachment-reader'
 import type { AgentBackend, ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from './types'
@@ -128,6 +129,27 @@ function buildWireDecision(
   }
 }
 
+/**
+ * The turn's own output (not a sub-agent's), or its end: what opened it is in
+ * the session file by now (see `ClaudeTaskNotifications`).
+ */
+function endsCauseWindow(ev: AgentEvent): boolean {
+  switch (ev.kind) {
+    case 'assistant-text':
+    case 'assistant-thinking':
+    case 'tool-call':
+    case 'stream-message-start':
+    case 'stream-block-start':
+    case 'stream-block-delta':
+      return ev.parentToolUseId == null
+    case 'result':
+    case 'interrupted':
+      return true
+    default:
+      return false
+  }
+}
+
 export class ClaudeSessionDriver implements ChatSessionDriver {
   /** Claude reports delivery itself: `command_lifecycle` + the replay of the message `uuid`. */
   readonly confirmsDelivery = true
@@ -150,6 +172,8 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     emit: (ev) => this.ctx?.emit(ev),
     now: () => Date.now()
   })
+  /** What opened an agent-started turn (a Monitor event, …): read from the session file. */
+  private notifications: ClaudeTaskNotifications | null = null
 
   /**
    * Asks the CLI for its slash commands with descriptions and argument hints
@@ -160,6 +184,11 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
    */
   start(ctx: ChatDriverContext): Promise<void> {
     this.ctx = ctx
+    this.notifications?.dispose()
+    this.notifications = new ClaudeTaskNotifications({
+      emit: (ev) => this.ctx?.emit(ev),
+      startedAt: Date.now()
+    })
     const { written, response } = this.issueControl(
       { subtype: 'initialize' },
       INITIALIZE_TIMEOUT_MS
@@ -229,10 +258,13 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
       if (!this.pendingPrompts.delete(ev.requestId)) return
     } else if (ev.kind === 'turn-init') {
       if (ev.permissionMode) this.permissionMode = ev.permissionMode
+      this.notifications?.turnStarted(ev.cwd, ev.sessionId)
     } else if (ev.kind === 'permission-mode-changed') {
       if (ev.mode === this.permissionMode) return
       this.permissionMode = ev.mode
     }
+
+    if (endsCauseWindow(ev)) this.notifications?.turnOutput()
 
     if (ev.kind === 'unknown' && ev.reason === 'unknown-type') {
       const raw = ev.raw as { type?: string } | null
@@ -431,6 +463,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
 
   dispose(): void {
     this.tasks.dispose()
+    this.notifications?.dispose()
     for (const [id, pending] of this.pendingControl) {
       clearTimeout(pending.timer)
       pending.reject(new Error('session ended before control_response'))

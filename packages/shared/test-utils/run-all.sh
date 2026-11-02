@@ -897,6 +897,8 @@ run_harness packages/domains/terminal/src/server/adapters/qwen-adapter.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
 # One Claude process's task_* frames → command tasks (Bash/Monitor) or sub-agents; task control requests.
 run_harness packages/domains/terminal/src/server/agents/claude-command-tasks.test.ts
+# Session-file <task-notification> records → what opened an agent-started turn (Monitor events, …).
+run_harness packages/domains/terminal/src/server/agents/claude-task-notifications.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-import.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-content.test.ts

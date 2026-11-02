@@ -55,6 +55,7 @@ export type AgentEvent =
   | CliTaskEvent
   | CommandTaskEvent
   | CommandTaskOutputEvent
+  | BackgroundNotificationEvent
   | ConversationBranchEvent
   | CliCommandDetailsEvent
   | ContextUsageEvent
@@ -551,6 +552,30 @@ export interface SubAgentEvent {
     durationMs: number
   }
   raw: unknown
+}
+
+/**
+ * A background task told the agent something (Claude Code's
+ * `<task-notification>`): a Monitor reported a line, a background command or
+ * sub-agent ended. The CLI feeds it to the model as a hidden message and often
+ * answers it with a turn of its own; the stream says nothing about it, so the
+ * driver reads it from the CLI's session file. The chat names it above the turn
+ * it opened.
+ */
+export interface BackgroundNotificationEvent {
+  kind: 'background-notification'
+  /** The session-file record's uuid: one notification, one event. */
+  uuid: string
+  /** `<task-id>`: the CLI's task id. */
+  taskId: string
+  /** `<tool-use-id>`: the call that started the task (an ended task names it). */
+  toolUseId?: string
+  /** `<status>` of an ended task (`completed`, `failed`, `killed`, …). */
+  status?: string
+  /** `<summary>`, e.g. `Monitor event: "x"`, `Background command "x" completed (exit code 0)`. */
+  summary: string
+  /** `<event>`: the line a Monitor reported. */
+  event?: string
 }
 
 export interface StderrEvent {

@@ -3252,6 +3252,152 @@ describe('background sub-agents (Agent run in the background)', () => {
   })
 })
 
+describe('background notifications (Monitor events, ended background commands)', () => {
+  const claude = () => initialState({ agentStartedTurns: true })
+  /** A user turn that started a Monitor, done. */
+  const monitoring = (): ChatTimelineState => {
+    let s = reducer(claude(), { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'user-sent', id: 'u1', text: 'watch it' })
+    s = reducer(s, { type: 'event', event: userMsg('watch it', 'u1') })
+    s = reducer(s, { type: 'event', event: ev.call('tu_MON', 'Monitor') })
+    s = reducer(s, { type: 'event', event: ev.result('tu_MON') })
+    s = reducer(s, { type: 'event', event: ev.text('m-1', 'watching') })
+    return reducer(s, { type: 'event', event: ev.turnResult() })
+  }
+  const monitorEvent = (uuid: string, line: string): AgentEvent => ({
+    kind: 'background-notification',
+    uuid,
+    taskId: 'bzdf0phch',
+    summary: 'Monitor event: "demo subtask"',
+    event: line
+  })
+  const notificationsOf = (s: ChatTimelineState) =>
+    rowsOf(s).flatMap((r) => (r.kind === 'turn-trigger' ? [r.notifications ?? []] : []))
+
+  test('a Monitor event opening a turn: a turn-trigger row names it before the reply', () => {
+    let s = reducer(monitoring(), { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: monitorEvent('n1', 'status=in_progress') })
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'Baseline: in progress') })
+    expect(
+      rowsOf(s)
+        .map((r) => r.kind)
+        .slice(-2)
+    ).toEqual(['turn-trigger', 'text'])
+    expect(notificationsOf(s)).toEqual([
+      [
+        {
+          uuid: 'n1',
+          taskId: 'bzdf0phch',
+          summary: 'Monitor event: "demo subtask"',
+          event: 'status=in_progress'
+        }
+      ]
+    ])
+    const row = rowsOf(s).find((r) => r.kind === 'turn-trigger')
+    expect(row?.kind === 'turn-trigger' && row.subAgents).toEqual([])
+  })
+
+  test('each turn names only its own notifications', () => {
+    let s = reducer(monitoring(), { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: monitorEvent('n1', 'first') })
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'got first') })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: monitorEvent('n2', 'second') })
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'got second') })
+    expect(notificationsOf(s).map((list) => list.map((n) => n.event))).toEqual([
+      ['first'],
+      ['second']
+    ])
+  })
+
+  test('the same record twice (a re-read) is named once', () => {
+    let s = reducer(monitoring(), { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: monitorEvent('n1', 'first') })
+    s = reducer(s, { type: 'event', event: monitorEvent('n1', 'first') })
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'got it') })
+    expect(notificationsOf(s)).toHaveLength(1)
+    expect(notificationsOf(s)[0]).toHaveLength(1)
+  })
+
+  test("one the CLI folded into the user's turn: no row (the user's message opened it)", () => {
+    let s = reducer(monitoring(), { type: 'user-sent', id: 'u2', text: 'status?' })
+    s = reducer(s, { type: 'event', event: userMsg('status?', 'u2') })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: monitorEvent('n1', 'mid') })
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'answer') })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'later, unexplained') })
+    expect(notificationsOf(s)).toEqual([])
+  })
+
+  test("a background sub-agent's own notification is not named twice", () => {
+    let s = reducer(claude(), { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'user-sent', id: 'u1', text: 'go' })
+    s = reducer(s, { type: 'event', event: userMsg('go', 'u1') })
+    s = reducer(s, { type: 'event', event: ev.call('tu_A', 'Agent') })
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'sub-agent',
+        phase: 'in-flight',
+        toolUseId: 'tu_A',
+        description: 'bg',
+        raw: {}
+      }
+    })
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'tool-result',
+        toolUseId: 'tu_A',
+        isError: false,
+        rawContent: 'Async agent launched successfully.',
+        structured: { isAsync: true, status: 'async_launched', agentId: 'a1' }
+      }
+    })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'sub-agent',
+        phase: 'in-flight',
+        toolUseId: 'tu_A',
+        status: 'completed',
+        raw: {}
+      }
+    })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, {
+      type: 'event',
+      event: {
+        kind: 'background-notification',
+        uuid: 'n-agent',
+        taskId: 'a1',
+        toolUseId: 'tu_A',
+        status: 'completed',
+        summary: 'Agent "bg" completed'
+      }
+    })
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'bg done') })
+    const rows = rowsOf(s).filter((r) => r.kind === 'turn-trigger')
+    expect(rows).toHaveLength(1)
+    const row = rows[0]
+    expect(row.kind === 'turn-trigger' && row.subAgents.map((a) => a.toolUseId)).toEqual(['tu_A'])
+    expect(row.kind === 'turn-trigger' && (row.notifications ?? [])).toEqual([])
+  })
+
+  test('a pending notification never names a turn the user opened later', () => {
+    let s = reducer(monitoring(), { type: 'event', event: monitorEvent('n1', 'unanswered') })
+    s = reducer(s, { type: 'user-sent', id: 'u2', text: 'next' })
+    s = reducer(s, { type: 'event', event: userMsg('next', 'u2') })
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'answer') })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'agent turn') })
+    expect(notificationsOf(s)).toEqual([])
+  })
+})
+
 describe('interrupted marker', () => {
   /** The markers the chat shows. */
   const interrupted = (s: ChatTimelineState) =>

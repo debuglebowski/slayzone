@@ -9,6 +9,7 @@ import { CompactionRow } from './CompactionRow'
 import { CommandOutputBlock, looksLikeMarkdown } from './CommandOutputBlock'
 import { HookOutputRow } from './HookOutputRow'
 import { NoticeRow } from './NoticeRow'
+import { TurnTriggerRow } from './TurnTriggerRow'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { PromptHistorySearch } from './PromptHistorySearch'
 import { formatCost, formatTokens } from './usage-format'
@@ -314,5 +315,61 @@ describe('plan markers', () => {
   it('are synthetic prompts (kept out of prompt history)', () => {
     expect(isSyntheticChatPrompt(PLAN_APPROVED_MARKER)).toBe(true)
     expect(isSyntheticChatPrompt(PLAN_CANCELLED_MARKER)).toBe(true)
+  })
+})
+
+describe('TurnTriggerRow', () => {
+  it('names a Monitor event that opened the turn: summary + the line it reported', () => {
+    render(
+      <TurnTriggerRow
+        item={{
+          kind: 'turn-trigger',
+          subAgents: [],
+          notifications: [
+            {
+              uuid: 'n1',
+              taskId: 'bzdf0phch',
+              summary: 'Monitor event: "demo-mode subtask"',
+              event: 'status=in_progress | changed_files=6'
+            }
+          ],
+          timestamp: 1
+        }}
+      />
+    )
+    const row = screen.getByTestId('turn-trigger-notification')
+    expect(row.textContent).toBe(
+      'AfterMonitor event: "demo-mode subtask"status=in_progress | changed_files=6'
+    )
+    expect(row.getAttribute('title')).toBe(
+      'Monitor event: "demo-mode subtask"\nstatus=in_progress | changed_files=6'
+    )
+    expect(screen.queryByText('finished')).toBeNull()
+  })
+
+  it('sub-agents and a notification: both named', () => {
+    render(
+      <TurnTriggerRow
+        item={{
+          kind: 'turn-trigger',
+          subAgents: [{ toolUseId: 'tu_A', description: 'review' }],
+          notifications: [
+            {
+              uuid: 'n2',
+              taskId: 'b2',
+              toolUseId: 'tu_B',
+              status: 'completed',
+              summary: 'Background command "build" completed (exit code 0)'
+            }
+          ],
+          timestamp: 1
+        }}
+      />
+    )
+    expect(screen.getByText('review')).toBeTruthy()
+    expect(screen.getByText('finished')).toBeTruthy()
+    expect(screen.getByTestId('turn-trigger-notification').textContent).toBe(
+      'AfterBackground command "build" completed (exit code 0)'
+    )
   })
 })
