@@ -150,7 +150,10 @@ async function main(): Promise<void> {
   }
   if (process.argv.includes('--upgrade-probe')) {
     await probeNativeTerminal((stage) => process.stderr.write(`[computer-probe] ${stage}\n`))
-    process.stdout.write(COMPUTER_VERSION + '\n')
+    // node-pty's ConPTY reader worker can outlive a successfully exited child.
+    // This is a one-shot probe with no other work: flush its result, then exit
+    // explicitly so install validation cannot hang on the native reader.
+    process.stdout.write(COMPUTER_VERSION + '\n', () => process.exit(0))
     return
   }
   if (process.argv.includes('--session-host')) {
