@@ -358,6 +358,7 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     is_temporary: Boolean(row.is_temporary),
     is_blocked: Boolean(row.is_blocked),
     active_artifact_id: (row.active_artifact_id as string) ?? null,
+    artifacts_sidebar: safeJsonParse(row.artifacts_sidebar),
     needs_attention: Boolean(row.needs_attention),
     dev_url_toast_dismissed: Boolean(row.dev_url_toast_dismissed),
     pinned: Boolean(row.pinned),
@@ -1360,6 +1361,10 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   if (data.activeArtifactId !== undefined) {
     fields.push('active_artifact_id = ?')
     values.push(data.activeArtifactId)
+  }
+  if (data.artifactsSidebar !== undefined) {
+    fields.push('artifacts_sidebar = ?')
+    values.push(data.artifactsSidebar ? JSON.stringify(data.artifactsSidebar) : null)
   }
   if (data.needsAttention !== undefined) {
     fields.push('needs_attention = ?')

@@ -284,6 +284,7 @@ function synthTask(
     browser_tabs: null,
     web_panel_urls: null,
     editor_open_files: null,
+    artifacts_sidebar: null,
     merge_state:
       typeof entry.merge_state === 'string' && entry.merge_state.length > 0
         ? (entry.merge_state as Task['merge_state'])

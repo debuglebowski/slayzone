@@ -1,20 +1,59 @@
 import React, { useRef, useCallback, useEffect, useEffectEvent } from 'react'
 import { useTRPCClient } from '../trpc'
-import type { Task } from '@slayzone/task-contracts'
+import type { ArtifactsSidebarState, Task } from '@slayzone/task-contracts'
 import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
 
 export interface UsePersistenceSavesResult {
   /** Live cache of web-panel URLs; callers (e.g. applyTemplate) may overwrite `.current` directly. */
   webPanelUrlsRef: React.RefObject<Record<string, string>>
   handleActiveArtifactIdChange: (id: string | null) => void
+  handleArtifactsSidebarChange: (state: ArtifactsSidebarState) => void
   handleWebPanelUrlChange: (panelId: string, url: string) => void
   handleEditorStateChange: (state: EditorOpenFilesState) => void
   handleWebPanelFaviconChange: (panelId: string, favicon: string) => void
 }
 
 /**
- * Debounced, ref-based persistence of web-panel URLs, editor open-files, and the
- * active artifact id. Flushes pending saves on task switch and unmount.
+ * A debounced save bound to the task it was made in: `schedule` (re)starts a 500 ms
+ * timer; `flush` (task switch, unmount) sends the pending value to its own task now.
+ */
+function useTaskBoundSave<T>(
+  taskIdRef: React.RefObject<string | null>,
+  send: (taskId: string, value: T) => void
+): { schedule: (value: T) => void; flush: () => void } {
+  const pendingRef = useRef<{
+    taskId: string
+    value: T
+    timer: ReturnType<typeof setTimeout>
+  } | null>(null)
+
+  const flush = useCallback(() => {
+    const pending = pendingRef.current
+    if (!pending) return
+    pendingRef.current = null
+    clearTimeout(pending.timer)
+    send(pending.taskId, pending.value)
+  }, [send])
+
+  const schedule = useCallback(
+    (value: T) => {
+      const previous = pendingRef.current
+      if (previous) clearTimeout(previous.timer)
+      pendingRef.current = null
+      const taskId = taskIdRef.current
+      if (!taskId) return
+      pendingRef.current = { taskId, value, timer: setTimeout(flush, 500) }
+    },
+    [taskIdRef, flush]
+  )
+
+  return { schedule, flush }
+}
+
+/**
+ * Debounced, ref-based persistence of web-panel URLs, editor open-files, the
+ * active artifact id, and the artifacts sidebar. Flushes pending saves on task
+ * switch and unmount.
  */
 export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResult {
   const trpcClient = useTRPCClient()
@@ -37,38 +76,23 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
     }
   }, [trpcClient])
 
-  // Active artifact persistence — debounced, ref-based. The pending save keeps the
-  // task it was selected in: a flush (task switch, unmount) sends it there, now.
-  const pendingActiveArtifactSaveRef = useRef<{
-    taskId: string
-    id: string | null
-    timer: ReturnType<typeof setTimeout>
-  } | null>(null)
-
-  // Send the pending save now (fire-and-forget); also the debounce timer's callback
-  const flushPendingActiveArtifactSave = useCallback(() => {
-    const pending = pendingActiveArtifactSaveRef.current
-    if (!pending) return
-    pendingActiveArtifactSaveRef.current = null
-    clearTimeout(pending.timer)
-    void trpcClient.task.update.mutate({ id: pending.taskId, activeArtifactId: pending.id })
-  }, [trpcClient])
-
-  const handleActiveArtifactIdChange = useCallback(
-    (id: string | null) => {
-      const previous = pendingActiveArtifactSaveRef.current
-      if (previous) clearTimeout(previous.timer)
-      pendingActiveArtifactSaveRef.current = null
-      const taskId = taskIdRef.current
-      if (!taskId) return
-      pendingActiveArtifactSaveRef.current = {
-        taskId,
-        id,
-        timer: setTimeout(flushPendingActiveArtifactSave, 500)
-      }
-    },
-    [flushPendingActiveArtifactSave]
+  // Active artifact + artifacts sidebar persistence — debounced; a pending save keeps
+  // the task it was made in: a flush (task switch, unmount) sends it there, now.
+  const sendActiveArtifact = useCallback(
+    (id: string, activeArtifactId: string | null) =>
+      void trpcClient.task.update.mutate({ id, activeArtifactId }),
+    [trpcClient]
   )
+  const { schedule: handleActiveArtifactIdChange, flush: flushPendingActiveArtifactSave } =
+    useTaskBoundSave(taskIdRef, sendActiveArtifact)
+
+  const sendArtifactsSidebar = useCallback(
+    (id: string, artifactsSidebar: ArtifactsSidebarState) =>
+      void trpcClient.task.update.mutate({ id, artifactsSidebar }),
+    [trpcClient]
+  )
+  const { schedule: handleArtifactsSidebarChange, flush: flushPendingArtifactsSidebarSave } =
+    useTaskBoundSave(taskIdRef, sendArtifactsSidebar)
 
   // Editor open files persistence — debounced, ref-based (same pattern as webPanelUrls)
   const editorStateRef = useRef<EditorOpenFilesState | null>(null)
@@ -100,9 +124,16 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
     flushPendingUrlSave()
     flushPendingEditorSave()
     flushPendingActiveArtifactSave()
+    flushPendingArtifactsSidebarSave()
     taskIdRef.current = taskId
     seedWebPanelUrls()
-  }, [taskId, flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveArtifactSave])
+  }, [
+    taskId,
+    flushPendingUrlSave,
+    flushPendingEditorSave,
+    flushPendingActiveArtifactSave,
+    flushPendingArtifactsSidebarSave
+  ])
 
   // Flush pending saves on unmount
   useEffect(() => {
@@ -110,8 +141,14 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
       flushPendingUrlSave()
       flushPendingEditorSave()
       flushPendingActiveArtifactSave()
+      flushPendingArtifactsSidebarSave()
     }
-  }, [flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveArtifactSave])
+  }, [
+    flushPendingUrlSave,
+    flushPendingEditorSave,
+    flushPendingActiveArtifactSave,
+    flushPendingArtifactsSidebarSave
+  ])
 
   const handleWebPanelUrlChange = useCallback(
     (panelId: string, url: string) => {
@@ -154,6 +191,7 @@ export function usePersistenceSaves(task: Task | null): UsePersistenceSavesResul
   return {
     webPanelUrlsRef,
     handleActiveArtifactIdChange,
+    handleArtifactsSidebarChange,
     handleWebPanelUrlChange,
     handleEditorStateChange,
     handleWebPanelFaviconChange

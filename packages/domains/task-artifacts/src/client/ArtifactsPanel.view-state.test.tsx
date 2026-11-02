@@ -13,7 +13,7 @@ import { Activity, createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { TaskArtifact } from '@slayzone/task-contracts'
+import type { ArtifactsSidebarState, TaskArtifact } from '@slayzone/task-contracts'
 import type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
 import { detectPlatform, useShortcutStore } from '@slayzone/ui'
 
@@ -283,6 +283,91 @@ describe('ArtifactsPanel sidebar shortcut', () => {
     } finally {
       modal.remove()
     }
+  })
+})
+
+describe('ArtifactsPanel sidebar persistence (per task)', () => {
+  function renderWith(
+    initialSidebarState: ArtifactsSidebarState | null,
+    onSidebarStateChange = vi.fn()
+  ) {
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ArtifactsPanel
+          ref={handle}
+          taskId="t1"
+          initialActiveArtifactId="a1"
+          initialSidebarState={initialSidebarState}
+          onSidebarStateChange={onSidebarStateChange}
+        />
+      </QueryClientProvider>
+    )
+    return { view, onSidebarStateChange }
+  }
+  const sidebarHeader = () => screen.getByText('Artifacts').parentElement as HTMLElement
+
+  it('mounts with the saved visibility and width', async () => {
+    renderWith({ visible: false, width: 220 })
+    await idle()
+    expect(screen.queryByTestId('artifacts-sidebar')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }))
+    expect(sidebarHeader().style.width).toBe('220px')
+  })
+
+  it('defaults to visible at the default width with nothing saved', async () => {
+    const { onSidebarStateChange } = renderWith(null)
+    await idle()
+    expect(screen.getByTestId('artifacts-sidebar')).toBeTruthy()
+    expect(sidebarHeader().style.width).toBe('300px')
+    expect(onSidebarStateChange).not.toHaveBeenCalled()
+  })
+
+  it('reports a toggle (button and shortcut)', async () => {
+    const { onSidebarStateChange } = renderWith({ visible: true, width: 250 })
+    await idle()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide sidebar' }))
+    expect(onSidebarStateChange).toHaveBeenLastCalledWith({ visible: false, width: 250 })
+    pressSidebarShortcut()
+    expect(onSidebarStateChange).toHaveBeenLastCalledWith({ visible: true, width: 250 })
+  })
+
+  it('reports the width at the end of a drag, and on double-click reset', async () => {
+    const { onSidebarStateChange } = renderWith({ visible: true, width: 250 })
+    await idle()
+    const grip = screen.getByTestId('artifacts-sidebar-resize')
+    fireEvent.mouseDown(grip, { clientX: 500 })
+    fireEvent.mouseMove(document, { clientX: 540 })
+    fireEvent.mouseMove(document, { clientX: 560 })
+    expect(onSidebarStateChange).not.toHaveBeenCalled()
+    fireEvent.mouseUp(document)
+    expect(onSidebarStateChange).toHaveBeenCalledTimes(1)
+    expect(onSidebarStateChange).toHaveBeenLastCalledWith({ visible: true, width: 310 })
+    fireEvent.doubleClick(grip)
+    expect(onSidebarStateChange).toHaveBeenLastCalledWith({ visible: true, width: 300 })
+  })
+
+  it('keeps the saved state across a tab switch without re-reporting it', async () => {
+    const onSidebarStateChange = vi.fn()
+    const tab = (mode: 'visible' | 'hidden') => (
+      <QueryClientProvider client={client}>
+        <Activity mode={mode}>
+          <ArtifactsPanel
+            ref={handle}
+            taskId="t1"
+            initialActiveArtifactId="a1"
+            initialSidebarState={{ visible: false, width: 220 }}
+            onSidebarStateChange={onSidebarStateChange}
+          />
+        </Activity>
+      </QueryClientProvider>
+    )
+    const view = render(tab('visible'))
+    await idle()
+    view.rerender(tab('hidden'))
+    view.rerender(tab('visible'))
+    await idle()
+    expect(screen.queryByTestId('artifacts-sidebar')).toBeNull()
+    expect(onSidebarStateChange).not.toHaveBeenCalled()
   })
 })
 

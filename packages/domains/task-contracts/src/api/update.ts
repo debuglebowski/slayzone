@@ -70,6 +70,14 @@ export const updateTaskInputSchema = z
 
     // Active artifact
     activeArtifactId: z.string().nullable().optional(),
+    artifactsSidebar: z
+      .object({
+        visible: z.boolean().optional(),
+        width: z.number().positive().optional()
+      })
+      .strict()
+      .nullable()
+      .optional(),
 
     // Multi-repo
     repoName: z.string().nullable().optional(),

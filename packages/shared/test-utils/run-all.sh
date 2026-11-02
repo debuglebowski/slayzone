@@ -843,6 +843,7 @@ run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
+run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
 # shared by the desktop task page and the hub's task.startMainAgent.

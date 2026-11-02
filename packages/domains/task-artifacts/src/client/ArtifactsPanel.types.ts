@@ -1,4 +1,5 @@
 import type { ArtifactVersion, DiffResult } from '@slayzone/task-artifacts/shared'
+import type { ArtifactsSidebarState } from '@slayzone/task-contracts'
 
 export interface ArtifactsPanelHandle {
   selectArtifact: (id: string) => void
@@ -11,6 +12,10 @@ export interface ArtifactsPanelProps {
   isResizing?: boolean
   initialActiveArtifactId?: string | null
   onActiveArtifactIdChange?: (id: string | null) => void
+  /** The task's saved sidebar visibility + width (null = defaults). Read at mount. */
+  initialSidebarState?: ArtifactsSidebarState | null
+  /** A user change to the sidebar (toggle, resize end, reset) — the parent saves it. */
+  onSidebarStateChange?: (state: Required<ArtifactsSidebarState>) => void
   /** Open a URL in the task's in-app browser (⌘-clicked links). */
   onOpenUrl?: (url: string) => void
 }

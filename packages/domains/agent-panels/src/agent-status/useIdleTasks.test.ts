@@ -63,6 +63,7 @@ function makeTask(id: string, projectId: string, title: string): Task {
     blocked_comment: null,
     pr_url: null,
     active_artifact_id: null,
+    artifacts_sidebar: null,
     repo_name: null,
     linear_url: null,
     needs_attention: false,

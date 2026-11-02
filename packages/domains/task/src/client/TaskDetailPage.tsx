@@ -1544,6 +1544,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const {
     webPanelUrlsRef,
     handleActiveArtifactIdChange,
+    handleArtifactsSidebarChange,
     handleWebPanelUrlChange,
     handleEditorStateChange,
     handleWebPanelFaviconChange
@@ -3604,6 +3605,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         isResizing={isResizing}
                         initialActiveArtifactId={task.active_artifact_id}
                         onActiveArtifactIdChange={handleActiveArtifactIdChange}
+                        initialSidebarState={task.artifacts_sidebar}
+                        onSidebarStateChange={handleArtifactsSidebarChange}
                         onOpenUrl={openDevServerInBrowser}
                       />
                     </Activity>

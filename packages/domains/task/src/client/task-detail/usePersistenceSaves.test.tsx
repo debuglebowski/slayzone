@@ -123,3 +123,42 @@ describe('usePersistenceSaves active artifact', () => {
     expect(artifactSaves()).toEqual([{ id: 'a', activeArtifactId: 'x' }])
   })
 })
+
+describe('usePersistenceSaves artifacts sidebar', () => {
+  const sidebarSaves = () =>
+    client.task.update.mutate.mock.calls
+      .map(([input]) => input as { id: string; artifactsSidebar?: unknown })
+      .filter((input) => 'artifactsSidebar' in input)
+
+  const mount = (t: Task | null = task('a')) => {
+    vi.useFakeTimers()
+    return renderHook((current: Task | null) => usePersistenceSaves(current), {
+      initialProps: t
+    })
+  }
+
+  it('saves the last of a burst once, 500 ms after it', () => {
+    const { result } = mount()
+    act(() => result.current.handleArtifactsSidebarChange({ visible: false, width: 300 }))
+    act(() => vi.advanceTimersByTime(300))
+    act(() => result.current.handleArtifactsSidebarChange({ visible: true, width: 300 }))
+    act(() => vi.advanceTimersByTime(499))
+    expect(sidebarSaves()).toEqual([])
+    act(() => vi.advanceTimersByTime(1))
+    expect(sidebarSaves()).toEqual([{ id: 'a', artifactsSidebar: { visible: true, width: 300 } }])
+  })
+
+  it('a pending change is saved to its own task on a task switch, and at unmount', () => {
+    const { result, rerender, unmount } = mount()
+    act(() => result.current.handleArtifactsSidebarChange({ visible: false, width: 220 }))
+    rerender(task('b'))
+    expect(sidebarSaves()).toEqual([{ id: 'a', artifactsSidebar: { visible: false, width: 220 } }])
+    act(() => result.current.handleArtifactsSidebarChange({ visible: true, width: 250 }))
+    unmount()
+    act(() => vi.advanceTimersByTime(1000))
+    expect(sidebarSaves()).toEqual([
+      { id: 'a', artifactsSidebar: { visible: false, width: 220 } },
+      { id: 'b', artifactsSidebar: { visible: true, width: 250 } }
+    ])
+  })
+})

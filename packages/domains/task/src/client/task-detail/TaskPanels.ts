@@ -1,6 +1,12 @@
 import type { ComponentType, RefAttributes } from 'react'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
-import type { GitTabId, Task, TaskArtifact, UpdateTaskInput } from '@slayzone/task-contracts'
+import type {
+  ArtifactsSidebarState,
+  GitTabId,
+  Task,
+  TaskArtifact,
+  UpdateTaskInput
+} from '@slayzone/task-contracts'
 
 /**
  * Panels and data hooks the task page embeds from features built ON TOP of task
@@ -24,6 +30,8 @@ export interface ArtifactsPanelProps {
   isResizing?: boolean
   initialActiveArtifactId?: string | null
   onActiveArtifactIdChange?: (id: string | null) => void
+  initialSidebarState?: ArtifactsSidebarState | null
+  onSidebarStateChange?: (state: Required<ArtifactsSidebarState>) => void
   /** Open a URL in the task's in-app browser (⌘-clicked links). */
   onOpenUrl?: (url: string) => void
 }

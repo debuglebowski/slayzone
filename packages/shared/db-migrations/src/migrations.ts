@@ -4411,6 +4411,11 @@ export const migrations: Migration[] = [
         update.run(JSON.stringify({ ...cfg, [MODE]: next }), task.id)
       }
     }
+  },
+  {
+    version: 186,
+    // Artifacts panel sidebar visibility + width, per task (JSON ArtifactsSidebarState)
+    up: (db) => db.exec(`ALTER TABLE tasks ADD COLUMN artifacts_sidebar TEXT DEFAULT NULL`)
   }
 ]
 

@@ -56,7 +56,8 @@ import {
   useShortcutStore,
   useShortcutDisplay,
   withShortcut,
-  withModalGuard
+  withModalGuard,
+  useStableCallback
 } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
@@ -102,18 +103,22 @@ function startSidebarResize(
   startW: number,
   sidebarDrag: RefObject<{ startX: number; startW: number } | null>,
   setSidebarWidth: (width: number) => void,
-  setSidebarDragging: (dragging: boolean) => void
+  setSidebarDragging: (dragging: boolean) => void,
+  onResizeEnd: (width: number) => void
 ): void {
   sidebarDrag.current = { startX, startW }
   setSidebarDragging(true)
+  let width = startW
   const handleMove = (ev: MouseEvent) => {
     if (!sidebarDrag.current) return
     const delta = ev.clientX - sidebarDrag.current.startX
-    setSidebarWidth(Math.max(100, Math.min(400, sidebarDrag.current.startW + delta)))
+    width = Math.max(100, Math.min(400, sidebarDrag.current.startW + delta))
+    setSidebarWidth(width)
   }
   const handleUp = () => {
     sidebarDrag.current = null
     setSidebarDragging(false)
+    if (width !== startW) onResizeEnd(width)
     document.removeEventListener('mousemove', handleMove)
     document.removeEventListener('mouseup', handleUp)
   }
@@ -125,7 +130,15 @@ function startSidebarResize(
 
 export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelProps>(
   function ArtifactsPanel(
-    { taskId, isResizing, initialActiveArtifactId, onActiveArtifactIdChange, onOpenUrl },
+    {
+      taskId,
+      isResizing,
+      initialActiveArtifactId,
+      onActiveArtifactIdChange,
+      initialSidebarState,
+      onSidebarStateChange,
+      onOpenUrl
+    },
     ref
   ) {
     const trpc = useTRPC()
@@ -245,7 +258,22 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
 
     // Search state
     const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
-    const [sidebarVisible, setSidebarVisible] = useState(true)
+    // Sidebar visibility + width: seeded from the task's saved state, every user
+    // change reported to the parent (which saves it per task).
+    const [sidebarVisible, setSidebarVisible] = useState(initialSidebarState?.visible ?? true)
+    const [sidebarWidth, setSidebarWidth] = useState(
+      initialSidebarState?.width ?? DEFAULT_SIDEBAR_WIDTH
+    )
+    const commitSidebar = useStableCallback((next: { visible?: boolean; width?: number }) => {
+      const state = {
+        visible: next.visible ?? sidebarVisible,
+        width: next.width ?? sidebarWidth
+      }
+      setSidebarVisible(state.visible)
+      setSidebarWidth(state.width)
+      onSidebarStateChange?.(state)
+    })
+    const toggleSidebar = useStableCallback(() => commitSidebar({ visible: !sidebarVisible }))
     const sidebarKeys = useShortcutStore((s) => s.getKeys('artifacts-toggle-sidebar'))
     const isRecordingShortcut = useShortcutStore((s) => s.isRecording)
     const sidebarShortcut = useShortcutDisplay('artifacts-toggle-sidebar')
@@ -254,11 +282,11 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       const handleKeyDown = withModalGuard((event: KeyboardEvent) => {
         if (event.defaultPrevented || !matchesShortcut(event, sidebarKeys)) return
         event.preventDefault()
-        setSidebarVisible((visible) => !visible)
+        toggleSidebar()
       })
       window.addEventListener('keydown', handleKeyDown)
       return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [sidebarKeys, isRecordingShortcut])
+    }, [sidebarKeys, isRecordingShortcut, toggleSidebar])
     const [findOpen, setFindOpen] = useState(false)
     const [findQuery, setFindQuery] = useState('')
     const [findActiveIndex, setFindActiveIndex] = useState(0)
@@ -622,7 +650,6 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     }
 
     // Sidebar resize
-    const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
     const [sidebarDragging, setSidebarDragging] = useState(false)
     const sidebarDrag = useRef<{ startX: number; startW: number } | null>(null)
 
@@ -634,10 +661,11 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
           sidebarWidth,
           sidebarDrag,
           setSidebarWidth,
-          setSidebarDragging
+          setSidebarDragging,
+          (width) => commitSidebar({ width })
         )
       },
-      [sidebarWidth, setSidebarWidth]
+      [sidebarWidth, setSidebarWidth, commitSidebar]
     )
 
     return (
@@ -703,7 +731,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 <TooltipTrigger asChild>
                   <button
                     className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                    onClick={() => setSidebarVisible((v) => !v)}
+                    onClick={toggleSidebar}
                     aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
                   >
                     {sidebarVisible ? (
@@ -714,10 +742,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  {withShortcut(
-                    sidebarVisible ? 'Hide sidebar' : 'Show sidebar',
-                    sidebarShortcut
-                  )}
+                  {withShortcut(sidebarVisible ? 'Hide sidebar' : 'Show sidebar', sidebarShortcut)}
                 </TooltipContent>
               </Tooltip>
               <div className="flex-1" />
@@ -1167,8 +1192,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             {sidebarVisible && (
               <div
                 className="absolute left-0 inset-y-0 w-2 -translate-x-1/2 z-10 cursor-col-resize hover:bg-primary/20 active:bg-primary/30 transition-colors"
+                data-testid="artifacts-sidebar-resize"
                 onMouseDown={handleSidebarMouseDown}
-                onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+                onDoubleClick={() => commitSidebar({ width: DEFAULT_SIDEBAR_WIDTH })}
               />
             )}
             {(isResizing || sidebarDragging) && <div className="absolute inset-0 z-10" />}

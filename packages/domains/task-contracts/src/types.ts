@@ -1,6 +1,7 @@
 import type { TerminalMode, LoopConfig } from '@slayzone/terminal-contracts'
 import type { BrowserTabsState } from './browser-tabs'
 import type { EditorOpenFilesState } from './editor-open-files'
+import type { ArtifactsSidebarState } from './artifacts-sidebar'
 
 // Built-in starter statuses used as defaults for new projects.
 export const BUILTIN_STATUSES = [
@@ -779,6 +780,8 @@ export interface Task {
   pr_url: string | null
   // Active artifact selection (persisted across task switches)
   active_artifact_id: string | null
+  // Artifacts panel sidebar visibility + width (JSON, persisted per task)
+  artifacts_sidebar: ArtifactsSidebarState | null
   // Multi-repo: folder name of the child repo this task is scoped to
   repo_name: string | null
   // External link (populated via JOIN)
@@ -918,6 +921,7 @@ export interface UpdateTaskInput {
   blockedComment?: string | null
   // Active artifact
   activeArtifactId?: string | null
+  artifactsSidebar?: ArtifactsSidebarState | null
   // Multi-repo
   repoName?: string | null
   // Reparent: undefined = no change, null = detach to root, string = new parent id
