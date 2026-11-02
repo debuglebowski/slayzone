@@ -1,9 +1,9 @@
 import { defineConfig } from 'vitest/config'
-import { stripCallerSlayzoneEnv } from '../../shared/test-utils/caller-env.ts'
+import { isolateFromCaller } from '../../shared/test-utils/caller-env.ts'
 
-// No suite here inherits the caller's SlayZone wiring (see caller-env.ts): vitest's
+// No suite here inherits the caller's SlayZone wiring, home or hub port block (see caller-env.ts): vitest's
 // main process, before any worker forks.
-stripCallerSlayzoneEnv()
+isolateFromCaller()
 
 export default defineConfig({
   test: {

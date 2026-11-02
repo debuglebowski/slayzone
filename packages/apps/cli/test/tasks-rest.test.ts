@@ -31,6 +31,7 @@ import {
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../shared/test-utils/mock-electron.js'
+import { DEFAULT_HUB_PORT_BLOCK } from '../../../shared/platform/src/paths.js'
 import {
   DB_PRAGMAS,
   SIDECAR_FIXED_PORT,
@@ -243,44 +244,31 @@ function runCli(
 }
 
 /**
- * Bind a NON-hub listener on one of the two fixed sidecar ports, so the CLI's
- * local-hub probe for that channel deterministically finds nothing dialable.
+ * Serve `handler` on the dev channel's fixed sidecar port — the port a `slay` with no
+ * hub address probes (SIDECAR_FIXED_PORT, keyed on SLAYZONE_DEV).
  *
- * Tries the dev port first (the channel every other test in this file uses) and
- * falls back to the prod port, since a developer box is usually running a real
- * dev sidecar on 51101. `dev` reports which one was claimed so the caller can set
- * SLAYZONE_DEV to match. Null when both are taken (a running prod AND dev app) —
- * the caller then asserts what still holds, never silently drives a live app.
+ * The test runner moved the hub port block off the shipped one (caller-env.ts
+ * `isolateFromCaller`), so this port is this run's own and never the developer's
+ * running app. Checked before binding: on the shipped block this would bind, or
+ * probe, the live app's port.
  */
-async function occupyFixedPort(): Promise<{ dev: boolean; close: () => Promise<void> } | null> {
-  for (const [port, dev] of [
-    [SIDECAR_FIXED_PORT.dev, true],
-    [SIDECAR_FIXED_PORT.prod, false]
-  ] as const) {
-    // 404 on everything: `findHub` requires a 200 with a hub-shaped body.
-    const server = http.createServer((_req, res) => {
-      res.writeHead(404, { 'content-type': 'text/plain' })
-      res.end('not a hub')
+async function serveOnFixedPort(handler: http.RequestListener): Promise<() => Promise<void>> {
+  const port: number = SIDECAR_FIXED_PORT.dev
+  expect(
+    port < DEFAULT_HUB_PORT_BLOCK.start || port > DEFAULT_HUB_PORT_BLOCK.end,
+    `fixed port ${port} is the shipped one: the runner did not move the hub port block`
+  ).toBe(true)
+  const server = http.createServer(handler)
+  server.keepAliveTimeout = 1
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '127.0.0.1', () => resolve())
+  })
+  return () =>
+    new Promise<void>((resolve) => {
+      server.closeAllConnections()
+      server.close(() => resolve())
     })
-    const bound = await new Promise<boolean>((resolve, reject) => {
-      const onError = (err: NodeJS.ErrnoException): void => {
-        server.off('error', onError)
-        if (err.code === 'EADDRINUSE') resolve(false)
-        else reject(err)
-      }
-      server.once('error', onError)
-      server.listen(port, '127.0.0.1', () => {
-        server.off('error', onError)
-        resolve(true)
-      })
-    })
-    if (!bound) continue
-    return {
-      dev,
-      close: () => new Promise<void>((resolve) => server.close(() => resolve()))
-    }
-  }
-  return null
 }
 
 describe.skipIf(!HAS_SLAY_BIN)('CLI tasks create → REST', () => {
@@ -931,45 +919,71 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI app-down path', () => {
     expect(r.stderr.includes('Could not connect to SlayZone hub')).toBe(true)
   })
 
+  // With no SLAYZONE_HUB_ADDRESS and no hub-target file (the runner's HOME is a
+  // throwaway) the CLI probes ONE fixed loopback port for its channel and requires a
+  // hub-shaped /health body serving this shell's SLAYZONE_ROOT. `settings.server_port`
+  // is no longer part of this contract — the CLI reads no database at all.
   test('exits when no hub is configured and nothing hub-shaped answers the channel port', async () => {
-    // `settings.server_port` is no longer part of this contract — the CLI reads no
-    // database at all. With no SLAYZONE_HUB_ADDRESS and no hub-target file it
-    // probes ONE fixed loopback port for its channel (SIDECAR_FIXED_PORT, keyed on
-    // SLAYZONE_DEV) and requires a hub-shaped /health body.
-    //
-    // So the fixture has to OWN that port rather than hope it is free: a developer
-    // box usually has a real sidecar on the dev port, and this case would then
-    // quietly drive the live app instead of failing. `occupyFixedPort` binds a
-    // listener that is emphatically NOT a hub on whichever channel port it can
-    // claim, which makes the outcome deterministic AND puts the hub-shape
-    // validation itself under test (a squatter must be rejected, not dialled).
-    //
-    // When BOTH channel ports are held (a prod and a dev app running), no decoy can
-    // be placed. The CLI then probes a real app — and since `runCli` points
-    // SLAYZONE_ROOT at this test's tmp dir, that app is FOREIGN and must be refused.
-    // The decision logic for every probe outcome is pinned on test-owned ports in
-    // local-hub.test.ts; this end-to-end case asserts the invariant that holds either
-    // way: exit 1, and nothing written anywhere.
-    const decoy = await occupyFixedPort()
+    // A squatter that is emphatically NOT a hub: the hub-shape check must reject it,
+    // not dial it.
+    const close = await serveOnFixedPort((_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('not a hub')
+    })
     let r: CliResult
     try {
       r = await runCli(['tasks', 'create', 'Lost2', '--project', 'CLIREST'], {
-        SLAYZONE_HUB_ADDRESS: undefined,
-        SLAYZONE_DEV: decoy && !decoy.dev ? '0' : '1'
+        SLAYZONE_HUB_ADDRESS: undefined
       })
     } finally {
-      await decoy?.close()
+      await close()
     }
     expect(r.exitCode).toBe(1)
-    if (decoy) {
-      expect(r.stderr, r.stderr).toContain('server port not found')
-    } else {
-      expect(r.stderr, r.stderr).toMatch(
-        /Refusing to act on the SlayZone app|server port not found/
-      )
-    }
-    // Nothing reached a hub this test owns, so no row was created here.
+    expect(r.stderr, r.stderr).toContain('server port not found')
     expect(db.prepare('SELECT id FROM tasks WHERE title = ?').get('Lost2')).toBe(undefined)
+  })
+
+  test('refuses a hub on the channel port that serves another root', async () => {
+    const close = await serveOnFixedPort((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, name: 'other', root: '/tmp/slz-not-this-root', pid: 1 }))
+    })
+    let r: CliResult
+    try {
+      r = await runCli(['tasks', 'create', 'Lost3', '--project', 'CLIREST'], {
+        SLAYZONE_HUB_ADDRESS: undefined
+      })
+    } finally {
+      await close()
+    }
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr, r.stderr).toContain('Refusing to act on the SlayZone app')
+    expect(db.prepare('SELECT id FROM tasks WHERE title = ?').get('Lost3')).toBe(undefined)
+  })
+
+  test('acts on the hub its channel port serves when that hub serves this root', async () => {
+    // The stand-in: this suite's own REST app behind a hub-shaped /health for the
+    // root runCli hands the CLI.
+    const close = await serveOnFixedPort((req, res) => {
+      if (req.url === '/health') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, name: 'stand-in', root: tmpDir, pid: 1 }))
+        return
+      }
+      app(req, res)
+    })
+    let r: CliResult
+    try {
+      r = await runCli(['tasks', 'create', 'ViaFallback', '--project', 'CLIREST'], {
+        SLAYZONE_HUB_ADDRESS: undefined
+      })
+    } finally {
+      await close()
+    }
+    expect(r.exitCode, r.stderr).toBe(0)
+    expect(db.prepare('SELECT title FROM tasks WHERE title = ?').get('ViaFallback')).toEqual({
+      title: 'ViaFallback'
+    })
   })
 })
 

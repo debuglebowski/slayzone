@@ -160,6 +160,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // overrides below. `infra`: a spawned terminal must never inherit it, or an
   // agent would resolve a different notify.sh than the one wired into its hooks.
   SLAYZONE_MACHINE_DIR: 'infra',
+  // TEST-ONLY: moves the hub port block (sidecar fixed ports, hub bind range, `slay`
+  // discovery sweep) off the shipped 51100-51199, so a test's `slay` with no hub
+  // address can never reach the developer's running app (paths.ts). Set by the test
+  // runners only. Infra: a terminal or agent must never inherit it.
+  SLAYZONE_TEST_HUB_PORT_BLOCK_START: 'infra',
   // Computer-only: a directory whose executables take precedence over PATH for
   // every process the computer starts (spawn-env.ts). The e2e chat group puts its
   // fake `claude` there — a dir merely prepended to the inherited PATH loses to the

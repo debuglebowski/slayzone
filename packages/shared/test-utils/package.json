@@ -13,6 +13,7 @@
   },
   "exports": {
     ".": "./ipc-harness.ts",
+    "./caller-env": "./caller-env.ts",
     "./event-spy": "./event-spy.ts",
     "./rest-harness": "./rest-harness.ts",
     "./mcp-harness": "./mcp-harness.ts",

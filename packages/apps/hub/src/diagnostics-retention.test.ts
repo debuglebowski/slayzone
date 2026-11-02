@@ -10,6 +10,7 @@
  *
  * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import {
@@ -30,7 +31,8 @@ const roots: string[] = []
 
 /** Fresh env + root for one in-process hub. */
 function prepareHub(supervised: boolean): { root: string; blobDir: string } {
-  for (const k of Object.keys(process.env)) if (/^SLAYZONE_/.test(k)) delete process.env[k]
+  for (const k of Object.keys(process.env))
+    if (/^SLAYZONE_/.test(k) && !TEST_ISOLATION_ENV.has(k)) delete process.env[k]
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'slz-hub-diag-retention-')))
   roots.push(root)
   mkdirSync(join(root, 'home'))

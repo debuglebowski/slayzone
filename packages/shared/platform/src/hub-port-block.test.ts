@@ -17,10 +17,12 @@ import { describe, expect, test } from 'vitest'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import {
+  DEFAULT_HUB_PORT_BLOCK,
   HUB_DYNAMIC_PORT_RANGE,
   HUB_PORT_BLOCK,
   SIDECAR_FIXED_PORT,
-  bindInHubPortBlock
+  bindInHubPortBlock,
+  resolveHubPortBlockStart
 } from './paths'
 
 /**
@@ -40,6 +42,41 @@ function occupy(port: number): Promise<() => Promise<void>> {
     })
   })
 }
+
+describe('the test-only hub port block seam', () => {
+  test('unset or empty is the shipped block', () => {
+    expect(resolveHubPortBlockStart(undefined)).toBe(51100)
+    expect(resolveHubPortBlockStart('')).toBe(51100)
+    expect(DEFAULT_HUB_PORT_BLOCK).toEqual({ start: 51100, end: 51199 })
+  })
+
+  test('a valid start moves the block there', () => {
+    expect(resolveHubPortBlockStart('20000')).toBe(20000)
+    expect(resolveHubPortBlockStart('65436')).toBe(65436)
+  })
+
+  test.each(['abc', '-1', '1.5', '1023', '65437', ' 20000'])('refuses malformed %j', (raw) => {
+    expect(() => resolveHubPortBlockStart(raw)).toThrow(/SLAYZONE_TEST_HUB_PORT_BLOCK_START/)
+  })
+
+  // It can only ever point AWAY from where real hubs run.
+  test.each(['51100', '51001', '51199', '51150'])(
+    'refuses %s, which overlaps the shipped block',
+    (raw) => {
+      expect(() => resolveHubPortBlockStart(raw)).toThrow(/overlaps the shipped hub port block/)
+    }
+  )
+
+  test('accepts the blocks right next to the shipped one', () => {
+    expect(resolveHubPortBlockStart('51000')).toBe(51000)
+    expect(resolveHubPortBlockStart('51200')).toBe(51200)
+  })
+
+  test('the test runner moved this run off the shipped block (caller-env.ts)', () => {
+    expect(HUB_PORT_BLOCK.start).not.toBe(DEFAULT_HUB_PORT_BLOCK.start)
+    expect(SIDECAR_FIXED_PORT.dev).toBe(HUB_PORT_BLOCK.start + 1)
+  })
+})
 
 describe('hub port block', () => {
   test('the dynamic range sits inside the block, after the supervised head', async () => {

@@ -35,6 +35,7 @@
  * `ELECTRON_RUN_AS_NODE=1 electron`, and so does this test. Needs the `openssl` CLI for
  * the test CA. Bundles are (re)built on demand.
  */
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import {
@@ -108,7 +109,11 @@ function scrubbedEnv(home: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue
-    if (/^(SLAYZONE_|ELECTRON_)/.test(k) || k === 'NODE_EXTRA_CA_CERTS') continue
+    if (
+      (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) ||
+      k === 'NODE_EXTRA_CA_CERTS'
+    )
+      continue
     out[k] = v
   }
   out.HOME = home

@@ -41,6 +41,7 @@
  * built for Electron's ABI, so both run under `ELECTRON_RUN_AS_NODE=1 electron` (as
  * does this suite, under vitest.harness.config.ts). The CLI bundle is plain node.
  */
+import { TEST_ISOLATION_ENV } from '../../../../shared/test-utils/caller-env.js'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
@@ -132,7 +133,7 @@ function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue
-    if (/^(SLAYZONE_|ELECTRON_)/.test(k)) continue
+    if (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) continue
     out[k] = v
   }
   const box = join(TMP, 'machine')

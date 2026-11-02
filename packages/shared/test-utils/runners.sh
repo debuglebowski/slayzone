@@ -23,21 +23,32 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 TEST_UTILS="packages/shared/test-utils"
 
-# No suite inherits the caller's SlayZone wiring (caller-env.ts): run from a task
-# terminal, its live hub/relay/task vars reached the user's real hub through the CLI
-# suites. Strip every SLAYZONE_* (bar the documented opt-in knobs) before any lane
-# starts, so every suite and everything it spawns starts clean. The names come from
-# stripCallerSlayzoneEnv itself, the one rule every runner config also applies. Fail
-# closed: no list, no run.
-if ! CALLER_SLAYZONE_ENV=$(node --no-warnings -e '
+# No suite inherits the caller's SlayZone wiring, home or hub port block
+# (caller-env.ts): run from a task terminal, its live hub/relay/task vars reached the
+# user's real hub through the CLI suites, and a CLI fallback test (no hub address)
+# reads the hub target under $HOME and probes the desktop app's fixed port. Before any
+# lane starts: strip every SLAYZONE_* (bar the documented opt-in knobs), move HOME to a
+# throwaway dir and the hub port block off the shipped one, so every suite and
+# everything it spawns starts clean. The values come from isolateFromCaller itself,
+# the one rule every runner config also applies. Fail closed: no values, no run.
+if ! CALLER_ISOLATION=$(node --no-warnings -e '
   import("./packages/shared/test-utils/caller-env.ts").then((m) => {
-    for (const key of m.stripCallerSlayzoneEnv()) console.log(key)
-  })'); then
-  echo "runners.sh: cannot compute the SLAYZONE_* vars to strip (caller-env.ts)" >&2
+    const r = m.isolateFromCaller(process.env, { cleanupOnExit: false })
+    for (const key of [...r.removed, ...r.unset]) console.log(`-${key}`)
+    for (const [key, value] of Object.entries(r.set)) console.log(`+${key}=${value}`)
+  })') || [ -z "$CALLER_ISOLATION" ]; then
+  echo "runners.sh: cannot isolate the run from the caller env (caller-env.ts)" >&2
   exit 2
 fi
-for _var in $CALLER_SLAYZONE_ENV; do unset "$_var"; done
-unset CALLER_SLAYZONE_ENV _var
+while IFS= read -r _line; do
+  case "$_line" in
+    -*) unset "${_line#-}" ;;
+    +*) _line="${_line#+}"; export "${_line%%=*}=${_line#*=}" ;;
+  esac
+done <<<"$CALLER_ISOLATION"
+unset CALLER_ISOLATION _line
+SLZ_TEST_HOME="$HOME"
+trap '[ -n "$SLZ_TEST_HOME" ] && rm -rf "$SLZ_TEST_HOME"' EXIT
 
 PASS=0
 FAIL=0

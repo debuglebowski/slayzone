@@ -1,11 +1,13 @@
 import { defineConfig } from '@playwright/test'
-import { stripCallerSlayzoneEnv } from '../../shared/test-utils/caller-env.ts'
+import { isolateFromCaller } from '../../shared/test-utils/caller-env.ts'
 
 // The runner and every worker load this file first: no spec, fixture or child it
-// spawns inherits the caller's SlayZone wiring (see caller-env.ts). The app launch and
-// `cliEnv()` strip at their own boundary too; this covers every other spawn (e.g. the
-// standalone computers of computers/110 + 112, which spread `...process.env`).
-stripCallerSlayzoneEnv()
+// spawns inherits the caller's SlayZone wiring or the shipped hub port block (see
+// caller-env.ts). The app launch and `cliEnv()` strip at their own boundary too; this
+// covers every other spawn (e.g. the standalone computers of computers/110 + 112, which
+// spread `...process.env`). The real HOME stays: the app confines its computer to it
+// (`keepHome` in caller-env.ts says why); `cliEnv()` gives each `slay` a throwaway one.
+isolateFromCaller(process.env, { keepHome: true })
 
 export default defineConfig({
   globalSetup: './e2e/global-setup.ts',

@@ -1,3 +1,4 @@
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { once } from 'node:events'
@@ -604,7 +605,9 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
   const child = spawn(process.execPath, [entry], {
     env: {
       ...Object.fromEntries(
-        Object.entries(process.env).filter(([key]) => !key.startsWith('SLAYZONE_'))
+        Object.entries(process.env).filter(
+          ([key]) => !key.startsWith('SLAYZONE_') || TEST_ISOLATION_ENV.has(key)
+        )
       ),
       HOME: root,
       USERPROFILE: root,

@@ -27,6 +27,7 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/web-login-routing.test.ts
  */
+import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
@@ -63,7 +64,7 @@ function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue
-    if (/^(SLAYZONE_|ELECTRON_)/.test(k)) continue
+    if (/^(SLAYZONE_|ELECTRON_)/.test(k) && !TEST_ISOLATION_ENV.has(k)) continue
     out[k] = v
   }
   return out
