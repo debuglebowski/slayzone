@@ -40,6 +40,7 @@ test.describe('Chat keyboard', () => {
     await expect(t.panel.getByText('echo: one')).toBeVisible()
     await t.send('two')
     await expect(t.panel.getByText('echo: two')).toBeVisible()
+    await expect(t.stopButton).toBeHidden()
     const items = t.page.getByTestId('rewind-picker-item')
 
     // Text in the composer: the first Esc keeps it; the second clears it.

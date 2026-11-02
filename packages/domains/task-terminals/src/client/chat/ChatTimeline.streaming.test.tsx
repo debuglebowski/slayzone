@@ -277,63 +277,71 @@ afterEach(() => {
 })
 
 describe('a stream delta re-renders only the row that streams', () => {
-  it.each([false, true])('streaming reply updates only its row (grouped=%s)', async (grouped) => {
-    let dispatch: Dispatch = () => {}
-    const client = new QueryClient()
-    render(
-      <QueryClientProvider client={client}>
-        <Harness
-          grouped={grouped}
-          initial={longSession(100)}
-          onReady={(d) => {
-            dispatch = d
-          }}
-        />
-      </QueryClientProvider>
-    )
-    // The reply's row appears (a structural change: the timeline grows once).
-    act(() =>
-      dispatch([
-        { kind: 'stream-message-start', messageId: 'm-stream' },
-        { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' },
-        { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'Hel' }
-      ])
-    )
-    rendered.reset()
+  // Render counts are the performance contract. The 100-turn jsdom fixture may
+  // need longer than the default five seconds when the registered lanes run together.
+  it.each([false, true])(
+    'streaming reply updates only its row (grouped=%s)',
+    async (grouped) => {
+      let dispatch: Dispatch = () => {}
+      const client = new QueryClient()
+      render(
+        <QueryClientProvider client={client}>
+          <Harness
+            grouped={grouped}
+            initial={longSession(100)}
+            onReady={(d) => {
+              dispatch = d
+            }}
+          />
+        </QueryClientProvider>
+      )
+      // The reply's row appears (a structural change: the timeline grows once).
+      act(() =>
+        dispatch([
+          { kind: 'stream-message-start', messageId: 'm-stream' },
+          { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' },
+          { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'Hel' }
+        ])
+      )
+      rendered.reset()
 
-    const DELTAS = 25
-    for (let i = 0; i < DELTAS; i++) {
-      await act(async () => {
-        dispatch([{ kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: ` w${i}` }])
-      })
-    }
+      const DELTAS = 25
+      for (let i = 0; i < DELTAS; i++) {
+        await act(async () => {
+          dispatch([
+            { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: ` w${i}` }
+          ])
+        })
+      }
 
-    // Only the streaming row re-rendered (useDeferredValue may render it twice per delta).
-    expect([...rendered.textRows.keys()]).toEqual(['m-stream'])
-    expect(rendered.textRows.get('m-stream')).toBeGreaterThanOrEqual(DELTAS)
-    expect(rendered.textRows.get('m-stream')).toBeLessThanOrEqual(2 * DELTAS)
-    // The rest of the timeline never ran.
-    for (const name of [
-      'VirtualTimelineRows',
-      'TimelineRow',
-      'RowContent',
-      'UserMessage',
-      'ToolRow',
-      'BashCard',
-      'ToolShell'
-    ]) {
-      expect(rendered.counts.get(name) ?? 0, name).toBe(0)
-    }
-    // And the live text is on screen.
-    const row = document.querySelector(
-      grouped ? '[aria-label="Message"]' : '[data-chat-text][data-streaming="true"]'
-    )
-    expect(row?.textContent).toContain(`w${DELTAS - 1}`)
-    if (grouped) {
-      expect(screen.queryByRole('toolbar', { name: 'Answer actions' })).toBeNull()
-      expect(screen.getByTestId('chat-working-indicator')).toBeDefined()
-    }
-  })
+      // Only the streaming row re-rendered (useDeferredValue may render it twice per delta).
+      expect([...rendered.textRows.keys()]).toEqual(['m-stream'])
+      expect(rendered.textRows.get('m-stream')).toBeGreaterThanOrEqual(DELTAS)
+      expect(rendered.textRows.get('m-stream')).toBeLessThanOrEqual(2 * DELTAS)
+      // The rest of the timeline never ran.
+      for (const name of [
+        'VirtualTimelineRows',
+        'TimelineRow',
+        'RowContent',
+        'UserMessage',
+        'ToolRow',
+        'BashCard',
+        'ToolShell'
+      ]) {
+        expect(rendered.counts.get(name) ?? 0, name).toBe(0)
+      }
+      // And the live text is on screen.
+      const row = document.querySelector(
+        grouped ? '[aria-label="Message"]' : '[data-chat-text][data-streaming="true"]'
+      )
+      expect(row?.textContent).toContain(`w${DELTAS - 1}`)
+      if (grouped) {
+        expect(screen.queryByRole('toolbar', { name: 'Answer actions' })).toBeNull()
+        expect(screen.getByTestId('chat-working-indicator')).toBeDefined()
+      }
+    },
+    30_000
+  )
 
   it.each([false, true])('saved block finalizes in place (grouped=%s)', async (grouped) => {
     let dispatch: Dispatch = () => {}

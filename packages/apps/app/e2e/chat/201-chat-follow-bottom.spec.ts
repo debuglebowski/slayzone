@@ -116,8 +116,16 @@ test.describe('Claude chat: following a streaming reply lets go', () => {
     expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(2)
   })
 
-  test('a scrollbar drag up lets go', async ({ chat }) => {
+  test('a scrollbar drag up lets go', async ({ chat, mainWindow }) => {
     test.setTimeout(90_000)
+    // Exercise a real draggable track regardless of the machine's overlay-scrollbar preference.
+    const style = await mainWindow.addStyleTag({
+      content: `
+      [data-testid="chat-timeline-scroller"]::-webkit-scrollbar { width: 12px; }
+      [data-testid="chat-timeline-scroller"]::-webkit-scrollbar-track { background: Canvas; }
+      [data-testid="chat-timeline-scroller"]::-webkit-scrollbar-thumb { background: GrayText; }
+    `
+    })
     const t = await openStreaming(chat, 'Follow scrollbar drag')
     const s = await scrollState(t.page)
     expect(s.scrollbar, 'classic (non-overlay) scrollbar').toBeGreaterThan(0)
@@ -135,11 +143,13 @@ test.describe('Claude chat: following a streaming reply lets go', () => {
     await waitForGrowth(t.page, before, 80)
     const held = await scrollState(t.page)
     await t.page.mouse.up()
-    expect(Math.abs(held.top - before.top)).toBeLessThanOrEqual(2)
-    // Released: still where it was dragged to.
+    // Chromium moves a held native thumb proportionally when its track grows.
+    // It must remain detached from the message end; after release the view stays put.
+    expect(held.target - held.top).toBeGreaterThan(70)
     const released = await scrollState(t.page)
     await waitForGrowth(t.page, released, 40)
-    expect(Math.abs((await scrollState(t.page)).top - before.top)).toBeLessThanOrEqual(2)
+    expect(Math.abs((await scrollState(t.page)).top - released.top)).toBeLessThanOrEqual(2)
+    await style.evaluate((node) => node.parentNode?.removeChild(node))
   })
 
   test('a scroll into the padding below the last message lets go', async ({ chat }) => {
