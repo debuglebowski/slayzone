@@ -1,4 +1,4 @@
-import { useContext, useRef, useState } from 'react'
+import { useContext, useMemo, useRef, useState } from 'react'
 import { Copy, GitBranch, MessageSquare, MoreHorizontal, Quote, ChevronRight } from 'lucide-react'
 import {
   cn,
@@ -16,6 +16,7 @@ import { AssistantMessageBody, InterruptedBlock } from './renderers'
 import { ActivityTurn } from './ActivityTurn'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { MessageDetails } from './MessageDetails'
+import { AnswerFooterPanelProvider } from './answer-footer-panel'
 import { useChatView } from './ChatViewContext'
 
 export function AssistantAnswer({
@@ -72,6 +73,8 @@ export function AssistantAnswer({
       : null
   const [menuOpen, setMenuOpen] = useState(false)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const [panelSlot, setPanelSlot] = useState<HTMLDivElement | null>(null)
+  const footerPanels = useMemo(() => ({ slot: panelSlot }), [panelSlot])
   const actionClass =
     'flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring'
   return (
@@ -179,29 +182,46 @@ export function AssistantAnswer({
             )}
           </div>
           {turn && (
-            <div
-              className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 empty:hidden"
-              data-testid="chat-answer-footer"
-            >
-              {appearance && (
-                <ActivityTurn turn={turn} appearance={appearance} rowOf={rowOf} embedded />
-              )}
-              {discussions.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => threads?.open(discussions[0])}
-                  className="inline-flex items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:bg-muted/50"
-                >
-                  <MessageSquare className="size-3" />
-                  <span className="font-medium text-foreground">Threads</span>
-                  <span>
-                    {discussions.length} {discussions.length === 1 ? 'item' : 'items'}
-                  </span>
-                  <ChevronRight className="size-3" />
-                </button>
-              )}
-              {turn.result && <MessageDetails item={turn.result} />}
-            </div>
+            <AnswerFooterPanelProvider value={footerPanels}>
+              <div
+                className={cn(
+                  // Stays in view while any of this answer is: pinned to the scroller's
+                  // bottom over the body, to its top over the expanded panels below (a
+                  // sticky box only travels within its parent: keep it a direct child
+                  // of this column). Opaque so content scrolls under it; ::before
+                  // re-applies the answer's hover/focus tint.
+                  'sticky top-0 bottom-0 z-[5] flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 bg-background py-2 -mb-2 empty:hidden',
+                  'before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:transition-colors group-hover/answer:before:bg-muted/50 group-focus-within/answer:before:bg-muted/50',
+                  menuOpen && 'before:bg-muted/50'
+                )}
+                data-testid="chat-answer-footer"
+              >
+                {appearance && (
+                  <ActivityTurn turn={turn} appearance={appearance} rowOf={rowOf} embedded />
+                )}
+                {discussions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => threads?.open(discussions[0])}
+                    className="inline-flex items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:bg-muted/50"
+                  >
+                    <MessageSquare className="size-3" />
+                    <span className="font-medium text-foreground">Threads</span>
+                    <span>
+                      {discussions.length} {discussions.length === 1 ? 'item' : 'items'}
+                    </span>
+                    <ChevronRight className="size-3" />
+                  </button>
+                )}
+                {turn.result && <MessageDetails item={turn.result} />}
+              </div>
+              {/* What the footer buttons expand: below the row, not sticky (AnswerFooterPanel). */}
+              <div
+                ref={setPanelSlot}
+                className="flex min-w-0 flex-wrap gap-y-2 pt-2 empty:hidden"
+                data-testid="chat-answer-footer-panels"
+              />
+            </AnswerFooterPanelProvider>
           )}
         </div>
       </div>

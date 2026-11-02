@@ -5,7 +5,7 @@
  * Models just what the timeline reads: the scroller
  * (`data-testid="chat-timeline-scroller"`) has a fixed viewport height, a
  * `scrollTop` clamped to its content and scroll events; a virtual row
- * (`[data-index]` with `translateY(...)`) has the height `rowHeight` gives it;
+ * (`[data-index]` at its inline `top`) has the height `rowHeight` gives it;
  * the list (`[data-virtual-list]`) is as tall as its inline height. A scroller
  * whose ancestor is `display:none` (a hidden tab) measures 0, as in a browser.
  */
@@ -48,8 +48,7 @@ export function installTimelineLayout(opts: {
     return Math.max(viewportOf(scroller), listHeight)
   }
   const rowTop = (row: HTMLElement): number => {
-    const m = /translateY\((-?[\d.]+)px\)/.exec(row.style.transform)
-    return m ? parseFloat(m[1]) : 0
+    return parseFloat(row.style.top) || 0
   }
   const rect = (top: number, height: number): DOMRect =>
     ({

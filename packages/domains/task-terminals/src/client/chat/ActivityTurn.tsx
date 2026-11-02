@@ -11,6 +11,7 @@ import { ToolInActivityContext } from './tool-cards/card-shell'
 import { ToolFocusContext } from './tool-cards/tool-focus'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
+import { AnswerFooterPanel } from './answer-footer-panel'
 
 function ActivityNarrative({
   item,
@@ -203,23 +204,25 @@ export function ActivityTurn({
               )}
             />
           </button>
-          <div id={id} hidden={!expanded} className="order-1 min-w-0 basis-full">
-            {expanded &&
-              items.map((item, index) => (
-                <ActivityEntry
-                  key={
-                    streamKeyOf(item) ??
-                    (item.kind === 'tool'
-                      ? item.invocation.id
-                      : item.kind === 'stderr'
-                        ? `stderr:${rowOf?.(item) ?? index}`
-                        : `${item.messageId}:${item.blockOrdinal ?? index}`)
-                  }
-                  item={item}
-                  row={rowOf?.(item)}
-                />
-              ))}
-          </div>
+          <AnswerFooterPanel>
+            <div id={id} hidden={!expanded} className="order-1 min-w-0 basis-full">
+              {expanded &&
+                items.map((item, index) => (
+                  <ActivityEntry
+                    key={
+                      streamKeyOf(item) ??
+                      (item.kind === 'tool'
+                        ? item.invocation.id
+                        : item.kind === 'stderr'
+                          ? `stderr:${rowOf?.(item) ?? index}`
+                          : `${item.messageId}:${item.blockOrdinal ?? index}`)
+                    }
+                    item={item}
+                    row={rowOf?.(item)}
+                  />
+                ))}
+            </div>
+          </AnswerFooterPanel>
         </>
       )}
       {turn.files.map((item) =>
@@ -230,9 +233,11 @@ export function ActivityTurn({
         )
       )}
       {latest && (
-        <div className="order-2 min-w-0 basis-full">
-          <ActivityEntry item={latest} row={rowOf?.(latest)} preview />
-        </div>
+        <AnswerFooterPanel>
+          <div className="order-2 min-w-0 basis-full">
+            <ActivityEntry item={latest} row={rowOf?.(latest)} preview />
+          </div>
+        </AnswerFooterPanel>
       )}
     </div>
   )

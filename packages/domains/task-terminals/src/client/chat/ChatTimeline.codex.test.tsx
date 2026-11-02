@@ -335,12 +335,14 @@ describe('Codex chat on the virtualized timeline', () => {
     expect(document.body.textContent).not.toContain('apply_patch verification failed')
     const activity = document.querySelector('[data-testid="chat-activity"]')!
     fireEvent.click(activity.querySelector('button')!)
-    const diagnostics = Array.from(activity.querySelectorAll('button')).find(
+    // Expanded content renders below the answer's sticky footer row, outside chat-activity.
+    const answer = activity.closest('[data-testid="chat-assistant-answer"]')!
+    const diagnostics = Array.from(answer.querySelectorAll('button')).find(
       (button) => button.textContent === 'Agent diagnostics'
     )!
     expect(diagnostics.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(diagnostics)
-    expect(activity.querySelector('pre')?.textContent).toBe('apply_patch verification failed')
+    expect(answer.querySelector('pre')?.textContent).toBe('apply_patch verification failed')
     act(() => display!.search.setQuery('verification failed'))
     await settle()
     expect(display!.search.matchCount).toBe(1)
@@ -373,7 +375,11 @@ describe('Codex chat on the virtualized timeline', () => {
     fireEvent.click(summary!)
     expect(summary?.getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(files!.querySelector('[data-testid="chat-files-changed-toggle"]')!)
-    expect(files!.querySelector('[data-testid="chat-files-changed-file"]')).not.toBeNull()
+    expect(
+      activity
+        .closest('[data-testid="chat-assistant-answer"]')!
+        .querySelector('[data-testid="chat-files-changed-file"]')
+    ).not.toBeNull()
 
     view.rerender(
       <QueryClientProvider client={client}>
@@ -443,11 +449,14 @@ describe('Codex chat on the virtualized timeline', () => {
     )
     expect(activity.textContent).toContain('3 items')
     fireEvent.click(activity.querySelector('button')!)
-    expect(activity.textContent!.indexOf('Checking now')).toBeLessThan(
-      activity.textContent!.indexOf('Inspect status')
+    const panels = activity
+      .closest('[data-testid="chat-assistant-answer"]')!
+      .querySelector('[data-testid="chat-answer-footer-panels"]')!
+    expect(panels.textContent!.indexOf('Checking now')).toBeLessThan(
+      panels.textContent!.indexOf('Inspect status')
     )
-    expect(activity.textContent!.indexOf('Inspect status')).toBeLessThan(
-      activity.textContent!.indexOf('git status')
+    expect(panels.textContent!.indexOf('Inspect status')).toBeLessThan(
+      panels.textContent!.indexOf('git status')
     )
   })
 
@@ -594,7 +603,9 @@ describe('Codex chat on the virtualized timeline', () => {
     await settle()
     const activity = document.querySelector('[data-testid="chat-activity"]')!
     expect(activity.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
-    expect(activity.textContent).toContain('git status')
+    expect(activity.closest('[data-testid="chat-assistant-answer"]')!.textContent).toContain(
+      'git status'
+    )
   })
 
   it('shows a running tool outside history and folds it when it finishes', async () => {

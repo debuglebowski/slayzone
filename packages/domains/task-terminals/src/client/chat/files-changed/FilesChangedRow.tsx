@@ -9,6 +9,7 @@ import { ToolFocusContext } from '../tool-cards/tool-focus'
 import { useRevealTimelineItem } from '../timeline-reveal'
 import { stableAnchorKey } from '../useChatDisplay'
 import { relativeToCwd } from './relative-path'
+import { AnswerFooterPanel } from '../answer-footer-panel'
 
 type FilesChangedItem = Extract<TimelineItem, { kind: 'files-changed' }>
 
@@ -185,45 +186,47 @@ export function FilesChangedRow({
           </button>
         </div>
         {open && (
-          <ul
-            className={cn(
-              'border-t border-border/40 bg-background/40 py-1',
-              embedded && 'order-3 min-w-0 basis-full rounded-lg border text-xs'
-            )}
-          >
-            {item.files.map((file) => (
-              <li key={file.path}>
-                <button
-                  type="button"
-                  data-testid="chat-files-changed-file"
-                  data-path={file.path}
-                  onClick={() => show(file)}
-                  title={file.path}
-                  className="flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left hover:bg-muted/40"
-                >
-                  <span className="truncate font-mono text-[11px] [direction:rtl]">
-                    <bdi>{relativeToCwd(file.path, cwd)}</bdi>
-                  </span>
-                  {file.created && <CardBadge>New</CardBadge>}
-                  <LineCounts additions={file.additions} deletions={file.deletions} />
-                  {file.toolUseIds.length > 1 && (
-                    <span className="shrink-0 text-muted-foreground">
-                      {file.toolUseIds.length} edits
+          <AnswerFooterPanel>
+            <ul
+              className={cn(
+                'border-t border-border/40 bg-background/40 py-1',
+                embedded && 'order-3 min-w-0 basis-full rounded-lg border text-xs'
+              )}
+            >
+              {item.files.map((file) => (
+                <li key={file.path}>
+                  <button
+                    type="button"
+                    data-testid="chat-files-changed-file"
+                    data-path={file.path}
+                    onClick={() => show(file)}
+                    title={file.path}
+                    className="flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left hover:bg-muted/40"
+                  >
+                    <span className="truncate font-mono text-[11px] [direction:rtl]">
+                      <bdi>{relativeToCwd(file.path, cwd)}</bdi>
                     </span>
-                  )}
-                </button>
-              </li>
-            ))}
-            {item.shellCommands > 0 && (
-              <li
-                data-testid="chat-files-changed-shell-note"
-                className="px-3 py-1 text-[11px] text-muted-foreground"
-              >
-                {item.shellCommands} shell command{item.shellCommands === 1 ? '' : 's'} ran in this
-                turn too: files they changed are not listed.
-              </li>
-            )}
-          </ul>
+                    {file.created && <CardBadge>New</CardBadge>}
+                    <LineCounts additions={file.additions} deletions={file.deletions} />
+                    {file.toolUseIds.length > 1 && (
+                      <span className="shrink-0 text-muted-foreground">
+                        {file.toolUseIds.length} edits
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+              {item.shellCommands > 0 && (
+                <li
+                  data-testid="chat-files-changed-shell-note"
+                  className="px-3 py-1 text-[11px] text-muted-foreground"
+                >
+                  {item.shellCommands} shell command{item.shellCommands === 1 ? '' : 's'} ran in
+                  this turn too: files they changed are not listed.
+                </li>
+              )}
+            </ul>
+          </AnswerFooterPanel>
         )}
       </div>
     </div>

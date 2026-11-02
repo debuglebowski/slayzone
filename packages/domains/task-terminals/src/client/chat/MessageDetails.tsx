@@ -6,6 +6,7 @@ import { useChatView } from './ChatViewContext'
 import { useRowUiState } from './row-ui-state'
 import { formatTime } from './tool-cards/card-shell'
 import { formatTokens } from './usage-format'
+import { AnswerFooterPanel } from './answer-footer-panel'
 
 function Detail({ children, first = false }: { children: ReactNode; first?: boolean }) {
   return (
@@ -105,9 +106,11 @@ export function MessageDetails({
         </button>
       )}
       {expanded && item.text && (
-        <div className="order-1 basis-full mt-1.5 text-xs text-foreground/80 whitespace-pre-wrap pl-2 border-l border-border/40">
-          {item.text}
-        </div>
+        <AnswerFooterPanel>
+          <div className="order-1 basis-full mt-1.5 text-xs text-foreground/80 whitespace-pre-wrap pl-2 border-l border-border/40">
+            {item.text}
+          </div>
+        </AnswerFooterPanel>
       )}
     </div>
   )

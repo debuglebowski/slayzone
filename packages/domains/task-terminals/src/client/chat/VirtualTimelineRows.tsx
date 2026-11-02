@@ -19,7 +19,10 @@ export interface VirtualTimelineRowsProps {
  * its item, so moving the view re-renders only rows that come into it.
  *
  * Rows are absolutely positioned at their measured offsets; each contains its
- * own margins (`flow-root`), so its measured height is the room it takes.
+ * own margins (`flow-root`), so its measured height is the room it takes. The
+ * offset is `top`, not a transform: sticky boxes inside a row (an answer's footer
+ * buttons) resolve against the row's layout position, which a transform leaves
+ * at the list's top — they would never stick.
  *
  * Its props change only when the rows do — never for a stream delta (deltas
  * live outside `timeline`, see `useLiveBlock`) — so a delta re-renders none of
@@ -84,8 +87,8 @@ const TimelineRow = memo(function TimelineRow({
       data-row={row}
       data-item-key={String(rowKey)}
       data-anchor-key={stableAnchorKey(item) ?? undefined}
-      className="absolute inset-x-0 top-0 flow-root"
-      style={{ transform: `translateY(${start}px)` }}
+      className="absolute inset-x-0 flow-root"
+      style={{ top: start }}
     >
       <TimelineRowKeyContext.Provider value={String(rowKey)}>
         <TimelineRowIndexContext.Provider value={row}>
