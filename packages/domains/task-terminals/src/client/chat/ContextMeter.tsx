@@ -1,4 +1,4 @@
-import { cn } from '@slayzone/ui'
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import type { UsageSummary } from '@slayzone/terminal/client'
 import { formatCost, formatTokens } from './usage-format'
 
@@ -6,10 +6,10 @@ import { formatCost, formatTokens } from './usage-format'
 const NEARLY_FULL = 0.9
 
 /**
- * Composer footer readout: how full the context window is and what the session
- * cost so far. Shows only what the provider reported (no window → tokens only;
- * no accounting → no cost: Codex shows the context only); nothing at all when
- * it reported nothing.
+ * Composer footer readout: how full the context window is. Shows the share only;
+ * tokens and session cost live in its tooltip. Falls back to what the provider
+ * reported (no window → tokens; no context → cost); nothing at all when it
+ * reported nothing.
  */
 export function ContextMeter({ summary }: { summary: UsageSummary | null }) {
   if (!summary) return null
@@ -18,35 +18,44 @@ export function ContextMeter({ summary }: { summary: UsageSummary | null }) {
     contextTokens !== null && contextWindow !== null && contextWindow > 0
       ? contextTokens / contextWindow
       : null
-  const parts: string[] = []
   const details: string[] = []
+  let shown: string | null = null
   if (contextTokens !== null) {
     if (share !== null && contextWindow !== null) {
       const pct = Math.round(share * 100)
-      parts.push(`${pct}% · ${formatTokens(contextTokens)}/${formatTokens(contextWindow)}`)
+      shown = `${pct}%`
       details.push(
         `Context: ${contextTokens.toLocaleString('en-US')} of ${contextWindow.toLocaleString('en-US')} tokens (${pct}%)`
       )
     } else {
-      parts.push(`${formatTokens(contextTokens)} tokens`)
+      shown = `${formatTokens(contextTokens)} tokens`
       details.push(`Context: ${contextTokens.toLocaleString('en-US')} tokens`)
     }
   }
   if (sessionCostUsd !== null) {
-    parts.push(formatCost(sessionCostUsd))
+    shown ??= formatCost(sessionCostUsd)
     details.push(`Session cost: $${sessionCostUsd.toFixed(4)}`)
   }
-  if (parts.length === 0) return null
+  if (shown === null) return null
   const nearlyFull = share !== null && share >= NEARLY_FULL
+  const label = details.join('\n')
   return (
-    <span
-      data-testid="chat-context-meter"
-      title={details.join('\n')}
-      className={cn('flex items-center gap-1.5 tabular-nums', nearlyFull && 'text-destructive')}
-    >
-      {share !== null && <ContextRing share={share} nearlyFull={nearlyFull} />}
-      {parts.join(' · ')}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-testid="chat-context-meter"
+          role="status"
+          aria-label={label}
+          className={cn('flex items-center gap-1.5 tabular-nums', nearlyFull && 'text-destructive')}
+        >
+          {share !== null && <ContextRing share={share} nearlyFull={nearlyFull} />}
+          {shown}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="whitespace-pre-line">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

@@ -3294,13 +3294,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                         Re-attach terminal
                                       </DropdownMenuItem>
                                       <DropdownMenuItem onClick={handleRestartTerminal}>
-                                        Restart terminal
+                                        Restart session
                                         <span className="ml-auto pl-4 text-xs text-muted-foreground">
                                           {terminalRestartShortcut}
                                         </span>
                                       </DropdownMenuItem>
                                       <DropdownMenuItem onClick={handleResetTerminal}>
-                                        Reset terminal
+                                        Reset session
                                       </DropdownMenuItem>
                                       {task.terminal_mode !== 'terminal' && (
                                         <>

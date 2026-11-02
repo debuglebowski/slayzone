@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { TooltipProvider } from '@slayzone/ui'
 import { isSyntheticChatPrompt } from '@slayzone/terminal-contracts'
 import { ContextMeter } from './ContextMeter'
 import { CompactionRow } from './CompactionRow'
@@ -29,22 +31,23 @@ describe('usage formatting', () => {
   })
 })
 
+const renderMeter = (ui: ReactElement) => render(ui, { wrapper: TooltipProvider })
+
 describe('ContextMeter', () => {
-  it('shows context %, tokens of window and session cost', () => {
-    render(
+  it('shows context % only; tokens of window and session cost in its label', () => {
+    renderMeter(
       <ContextMeter
         summary={{ contextTokens: 49939, contextWindow: 1_000_000, sessionCostUsd: 0.4213 }}
       />
     )
     const meter = screen.getByTestId('chat-context-meter')
-    expect(meter.textContent).toContain('5%')
-    expect(meter.textContent).toContain('50k/1M')
-    expect(meter.textContent).toContain('$0.42')
-    expect(meter.getAttribute('title')).toContain('49,939 of 1,000,000 tokens')
+    expect(meter.textContent).toBe('5%')
+    expect(meter.getAttribute('aria-label')).toContain('49,939 of 1,000,000 tokens')
+    expect(meter.getAttribute('aria-label')).toContain('Session cost: $0.4213')
   })
 
   it('renders only what is known', () => {
-    const { rerender } = render(
+    const { rerender } = renderMeter(
       <ContextMeter summary={{ contextTokens: 1200, contextWindow: null, sessionCostUsd: null }} />
     )
     const meter = screen.getByTestId('chat-context-meter')
@@ -59,12 +62,12 @@ describe('ContextMeter', () => {
   })
 
   it('nothing reported (e.g. Codex) → nothing rendered', () => {
-    const { container } = render(<ContextMeter summary={null} />)
+    const { container } = renderMeter(<ContextMeter summary={null} />)
     expect(container.innerHTML).toBe('')
   })
 
   it('nearly full context is flagged', () => {
-    render(
+    renderMeter(
       <ContextMeter
         summary={{ contextTokens: 190_000, contextWindow: 200_000, sessionCostUsd: null }}
       />

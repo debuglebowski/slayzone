@@ -222,9 +222,9 @@ test.describe('Session invalidation', () => {
 
     const countBefore = await getCreateCount(mainWindow, sessionId)
 
-    // Click "Reset terminal" in dropdown menu
+    // Click "Reset session" in dropdown menu
     await openTerminalMenu(mainWindow)
-    await mainWindow.getByRole('menuitem', { name: 'Reset terminal' }).click()
+    await mainWindow.getByRole('menuitem', { name: 'Reset session' }).click()
 
     // conversationId should be cleared
     await expect
@@ -287,9 +287,9 @@ test.describe('Session invalidation', () => {
 
     const countBefore = await getCreateCount(mainWindow, sessionId)
 
-    // Click "Restart terminal" in dropdown menu
+    // Click "Restart session" in dropdown menu
     await openTerminalMenu(mainWindow)
-    await mainWindow.getByRole('menuitem', { name: 'Restart terminal' }).click()
+    await mainWindow.getByRole('menuitem', { name: 'Restart session' }).click()
 
     // conversationId should be PRESERVED
     const task = await mainWindow.evaluate(

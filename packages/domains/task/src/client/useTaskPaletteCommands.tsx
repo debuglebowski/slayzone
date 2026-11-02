@@ -624,8 +624,8 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
     }
     commands.push({
       id: 'restart-agent',
-      label: 'Restart agent',
-      keywords: 'terminal respawn',
+      label: 'Restart session',
+      keywords: 'agent terminal chat respawn',
       icon: RotateCcw,
       shortcutId: 'terminal-restart',
       featured: true,
@@ -642,8 +642,8 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
     }
     commands.push({
       id: 'reset-terminal',
-      label: 'Reset terminal',
-      keywords: 'fresh clear session',
+      label: 'Reset session',
+      keywords: 'agent terminal chat fresh clear new',
       icon: RefreshCcw,
       run: onResetTerminal
     })

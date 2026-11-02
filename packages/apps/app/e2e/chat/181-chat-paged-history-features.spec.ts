@@ -69,15 +69,17 @@ test.describe('Claude chat: paged history — whole-history features (100,000 ev
     await expect(t.page.getByTestId('rewind-picker-item')).toHaveCount(1)
     await t.page.keyboard.press('Escape')
 
-    // Files changed: the count covers every file; the panel lists them all.
-    const button = t.panel.getByTestId('chat-files-changed-button')
-    await expect(button).toContainText(`${files.size} files`)
-    await button.click()
-    const panel = t.page.getByTestId('chat-files-panel')
-    await expect(panel.getByTestId('chat-files-panel-file')).toHaveCount(files.size, {
+    // Files changed (palette): the count covers every file; the panel lists them all.
+    await pressShortcut(t.page, 'search')
+    await expect(palette.locator('[cmdk-input]')).toBeFocused()
+    await row('Chat…').click()
+    await row(`Files changed (${files.size})`).click()
+    const filesPanel = t.page.getByTestId('chat-files-panel')
+    await expect(filesPanel.getByTestId('chat-files-panel-file')).toHaveCount(files.size, {
       timeout: 30_000
     })
-    await button.click()
+    await filesPanel.press('Escape')
+    await expect(filesPanel).toBeHidden()
 
     // Copy entire conversation: the whole history, first message to last reply.
     await t.page.evaluate(() => {

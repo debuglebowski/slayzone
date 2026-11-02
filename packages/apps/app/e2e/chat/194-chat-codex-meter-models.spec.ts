@@ -68,9 +68,9 @@ test.describe('Codex meter and models', () => {
     await expect(t.panel.getByText('Counted.')).toBeVisible()
     const meter = t.panel.getByTestId('chat-context-meter')
     // last.totalTokens 51,800 of 258,400 = 20%.
-    await expect(meter).toContainText('20%')
-    await expect(meter).toContainText('52k/258k')
-    await expect(meter).not.toContainText('$')
+    await expect(meter).toHaveText('20%')
+    await expect(meter).toHaveAttribute('aria-label', /51,800 of 258,400 tokens/)
+    await expect(meter).not.toHaveAttribute('aria-label', /cost/)
     await expect(t.panel.getByTestId('chat-turn-cost')).toHaveCount(0)
     // The meter is saved: a reload shows it again.
     await t.reload()

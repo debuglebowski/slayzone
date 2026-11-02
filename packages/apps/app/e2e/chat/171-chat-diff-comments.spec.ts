@@ -8,6 +8,7 @@
  */
 import { resetApp } from '../fixtures/electron'
 import { openActivityCard } from '../fixtures/chat-activity'
+import { pressShortcut } from '../fixtures/shortcuts'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
 
 const BEFORE = 'const a = 1\nconst b = 2\nconst c = 3\n'
@@ -83,8 +84,11 @@ test.describe('Chat diff comments', () => {
     await expect(t.composer).toBeFocused()
     await expect(t.composer).toHaveValue(`${CARD_COMMENT}\n\n`)
 
-    // In the files-changed panel: the removed line of the combined diff.
-    await t.panel.getByTestId('chat-files-changed-button').click()
+    // In the files-changed panel (palette): the removed line of the combined diff.
+    await pressShortcut(t.page, 'search')
+    const palette = t.page.locator('[cmdk-root]')
+    await palette.locator('[cmdk-item]').filter({ hasText: 'Chat…' }).click()
+    await palette.locator('[cmdk-item]').filter({ hasText: 'Files changed (' }).click()
     const panel = t.page.getByTestId('chat-files-panel')
     const removed = panel.locator('.group\\/line').filter({ hasText: /^.*const b = 2$/ })
     await removed.first().hover()

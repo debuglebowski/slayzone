@@ -106,7 +106,7 @@ test.describe('Terminal: Continue here', () => {
       await pressShortcut(t.page, 'search')
       const palette = t.page.locator('[cmdk-root]')
       await expect(palette.locator('[cmdk-input]')).toBeFocused()
-      await palette.locator('[cmdk-item]').filter({ hasText: 'Restart agent' }).click()
+      await palette.locator('[cmdk-item]').filter({ hasText: 'Restart session' }).click()
       const refusal = t.page.getByTestId('terminal-start-error')
       await expect(refusal).toContainText('running in the chat')
       await refusal.getByTestId('terminal-continue-here').click()

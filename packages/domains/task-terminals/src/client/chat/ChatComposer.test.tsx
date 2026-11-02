@@ -2,7 +2,7 @@
 import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { appearanceDefaults } from '@slayzone/ui'
+import { appearanceDefaults, TooltipProvider } from '@slayzone/ui'
 import {
   type ChatAttachment,
   chatModelsView,
@@ -144,11 +144,15 @@ function makeProps(over: Partial<ChatComposerProps> = {}): ChatComposerProps {
 
 function setup(over: Partial<ChatComposerProps> = {}) {
   props = makeProps(over)
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <ChatComposer {...props} />
-    </QueryClientProvider>
-  )
+  const client = new QueryClient()
+  // A wrapper, not inline providers: `rerender` keeps it.
+  return render(<ChatComposer {...props} />, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>
+        <TooltipProvider>{children}</TooltipProvider>
+      </QueryClientProvider>
+    )
+  })
 }
 
 const textarea = () => screen.getByRole('textbox') as HTMLTextAreaElement
@@ -167,7 +171,7 @@ function switchFor(label: string): HTMLButtonElement {
   throw new Error(`no switch for "${label}"`)
 }
 
-const openDisplay = () => fireEvent.click(button('Display'))
+const openDisplay = () => fireEvent.click(button('Display options'))
 
 // jsdom has no layout: the autocomplete menu scrolls its selected row into view.
 const originalScrollIntoView = Element.prototype.scrollIntoView
@@ -359,16 +363,9 @@ describe('ChatComposer ended session', () => {
 })
 
 describe('ChatComposer running session', () => {
-  it('can restart an idle agent without resetting the conversation', () => {
+  it('has no restart button: restarting lives in the task menu and palette', () => {
     setup({ inFlight: false })
-    fireEvent.click(button('Restart'))
-    expect(props.handleRestart).toHaveBeenCalledOnce()
-    expect(props.handleReset).not.toHaveBeenCalled()
-  })
-
-  it('does not restart during a turn', () => {
-    setup({ inFlight: true })
-    expect(button('Restart').disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: /restart/i })).toBeNull()
   })
 })
 
@@ -634,13 +631,13 @@ describe('ChatComposer Display options', () => {
 describe('ChatComposer Reset', () => {
   it('resets on click', () => {
     setup()
-    fireEvent.click(button('Reset'))
+    fireEvent.click(button('Reset chat'))
     expect(props.handleReset).toHaveBeenCalled()
   })
 
   it('is disabled while a reset runs', () => {
     setup({ resetting: true })
-    expect(button('Reset').disabled).toBe(true)
+    expect(button('Reset chat').disabled).toBe(true)
   })
 })
 

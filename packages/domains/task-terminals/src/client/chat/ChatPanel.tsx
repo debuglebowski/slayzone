@@ -343,9 +343,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       () => (filesCapable ? sessionFileCount(display.summary, display.conversationFolded) : 0),
       [filesCapable, display.summary, display.conversationFolded]
     )
-    const changesByTurn = timeline.some(
-      (item, row) => item?.kind === 'workspace-changes' && !display.conversationFolded.has(row)
-    )
     // Paged history: the panel shows every file change — the pages holding
     // them load (held while it is open).
     const filesPanelOpen = filesPanel !== null
@@ -947,19 +944,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         chatFastMode={chatFastMode}
                         handleFastModeChange={handleFastModeChange}
                         fastModeChanging={fastModeChanging}
-                        {...(filesCapable
-                          ? {
-                              filesChanged: {
-                                count: filesCount,
-                                byTurn: changesByTurn,
-                                open: filesPanel !== null,
-                                toggle: () => {
-                                  if (filesPanel) setFilesPanel(null)
-                                  else openFilesPanel()
-                                }
-                              }
-                            }
-                          : {})}
                       />
                     </div>
                     {filesPanel && (

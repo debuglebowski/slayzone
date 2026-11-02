@@ -1,5 +1,5 @@
 import { useRef, type ReactNode, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { ArrowUp, Square, RotateCcw, Filter, Paperclip, Loader2, FileDiff } from 'lucide-react'
+import { ArrowUp, Square, Filter, Paperclip, Loader2, Eraser } from 'lucide-react'
 import { ChatDisplayOptions } from './ChatDisplayOptions'
 import {
   cn,
@@ -9,6 +9,9 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
   type AppearanceSettings
 } from '@slayzone/ui'
 import {
@@ -109,8 +112,6 @@ export interface ChatComposerProps {
   chatFastMode: FastModeApi['chatFastMode']
   handleFastModeChange: FastModeApi['handleFastModeChange']
   fastModeChanging: FastModeApi['fastModeChanging']
-  /** The files-changed panel's button (absent: the provider has none). */
-  filesChanged?: { count: number; byTurn?: boolean; open: boolean; toggle: () => void }
 }
 
 /**
@@ -166,8 +167,7 @@ export function ChatComposer({
   collaborationChanging,
   chatFastMode,
   handleFastModeChange,
-  fastModeChanging,
-  filesChanged
+  fastModeChanging
 }: ChatComposerProps) {
   // Structured providers share the picker; accepted kinds come from capabilities.
   const canPickFiles = chatCapabilitiesForMode(mode).attachments === 'blocks'
@@ -410,42 +410,23 @@ export function ChatComposer({
             </>
           )}
           <div className="flex-1" />
-          {filesChanged && (filesChanged.count > 0 || filesChanged.byTurn) && (
-            <button
-              type="button"
-              data-testid="chat-files-changed-button"
-              aria-pressed={filesChanged.open}
-              onClick={filesChanged.toggle}
-              className={cn(
-                'flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors',
-                filesChanged.open
-                  ? 'bg-primary/15 text-foreground'
-                  : 'hover:bg-muted/60 hover:text-foreground'
-              )}
-              title="Files changed in this conversation"
-            >
-              <FileDiff className="size-3" />
-              {filesChanged.byTurn
-                ? 'Files changed'
-                : `${filesChanged.count} file${filesChanged.count === 1 ? '' : 's'}`}
-            </button>
-          )}
           <ContextMeter summary={usage} />
           <Popover>
-            <PopoverTrigger asChild>
-              <button
-                className={cn(
-                  'flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors',
-                  finalOnly
-                    ? 'bg-primary/15 text-foreground'
-                    : 'hover:bg-muted/60 hover:text-foreground'
-                )}
-                title="Display options"
-              >
-                <Filter className="size-3" />
-                Display
-              </button>
-            </PopoverTrigger>
+            <FooterTip label="Display options">
+              <PopoverTrigger asChild>
+                <button
+                  className={cn(
+                    'flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors',
+                    finalOnly
+                      ? 'bg-primary/15 text-foreground'
+                      : 'hover:bg-muted/60 hover:text-foreground'
+                  )}
+                  aria-label="Display options"
+                >
+                  <Filter className="size-3" />
+                </button>
+              </PopoverTrigger>
+            </FooterTip>
             <PopoverContent
               align="end"
               className="w-[320px] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-2"
@@ -453,33 +434,35 @@ export function ChatComposer({
               <ChatDisplayOptions appearance={appearance} />
             </PopoverContent>
           </Popover>
-          {!displaySessionEnded && (
+          <FooterTip label="Reset chat (kill session and start fresh)">
             <button
-              type="button"
               onClick={() => {
-                void handleRestart()
+                void handleReset()
               }}
-              disabled={restarting || inFlight}
+              disabled={resetting}
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-muted/60 hover:text-foreground transition-colors disabled:opacity-50"
-              title="Restart agent process (keeps chat history)"
+              aria-label="Reset chat"
             >
-              <RotateCcw className={cn('size-3', restarting && 'animate-spin')} />
-              {restarting ? 'Restarting…' : 'Restart'}
+              <Eraser className={cn('size-3', resetting && 'animate-pulse')} />
             </button>
-          )}
-          <button
-            onClick={() => {
-              void handleReset()
-            }}
-            disabled={resetting}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-muted/60 hover:text-foreground transition-colors disabled:opacity-50"
-            title="Reset chat (kill session and start fresh)"
-          >
-            <RotateCcw className={cn('size-3', resetting && 'animate-spin')} />
-            Reset
-          </button>
+          </FooterTip>
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Tooltip for an icon-only footer control. The trigger is a wrapping span, not the
+ * control: a disabled button gets no pointer events, and its tooltip must still show.
+ */
+function FooterTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
   )
 }

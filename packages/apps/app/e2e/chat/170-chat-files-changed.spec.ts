@@ -131,6 +131,5 @@ test.describe('Chat files changed', () => {
     // A reload rebuilds the row from the saved events.
     await t.reload()
     await expect(t.panel.getByTestId('chat-files-changed')).toContainText('3 files changed')
-    await expect(t.panel.getByTestId('chat-files-changed-button')).toContainText('Files changed')
   })
 })

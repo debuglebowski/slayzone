@@ -179,12 +179,14 @@ test.describe('Claude chat: compaction, context meter, slash commands, prompt hi
     await expect(panel.locator('table').getByText('Messages', { exact: true })).toBeVisible()
   })
 
-  test('the composer shows context used and session cost', async ({ mainWindow }) => {
+  test('the composer shows context used; tokens and session cost in its label', async ({
+    mainWindow
+  }) => {
     const meter = mainWindow.locator('[data-chat-panel]:visible [data-testid="chat-context-meter"]')
     // Latest main call: 8036 + 2569 + 39334 = 49,939 of 1,000,000 tokens; cost $0.0147.
-    await expect(meter).toContainText('5% · 50k/1M')
-    await expect(meter).toContainText('$0.01')
-    await expect(meter).toHaveAttribute('title', /49,939 of 1,000,000 tokens/)
+    await expect(meter).toHaveText('5%')
+    await expect(meter).toHaveAttribute('aria-label', /49,939 of 1,000,000 tokens/)
+    await expect(meter).toHaveAttribute('aria-label', /Session cost: \$0\.0147/)
   })
 
   test('the / menu lists the CLI commands usable in chat', async ({ mainWindow }) => {
