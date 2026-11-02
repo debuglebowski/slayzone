@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { listTaskSessions } from './agent-sessions.js'
+import { listTaskSessions, setTaskSessionPromptReader } from './agent-sessions.js'
 
 // Harness — agent_sessions + session_resets + agent_prompts (columns used by
 // listTaskSessions: session grouping, reset cutoff, per-session message count).
@@ -210,6 +210,38 @@ beforeAll(async () => {
 })
 
 describe('listTaskSessions', () => {
+  test('computer prompt summaries replace hub content queries and never persist returned text', async () => {
+    insSession({
+      id: 'pc-session',
+      taskId: 'PC',
+      mode: 'claude-chat',
+      conv: 'pc-thread',
+      origin: 'slay-spawned-fresh',
+      createdAt: 123
+    })
+    setTaskSessionPromptReader(async (_db, taskId, ids) => {
+      expect(taskId).toBe('PC')
+      expect(ids).toEqual(['pc-thread'])
+      return [{ conversationId: 'pc-thread', firstPrompt: 'computer-only label', count: 601 }]
+    })
+    try {
+      const guarded: SlayzoneDb = {
+        ...db,
+        all: async <T>(sql: string, params: unknown[] = []) => {
+          if (/agent_prompts|chat_events/.test(sql)) throw new Error('Hub content query forbidden')
+          return db.all<T>(sql, params)
+        }
+      }
+      expect(await listTaskSessions(guarded, 'PC', 'claude-chat')).toMatchObject([
+        { conversationId: 'pc-thread', firstPrompt: 'computer-only label', messageCount: 601 }
+      ])
+      expect(
+        raw.prepare("SELECT 1 FROM agent_prompts WHERE text='computer-only label'").get()
+      ).toBeUndefined()
+    } finally {
+      setTaskSessionPromptReader(null)
+    }
+  })
   // 1. Exactly two sessions (A + B), resume re-spawns collapsed, noise excluded.
   test('expected 2 sessions', () => {
     expect(sessions).toHaveLength(2)

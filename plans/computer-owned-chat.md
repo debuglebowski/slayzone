@@ -331,3 +331,32 @@ desktop/mobile E2E; long-session budgets; packaging/full lint/registered suites;
 final rebase/review and safe main merge.
 
 Unresolved questions: none.
+
+## Privacy and desktop parity checkpoint
+
+Rich chat diagnostics now stay on the owning computer. Generic hub diagnostics
+strip conversation content before queueing or offloading. Legacy diagnostics with
+provable ownership migrate with their task; ambiguous rows and referenced
+screenshots remain explicitly held on the original hub until attributable.
+
+E2E fixtures seed/read the real computer store through bounded, strictly test-only
+ports. A disk scan test verifies saved history, draft and upload markers never
+appear anywhere under the hub data root and survive a computer restart. It passes.
+
+The full desktop chat run passed 152 tests, failed 15, and skipped one opt-in real
+Codex test. Failures exposed missing attention/state notifications, session ledger
+updates, native handoff release acknowledgement, injected workspace readers and
+tab-only side-question cancellation. Fixes are covered by units and targeted E2E;
+all previously failing cases have passed their focused reruns. Full rerun pending.
+
+Session labels/counts read summaries computed from full computer event history,
+independently of the 500-prompt recall cap. Early prompts bind to their native
+session on delivery. Manual-reset cutoffs migrate with their original timestamps.
+Backup policy publication is durable before the running policy changes; failed
+publication leaves the previous policy intact.
+
+Remaining: latest-main rebase, broad registered units/types/lint/build, full chat
+rerun, native/computer desktop and mobile checks, performance budgets, final review
+and safe local main merge. No push or release.
+
+Unresolved questions: none.

@@ -8,6 +8,16 @@ import {
 } from '@slayzone/terminal-contracts'
 import { agentSessionsEvents } from '../events'
 
+type SessionPromptReader = (
+  db: SlayzoneDb,
+  taskId: string,
+  conversationIds: string[]
+) => Promise<Array<{ conversationId: string; count: number; firstPrompt: string }>>
+let sessionPromptReader: SessionPromptReader | null = null
+export function setTaskSessionPromptReader(reader: SessionPromptReader | null): void {
+  sessionPromptReader = reader
+}
+
 /**
  * Read-side of the first-class agent-session entity (tables `agent_sessions` +
  * `session_resets`, migration v147). See plans/agent-sessions.md.
@@ -432,6 +442,7 @@ export async function listTaskSessions(
   mode: string
 ): Promise<TaskSessionSummary[]> {
   const current = await getCurrentConversationId(db, taskId, mode)
+  const reader = sessionPromptReader
   const rows = await db.all<{
     conversation_id: string
     origin: ConversationOrigin
@@ -449,11 +460,15 @@ export async function listTaskSessions(
           ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
        min(s.created_at)                         AS started_at,
        max(s.created_at)                         AS last_active_at,
-       (SELECT count(*) FROM agent_prompts p
+       ${
+         reader
+           ? '0 AS message_count, NULL AS first_prompt'
+           : `(SELECT count(*) FROM agent_prompts p
           WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id) AS message_count,
        (SELECT p.text FROM agent_prompts p
           WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id
-          ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1) AS first_prompt
+          ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1) AS first_prompt`
+       }
      FROM agent_sessions s
      WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
        AND s.origin IN (${HONORED_ORIGINS_SQL})
@@ -462,9 +477,21 @@ export async function listTaskSessions(
      ORDER BY started_at DESC`,
     [taskId, mode]
   )
-  const savedChatPrompts = mode === 'codex-chat' ? await codexChatEventPrompts(db, taskId) : null
+  const savedChatPrompts =
+    !reader && mode === 'codex-chat' ? await codexChatEventPrompts(db, taskId) : null
+  const summaries = new Map(
+    reader
+      ? (
+          await reader(
+            db,
+            taskId,
+            rows.map((r) => r.conversation_id)
+          )
+        ).map((s) => [s.conversationId, s])
+      : []
+  )
   return rows.map((r) => {
-    const saved = savedChatPrompts?.get(r.conversation_id)
+    const saved = summaries.get(r.conversation_id) ?? savedChatPrompts?.get(r.conversation_id)
     return {
       conversationId: r.conversation_id,
       origin: r.origin,

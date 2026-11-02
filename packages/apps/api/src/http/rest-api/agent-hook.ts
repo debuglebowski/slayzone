@@ -4,7 +4,6 @@ import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone
 import {
   resolveAgentHook as resolveHookIdentity,
   sanitizeAgentHook,
-  type HookAgentId,
   mapEventType
 } from '@slayzone/terminal-contracts'
 import {
@@ -328,21 +327,6 @@ function hookToAwaitingUser(agentId: string, sessionId: string, hookEvent: strin
   // reports "not blocked" for a main loop that is parked on a question, so a task
   // mid-question can no longer be idle-closed.
   return agentTrees.get(sessionId)?.awaitingUser ?? null
-}
-
-/** Stringify + clamp for diagnostic storage. Keeps raw hook payloads from
- *  blowing up the diagnostics DB while still capturing tool_name,
- *  stop_hook_active, transcript_path, etc. Returns the original on
- *  serialization failure so we still log something useful. */
-function truncateForDiag(value: unknown, maxChars: number): string {
-  if (value == null) return ''
-  let s: string
-  try {
-    s = typeof value === 'string' ? value : JSON.stringify(value)
-  } catch {
-    s = String(value)
-  }
-  return s.length <= maxChars ? s : s.slice(0, maxChars) + '…[truncated]'
 }
 
 /**

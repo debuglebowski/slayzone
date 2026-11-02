@@ -533,6 +533,10 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.tabState.saveDraft': 'never',
   'chat.tabState.saveScroll': 'never',
   'chat.testSetWatchdogTimings': 'never',
+  'chat.testSeedEvents': 'never',
+  'chat.testReadEvents': 'never',
+  'chat.testProjection': 'never',
+  'chat.testSeedPrompts': 'never',
   // Side threads: `create` forks a new conversation, like `fork`.
   'chat.threads.create': 'never',
   'chat.threads.list': 'agent',

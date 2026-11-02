@@ -31,7 +31,6 @@ import {
 import { listSessions, getSessionState, listChatSessionEntries } from './session-registry'
 import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty-data-ops'
 import type { TaskSessionStore } from './task-session-store'
-import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { resolveSpawnTarget } from './spawn-target'
 import { getPtyBackend } from './pty-backend'

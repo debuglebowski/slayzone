@@ -115,6 +115,34 @@ function sleep(ms: number): Promise<void> {
 // Steps share one in-memory DB and run in declaration order; each test builds
 // on the state the previous ones left behind.
 describe('task_conversations', () => {
+  test('computer metadata replay preserves timestamp and both ledgers without overwriting current provider settings', async () => {
+    raw
+      .prepare('INSERT INTO tasks(id,provider_config) VALUES(?,?)')
+      .run('replay', JSON.stringify({ 'claude-chat': { chatConversationId: 'newer' } }))
+    const input = {
+      taskId: 'replay',
+      mode: 'claude-chat',
+      conversationId: 'older',
+      origin: 'slay-spawned-fresh' as const,
+      id: 'computer-ledger-replay',
+      createdAt: 123,
+      mirrorProviderConfig: false
+    }
+    await recordConversation(db, input)
+    await recordConversation(db, input)
+    for (const table of ['task_conversations', 'agent_sessions'])
+      expect(
+        raw
+          .prepare(`SELECT id,conversation_id,created_at FROM ${table} WHERE task_id='replay'`)
+          .all()
+      ).toEqual([{ id: 'computer-ledger-replay', conversation_id: 'older', created_at: 123 }])
+    expect(raw.prepare("SELECT provider_config FROM tasks WHERE id='replay'").get()).toEqual({
+      provider_config: JSON.stringify({ 'claude-chat': { chatConversationId: 'newer' } })
+    })
+    await expect(recordConversation(db, { ...input, conversationId: 'conflict' })).rejects.toThrow(
+      /conflict/i
+    )
+  })
   // 1. Honored read returns latest honored row.
   test('latest honored row should be current', async () => {
     await recordConversation(db, {

@@ -9,15 +9,15 @@
  *   pull the view back up)
  */
 import type { Page } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, streamMessage, test, type ChatHarness } from '../fixtures/chat'
 import { answeredLongSessionEvents, LAST_REPLY } from '../fixtures/chat-long-session'
 
-const CONVERSATION = '20100000-0000-4000-8000-000000000001'
 /** History taller than the view: the stream starts followed, at the end of it. */
-const history = () =>
+const history = (conversationId: string) =>
   answeredLongSessionEvents(2000).map((event) =>
-    event.kind === 'turn-init' ? { ...event, sessionId: CONVERSATION } : event
+    event.kind === 'turn-init' ? { ...event, sessionId: conversationId } : event
   )
 const LINES = 60
 /** One paragraph per token: every delta grows the content. */
@@ -51,10 +51,11 @@ function scrollState(page: Page): Promise<ScrollState> {
 }
 
 async function openStreaming(chat: ChatHarness, title: string) {
+  const conversationId = randomUUID()
   const t = await chat.openTask({
     title,
-    conversationId: CONVERSATION,
-    seedEvents: history(),
+    conversationId,
+    seedEvents: history(conversationId),
     scenario: {
       processes: [
         {

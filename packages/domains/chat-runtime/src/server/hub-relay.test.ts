@@ -7,6 +7,92 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createHubChatRelay } from './hub-relay'
 
+test('state relay validates identity and waits for attention consumers with computer user-input metadata', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb),
+      calls: unknown[] = [],
+      requests: unknown[] = []
+    await ownership.register({
+      id: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      request: async (_pc, value) => {
+        requests.push(value)
+        const request = value as { kind: string }
+        if (['sessions', 'pendingMetadata'].includes(request.kind)) return []
+        return null
+      },
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      bootstrap: async () => ({
+        identity: { id: 'c', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+        projectId: null,
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }),
+      migrate: async () => {
+        throw new Error('Unexpected migration')
+      },
+      recordConversation: async () => {
+        throw new Error('Unexpected ledger write')
+      },
+      onState: async (...args) => {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        calls.push(args)
+      }
+    })
+    const state = {
+      type: 'state',
+      conversationId: 'c',
+      epoch: 1,
+      tabId: 'tab',
+      sessionId: 'task:tab',
+      newState: 'idle',
+      oldState: 'running',
+      hasUserInput: true,
+      providerSessionId: 'native'
+    }
+    await relay.receive('pc', state)
+    expect(calls).toEqual([['task:tab', 'idle', 'running', true]])
+    await expect(relay.receive('pc', { ...state, sessionId: 'foreign:tab' })).rejects.toThrow(
+      /state notification/i
+    )
+    await expect(
+      relay.receive('pc', { ...state, newState: 'private arbitrary text' })
+    ).rejects.toThrow(/state notification/i)
+    expect(calls).toHaveLength(1)
+    expect(relay.conversations.isLive('task', 'native')).toBe(true)
+    await relay.conversations.release('task', 'native')
+    expect(requests).toContainEqual({
+      kind: 'invoke',
+      value: {
+        route: { id: 'c', epoch: 1 },
+        target: 'ops',
+        method: 'releaseConversation',
+        args: ['tab', 'native'],
+        operationId: expect.any(String)
+      }
+    })
+    expect(relay.conversations.isLive('task', 'native')).toBe(false)
+  } finally {
+    h.cleanup()
+  }
+})
+
 test('folder locators recover when child metadata arrives before its parent', async () => {
   const h = await createTestHarness()
   try {
@@ -23,6 +109,9 @@ test('folder locators recover when child metadata arrives before its parent', as
       epoch: 1
     })
     const relay = createHubChatRelay({
+      recordConversation: async () => {
+        throw new Error('Unexpected conversation write')
+      },
       db: h.slayDb,
       ownership,
       request: async () => null,
@@ -111,6 +200,9 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
     })
     const gate = vi.fn(async () => {})
     const relay = createHubChatRelay({
+      recordConversation: async () => {
+        throw new Error('Unexpected conversation write')
+      },
       db: h.slayDb,
       ownership,
       request,

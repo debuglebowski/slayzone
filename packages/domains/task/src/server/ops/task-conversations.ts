@@ -46,6 +46,9 @@ const FIND_PENDING_RETRY_MS = 100
 export async function recordConversation(
   db: SlayzoneDb,
   args: {
+    id?: string
+    createdAt?: number
+    mirrorProviderConfig?: boolean
     taskId: string
     mode: string
     conversationId: string | null
@@ -63,8 +66,26 @@ export async function recordConversation(
 ): Promise<void> {
   const { taskId, mode, conversationId, origin, pendingMeta } = args
   const legacyJsonField = args.legacyJsonField ?? 'conversationId'
-  const id = randomUUID()
-  const createdAt = Date.now()
+  const id = args.id ?? randomUUID()
+  const createdAt = args.createdAt ?? Date.now()
+  if (!Number.isSafeInteger(createdAt) || createdAt < 0)
+    throw new Error('Invalid conversation timestamp')
+  if (args.id) {
+    const existing = await db.get<{
+      task_id: string
+      mode: string
+      conversation_id: string | null
+      origin: string
+    }>('SELECT task_id,mode,conversation_id,origin FROM task_conversations WHERE id=?', [id])
+    if (
+      existing &&
+      (existing.task_id !== taskId ||
+        existing.mode !== mode ||
+        existing.conversation_id !== conversationId ||
+        existing.origin !== origin)
+    )
+      throw new Error('Conversation ledger identity conflict')
+  }
   const meta = origin === 'pending-spawn' && pendingMeta ? JSON.stringify(pendingMeta) : null
 
   const ops: BatchOp[] = [
@@ -72,12 +93,12 @@ export async function recordConversation(
       type: 'run',
       sql: `INSERT INTO task_conversations
               (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
       params: [id, taskId, mode, conversationId, origin, meta, createdAt]
     }
   ]
 
-  if (HONORED_ORIGINS.has(origin) && conversationId) {
+  if (args.mirrorProviderConfig !== false && HONORED_ORIGINS.has(origin) && conversationId) {
     // Dual-write the legacy JSON field so consumers that still read
     // `provider_config.{mode}.{legacyJsonField}` keep seeing fresh data
     // during the transition slice.
@@ -101,7 +122,7 @@ export async function recordConversation(
         })
       }
     }
-  } else if (origin === 'manual-reset') {
+  } else if (args.mirrorProviderConfig !== false && origin === 'manual-reset') {
     // Phase 1 transitional patch (delete in Phase 4): clear the legacy fields
     // so consumers that still read `provider_config.{mode}.conversationId` /
     // `chatConversationId` and the `*_conversation_id` columns immediately see
@@ -140,7 +161,7 @@ export async function recordConversation(
   if (origin === 'manual-reset') {
     ops.push({
       type: 'run',
-      sql: `INSERT INTO session_resets (id, task_id, mode, created_at) VALUES (?, ?, ?, ?)`,
+      sql: `INSERT INTO session_resets (id, task_id, mode, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
       params: [id, taskId, mode, createdAt]
     })
   } else {
@@ -165,7 +186,7 @@ export async function recordConversation(
       type: 'run',
       sql: `INSERT INTO agent_sessions
               (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta, created_at, bound_at)
-            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
       params: [id, mode, taskId, conversationId, origin, shadowStatus, meta, createdAt, createdAt]
     })
     if (origin !== 'pending-spawn' && conversationId && provenAtWrite) {

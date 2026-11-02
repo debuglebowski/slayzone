@@ -14,7 +14,8 @@ import {
   type ChatQueueEventMap,
   type ChatCatalog,
   type ChatCatalogOperation,
-  type ChatCatalogContext
+  type ChatCatalogContext,
+  type ChatDataOps
 } from '@slayzone/terminal/runtime'
 import {
   chatOperationSchemas,
@@ -71,7 +72,13 @@ export function createHubChatRelay(opts: {
   migrate(id: string, computerId: string): Promise<HubChatOwnership>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
   onTasksChanged?(taskId: string): void
-  onState?(sessionId: string, state: ChatTerminalState, previous: ChatTerminalState): void
+  recordConversation: ChatDataOps['recordConversation']
+  onState?(
+    sessionId: string,
+    state: ChatTerminalState,
+    previous: ChatTerminalState,
+    hasUserInput: boolean
+  ): void | Promise<void>
 }) {
   const { db, ownership } = opts
   const folderDeletions = createChatFolderDeletions(db)
@@ -344,20 +351,29 @@ export function createHubChatRelay(opts: {
         conversationId: string | null
         origin: string
         legacyJsonField?: string
+        createdAt?: number
       }
+      if (
+        !['claude-chat', 'codex-chat', 'claude-code', 'codex'].includes(input.mode) ||
+        (input.legacyJsonField &&
+          !['conversationId', 'chatConversationId'].includes(input.legacyJsonField))
+      )
+        throw new Error('Invalid conversation metadata')
+      await opts.recordConversation({
+        id: `chat:${current.id}:${raw.operationId}:${input.createdAt ?? 0}`,
+        taskId: current.taskId,
+        mode: input.mode,
+        conversationId: input.conversationId,
+        origin: input.origin as Parameters<ChatDataOps['recordConversation']>[0]['origin'],
+        ...(input.createdAt !== undefined ? { createdAt: input.createdAt } : {}),
+        legacyJsonField: input.legacyJsonField as
+          | 'conversationId'
+          | 'chatConversationId'
+          | undefined,
+        mirrorProviderConfig: advance
+      })
       if (input.conversationId)
         await ownership.bindProvider(current.id, input.conversationId, input.mode)
-      await db.run(
-        `INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
-        [
-          raw.operationId,
-          current.taskId,
-          input.mode,
-          input.conversationId,
-          input.origin,
-          Date.now()
-        ]
-      )
     } else if (raw.kind === 'activity') {
       const at = Number(value.at)
       if (!Number.isSafeInteger(at)) throw new Error('Invalid activity metadata')
@@ -612,6 +628,13 @@ export function createHubChatRelay(opts: {
   ): Promise<unknown> {
     args = trimUnsetArgs(args)
     if (target === 'ops' && method === 'supports') return supportsChatMode(String(args[0]))
+    if (target === 'ops' && method === 'testSetWatchdogTimings') {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      const pc = await opts.defaultComputer()
+      if (!pc) throw new Error('Test computer unavailable')
+      await opts.recoverComputer?.(pc)
+      return opts.request(pc, { kind: 'test.watchdog', timings: args[0] })
+    }
     if (target === 'ops' && catalogMethods.has(method))
       return catalogCall(method as ChatCatalogOperation, {}, args)
     const owner = await route(target, method, args)
@@ -629,7 +652,11 @@ export function createHubChatRelay(opts: {
         ...(!read ? { operationId: operationId ?? randomUUID() } : {})
       }
     })
-    if (!read) await drainMetadata(owner.computerId!)
+    if (!read) {
+      await drainMetadata(owner.computerId!)
+      if (['continueInTerminal', 'releaseConversation', 'remove', 'kill'].includes(method))
+        await refreshSessions(owner.computerId!)
+    }
     return result
   }
   async function catalogCall(
@@ -685,7 +712,10 @@ export function createHubChatRelay(opts: {
     release: async (taskId: string, providerSessionId: string) => {
       for (const row of [...sessionMirror.values()])
         if (row.taskId === taskId && row.providerSessionId === providerSessionId)
-          await invoke('ops', 'kill', [row.sessionId.slice(taskId.length + 1)])
+          await invoke('ops', 'releaseConversation', [
+            row.sessionId.slice(taskId.length + 1),
+            providerSessionId
+          ])
     }
   }
   const ops = Object.fromEntries(
@@ -757,7 +787,7 @@ export function createHubChatRelay(opts: {
           )
           break
         case 'exit':
-          sessionMirror.delete(String(p.sessionId))
+          sessionMirror.delete(`${owner.taskId}:${owner.tabId}`)
           events.emit(
             'exit',
             owner.tabId,
@@ -776,6 +806,16 @@ export function createHubChatRelay(opts: {
           queueEvents.emit('queue-drained', owner.tabId, String(p.original))
           break
         case 'state':
+          if (
+            p.sessionId !== `${owner.taskId}:${owner.tabId}` ||
+            !['not-spawned', 'starting', 'idle', 'running', 'background', 'error', 'dead'].includes(
+              String(p.newState)
+            ) ||
+            !['not-spawned', 'starting', 'idle', 'running', 'background', 'error', 'dead'].includes(
+              String(p.oldState)
+            )
+          )
+            throw new Error('Invalid chat state notification')
           if (p.newState !== 'not-spawned' && p.newState !== 'dead')
             sessionMirror.set(String(p.sessionId), {
               sessionId: String(p.sessionId),
@@ -787,10 +827,11 @@ export function createHubChatRelay(opts: {
               providerSessionId: p.providerSessionId as string | null
             })
           else sessionMirror.delete(String(p.sessionId))
-          opts.onState?.(
+          await opts.onState?.(
             String(p.sessionId),
             p.newState as ChatTerminalState,
-            p.oldState as ChatTerminalState
+            p.oldState as ChatTerminalState,
+            p.hasUserInput === true
           )
           break
       }

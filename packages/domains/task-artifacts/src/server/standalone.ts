@@ -7,7 +7,7 @@ import { artifactsTxns } from './artifact-store-txns'
 export function createStandaloneArtifacts(
   raw: Database.Database,
   dataDir: string,
-  beforeWrite: () => void = () => {}
+  beforeWrite: () => void = () => undefined
 ) {
   raw.pragma('foreign_keys=ON')
   raw.exec(`
@@ -72,7 +72,7 @@ export function createStandaloneArtifacts(
     },
     namedTxn: (async (name: string, params: unknown) => {
       const implementation = (
-        artifactsTxns as Record<string, (db: Database.Database, p: any) => unknown>
+        artifactsTxns as unknown as Record<string, (db: Database.Database, p: unknown) => unknown>
       )[name]
       if (!implementation) throw new Error('Unknown standalone artifact transaction')
       if (
@@ -92,7 +92,7 @@ export function createStandaloneArtifacts(
       await raw.backup(destination)
     },
     // The owning chat runtime closes this shared connection.
-    close: async () => {}
+    close: async () => undefined
   }
   return { db, store: createArtifactStore(dataDir) }
 }

@@ -44,6 +44,10 @@ export interface TaskSessionStore {
 
 /** Input of `TaskSessionStore.recordConversation` (task-conversations ledger append). */
 export interface RecordConversationInput {
+  /** Stable metadata identity and original time when replaying a computer ledger. */
+  id?: string
+  createdAt?: number
+  mirrorProviderConfig?: boolean
   taskId: string
   mode: string
   conversationId: string | null

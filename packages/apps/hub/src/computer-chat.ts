@@ -1,4 +1,5 @@
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
+import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -51,7 +52,12 @@ export function createComputerChatServices(opts: {
   hasLiveTask(taskId: string): Promise<boolean>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
   onTasksChanged?(taskId: string): void
-  onState?(sessionId: string, state: ChatTerminalState, previous: ChatTerminalState): void
+  onState?(
+    sessionId: string,
+    state: ChatTerminalState,
+    previous: ChatTerminalState,
+    hasUserInput: boolean
+  ): void | Promise<void>
 }) {
   const ownership = createChatOwnershipStore(opts.db)
   const folderDeletions = createChatFolderDeletions(opts.db)
@@ -150,12 +156,10 @@ export function createComputerChatServices(opts: {
         'SELECT mode,conversation_id AS conversationId FROM session_deletions WHERE task_id=?',
         [owner.taskId]
       ),
-      honoredConversations: (
-        await opts.db.all<{ conversation_id: string }>(
-          "SELECT DISTINCT conversation_id FROM task_conversations WHERE task_id=? AND mode IN (?,?) AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn')",
-          [owner.taskId, owner.mode, terminalMode]
-        )
-      ).map((r) => r.conversation_id)
+      honoredSessions: await opts.db.all<{ mode: string; conversationId: string }>(
+        "SELECT DISTINCT mode,conversation_id AS conversationId FROM agent_sessions WHERE task_id=? AND mode IN (?,?) AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn')",
+        [owner.taskId, owner.mode, terminalMode]
+      )
     }
     const hash = createHash('sha256').update(JSON.stringify(values)).digest('hex')
     return {
@@ -247,6 +251,7 @@ export function createComputerChatServices(opts: {
   const migration = createChatMigration({ ownership, source, request })
   const relay = createHubChatRelay({
     ...opts,
+    recordConversation: (input) => opts.legacyData.recordConversation(input),
     request,
     ownership,
     hasLegacyTaskContent: async (taskId) =>
@@ -306,10 +311,24 @@ export function createComputerChatServices(opts: {
               'saveTabScroll',
               'listThreads'
             ].includes(method)
-          )
+          ) {
+            const context = await bootstrap(owner)
+            await request(owner.computerId!, {
+              kind: 'invoke',
+              value: {
+                route: { id: owner.id, epoch: owner.epoch },
+                target: 'ops',
+                method: 'refuseStart',
+                operationId: randomUUID(),
+                args: [
+                  { tabId: owner.tabId, taskId: owner.taskId, mode: owner.mode, cwd: context.cwd }
+                ]
+              }
+            })
             throw new Error(
               'This conversation is running in the terminal. Continue in chat to stop it there first.'
             )
+          }
         }
       }
       await opts.beforeInvoke?.(owner, method, args)
@@ -379,6 +398,53 @@ export function createComputerChatServices(opts: {
       }) as ReturnType<ChatComputerOps['archiveFile']>
   }
   return {
+    testing: {
+      async seedEvents(tabId, fromSeq, events) {
+        if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+        const owner = await relay.ensureTab(tabId)
+        for (const event of events)
+          if (event.kind === 'user-message' && Array.isArray(event.content))
+            await sealAttachments(owner, 'send', [tabId, event])
+        await request(owner.computerId!, {
+          kind: 'test.seedEvents',
+          route: { id: owner.id, epoch: owner.epoch },
+          fromSeq,
+          events
+        })
+      },
+      async readEvents(tabId, afterSeq, limit) {
+        if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+        const owner = await relay.ensureTab(tabId)
+        return request(owner.computerId!, {
+          kind: 'test.readEvents',
+          route: { id: owner.id, epoch: owner.epoch },
+          afterSeq,
+          limit
+        }) as ReturnType<NonNullable<ChatDeps['testing']>['readEvents']>
+      },
+      async projection(tabId, action) {
+        if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+        const owner = await relay.ensureTab(tabId)
+        return request(owner.computerId!, {
+          kind: 'test.projection',
+          route: { id: owner.id, epoch: owner.epoch },
+          action
+        }) as ReturnType<NonNullable<ChatDeps['testing']>['projection']>
+      },
+      async seedPrompts(taskId, prompts) {
+        if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+        const pc = await opts.resolveComputer(taskId),
+          owners = await relay.ensurePromptTask(taskId),
+          owner = owners.find((o) => o.computerId === pc)
+        if (!owner) throw new Error('Test prompt storage is unavailable')
+        await opts.gate?.(pc!, taskId)
+        await request(pc!, {
+          kind: 'test.seedPrompts',
+          route: { id: owner.id, epoch: owner.epoch },
+          prompts
+        })
+      }
+    } satisfies NonNullable<ChatDeps['testing']>,
     computers,
     availability: createChatAvailability({
       db: opts.db,
@@ -556,6 +622,32 @@ export function createComputerChatServices(opts: {
         await lifecycle.sync(computerId)
       }
       return computerId
+    },
+    async promptSummaries(taskId: string, conversationIds: string[]) {
+      if (!conversationIds.length) return []
+      const owners = await relay.ensurePromptTask(taskId)
+      type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
+      const result = new Map<string, Summary>()
+      for (const computerId of new Set(owners.map((o) => o.computerId!))) {
+        await opts.gate?.(computerId, taskId)
+        for (let offset = 0; offset < conversationIds.length; offset += 500) {
+          const summaries = (await request(computerId, {
+            kind: 'prompt.summaries',
+            taskId,
+            conversationIds: conversationIds.slice(offset, offset + 500)
+          })) as Summary[]
+          for (const summary of summaries) {
+            const prior = result.get(summary.conversationId)
+            if (!prior) result.set(summary.conversationId, summary)
+            else
+              result.set(summary.conversationId, {
+                ...(prior.firstAt <= summary.firstAt ? prior : summary),
+                count: prior.count + summary.count
+              })
+          }
+        }
+      }
+      return [...result.values()]
     },
     async prompts(taskId: string, agentId?: string) {
       const owners = await relay.ensurePromptTask(taskId)

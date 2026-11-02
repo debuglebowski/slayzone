@@ -112,6 +112,6 @@ export default function globalSetup(): void {
 
   // e2e is computer-ON by default (every worker app auto-enrolls a co-located
   // computer), so the bundle must exist before the first launch — not just for the
-  // computer specs. Idempotent + no-ops when already fresh.
+  // computer specs. Rebuild includes imported workspace domains.
   ensureComputerBuilt()
 }

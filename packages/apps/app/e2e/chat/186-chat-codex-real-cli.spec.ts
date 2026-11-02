@@ -15,6 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { expect, openTaskById, resetApp, seed, test as base } from '../fixtures/electron'
 import { closeAllTaskTabs } from '../fixtures/terminal'
+import { readChatEvents } from '../fixtures/chat-seed'
 
 const BIN = process.env.SLAYZONE_CODEX_BIN_PATH ?? ''
 const WORK_DIR = process.env.SLAYZONE_CODEX_RECORD_DIR ?? ''
@@ -90,12 +91,7 @@ test.describe('Codex chat — real codex app-server', () => {
         },
         { fn, input }
       ) as Promise<T>
-    const events = async () =>
-      (
-        await db<{ event: string }>('SELECT event FROM chat_events WHERE tab_id = ? ORDER BY seq', [
-          tabId
-        ])
-      ).map((r) => JSON.parse(r.event) as Record<string, unknown> & { kind: string })
+    const events = async () => (await readChatEvents(page, tabId)).map((r) => r.event)
 
     await trpc('chat.setModel.mutate', { ...o, chatModel: MODEL })
     await trpc('chat.setEffort.mutate', { ...o, chatEffort: 'low' })

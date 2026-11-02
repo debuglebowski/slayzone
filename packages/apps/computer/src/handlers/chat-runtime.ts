@@ -2,6 +2,7 @@ import type { ResolvedAgentHook } from '@slayzone/terminal-contracts'
 import { rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import { chatTestRequestSchema, handleChatTesting } from './chat-testing'
 import {
   createComputerChatRuntime,
   computerArtifactRequestSchema,
@@ -39,6 +40,7 @@ import type { ProjectPathStore } from '../project-paths'
 import type { SpawnAdmission } from '../spawn-admission'
 
 const requestSchema = z.discriminatedUnion('kind', [
+  ...chatTestRequestSchema.options,
   z.object({
     kind: z.literal('diagnostics.configure'),
     enabled: z.boolean(),
@@ -158,6 +160,11 @@ const requestSchema = z.discriminatedUnion('kind', [
     operationId: z.string().optional()
   }),
   z.object({ kind: z.literal('sessions') }),
+  z.object({
+    kind: z.literal('prompt.summaries'),
+    taskId: z.string(),
+    conversationIds: z.array(z.string()).max(500)
+  }),
   z.object({
     kind: z.literal('prompts'),
     taskId: z.string(),
@@ -305,7 +312,12 @@ export function createChatRuntimeHandlers(opts: {
       transport: {
         backend,
         onStateChange: (sessionId, newState, oldState) =>
-          publish('state', { sessionId, newState, oldState }),
+          publish('state', {
+            sessionId,
+            newState,
+            oldState,
+            hasUserInput: instance?.transport.hasSessionUserInput(sessionId) ?? false
+          }),
         workspaceCapture: {
           begin: async (ctx) =>
             workspaceCaptureBeginSchema.parse(
@@ -342,6 +354,10 @@ export function createChatRuntimeHandlers(opts: {
   }
   async function request(raw: unknown): Promise<unknown> {
     const req = requestSchema.parse(raw)
+    if (req.kind.startsWith('test.') && process.env.PLAYWRIGHT !== '1')
+      throw new Error('test-only handler unavailable')
+    if (req.kind !== 'test.reset' && req.kind.startsWith('test.'))
+      return handleChatTesting(runtime(), chatTestRequestSchema.parse(req))
     if (req.kind === 'test.reset') {
       if (!process.env.PLAYWRIGHT) throw new Error('Test reset is unavailable')
       resetting = true
@@ -439,6 +455,8 @@ export function createChatRuntimeHandlers(opts: {
         return r.storage.migrationCheckpoint(req.identity, req.migrationId, req.candidate)
       case 'prompts':
         return r.prompts(req.taskId, req.agentId, req.excluded)
+      case 'prompt.summaries':
+        return r.promptSummaries(req.taskId, req.conversationIds)
       case 'sessions':
         return r.transport.listChatSessions().map((row) => ({
           ...row,

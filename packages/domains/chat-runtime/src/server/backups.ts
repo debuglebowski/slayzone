@@ -384,6 +384,7 @@ export function createChatBackups(store: ChatStorage) {
     },
     settings: () => ({ ...policy }),
     configure(value: Policy) {
+      if (closed) throw new Error('Backup service is closed')
       if (
         !Number.isSafeInteger(value.intervalMinutes) ||
         value.intervalMinutes < 15 ||
@@ -392,10 +393,22 @@ export function createChatBackups(store: ChatStorage) {
       )
         throw new Error('Invalid backup settings')
       if (JSON.stringify(value) === JSON.stringify(policy)) return
+      const temp = `${settingsPath}.${randomUUID()}.tmp`
+      try {
+        durableJson(temp, value)
+        renameSync(temp, settingsPath)
+        if (process.platform !== 'win32') {
+          const fd = openSync(dir, 'r')
+          try {
+            fsyncSync(fd)
+          } finally {
+            closeSync(fd)
+          }
+        }
+      } finally {
+        rmSync(temp, { force: true })
+      }
       policy = { ...value }
-      const temp = settingsPath + '.tmp'
-      writeFileSync(temp, JSON.stringify(policy), { mode: 0o600 })
-      renameSync(temp, settingsPath)
       schedule()
     },
     async restore(backupId: string, id: string = randomUUID()): Promise<ComputerChatArchive> {

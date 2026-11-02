@@ -4,6 +4,7 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
+  mkdirSync,
   promises as fsAsync
 } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -11,6 +12,31 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
+
+test('backup preference publish failure keeps old policy and permits a durable retry', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-backup-policy-')),
+    r = createComputerChatRuntime({ stateDir: dir, hubScope: 'hub', computerId: 'pc' }),
+    path = join(r.backups.dir, 'settings.json')
+  let reopened: ReturnType<typeof createComputerChatRuntime> | undefined
+  try {
+    const previous = r.backups.settings(),
+      next = { autoEnabled: true, intervalMinutes: 15, maxAutoBackups: 3 }
+    mkdirSync(path)
+    expect(() => r.backups.configure(next)).toThrow()
+    expect(r.backups.settings()).toEqual(previous)
+    expect(readdirSync(r.backups.dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    rmSync(path, { recursive: true })
+    r.backups.configure(next)
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(next)
+    await r.close()
+    reopened = createComputerChatRuntime({ stateDir: dir, hubScope: 'hub', computerId: 'pc' })
+    expect(reopened.backups.settings()).toEqual(next)
+  } finally {
+    await reopened?.close()
+    await r.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 test('backup includes consistent history and blobs; restore is a separate read-only archive', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'chat-backup-')),

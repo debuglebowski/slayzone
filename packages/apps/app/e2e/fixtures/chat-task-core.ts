@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { createIsolatedGitRepo, expect, openTaskById, seed } from './electron'
-import { seedChatEvents } from './chat-seed'
+import { seedChatEvents, readChatEvents } from './chat-seed'
 
 export type ChatMode = 'claude-chat' | 'codex-chat'
 
@@ -139,7 +139,7 @@ export async function openChatTaskCore<M extends ChatMode>(
       [o.conversationId, task.id]
     )
   }
-  await seedChatEvents(o.electronApp, tabId, o.seedEvents ?? [])
+  await seedChatEvents(page, tabId, o.seedEvents ?? [])
   await s.refreshData()
   await openTaskById(page, task.id)
   const panel = page.locator('[data-chat-panel]:visible')
@@ -177,14 +177,7 @@ export async function openChatTaskCore<M extends ChatMode>(
       await composer.press('Enter')
     },
     async events() {
-      const rows = await db.all<{ seq: number; event: string }>(
-        'SELECT seq, event FROM chat_events WHERE tab_id = ? ORDER BY seq',
-        [tabId]
-      )
-      return rows.map((r) => ({
-        seq: r.seq,
-        event: JSON.parse(r.event) as ChatEventRow['event']
-      }))
+      return readChatEvents(page, tabId)
     },
     async reload() {
       await page.reload({ waitUntil: 'domcontentloaded' })

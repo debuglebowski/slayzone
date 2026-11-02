@@ -28,7 +28,9 @@ export function resolveAgentHook(input: unknown): ResolvedAgentHook | null {
   if (!raw && argJson) {
     try {
       raw = record(JSON.parse(arg!))
-    } catch {}
+    } catch {
+      // An invalid JSON argument is not a usable raw hook envelope.
+    }
   }
   const hookEvent =
     str(body.hookEvent) ??

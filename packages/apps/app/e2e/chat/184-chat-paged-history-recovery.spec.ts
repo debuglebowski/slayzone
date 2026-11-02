@@ -1,60 +1,32 @@
 /**
- * Paged chat history (chat F), recovery: the hub's stored projection is derived
+ * Paged chat history (chat F), recovery: the computer's stored projection is derived
  * from the saved events and safe to throw away.
  * - A stored page that cannot be read: the client opens again from the events
  *   (same content), and the stored projection is thrown away.
- * - The hub restarting over a corrupt checkpoint: the tab opens paged again,
+ * - A cold conversation with a corrupt checkpoint after hub reconnect: opens paged again,
  *   from a projection rebuilt from the events (same content).
  */
-import type { ElectronApplication, Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { TIMELINE_PROJECTION_VERSION } from '@slayzone/terminal/timeline-checkpoint'
 import { resetApp } from '../fixtures/electron'
 import { expect, test } from '../fixtures/chat'
 import { FIRST_PROMPT, LAST_REPLY, answeredLongSessionEvents } from '../fixtures/chat-long-session'
+import { chatProjection } from '../fixtures/chat-seed'
 
 const EVENTS = 20_000
 
-type Db = {
-  get: (sql: string, params?: unknown[]) => Promise<unknown>
-  run: (sql: string, params?: unknown[]) => Promise<unknown>
-}
-
-function sql(
-  app: ElectronApplication,
-  op: 'get' | 'run',
-  query: string,
-  params: unknown[]
-): Promise<unknown> {
-  return app.evaluate(
-    async ({}, { op, query, params }) => {
-      const db = (globalThis as Record<string, unknown>).__db as Db
-      return db[op](query, params)
-    },
-    { op, query, params }
-  )
-}
-
 /** The tab's stored checkpoint (null: none). */
 async function checkpoint(
-  app: ElectronApplication,
+  page: Page,
   tabId: string
 ): Promise<{ version: string; seq: number; data: string } | null> {
-  const row = await sql(
-    app,
-    'get',
-    'SELECT version, seq, data FROM chat_timeline_checkpoints WHERE tab_id = ?',
-    [tabId]
-  ).catch(() => null)
-  return (row as { version: string; seq: number; data: string } | undefined) ?? null
+  return (await chatProjection(page, tabId)).checkpoint
 }
 
 /** Stored as of the tab's newest saved event (nothing left to write). */
-async function storedUpToDate(app: ElectronApplication, tabId: string): Promise<boolean> {
-  const last = (await sql(app, 'get', 'SELECT MAX(seq) AS seq FROM chat_events WHERE tab_id = ?', [
-    tabId
-  ]).catch(() => null)) as { seq: number } | null
-  const cp = await checkpoint(app, tabId)
-  return last !== null && cp !== null && cp.seq === last.seq
+async function storedUpToDate(page: Page, tabId: string): Promise<boolean> {
+  const { checkpoint, lastSeq } = await chatProjection(page, tabId)
+  return checkpoint !== null && checkpoint.seq === lastSeq
 }
 
 /** How the hub opens the tab for a client of this reducer version. */
@@ -75,8 +47,7 @@ test.describe('Claude chat: paged history — recovery', () => {
   })
 
   test('a stored page that cannot be read: opened again from the events, the stored projection thrown away', async ({
-    chat,
-    electronApp
+    chat
   }) => {
     test.setTimeout(240_000)
     const t = await chat.openTask({
@@ -89,25 +60,20 @@ test.describe('Claude chat: paged history — recovery', () => {
     await expect(timeline.getByText(LAST_REPLY)).toBeVisible({ timeout: 60_000 })
     expect(await openKind(t.page, t.tabId)).toBe('paged')
     // Stored (as of the newest event), then page 0 damaged.
-    await expect.poll(() => storedUpToDate(electronApp, t.tabId), { timeout: 20_000 }).toBe(true)
-    await sql(
-      electronApp,
-      'run',
-      `UPDATE chat_timeline_pages SET rows = '{oops' WHERE tab_id = ? AND page = 0`,
-      [t.tabId]
-    )
+    await expect.poll(() => storedUpToDate(t.page, t.tabId), { timeout: 20_000 }).toBe(true)
+    await chatProjection(t.page, t.tabId, 'corrupt-page')
 
     await t.composer.focus()
     await t.page.keyboard.press('Meta+ArrowUp')
     await expect(timeline.getByText(FIRST_PROMPT)).toBeVisible({ timeout: 30_000 })
     await t.page.keyboard.press('Meta+ArrowDown')
     await expect(timeline.getByText(LAST_REPLY)).toBeVisible({ timeout: 20_000 })
-    // Thrown away; this hub tab no longer serves pages.
-    await expect.poll(() => checkpoint(electronApp, t.tabId), { timeout: 10_000 }).toBeNull()
+    // Thrown away; this computer tab no longer serves pages.
+    await expect.poll(() => checkpoint(t.page, t.tabId), { timeout: 10_000 }).toBeNull()
     expect(await openKind(t.page, t.tabId)).toBe('full')
   })
 
-  test('the hub restarting over a corrupt checkpoint: rebuilt, paged again, same content', async ({
+  test('cold computer conversation after hub restart: corrupt checkpoint rebuilt, same content', async ({
     chat,
     electronApp,
     mainWindow
@@ -121,13 +87,9 @@ test.describe('Claude chat: paged history — recovery', () => {
     })
     const timeline = t.panel.getByTestId('chat-timeline-scroller')
     await expect(timeline.getByText(LAST_REPLY)).toBeVisible({ timeout: 60_000 })
-    await expect.poll(() => storedUpToDate(electronApp, t.tabId), { timeout: 20_000 }).toBe(true)
-    await sql(
-      electronApp,
-      'run',
-      `UPDATE chat_timeline_checkpoints SET data = '{oops' WHERE tab_id = ?`,
-      [t.tabId]
-    )
+    await expect.poll(() => storedUpToDate(t.page, t.tabId), { timeout: 20_000 }).toBe(true)
+    // Flush/unload the computer's in-memory conversation before damaging its checkpoint.
+    await chatProjection(t.page, t.tabId, 'corrupt-checkpoint')
 
     // The hub restarts (its tabs load again from what is stored).
     type Status = { health: string; pid: number | null }
@@ -155,7 +117,7 @@ test.describe('Claude chat: paged history — recovery', () => {
     const again = panel.getByTestId('chat-timeline-scroller')
     await expect(again.getByText(LAST_REPLY)).toBeVisible({ timeout: 60_000 })
     await expect
-      .poll(async () => (await checkpoint(electronApp, t.tabId))?.data.startsWith('{"'), {
+      .poll(async () => (await checkpoint(t.page, t.tabId))?.data.startsWith('{"'), {
         timeout: 20_000
       })
       .toBe(true)

@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from '@slayzone/task/server'
@@ -132,6 +132,31 @@ test('first chat read migrates legacy history then all writes stay on its comput
       { text: 'computer-only hook marker' }
     ])
     expect(h.db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
+    try {
+      vi.stubEnv('PLAYWRIGHT', 'true')
+      await expect(services.testing.seedEvents('tab', 0, [])).rejects.toThrow(/test-only/i)
+      vi.stubEnv('PLAYWRIGHT', '1')
+      await services.testing.seedEvents('tab', 0, [
+        { kind: 'assistant-text', messageId: 'seed', text: 'computer-only seeded marker' }
+      ])
+      expect(await services.testing.readEvents('tab', -1, 1)).toMatchObject([
+        { seq: 0, event: { text: 'computer-only seeded marker' } }
+      ])
+      expect((await services.testing.projection('tab', 'read')).lastSeq).toBe(0)
+      await services.testing.seedPrompts('task', [
+        {
+          id: 'seed-prompt',
+          agentId: 'claude-code',
+          text: 'computer-only seeded prompt',
+          cliSessionId: 'provider',
+          createdAt: 1
+        }
+      ])
+      expect(h.db.prepare('SELECT count(*) AS n FROM chat_events').get()).toEqual({ n: 0 })
+      expect(h.db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   } finally {
     await pc.close()
     h.cleanup()

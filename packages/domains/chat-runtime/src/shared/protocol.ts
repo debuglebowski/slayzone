@@ -82,6 +82,8 @@ const tab = z.tuple([id]),
   taskMode = z.tuple([id, z.string()]),
   createTuple = z.tuple([create])
 export const chatOperationSchemas = {
+  refuseStart: createTuple,
+  releaseConversation: z.tuple([id, id]),
   askSideQuestion: z.tuple([
     create.extend({
       requestId: id,
@@ -289,6 +291,7 @@ export const chatBootstrapSchema = z.object({
   settings: z.record(z.string(), z.string().nullable()).optional(),
   terminalProviderConfig: z.record(z.string(), z.unknown()).optional(),
   honoredConversations: z.array(z.string()).optional(),
+  honoredSessions: z.array(z.object({ mode: z.string(), conversationId: z.string() })).optional(),
   deletedConversations: z
     .array(z.object({ mode: z.string(), conversationId: z.string() }))
     .optional(),

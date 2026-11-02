@@ -10,6 +10,7 @@ type Runtime = {
   queueOps: ReturnType<ChatQueueRuntime['createChatQueueOps']>
 }
 const tabOperations = new Set([
+  'releaseConversation',
   'send',
   'sendToolResult',
   'respondPermission',
@@ -59,8 +60,8 @@ export function createChatInvoker(runtime: Runtime) {
       const context = first as { tabId: unknown; taskId: unknown; mode: unknown }
       if (
         context.tabId !== identity.tabId ||
-        context.taskId !== identity.taskId ||
-        context.mode !== identity.mode
+        ('taskId' in first && context.taskId !== identity.taskId) ||
+        ('mode' in first && context.mode !== identity.mode)
       )
         throw new Error('Chat tab ownership mismatch')
     }

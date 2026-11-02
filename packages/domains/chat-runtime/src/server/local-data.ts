@@ -41,6 +41,7 @@ export interface ChatBootstrap {
   env: Record<string, string>
   terminalProviderConfig?: ProviderConfigEntry
   honoredConversations?: string[]
+  honoredSessions?: Array<{ mode: string; conversationId: string }>
   deletedConversations?: Array<{ mode: string; conversationId: string }>
 }
 export interface ChatMetadataUpdate {
@@ -233,6 +234,13 @@ export function createLocalChatData(
     for (const id of value.honoredConversations ?? [])
       if (!get(value.identity.tabId, 'settings', `session:${id}`))
         set(value.identity.tabId, 'settings', `session:${id}`, { conversationId: id })
+    for (const session of value.honoredSessions ?? [])
+      set(
+        value.identity.tabId,
+        'settings',
+        `session-proof:${session.mode}:${session.conversationId}`,
+        true
+      )
   }
   const queued = (tabId: string): QueuedChatMessage[] =>
     store
@@ -409,20 +417,29 @@ export function createLocalChatData(
     recordConversation: async (input) => {
       store.transaction(() => {
         const tabId = taskTab(input.taskId, input.mode)
-        set(tabId, 'settings', `session:${input.conversationId ?? 'reset'}`, input)
+        const value = { ...input, createdAt: input.createdAt ?? Date.now() }
+        set(tabId, 'settings', `session:${input.conversationId ?? 'reset'}`, value)
+        if (input.conversationId)
+          set(tabId, 'settings', `session-proof:${input.mode}:${input.conversationId}`, true)
         patchSync(
           input.taskId,
           input.mode,
           input.legacyJsonField ?? 'conversationId',
           input.conversationId
         )
-        metadata(tabId, 'conversation', input)
+        metadata(tabId, 'conversation', value)
       })
     },
-    isHonoredConversation: async (t, m, id) =>
-      !deleted(t, m, id) &&
-      (Boolean(get(taskTab(t, m), 'settings', `session:${id}`)) ||
-        [provider(t, m).chatConversationId, provider(t, m).conversationId].includes(id)),
+    isHonoredConversation: async (t, m, id) => {
+      if (deleted(t, m, id)) return false
+      const tabId = taskTab(t, m),
+        session = get<{ mode?: string }>(tabId, 'settings', `session:${id}`)
+      return (
+        Boolean(get(tabId, 'settings', `session-proof:${m}:${id}`)) ||
+        Boolean(session && (session.mode ?? owner(tabId).mode) === m) ||
+        [provider(t, m).chatConversationId, provider(t, m).conversationId].includes(id)
+      )
+    },
     getCurrentConversationId: async (t, m) => {
       const id =
         (chatModeForTerminal(m)
@@ -477,6 +494,25 @@ export function createLocalChatData(
           )
           if (record?.needsRecoveryEvent)
             set(tabId, 'workspace', event.captureId, { ...record, needsRecoveryEvent: false })
+        }
+        if (
+          outcome === 'inserted' &&
+          event.kind === 'user-message-delivery' &&
+          ['delivered', 'answered'].includes(event.state)
+        ) {
+          const prompt = get<{ id: string; cliSessionId: string | null; createdAt: number }>(
+            tabId,
+            'prompt',
+            event.id
+          )
+          const conversationId = provider(i.taskId, i.mode).chatConversationId
+          if (prompt && conversationId && prompt.cliSessionId !== conversationId)
+            store.putRecord(i.id, i.epoch, {
+              kind: 'prompt',
+              id: prompt.id,
+              value: { ...prompt, cliSessionId: conversationId },
+              at: prompt.createdAt
+            })
         }
         return outcome
       }),
@@ -655,12 +691,24 @@ export function createLocalChatData(
       }
       for (const r of records) {
         if (r.kind === 'settings' && r.id.startsWith('session:')) {
-          const v = r.value as { conversationId?: string; mode?: string; origin?: string }
-          if (v.conversationId && !deleted(i.taskId, v.mode ?? i.mode, v.conversationId))
+          const v = r.value as {
+            conversationId?: string | null
+            mode?: string
+            origin?: string
+            createdAt?: number
+          }
+          if (
+            (v.conversationId && !deleted(i.taskId, v.mode ?? i.mode, v.conversationId)) ||
+            (v.conversationId === null && v.origin === 'manual-reset')
+          )
             add('conversation', r.id, {
               mode: v.mode ?? i.mode,
               conversationId: v.conversationId,
-              origin: v.origin ?? 'legacy-migration'
+              origin: v.origin ?? 'legacy-migration',
+              createdAt: v.createdAt ?? r.at,
+              legacyJsonField: (v.mode ?? i.mode).endsWith('-chat')
+                ? 'chatConversationId'
+                : 'conversationId'
             })
         }
         if (r.kind === 'settings' && (r.id === 'provider' || r.id.startsWith('provider:'))) {

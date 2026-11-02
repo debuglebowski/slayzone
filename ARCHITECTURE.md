@@ -122,6 +122,26 @@ placements. Hub administration still requires an explicit user login.
 `slay hub ls` shows local hubs and the task's hub target. `--json` retains the local
 discovery array; `--json-v2` adds task-hub metadata in a versioned envelope.
 
+### Computer-owned chat
+
+Desktop/mobile requests pass through the hub's authorization and ownership gates
+to the history-owning computer. Every computer, including the local one, runs an
+independent chat transport, queue and per-hub SQLite database with immutable blobs.
+Events, drafts, prompts, timelines, workspace diffs and new chat uploads persist
+there before acknowledgement/display. The hub keeps opaque ownership/epoch,
+session and artifact locators, lifecycle fences and transient relay data.
+
+Changing task placement does not relocate chat history. Legacy cutover freezes
+writers, streams/verifies data, commits ownership, waits for activation and then
+cleans/compacts the source. Reconnect reconciles ownership, metadata and deletion
+fences before admitting new work. Offline computers cause explicit unavailability.
+General artifact originals and old hub backups remain documented exceptions;
+unattributed legacy diagnostics remain held pending proven ownership.
+
+Computer backups snapshot SQLite and referenced blobs together. Restores publish
+separate read-only archives; provider session resumability is not guaranteed.
+See [backup and restore](docs/backup-and-restore.md) for retention and operator details.
+
 ## Dependency Rules
 
 1. **Apps** compose domains. No business logic.

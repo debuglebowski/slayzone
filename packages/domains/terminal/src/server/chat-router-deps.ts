@@ -1,4 +1,4 @@
-import type { ChatComputerOps, ChatAvailability } from '@slayzone/terminal-contracts'
+import type { ChatComputerOps, ChatAvailability, AgentEvent } from '@slayzone/terminal-contracts'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { createChatOps } from './runtime/chat-handlers'
 import type { createChatQueueOps, ChatQueueEventMap } from './runtime/chat-queue-handlers'
@@ -32,6 +32,31 @@ export type ChatCatalog = {
   ) => Promise<Awaited<ReturnType<ReturnType<typeof createChatOps>[K]>>>
 }
 export type ChatDeps = {
+  testing?: {
+    seedEvents(tabId: string, fromSeq: number, events: Record<string, unknown>[]): Promise<void>
+    readEvents(
+      tabId: string,
+      afterSeq: number,
+      limit: number
+    ): Promise<Array<{ seq: number; event: AgentEvent }>>
+    projection(
+      tabId: string,
+      action: 'read' | 'corrupt-page' | 'corrupt-checkpoint'
+    ): Promise<{
+      checkpoint: { version: string; seq: number; data: string } | null
+      lastSeq: number
+    }>
+    seedPrompts(
+      taskId: string,
+      prompts: Array<{
+        id: string
+        agentId: string
+        text: string
+        cliSessionId: string | null
+        createdAt: number
+      }>
+    ): Promise<void>
+  }
   ops: AsyncCapable<ReturnType<typeof createChatOps>>
   queueOps: AsyncCapable<ReturnType<typeof createChatQueueOps>>
   catalog?: ChatCatalog

@@ -96,6 +96,53 @@ test('diagnostic policy accepts only explicit booleans', async () => {
     h.request({ kind: 'diagnostics.configure', enabled: 'false', verbose: true })
   ).rejects.toThrow()
 })
+
+test('computer-only test seeding is gated, atomic and epoch/task fenced', async () => {
+  const { h } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  const seed = {
+    kind: 'test.seedEvents',
+    route: { id: 'store', epoch: 1 },
+    fromSeq: 1,
+    events: [{ kind: 'assistant-text', messageId: 'a', text: 'computer-only marker' }]
+  }
+  try {
+    vi.stubEnv('PLAYWRIGHT', 'true')
+    await expect(h.request(seed)).rejects.toThrow(/test-only/i)
+    vi.stubEnv('PLAYWRIGHT', '1')
+    await expect(h.request({ ...seed, route: { id: 'store', epoch: 2 } })).rejects.toThrow(
+      /ownership/i
+    )
+    expect(await h.request(seed)).toEqual({ ok: true })
+    expect(await h.request(seed)).toEqual({ ok: true })
+    expect(
+      await h.request({ kind: 'test.readEvents', route: seed.route, afterSeq: -1, limit: 1 })
+    ).toMatchObject([{ seq: 1, event: { text: 'computer-only marker' } }])
+    await expect(
+      h.request({
+        ...seed,
+        fromSeq: 0,
+        events: [
+          { kind: 'notice', text: 'must rollback' },
+          { kind: 'assistant-text', text: 'conflict' }
+        ]
+      })
+    ).rejects.toThrow()
+    expect(
+      await h.request({ kind: 'test.readEvents', route: seed.route, afterSeq: -1, limit: 10 })
+    ).toMatchObject([{ seq: 1 }])
+    await expect(
+      h.request({ ...seed, events: Array.from({ length: 1001 }, () => ({ kind: 'notice' })) })
+    ).rejects.toThrow()
+    await expect(
+      h.request({ ...seed, events: [{ kind: 'notice', text: 'x'.repeat(8 * 1024 * 1024) }] })
+    ).rejects.toThrow(/byte limit/i)
+    await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'paused', revision: 1 })
+    await expect(h.request({ ...seed, fromSeq: 1 })).rejects.toThrow(/paused/i)
+  } finally {
+    vi.unstubAllEnvs()
+  }
+})
 test('file listing still obeys the computer allowed-roots guard', async () => {
   const { h } = setup()
   await h.request({ kind: 'bootstrap', value: bootstrap })

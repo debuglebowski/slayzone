@@ -19,11 +19,11 @@ export function registerArtifactsListRoute(app: Express, deps: RestApiDeps): voi
         res.status(task.status).json({ ok: false, error: task.error })
         return
       }
-      const artifacts = await db.all(
+      const artifacts = await db.all<Record<string, unknown> & { id: string }>(
         `SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY "order" ASC, created_at ASC`,
         [task.row.id]
       )
-      const folders = await db.all(
+      const folders = await db.all<Record<string, unknown> & { id: string }>(
         `SELECT * FROM artifact_folders WHERE task_id = ? ORDER BY "order" ASC, created_at ASC`,
         [task.row.id]
       )
@@ -34,11 +34,11 @@ export function registerArtifactsListRoute(app: Express, deps: RestApiDeps): voi
         ok: true,
         data: {
           folders: currentFolders.map((f) => ({
-            ...(folders.find((r: any) => r.id === f.id) as object),
+            ...folders.find((r) => r.id === f.id),
             ...f
           })),
           artifacts: currentArtifacts.map((a) => ({
-            ...(artifacts.find((r: any) => r.id === a.id) as object),
+            ...artifacts.find((r) => r.id === a.id),
             ...a
           }))
         }

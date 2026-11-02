@@ -59,7 +59,11 @@ import { ChatEventLog, type BufferedEvent } from '../chat-events-store'
 // alias for claude-chat, Codex model id for codex-chat) — typed as `string`.
 // The provider-aware catalog (`shared/chat-model-catalog.ts`) owns validity.
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
-import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
+import {
+  markSessionUserInput,
+  clearSessionUserInputMark,
+  hasSessionUserInput
+} from '../user-input-tracker'
 import type { AgentStateRecorder } from './pty-manager'
 import { ptyEvents } from './pty-events'
 import {
@@ -102,6 +106,11 @@ export interface ChatEventStore {
 
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
 export interface TransportDeps {
+  userInputTracker: {
+    mark(sessionId: string): void
+    clear(sessionId: string): void
+    has(sessionId: string): boolean
+  }
   diagnostic?: (tabId: string, event: DiagnosticEvent) => void
   attachmentReader?: ChatAttachmentReader
   /**
@@ -552,6 +561,11 @@ export function createChatTransport(
   }
 
   const defaultDeps: TransportDeps = {
+    userInputTracker: {
+      mark: markSessionUserInput,
+      clear: clearSessionUserInputMark,
+      has: hasSessionUserInput
+    },
     spawn: realSpawn,
     whichBinary: realWhichBinary,
     broadcastEvent: (tabId, event, seq, live, at) => {
@@ -1382,7 +1396,7 @@ export function createChatTransport(
   function markTurnStarted(tab: ChatTab): void {
     tab.turnProgress = false
     tab.turnInterrupted = false
-    markSessionUserInput(stateKey(tab))
+    deps.userInputTracker.mark(stateKey(tab))
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
     armWatchdog(tab)
@@ -1487,7 +1501,7 @@ export function createChatTransport(
     }
     routeHostEvent(tab, { kind: 'process-exit', code, signal })
     deps.broadcastExit(tab.tabId, tab.sessionId, code, signal)
-    clearSessionUserInputMark(stateKey(tab))
+    deps.userInputTracker.clear(stateKey(tab))
   }
 
   /**
@@ -2836,7 +2850,12 @@ export function createChatTransport(
           Promise.race([
             proc.exited,
             new Promise((r) => setTimeout(r, RELEASE_EXIT_TIMEOUT_MS).unref?.())
-          ])
+          ]).then(() => {
+            if (!proc.ended)
+              throw new ChatTransportError(
+                'Chat process exit is unconfirmed; cannot release this conversation'
+              )
+          })
         )
       }
       waits.push(flushed)
@@ -3255,6 +3274,8 @@ export function createChatTransport(
   function removeSession(tabId: string): Promise<void> {
     const tab = tabs.get(tabId)
     if (!tab) return closing.get(tabId) ?? Promise.resolve()
+    transitionState(tab, 'dead')
+    deps.userInputTracker.clear(stateKey(tab))
     tabs.delete(tabId)
     tab.closed = true
     clearWatchdog(tab)
@@ -3413,7 +3434,7 @@ export function createChatTransport(
       proc.reap(null, 'SIGKILL')
     }
     transitionState(tab, 'dead')
-    clearSessionUserInputMark(stateKey(tab))
+    deps.userInputTracker.clear(stateKey(tab))
   }
 
   function shutdownSession(
@@ -3584,6 +3605,13 @@ export function createChatTransport(
   }
   return {
     chatEvents,
+    recordConversationInUse: (tabId: string) => {
+      const tab = tabs.get(tabId)
+      if (!tab) throw new ChatTransportError('Chat tab is not hydrated')
+      if (tab.proc && !tab.proc.ended) throw new ChatTransportError('Cannot refuse a live chat')
+      failStart(tab, chatSpawnError('conversation-in-use', conversationInUseMessage('terminal')))
+    },
+    hasSessionUserInput: (sessionId: string) => deps.userInputTracker.has(sessionId),
     setTransportDepsForTests,
     setAgentStateTabRecorder,
     getAgentStateTabRecorder,

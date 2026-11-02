@@ -105,13 +105,35 @@ export function createLegacyChatSource(opts: {
       origin: string
       created_at: number
     }>(
-      `SELECT rowid AS _rowid,* FROM task_conversations c WHERE task_id=? AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn') AND rowid=(SELECT max(d.rowid) FROM task_conversations d WHERE d.task_id=c.task_id AND d.conversation_id=c.conversation_id AND d.origin NOT IN ('foreign-observed','pending-spawn'))`,
+      `SELECT rowid AS _rowid,* FROM task_conversations c WHERE task_id=? AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn') AND rowid=(SELECT max(d.rowid) FROM task_conversations d WHERE d.task_id=c.task_id AND d.mode=c.mode AND d.conversation_id=c.conversation_id AND d.origin NOT IN ('foreign-observed','pending-spawn'))`,
       [owner.taskId]
     ))
       yield record(
         'settings',
         `session:${r.conversation_id}`,
-        { taskId: owner.taskId, mode: r.mode, conversationId: r.conversation_id, origin: r.origin },
+        {
+          taskId: owner.taskId,
+          mode: r.mode,
+          conversationId: r.conversation_id,
+          origin: r.origin,
+          createdAt: r.created_at
+        },
+        r.created_at
+      )
+    for (const r of await db.all<{ mode: string; created_at: number }>(
+      'SELECT mode,max(created_at) AS created_at FROM session_resets WHERE task_id=? GROUP BY mode',
+      [owner.taskId]
+    ))
+      yield record(
+        'settings',
+        `session:reset:${r.mode}`,
+        {
+          taskId: owner.taskId,
+          mode: r.mode,
+          conversationId: null,
+          origin: 'manual-reset',
+          createdAt: r.created_at
+        },
         r.created_at
       )
     if (task?.project_id) {

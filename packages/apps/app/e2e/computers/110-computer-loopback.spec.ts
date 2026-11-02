@@ -1,10 +1,10 @@
-import { spawn, execFileSync, type ChildProcess } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import fs from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { test as base, expect, type Page } from '@playwright/test'
 import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
+import { COMPUTER_BIN, ensureComputerBuilt } from '../fixtures/computer-build'
 
 /**
  * Wave 3 — computer-ON loopback end-to-end.
@@ -47,42 +47,7 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  * plain non-computer server, which is exactly what this spec must boot without.
  */
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
-const APP_DIR = path.resolve(__dirname, '..', '..')
-const COMPUTER_DIR = path.resolve(APP_DIR, '..', 'computer')
-const COMPUTER_BIN = path.join(COMPUTER_DIR, 'dist', 'bin.cjs')
-
-/** Build the computer bundle on demand — it is not part of the app build pipeline
- *  (see packages/apps/computer/build.mjs). Idempotent: skip when the bundle is
- *  present AND newer than every computer source file, else (re)build. */
-function ensureComputerBuilt(): void {
-  let needsBuild = !fs.existsSync(COMPUTER_BIN)
-  if (!needsBuild) {
-    const binMtime = fs.statSync(COMPUTER_BIN).mtimeMs
-    const srcDir = path.join(COMPUTER_DIR, 'src')
-    const newest = newestMtime(srcDir)
-    if (newest > binMtime) needsBuild = true
-  }
-  if (!needsBuild) return
-  execFileSync('node', ['build.mjs'], { cwd: COMPUTER_DIR, stdio: 'inherit' })
-  if (!fs.existsSync(COMPUTER_BIN)) {
-    throw new Error(`computer build did not produce ${COMPUTER_BIN}`)
-  }
-}
-
-function newestMtime(dir: string): number {
-  let newest = 0
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      newest = Math.max(newest, newestMtime(full))
-    } else {
-      newest = Math.max(newest, fs.statSync(full).mtimeMs)
-    }
-  }
-  return newest
-}
 
 /** Minimal shape of the token embedded by mintJoinToken (szjt1.<b64url(json)>). */
 function decodeHubUrl(token: string): string {

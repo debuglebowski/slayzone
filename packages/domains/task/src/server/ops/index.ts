@@ -74,6 +74,7 @@ export {
   getCurrentConversationId,
   listConversationHistory,
   listTaskSessions,
+  setTaskSessionPromptReader,
   isHonoredConversation,
   deleteSession,
   findPendingSpawn,

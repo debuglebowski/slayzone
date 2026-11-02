@@ -504,10 +504,10 @@ async function exportArchivedConversation(
       for (const ref of draft.draft?.attachments ?? [])
         refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
     }
-  const attachments = []
+  const attachments: Array<{ ref: ChatAttachment; data: string }> = []
   for (const ref of refs.values())
     attachments.push({ ref, ...(await api.chat.archives.attachment.query({ ...target, ref })) })
-  const files = []
+  const files: Array<{ version: ArchivedArtifactVersion; name: string; data: string }> = []
   for (const record of allRecords) {
     if (record.kind !== 'artifact-version') continue
     const version = record.value as ArchivedArtifactVersion

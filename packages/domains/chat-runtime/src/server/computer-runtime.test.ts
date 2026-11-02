@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 
 const dirs: string[] = []
@@ -40,6 +40,25 @@ test('drafts persist on computer and restore without a hub database', async () =
   expect((await next.ops.getTabState('tab-a'))?.draft.text).toBe('private draft')
 })
 
+test('side-question cancellation accepts its tab-only context and fences foreign tabs', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  const cancel = vi.spyOn(r.ops, 'cancelSideQuestion')
+  const request = {
+    route: { id: 'storage-a', epoch: 1 },
+    target: 'ops',
+    method: 'cancelSideQuestion',
+    operationId: 'cancel',
+    args: [{ tabId: 'tab-a', requestId: 'q' }]
+  }
+  await r.invoke(request)
+  expect(cancel).toHaveBeenCalledWith({ tabId: 'tab-a', requestId: 'q' })
+  await expect(
+    r.invoke({ ...request, operationId: 'foreign', args: [{ tabId: 'other', requestId: 'q' }] })
+  ).rejects.toThrow(/ownership/i)
+  expect(cancel).toHaveBeenCalledTimes(1)
+})
+
 test('computer diagnostic opt-out persists independently for each hub', async () => {
   const { r, stateDir } = runtime()
   r.configureDiagnostics({ enabled: false, verbose: true })
@@ -49,6 +68,37 @@ test('computer diagnostic opt-out persists independently for each hub', async ()
     enabled: true,
     verbose: false
   })
+})
+
+test('same session IDs on different hubs keep independent user-input attention marks', async () => {
+  const { fakeChild, until } = await import(
+    '../../../terminal/src/server/runtime/chat-transport-testkit'
+  )
+  const root = mkdtempSync(join(tmpdir(), 'chat-input-isolation-')),
+    child = fakeChild({ exitOnKill: true })
+  dirs.push(root)
+  const a = createComputerChatRuntime({
+      stateDir: root,
+      hubScope: 'a',
+      computerId: 'pc',
+      transport: {
+        spawn: () => {
+          setImmediate(() => child.child.emit('spawn'))
+          return child.child
+        },
+        whichBinary: async () => '/fake/claude'
+      }
+    }),
+    b = createComputerChatRuntime({ stateDir: root, hubScope: 'b', computerId: 'pc' })
+  runtimes.push(a, b)
+  a.bootstrap(bootstrap)
+  b.bootstrap(bootstrap)
+  await a.ops.start(createOpts)
+  a.transport.sendUserMessage('tab-a', 'hello')
+  await until(() => a.transport.hasSessionUserInput('task-a:tab-a'))
+  expect(b.transport.hasSessionUserInput('task-a:tab-a')).toBe(false)
+  await a.transport.removeSession('tab-a')
+  expect(a.transport.hasSessionUserInput('task-a:tab-a')).toBe(false)
 })
 
 test.each([true, false])(
@@ -129,6 +179,32 @@ test('chat prompt recall keeps the latest 500 entries without truncating convers
   expect(prompts[0].text).toBe('prompt 1')
   expect(prompts.at(-1)?.text).toBe('prompt 500')
   expect(r.storage.read(bootstrap.identity.id, -1, 1000)).toHaveLength(501)
+})
+
+test('delivery binds a prompt accepted before provider initialization to its actual conversation', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  r.local.data.persistChatEventSync!(
+    'tab-a',
+    0,
+    { kind: 'user-message', id: 'first', text: 'first question' },
+    1
+  )
+  expect(r.prompts('task-a')[0].cli_session_id).toBeNull()
+  await r.local.data.recordConversation({
+    taskId: 'task-a',
+    mode: 'claude-chat',
+    conversationId: 'native',
+    origin: 'slay-spawned-fresh',
+    legacyJsonField: 'chatConversationId'
+  })
+  r.local.data.persistChatEventSync!(
+    'tab-a',
+    1,
+    { kind: 'user-message-delivery', id: 'first', state: 'delivered' },
+    2
+  )
+  expect(r.prompts('task-a')[0]).toMatchObject({ cli_session_id: 'native', text: 'first question' })
 })
 
 test('two hubs can use the same task and tab ids without sharing chat content', async () => {
@@ -267,6 +343,11 @@ test('workspace metadata and lazy diff reads survive computer restart', async ()
     diff: null,
     hasDiff: true
   })
+  expect((await r.ops.getWorkspaceChanges('tab-a', 'capture'))?.files[0]).toMatchObject({
+    path: 'a.ts',
+    hasDiff: true
+  })
+  expect(await r.ops.getWorkspaceFileDiff('tab-a', 'capture', 'a.ts')).toBe('private diff')
   await r.close()
   const next = runtime(stateDir).r
   next.bootstrap(bootstrap)
@@ -302,6 +383,37 @@ test('terminal hook prompts survive before a tab bootstrap and never enter metad
   } finally {
     await b.close()
   }
+})
+
+test('session summaries retain old labels and full event counts beyond capped prompt recall', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  let seq = 0
+  const save = (event: Parameters<typeof r.storage.append>[2]) =>
+    r.local.data.persistChatEventSync!('tab-a', seq++, event, seq)
+  save({ kind: 'user-message', id: 'first', text: 'original session label' })
+  save({ kind: 'turn-init', sessionId: 'native', model: 'test', cwd: '/tmp', tools: [] })
+  await r.local.data.recordConversation({
+    taskId: 'task-a',
+    mode: 'claude-chat',
+    conversationId: 'native',
+    origin: 'slay-spawned-fresh',
+    legacyJsonField: 'chatConversationId'
+  })
+  save({ kind: 'user-message-delivery', id: 'first', state: 'delivered' })
+  for (let n = 0; n < 600; n++)
+    save({ kind: 'user-message', id: `later-${n}`, text: `later prompt ${n}` })
+  // Replayed history and synthetic control prompts must not inflate session counts.
+  save({ kind: 'user-message', id: 'first', text: 'original session label', history: true })
+  save({ kind: 'user-message', id: 'control', text: '__slay_control__' })
+  expect(r.prompts('task-a')).toHaveLength(500)
+  expect(r.promptSummaries('task-a', ['native'])).toEqual([
+    { conversationId: 'native', count: 601, firstPrompt: 'original session label', firstAt: 1 }
+  ])
+  expect(r.promptSummaries('other-task', ['native'])).toEqual([])
+  expect(r.promptSummaries('task-a', ['unknown'])).toEqual([])
+  await r.applyTaskLifecycle('task-a', 'deleted', 1)
+  expect(r.promptSummaries('task-a', ['native'])).toEqual([])
 })
 
 test('Trash pauses chat without losing drafts or queue; final purge cannot be undone by old state', async () => {
@@ -367,6 +479,38 @@ test('deleted native sessions remain excluded after newer and stale bootstraps',
     providerConfig: { chatConversationId: 'native' }
   })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
+})
+
+test('historical session proof preserves source mode and respects later deletion', async () => {
+  const { r } = runtime()
+  r.bootstrap({
+    ...bootstrap,
+    honoredSessions: [{ mode: 'claude-code', conversationId: 'terminal-old' }]
+  })
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-code', 'terminal-old')).toBe(
+    true
+  )
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'terminal-old')).toBe(
+    false
+  )
+  await r.local.data.recordConversation({
+    taskId: 'task-a',
+    mode: 'claude-code',
+    conversationId: 'terminal-new',
+    origin: 'slay-spawned-fresh'
+  })
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'terminal-new')).toBe(
+    false
+  )
+  r.bootstrap({
+    ...bootstrap,
+    revision: 2,
+    honoredSessions: [{ mode: 'claude-code', conversationId: 'terminal-old' }],
+    deletedConversations: [{ mode: 'claude-code', conversationId: 'terminal-old' }]
+  })
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-code', 'terminal-old')).toBe(
+    false
+  )
 })
 
 test('computer bootstrap preserves user default settings added on main', async () => {

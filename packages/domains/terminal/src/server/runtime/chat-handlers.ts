@@ -5,48 +5,8 @@ import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal
 import { getPtyHostBridge } from '../pty-host'
 import {
   hydrateSession,
-  ensureSpawned,
-  dispatchUserMessage,
-  recordCodexPlanDecision,
-  respawn,
-  getReplay,
-  openTimeline,
-  timelinePages,
-  searchTimeline,
-  getCommandTaskOutput,
-  stopCommandTask,
-  backgroundCommandTask,
-  sendToolResult,
-  sendControlRequest,
-  respondToPermissionRequest,
-  updateSessionChatMode,
-  changeCodexPermissionsAndResume,
-  updateSessionChatModel,
-  updateSessionChatEffort,
-  updateSessionChatCollaboration,
-  updateSessionChatFastMode,
-  kill as killChat,
-  removeSession,
-  recordInterrupted,
-  stopTurn,
-  previewRewind,
-  rewindTab,
-  forkTab,
-  threadForkSource,
-  askSideQuestion,
-  cancelSideQuestion,
-  confirmedConversation,
-  releaseChatConversation,
-  switchTabConversation,
-  getEventBufferSince,
-  readEventsSince,
-  getSessionInfo,
-  getSessionTerminalState,
-  isTurnOpen,
   killAll,
   shutdownAll,
-  configureTransport,
-  chatEvents,
   type TransportDeps,
   type ChatSessionInfo,
   type ShutdownOptions,
@@ -115,7 +75,6 @@ import {
 import type { AgentEvent as ChatAgentEvent } from '@slayzone/terminal-contracts'
 import { claudeSessionHistory } from '../agents/claude-session-import'
 import { randomUUID } from 'node:crypto'
-import { getWorkspaceChanges, getWorkspaceFileDiff } from './chat-transport-manager'
 import type {
   RewindFilesPreview,
   RewindResult,
@@ -657,6 +616,8 @@ const cliDetailsListeners = new WeakMap<ChatTransport, (tabId: string, event: Ag
 export function createChatOps(opts: ChatHandlerOpts) {
   const transport = opts.transport ?? defaultChatTransport
   const {
+    getWorkspaceChanges,
+    getWorkspaceFileDiff,
     hydrateSession,
     ensureSpawned,
     dispatchUserMessage,
@@ -893,6 +854,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
   const ops = {
     supports: (mode: string): boolean => supportsChatMode(mode),
+    refuseStart: async (o: ChatCreateOpts): Promise<void> => {
+      await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      transport.recordConversationInUse(o.tabId)
+    },
 
     /**
      * E2E-only (the router gates it on PLAYWRIGHT): shorten the watchdog so a spec
@@ -1266,6 +1231,13 @@ export function createChatOps(opts: ChatHandlerOpts) {
         origin: 'handoff'
       })
       return { conversationId }
+    },
+    releaseConversation: async (tabId: string, conversationId: string): Promise<void> => {
+      const info = getSessionInfo(tabId)
+      if (!info) return
+      if (info.sessionId !== conversationId)
+        throw new Error('Chat conversation changed before release')
+      await releaseChatConversation(info.taskId, conversationId)
     },
 
     /**

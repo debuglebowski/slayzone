@@ -1,9 +1,10 @@
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
 import { setChatSessionSource } from '@slayzone/terminal/server'
-import { setAgentPromptReader } from '@slayzone/agent-turns/server'
+import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
+import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
 import {
@@ -116,6 +117,8 @@ import {
   reserveWarmTaskId,
   onGlobalStateChange,
   hasSessionUserInput,
+  markSessionUserInput,
+  clearSessionUserInputMark,
   configureTransport,
   createDbChatDataOps,
   setPtyEnricher,
@@ -874,9 +877,14 @@ export function composeServer(opts: {
       computerChat.relay.sessions
         .list()
         .some((s) => s.taskId === taskId && !['not-spawned', 'dead', 'error'].includes(s.state)),
-    onState: (sessionId, state, previous) => {
-      if (state !== 'not-spawned' && previous !== 'not-spawned')
-        notifyGlobalStateListeners(sessionId, state, previous)
+    onState: async (sessionId, state, previous, hasUserInput) => {
+      if (hasUserInput && state !== 'dead') markSessionUserInput(sessionId)
+      else clearSessionUserInputMark(sessionId)
+      if (state !== 'not-spawned') {
+        const oldState = previous === 'not-spawned' ? 'dead' : previous
+        ptyEvents.emit('state-change', sessionId, state, oldState)
+        await notifyGlobalStateListeners(sessionId, state, oldState)
+      }
     }
   })
   setArtifactStorage(
@@ -891,11 +899,24 @@ export function composeServer(opts: {
   setChatDeps({
     ...computerChat.relay,
     computers: computerChat.computers,
+    testing: computerChat.testing,
     availability: computerChat.availability
   })
   setChatSessionSource(computerChat.relay.sessions)
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
+  setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))
+  computerChat.relay.events.on('event', (tabId, event) => {
+    if (event.kind !== 'user-message' && event.kind !== 'user-message-delivery') return
+    void computerChat.ownership
+      .forTab(tabId)
+      .then((owner) => {
+        if (!owner) return
+        agentPromptsEvents.emit('agent-prompts:changed', owner.taskId)
+        agentSessionsEvents.emit('agent-sessions:changed', { taskId: owner.taskId })
+      })
+      .catch(() => console.error('[chat] prompt notification pending'))
+  })
   let resettingForTest = false
   const chatNotificationChains = new Map<string, Promise<void>>()
   let maintainComputerChat = (computerId: string) => computerChat.lifecycle.sync(computerId)

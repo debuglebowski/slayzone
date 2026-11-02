@@ -12,7 +12,7 @@
 import { describe, test, expect } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { chatRouter } from './chat-router.js'
-import { setChatDeps, type ChatDeps } from './chat-router-deps.js'
+import { getChatDeps, setChatDeps, type ChatDeps } from './chat-router-deps.js'
 
 const events = new TypedEmitter<{
   event: [tabId: string, agentEvent: unknown, seq: number]
@@ -54,6 +54,62 @@ setChatDeps({
 const ctx = { db: {} as never, dataRoot: '' }
 
 describe('chat router', () => {
+  test('computer storage test ports refuse production calls and delegate only in explicit test mode', async () => {
+    const previous = getChatDeps(),
+      saved = process.env.PLAYWRIGHT,
+      got: unknown[] = []
+    setChatDeps({
+      ...previous,
+      testing: {
+        seedEvents: async (...args) => {
+          got.push(args)
+        },
+        readEvents: async (...args) => {
+          got.push(args)
+          return []
+        },
+        projection: async (...args) => {
+          got.push(args)
+          return { checkpoint: null, lastSeq: -1 }
+        },
+        seedPrompts: async (...args) => {
+          got.push(args)
+        }
+      }
+    })
+    try {
+      const caller = chatRouter.createCaller(ctx)
+      process.env.PLAYWRIGHT = 'true'
+      await expect(caller.testSeedEvents({ tabId: 't', fromSeq: 0, events: [] })).rejects.toThrow(
+        /test-only/i
+      )
+      await expect(caller.testReadEvents({ tabId: 't', afterSeq: -1, limit: 10 })).rejects.toThrow(
+        /test-only/i
+      )
+      await expect(caller.testProjection({ tabId: 't', action: 'read' })).rejects.toThrow(
+        /test-only/i
+      )
+      await expect(caller.testSeedPrompts({ taskId: 'task', prompts: [] })).rejects.toThrow(
+        /test-only/i
+      )
+      expect(got).toEqual([])
+      process.env.PLAYWRIGHT = '1'
+      await caller.testSeedEvents({ tabId: 't', fromSeq: 0, events: [] })
+      await caller.testReadEvents({ tabId: 't', afterSeq: -1, limit: 10 })
+      await caller.testProjection({ tabId: 't', action: 'read' })
+      await caller.testSeedPrompts({ taskId: 'task', prompts: [] })
+      expect(got).toEqual([
+        ['t', 0, []],
+        ['t', -1, 10],
+        ['t', 'read'],
+        ['task', []]
+      ])
+    } finally {
+      setChatDeps(previous)
+      if (saved === undefined) delete process.env.PLAYWRIGHT
+      else process.env.PLAYWRIGHT = saved
+    }
+  })
   test('procedures + nested queue delegate to injected ops', async () => {
     const caller = chatRouter.createCaller(ctx)
     expect(await caller.supports({ mode: 'claude-chat' })).toEqual(true)

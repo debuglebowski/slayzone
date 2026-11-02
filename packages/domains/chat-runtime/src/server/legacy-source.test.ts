@@ -50,6 +50,11 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
       .run('session-2', 'task', 'claude-chat', 'native', 'user-selected', 2)
     h.db
       .prepare(
+        "INSERT INTO session_resets(id,task_id,mode,created_at) VALUES('reset','task','claude-chat',3)"
+      )
+      .run()
+    h.db
+      .prepare(
         "INSERT INTO chat_events(tab_id,seq,event,created_at) VALUES('tab',10,?,'2026-01-01T12:00:00Z')"
       )
       .run(JSON.stringify({ kind: 'notice', text: 'timestamp' }))
@@ -110,6 +115,12 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
     expect(dest.read('c', 9)[0].at).toBe(Date.parse('2026-01-01T12:00:00Z'))
     expect(dest.getRecord('c', 'settings', 'session:native')).toMatchObject({
       conversationId: 'native'
+    })
+    expect(dest.getRecord('c', 'settings', 'session:reset:claude-chat')).toMatchObject({
+      mode: 'claude-chat',
+      conversationId: null,
+      origin: 'manual-reset',
+      createdAt: 3
     })
     // Source cleanup itself requires a committed receipt, even if called incorrectly.
     await expect(source.cleanup(owner)).rejects.toThrow(/committed/i)

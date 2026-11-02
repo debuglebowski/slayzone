@@ -136,7 +136,63 @@ const backupTarget = z.object({ computerId: z.string().min(1) })
 const backupId = backupTarget.extend({ id: z.string().uuid() })
 const archiveTarget = backupTarget.extend({ archiveId: z.string().uuid() })
 const archiveConversation = archiveTarget.extend({ conversationId: z.string().min(1) })
+function testing() {
+  if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+  const port = getChatDeps().testing
+  if (!port) throw new Error('Test computer storage unavailable')
+  return port
+}
 export const chatRouter = router({
+  testSeedEvents: publicProcedure
+    .input(
+      z.object({
+        tabId: z.string().min(1),
+        fromSeq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        events: z.array(z.object({ kind: z.string().min(1).max(100) }).passthrough()).max(1000)
+      })
+    )
+    .mutation(async ({ input }) => {
+      await testing().seedEvents(input.tabId, input.fromSeq, input.events)
+      return { ok: true }
+    }),
+  testReadEvents: publicProcedure
+    .input(
+      z.object({
+        tabId: z.string().min(1),
+        afterSeq: z.number().int().min(-1),
+        limit: z.number().int().min(1).max(1000)
+      })
+    )
+    .query(({ input }) => testing().readEvents(input.tabId, input.afterSeq, input.limit)),
+  testProjection: publicProcedure
+    .input(
+      z.object({
+        tabId: z.string().min(1),
+        action: z.enum(['read', 'corrupt-page', 'corrupt-checkpoint'])
+      })
+    )
+    .mutation(({ input }) => testing().projection(input.tabId, input.action)),
+  testSeedPrompts: publicProcedure
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        prompts: z
+          .array(
+            z.object({
+              id: z.string().min(1).max(200),
+              agentId: z.string().min(1).max(100),
+              text: z.string().max(1_000_000),
+              cliSessionId: z.string().max(200).nullable(),
+              createdAt: z.number().int().nonnegative()
+            })
+          )
+          .max(1000)
+      })
+    )
+    .mutation(async ({ input }) => {
+      await testing().seedPrompts(input.taskId, input.prompts)
+      return { ok: true }
+    }),
   availability: publicProcedure.input(z.object({ tabId: z.string().min(1) })).query(({ input }) => {
     const read = getChatDeps().availability
     if (!read) throw new Error('Chat availability is unavailable')

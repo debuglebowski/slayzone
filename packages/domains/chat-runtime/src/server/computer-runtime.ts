@@ -63,9 +63,19 @@ export function createComputerChatRuntime(opts: {
   const workspaceStore = createLocalWorkspaceStore(storage, local)
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
+  const userInputSessions = new Set<string>()
   const transport = createChatTransport(
     {
       ...opts.transport,
+      userInputTracker: {
+        mark: (id) => {
+          userInputSessions.add(id)
+        },
+        clear: (id) => {
+          userInputSessions.delete(id)
+        },
+        has: (id) => userInputSessions.has(id)
+      },
       diagnostic: (tabId, event) => {
         const config = diagnosticsConfig()
         if (!config.enabled || (event.level === 'debug' && !config.verbose)) return
@@ -167,6 +177,7 @@ export function createComputerChatRuntime(opts: {
     retention: retentionService,
     captureHook: prompts.capture,
     prompts: prompts.list,
+    promptSummaries: prompts.summaries,
     storage,
     transfers,
     attachments,

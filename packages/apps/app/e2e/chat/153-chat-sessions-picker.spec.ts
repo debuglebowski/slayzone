@@ -48,15 +48,21 @@ test.describe('Chat sessions picker', () => {
           `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
           [r.conv, r.at]
         )
-        for (const [i, text] of ['terminal question', 'terminal follow-up'].entries()) {
-          await db.run(
-            `INSERT INTO agent_prompts (id, task_id, agent_id, cli_session_id, text, created_at)
-             VALUES (?, ?, 'claude-code', ?, ?, ?)`,
-            [`seed-prompt-${i}`, r.taskId, r.conv, text, r.at + i + 1]
-          )
-        }
       },
       { taskId: t.taskId, conv: TERMINAL_CONV, cwd: t.cwd, at: olderAt }
+    )
+    await t.page.evaluate(
+      (input) => window.getTrpcVanillaClient().chat.testSeedPrompts.mutate(input),
+      {
+        taskId: t.taskId,
+        prompts: ['terminal question', 'terminal follow-up'].map((text, i) => ({
+          id: `seed-prompt-${i}`,
+          agentId: 'claude-code',
+          cliSessionId: TERMINAL_CONV,
+          text,
+          createdAt: olderAt + i + 1
+        }))
+      }
     )
     writeSessionFile({
       configDir: chat.claudeConfigDir,
@@ -167,14 +173,22 @@ test.describe('Chat sessions picker', () => {
             `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
             [row.conv, row.at]
           )
-          await db.run(
-            `INSERT INTO agent_prompts (id, task_id, agent_id, cli_session_id, text, created_at)
-             VALUES (?, ?, 'claude-code', ?, ?, ?)`,
-            [`tp-p-${row.conv}`, r.taskId, row.conv, row.text, row.at + 1]
-          )
         }
       },
       { taskId: task.id, rows }
+    )
+    await mainWindow.evaluate(
+      (input) => window.getTrpcVanillaClient().chat.testSeedPrompts.mutate(input),
+      {
+        taskId: task.id,
+        prompts: rows.map((row) => ({
+          id: `tp-p-${row.conv}`,
+          agentId: row.mode,
+          cliSessionId: row.conv,
+          text: row.text,
+          createdAt: row.at + 1
+        }))
+      }
     )
     await s.refreshData()
 
