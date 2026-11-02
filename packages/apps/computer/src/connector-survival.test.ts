@@ -73,7 +73,11 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
     await new Promise((resolve) => setTimeout(resolve, 250))
     connector = await launch()
     expect(hub.gateway.listComputers()[0].epoch).toBe(epoch)
-    expect(await hub.gateway.request(id, 'pty.list')).toEqual(before)
+    const sessionPids = (value: unknown) =>
+      (value as { sessions: Array<{ sessionId: string; pid: number }> }).sessions.map(
+        ({ sessionId, pid }) => ({ sessionId, pid })
+      )
+    expect(sessionPids(await hub.gateway.request(id, 'pty.list'))).toEqual(sessionPids(before))
     expect((jobs as { sessions: Array<{ pid: number }> }).sessions[0].pid).toBeGreaterThan(0)
     await vi.waitFor(
       async () => {

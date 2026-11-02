@@ -220,6 +220,8 @@ jobs:
           CI_SKIP_POSTINSTALL: '1'
       - name: Prepare native terminals
         run: pnpm rebuild node-pty
+      - name: Restore POSIX terminal helper permissions
+        run: node -e "const fs = require('node:fs'); const p = 'node_modules/node-pty/prebuilds/' + process.platform + '-' + process.arch + '/spawn-helper'; if (process.platform !== 'win32' && fs.existsSync(p)) fs.chmodSync(p, 0o755)"
       - name: Build standalone computer bundle
         run: pnpm --filter @slayzone/computer build
       - name: Test upgrades and process survival
