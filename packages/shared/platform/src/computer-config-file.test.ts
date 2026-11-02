@@ -188,6 +188,29 @@ describe('computer-config-file: save / update round-trip', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  test('root updates preserve auto-upgrade policy and multi-hub config', () => {
+    const dir = tmp()
+    const p = join(dir, 'computer.config.json')
+    try {
+      saveComputerConfigFile(
+        {
+          autoUpgrade: false,
+          hubUrls: ['wss://hub.example/computers'],
+          allowedRoots: ['/srv/old']
+        },
+        p
+      )
+      updateComputerConfigFile({ allowedRoots: ['/srv/new'] }, p)
+      expect(loadComputerConfigFile(p)).toEqual({
+        autoUpgrade: false,
+        hubUrls: ['wss://hub.example/computers'],
+        allowedRoots: ['/srv/new']
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test('updateComputerConfigFile merges over on-disk base (no clobber of other keys)', () => {
     const dir = tmp()
     const p = join(dir, 'computer.config.json')

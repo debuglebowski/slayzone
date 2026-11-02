@@ -1,0 +1,20 @@
+{
+  "name": "@slayzone/computer-runtime",
+  "version": "0.36.4",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@slayzone/computer-transport": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "vitest": "^5.0.2"
+  }
+}

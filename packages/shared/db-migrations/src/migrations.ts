@@ -4374,6 +4374,16 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 184,
+    up: (db) =>
+      db.exec(`CREATE TABLE computer_runtime_state (
+      computer_id TEXT PRIMARY KEY REFERENCES computers(id) ON DELETE CASCADE,
+      connector_generation INTEGER NOT NULL DEFAULT 0,
+      upgrade_status_json TEXT,
+      reported_at INTEGER
+    );`)
   }
 ]
 

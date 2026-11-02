@@ -22,6 +22,7 @@ import {
 } from './computers-router-deps'
 import { decideJoinTokenMint } from './join-token-policy'
 import {
+  getComputerUpgradeStatuses,
   listComputers as storeListComputers,
   revokeComputer as storeRevokeComputer,
   unrevokeComputer as storeUnrevokeComputer,
@@ -139,6 +140,7 @@ export const computersRouter = router({
       // One query for the whole list rather than a join per row: the machine is
       // decoration, and a computer with no host id is legitimately ungrouped.
       const machines = await storeMachinesByHostId(ctx.db)
+      const upgrades = await getComputerUpgradeStatuses(ctx.db)
       const deps = getComputersDepsOrNull()
       const gateway = deps?.getGateway()
       const live = gateway?.listComputers() ?? []
@@ -153,6 +155,9 @@ export const computersRouter = router({
             name: row.name,
             platform: row.platform,
             version: row.version,
+            upgradeStatus: upgrades.get(row.id) as
+              | (import('../shared/upgrade-status').ComputerUpgradeStatus & { reportedAt: number })
+              | undefined,
             capabilities: parseCapabilities(row.capabilities_json),
             lastSeenAt: row.last_seen_at,
             createdAt: row.created_at,

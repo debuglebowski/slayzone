@@ -74,3 +74,59 @@ export async function installAgentHooks(
     })
   }
 }
+
+/** Release assets are immutable; sessions select one directory via their environment. */
+export async function stageComputerHooks(
+  root: string,
+  version: string,
+  installGlobal = false
+): Promise<string> {
+  const { mkdirSync, writeFileSync, readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  if (!/^[0-9A-Za-z.-]+$/.test(version) || version.includes('..'))
+    throw new Error('invalid hook release')
+  const dir = join(root, 'computer-runtime', 'hook-assets', version)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const notify = join(dir, 'notify.sh')
+  const immutable = (path: string, source: string, mode: number): void => {
+    try {
+      writeFileSync(path, source, { mode, flag: 'wx' })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      if (readFileSync(path, 'utf8') !== source)
+        throw new Error('installed hook release differs from immutable assets')
+    }
+  }
+  immutable(notify, asString(notifyScriptRaw), 0o700)
+  immutable(
+    join(dir, 'opencode-plugin.mjs'),
+    asString(opencodePluginRaw).split('{{NOTIFY_PATH}}').join(notify.replace(/\\/g, '/')),
+    0o600
+  )
+  if (installGlobal) {
+    const { getHooksDir } = await import('@slayzone/platform')
+    const hooks = getHooksDir()
+    // Legacy/default consumers keep a version-gated fallback. Computer sessions
+    // always use their own immutable release, independent of other hub rollbacks.
+    await installNotifyScript({
+      source: asString(notifyScriptRaw),
+      targetPath: join(hooks, 'notify-default.sh')
+    })
+    const fallback = join(hooks, 'notify-default.sh').replace(/'/g, "'\\''")
+    const dispatcher = `#!/usr/bin/env bash\n# SLAYZONE_NOTIFY_VERSION=2147483647\n# SLAYZONE_COMPUTER_DISPATCHER=1\nif [ -n "\${SLAYZONE_COMPUTER_HOOK_DIR:-}" ]; then\n  exec bash "$SLAYZONE_COMPUTER_HOOK_DIR/notify.sh" "$@"\nfi\nexec bash '${fallback}' "$@"\n`
+    const { path: scriptPath } = await installNotifyScript({ source: dispatcher })
+    await installClaudeHooks({ scriptPath })
+    await installCodexHooks({ scriptPath })
+    await installGeminiHooks({ scriptPath })
+    await installAntigravityHooks({ scriptPath })
+    const pluginFallback = join(hooks, 'opencode-default.mjs')
+    writeFileSync(
+      pluginFallback,
+      asString(opencodePluginRaw).split('{{NOTIFY_PATH}}').join(scriptPath.replace(/\\/g, '/')),
+      { mode: 0o600 }
+    )
+    const wrapper = `// SLAYZONE_COMPUTER_DISPATCHER=1\nimport { pathToFileURL } from 'node:url';\nexport const SlayzoneNotifyPlugin = async (context) => {\n const p = process.env.SLAYZONE_COMPUTER_HOOK_DIR ? process.env.SLAYZONE_COMPUTER_HOOK_DIR + '/opencode-plugin.mjs' : ${JSON.stringify(pluginFallback)};\n return (await import(pathToFileURL(p).href)).SlayzoneNotifyPlugin(context);\n};\n`
+    await installOpencodePlugin({ source: wrapper, notifyPath: scriptPath })
+  }
+  return dir
+}

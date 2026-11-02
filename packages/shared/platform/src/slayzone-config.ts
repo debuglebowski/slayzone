@@ -121,6 +121,8 @@ export interface HubState {
 
 /** `<ROOT>/computer.config.json` — operator-set computer keys. Every key optional, a fresh install has no file. */
 export interface ComputerConfig {
+  /** Follow the connected hub release automatically; default on for standalone computers. */
+  autoUpgrade?: boolean
   /** First-contact join token for a standalone computer. */
   joinToken?: string
   /** Human-readable computer name. */
@@ -256,10 +258,16 @@ function coerceHubState(raw: Record<string, unknown>): HubState {
 
 function coerceComputerConfig(raw: Record<string, unknown>): ComputerConfig {
   const cfg: ComputerConfig = {}
+  if (typeof raw.autoUpgrade === 'boolean') cfg.autoUpgrade = raw.autoUpgrade
   if (typeof raw.joinToken === 'string' && raw.joinToken.length > 0) cfg.joinToken = raw.joinToken
   if (typeof raw.computerName === 'string' && raw.computerName.length > 0)
     cfg.computerName = raw.computerName
   if (typeof raw.hubUrl === 'string' && raw.hubUrl.length > 0) cfg.hubUrl = raw.hubUrl
+  if (Array.isArray(raw.hubUrls)) {
+    cfg.hubUrls = raw.hubUrls.filter(
+      (url): url is string => typeof url === 'string' && url.length > 0
+    )
+  }
   if (Array.isArray(raw.allowedRoots)) {
     const roots = raw.allowedRoots.filter((r): r is string => typeof r === 'string' && r.length > 0)
     if (roots.length > 0) cfg.allowedRoots = roots

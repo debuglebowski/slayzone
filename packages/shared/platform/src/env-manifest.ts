@@ -131,6 +131,8 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // a client-named one (T-99). Hub process config, set by the desktop app for its hub.
   SLAYZONE_HUB_CONVEX_ADDRESS: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
+  SLAYZONE_COMPUTER_AUTO_UPGRADE: 'infra',
+  SLAYZONE_COMPUTER_UPGRADE_WORKER: 'infra',
   SLAYZONE_SUPERVISED: 'infra', // "started by the desktop app" flag
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect
   SLAYZONE_SIDECAR_HOT_RESTART: 'infra',
@@ -177,6 +179,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // deliberately unlisted: warm agents boot with SLAYZONE_TASK_ID now.
   SLAYZONE_AGENT_ID: 'identity',
   SLAYZONE_AGENT_HOOK_URL: 'identity',
+  SLAYZONE_COMPUTER_HOOK_DIR: 'identity',
   // Pairs with _HOOK_URL (where to post / who is posting). The pre-v4 name
   // `SLAYZONE_HOOK_CONTEXT` is RETIRED and deliberately unlisted: unlisted =
   // stripped (fail closed), and the old-name value an older release channel's app

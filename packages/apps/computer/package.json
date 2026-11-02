@@ -14,7 +14,7 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run"
+    "test": "node build.mjs && vitest run"
   },
   "dependencies": {
     "@slayzone/agent-turns": "workspace:*",
@@ -24,7 +24,8 @@
     "@slayzone/computer-transport": "workspace:*",
     "node-pty": "^1.1.0",
     "zod": "^4.3.5",
-    "@slayzone/ai-config": "workspace:*"
+    "@slayzone/ai-config": "workspace:*",
+    "@slayzone/computer-runtime": "workspace:*"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",

@@ -195,3 +195,61 @@ describe('a computer refusal is a clean, audited error', () => {
     })
   })
 })
+
+it('late generation verification cannot replace a newer connector', async () => {
+  const auth = createMemoryComputerAuth()
+  let releaseOld!: () => void
+  const held = new Promise<void>((resolve) => {
+    releaseOld = resolve
+  })
+  const gateway = createHubComputerGateway({
+    verifyEnrollment: auth.verifyEnrollment,
+    verifyApiKey: auth.verifyApiKey,
+    verifyGeneration: async (_id, generation) => {
+      if (generation === 1) await held
+      return true
+    },
+    heartbeatTimeoutMs: 0,
+    floodLimits: false
+  })
+  try {
+    const original = new FakeSocket()
+    gateway.handleConnection(original as unknown as WebSocket, { ip: '127.0.0.1' })
+    const { apiKey } = await enroll(original)
+    original.close()
+    const old = new FakeSocket(),
+      latest = new FakeSocket()
+    gateway.handleConnection(old as unknown as WebSocket, { ip: '127.0.0.1' })
+    gateway.handleConnection(latest as unknown as WebSocket, { ip: '127.0.0.1' })
+    old.frame({
+      id: 2,
+      method: 'hello',
+      params: {
+        apiKey,
+        protocolVersion: COMPUTER_PROTOCOL_VERSION,
+        connectorGeneration: 1,
+        epoch: 'host',
+        version: '1.0.0'
+      }
+    })
+    await flush()
+    latest.frame({
+      id: 3,
+      method: 'hello',
+      params: {
+        apiKey,
+        protocolVersion: COMPUTER_PROTOCOL_VERSION,
+        connectorGeneration: 2,
+        epoch: 'host',
+        version: '2.0.0'
+      }
+    })
+    await flush()
+    releaseOld()
+    await flush()
+    expect(gateway.listComputers()[0].version).toBe('2.0.0')
+    expect(old.response(2)?.error).toBeDefined()
+  } finally {
+    gateway.close()
+  }
+})

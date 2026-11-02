@@ -38,6 +38,7 @@ describe('loadComputerConfig', () => {
     })
     expect(config).toEqual({
       hubUrl: 'wss://hub.example:8443/computers',
+      autoUpgrade: true,
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
@@ -491,4 +492,28 @@ describe('effectiveHubUrls', () => {
     // Two dialers for one hub would race over a single credential entry.
     expect(effectiveHubUrls(config)).toEqual(['wss://a/computers', 'wss://b/computers'])
   })
+})
+
+it('reloads current local policy over cached supervisor config', async () => {
+  const { loadBootComputerConfig } = await import('./config')
+  const config = loadBootComputerConfig(
+    {
+      hubUrl: 'ws://localhost:123/computers',
+      name: 'cached',
+      autoUpgrade: true,
+      allowedRoots: ['/old']
+    },
+    {},
+    { autoUpgrade: false, allowedRoots: ['/new'], computerName: 'edited' }
+  )
+  expect(config.autoUpgrade).toBe(false)
+  expect(config.allowedRoots).toEqual(['/new'])
+  expect(config.name).toBe('edited')
+  expect(
+    loadBootComputerConfig(
+      { autoUpgrade: false, hubUrl: config.hubUrl },
+      { SLAYZONE_COMPUTER_AUTO_UPGRADE: '1' },
+      {}
+    ).autoUpgrade
+  ).toBe(true)
 })

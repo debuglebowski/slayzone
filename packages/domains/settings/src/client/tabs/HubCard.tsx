@@ -301,9 +301,9 @@ export function HubCard({
   // A hub always accepts computers, so the list is always available (no mode to
   // enable). `list` merges live connection status when a computer is connected;
   // it's a plain DB read otherwise.
-  const computersQuery = useQuery(trpc.computers.list.queryOptions())
+  const computersQuery = useQuery({ ...trpc.computers.list.queryOptions(), refetchInterval: 5000 })
 
-  // Push, not poll. The hub already knows the moment a computer connects, drops
+  // Connection changes push immediately; polling also refreshes independent upgrade reports. The hub already knows the moment a computer connects, drops
   // or is reaped by the heartbeat watchdog — before this the list refreshed only
   // when a human clicked refresh, so an offline computer looked connected
   // indefinitely. Invalidate rather than patch the cache: the row also carries
@@ -491,6 +491,26 @@ export function HubCard({
                           which is what makes the grouping visible without adding a
                           header to the common one-computer-per-machine case. */}
                       <MachineLabel machine={computer.machine ?? null} />
+                      {computer.upgradeStatus && (
+                        <span
+                          className="text-muted-foreground text-xs"
+                          title={
+                            computer.upgradeStatus.error ??
+                            `Connector ${computer.upgradeStatus.version ?? computer.upgradeStatus.currentVersion}; host ${computer.upgradeStatus.hostVersion}`
+                          }
+                        >
+                          Upgrade: {computer.upgradeStatus.phase}
+                          {computer.upgradeStatus.target
+                            ? ` → ${computer.upgradeStatus.target}`
+                            : ''}
+                          {computer.upgradeStatus.maintenanceReason
+                            ? ' · host maintenance pending'
+                            : ''}
+                          {computer.upgradeStatus.retryAt
+                            ? ` · retry ${new Date(computer.upgradeStatus.retryAt).toLocaleTimeString()}`
+                            : ''}
+                        </span>
+                      )}
                     </div>
                   </td>
                   {/* The same component the hub header uses, so the dot, the

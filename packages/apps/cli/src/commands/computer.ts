@@ -25,8 +25,8 @@
  * pins `SLAYZONE_ROOT` and nothing else.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, openSync, rmSync } from 'node:fs'
-import { resolve as resolvePath } from 'node:path'
+import { existsSync, openSync, rmSync, writeFileSync } from 'node:fs'
+import { resolve as resolvePath, join } from 'node:path'
 import { Command } from 'commander'
 import { decodeJoinToken, JOIN_TOKEN_MAX_TTL_MS } from '@slayzone/platform/join-token'
 import { isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
@@ -267,7 +267,7 @@ async function launchComputer(args: {
   creating: boolean
 }): Promise<void> {
   const { name, root, backend, creating } = args
-  const bin = resolveServiceBin('computer')
+  const bin = resolveServiceBin('computer', root)
   const logDir = ensureLogDir('computer', root)
   const logs = serviceLogPaths('computer', root)
 
@@ -322,6 +322,29 @@ async function launchComputer(args: {
     return
   }
 
+  const hostUnitPath = writeUnit(
+    {
+      kind: 'computer-host',
+      name,
+      root,
+      command: bin.command,
+      args: [...bin.args, '--session-host'],
+      logDir,
+      ...(bin.env ? { env: bin.env } : {})
+    },
+    backend
+  )
+  writeFileSync(
+    join(root, 'computer-runtime', 'host-service.json'),
+    JSON.stringify({ backend, name }),
+    { mode: 0o600 }
+  )
+  if (creating)
+    registerCreateRollback(() => {
+      supervisorStopQuiet('computer-host', backend, name)
+      removeUnit('computer-host', name, backend)
+    })
+  supervisorStart('computer-host', backend, name, hostUnitPath)
   const writtenUnitPath = writeUnit(
     {
       kind: 'computer',
@@ -381,10 +404,12 @@ async function launchComputer(args: {
       // no working computer. An existing computer's unit is left alone — the operator may
       // want to fix its config and `start` again.
       supervisorStop('computer', backend, name)
+      supervisorStopQuiet('computer-host', backend, name)
       removeUnit('computer', name, backend)
       runCreateRollback()
     } else {
       supervisorStop('computer', backend, name)
+      supervisorStopQuiet('computer-host', backend, name)
     }
     failWithLog(
       'computer',
@@ -766,6 +791,7 @@ export function computerCommand(): Command {
         return
       }
       supervisorStop('computer', backend, name)
+      supervisorStopQuiet('computer-host', backend, name)
       if (!(await waitForStopped(name, backend, 15_000))) {
         fail(
           `Computer "${name}" is still running after 15s according to ${backend}. ` +
@@ -794,6 +820,8 @@ export function computerCommand(): Command {
         // which is the very case that leaves a stale unit behind. Neither must block
         // removal.
         supervisorStopQuiet('computer', backend, name)
+        supervisorStopQuiet('computer-host', backend, name)
+        removeUnit('computer-host', name, backend)
         removeUnit('computer', name, backend)
         console.log(`Unregistered "${name}" from ${backend}.`)
       } else if (backend !== 'none') {
@@ -833,7 +861,7 @@ export function computerCommand(): Command {
       // --upgrade re-resolves the package so the unit points at the new version;
       // without it the existing unit is reused verbatim.
       if (opts.upgrade) {
-        const bin = resolveServiceBin('computer')
+        const bin = resolveServiceBin('computer', root, true)
         writeUnit(
           {
             kind: 'computer',
@@ -851,7 +879,10 @@ export function computerCommand(): Command {
         console.log(`Unit updated to ${COMPUTER_PACKAGE}@${bin.version}.`)
       }
       supervisorStop('computer', backend, name)
+      supervisorStopQuiet('computer-host', backend, name)
       await waitForStopped(name, backend, 15_000)
+      if (existsSync(unitPath('computer-host', name, backend)))
+        supervisorStart('computer-host', backend, name, unitPath('computer-host', name, backend))
       supervisorStart('computer', backend, name, unitPath('computer', name, backend))
       if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
         fail(

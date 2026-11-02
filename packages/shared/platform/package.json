@@ -40,7 +40,8 @@
     "./startup-deadline": "./src/startup-deadline.ts",
     "./event-loop-stall": "./src/event-loop-stall.ts",
     "./parent-watch": "./src/parent-watch.ts",
-    "./node-pty-install": "./src/node-pty-install.ts"
+    "./node-pty-install": "./src/node-pty-install.ts",
+    "./computer-launcher": "./src/computer-launcher.ts"
   },
   "scripts": {
     "test": "vitest run",

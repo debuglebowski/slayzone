@@ -76,6 +76,26 @@ describe('remote session ownership', () => {
     expect(acknowledged).toBe(true)
   })
 
+  it('only unused warm terminals allow an automatic upgrade restart', async () => {
+    const { ctx } = makeCtx()
+    const child = controlledPty(9005)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn
+    })
+    try {
+      await pty.handlers['pty.warmSpawn']({
+        warmId: 'warm-upgrade',
+        command: 'cat',
+        cwd: process.cwd()
+      })
+      expect(pty.hasWork()).toBe(false)
+      await pty.handlers['pty.warmAdopt']({ warmId: 'warm-upgrade', sessionId: 'adopted-upgrade' })
+      expect(pty.hasWork()).toBe(true)
+    } finally {
+      pty.disposeAll()
+    }
+  })
+
   it('ignores a late write and resize for the previous start', async () => {
     const { ctx } = makeCtx()
     const first = controlledPty(9003)

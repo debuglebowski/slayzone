@@ -135,6 +135,7 @@ interface QueuedSpawn {
 }
 
 export interface PtyHandlers {
+  hasWork(): boolean
   handlers: HubMethodTable
   /** Kill every live pty (called on computer shutdown). */
   disposeAll(): void
@@ -1032,5 +1033,10 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyWarmList]: warmList
   }
 
-  return { handlers, disposeAll, dropQueued }
+  return {
+    hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
+    handlers,
+    disposeAll,
+    dropQueued
+  }
 }

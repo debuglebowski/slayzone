@@ -256,6 +256,9 @@ run_harness packages/apps/hub/src/build-info.test.ts
 # gated by its "Local Network" privacy permission — seen hanging there until granted,
 # and every new Electron binary (an upgrade) asks again. Plain node passed throughout.
 run_harness_node packages/apps/hub/src/health.test.ts
+run_harness_node packages/apps/hub/src/computer-upgrade-status.test.ts
+run_harness_node packages/shared/platform/src/computer-launcher.test.ts
+run_harness_node packages/domains/computer-runtime/src/runtime.test.ts
 # A closed window's warm-pool tab counts are dropped (after a reconnect grace).
 run_harness packages/apps/hub/src/warm-window-sockets.test.ts
 run_harness packages/apps/hub/src/web-assets.test.ts

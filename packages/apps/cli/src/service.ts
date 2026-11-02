@@ -1,3 +1,4 @@
+import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
 /**
  * Supervisor plumbing shared by `slay hub` and `slay computer`.
  *
@@ -63,6 +64,12 @@ export function resolveBackend(): ServiceBackend {
 
 /** npm package + dev-tree location for each kind. */
 const PACKAGES = {
+  'computer-host': {
+    pkg: '@slayzone/computer',
+    bin: 'slayzone-computer',
+    devDir: 'computer',
+    envOverride: 'SLZ_COMPUTER_BIN'
+  },
   hub: { pkg: '@slayzone/hub', bin: 'slayzone-hub', devDir: 'hub', envOverride: 'SLZ_HUB_BIN' },
   computer: {
     pkg: '@slayzone/computer',
@@ -168,7 +175,24 @@ export function interpreterFor(binPath: string, version: string): ServiceBin {
  *      module resolution paths, so that require.resolve fails even though the
  *      download succeeded.
  */
-export function resolveServiceBin(kind: ServiceKind): ServiceBin {
+export function resolveServiceBin(
+  kind: ServiceKind,
+  computerRoot?: string,
+  forceUpgrade = false
+): ServiceBin {
+  const resolve = (bin: ServiceBin): ServiceBin => {
+    if (kind !== 'computer' || !computerRoot) return bin
+    return {
+      ...bin,
+      args: [
+        ensureComputerLauncher(
+          computerRoot,
+          { entry: bin.args[0], version: bin.version },
+          forceUpgrade
+        )
+      ]
+    }
+  }
   const { pkg, devDir, envOverride } = PACKAGES[kind]
 
   // Test-only override: point `create` at a specific bundle so the failed-boot
@@ -201,7 +225,7 @@ export function resolveServiceBin(kind: ServiceKind): ServiceBin {
     const path = find()
     if (!path) continue
     const found = readServicePkg(kind, path)
-    if (found) return interpreterFor(found.binPath, found.version)
+    if (found) return resolve(interpreterFor(found.binPath, found.version))
   }
 
   // (3) Install into our own prefix so the result is resolvable by absolute path
@@ -247,7 +271,7 @@ export function resolveServiceBin(kind: ServiceKind): ServiceBin {
   }
   // Invoke through an explicit interpreter rather than the bin's shebang: the
   // supervisor starts the unit with almost no PATH to find one on.
-  return interpreterFor(found.binPath, found.version)
+  return resolve(interpreterFor(found.binPath, found.version))
 }
 
 // ------------------------------------------------------------------ log directories

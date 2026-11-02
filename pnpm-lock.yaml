@@ -777,6 +777,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config
+      '@slayzone/computer-runtime':
+        specifier: workspace:*
+        version: link:../../domains/computer-runtime
       '@slayzone/computer-transport':
         specifier: workspace:*
         version: link:../../domains/computer-transport
@@ -1510,6 +1513,19 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.19.0)(jsdom@30.1.1(@noble/hashes@2.2.0))(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/domains/computer-runtime:
+    dependencies:
+      '@slayzone/computer-transport':
+        specifier: workspace:*
+        version: link:../computer-transport
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.0
+        version: 24.19.0
       vitest:
         specifier: ^5.0.2
         version: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.19.0)(jsdom@30.1.1(@noble/hashes@2.2.0))(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))

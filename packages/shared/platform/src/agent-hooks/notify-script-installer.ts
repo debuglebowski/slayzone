@@ -67,10 +67,28 @@ export async function installNotifyScript(
   const source = opts.source
   const incomingV = parseNotifyVersion(source)
 
+  // Once the dispatcher exists, application updates advance only its fallback.
+  if (!opts.targetPath && !source.includes('# SLAYZONE_COMPUTER_DISPATCHER=1')) {
+    const { readFile } = await import('node:fs/promises')
+    const current = await readFile(target, 'utf8').catch(() => '')
+    if (current.includes('# SLAYZONE_COMPUTER_DISPATCHER=1')) {
+      const fallback = await installNotifyScript({
+        source,
+        targetPath: path.join(path.dirname(target), 'notify-default.sh')
+      })
+      return { path: target, changed: fallback.changed }
+    }
+  }
   const changed = await updateFileAtomically(
     target,
     (current) => {
       if (current === null) return source
+      if (
+        current.toString('utf8').includes('# SLAYZONE_COMPUTER_DISPATCHER=1') &&
+        !source.includes('# SLAYZONE_COMPUTER_DISPATCHER=1')
+      ) {
+        return null
+      }
       // Strict downgrade → decline: preserve the newer on-disk script untouched.
       if (incomingV < parseNotifyVersion(current.toString('utf8'))) return null
       return source

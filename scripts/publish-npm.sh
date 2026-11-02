@@ -185,8 +185,34 @@ on this machine.
 
 The join token embeds the hub URL, so nothing else is required.
 
-This runs the computer in the FOREGROUND: it will not come back after a crash or a
-logout. To install it as a supervised service instead, use the CLI:
+Standalone computers automatically follow each connected hub's exact npm release,
+even when a protocol mismatch prevents the normal connection. Downloads and native
+runtime checks run in a private staging directory. A replaceable connector attaches
+to the persistent session host, preserving running terminals/jobs, enrollment,
+allowed roots, output buffers, and session hook/CLI addresses. Different hubs may
+run different releases when their local host contracts are compatible.
+
+Candidates complete a 60-second connection probation before becoming current.
+Failures roll back, retry with exponential backoff and jitter, and quarantine
+repeatedly failing releases for 15 minutes. Supervisor updates preserve the host;
+host updates wait until all work finishes. Incompatible host contracts report
+maintenance required and wait for the same safe maintenance window.
+Node and npm must be available, and the computer ROOT must be writable.
+
+To disable automatic release changes, set `"autoUpgrade": false` in
+`<ROOT>/computer.config.json`, or `SLAYZONE_COMPUTER_AUTO_UPGRADE=0`, then restart.
+Desktop-managed computers use the app updater. Hub computer details show progress,
+errors and next retry; local status lives under
+`<ROOT>/computer-runtime/hubs/<hub-host>/upgrade-status.json`.
+
+Existing monolithic releases need one planned migration restart after active work
+finishes. Later connector/supervisor upgrades need no VM access. The hub must
+advertise its published release on `/health`. Explicit service stop/restart still
+ends running work. Production migration and cloud validation are separate rollout
+steps.
+
+This runs the launcher in the FOREGROUND. It recovers child crashes, but does not
+start again after logout or reboot. To install it as a supervised service instead, use the CLI:
 
     npm install -g @slayzone/cli
     slay computer create <name> --token <token from the hub>

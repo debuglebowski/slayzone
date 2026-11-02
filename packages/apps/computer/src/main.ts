@@ -45,7 +45,7 @@ import {
 } from './config'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
-import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
+import { createAgentHookServer } from './handlers/agent-hook'
 import { createComputerCliRelay, type ComputerCliRelay } from './cli-relay'
 import { createFsHandlers } from './handlers/fs'
 import { createSlayHandlers } from './handlers/slay'
@@ -68,6 +68,9 @@ export const COMPUTER_VERSION =
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
+  initiallyPaused?: boolean
+  hookDirectory?: (hubUrl: string) => string | undefined
+  createDialer?: (options: ConstructorParameters<typeof HubDialer>[0]) => HubDialer
   /** Invoked after a graceful `computer.shutdown` stop completes. */
   onShutdown?: (reason: string) => void
   /** Override the credential store (tests). */
@@ -87,6 +90,10 @@ export interface ComputerHandle {
   dialer: HubDialer
   /** One per hub this computer serves. Length 1 unless `hubUrls` is configured. */
   dialers: HubDialer[]
+  activate(): void | Promise<void>
+  isIdle(): boolean
+  setHookDirectory(hub: string, directory: string): void
+  drainForUpgrade(): boolean
   stop(): Promise<void>
 }
 
@@ -94,9 +101,12 @@ export interface ComputerHandle {
 interface HubConnection {
   dialer: HubDialer
   dispose: () => Promise<void>
+  isIdle: () => boolean
+  setHookDirectory: (directory: string) => void
 }
 
 export interface HubRequestHandlerDeps {
+  hookDirectory?: string
   cliRelayReady?: Promise<ComputerCliRelay>
   /** Trigger a graceful stop (after the ack flushes). */
   shutdown: (reason: string) => void
@@ -142,6 +152,8 @@ export interface HubRequestDispatch {
   handle(method: string, params: unknown, actor: unknown): Promise<unknown>
   /** Tear down live sessions/processes/fs watches (computer shutdown). */
   dispose(): void
+  isIdle(): boolean
+  setHookDirectory(directory: string): void
   /** Late-bind the computer loopback agent-hook URL once its listener has bound
    *  (the port is ephemeral, resolved async after the dispatch is built). The
    *  ctx is shared by reference, so pty spawns issued after this see the URL. */
@@ -163,6 +175,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     })
   const ctx: HandlerContext = {
     dialer: deps.dialer,
+    hookDirectory: deps.hookDirectory,
     config: deps.config,
     log,
     ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {}),
@@ -288,7 +301,25 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     pty.dropQueued(`hub disconnected (${reason})`)
   }
 
-  return { handle, dispose, setAgentHookUrl, hubDisconnected }
+  let inFlight = 0
+  const trackedHandle: HubRequestDispatch['handle'] = async (...args) => {
+    inFlight++
+    try {
+      return await handle(...args)
+    } finally {
+      inFlight--
+    }
+  }
+  return {
+    setHookDirectory: (directory) => {
+      ctx.hookDirectory = directory
+    },
+    handle: trackedHandle,
+    dispose,
+    setAgentHookUrl,
+    hubDisconnected,
+    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork()
+  }
 }
 
 export function startComputer(
@@ -316,7 +347,7 @@ export function startComputer(
     capabilities: config.capabilities
   } as ComputerIdentity
   let hostIdStop: (() => void) | undefined
-  void startHostIdReconciler({ log })
+  const hostIdReady = startHostIdReconciler({ log })
     .then((r) => {
       identity.hostId = r.hostId
       hostIdStop = r.stop
@@ -328,6 +359,15 @@ export function startComputer(
     })
 
   let handle: ComputerHandle
+  let draining = false
+  let activate = (): void => undefined
+  // A candidate authenticates before its release is committed. Hold the hub's
+  // immediate reconciliation requests until activation instead of failing them.
+  const activation = deps.initiallyPaused
+    ? new Promise<void>((resolve) => {
+        activate = resolve
+      })
+    : undefined
 
   // The computer's own state (T-27): its config — which holds allowedRoots — its
   // credentials and its request log are refused to every hub frame, and the log
@@ -340,6 +380,7 @@ export function startComputer(
     // The legacy file computer.config.json falls back to when absent.
     join(stateDir, 'config.json'),
     credentialsFilePath(stateDir),
+    join(stateDir, 'computer-runtime'),
     join(stateDir, REQUEST_LOG_DIR_NAME)
   ])
   const requestLog = createRequestLog({
@@ -394,12 +435,17 @@ export function startComputer(
     // How this box reaches the hub — what `slay` in its terminals must dial too.
     const hubAddress = hubAddrFromUrl(hubUrl)
     let dispatch: HubRequestDispatch
-    const dialer = new HubDialer({
+    const dialer = (deps.createDialer ?? ((options) => new HubDialer(options)))({
       url: hubUrl,
       identity,
       credentialStore,
       ...(config.joinToken && isPrimary ? { joinToken: config.joinToken } : {}),
-      onHubRequest: (method, params, actor) => dispatch.handle(method, params, actor),
+      onHubRequest: async (method, params, actor) => {
+        if (activation) await activation
+        if (draining)
+          throw new Error('computer is restarting for an upgrade; retry after reconnect')
+        return dispatch.handle(method, params, actor)
+      },
       log
     })
 
@@ -422,6 +468,7 @@ export function startComputer(
     void cliRelayReady.catch(() => log('CLI relay failed to start', { hubUrl }))
     dispatch = createHubRequestHandler({
       cliRelayReady,
+      hookDirectory: deps.hookDirectory?.(hubUrl),
       shutdown: (reason) => {
         log('computer shutdown requested by hub', { hubUrl, reason })
         void handle.stop().then(() => deps.onShutdown?.(reason))
@@ -478,18 +525,22 @@ export function startComputer(
     // Its ephemeral port binds async; feed the URL into the dispatch so ptys
     // spawned after the bind overlay it into the agent env. Best-effort — a bind
     // failure only degrades remote hooks, it does not stop exec.
-    let agentHookServer: AgentHookServer | null = null
-    void createAgentHookServer({ dialer, config, log })
+    const agentHookReady = createAgentHookServer({ dialer, config, log })
       .then((srv) => {
-        agentHookServer = srv
         dispatch.setAgentHookUrl(srv.url)
+        return srv
       })
-      .catch((err) => log('agent-hook relay failed to start', { hubUrl, error: String(err) }))
+      .catch((err) => {
+        log('agent-hook relay failed to start', { hubUrl, error: String(err) })
+        return null
+      })
 
     dialer.start()
 
     return {
       dialer,
+      isIdle: () => dispatch.isIdle(),
+      setHookDirectory: (directory) => dispatch.setHookDirectory(directory),
       dispose: async () => {
         // Kill live ptys/processes and close fs watches before the socket drops, so
         // nothing is orphaned and no handle keeps the stopped process alive.
@@ -500,6 +551,7 @@ export function startComputer(
             // Startup failure was already logged; there is no listener to close.
           }
         )
+        const agentHookServer = await agentHookReady
         if (agentHookServer) await agentHookServer.close()
         await dialer.stop()
       }
@@ -515,7 +567,22 @@ export function startComputer(
     // `dialers` is what multi-hub callers iterate.
     dialer: connections[0].dialer,
     dialers: connections.map((c) => c.dialer),
+    activate: () => {
+      activate()
+      draining = false
+    },
+    setHookDirectory: (hub, directory) => {
+      const i = hubUrls.indexOf(hub)
+      if (i >= 0) connections[i].setHookDirectory(directory)
+    },
+    isIdle: () => connections.every((c) => c.isIdle()),
+    drainForUpgrade: () => {
+      if (!connections.every((c) => c.isIdle())) return false
+      draining = true
+      return true
+    },
     stop: async () => {
+      await hostIdReady
       hostIdStop?.()
       if (watchLocalRoots) unwatchFile(configFile)
       await Promise.all(connections.map((c) => c.dispose()))

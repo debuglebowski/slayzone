@@ -1,4 +1,7 @@
 export {
+  acceptComputerGeneration,
+  saveComputerUpgradeStatus,
+  getComputerUpgradeStatuses,
   registerComputer,
   registerOrReplaceComputer,
   deterministicLocalComputerId,

@@ -20,6 +20,7 @@ export interface ComputerDialer {
 export type ComputerLog = (message: string, meta?: Record<string, unknown>) => void
 
 export interface HandlerContext {
+  hookDirectory?: string
   cliRelay?: ComputerCliRelay
   dialer: ComputerDialer
   config: ComputerConfig

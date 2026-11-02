@@ -59,7 +59,7 @@ import { join } from 'node:path'
 export type ServiceBackend = 'launchd' | 'systemd' | 'none'
 
 /** Which SlayZone process a unit supervises. Drives identity + pinned env. */
-export type ServiceKind = 'hub' | 'computer'
+export type ServiceKind = 'hub' | 'computer' | 'computer-host'
 
 /** Everything a unit file needs to run one hub or computer. */
 export interface ServiceUnitSpec {
@@ -110,6 +110,15 @@ export interface ServiceUnitSpec {
  * `listRegisteredUnits('computer')` will not see a hub, and vice versa.
  */
 const KINDS = {
+  'computer-host': {
+    labelPrefix: 'com.slayzone.session-host.',
+    systemdPrefix: 'slayzone-session-host-',
+    description: 'SlayZone persistent session host',
+    outLog: 'session-host.out.log',
+    errLog: 'session-host.err.log',
+    logsCommand: 'slay computer logs',
+    renameHint: 'Use the computer service name.'
+  },
   hub: {
     labelPrefix: 'com.slayzone.hub.',
     systemdPrefix: 'slayzone-hub-',

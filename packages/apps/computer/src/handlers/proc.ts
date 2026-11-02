@@ -118,6 +118,7 @@ interface QueuedProcSpawn {
 }
 
 export interface ProcHandlers {
+  hasWork(): boolean
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
@@ -511,5 +512,5 @@ export function createProcHandlers(
     [ProcMethods.procList]: procList
   }
 
-  return { handlers, disposeAll }
+  return { hasWork: () => procs.size > 0 || queued.size > 0, handlers, disposeAll }
 }

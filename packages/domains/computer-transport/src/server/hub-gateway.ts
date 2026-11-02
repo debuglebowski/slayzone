@@ -116,6 +116,7 @@ export interface HubComputerGatewayOptions {
    * can drop between minting and delivery, in which case the computer enrolls
    * again and any previously minted credential is never used.
    */
+  verifyGeneration?: (computerId: string, generation?: number) => Promise<boolean>
   verifyEnrollment: (params: EnrollParams) => Promise<{ computerId: string; apiKey: string }>
   /** Resolve an api key to a computer identity, or null to refuse. */
   /** `hostId` rides the HELLO frame: a computer that adopted a peer's id while
@@ -325,6 +326,15 @@ interface ComputerConnection {
 }
 
 export function createHubComputerGateway(options: HubComputerGatewayOptions): HubComputerGateway {
+  const claimedGenerations = new Map<string, number>()
+  // Run after every awaited credential/storage check, immediately before attach.
+  const claimGeneration = (id: string, generation?: number): boolean => {
+    const previous = claimedGenerations.get(id) ?? 0
+    if ((generation ?? 0) < previous) return false
+    if (generation !== undefined) claimedGenerations.set(id, generation)
+    return true
+  }
+
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
   const authTimeoutMs = options.authTimeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
@@ -616,6 +626,22 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       return
     }
     if (conn.closed) return
+    const verifiedGeneration =
+      !options.verifyGeneration ||
+      (await options.verifyGeneration(minted.computerId, parsed.data.connectorGeneration))
+    if (conn.closed) return
+    if (
+      !verifiedGeneration ||
+      !claimGeneration(minted.computerId, parsed.data.connectorGeneration)
+    ) {
+      conn.rpc.respondError(
+        id,
+        ComputerTransportErrorCodes.computerInUse,
+        'stale connector generation'
+      )
+      conn.ws.close(1008)
+      return
+    }
     const descriptor: ComputerDescriptor = {
       computerId: minted.computerId,
       name: parsed.data.name,
@@ -740,6 +766,22 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       conn.ws.close(1008, 'computer in use')
       return
     }
+    const verifiedGeneration =
+      !options.verifyGeneration ||
+      (await options.verifyGeneration(identity.computerId, parsed.data.connectorGeneration))
+    if (conn.closed) return
+    if (
+      !verifiedGeneration ||
+      !claimGeneration(identity.computerId, parsed.data.connectorGeneration)
+    ) {
+      conn.rpc.respondError(
+        id,
+        ComputerTransportErrorCodes.computerInUse,
+        'stale connector generation'
+      )
+      conn.ws.close(1008)
+      return
+    }
     const descriptor: ComputerDescriptor = {
       computerId: identity.computerId,
       name: identity.name,
@@ -763,12 +805,39 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     log('computer computer reconnected', { computerId: identity.computerId })
   }
 
+  const deliveredEvents = new Map<string, Set<string>>()
   function handleComputerRequest(
     conn: ComputerConnection,
     method: string,
     params: unknown,
     id: JsonRpcId
   ): void {
+    if (conn.descriptor && method === 'computer.event') {
+      const event = params as { id?: unknown; params?: unknown }
+      if (
+        !event ||
+        typeof event.id !== 'string' ||
+        event.id.length > 128 ||
+        !computerNotificationSchemas[ComputerNotificationMethods.event].safeParse(event.params)
+          .success
+      ) {
+        conn.rpc.respondError(id, -32602, 'invalid event delivery')
+        return
+      }
+      const computerId = conn.descriptor.computerId
+      let ids = deliveredEvents.get(computerId)
+      if (!ids) {
+        ids = new Set()
+        deliveredEvents.set(computerId, ids)
+      }
+      if (!ids.has(event.id)) {
+        ids.add(event.id)
+        if (ids.size > 10000) ids.delete(ids.values().next().value!)
+        handleComputerNotification(conn, ComputerNotificationMethods.event, event.params)
+      }
+      conn.rpc.respond(id, { ok: true })
+      return
+    }
     if (!conn.descriptor) {
       const isAuth = method === ComputerToHubMethods.enroll || method === ComputerToHubMethods.hello
       if (isAuth && limits && ++conn.authAttempts > limits.attemptsPerSocket) {

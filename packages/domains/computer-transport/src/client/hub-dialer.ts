@@ -71,6 +71,7 @@ export type HubDialerEvents = {
 }
 
 export interface HubDialerOptions {
+  connectorGeneration?: number
   /** `ws://` or `wss://` hub computer endpoint. */
   url: string
   identity: ComputerIdentity
@@ -308,6 +309,7 @@ export class HubDialer {
       version: this.opts.identity.version,
       capabilities: this.opts.identity.capabilities,
       protocolVersion: COMPUTER_PROTOCOL_VERSION,
+      connectorGeneration: this.opts.connectorGeneration,
       epoch: this.epoch,
       ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {})
     })
@@ -344,6 +346,7 @@ export class HubDialer {
             version: this.opts.identity.version,
             epoch: this.epoch,
             protocolVersion: COMPUTER_PROTOCOL_VERSION,
+            connectorGeneration: this.opts.connectorGeneration,
             // Reconnect is the ONLY moment the hub can learn that this computer
             // adopted a peer's host id while it was offline.
             ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {})

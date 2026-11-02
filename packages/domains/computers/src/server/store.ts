@@ -390,3 +390,52 @@ export async function resolveTaskComputerIdOrDefault(
   const local = connected.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
   return local ? local.computerId : null
 }
+
+/** Durable high-water mark. Missing generation is accepted only before adoption. */
+export async function acceptComputerGeneration(
+  db: SlayzoneDb,
+  id: string,
+  generation?: number
+): Promise<boolean> {
+  if (generation === undefined) {
+    const row = await db.get<{ connector_generation: number }>(
+      'SELECT connector_generation FROM computer_runtime_state WHERE computer_id = ?',
+      [id]
+    )
+    return !row || row.connector_generation === 0
+  }
+  if (!Number.isSafeInteger(generation) || generation < 1) return false
+  const result = await db.run(
+    `INSERT INTO computer_runtime_state(computer_id, connector_generation) VALUES (?, ?)
+    ON CONFLICT(computer_id) DO UPDATE SET connector_generation = excluded.connector_generation
+    WHERE computer_runtime_state.connector_generation <= excluded.connector_generation`,
+    [id, generation]
+  )
+  return result.changes > 0
+}
+export async function saveComputerUpgradeStatus(
+  db: SlayzoneDb,
+  id: string,
+  status: unknown
+): Promise<void> {
+  await db.run(
+    `INSERT INTO computer_runtime_state(computer_id, upgrade_status_json, reported_at) VALUES (?, ?, ?)
+    ON CONFLICT(computer_id) DO UPDATE SET upgrade_status_json = excluded.upgrade_status_json, reported_at = excluded.reported_at`,
+    [id, JSON.stringify(status), Date.now()]
+  )
+}
+export async function getComputerUpgradeStatuses(db: SlayzoneDb): Promise<Map<string, unknown>> {
+  const rows = await db.all<{
+    computer_id: string
+    upgrade_status_json: string
+    reported_at: number
+  }>(
+    'SELECT computer_id, upgrade_status_json, reported_at FROM computer_runtime_state WHERE upgrade_status_json IS NOT NULL'
+  )
+  return new Map(
+    rows.map((row) => [
+      row.computer_id,
+      { ...JSON.parse(row.upgrade_status_json), reportedAt: row.reported_at }
+    ])
+  )
+}

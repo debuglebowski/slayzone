@@ -172,6 +172,7 @@ const hostIdField = z.string().min(1).optional()
 
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
+  connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
   name: z.string().min(1),
@@ -197,6 +198,7 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
+  connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),
   apiKey: z.string().min(1),

@@ -41,6 +41,22 @@ export async function installOpencodePlugin(
   // and then shells out `bash <path>` — backslashes would break both the JS
   // literal and bash's path parsing on Windows.
   const content = rawSource.split(NOTIFY_PATH_PLACEHOLDER).join(toPosixPath(opts.notifyPath))
+  const { readFile } = await import('node:fs/promises')
+  const current = await readFile(target, 'utf8').catch(() => '')
+  if (
+    !opts.targetPath &&
+    current.includes('// SLAYZONE_COMPUTER_DISPATCHER=1') &&
+    !content.includes('// SLAYZONE_COMPUTER_DISPATCHER=1')
+  ) {
+    const { getHooksDir } = await import('../dirs')
+    const { join } = await import('node:path')
+    const changed = await writeFileIfChanged(
+      join(getHooksDir(), 'opencode-default.mjs'),
+      content,
+      0o600
+    )
+    return { path: target, changed }
+  }
   const changed = await writeFileIfChanged(target, content, 0o644)
   return { path: target, changed }
 }

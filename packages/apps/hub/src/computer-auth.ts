@@ -237,31 +237,9 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
   }
 
   const verifyApiKey: ComputerAuthAdapters['verifyApiKey'] = async (apiKey, context) => {
-    const principal = await verifyComputerApiKey(auth, apiKey)
-    if (!principal) return null
-
-    const computer = await getComputer(db, principal.computerId)
-    if (!computer || computer.revoked_at !== null) return null
-    // An owned computer works only while its owner's account does (T-12). Disabling
-    // revokes the owner's computers too (user-access.ts); this refuses one that is still
-    // unrevoked anyway. An unowned computer (login off, or enrolled before ownership)
-    // has no account to check.
-    if (computer.owner_user_id && !(await isActiveAccount(computer.owner_user_id))) return null
-
-    // The key must be THE key this computer enrolled with, not merely A key that
-    // names it. Second half of the impersonation fix whose first half lives in
-    // `verifyComputerApiKey` (see its docstring): that one proves the key was
-    // minted by us, this one proves it was minted FOR this computer. Without it,
-    // a stale key from a previous enroll of the same id keeps working forever —
-    // `revokeComputerApiKey` deletes the apikey row, but a re-enroll rotates
-    // `auth_key_id` and left the old row's holder authenticated.
-    //
-    // NULL IS ALLOWED, deliberately: `auth_key_id` is nullable and rows enrolled
-    // before it was recorded carry null. Refusing those would disconnect every
-    // pre-existing computer on upgrade. Such a row is still protected by the
-    // `referenceId` check upstream; it just cannot be pinned any tighter until it
-    // re-enrolls, at which point `registerComputer` fills the column in.
-    if (computer.auth_key_id !== null && computer.auth_key_id !== principal.keyId) return null
+    const authorized = await authorizeComputerCredential(db, auth, apiKey)
+    if (!authorized) return null
+    const { computer } = authorized
 
     await touchComputerLastSeen(db, computer.id, now())
     if (context?.version && context.version !== computer.version) {
@@ -324,4 +302,18 @@ function parseCapabilityTags(json: string): string[] | undefined {
     // Malformed JSON — treat as no advertised capabilities.
   }
   return undefined
+}
+
+/** Shared by the wire handshake and protocol-independent machine reports. */
+export async function authorizeComputerCredential(db: SlayzoneDb, auth: HubAuth, apiKey: string) {
+  const principal = await verifyComputerApiKey(auth, apiKey)
+  if (!principal) return null
+  const computer = await getComputer(db, principal.computerId)
+  if (!computer || computer.revoked_at !== null) return null
+  if (computer.owner_user_id) {
+    const account = await findHubAccount(auth, computer.owner_user_id)
+    if (!account || account.disabled) return null
+  }
+  if (computer.auth_key_id !== null && computer.auth_key_id !== principal.keyId) return null
+  return { computer, principal }
 }

@@ -1,3 +1,4 @@
+import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -1528,6 +1529,7 @@ export function composeServer(opts: {
     // forward reference is never read before it is set.
     let syncComputerProjects: (computerId: string) => Promise<void> = async () => undefined
     const computerGateway = createHubComputerGateway({
+      verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
       ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
       // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
       ...(opts.floodLimits ? {} : { floodLimits: false as const })

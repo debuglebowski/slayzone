@@ -1,3 +1,6 @@
+import { createComputerUpgradeStatusHandler } from './computer-upgrade-status'
+import { authorizeComputerCredential } from './computer-auth'
+import { saveComputerUpgradeStatus } from '@slayzone/computers/server'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { type WebSocket, WebSocketServer } from 'ws'
@@ -212,6 +215,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   bootSteps.step('computers ready')
   const computerGateway = composition.computerGateway
   const hubAuth = composition.hubAuth
+  const handleUpgradeStatus = createComputerUpgradeStatusHandler({
+    authorize: async (key) =>
+      hubAuth ? ((await authorizeComputerCredential(db, hubAuth, key))?.computer.id ?? null) : null,
+    save: (id, status) => saveComputerUpgradeStatus(db, id, status)
+  })
   // better-auth express app for `/api/auth/*`. Mounted via a direct dispatch in
   // the HTTP request handler BELOW (not inside the mcpRest express app) so the
   // RAW request body reaches better-auth — mcpRest applies `express.json()`,
@@ -546,6 +554,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // it must keep answering even when auth is misconfigured.
     if (handleHealth(state, req, res)) return
     if (floodGuard.refuseRequest(req, res)) return
+    if (handleUpgradeStatus(req, res)) return
     gatedDispatch(req, res)
   }
   // Every response gets the security headers here, whichever handler writes it.

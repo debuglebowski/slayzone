@@ -52,6 +52,8 @@ export function buildSpawnEnv(
     merged.SLAYZONE_CLI_RELAY_ADDRESS = new URL(ctx.cliRelay.url).host
     merged.SLAYZONE_CLI_RELAY_TOKEN = capability.token
   }
+  delete merged.SLAYZONE_COMPUTER_HOOK_DIR
+  if (ctx.hookDirectory) merged.SLAYZONE_COMPUTER_HOOK_DIR = ctx.hookDirectory.replace(/\\/g, '/')
   // Last, so it wins over whichever channel supplied PATH (inherited or a hub
   // override): a configured override dir resolves before anything else. Node
   // looks a bare command up on `env.PATH`, so this is what an agent spawn resolves.

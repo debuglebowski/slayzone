@@ -30,9 +30,23 @@ import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
-import { ENV_VARS, ignoredCertPinNotices, loadComputerConfig } from './config'
+import {
+  ENV_VARS,
+  effectiveHubUrls,
+  ignoredCertPinNotices,
+  loadComputerConfig,
+  loadBootComputerConfig
+} from './config'
 import { adoptLoginShellPath } from './login-shell-path'
-import { startComputer } from './main'
+import { COMPUTER_VERSION, startComputer } from './main'
+import { isUpgradeWorker, receiveUpgradeBoot, superviseUpgrades } from './upgrade-runtime'
+import { dirname, join } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fork } from 'node:child_process'
+import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
+import { startSessionHost } from './session-host'
+import { startConnector } from './connector'
+import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -129,6 +143,56 @@ async function maybeInteractiveSetup(): Promise<{
 }
 
 async function main(): Promise<void> {
+  if (process.argv.includes('--runtime-contract')) {
+    process.stdout.write(
+      JSON.stringify({ min: HOST_CONTRACT_VERSION, max: HOST_CONTRACT_VERSION }) + '\n'
+    )
+    return
+  }
+  if (process.argv.includes('--upgrade-probe')) {
+    const pty = await import('node-pty')
+    await new Promise<void>((resolve, reject) => {
+      const child = pty.spawn(process.execPath, ['-e', 'process.exit(0)'], {
+        cols: 80,
+        rows: 24,
+        env: process.env as Record<string, string>
+      })
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error('native terminal probe timed out'))
+      }, 10_000)
+      child.onData(() => undefined)
+      child.onExit(({ exitCode }) => {
+        clearTimeout(timer)
+        if (exitCode === 0) resolve()
+        else reject(new Error('native terminal probe failed'))
+      })
+    })
+    process.stdout.write(COMPUTER_VERSION + '\n')
+    return
+  }
+  if (process.argv.includes('--session-host')) {
+    const root = process.env.SLAYZONE_ROOT ?? process.cwd()
+    let seed: Record<string, unknown> = {}
+    try {
+      seed = JSON.parse(readFileSync(join(root, 'computer-runtime', 'host-config.json'), 'utf8'))
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+    }
+    const config = loadBootComputerConfig(seed)
+    if (!config.allowedRoots.length) config.allowedRoots = [root]
+    const host = await startSessionHost(root, config, (message, meta) =>
+      process.stdout.write(`[host] ${message} ${JSON.stringify(meta ?? {})}\n`)
+    )
+    process.send?.({ type: 'supervisor-ready' }, () => undefined)
+    void host.closed.then(() => {
+      if (process.connected) process.disconnect()
+    })
+    process.on('SIGINT', () => void host.stop())
+    process.on('SIGTERM', () => void host.stop())
+    return
+  }
+  const workerBoot = isUpgradeWorker() ? await receiveUpgradeBoot() : undefined
   // Started by the desktop app (local-computer-supervisor.ts), which owns this
   // computer's env, root and lifetime.
   const supervised = process.env.SLAYZONE_SUPERVISED === '1'
@@ -147,18 +211,38 @@ async function main(): Promise<void> {
   // non-interactive / enrolled. Returns the prompted display name + path-jail (if
   // any) so a declined-save still applies them this boot (neither has an env
   // channel).
-  const prompted = await maybeInteractiveSetup()
+  const prompted = workerBoot ? {} : await maybeInteractiveSetup()
 
   let config
   try {
+    const supervisorConfig = process.argv.includes('--supervisor')
+      ? (() => {
+          try {
+            return JSON.parse(
+              readFileSync(
+                join(
+                  dirname(getComputerConfigFilePath()),
+                  'computer-runtime',
+                  'supervisor-config.json'
+                ),
+                'utf8'
+              )
+            )
+          } catch {
+            return undefined
+          }
+        })()
+      : undefined
     config =
-      prompted.name !== undefined || prompted.allowedRoots !== undefined
+      workerBoot?.config ??
+      (supervisorConfig ? loadBootComputerConfig(supervisorConfig) : undefined) ??
+      (prompted.name !== undefined || prompted.allowedRoots !== undefined
         ? loadComputerConfig(process.env, {
             ...loadComputerConfigFile(),
             ...(prompted.name !== undefined ? { computerName: prompted.name } : {}),
             ...(prompted.allowedRoots !== undefined ? { allowedRoots: prompted.allowedRoots } : {})
           })
-        : loadComputerConfig()
+        : loadComputerConfig())
   } catch (err) {
     process.stderr.write(`slayzone-computer: ${err instanceof Error ? err.message : String(err)}\n`)
     process.stderr.write(
@@ -176,6 +260,33 @@ async function main(): Promise<void> {
   // here where SLAYZONE_ROOT is resolved.
   if (config.allowedRoots.length === 0 && process.env.SLAYZONE_ROOT) {
     config.allowedRoots = [process.env.SLAYZONE_ROOT]
+  }
+
+  if (!supervised && !workerBoot && !process.argv.includes('--supervisor')) {
+    const root = dirname(getComputerConfigFilePath())
+    const launcher = ensureComputerLauncher(root, {
+      entry: process.argv[1],
+      version: COMPUTER_VERSION
+    })
+    writeFileSync(
+      join(root, 'computer-runtime', 'supervisor-config.json'),
+      JSON.stringify(config),
+      { mode: 0o600 }
+    )
+    const child = fork(launcher, [], {
+      stdio: 'inherit',
+      env: { ...process.env, SLAYZONE_NONINTERACTIVE: '1' }
+    })
+    process.on('SIGINT', () => child.kill('SIGINT'))
+    process.on('SIGTERM', () => child.kill('SIGTERM'))
+    child.on('exit', (code) => {
+      process.exitCode = code ?? 1
+    })
+    child.on('error', (err) => {
+      process.stderr.write(String(err))
+      process.exitCode = 1
+    })
+    return
   }
 
   const log = (message: string, meta?: Record<string, unknown>): void => {
@@ -197,9 +308,13 @@ async function main(): Promise<void> {
   // Skipped when SUPERVISED: the Electron host installs the very same files from
   // the very same shared installers during its own boot, so doing it again here
   // would be two writers racing for no gain.
-  if (!supervised) {
-    const { installAgentHooks } = await import('./agent-hooks')
-    await installAgentHooks(log)
+  if (!supervised && !workerBoot) {
+    const { stageComputerHooks } = await import('./agent-hooks')
+    await stageComputerHooks(dirname(getComputerConfigFilePath()), COMPUTER_VERSION, true).catch(
+      (err) => {
+        log('agent hook install failed', { error: String(err) })
+      }
+    )
   }
 
   // The user's login-shell PATH: every process this computer starts inherits
@@ -214,13 +329,37 @@ async function main(): Promise<void> {
     )
   )
 
-  const handle = startComputer(config, {
-    log,
-    pathReady,
-    onShutdown: () => {
-      process.exitCode = 0
-    }
-  })
+  if (!supervised && !workerBoot) {
+    await pathReady
+    await superviseUpgrades(
+      config,
+      { version: COMPUTER_VERSION, entry: process.argv[1] },
+      dirname(getComputerConfigFilePath()),
+      log
+    )
+    return
+  }
+
+  const handle = workerBoot?.grant
+    ? await startConnector(
+        dirname(getComputerConfigFilePath()),
+        config,
+        workerBoot.grant,
+        workerBoot.probation
+      )
+    : startComputer(config, {
+        initiallyPaused: workerBoot?.probation,
+        log,
+        pathReady,
+        onShutdown: () => {
+          process.exitCode = 0
+          if (workerBoot) {
+            process.send?.({ type: 'shutdown' }, () => {
+              if (process.connected) process.disconnect()
+            })
+          }
+        }
+      })
 
   // The dialer gives up on fatal auth errors (bad join token, missing creds);
   // exit non-zero so supervisors notice instead of idling forever.
@@ -236,6 +375,33 @@ async function main(): Promise<void> {
     }
     if (fatal) process.exitCode = 1
   })
+
+  if (workerBoot) {
+    for (const dialer of handle.dialers) {
+      const hubUrl = effectiveHubUrls(config)[handle.dialers.indexOf(dialer)]
+      dialer.events.on('connected', () =>
+        process.send?.({ type: 'connected', hubUrl }, () => undefined)
+      )
+      dialer.events.on('disconnected', () =>
+        process.send?.({ type: 'disconnected', hubUrl }, () => undefined)
+      )
+      dialer.events.on('error', ({ fatal, error }) => {
+        if (fatal) process.send?.({ type: 'fatal', error: error.message }, () => undefined)
+      })
+    }
+    process.on('message', (msg: { type?: string }) => {
+      if (msg?.type === 'activate') {
+        void Promise.resolve()
+          .then(() => handle.activate())
+          .then(
+            () => process.send?.({ type: 'activated' }, () => undefined),
+            (err) => process.send?.({ type: 'fatal', error: String(err) }, () => undefined)
+          )
+      }
+      if (msg?.type === 'drain')
+        process.send?.({ type: 'drained', idle: handle.drainForUpgrade() }, () => undefined)
+    })
+  }
 
   let stopping = false
   const gracefulStop = (why: string): void => {
@@ -258,10 +424,13 @@ async function main(): Promise<void> {
     }
     void handle.stop().then(() => {
       process.exitCode ??= 0
+      if (workerBoot && process.connected) process.disconnect()
     })
   }
   process.on('SIGINT', () => gracefulStop('received SIGINT, stopping'))
   process.on('SIGTERM', () => gracefulStop('received SIGTERM, stopping'))
+  if (workerBoot)
+    process.on('disconnect', () => gracefulStop('upgrade supervisor exited, stopping'))
 
   // A supervised computer must never outlive the app that spawned it. See
   // @slayzone/platform/parent-watch for the signals and why each is needed.

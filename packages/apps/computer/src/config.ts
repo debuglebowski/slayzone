@@ -27,6 +27,8 @@ import { decodeJoinToken, joinTokenCarriesCertPin } from '@slayzone/platform/joi
 export const computerConfigSchema = z.object({
   /** `ws://` or `wss://` hub computer endpoint. */
   hubUrl: z.string().min(1),
+  /** Standalone supervisor follows the connected hub release. Default on. */
+  autoUpgrade: z.boolean().optional(),
   /**
    * Additional hubs this computer serves, beyond `hubUrl`.
    *
@@ -83,6 +85,7 @@ export const computerConfigSchema = z.object({
 export type ComputerConfig = z.infer<typeof computerConfigSchema>
 
 export const ENV_VARS = {
+  autoUpgrade: 'SLAYZONE_COMPUTER_AUTO_UPGRADE',
   // Authority ONLY — `host[:port]`, no scheme, no path. The dial scheme
   // (ws/wss) is derived from the host via hubUrlFromAddr (loopback → ws, any other
   // host → wss), and `/computers` is
@@ -271,6 +274,7 @@ type Env = Record<string, string | undefined>
  */
 function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
   const out: Partial<ComputerConfig> = {}
+  if (shared.autoUpgrade !== undefined) out.autoUpgrade = shared.autoUpgrade
   if (shared.hubUrl !== undefined) out.hubUrl = shared.hubUrl
   if (shared.hubUrls !== undefined) out.hubUrls = shared.hubUrls
   if (shared.joinToken !== undefined) out.joinToken = shared.joinToken
@@ -340,11 +344,22 @@ export function loadComputerConfig(
     // fallback in bin.ts. No env channel either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
+    autoUpgrade: env.SLAYZONE_SUPERVISED !== '1',
     ...(fromToken ? { hubUrl: fromToken.hubUrl } : {}),
     // <ROOT>/computer.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
     ...(envJoinToken !== undefined ? { joinToken: envJoinToken } : {}),
+    ...(env[ENV_VARS.autoUpgrade] !== undefined
+      ? {
+          autoUpgrade:
+            env[ENV_VARS.autoUpgrade] === '1'
+              ? true
+              : env[ENV_VARS.autoUpgrade] === '0'
+                ? false
+                : env[ENV_VARS.autoUpgrade]
+        }
+      : {}),
     ...(env[ENV_VARS.binOverrideDir] !== undefined
       ? { binOverrideDir: env[ENV_VARS.binOverrideDir] }
       : {})
@@ -443,4 +458,21 @@ function urlProtocol(url: string): string | null {
 export function effectiveHubUrls(config: ComputerConfig): string[] {
   const all = config.hubUrls && config.hubUrls.length > 0 ? config.hubUrls : [config.hubUrl]
   return [...new Set(all)]
+}
+
+/** Cached boot config supplies interactive defaults; current device policy and env win. */
+export function loadBootComputerConfig(
+  seed: Partial<ComputerConfig>,
+  env: NodeJS.ProcessEnv = process.env,
+  file: ComputerConfigFile = loadComputerConfigFile()
+): ComputerConfig {
+  return loadComputerConfig(env, {
+    ...(seed.hubUrl !== undefined ? { hubUrl: seed.hubUrl } : {}),
+    ...(seed.name !== undefined ? { computerName: seed.name } : {}),
+    ...(seed.joinToken !== undefined ? { joinToken: seed.joinToken } : {}),
+    ...(seed.hubUrls !== undefined ? { hubUrls: seed.hubUrls } : {}),
+    ...(seed.allowedRoots !== undefined ? { allowedRoots: seed.allowedRoots } : {}),
+    ...(seed.autoUpgrade !== undefined ? { autoUpgrade: seed.autoUpgrade } : {}),
+    ...file
+  })
 }

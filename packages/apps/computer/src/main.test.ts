@@ -62,6 +62,28 @@ describe('createHubRequestHandler dispatch table', () => {
     }
   )
 
+  it('counts in-flight filesystem work when deciding whether an upgrade may restart', async () => {
+    let ready!: () => void
+    const pathReady = new Promise<void>((resolve) => {
+      ready = resolve
+    })
+    const dispatch = createHubRequestHandler({
+      shutdown: () => {},
+      dialer: fakeDialer,
+      config: testConfig,
+      pathReady
+    })
+    try {
+      const request = dispatch.handle(HubToComputerMethods.fsPathExists, { path: '/tmp' }, ACTOR)
+      expect(dispatch.isIdle()).toBe(false)
+      ready()
+      await request
+      expect(dispatch.isIdle()).toBe(true)
+    } finally {
+      dispatch.dispose()
+    }
+  })
+
   it('routes implemented methods (git.isGitRepo does not throw unimplemented)', async () => {
     const { handle } = makeDispatch()
     // /tmp is inside allowedRoots but not a git repo → resolves to

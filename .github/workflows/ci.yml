@@ -198,3 +198,33 @@ jobs:
 
       - name: Test agent-hooks
         run: pnpm --filter @slayzone/app test:agent-hooks
+
+  computer-upgrades:
+    name: computer-upgrades (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install Node runtime dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+      - name: Prepare native terminals
+        run: pnpm rebuild node-pty
+      - name: Build standalone computer bundle
+        run: pnpm --filter @slayzone/computer build
+      - name: Test upgrades and process survival
+        run: pnpm --filter @slayzone/computer exec vitest run src/auto-upgrade.test.ts src/upgrade-runtime.test.ts src/upgrade-install.test.ts src/upgrade-integration.test.ts src/persistent-host.test.ts src/connector-survival.test.ts src/hook-assets.test.ts --maxWorkers=1 --testTimeout=60000 --hookTimeout=30000
+      - name: Test runtime recovery policy
+        run: pnpm --filter @slayzone/computer-runtime test
+      - name: Test stable launcher rollback
+        run: pnpm exec vitest run packages/shared/platform/src/computer-launcher.test.ts --testTimeout=15000

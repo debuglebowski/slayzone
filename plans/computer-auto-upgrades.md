@@ -1,6 +1,6 @@
 # Computer upgrades without losing running work
 
-Status: proposed. Supersedes the current idle-only restart implementation. No deployment yet.
+Status: implemented; macOS process/integration checks passed. Cross-platform CI added. No production deployment yet.
 
 ## Outcome
 
@@ -147,6 +147,20 @@ Release gate: all scenarios pass, affected typechecks/builds pass, and a disposa
 cloud canary survives a hub upgrade plus injected upgrade failures. Then roll out
 the initial migration and validate golden-comet. Production deployment is a separate step.
 
+## Verification notes
+
+Local checks exercise protocol v3 → v4 rejection and recovery, failed candidates,
+registry failure/corrupt cache recovery, persistent cooldown, pre/post-readiness
+rollback, supervisor replacement, deferred host replacement, stale-generation
+races, queued hooks, stdout/exit replay and surviving child PIDs/session epochs.
+Authentication/status, service lifecycle, configuration and hook installers have
+regression coverage. A dedicated CI matrix runs upgrade tests on Linux, Windows
+and macOS; only macOS was executed locally.
+
+Remaining rollout gates: successful cross-platform CI, a disposable cloud canary,
+and the planned initial migration of existing monolithic agents. No production
+agent was restarted or upgraded during implementation.
+
 ## Unresolved questions
 
-None. Proposed defaults above; no production interruption authorized.
+None. Defaults above implemented; no production interruption authorized.
