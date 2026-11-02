@@ -21,6 +21,7 @@
 
 import type { ComputerBootSeed } from './config'
 import { hostname } from 'node:os'
+import { probeNativeTerminal } from './native-probe'
 import { delimiter } from 'node:path'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
 import {
@@ -148,24 +149,7 @@ async function main(): Promise<void> {
     return
   }
   if (process.argv.includes('--upgrade-probe')) {
-    const pty = await import('node-pty')
-    await new Promise<void>((resolve, reject) => {
-      const child = pty.spawn(process.execPath, ['-e', 'process.exit(0)'], {
-        cols: 80,
-        rows: 24,
-        env: process.env as Record<string, string>
-      })
-      const timer = setTimeout(() => {
-        child.kill()
-        reject(new Error('native terminal probe timed out'))
-      }, 10_000)
-      child.onData(() => undefined)
-      child.onExit(({ exitCode }) => {
-        clearTimeout(timer)
-        if (exitCode === 0) resolve()
-        else reject(new Error('native terminal probe failed'))
-      })
-    })
+    await probeNativeTerminal()
     process.stdout.write(COMPUTER_VERSION + '\n')
     return
   }

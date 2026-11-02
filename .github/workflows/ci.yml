@@ -225,7 +225,7 @@ jobs:
       - name: Build standalone computer bundle
         run: pnpm --filter @slayzone/computer build
       - name: Test upgrades and process survival
-        run: pnpm --filter @slayzone/computer exec vitest run src/auto-upgrade.test.ts src/upgrade-runtime.test.ts src/upgrade-install.test.ts src/upgrade-integration.test.ts src/persistent-host.test.ts src/connector-survival.test.ts src/hook-assets.test.ts --maxWorkers=1 --testTimeout=60000 --hookTimeout=30000
+        run: pnpm --filter @slayzone/computer exec vitest run src/auto-upgrade.test.ts src/upgrade-runtime.test.ts src/upgrade-install.test.ts src/upgrade-integration.test.ts src/persistent-host.test.ts src/connector-survival.test.ts src/hook-assets.test.ts src/native-probe.test.ts src/handlers/computer-config.test.ts --maxWorkers=1 --testTimeout=60000 --hookTimeout=30000
       - name: Test runtime recovery policy
         run: pnpm --filter @slayzone/computer-runtime test
       - name: Test stable launcher rollback
