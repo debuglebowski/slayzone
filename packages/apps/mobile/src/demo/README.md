@@ -28,16 +28,16 @@ is the app's own and runs unchanged:
 - `terminal-recording.ts`: the terminal agent's output (ANSI chunks).
 - `demo-image.ts`: the PNG (a SlayZone desktop screenshot), base64 in the JS bundle.
 - `DemoBanner.tsx`: "DEMO · Sample data — changes reset when you exit · Exit demo",
-  above every tab (`TabStack`).
+  above every tab (`TabStack`): Board, Search, Settings.
 
 ## Writes: in memory, reset on exit
 
-Writes work, like on a hub, and are kept in memory only: creating / editing / moving /
-archiving / deleting tasks and subtasks, tags, blockers, uploading artifacts, sending a
+Writes work, like on a hub, and are kept in memory only: creating projects, creating / editing / moving /
+archiving (one or a whole column) / deleting tasks and subtasks, tags, blockers, uploading artifacts, sending a
 chat message (the demo answers itself: no agent runs), typing into the terminal (echoed,
 with a note), start / stop / interrupt / restart / reset of agents. Exit demo (the
 banner, or Settings → Hubs → Exit demo) drops the demo hub; the next "Try demo" starts from the
-sample data again. Signing in to a real hub from inside the demo (Hubs → Add a hub) also
+sample data again. Signing in to a real hub from inside the demo (Settings → Add a hub) also
 ends it.
 
 What needs a real computer answers `DEMO_UNAVAILABLE` ("Not available in the demo — sign
@@ -70,6 +70,6 @@ App Store) carries:
 
 > SlayZone is the mobile client for a self-hosted SlayZone hub. To review without a hub,
 > tap "Try demo" on the sign-in screen: it opens the full app on sample data (no account,
-> no network). Every tab works — Agents, Tasks, Search, Hubs — including task details,
+> no network). Every tab works — Board, Search, Settings — including task details,
 > artifacts, an agent chat and a terminal. Changes stay on the device and reset when you
 > tap "Exit demo".

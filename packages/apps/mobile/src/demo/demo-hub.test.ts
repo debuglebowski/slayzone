@@ -139,6 +139,18 @@ describe('demo hub: tRPC', () => {
     expect(states.at(-1)).toBe('running')
   })
 
+  it('creates a project, and archives a column’s tasks at once', async () => {
+    const client = clientOf(demo())
+    const project = await client.projects.create.mutate({ name: 'Side quest', color: '#3b82f6' })
+    expect((await client.projects.list.query()).map((p) => p.name)).toContain('Side quest')
+    expect(project.name).toBe('Side quest')
+
+    await client.task.archiveMany.mutate({ ids: [DEMO_IDS.changelog, DEMO_IDS.layoutShift] })
+    const board = await client.task.loadBoardData.query()
+    const archived = board.tasks.filter((t) => t.archived_at !== null).map((t) => t.id)
+    expect(archived.sort()).toEqual([DEMO_IDS.changelog, DEMO_IDS.layoutShift].sort())
+  })
+
   it('what needs a real computer says so', async () => {
     const client = clientOf(demo())
     await expect(client.workspace.listRoots.query({ computerId: 'x' } as never)).rejects.toThrow(

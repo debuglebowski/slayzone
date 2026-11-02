@@ -31,6 +31,7 @@ import {
   DEMO_IDS,
   type DemoSeed,
   demoArtifact,
+  demoProject,
   demoTask,
   hubTime,
   seedDemo
@@ -417,6 +418,14 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       return true
     },
     'task.archive': ({ id }) => touch(taskOrThrow(id), { archived_at: hubTime(Date.now()) }),
+    'task.archiveMany': ({ ids }) => {
+      const at = hubTime(Date.now())
+      for (const id of ids) {
+        const task = tasks.get(id)
+        if (task && !task.deleted_at) tasks.set(id, { ...task, archived_at: at })
+      }
+      tasksChanged([...ids])
+    },
     'task.unarchive': ({ id }) => touch(taskOrThrow(id), { archived_at: null }),
     'task.reorder': ({ taskIds }) => {
       taskIds.forEach((id, order) => {
@@ -457,6 +466,16 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     },
     'template.getByProject': () => [],
     'projects.list': () => projects,
+    'projects.create': ({ name, color }) => {
+      const project = demoProject(
+        Date.now(),
+        { id: newId('project'), name, color, sort_order: projects.length },
+        `~/dev/projects/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+      )
+      projects.push(project)
+      tasksChanged(null)
+      return project
+    },
 
     // Computers + folders (a real computer's)
     'computers.list': () => [
