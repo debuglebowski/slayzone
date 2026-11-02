@@ -17,7 +17,8 @@ function shell(spawnedAt: number): BgShell {
     lastPolledAt: null,
     latestStdout: '',
     latestStderr: '',
-    spawnedInSpawnId: null
+    spawnedInSpawnId: null,
+    spawnedInTurn: null
   }
 }
 
@@ -32,15 +33,14 @@ describe('BackgroundJobsBanner', () => {
   })
 
   it('ages tick while the job list is expanded', () => {
-    const shells = new Map([['tu-1', shell(START - 5_000)]])
-    render(<BackgroundJobsBanner shells={shells} order={['tu-1']} defaultCollapsed={false} />)
+    render(<BackgroundJobsBanner jobs={[shell(START - 5_000)]} defaultCollapsed={false} />)
     expect(screen.getByText('5s')).toBeTruthy()
     act(() => vi.advanceTimersByTime(3_000))
     expect(screen.getByText('8s')).toBeTruthy()
   })
 
   it('renders nothing without jobs', () => {
-    const { container } = render(<BackgroundJobsBanner shells={new Map()} order={[]} />)
+    const { container } = render(<BackgroundJobsBanner jobs={[]} />)
     expect(container.firstChild).toBeNull()
   })
 
@@ -53,18 +53,7 @@ describe('BackgroundJobsBanner', () => {
       status: 'completed' as const
     }
     const stop = vi.fn()
-    render(
-      <BackgroundJobsBanner
-        shells={
-          new Map([
-            ['done', finished],
-            ['tu-1', shell(START)]
-          ])
-        }
-        order={['done', 'tu-1']}
-        onStop={stop}
-      />
-    )
+    render(<BackgroundJobsBanner jobs={[finished, shell(START)]} onStop={stop} />)
     const toggle = screen.getByRole('button', { name: '1 job running' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('npm run dev')).toBeNull()
@@ -82,13 +71,9 @@ describe('BackgroundJobsBanner', () => {
     'disappears when the last active job becomes %s',
     (status) => {
       const job = shell(START)
-      const { container, rerender } = render(
-        <BackgroundJobsBanner shells={new Map([['tu-1', job]])} order={['tu-1']} />
-      )
+      const { container, rerender } = render(<BackgroundJobsBanner jobs={[job]} />)
       expect(screen.getByRole('button', { name: '1 job running' })).toBeTruthy()
-      rerender(
-        <BackgroundJobsBanner shells={new Map([['tu-1', { ...job, status }]])} order={['tu-1']} />
-      )
+      rerender(<BackgroundJobsBanner jobs={[{ ...job, status }]} />)
       expect(container.firstChild).toBeNull()
     }
   )

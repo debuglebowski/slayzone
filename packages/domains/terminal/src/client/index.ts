@@ -73,6 +73,7 @@ export {
   isAwaitingUserQuestion,
   deriveLoadingLabel,
   selectUsageSummary,
+  selectBackgroundJobs,
   liveBlockOf,
   streamKeyOf,
   selectActiveUserIds,

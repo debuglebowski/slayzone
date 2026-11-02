@@ -17,6 +17,7 @@ import {
   selectFoldedIndexes,
   selectUsageSummary,
   selectConversationAttachmentBytes,
+  selectBackgroundJobs,
   type ChatTimelineState,
   type TimelineItem
 } from './chat-timeline'
@@ -1638,6 +1639,83 @@ test('spawn-token: replay determinism across spawn-token boundary', () => {
   for (const e of events) s = reducer(s, { type: 'event', event: e })
   expect(s.bgShells.has('shell-a')).toBe(false)
   expect(s.currentSpawnId).toBe('sp-new')
+})
+
+// A background job is one the agent is NOT working on: a job the open turn
+// started is that turn's own running work (its tool card shows it), listed once
+// the turn ends.
+describe('selectBackgroundJobs', () => {
+  const listed = (s: ChatTimelineState): string[] =>
+    selectBackgroundJobs(s).map((j) => j.spawnToolUseId)
+  const send = (s: ChatTimelineState, text = 'go'): ChatTimelineState =>
+    reducer(reducer(s, { type: 'event', event: ev.turnInit() }), { type: 'user-sent', text })
+  const bgSpawn = (id: string): AgentEvent =>
+    bgCall(id, 'Bash', { command: 'pnpm dev', run_in_background: true })
+  // Codex: a command still running past its yield window turns up in Codex's
+  // background-terminal registry while the turn is still on it.
+  const codexYielded = (id: string): AgentEvent[] => [
+    bgCall(id, 'codex/commandExecution', { command: 'pnpm typecheck' }),
+    { kind: 'command-task', taskId: id, toolUseId: id, status: 'running', backgrounded: true }
+  ]
+  const apply = (s: ChatTimelineState, events: AgentEvent[]): ChatTimelineState =>
+    events.reduce((acc, event) => reducer(acc, { type: 'event', event }), s)
+
+  test('a run_in_background job of the open turn: listed once that turn ends', () => {
+    let s = apply(send(initialState()), [bgSpawn('spawn-1')])
+    expect(s.bgShells.has('spawn-1')).toBe(true)
+    expect(listed(s)).toEqual([])
+    s = apply(s, [ev.turnResult()])
+    expect(listed(s)).toEqual(['spawn-1'])
+  })
+
+  test('a Codex command past its yield window: its turn’s work until the turn ends', () => {
+    let s = apply(send(initialState()), codexYielded('exec-1'))
+    expect(s.bgShells.get('exec-1')?.status).toBe('running')
+    expect(listed(s)).toEqual([])
+    s = apply(s, [ev.turnResult()])
+    expect(listed(s)).toEqual(['exec-1'])
+  })
+
+  test('Stop ends the turn: its still-running job is listed', () => {
+    let s = apply(send(initialState()), [bgSpawn('spawn-1')])
+    s = reducer(s, { type: 'turn-interrupted' })
+    expect(listed(s)).toEqual(['spawn-1'])
+  })
+
+  test('an earlier turn’s job stays listed while the next turn runs; the new one waits', () => {
+    let s = apply(send(initialState()), [bgSpawn('old'), ev.turnResult()])
+    s = apply(send(s, 'next'), [bgSpawn('new')])
+    expect(isTurnOpen(s)).toBe(true)
+    expect(listed(s)).toEqual(['old'])
+    s = apply(s, [ev.turnResult()])
+    expect(listed(s)).toEqual(['old', 'new'])
+  })
+
+  test('a job found while no turn runs (Codex resume) is listed at once, and through the next turn', () => {
+    let s = apply(initialState(), [ev.turnInit(), ...codexYielded('found')])
+    expect(isTurnOpen(s)).toBe(false)
+    expect(listed(s)).toEqual(['found'])
+    s = send(s, 'next')
+    expect(listed(s)).toEqual(['found'])
+  })
+
+  test('a job of an agent-started turn: listed once that turn ends', () => {
+    let s = apply(send(initialState({ agentStartedTurns: true })), [ev.turnResult()])
+    s = apply(s, [ev.text('m-2', 'the loop finished'), bgSpawn('spawn-2')])
+    expect(isTurnOpen(s)).toBe(true)
+    expect(listed(s)).toEqual([])
+    s = apply(s, [ev.turnResult()])
+    expect(listed(s)).toEqual(['spawn-2'])
+  })
+
+  test('the same list while its jobs and turn stay: a render reading it stays memoized', () => {
+    let s = apply(send(initialState()), [bgSpawn('spawn-1'), ev.turnResult()])
+    const before = selectBackgroundJobs(s)
+    s = apply(s, [ev.text('m-9', 'unrelated')])
+    expect(selectBackgroundJobs(s)).toBe(before)
+    s = apply(send(s, 'next'), [bgSpawn('spawn-3')])
+    expect(selectBackgroundJobs(s)).not.toBe(before)
+  })
 })
 
 // ---- Slash commands, compaction, context + cost (chat plan 3.1 / 3.4) ----

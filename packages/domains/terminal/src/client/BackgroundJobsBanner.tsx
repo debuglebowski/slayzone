@@ -4,8 +4,8 @@ import { ChevronRight } from 'lucide-react'
 import type { BgShell, BgShellStatus } from '../shared/chat-timeline'
 
 interface BackgroundJobsBannerProps {
-  shells: Map<string, BgShell>
-  order: string[]
+  /** The background jobs, in start order (`selectBackgroundJobs`). */
+  jobs: readonly BgShell[]
   defaultCollapsed?: boolean
   onStop?: (shell: BgShell) => void
 }
@@ -40,21 +40,13 @@ function formatAge(ms: number): string {
 
 /** Compact composer disclosure; timeline reducer owns job state. */
 export function BackgroundJobsBanner({
-  shells,
-  order,
+  jobs,
   defaultCollapsed = true,
   onStop
 }: BackgroundJobsBannerProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const id = useId()
-  const active = useMemo(() => {
-    const active: BgShell[] = []
-    for (const key of order) {
-      const shell = shells.get(key)
-      if (shell && ACTIVE_STATUSES.has(shell.status)) active.push(shell)
-    }
-    return active
-  }, [shells, order])
+  const active = useMemo(() => jobs.filter((shell) => ACTIVE_STATUSES.has(shell.status)), [jobs])
   const now = useNow(1000, { enabled: active.length > 0 && !collapsed })
   if (active.length === 0) return null
 

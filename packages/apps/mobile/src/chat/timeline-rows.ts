@@ -9,6 +9,7 @@
 import {
   type BgShell,
   type ChatTimelineState,
+  selectBackgroundJobs,
   streamKeyOf,
   type TimelineItem,
   type TimelineRows,
@@ -318,12 +319,9 @@ export function toolBody(inv: ToolInvocation): ToolBody {
   }
 }
 
-/** Background jobs in spawn order (desktop's banner list). */
-export function bgShellList(state: ChatTimelineState): BgShell[] {
-  return state.bgShellOrder.flatMap((id) => {
-    const s = state.bgShells.get(id)
-    return s ? [s] : []
-  })
+/** Background jobs in spawn order (desktop's banner list): not the open turn's own. */
+export function bgShellList(state: ChatTimelineState): readonly BgShell[] {
+  return selectBackgroundJobs(state)
 }
 
 export const BG_STATUS_LABELS: Record<BgShell['status'], string> = {

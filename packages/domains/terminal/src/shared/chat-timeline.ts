@@ -442,6 +442,12 @@ export interface BgShell {
    * they cannot outlive it.
    */
   spawnedInSpawnId: string | null
+  /**
+   * `turnsClosed` when the job started while a turn was open, null when no turn
+   * was (a job found at resume). Until that turn closes, the job is its own
+   * running work — not a background job ({@link selectBackgroundJobs}).
+   */
+  spawnedInTurn: number | null
 }
 
 /** Waiting for rows: what to load, and the actions to apply once they are in. */
@@ -604,6 +610,12 @@ export interface ChatTimelineState {
   /** Such a turn is running now: the chat reads as working until its result. */
   agentTurnOpen: boolean
   /**
+   * Turns closed so far, user and agent-started alike (result, Stop, a refused
+   * or withdrawn message, the process ending). Identifies the open turn: it is
+   * `turnsClosed` while it runs, and moves on when it closes.
+   */
+  turnsClosed: number
+  /**
    * Replaying a conversation's imported history (a switched / handed-over
    * session): its output is the past, never a turn now. Ends at the live
    * session's turn-init.
@@ -659,6 +671,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     freshStartPending: false,
     agentStartedTurns: opts.agentStartedTurns ?? false,
     agentTurnOpen: false,
+    turnsClosed: 0,
     importingHistory: false
   }
 }
@@ -791,6 +804,23 @@ type QueuedAction = Exclude<
 
 function reduceAction(state: ChatTimelineState, action: QueuedAction): ChatTimelineState {
   if (action.type === 'events') return reduceEvents(state, action.events, action.at, action.seq)
+  return countClosedTurn(state, reduceSingle(state, action))
+}
+
+/**
+ * `next` with `turnsClosed` moved on when the action closed a turn: one stops
+ * being open, a user turn's result counts (a queued message keeps the chat
+ * working, yet that turn is over), or an agent-started turn ends.
+ */
+function countClosedTurn(prev: ChatTimelineState, next: ChatTimelineState): ChatTimelineState {
+  const closed =
+    (isTurnOpen(prev) && !isTurnOpen(next)) ||
+    next.resultCount > prev.resultCount ||
+    (prev.agentTurnOpen && !next.agentTurnOpen)
+  return closed ? { ...next, turnsClosed: next.turnsClosed + 1 } : next
+}
+
+function reduceSingle(state: ChatTimelineState, action: SingleAction): ChatTimelineState {
   // A turn's end (or its process's) ends every stream it left open: those rows
   // keep the text they got. The splitter saved them first, so this only heals.
   const kind = action.type === 'event' ? action.event.kind : null
@@ -3143,6 +3173,37 @@ function dropActiveShells(
   }
 }
 
+/** The open turn's identity (`turnsClosed`), null when none is open. */
+function openTurn(state: ChatTimelineState): number | null {
+  return isTurnOpen(state) ? state.turnsClosed : null
+}
+
+/**
+ * The background jobs, in start order: every job but those the open turn
+ * started — the agent is still on those (a Codex command past its yield window,
+ * a `run_in_background` one), and its tool card shows them running. They join
+ * once that turn closes. Any status: the caller picks the ones it shows.
+ */
+export function selectBackgroundJobs(state: ChatTimelineState): readonly BgShell[] {
+  const open = openTurn(state)
+  // The same list for the same jobs and turn: a render reading it stays memoized.
+  const cached = backgroundJobsCache.get(state.bgShells)
+  if (cached && cached.order === state.bgShellOrder && cached.open === open) return cached.jobs
+  const jobs: BgShell[] = []
+  for (const id of state.bgShellOrder) {
+    const shell = state.bgShells.get(id)
+    if (shell && (open === null || shell.spawnedInTurn !== open)) jobs.push(shell)
+  }
+  backgroundJobsCache.set(state.bgShells, { order: state.bgShellOrder, open, jobs })
+  return jobs
+}
+
+/** By `bgShells` (never changed once a reducer call returned it). */
+const backgroundJobsCache = new WeakMap<
+  ReadonlyMap<string, BgShell>,
+  { order: readonly string[]; open: number | null; jobs: readonly BgShell[] }
+>()
+
 /**
  * A background command task (a `run_in_background` call, or one moved there)
  * is a background job: its task id is the shell id, its status the CLI's.
@@ -3172,7 +3233,8 @@ function applyBgShellCommandTask(
     lastPolledAt: null,
     latestStdout: '',
     latestStderr: '',
-    spawnedInSpawnId: state.currentSpawnId
+    spawnedInSpawnId: state.currentSpawnId,
+    spawnedInTurn: openTurn(state)
   })
 }
 
@@ -3196,7 +3258,8 @@ function applyBgShellToolCall(
       lastPolledAt: null,
       latestStdout: '',
       latestStderr: '',
-      spawnedInSpawnId: state.currentSpawnId
+      spawnedInSpawnId: state.currentSpawnId,
+      spawnedInTurn: openTurn(state)
     }
     return setBgShell(state, shell)
   }

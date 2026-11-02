@@ -34,6 +34,7 @@ import {
   LiveBlockStore,
   LiveBlockStoreContext,
   selectUsageSummary,
+  selectBackgroundJobs,
   selectCodexPlanReview,
   useChatSession
 } from '@slayzone/terminal/client'
@@ -209,6 +210,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       tabId,
       cwd
     })
+    const backgroundJobs = selectBackgroundJobs(state)
     const codexPlanReview = useMemo(
       () => (mode === 'codex-chat' ? selectCodexPlanReview(timeline, chatCollaboration) : null),
       [mode, timeline, chatCollaboration]
@@ -880,11 +882,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       )}
                       <ChatComposer
                         backgroundJobs={
-                          state.bgShells.size > 0 ? (
-                            <ComposerBackgroundJobs
-                              shells={state.bgShells}
-                              order={state.bgShellOrder}
-                            />
+                          backgroundJobs.length > 0 ? (
+                            <ComposerBackgroundJobs jobs={backgroundJobs} />
                           ) : null
                         }
                         compact={props.isThread}
