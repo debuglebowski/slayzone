@@ -22,3 +22,4 @@ export { createChatRecovery } from './hub-recovery'
 export { computerArtifactRequestSchema } from './artifacts'
 
 export { createChatAvailability } from './hub-availability'
+export { createChatFolderDeletions } from './hub-folders'

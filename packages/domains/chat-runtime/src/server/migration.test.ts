@@ -5,6 +5,8 @@ import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harne
 import { createChatOwnershipStore } from './hub-ownership'
 import { createChatMigration } from './migration'
 import { encodeTransfer } from './transfers'
+import type { ChatTransferManifest } from '../shared'
+type TestRequest = { kind: string; data: string; hash: string; manifest: ChatTransferManifest }
 const dbs: Database.Database[] = []
 afterEach(() => {
   for (const db of dbs.splice(0)) db.close()
@@ -12,7 +14,7 @@ afterEach(() => {
 async function fixture() {
   const db = new Database(':memory:')
   dbs.push(db)
-  migrations.find((m) => m.version === 187)!.up(db)
+  for (const migration of migrations.filter((m) => m.version >= 187)) migration.up(db)
   const ownership = createChatOwnershipStore(createSlayzoneDbAdapter(db))
   const route = await ownership.register({
     id: 'c',
@@ -48,7 +50,7 @@ async function fixture() {
     activationFailures = 0,
     failChunk = false
   const request = vi.fn(async (_pc: string, raw: unknown): Promise<unknown> => {
-    const p = raw as Record<string, any>
+    const p = raw as TestRequest
     switch (p.kind) {
       case 'transfer.begin':
         return { id: 'transfer', offset }
@@ -70,7 +72,7 @@ async function fixture() {
   })
   // finish returns the destination's verified digest, independent of hub state.
   request.mockImplementation(async (_pc, raw) => {
-    const p = raw as Record<string, any>
+    const p = raw as TestRequest
     if (p.kind === 'transfer.begin') {
       manifest = p.manifest
       return { id: 'transfer', offset }
@@ -90,7 +92,7 @@ async function fixture() {
       return { ok: true }
     }
   })
-  let manifest: any
+  let manifest: ChatTransferManifest
   const migration = createChatMigration({ ownership, source, request })
   return {
     ownership,

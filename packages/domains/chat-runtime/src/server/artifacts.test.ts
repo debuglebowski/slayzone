@@ -63,6 +63,105 @@ test('chat uploads remain computer-local, support editing, and seal historical v
   }
 })
 
+test('a deleted folder cannot be reimported by a delayed command; duplicate delete remains acknowledged', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-folder-fence-')),
+    r = createComputerChatRuntime({ stateDir: dir, hubScope: 'hub', computerId: 'pc' })
+  try {
+    r.bootstrap({
+      identity: { id: 'c', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+      projectId: null,
+      cwd: '/tmp',
+      revision: 1,
+      providerConfig: {},
+      defaultFlags: null,
+      env: {}
+    })
+    const route = { id: 'c', epoch: 1 }
+    const folder = (await r.artifacts.invoke({
+      route,
+      method: 'createFolder',
+      operationId: 'new',
+      args: [{ taskId: 't', name: 'Folder' }]
+    })) as { id: string }
+    const deletion = { route, method: 'deleteFolder', operationId: 'delete', args: [folder.id] }
+    expect(await r.artifacts.invoke(deletion)).toBe(true)
+    expect(await r.artifacts.invoke(deletion)).toBe(true)
+    await expect(
+      r.artifacts.invoke({
+        route,
+        method: 'importFolder',
+        operationId: 'stale-import',
+        args: [{ id: folder.id, taskId: 't', name: 'Old', parentId: null }]
+      })
+    ).rejects.toThrow(/deleted/)
+  } finally {
+    await r.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('folder cleanup is atomic across a mixed-task batch and its fences survive restart', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-folder-scope-'))
+  let r = createComputerChatRuntime({ stateDir: dir, hubScope: 'hub', computerId: 'pc' })
+  try {
+    for (const taskId of ['one', 'two'])
+      r.bootstrap({
+        identity: { id: taskId, taskId, tabId: taskId, mode: 'claude-chat', epoch: 1 },
+        projectId: null,
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      })
+    const create = (id: string) =>
+      r.artifacts.invoke({
+        route: { id, epoch: 1 },
+        method: 'createFolder',
+        operationId: 'new',
+        args: [{ taskId: id, name: id }]
+      }) as Promise<{ id: string }>
+    const one = await create('one'),
+      two = await create('two')
+    expect(() => r.artifacts.deleteFolders('one', [one.id, two.id])).toThrow(/outside.*task/i)
+    expect(r.artifacts.deletedFolderInventory(0).rows).toEqual([])
+    expect(
+      await r.artifacts.invoke({
+        route: { id: 'one', epoch: 1 },
+        method: 'listFoldersByTask',
+        args: ['one']
+      })
+    ).toHaveLength(1)
+    await r.applyTaskLifecycle('one', 'paused', 1)
+    // Reconciliation can finish a committed deletion while the task is in Trash.
+    r.artifacts.deleteFolders('one', [one.id])
+    await r.close()
+    r = createComputerChatRuntime({ stateDir: dir, hubScope: 'hub', computerId: 'pc' })
+    expect(r.artifacts.deletedFolderInventory(0).rows).toMatchObject([
+      { folderId: one.id, taskId: 'one' }
+    ])
+    await r.applyTaskLifecycle('one', 'active', 2)
+    await expect(
+      r.artifacts.invoke({
+        route: { id: 'one', epoch: 1 },
+        method: 'importFolder',
+        operationId: 'late',
+        args: [{ id: one.id, taskId: 'one', name: 'Old', parentId: null }]
+      })
+    ).rejects.toThrow(/deleted/i)
+    expect(
+      await r.artifacts.invoke({
+        route: { id: 'two', epoch: 1 },
+        method: 'listFoldersByTask',
+        args: ['two']
+      })
+    ).toHaveLength(1)
+  } finally {
+    await r.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test.each(['size', 'type', 'metadata'] as const)(
   'prepared attachments reject %s mismatches before storing bytes',
   async (mismatch) => {

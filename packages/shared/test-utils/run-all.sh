@@ -661,6 +661,7 @@ run_harness packages/apps/hub/src/chat-compaction.test.ts
 run_harness packages/apps/hub/src/chat-diagnostics.test.ts
 run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts
 run_harness packages/apps/hub/src/computer-artifacts.test.ts
+run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifacts.test.ts
 run_harness packages/domains/task-artifacts/src/server/standalone.test.ts
 run_harness packages/domains/task/src/server/artifact-downloads.test.ts
@@ -669,6 +670,7 @@ run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-recovery.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts

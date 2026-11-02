@@ -174,7 +174,9 @@ export function createLocalArtifacts(
   })
   storage.compose((raw) => {
     raw.function('computer_chat_artifact_owner', () => context.getStore()?.id ?? '')
-    raw.exec(`CREATE TABLE IF NOT EXISTS artifact_owners(id TEXT PRIMARY KEY,kind TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id));
+    raw.exec(`CREATE TABLE IF NOT EXISTS artifact_folder_tombstones(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,task_id TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS artifact_folder_tombstones_task ON artifact_folder_tombstones(task_id);
+    CREATE TABLE IF NOT EXISTS artifact_owners(id TEXT PRIMARY KEY,kind TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id));
     CREATE TRIGGER IF NOT EXISTS chat_artifact_owner AFTER INSERT ON task_artifacts BEGIN INSERT INTO artifact_owners VALUES(NEW.id,'artifact',computer_chat_artifact_owner()); END;
     CREATE TRIGGER IF NOT EXISTS chat_folder_owner AFTER INSERT ON artifact_folders BEGIN INSERT INTO artifact_owners VALUES(NEW.id,'folder',computer_chat_artifact_owner()); END;
     CREATE TRIGGER IF NOT EXISTS chat_artifact_owner_delete AFTER DELETE ON task_artifacts BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END;
@@ -194,6 +196,42 @@ export function createLocalArtifacts(
       [id]
     )
     if (!row || row.task_id !== taskId) throw new Error('Folder is outside this task')
+  }
+  function assertFolderAlive(id: string) {
+    if (
+      storage.compose((raw) =>
+        raw.prepare('SELECT 1 FROM artifact_folder_tombstones WHERE id=?').get(id)
+      )
+    )
+      throw new Error('Folder was deleted')
+  }
+  function deleteFolders(taskId: string, folderIds: string[]) {
+    storage.transaction(() =>
+      storage.compose((raw) => {
+        for (const id of folderIds) {
+          const existing = raw
+            .prepare(
+              'SELECT task_id FROM artifact_folders WHERE id=? UNION ALL SELECT task_id FROM artifact_folder_tombstones WHERE id=?'
+            )
+            .all(id, id) as Array<{ task_id: string }>
+          if (existing.some((f) => f.task_id !== taskId))
+            throw new Error('Folder is outside this task')
+          const rows = raw
+            .prepare(`WITH RECURSIVE gone(id) AS (
+          SELECT id FROM artifact_folders WHERE id=? AND task_id=?
+          UNION SELECT f.id FROM artifact_folders f JOIN gone ON f.parent_id=gone.id WHERE f.task_id=?
+        ) SELECT id FROM gone`)
+            .all(id, taskId, taskId) as Array<{ id: string }>
+          for (const folderId of new Set([id, ...rows.map((r) => r.id)]))
+            raw
+              .prepare(
+                'INSERT INTO artifact_folder_tombstones(id,task_id) VALUES(?,?) ON CONFLICT(id) DO NOTHING'
+              )
+              .run(folderId, taskId)
+          raw.prepare('DELETE FROM artifact_folders WHERE id=? AND task_id=?').run(id, taskId)
+        }
+      })
+    )
   }
   async function seal(tabId: string, ref: ChatAttachment) {
     const owner = local.owner(tabId),
@@ -224,6 +262,22 @@ export function createLocalArtifacts(
     if (!read && storage.taskLifecycle(taskId).state !== 'active')
       throw new Error('Task chat is paused or deleted')
     if (!read && !req.operationId) throw new Error('Artifact mutation requires an operation id')
+    if (!read) {
+      const receipt = storage.receipt(owner.identity.id, req.operationId!)
+      if (receipt) {
+        storage.acceptCommand(owner.identity.id, req.route.epoch, req.operationId!, {
+          method: req.method,
+          args
+        })
+        if (receipt.resultExpired)
+          throw new Error(
+            'Artifact operation result expired under chat retention; operation was not repeated'
+          )
+        if (receipt.state !== 'delivered')
+          throw new Error('Artifact operation outcome is unconfirmed')
+        return receipt.result
+      }
+    }
     if (req.method === 'listArtifactsByTask' || req.method === 'listFoldersByTask') {
       if (first !== taskId) throw new Error('Artifact task scope mismatch')
     } else if (
@@ -259,20 +313,6 @@ export function createLocalArtifacts(
       if (req.method === 'updateArtifact') await checkFolder(first.folderId, taskId)
     }
     if (!read) {
-      const receipt = storage.receipt(owner.identity.id, req.operationId!)
-      if (receipt) {
-        storage.acceptCommand(owner.identity.id, req.route.epoch, req.operationId!, {
-          method: req.method,
-          args
-        })
-        if (receipt.resultExpired)
-          throw new Error(
-            'Artifact operation result expired under chat retention; operation was not repeated'
-          )
-        if (receipt.state !== 'delivered')
-          throw new Error('Artifact operation outcome is unconfirmed')
-        return receipt.result
-      }
       storage.acceptCommand(owner.identity.id, req.route.epoch, req.operationId!, {
         method: req.method,
         args
@@ -287,6 +327,7 @@ export function createLocalArtifacts(
         )
         if (existing && existing.task_id !== taskId) throw new Error('Folder task scope mismatch')
         if (!existing) {
+          assertFolderAlive(first.id)
           await db.run('INSERT INTO artifact_folders(id,task_id,name,parent_id) VALUES(?,?,?,?)', [
             first.id,
             taskId,
@@ -301,6 +342,9 @@ export function createLocalArtifacts(
             first.id
           ])
         result = null
+      } else if (req.method === 'deleteFolder') {
+        deleteFolders(taskId, [first])
+        result = true
       } else if (req.method === 'listFoldersByTask')
         result = (await store.listFoldersByTask(db, taskId)).filter((f) =>
           storage.compose(
@@ -439,6 +483,18 @@ export function createLocalArtifacts(
   }
   return {
     invoke,
+    deleteFolders,
+    deletedFolderInventory(after: number) {
+      const rows = storage.compose((raw) =>
+        raw
+          .prepare(
+            'SELECT sequence,id AS folderId,task_id AS taskId FROM artifact_folder_tombstones WHERE sequence>? ORDER BY sequence LIMIT 501'
+          )
+          .all(after)
+      ) as Array<{ sequence: number; folderId: string; taskId: string }>
+      const page = rows.slice(0, 500)
+      return { rows: page, hasMore: rows.length > 500, nextCursor: page.at(-1)?.sequence ?? after }
+    },
     seal,
     store,
     db,

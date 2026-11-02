@@ -78,6 +78,12 @@ const requestSchema = z.discriminatedUnion('kind', [
     })
   }),
   z.object({ kind: z.literal('archive.list') }),
+  z.object({ kind: z.literal('folders.inventory'), after: z.number().int().nonnegative() }),
+  z.object({
+    kind: z.literal('folders.delete'),
+    taskId: z.string().min(1).max(200),
+    folderIds: z.array(z.string().min(1).max(200)).min(1).max(500)
+  }),
   z.object({ kind: z.literal('archive.conversations'), archiveId: z.string().uuid() }),
   z.object({
     kind: z.literal('archive.file'),
@@ -391,6 +397,11 @@ export function createChatRuntimeHandlers(opts: {
         return null
       case 'archive.list':
         return r.backups.listArchives()
+      case 'folders.inventory':
+        return r.artifacts.deletedFolderInventory(req.after)
+      case 'folders.delete':
+        r.artifacts.deleteFolders(req.taskId, req.folderIds)
+        return { ok: true }
       case 'archive.conversations':
         return r.backups.conversations(req.archiveId)
       case 'archive.file': {

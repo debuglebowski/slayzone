@@ -17,6 +17,7 @@ import {
   createChatRecovery,
   createChatAvailability,
   createChatLifecycle,
+  createChatFolderDeletions,
   createChatOwnershipStore,
   createChatMigration,
   createLegacyChatSource,
@@ -52,6 +53,7 @@ export function createComputerChatServices(opts: {
   onState?(sessionId: string, state: ChatTerminalState, previous: ChatTerminalState): void
 }) {
   const ownership = createChatOwnershipStore(opts.db)
+  const folderDeletions = createChatFolderDeletions(opts.db)
   const lifecycle = createChatLifecycle({ db: opts.db, request: opts.request })
   const request = lifecycle.request
   const recovery = createChatRecovery({ db: opts.db, request: opts.request, gate: opts.gate })
@@ -67,6 +69,7 @@ export function createComputerChatServices(opts: {
     if (existing) return existing
     const work = recovery
       .reconcile(computerId)
+      .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
       .then(() => relay.drainMetadata(computerId, true))
       .then(() => lifecycle.sync(computerId))
       .then(async () => {
@@ -503,6 +506,7 @@ export function createComputerChatServices(opts: {
     recoverComputer,
     ownership,
     invalidateRecovery,
+    folderDeletions,
     migration,
     relay,
     lifecycle,

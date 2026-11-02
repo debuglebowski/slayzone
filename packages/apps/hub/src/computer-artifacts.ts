@@ -114,7 +114,22 @@ export function createComputerArtifactStorage(opts: {
         const remote = (await call(owner, folder ? 'listFoldersByTask' : 'listArtifactsByTask', [
           taskId
         ])) as typeof result
-        result.push(...remote.map((r) => ({ ...r, storage: { computerId, available: true } })))
+        const canonical = new Map(rows.map((row) => [row.id, row]))
+        result.push(
+          ...remote
+            .filter((r) => ids.has(r.id))
+            .map((r) => {
+              const row = canonical.get(r.id)!
+              return {
+                ...r,
+                order: row.order,
+                ...('parent_id' in row
+                  ? { parent_id: row.parent_id }
+                  : { folder_id: row.folder_id }),
+                storage: { computerId, available: true }
+              }
+            })
+        )
       } catch {
         for (const row of rows.filter(
           (r) =>
@@ -184,6 +199,24 @@ export function createComputerArtifactStorage(opts: {
       if (key === 'uploadArtifactBlob')
         return (_db: SlayzoneDb, data: Parameters<ArtifactStore['uploadArtifactBlob']>[1]) =>
           upload(data)
+      if (key === 'deleteFolder')
+        return async (_db: SlayzoneDb, id: string) => {
+          const folder = await db.get<{ task_id: string }>(
+            'SELECT task_id FROM artifact_folders WHERE id=?',
+            [id]
+          )
+          if (!folder) return false
+          await chat.folderDeletions.record(folder.task_id, [id])
+          // Acceptance is durable even when a computer is offline. Reconnect retries delivery.
+          for (const row of await db.all<{ computer_id: string }>(
+            'SELECT computer_id FROM chat_task_computers WHERE task_id=?',
+            [folder.task_id]
+          ))
+            void chat.lifecycle.sync(row.computer_id).catch(() => {
+              // Durable intent remains pending for the next tick/reconnect.
+            })
+          return true
+        }
       if (key === 'copyArtifacts')
         return async (_db: SlayzoneDb, data: Parameters<ArtifactStore['copyArtifacts']>[1]) => {
           const result: TaskArtifact[] = []

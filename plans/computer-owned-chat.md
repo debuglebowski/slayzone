@@ -285,3 +285,27 @@ current helper inserts hub `chat_events` directly); desktop/mobile E2E and long-
 budgets; packaging/full lint/registered suites; final rebase/review and safe main merge.
 
 Unresolved questions: none.
+
+## Folder deletion checkpoint
+
+Hub schema v188 records opaque folder tombstones and per-task/computer delivery
+progress. Folder deletion is accepted durably without waiting for offline peers.
+Normal command barriers replay bounded cleanup batches before further work; failed
+acknowledgements remain pending. Local tombstones fence delayed imports and survive
+restart. Cleanup is atomic across task scope checks and may finish while in Trash.
+Files keep their contents/version history and move out of deleted folders.
+
+Metadata and artifact lists respect canonical folder placement; stale snapshots
+cannot resurrect deleted folders. Computers page their deletion inventory back to
+a restored older hub, with task authorization before mutation and strict cursors.
+Duplicate artifact delete attempts return their original receipt after the resource
+is gone.
+
+Validation: 108 tests across 20 suites pass, plus 16 focused final regressions,
+including two-computer offline/reconnect/older-hub restore and native restart/task
+isolation cases. Four affected typechecks, both bundles and changed-file lint pass.
+Remaining: orphan diagnostic/privacy marker audit; computer-owned E2E seeding and
+desktop/mobile E2E; long-session budgets; packaging/full lint/registered suites;
+final rebase/review and safe main merge.
+
+Unresolved questions: none.

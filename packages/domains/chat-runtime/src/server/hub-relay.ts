@@ -26,6 +26,7 @@ import {
 import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
+import { createChatFolderDeletions } from './hub-folders'
 
 const trimUnsetArgs = (args: unknown[]) => {
   let end = args.length
@@ -73,6 +74,7 @@ export function createHubChatRelay(opts: {
   onState?(sessionId: string, state: ChatTerminalState, previous: ChatTerminalState): void
 }) {
   const { db, ownership } = opts
+  const folderDeletions = createChatFolderDeletions(db)
   const events = new TypedEmitter<ChatEventMap>(),
     queueEvents = new TypedEmitter<ChatQueueEventMap>()
   const sessionMirror = new Map<
@@ -375,58 +377,7 @@ export function createHubChatRelay(opts: {
         raw.kind
       )
     ) {
-      const isFolder = raw.kind.startsWith('folder'),
-        id = String(value.id),
-        table = isFolder ? 'artifact_folders' : 'task_artifacts',
-        locations = isFolder ? 'chat_folder_locations' : 'chat_artifact_locations',
-        idColumn = isFolder ? 'folder_id' : 'artifact_id'
-      if (!id || id.length > 200) throw new Error('Invalid artifact locator')
-      const previous = await db.get<{ task_id: string; computer_id: string | null }>(
-        `SELECT a.task_id,o.computer_id FROM ${table} a LEFT JOIN ${locations} l ON l.${idColumn}=a.id LEFT JOIN chat_ownership o ON o.id=l.conversation_id WHERE a.id=?`,
-        [id]
-      )
-      if (previous && (previous.task_id !== current.taskId || previous.computer_id !== computerId))
-        throw new Error('Artifact locator belongs to another owner')
-      if (raw.kind.endsWith('deleted')) {
-        await db.run(`DELETE FROM ${table} WHERE id=?`, [id])
-      } else {
-        const parent = String((isFolder ? value.parentId : value.folderId) ?? '') || null
-        if (parent) {
-          const folder = await db.get<{ task_id: string }>(
-            'SELECT task_id FROM artifact_folders WHERE id=?',
-            [parent]
-          )
-          if (folder && folder.task_id !== current.taskId)
-            throw new Error('Folder locator task mismatch')
-          if (!folder)
-            await db.batchTxn([
-              {
-                type: 'run',
-                sql: "INSERT INTO artifact_folders(id,task_id,name) VALUES(?,?,'Chat files')",
-                params: [parent, current.taskId]
-              },
-              {
-                type: 'run',
-                sql: 'INSERT INTO chat_folder_locations(folder_id,conversation_id) VALUES(?,?)',
-                params: [parent, current.id]
-              }
-            ])
-        }
-        if (isFolder)
-          await db.run(
-            `INSERT INTO artifact_folders(id,task_id,name,parent_id,"order") VALUES(?,?,'Chat files',?,?) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,"order"=excluded."order"`,
-            [id, current.taskId, parent, Number.isSafeInteger(value.order) ? value.order : 0]
-          )
-        else
-          await db.run(
-            `INSERT INTO task_artifacts(id,task_id,title,folder_id,"order") VALUES(?,?,'Chat attachment',?,?) ON CONFLICT(id) DO UPDATE SET folder_id=excluded.folder_id,"order"=excluded."order"`,
-            [id, current.taskId, parent, Number.isSafeInteger(value.order) ? value.order : 0]
-          )
-        await db.run(
-          `INSERT INTO ${locations}(${idColumn},conversation_id) VALUES(?,?) ON CONFLICT(${idColumn}) DO NOTHING`,
-          [id, current.id]
-        )
-      }
+      await reconcileFileLocation(current, computerId, raw.kind, value)
     } else if (raw.kind === 'queue-item') {
       await ownership.setQueueRoute(String(value.id), current.id, value.removed === true)
     } else if (raw.kind !== 'thread-created') throw new Error('Unknown chat metadata kind')
@@ -436,6 +387,82 @@ export function createHubChatRelay(opts: {
         'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
         [current.id, raw.sequence]
       )
+  }
+  async function reconcileFileLocation(
+    current: HubChatOwnership,
+    computerId: string,
+    kind: string,
+    value: Record<string, unknown>
+  ) {
+    const isFolder = kind.startsWith('folder'),
+      id = value.id
+    if (typeof id !== 'string' || !id || id.length > 200)
+      throw new Error('Invalid artifact locator')
+    if (isFolder && (await folderDeletions.deleted(current.taskId, id))) return
+    const table = isFolder ? 'artifact_folders' : 'task_artifacts',
+      locations = isFolder ? 'chat_folder_locations' : 'chat_artifact_locations',
+      idColumn = isFolder ? 'folder_id' : 'artifact_id'
+    const previous = await db.get<{ task_id: string; computer_id: string | null }>(
+      `SELECT a.task_id,o.computer_id FROM ${table} a LEFT JOIN ${locations} l ON l.${idColumn}=a.id LEFT JOIN chat_ownership o ON o.id=l.conversation_id WHERE a.id=?`,
+      [id]
+    )
+    if (previous && (previous.task_id !== current.taskId || previous.computer_id !== computerId))
+      throw new Error('Artifact locator belongs to another owner')
+    if (kind.endsWith('deleted')) {
+      if (isFolder) await folderDeletions.record(current.taskId, [id])
+      else await db.run('DELETE FROM task_artifacts WHERE id=?', [id])
+      return
+    }
+    let parent = (isFolder ? value.parentId : value.folderId) ?? null
+    if (parent !== null && (typeof parent !== 'string' || !parent || parent.length > 200))
+      throw new Error('Invalid parent folder locator')
+    if (parent && (await folderDeletions.deleted(current.taskId, String(parent)))) {
+      if (isFolder) {
+        await folderDeletions.record(current.taskId, [id])
+        return
+      }
+      parent = null
+    }
+    if (parent) {
+      const folder = await db.get<{ task_id: string }>(
+        'SELECT task_id FROM artifact_folders WHERE id=?',
+        [parent]
+      )
+      if (folder && folder.task_id !== current.taskId)
+        throw new Error('Folder locator task mismatch')
+      if (!folder)
+        await db.batchTxn([
+          {
+            type: 'run',
+            sql: "INSERT INTO artifact_folders(id,task_id,name) SELECT ?,?,'Chat files' WHERE NOT EXISTS(SELECT 1 FROM chat_folder_deletions WHERE folder_id=?) ON CONFLICT(id) DO NOTHING",
+            params: [parent, current.taskId, parent]
+          },
+          {
+            type: 'run',
+            sql: 'INSERT INTO chat_folder_locations(folder_id,conversation_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM artifact_folders WHERE id=? AND task_id=?) ON CONFLICT(folder_id) DO NOTHING',
+            params: [parent, current.id, parent, current.taskId]
+          }
+        ])
+    }
+    const order = Number.isSafeInteger(value.order) ? value.order : 0
+    if (isFolder)
+      await db.run(
+        `INSERT INTO artifact_folders(id,task_id,name,parent_id,"order")
+        SELECT ?,?,'Chat files',?,? WHERE NOT EXISTS(SELECT 1 FROM chat_folder_deletions WHERE folder_id IN (?,?))
+        ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,"order"=excluded."order" WHERE task_id=excluded.task_id`,
+        [id, current.taskId, parent, order, id, parent]
+      )
+    else
+      await db.run(
+        `INSERT INTO task_artifacts(id,task_id,title,folder_id,"order")
+        VALUES(?,?,'Chat attachment',CASE WHEN EXISTS(SELECT 1 FROM chat_folder_deletions WHERE folder_id=?) THEN NULL ELSE ? END,?)
+        ON CONFLICT(id) DO UPDATE SET folder_id=excluded.folder_id,"order"=excluded."order" WHERE task_id=excluded.task_id`,
+        [id, current.taskId, parent, parent, order]
+      )
+    await db.run(
+      `INSERT INTO ${locations}(${idColumn},conversation_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM ${table} WHERE id=? AND task_id=?) ON CONFLICT(${idColumn}) DO NOTHING`,
+      [id, current.id, id, current.taskId]
+    )
   }
   const metadataChains = new Map<string, Promise<void>>()
   async function recoverMetadataNow(computerId: string, id: string) {

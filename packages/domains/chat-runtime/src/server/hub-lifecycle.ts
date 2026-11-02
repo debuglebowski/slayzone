@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ChatComputerRequest } from './migration'
 import { createChatOwnershipStore } from './hub-ownership'
+import { createChatFolderDeletions } from './hub-folders'
 
 type State = 'active' | 'paused' | 'deleted'
 interface Lifecycle {
@@ -38,6 +39,7 @@ export function createChatLifecycle(opts: { db: SlayzoneDb; request: ChatCompute
       )
       if (!rows.length) {
         await deliverDeletions(computerId)
+        await createChatFolderDeletions(db).sync(computerId, opts.request)
         return
       }
       for (const row of rows) {

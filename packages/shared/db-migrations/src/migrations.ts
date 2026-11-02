@@ -4549,6 +4549,19 @@ export const migrations: Migration[] = [
           BEGIN SELECT RAISE(ABORT,'Prompt previews are computer-owned'); END;`)
         }
     }
+  },
+  {
+    version: 188,
+    up(db) {
+      db.exec(`CREATE TABLE chat_folder_deletions (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,folder_id TEXT NOT NULL UNIQUE,task_id TEXT NOT NULL
+      );
+      CREATE INDEX chat_folder_deletions_task ON chat_folder_deletions(task_id,sequence);
+      CREATE TABLE chat_folder_deletion_acks (
+        task_id TEXT NOT NULL,computer_id TEXT NOT NULL,sequence INTEGER NOT NULL,
+        PRIMARY KEY(task_id,computer_id)
+      );`)
+    }
   }
 ]
 
