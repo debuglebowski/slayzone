@@ -132,3 +132,26 @@ Rebase checks: 143 targeted storage/protocol/service/transport/handler tests pas
 hub/computer bundles build. Restore /btw calls through each injected transport,
 forward user defaults in bootstrap metadata, keep optional args intact across JSON,
 and propagate upgrade hook-directory changes into computer-local chat processes.
+
+## Idle migration and privacy cleanup checkpoint
+
+Reconnect now runs project path sync, ownership recovery, lifecycle/deletion fences,
+session refresh and idle migration in order, as the authenticated computer owner.
+Periodic migration finds pending tabs even when the first tab already migrated;
+live PTYs and managed chat sessions defer cutover. Inventory authorization precedes
+all lifecycle/tombstone mutations. E2E reset drains maintenance and notifications
+before wiping storage.
+
+Diagnostic cutover records a durable event-ID boundary. Fresh lifecycle metadata
+stays outside legacy history after restart. Screenshot reads/deletes resolve real
+paths inside the diagnostics blob directory. Verified cleanup marks a durable
+compaction generation; hub and diagnostic VACUUM/checkpoint passes reclaim old
+free pages and retry on failure. Explicitly deleted tasks also clear old diagnostics.
+
+Validation: 66 tests across 19 storage/protocol/migration/artifact/backup/relay
+suites pass. Hub build and hub, computer and chat-runtime typechecks pass. Rebase base remains
+`0a5cccb6e`. Main worktree untouched. Feature remains unmerged and not release-ready.
+Remaining: retention, availability UI, archive/artifact edge cases, lifecycle command
+barrier audit, full desktop/mobile E2E and performance validation.
+
+Unresolved questions: none.

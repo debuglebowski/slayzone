@@ -32,12 +32,14 @@ export function createChatRecovery(opts: {
         entry.bootstrapRevision < 0
       )
         throw new Error('Invalid computer ownership')
+      // Authorization precedes every mutation, including restore-time tombstones.
+      // A task absent from this hub snapshot stays only on the computer for now.
+      if (!(await db.get('SELECT 1 FROM tasks WHERE id=?', [i.taskId]))) continue
+      await opts.gate?.(computerId, i.taskId)
       if (i.id.startsWith('task-tombstone:')) {
         if (entry.state === 'deleted') await owners.deleteForTask(i.taskId)
         continue
       }
-      // Retain history whose task postdates the restored hub. Never delete it by inference.
-      if (!(await db.get('SELECT 1 FROM tasks WHERE id=?', [i.taskId]))) continue
       await db.run(
         'INSERT INTO chat_task_computers VALUES(?,?) ON CONFLICT(task_id,computer_id) DO NOTHING',
         [i.taskId, computerId]
@@ -79,7 +81,6 @@ export function createChatRecovery(opts: {
         ])
       )
         continue
-      await opts.gate?.(computerId, i.taskId)
       const previous = await owners.forTab(i.tabId)
       if (previous?.state === 'deleted') continue
       if (previous && (previous.taskId !== i.taskId || previous.mode !== i.mode))

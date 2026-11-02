@@ -44,3 +44,49 @@ test('diagnostic migration fences retention until copied; cleanup keeps metadata
     raw.close()
   }
 })
+
+test('post-cutover metadata does not make new tabs look like legacy content', async () => {
+  const raw = new Database(':memory:')
+  try {
+    raw.exec(
+      'CREATE TABLE diagnostics_events(id TEXT PRIMARY KEY,task_id TEXT,event TEXT,message TEXT,payload_json TEXT,ts_ms INTEGER)'
+    )
+    const source = createLegacyChatDiagnostics({ db: createSlayzoneDbAdapter(raw) })
+    await source.tasks()
+    raw
+      .prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+      .run('new', 'new-task', 'renderer.chat.inFlight.flip', 'state only', '{}', Date.now() + 1000)
+    expect(await source.hasTask('new-task')).toBe(false)
+    expect(await source.tasks()).toEqual([])
+    // A new process must keep the original cutoff, even for backdated metadata.
+    raw
+      .prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+      .run('backdated', 'new-task', 'renderer.chat.inFlight.flip', 'state only', '{}', 1)
+    const reopened = createLegacyChatDiagnostics({ db: createSlayzoneDbAdapter(raw) })
+    expect(await reopened.tasks()).toEqual([])
+  } finally {
+    raw.close()
+  }
+})
+
+test('compaction and row ID reuse cannot turn new diagnostics into legacy history', async () => {
+  const raw = new Database(':memory:')
+  try {
+    raw.exec(
+      'CREATE TABLE diagnostics_events(id TEXT PRIMARY KEY,task_id TEXT,event TEXT,message TEXT,payload_json TEXT,ts_ms INTEGER)'
+    )
+    raw
+      .prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+      .run('old', 'old-task', 'chat.old', 'private old history', '{}', 1)
+    const source = createLegacyChatDiagnostics({ db: createSlayzoneDbAdapter(raw) })
+    expect(await source.tasks()).toEqual(['old-task'])
+    raw.exec('DELETE FROM diagnostics_events; VACUUM')
+    raw
+      .prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+      .run('fresh', 'fresh-task', 'renderer.chat.inFlight.flip', 'state only', '{}', 1)
+    expect(await source.hasTask('fresh-task')).toBe(false)
+    expect(await source.tasks()).toEqual([])
+  } finally {
+    raw.close()
+  }
+})

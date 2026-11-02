@@ -474,6 +474,11 @@ export function createLegacyChatSource(opts: {
           sql: `DELETE FROM ${table} WHERE project_id=(SELECT project_id FROM tasks WHERE id=?) AND mode=? AND NOT EXISTS(SELECT 1 FROM terminal_tabs t JOIN tasks task ON task.id=t.task_id LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE task.project_id=(SELECT project_id FROM tasks WHERE id=?) AND t.mode=? AND (o.state IS NULL OR o.state<>'active'))`,
           params: [owner.taskId, owner.mode, owner.taskId, owner.mode]
         })
+      ops.push({
+        type: 'run',
+        sql: "INSERT INTO settings(key,value) VALUES('computer_chat_compaction_generation','2') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(settings.value AS INTEGER)+1 AS TEXT)",
+        params: []
+      })
       await db.batchTxn(ops)
       const checkpoint = await db.get<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
       if (checkpoint?.busy) throw new Error('Hub cleanup checkpoint is busy; retry cleanup')

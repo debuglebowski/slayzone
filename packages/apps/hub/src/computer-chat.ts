@@ -357,19 +357,35 @@ export function createComputerChatServices(opts: {
           )
         ).map((t) => t.task_id)
       )
-      for (const task of (await opts.diagnostics?.tasks()) ?? []) tasks.add(task)
+      for (const task of (await opts.diagnostics?.tasks()) ?? []) {
+        const deleted = await opts.db.get(
+          "SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'",
+          [task]
+        )
+        if (deleted && opts.diagnostics) {
+          await opts.diagnostics.cleanup(task, await opts.diagnostics.freeze(task))
+        } else tasks.add(task)
+      }
       for (const taskId of tasks) {
         if (await opts.hasLiveTask(taskId)) continue
         try {
           const owners = await ownership.forTask(taskId)
-          const pc =
-            owners.find((o) => o.state !== 'deleted' && o.destinationComputerId)
-              ?.destinationComputerId ?? (await opts.resolveComputer(taskId))
-          if (pc !== computerId) continue
           const tab = await opts.db.get<{ id: string }>(
-            "SELECT id FROM terminal_tabs WHERE task_id=? AND mode IN ('claude-chat','codex-chat') ORDER BY created_at,id LIMIT 1",
+            "SELECT t.id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE t.task_id=? AND t.mode IN ('claude-chat','codex-chat') AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1) ORDER BY t.created_at,t.id LIMIT 1",
             [taskId]
           )
+          const recorded = tab
+            ? await opts.db.get<{ computer_id: string }>(
+                'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+                [tab.id]
+              )
+            : null
+          const pc =
+            owners.find((o) => o.state !== 'deleted' && o.destinationComputerId)
+              ?.destinationComputerId ??
+            recorded?.computer_id ??
+            (await opts.resolveComputer(taskId))
+          if (pc !== computerId) continue
           if (tab) await relay.ensureTab(tab.id)
           else if (await opts.db.get('SELECT 1 FROM tasks WHERE id=?', [taskId]))
             await relay.ensurePromptTask(taskId)

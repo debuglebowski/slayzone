@@ -86,6 +86,26 @@ test('first chat read migrates legacy history then all writes stay on its comput
       epoch: 1,
       computerId: 'pc'
     })
+    h.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('third','task','claude-chat',2)"
+      )
+      .run()
+    h.db
+      .prepare(
+        "INSERT INTO chat_tab_state(tab_id,draft_text,updated_at) VALUES('third','idle migration private',1)"
+      )
+      .run()
+    await services.migrateIdleComputer('pc')
+    expect(await services.ownership.forTab('third')).toBeNull()
+    live = false
+    await services.migrateIdleComputer('pc')
+    expect(await services.ownership.forTab('third')).toMatchObject({
+      state: 'active',
+      computerId: 'pc',
+      cleanupPending: false
+    })
+    expect(h.db.prepare("SELECT 1 FROM chat_tab_state WHERE tab_id='third'").get()).toBeUndefined()
     expect(JSON.stringify(h.db.prepare('SELECT * FROM chat_ownership').all())).not.toContain(
       'private'
     )

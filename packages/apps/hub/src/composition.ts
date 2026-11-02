@@ -4,6 +4,9 @@ import { setChatSessionSource } from '@slayzone/terminal/server'
 import { setAgentPromptReader } from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
+import { createChatCompaction } from './chat-compaction'
+import { createComputerChatMaintenance } from './computer-chat-maintenance'
+import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
@@ -211,7 +214,7 @@ import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-us
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, webSessionCookieSecure } from './web-sessions.js'
-import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
+import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
@@ -781,11 +784,15 @@ export function composeServer(opts: {
     resolveComputerId: (projectId) => resolveComputerForProject(projectId)
   })
   // Chat content and provider processes belong to the owning computer.
+  const legacyChatDiagnostics = opts.diagnostics
+    ? createLegacyChatDiagnostics({ db: opts.diagnostics.db, blobDir: opts.diagnostics.blobDir })
+    : undefined
+  if (legacyChatDiagnostics)
+    bootBestEffort('chat-privacy-boundary', legacyChatDiagnostics.initialize)
+  const chatCompaction = createChatCompaction(db)
   const computerChat = createComputerChatServices({
     db,
-    diagnostics: opts.diagnostics
-      ? createLegacyChatDiagnostics({ db: opts.diagnostics.db, blobDir: opts.diagnostics.blobDir })
-      : undefined,
+    diagnostics: legacyChatDiagnostics,
     legacyData: createDbChatDataOps(db, taskSessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request) => {
@@ -820,7 +827,10 @@ export function composeServer(opts: {
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
     hasLiveTask: async (taskId) =>
-      (await listPtys()).some((p) => p.taskId === taskId && hasLivePty(p.sessionId)),
+      (await listPtys()).some((p) => p.taskId === taskId && hasLivePty(p.sessionId)) ||
+      computerChat.relay.sessions
+        .list()
+        .some((s) => s.taskId === taskId && !['not-spawned', 'dead', 'error'].includes(s.state)),
     onState: (sessionId, state, previous) => {
       if (state !== 'not-spawned' && previous !== 'not-spawned')
         notifyGlobalStateListeners(sessionId, state, previous)
@@ -839,14 +849,26 @@ export function composeServer(opts: {
   setChatSessionSource(computerChat.relay.sessions)
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
+  let resettingForTest = false
+  const chatNotificationChains = new Map<string, Promise<void>>()
+  let maintainComputerChat = (computerId: string) => computerChat.lifecycle.sync(computerId)
+  let syncComputerChatLifecycle = (computerId: string) => computerChat.lifecycle.sync(computerId)
+  let drainComputerChatMaintenance = async () => {}
   const syncChatLifecycle = (): void => {
+    if (resettingForTest) return
     for (const computer of execGateway?.listUsableComputers() ?? [])
-      void computerChat.lifecycle.sync(computer.computerId).catch(() => {})
+      void syncComputerChatLifecycle(computer.computerId).catch(() => {})
   }
   notifyEvents.on('tasks-changed', syncChatLifecycle)
-  // SQL cascades and startup purges may have no renderer notification.
+  // Covers startup purges, offline deletions and legacy tasks never opened in this boot.
   const chatLifecycleTimer = setInterval(syncChatLifecycle, 10_000)
   chatLifecycleTimer.unref()
+  const chatMigrationTimer = setInterval(() => {
+    if (resettingForTest) return
+    for (const computer of execGateway?.listUsableComputers() ?? [])
+      void maintainComputerChat(computer.computerId).catch(() => {})
+  }, 60_000)
+  chatMigrationTimer.unref()
 
   // --- AI config / context manager --------------------------------------------
   // Build the ai-config + marketplace ops singletons that back the tRPC
@@ -1611,14 +1633,32 @@ export function composeServer(opts: {
     // unclaimed pre-booted agent is a billable LLM process with no owner, so
     // reconcile against the computer's own list on every (re)connect and reap
     // whatever this hub is no longer tracking.
+    const asComputerOwner = async (computerId: string, work: () => Promise<void>) => {
+      if (!opts.requireLogin) return work()
+      const actor = await computerOwnerOf(db, computerId)
+      return runWithSecurityContext({ actor, ip: null, route: 'computer chat maintenance' }, work)
+    }
+    const chatMaintenance = createComputerChatMaintenance({
+      asOwner: asComputerOwner,
+      projects: (id) => syncComputerProjects(id),
+      recover: (id) => computerChat.recoverComputer(id, true),
+      lifecycle: computerChat.lifecycle.sync,
+      sessions: computerChat.relay.refreshSessions,
+      migrate: async (id) => {
+        await computerChat.migrateIdleComputer(id)
+        await chatCompaction.run()
+        await legacyChatDiagnostics?.compact()
+      }
+    })
+    maintainComputerChat = (id) => chatMaintenance.run(id)
+    syncComputerChatLifecycle = (id) => asComputerOwner(id, () => computerChat.lifecycle.sync(id))
+    drainComputerChatMaintenance = () => chatMaintenance.drain()
     computerGateway.events.on('computer-connected', ({ computer }) => {
-      void computerChat
-        .recoverComputer(computer.computerId, true)
-        .then(() => computerChat.relay.refreshSessions(computer.computerId))
-        .catch(() => console.error('[chat] computer metadata reconciliation pending'))
+      if (!resettingForTest)
+        void maintainComputerChat(computer.computerId).catch(() =>
+          console.error('[chat] computer reconciliation pending')
+        )
       void reapOrphanWarms(computer.computerId)
-      // Project folders: one ordered sequence per computer (computer-project-sync.ts).
-      void syncComputerProjects(computer.computerId)
     })
     // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
     // servers, not agents. `doSpawn` is synchronous and also driven by restart
@@ -1630,12 +1670,13 @@ export function composeServer(opts: {
     // The routing backend stays available for when they become async and routable
     // (a separate change); until then the in-process default stands.
     // Only normalized, computer-persisted chat events cross this channel.
-    const chatNotificationChains = new Map<string, Promise<void>>()
     computerGateway.events.on('event', ({ computerId, name, payload }) => {
-      if (name !== 'chat-runtime') return
+      if (name !== 'chat-runtime' || resettingForTest) return
       const previous = chatNotificationChains.get(computerId) ?? Promise.resolve()
       const next = previous
-        .then(() => computerChat.relay.receive(computerId, payload))
+        .then(() =>
+          asComputerOwner(computerId, () => computerChat.relay.receive(computerId, payload))
+        )
         .catch(() => {
           console.error('[chat] rejected computer notification')
         })
@@ -1850,38 +1891,50 @@ export function composeServer(opts: {
    * stop/start would double its listeners) and the gateway.
    */
   const resetForTest = async (): Promise<void> => {
-    await computerChat.resetForTest()
-    for (const pc of execGateway?.listUsableComputers() ?? [])
-      await execGateway!.request(pc.computerId, HubToComputerMethods.chatRequest, {
-        kind: 'test.reset'
-      })
-    await resetTerminalRuntimeForTest()
-    killAllProcesses()
-    await db.namedTxn('db:reset-for-test', {})
-    // Post-onboarding baseline every spec was written against. `manual` startup =
-    // the Start gate + no warm pool (a fresh DB defaults to `auto`); specs that
-    // exercise another mode set it themselves.
-    const baseline: Array<[string, string]> = [
-      ['onboarding_completed', 'true'],
-      [AGENT_STARTUP_SETTING, 'manual']
-    ]
-    // Boot-time write the wipe erased: the CLI/agents discover this process via
-    // `settings.server_port` (port-claim.ts). A restart re-claimed it at listen.
-    if (boundPort) baseline.push(['server_port', String(boundPort)])
-    for (const [key, value] of baseline) {
-      await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
+    resettingForTest = true
+    try {
+      await drainComputerChatMaintenance()
+      await Promise.all(
+        (execGateway?.listUsableComputers() ?? []).map((pc) =>
+          computerChat.lifecycle.sync(pc.computerId)
+        )
+      )
+      await Promise.allSettled([...chatNotificationChains.values()])
+      await computerChat.resetForTest()
+      for (const pc of execGateway?.listUsableComputers() ?? [])
+        await execGateway!.request(pc.computerId, HubToComputerMethods.chatRequest, {
+          kind: 'test.reset'
+        })
+      await resetTerminalRuntimeForTest()
+      killAllProcesses()
+      await db.namedTxn('db:reset-for-test', {})
+      // Post-onboarding baseline every spec was written against. `manual` startup =
+      // the Start gate + no warm pool (a fresh DB defaults to `auto`); specs that
+      // exercise another mode set it themselves.
+      const baseline: Array<[string, string]> = [
+        ['onboarding_completed', 'true'],
+        [AGENT_STARTUP_SETTING, 'manual']
+      ]
+      // Boot-time write the wipe erased: the CLI/agents discover this process via
+      // `settings.server_port` (port-claim.ts). A restart re-claimed it at listen.
+      if (boundPort) baseline.push(['server_port', String(boundPort)])
+      for (const [key, value] of baseline) {
+        await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
+      }
+      await idleClose.rewarm()
+      await refreshPrewarm()
+      await initProcessManager(db)
+      await backupOps.startAuto()
+      integrationHandles.testClearGithubMocks()
+      resetSyncFlags()
+      clearDiagnosticsConfigCache()
+      resetWorktreeColorsForTest()
+      invalidateProjectReposCache()
+      closeAllFileWatchers()
+      resetAgentHookStateForTest()
+    } finally {
+      resettingForTest = false
     }
-    await idleClose.rewarm()
-    await refreshPrewarm()
-    await initProcessManager(db)
-    await backupOps.startAuto()
-    integrationHandles.testClearGithubMocks()
-    resetSyncFlags()
-    clearDiagnosticsConfigCache()
-    resetWorktreeColorsForTest()
-    invalidateProjectReposCache()
-    closeAllFileWatchers()
-    resetAgentHookStateForTest()
   }
 
   return {

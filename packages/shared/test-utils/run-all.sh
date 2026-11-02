@@ -655,6 +655,13 @@ run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
+run_harness packages/apps/hub/src/chat-compaction.test.ts
+run_harness packages/apps/hub/src/chat-diagnostics.test.ts
+run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts
+run_harness packages/apps/hub/src/computer-artifacts.test.ts
+run_harness packages/domains/chat-runtime/src/server/artifacts.test.ts
+run_harness packages/domains/task-artifacts/src/server/standalone.test.ts
+run_harness packages/domains/task/src/server/artifact-downloads.test.ts
 run_harness packages/apps/hub/src/computer-chat.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
