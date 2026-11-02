@@ -346,34 +346,20 @@ test.describe('web shell — real login-required hub, real browser', () => {
 
 // The web shell has no onboarding. A fresh hub (`onboarding_completed` unset) opens the
 // first-run dialog on desktop; here none opens, and the sidebar has no Getting Started
-// checklist. Its own hub: the board needs a project to render past its empty state,
-// which the tests above must not see.
+// checklist. Its own empty hub also verifies this without an enrolled computer.
 test.describe('web shell — no onboarding', () => {
   let hub: LoginHub
   let browser: Browser
-  let projectDir: string
 
   test.beforeAll(async () => {
     hub = await spawnLoginHub()
     browser = await chromium.launch()
-    // Outside the hub root: the owner gate refuses a project path in the hub's state dir.
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-web-shell-project-'))
-    const res = await fetch(`http://127.0.0.1:${hub.port}/api/projects`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${hub.owner.token}`
-      },
-      body: JSON.stringify({ name: 'Web Project', path: projectDir })
-    })
-    if (!res.ok) throw new Error(`/api/projects: ${res.status} ${await res.text()}`)
   })
 
   test.afterAll(async () => {
     await browser.close()
     await hub.stop()
     fs.rmSync(hub.root, { recursive: true, force: true })
-    fs.rmSync(projectDir, { recursive: true, force: true })
   })
 
   test('a fresh hub opens no onboarding dialog and shows no Getting Started checklist', async () => {

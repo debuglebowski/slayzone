@@ -111,8 +111,10 @@ test.describe('Terminal crash overlay', () => {
     // startup, so an immediate `exit 7` can land while the shell isn't
     // processing input yet (flaky overlay). Prove the shell is live with an
     // echo round-trip first.
-    const ready = `CRASH_READY_${Date.now()}`
-    await runCommand(mainWindow, sessionId, `echo ${ready}`)
+    const token = String(Date.now())
+    const ready = `CRASH_READY_${token}`
+    // The marker must come from execution, not the shell echoing its input.
+    await runCommand(mainWindow, sessionId, `printf 'CRASH_READY_%s\\n' '${token}'`)
     await waitForBufferContains(mainWindow, sessionId, ready)
     await runCommand(mainWindow, sessionId, 'exit 7')
   }

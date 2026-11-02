@@ -2,11 +2,10 @@ import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   openTaskTerminal,
-  switchTerminalMode,
   getMainSessionId,
   waitForPtySession,
-  runCommand,
   waitForBufferContains,
+  runCommand,
   readFullBuffer
 } from '../fixtures/terminal'
 
@@ -24,13 +23,17 @@ test.describe('Terminal theme environment variables', () => {
     const t = await s.createTask({
       projectId: p.id,
       title: 'Theme env task',
-      status: 'in_progress'
+      status: 'in_progress',
+      terminalMode: 'terminal'
     })
     taskId = t.id
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev: 'TH', taskTitle: 'Theme env task' })
-    await switchTerminalMode(mainWindow, 'terminal')
+    const sessionId = getMainSessionId(taskId)
+    await waitForPtySession(mainWindow, sessionId)
+    await runCommand(mainWindow, sessionId, `printf '__THEME_%s__\\n' 'ENV_READY'`)
+    await waitForBufferContains(mainWindow, sessionId, '__THEME_ENV_READY__')
   })
 
   test('COLORFGBG is set in PTY environment', async ({ mainWindow }) => {
@@ -44,11 +47,11 @@ test.describe('Terminal theme environment variables', () => {
       .poll(
         async () => {
           const buf = await readFullBuffer(mainWindow, sessionId)
-          return buf.includes('CFG:0;15') || buf.includes('CFG:15;0')
+          return buf.match(/CFG:[^\r\n]*/g) ?? []
         },
         { timeout: 10_000 }
       )
-      .toBe(true)
+      .toEqual(expect.arrayContaining([expect.stringMatching(/^CFG:(0;15|15;0)$/)]))
   })
 
   test('TERM_BACKGROUND is set in PTY environment', async ({ mainWindow }) => {
@@ -59,17 +62,19 @@ test.describe('Terminal theme environment variables', () => {
       .poll(
         async () => {
           const buf = await readFullBuffer(mainWindow, sessionId)
-          return buf.includes('TBG:light') || buf.includes('TBG:dark')
+          return buf.match(/TBG:[^\r\n]*/g) ?? []
         },
         { timeout: 10_000 }
       )
-      .toBe(true)
+      .toEqual(expect.arrayContaining([expect.stringMatching(/^TBG:(light|dark)$/)]))
   })
 
   test('COLORTERM is truecolor', async ({ mainWindow }) => {
     const sessionId = getMainSessionId(taskId)
 
     await runCommand(mainWindow, sessionId, 'echo "CT:$COLORTERM"')
-    await waitForBufferContains(mainWindow, sessionId, 'CT:truecolor')
+    await expect
+      .poll(async () => (await readFullBuffer(mainWindow, sessionId)).match(/CT:[^\r\n]*/g) ?? [])
+      .toContain('CT:truecolor')
   })
 })

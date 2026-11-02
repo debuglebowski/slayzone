@@ -26,6 +26,42 @@ afterEach(() => {
   mgr.resetTransportDeps()
 })
 
+test('interrupt cancels a message still waiting for its workspace baseline', async () => {
+  let release!: () => void
+  let capturing = false
+  const h = transportHarness({
+    deps: {
+      workspaceCapture: {
+        begin: () => {
+          capturing = true
+          return new Promise((resolve) => {
+            release = () => resolve({ status: 'ready' })
+          })
+        },
+        finish: async () => ({ status: 'complete', files: [] }),
+        discard: async () => {}
+      },
+      workspaceStore: { begin: async () => {}, save: async () => {}, get: async () => null }
+    }
+  })
+  await startTab()
+  const f = h.fakes[0]
+  mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'held',
+    content: [{ type: 'text', text: 'first' }]
+  })
+  await until(() => capturing)
+  await stop(false)
+  release()
+  await wait(20)
+  expect(f.stdin.filter((message) => message.type === 'user')).toEqual([])
+  expect(h.saved()).toContainEqual({
+    kind: 'user-message-delivery',
+    id: 'held',
+    state: 'cancelled'
+  })
+})
+
 test('Stop mid-turn sends a live interrupt and keeps the process', async () => {
   const h = transportHarness()
   await startTab()

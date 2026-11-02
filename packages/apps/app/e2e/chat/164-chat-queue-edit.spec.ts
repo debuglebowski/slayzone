@@ -80,6 +80,8 @@ test.describe('Claude chat: editable, reorderable queue', () => {
     const t = await chat.openTask({ title: 'Queue send now', scenario: scenario(30_000) })
     await t.send('first')
     await expect(t.stopButton).toBeVisible()
+    // Exercise interrupting a running turn, after the workspace baseline/write.
+    await t.run(0, (run) => run.userMessages().includes('first'))
     await queue(t, 'later')
     await queue(t, 'urgent')
     await t.panel

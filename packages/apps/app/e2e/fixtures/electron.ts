@@ -14,6 +14,7 @@ import { createRequire } from 'module'
 import { pressShortcut } from './shortcuts'
 import { E2E_OWNER_ENV } from './stale-processes'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
+import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -784,7 +785,9 @@ export function cliEnv(root: string): Record<string, string> {
     )
   }
   return {
-    ...(process.env as Record<string, string>),
+    // Parent task relays outrank HUB_ADDRESS in the CLI. Never let the test
+    // subprocess escape to the developer's task/hub or inherit its credentials.
+    ...sanitizeSpawnEnv(process.env),
     SLAYZONE_HUB_ADDRESS: `127.0.0.1:${sharedSidecarPort}`,
     SLAYZONE_ROOT: supervisedHubRoot(root),
     SLAYZONE_DEV: '1'
@@ -868,8 +871,8 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
         // full-suite load, and the fixture timeout below is sized for the SETUP
         // budget (launch retries + the computer gate) — letting a stuck close
         // consume that same ceiling would add minutes of dead wall clock per
-        // worker. Report it and move on: the process is about to be reaped
-        // anyway, and a silent raise of the ceiling would just hide the hang.
+        // worker. Report a stuck close and reap only this fixture's process;
+        // leaving it alive leaks renderers into later workers.
         const closed = await Promise.race([
           sharedApp
             .close()
@@ -882,6 +885,14 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
             `[e2e] electronApp.close() did not settle within 20s in worker ` +
               `${workerInfo.workerIndex} — the app is wedged on shutdown, not merely slow.`
           )
+          const ownedProcess = sharedApp.process()
+          if (ownedProcess.exitCode === null && ownedProcess.signalCode === null) {
+            const exited = new Promise<void>((resolve) =>
+              ownedProcess.once('exit', () => resolve())
+            )
+            ownedProcess.kill('SIGKILL')
+            await Promise.race([exited, wait(1_000)])
+          }
         }
       }
 

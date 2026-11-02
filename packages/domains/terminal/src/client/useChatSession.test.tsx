@@ -3,7 +3,8 @@
 // live events queued during a load, prompts rebuilt by the replay, and stale-load
 // isolation. A reload (same tab, new folder / flags) must end in the same timeline a
 // fresh open of the tab shows — never the old timeline with the history replayed on top.
-import { useLayoutEffect } from 'react'
+import { createElement, useLayoutEffect } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
@@ -44,6 +45,8 @@ const sent: Array<{ tabId: string; message: { id: string; content: unknown } }> 
 let sendFails: Error | null = null
 // The load whose hydrate the test just resolved — its buffer fetch follows.
 let bufferLoad = -1
+const modelQueryKey = (input: unknown) => ['chat.getModels', input]
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 const subs: Record<string, ((data: unknown) => void) | null> = { event: null, exit: null }
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
@@ -52,6 +55,7 @@ vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     chat: {
+      getModels: { queryKey: modelQueryKey },
       onEvent: { subscriptionOptions: (_i: unknown, o: object) => ({ ...o, name: 'event' }) },
       onExit: { subscriptionOptions: (_i: unknown, o: object) => ({ ...o, name: 'exit' }) }
     }
@@ -195,7 +199,11 @@ function setup() {
       })
       return r
     },
-    { initialProps: { cwd: '/repo' } as Props }
+    {
+      initialProps: { cwd: '/repo' } as Props,
+      wrapper: ({ children }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children)
+    }
   )
   return { ...hook, frames }
 }
@@ -245,6 +253,7 @@ const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
 
 afterEach(() => {
   cleanup()
+  queryClient.clear()
   hub = null
   reducerActions.clear()
   loads = []
@@ -253,6 +262,26 @@ afterEach(() => {
   respondCalls.length = 0
   sent.length = 0
   sendFails = null
+})
+
+describe('live CLI model lists', () => {
+  it('updates the picker cache and prevents an older empty query overwriting it', async () => {
+    setup()
+    const queryKey = modelQueryKey({ taskId: 't1', mode: 'claude-chat' })
+    const oldReply = deferred<unknown[]>()
+    const oldQuery = queryClient
+      .fetchQuery({ queryKey, queryFn: () => oldReply.promise })
+      .catch(() => {})
+    const models = [{ id: 'model-new', label: 'New model' }]
+    liveOnly(-1, 1, { kind: 'cli-models', models })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(queryClient.getQueryData(queryKey)).toEqual(models)
+    oldReply.resolve([])
+    await oldQuery
+    expect(queryClient.getQueryData(queryKey)).toEqual(models)
+  })
 })
 
 describe('useChatSession — must keep working', () => {

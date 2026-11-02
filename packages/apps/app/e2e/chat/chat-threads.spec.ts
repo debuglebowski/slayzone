@@ -37,7 +37,7 @@ test.describe('Answer threads', () => {
     const toolbarBounds = (await toolbar.boundingBox())!
     expect(Math.abs(toolbarBounds.y - (rowBounds.y - 10))).toBeLessThan(1)
     expect(
-      Math.abs(toolbarBounds.x + toolbarBounds.width - (rowBounds.x + rowBounds.width - 16))
+      Math.abs(toolbarBounds.x + toolbarBounds.width - (rowBounds.x + rowBounds.width - 20))
     ).toBeLessThan(1)
     await t.page.screenshot({ path: '/tmp/slayzone-option-d-native.png' })
     await answer.getByRole('button', { name: 'Start thread', exact: true }).click()

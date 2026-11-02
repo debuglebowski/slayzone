@@ -95,6 +95,19 @@ const scopeHint = (): string =>
   screen.getByText(/Stopped when this task|Shared across all tasks/).textContent ?? ''
 
 describe('ProcessDialog', () => {
+  it('does not steal focus after the user starts editing the command', () => {
+    vi.useFakeTimers()
+    try {
+      renderDialog({ open: true, process: null })
+      commandInput().focus()
+      fireEvent.change(commandInput(), { target: { value: 'printf output' } })
+      act(() => vi.advanceTimersByTime(100))
+      expect(document.activeElement).toBe(commandInput())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('mounts with the edited process loaded (task scope from taskId)', () => {
     const a = proc({})
     renderDialog({ open: true, process: a })

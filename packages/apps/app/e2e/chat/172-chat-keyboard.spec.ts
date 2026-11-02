@@ -2,7 +2,7 @@
  * Claude Code chat: keyboard flow (chat E, plan 4.6).
  * - Esc Esc with no turn running and an empty composer opens the message list
  *   (the TUI's double-Esc → rewind); picking a message edits & resends it.
- *   With text in the composer it does nothing (typed text is never lost);
+ *   With text in the composer it clears the draft;
  *   while a turn runs Esc stops it and never rewinds.
  * - Cmd+K (the app's palette) has the chat's own page: Compact runs /compact
  *   without touching the draft; Model… switches the model.
@@ -40,11 +40,12 @@ test.describe('Chat keyboard', () => {
     await expect(t.panel.getByText('echo: two')).toBeVisible()
     const items = t.page.getByTestId('rewind-picker-item')
 
-    // Text in the composer: nothing happens, the text stays.
+    // Text in the composer: the first Esc keeps it; the second clears it.
     await t.composer.fill('keep me')
     await t.composer.press('Escape')
-    await t.composer.press('Escape')
     await expect(t.composer).toHaveValue('keep me')
+    await t.composer.press('Escape')
+    await expect(t.composer).toHaveValue('')
     await expect(items).toHaveCount(0)
 
     // Empty and idle: the message list, newest first; Enter edits & resends it.

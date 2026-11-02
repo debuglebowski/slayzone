@@ -1,3 +1,4 @@
+import type { ElectronApplication, Page } from '@playwright/test'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   testInvoke,
@@ -6,6 +7,28 @@ import {
   openTaskViaSearch,
   getActiveViewId
 } from '../fixtures/browser-view'
+
+// isDevToolsOpened flips before the old inspector WebContents is destroyed.
+// Reopening another dock mode must wait for that native teardown too.
+async function closeDevTools(page: Page, app: ElectronApplication, viewId: string) {
+  const id = (await testInvoke(page, 'browser:get-web-contents-id', viewId)) as number
+  const inspectorId = await app.evaluate(
+    ({ webContents }, id) => webContents.fromId(id)?.devToolsWebContents?.id ?? null,
+    id
+  )
+  await testInvoke(page, 'browser:close-devtools', viewId)
+  await expect.poll(() => testInvoke(page, 'browser:is-devtools-open', viewId)).toBe(false)
+  if (inspectorId !== null) {
+    await expect
+      .poll(() =>
+        app.evaluate(({ webContents }, id) => {
+          const inspector = webContents.fromId(id)
+          return !inspector || inspector.isDestroyed()
+        }, inspectorId)
+      )
+      .toBe(true)
+  }
+}
 
 test.describe('Browser view DevTools (WebContentsView)', () => {
   let taskId: string
@@ -31,58 +54,62 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     expect(isOpen).toBe(false)
   })
 
-  test('open devtools docked bottom', async ({ mainWindow }) => {
+  test('open devtools docked bottom', async ({ mainWindow, electronApp }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'bottom')
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
 
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
+    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
   })
 
-  test('open devtools docked right', async ({ mainWindow }) => {
+  test('open devtools docked right', async ({ mainWindow, electronApp }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'right')
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
 
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
+    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
   })
 
-  test('open devtools undocked', async ({ mainWindow }) => {
+  test('open devtools undocked', async ({ mainWindow, electronApp }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'undocked')
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
 
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
+    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
   })
 
-  test('open devtools detached', async ({ mainWindow }) => {
+  test('open devtools detached', async ({ mainWindow, electronApp }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'detach')
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
 
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
   })
 
-  test('close devtools is idempotent', async ({ mainWindow }) => {
+  test('close devtools is idempotent', async ({ mainWindow, electronApp }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Close when already closed — should not throw
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
+    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
     const isOpen = (await testInvoke(mainWindow, 'browser:is-devtools-open', viewId)) as boolean
     expect(isOpen).toBe(false)
   })
 
-  test('open devtools toggle cycle', async ({ mainWindow }) => {
+  test('open devtools toggle cycle', async ({ mainWindow, electronApp }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
@@ -91,7 +118,7 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
 
     // Close
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
 
     // Re-open
@@ -99,7 +126,8 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
 
     // Final close
-    await testInvoke(mainWindow, 'browser:close-devtools', viewId)
+    await closeDevTools(mainWindow, electronApp, viewId)
+    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
   })
 
   test('devtools on destroyed view returns false (not crash)', async ({ mainWindow }) => {

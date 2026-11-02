@@ -12,7 +12,7 @@ const STORED = '0b6c1a52-5f6e-4d55-9c7e-2a9a3f1e6d02'
 
 /** What a finished earlier turn left in `chat_events`. */
 const HISTORY = [
-  { kind: 'user-message', text: 'an earlier question' },
+  { kind: 'user-message', id: 'old-question', text: 'an earlier question', history: true },
   { kind: 'assistant-text', messageId: 'm-old', text: 'an earlier answer' }
 ]
 

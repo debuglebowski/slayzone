@@ -177,9 +177,9 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await expect(mainWindow.getByText('TS throwaway')).not.toBeAttached({ timeout: 5_000 })
   })
 
-  // ── 3. Closing temp task tab deletes it from DB ────────────────────────
+  // ── 3. Closing a scratch tab preserves it for reopening ────────────────
 
-  test('closing temp task tab deletes it from DB', async ({ mainWindow, electronApp }) => {
+  test('closing temp task tab preserves it in DB', async ({ mainWindow, electronApp }) => {
     const s = seed(mainWindow)
     const temp = await mainWindow.evaluate(
       (d: { projectId: string; title: string; status: string; isTemporary: boolean }) =>
@@ -223,7 +223,7 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
         },
         { timeout: 10_000 }
       )
-      .toBe(false)
+      .toBe(true)
   })
 
   // ── 4. Tab persistence across reload ───────────────────────────────────

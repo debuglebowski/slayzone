@@ -6,6 +6,7 @@
  */
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, taskStep, test } from '../fixtures/chat'
+import { openActivityTool } from '../fixtures/chat-activity'
 
 const ticks = (n: number, everyMs: number, firstAtMs: number) =>
   Array.from({ length: n }, (_, i) => ({ atMs: firstAtMs + i * everyMs, text: `tick ${i + 1}\n` }))
@@ -58,26 +59,28 @@ test.describe('Chat background commands', () => {
     await t.send('loop in the background')
     await expect(t.panel.getByText('STARTED')).toBeVisible({ timeout: 5_000 })
 
-    const card = t.panel.getByTestId('tool-bash')
+    const card = await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toHaveAttribute('data-task-state', 'background', { timeout: 5_000 })
+    // Job details are disclosed while active; ended jobs remain in the timeline.
+    const banner = t.page.getByTestId('background-jobs-banner')
+    await banner.getByRole('button', { name: '1 job running' }).click()
+    await banner.getByText('Details', { exact: true }).click()
+    await expect(banner).toContainText('t159')
+    await expect(banner).toContainText('Running')
     const live = card.getByTestId('bash-live-output')
     await expect(live).toContainText('tick 1', { timeout: 4_000 })
     await expect(live).toContainText('tick 2', { timeout: 4_000 })
 
-    // The banner lists the job by its task id, running.
-    const banner = t.page.getByTestId('background-jobs-banner')
-    await expect(banner).toContainText('t159')
-    await expect(banner).toContainText('Running')
-
-    // It exits: final output (kept by the CLI) is saved and shown; banner completes.
+    // It exits: final output is saved; no active jobs remain in the composer.
     await expect(card).toHaveAttribute('data-task-state', 'exited', { timeout: 8_000 })
     await expect(card.getByTestId('bash-output')).toContainText('tick 3')
     await expect(card.getByTestId('bash-output')).toContainText('[exited with code 0]')
-    await expect(banner).toContainText('Completed')
+    await expect(banner).toBeHidden()
     // The turn the CLI started by itself shows up.
     await expect(t.panel.getByText('The loop finished.')).toBeVisible({ timeout: 5_000 })
 
     await t.reload()
+    await openActivityTool(t.panel, 'tool-bash')
     const after = t.panel.getByTestId('tool-bash')
     await expect(after).toHaveAttribute('data-task-state', 'exited')
     await expect(after.getByTestId('bash-output')).toContainText('[exited with code 0]')
@@ -116,7 +119,7 @@ test.describe('Chat background commands', () => {
       }
     })
     await t.send('serve it')
-    const card = t.panel.getByTestId('tool-bash')
+    const card = await openActivityTool(t.panel, 'tool-bash')
     await expect(card.getByTestId('bash-live-output')).toContainText('tick 1', { timeout: 5_000 })
     await card.getByRole('button', { name: 'Stop command' }).click()
 
@@ -127,6 +130,6 @@ test.describe('Chat background commands', () => {
     await expect(card).toHaveAttribute('data-task-state', 'stopped', { timeout: 5_000 })
     await expect(card.getByTestId('bash-output')).toContainText('[killed]', { timeout: 5_000 })
     const banner = t.page.getByTestId('background-jobs-banner')
-    await expect(banner).toContainText('Killed')
+    await expect(banner).toBeHidden()
   })
 })

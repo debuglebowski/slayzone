@@ -139,7 +139,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
     )
     await s.refreshData()
 
-    runCli('tasks', 'open', task.id)
+    // Keep the task closed: opening a plain terminal already starts its PTY.
     expect(await ptyExists(electronApp, `${task.id}:${task.id}`)).toBe(false)
 
     // Use --no-wait so submit doesn't block on AI idle check (mode=terminal).

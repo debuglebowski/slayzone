@@ -188,8 +188,9 @@ function ToolShell({
     false
   )
   useEffect(() => {
-    if (inActivity) setOpen(false)
-    else if (autoOpen !== undefined) setOpen(autoOpen)
+    // Activity defaults are applied by useRowUiState. A remount must retain
+    // the user's stored disclosure choice instead of closing it again.
+    if (!inActivity && autoOpen !== undefined) setOpen(autoOpen)
   }, [inActivity, autoOpen, setOpen])
   // "Show this card" (files-changed row) opens it, also when it mounts after the
   // request (the timeline scrolled it in first).

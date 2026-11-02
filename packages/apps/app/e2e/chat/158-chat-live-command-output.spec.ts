@@ -8,6 +8,7 @@
  */
 import { resetApp, seed, openTaskById } from '../fixtures/electron'
 import { type ChatTask, ev, expect, step, taskStep, test } from '../fixtures/chat'
+import { openActivityTool } from '../fixtures/chat-activity'
 
 const bash = (id: string, command: string, extra: Record<string, unknown> = {}) =>
   step.emit(ev.toolUse({ id, name: 'Bash', input: { command, description: 'Ticks', ...extra } }))
@@ -52,7 +53,7 @@ test.describe('Chat live command output', () => {
       }
     })
     await t.send('tick please')
-    const card = t.panel.getByTestId('tool-bash')
+    const card = await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toHaveAttribute('data-task-state', 'running', { timeout: 5_000 })
     const live = card.getByTestId('bash-live-output')
     await expect(live).toContainText('tick 1', { timeout: 4_000 })
@@ -70,6 +71,7 @@ test.describe('Chat live command output', () => {
 
     // The tool result replaces the live output with the final one.
     await expect(t.panel.getByText('Ticks done.')).toBeVisible({ timeout: 8_000 })
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toHaveAttribute('data-task-state', 'exited')
     await expect(card.getByTestId('bash-output')).toContainText('tick 3')
     await expect(live).toHaveCount(0)
@@ -117,16 +119,18 @@ test.describe('Chat live command output', () => {
         ]
       }
     })
+    // Prepare the other workspace before starting the timed command.
+    const s = seed(mainWindow)
+    const project = await s.createProject({ name: 'Chat 158 other', color: '#a3e635', path: t.cwd })
+    const other = await s.createTask({ projectId: project.id, title: 'Other task', status: 'todo' })
+    await s.refreshData()
     await t.send('long one')
-    const live = t.panel.getByTestId('tool-bash').getByTestId('bash-live-output')
+    const live = (await openActivityTool(t.panel, 'tool-bash')).getByTestId('bash-live-output')
     await expect(live).toContainText('tick 1', { timeout: 5_000 })
 
     // Show another task: this chat tab is hidden now.
-    const s = seed(mainWindow)
-    const project = await s.createProject({ name: 'Chat 158 other', color: '#a3e635' })
-    const other = await s.createTask({ projectId: project.id, title: 'Other task', status: 'todo' })
-    await s.refreshData()
     await openTaskById(mainWindow, other.id)
+    await expect(t.panel).toBeHidden()
     await mainWindow.waitForTimeout(1_200)
     const hiddenAt = await polls(t)
     await mainWindow.waitForTimeout(2_500)
@@ -134,6 +138,7 @@ test.describe('Chat live command output', () => {
 
     // Back: polling resumes.
     await openTaskById(mainWindow, t.taskId)
+    await expect(t.panel).toBeVisible()
     await expect.poll(() => polls(t), { timeout: 4_000 }).toBeGreaterThan(hiddenAt)
     await expect(t.panel.getByText('over')).toBeVisible({ timeout: 12_000 })
   })
@@ -165,7 +170,7 @@ test.describe('Chat live command output', () => {
       }
     })
     await t.send('build slowly')
-    const card = t.panel.getByTestId('tool-bash')
+    const card = await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toHaveAttribute('data-task-state', 'running', { timeout: 5_000 })
     await card.getByRole('button', { name: 'Move to background' }).click()
 
@@ -173,8 +178,9 @@ test.describe('Chat live command output', () => {
     await expect
       .poll(() => run.controlRequests().filter((r) => r.subtype === 'background_tasks'))
       .toEqual([{ subtype: 'background_tasks', tool_use_id: 'toolu_158m' }])
-    await expect(card).toHaveAttribute('data-task-state', 'background', { timeout: 5_000 })
     await expect(t.panel.getByText('Moved on.')).toBeVisible({ timeout: 5_000 })
+    await openActivityTool(t.panel, 'tool-bash')
+    await expect(card).toHaveAttribute('data-task-state', 'background', { timeout: 5_000 })
     // Still live after the turn ended.
     await expect(card.getByTestId('bash-live-output')).toContainText('tick 3', { timeout: 6_000 })
     // It exits on its own; its final output is saved (survives a reload).
@@ -184,6 +190,7 @@ test.describe('Chat live command output', () => {
     expect(saved).toHaveLength(1)
     expect(saved[0].event.output).toContain('[exited with code 0]')
     await t.reload()
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(t.panel.getByTestId('tool-bash').getByTestId('bash-output')).toContainText(
       'tick 4'
     )

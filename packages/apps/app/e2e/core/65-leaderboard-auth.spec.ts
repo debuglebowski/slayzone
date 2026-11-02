@@ -21,7 +21,10 @@ base.describe('Leaderboard auth transport', () => {
     base.setTimeout(120_000)
     const launched = await launchIsolatedElectron({
       name: 'leaderboard-auth',
-      extraEnv: () => ({ SLAYZONE_E2E_CONVEX_ADDRESS: CONVEX_ADDRESS })
+      extraEnv: () => ({
+        SLAYZONE_E2E_CONVEX_ADDRESS: CONVEX_ADDRESS,
+        SLAYZONE_E2E_NO_COMPUTER: '1'
+      })
     })
     try {
       const { app: electronApp, page: mainWindow } = launched

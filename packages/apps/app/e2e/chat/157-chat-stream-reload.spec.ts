@@ -6,6 +6,7 @@
  */
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, streamEv, streamMessage, test } from '../fixtures/chat'
+import { openActivityTool } from '../fixtures/chat-activity'
 
 test.describe('Chat streaming: reload mid-stream', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -41,14 +42,17 @@ test.describe('Chat streaming: reload mid-stream', () => {
       }
     })
     await t.send('reload me')
-    const row = t.panel.locator('[data-chat-text]')
+    const row = t.panel.getByRole('button', { name: 'Message', exact: true })
     await expect(row).toHaveText('Before the reload,', { timeout: 5_000 })
 
     await t.reload()
     await expect(row).toHaveText('Before the reload,', { timeout: 5_000 })
-    await expect(row).toHaveAttribute('data-streaming', 'true')
-    await expect(row).toHaveText('Before the reload, after the reload.', { timeout: 10_000 })
-    await expect(row).toHaveCount(1)
+    await expect(t.stopButton).toBeVisible()
+    await expect(t.panel.locator('[data-chat-text]')).toHaveText(
+      'Before the reload, after the reload.',
+      { timeout: 10_000 }
+    )
+    await expect(t.panel.locator('[data-chat-text]')).toHaveCount(1)
     await expect(t.panel.getByText('reload me')).toHaveCount(1)
     expect(t.epoch.runs()).toHaveLength(1)
     const texts = (await t.events()).filter((e) => e.event.kind === 'assistant-text')
@@ -92,11 +96,15 @@ test.describe('Chat streaming: reload mid-stream', () => {
       }
     })
     await t.send('build it')
+    await openActivityTool(t.panel, 'tool-bash')
     const command = t.panel.getByTestId('tool-bash').getByTestId('bash-command')
     await expect(command).toHaveText('npm run build', { timeout: 5_000 })
 
     await t.reload()
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(command).toHaveText('npm run build', { timeout: 5_000 })
+    await expect(t.sendButton).toBeVisible({ timeout: 10_000 })
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(command).toHaveText('npm run build --watch', { timeout: 10_000 })
     await expect(t.panel.getByTestId('tool-bash')).toHaveCount(1)
     await expect(t.panel.getByTestId('tool-bash')).toContainText('built')

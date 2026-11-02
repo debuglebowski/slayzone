@@ -44,6 +44,23 @@ test('an unreadable manifest is unknown, not healthy and not broken', () => {
   )
 })
 
+test('explicitly disabled dependency builds are not pending install work', () => {
+  expect(
+    pendingBuildsFrom(
+      JSON.stringify({
+        pendingBuilds: [
+          '.',
+          '@parcel/watcher@2.6.0',
+          'sharp@0.34.5',
+          'node-pty@1.1.0(patch_hash=x)',
+          'posix@4.2.0'
+        ],
+        allowBuilds: { '@parcel/watcher': false, sharp: false, 'node-pty': true }
+      })
+    )
+  ).toEqual(['.', 'node-pty@1.1.0(patch_hash=x)', 'posix@4.2.0'])
+})
+
 test('spawn-helper candidates mirror node-pty load order for this platform', () => {
   // Joined with the HOST's separator: the darwin list is also built on Windows CI.
   const dir = '/r/node_modules/node-pty'

@@ -28,7 +28,24 @@ beforeEach(() => {
 })
 
 describe('remote pty environment', () => {
-  it('keeps computer identity and PATH; admits only task identity from hub', () => {
+  it.each([
+    ['dark', '15;0'],
+    ['light', '0;15']
+  ])('carries validated %s appearance to shells', (theme, colors) => {
+    expect(
+      buildPtySpawnEnv(ctxWith(), { TERM_BACKGROUND: theme, COLORFGBG: colors })
+    ).toMatchObject({
+      TERM_BACKGROUND: theme,
+      COLORFGBG: colors,
+      COLORTERM: 'truecolor'
+    })
+  })
+  it('does not pass arbitrary appearance environment values through', () => {
+    const env = buildPtySpawnEnv(ctxWith(), { TERM_BACKGROUND: 'bad', COLORFGBG: 'bad' })
+    expect(env.TERM_BACKGROUND).not.toBe('bad')
+    expect(env.COLORFGBG).not.toBe('bad')
+  })
+  it('keeps computer identity and PATH while accepting task identity', () => {
     process.env.PATH = '/computer/bin:/usr/bin'
     const env = buildPtySpawnEnv(ctxWith(), {
       HOME: '/tmp',

@@ -5,6 +5,7 @@
  * reply wiping the history).
  */
 import { resetApp } from '../fixtures/electron'
+import { openActivityTool } from '../fixtures/chat-activity'
 import {
   codexEchoTurn,
   codexReply,
@@ -80,6 +81,10 @@ test.describe('Codex chat turn', () => {
       },
       { ...t.opts(), conversationId: run.threadId! }
     )
+    // Switching starts the replacement asynchronously. Keep its spawn inside
+    // this scenario instead of letting it consume the next test's process slot.
+    const imported = await t.run(1, (r) => r.requests('thread/turns/list').length > 0)
+    expect(imported.resumedThread).toBe(run.threadId)
     await expect(
       t.panel.getByTestId('chat-message-attachments').getByRole('button', { name: 'Open red.png' })
     ).toBeVisible()
@@ -234,6 +239,7 @@ test.describe('Codex chat turn', () => {
     })
     await t.send('run the tests')
     await expect(t.panel.getByText('The suite passed.')).toBeVisible()
+    await openActivityTool(t.panel, 'tool-codex-command')
     // Precondition: the card for this command exists.
     await expect(t.panel.getByText('npm test', { exact: false }).first()).toBeVisible()
 
@@ -271,6 +277,7 @@ test.describe('Codex chat turn', () => {
     })
     await t.send('edit the note')
     await expect(t.panel.getByText('Edited notes.txt.')).toBeVisible()
+    await openActivityTool(t.panel, 'tool-codex-file-change')
     await expect(t.panel.getByText('notes.txt', { exact: false }).first()).toBeVisible()
 
     await expect(t.panel.getByText(/"changes"\s*:/)).toHaveCount(0)

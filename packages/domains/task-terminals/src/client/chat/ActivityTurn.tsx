@@ -1,6 +1,6 @@
 import { useContext, useEffect, useId, useState } from 'react'
 import { Brain, ChevronRight, MessageSquare, Wrench } from 'lucide-react'
-import { cn, type AppearanceSettings } from '@slayzone/ui'
+import { cn, useNow, type AppearanceSettings } from '@slayzone/ui'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
 import type { ActivityItem, ActivityTurn as ActivityTurnData } from './activity-view'
@@ -11,6 +11,7 @@ import { ToolInActivityContext } from './tool-cards/card-shell'
 import { ToolFocusContext } from './tool-cards/tool-focus'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
+import { formatSeconds } from './tool-cards/command-live'
 import { AnswerFooterPanel } from './answer-footer-panel'
 
 function ActivityNarrative({
@@ -25,11 +26,17 @@ function ActivityNarrative({
   const id = useId()
   const text = live?.text || item.text
   const thinking = item.kind === 'thinking'
+  const streaming = item.stream === 'open'
+  const now = useNow(1000, { enabled: thinking && streaming })
   if (!text && item.stream !== 'open') return null
   const Icon = thinking ? Brain : MessageSquare
   if (preview) {
     return (
-      <div className="my-1 max-w-[620px] rounded-md border border-border/50 bg-card/40 text-xs">
+      <div
+        className="my-1 max-w-[620px] rounded-md border border-border/50 bg-card/40 text-xs"
+        data-chat-thinking={thinking ? '' : undefined}
+        data-streaming={streaming ? 'true' : undefined}
+      >
         <button
           type="button"
           aria-label={thinking ? 'Thinking' : 'Message'}
@@ -44,6 +51,14 @@ function ActivityNarrative({
           >
             {text || 'Thinking…'}
           </span>
+          {thinking && streaming && (
+            <span
+              data-testid="thinking-elapsed"
+              className="shrink-0 tabular-nums text-muted-foreground"
+            >
+              {formatSeconds(now - item.timestamp)}
+            </span>
+          )}
           <ChevronRight
             className={cn(
               'size-3 shrink-0 text-muted-foreground transition-transform',

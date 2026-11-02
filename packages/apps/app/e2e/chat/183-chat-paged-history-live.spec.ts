@@ -7,8 +7,9 @@
  */
 import { TIMELINE_PROJECTION_VERSION } from '@slayzone/terminal/timeline-checkpoint'
 import { resetApp } from '../fixtures/electron'
+import { expandActivities } from '../fixtures/chat-activity'
 import { ev, expect, step, test } from '../fixtures/chat'
-import { LAST_REPLY, longSessionEvents } from '../fixtures/chat-long-session'
+import { LAST_REPLY, answeredLongSessionEvents } from '../fixtures/chat-long-session'
 
 const LATE = 'LATE-183 output of a long-running command'
 
@@ -21,7 +22,7 @@ test.describe('Claude chat: paged history — a late result for a row not loaded
     chat
   }) => {
     test.setTimeout(240_000)
-    const events = longSessionEvents(20_000)
+    const events = answeredLongSessionEvents(20_000)
     // The first Bash call (turn 0, the first page).
     const call = events.find((e) => e.kind === 'tool-call' && e.name === 'Bash') as {
       id: string
@@ -61,7 +62,9 @@ test.describe('Claude chat: paged history — a late result for a row not loaded
     // The card, far up: its result is the late one.
     await t.composer.focus()
     await t.page.keyboard.press('Meta+ArrowUp')
-    const card = timeline.locator(`[data-item-key="tool:${call.id}"]`)
+    await expandActivities(t.panel, 'first')
+    const card = timeline.locator(`[data-tool-use-id="${call.id}"]`)
+    await card.getByRole('button').first().click()
     await expect(card).toBeVisible({ timeout: 20_000 })
     // (A Bash card shows its output.)
     await expect(card.getByText(LATE)).toBeVisible({ timeout: 10_000 })

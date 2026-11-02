@@ -7,6 +7,7 @@
  * scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
+import { openActivityCard } from '../fixtures/chat-activity'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
 
 const BEFORE = 'const a = 1\nconst b = 2\nconst c = 3\n'
@@ -71,7 +72,7 @@ test.describe('Chat diff comments', () => {
     await expect(t.stopButton).toBeVisible()
 
     // On the Edit card: hover the added line, comment, Enter.
-    const card = t.panel.locator('[data-item-key="tool:toolu_e1"]')
+    const card = await openActivityCard(t.panel, /^Edit.*app\.ts/)
     const added = card.locator('.group\\/line').filter({ hasText: 'const b = 22' })
     await added.hover()
     await added.getByTestId('diff-comment-button').click()
@@ -102,6 +103,7 @@ test.describe('Chat diff comments', () => {
     // The saved draft brings it back after a reload.
     await t.reload()
     await expect(t.composer).toHaveValue(draft)
+    await expect(t.stopButton).toBeVisible()
 
     // A turn runs: it queues, and goes out next ("Send now" stops the turn).
     await t.composer.press('Enter')

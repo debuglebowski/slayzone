@@ -1,9 +1,10 @@
 /**
  * Claude Code chat: controlling a running turn — Stop (a live interrupt), a live
- * model change, and a setting change that respawns the agent mid-turn — against
+ * model change, and an explicit restart mid-turn — against
  * the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
+import { expandActivities } from '../fixtures/chat-activity'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
 
 test.describe('Chat control', () => {
@@ -55,6 +56,7 @@ test.describe('Chat control', () => {
     await t.stopButton.click()
     await expect(t.sendButton).toBeVisible()
     await t.run(0, (r) => r.controlRequests('interrupt').length === 1)
+    await expandActivities(t.panel)
     // Progress had arrived: the turn stays (marked interrupted), nothing is restored.
     await expect(t.panel.getByText('working on it')).toBeVisible()
     await expect(t.panel.getByText('a long job')).toBeVisible()
@@ -87,9 +89,8 @@ test.describe('Chat control', () => {
     })
     await t.send('question')
     await expect(t.panel.getByText('thinking about it')).toBeVisible()
-    // The composer's model pill is locked while a turn runs…
-    await expect(t.panel.getByRole('button', { name: /^Chat model:/ })).toBeDisabled()
-    // …but the server accepts a change from any other client mid-turn.
+    // Model changes stay available during a turn and apply without replacing it.
+    await expect(t.panel.getByRole('button', { name: /^Chat model:/ })).toBeEnabled()
     await t.page.evaluate(
       (o) => window.getTrpcVanillaClient().chat.setModel.mutate({ ...o, chatModel: 'sonnet' }),
       t.opts()
@@ -137,12 +138,8 @@ test.describe('Chat control', () => {
     await t.send('start')
     await expect(t.panel.getByText('gen1 working')).toBeVisible()
 
-    // A switch to bypass has no live equivalent: it always respawns a live agent
-    // (chat-handlers setMode). (Effort changes live since chat A.)
-    await t.page.evaluate(
-      (o) => window.getTrpcVanillaClient().chat.setMode.mutate({ ...o, chatMode: 'bypass' }),
-      t.opts()
-    )
+    // Explicit restart replaces the process even while a turn is running.
+    await t.page.evaluate((o) => window.getTrpcVanillaClient().chat.restart.mutate(o), t.opts())
     await t.run(1)
     await t.send('after respawn')
     await expect(t.panel.getByText('GEN2: after respawn')).toBeVisible()

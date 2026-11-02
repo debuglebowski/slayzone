@@ -96,6 +96,34 @@ function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = 
   }
 }
 
+test('remote PTYs receive appearance hints without hub machine environment', async () => {
+  const handle = makeFakeHandle()
+  let captured: PtySpawnSpec | undefined
+  setPtyBackend({
+    spawn: (spec) => {
+      captured = spec
+      return handle
+    }
+  })
+  const sid = 'remoteTheme:remoteTheme'
+  try {
+    await createPty({
+      win: fakeWin,
+      sessionId: sid,
+      cwd: '/tmp',
+      mode: 'terminal',
+      type: 'terminal',
+      computerId: 'computer-1'
+    })
+    expect(captured?.options.env).toMatchObject({ TERM_BACKGROUND: 'dark', COLORFGBG: '15;0' })
+    expect(captured?.options.env).not.toHaveProperty('HOME')
+    expect(captured?.options.env).not.toHaveProperty('PATH')
+  } finally {
+    killPty(sid)
+    setPtyBackend(null)
+  }
+})
+
 test('fake backend: createPty routes spawn; onData→ptyEvents data (monotonic seq); write/resize reach handle; onExit→ptyEvents exit', async () => {
   const handle = makeFakeHandle()
   let capturedSpec: PtySpawnSpec | null = null

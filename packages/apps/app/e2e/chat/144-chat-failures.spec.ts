@@ -4,6 +4,7 @@
  * against the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
+import { expandActivities, openActivityTool } from '../fixtures/chat-activity'
 import { ev, expect, step, test } from '../fixtures/chat'
 
 /** Short enough to see the watchdog act; production keeps 20 s / 300 s / 2 s. */
@@ -32,6 +33,7 @@ test.describe('Chat failures', () => {
       }
     })
     await t.send('do the thing')
+    await expandActivities(t.panel)
     await expect(t.panel.getByText('about to crash')).toBeVisible()
     await t.run(0, (r) => r.exit()?.code === 1)
 
@@ -39,6 +41,7 @@ test.describe('Chat failures', () => {
       t.panel.getByRole('button', { name: /Session ended, click to restart/ })
     ).toBeVisible()
     await expect(t.composer).toBeDisabled()
+    await t.panel.getByRole('button', { name: 'Agent diagnostics' }).click()
     await expect(t.panel.getByText('panic: fake-claude crashed on purpose')).toBeVisible()
   })
 
@@ -86,6 +89,7 @@ test.describe('Chat failures', () => {
     await expect
       .poll(async () => (await t.events()).some((e) => e.event.kind === 'tool-call'))
       .toBe(true)
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(t.panel.getByText('npm test').first()).toBeVisible()
 
     // A running tool is silent; while it is open the watchdog's bound is the

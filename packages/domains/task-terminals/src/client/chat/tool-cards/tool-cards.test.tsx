@@ -35,9 +35,37 @@ vi.mock('../../trpc', () => ({
 
 import { ChatViewContext, type ChatViewState } from '../ChatViewContext'
 import { renderTimelineItem, renderTool } from '../renderers'
+import { ToolInActivityContext, ToolShell } from './card-shell'
+import { RowUiStateContext, RowUiStateStore, TimelineRowKeyContext } from '../row-ui-state'
 
 const onOpenFile = vi.fn()
 const onOpenUrl = vi.fn()
+
+it('keeps an activity card open when virtualization remounts it', () => {
+  const store = new RowUiStateStore()
+  const mount = () =>
+    render(
+      <RowUiStateContext.Provider value={store}>
+        <TimelineRowKeyContext.Provider value="tool:remember">
+          <ToolInActivityContext.Provider value>
+            <ToolShell
+              invocation={{ id: 'remember', name: 'Bash', input: {}, status: 'done' }}
+              icon={null}
+              title="Remember"
+            >
+              <span>Remembered output</span>
+            </ToolShell>
+          </ToolInActivityContext.Provider>
+        </TimelineRowKeyContext.Provider>
+      </RowUiStateContext.Provider>
+    )
+  const first = mount()
+  fireEvent.click(screen.getByRole('button', { name: 'Remember' }))
+  expect(screen.getByText('Remembered output')).toBeTruthy()
+  first.unmount()
+  mount()
+  expect(screen.getByText('Remembered output')).toBeTruthy()
+})
 
 function View({ children }: { children: React.ReactNode }) {
   const base = useContext(ChatViewContext)

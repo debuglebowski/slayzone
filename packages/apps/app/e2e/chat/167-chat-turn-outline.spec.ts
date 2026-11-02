@@ -32,7 +32,12 @@ function history(turns: number): Array<Record<string, unknown>> {
   for (let i = 0; i < turns; i++) {
     const answer = Array.from({ length: 8 }, (_, l) => `answer ${i}, line ${l}`).join('\n\n')
     out.push(
-      { kind: 'user-message', id: `u${i}`, text: `Turn ${i} question\nwith a second line` },
+      {
+        kind: 'user-message',
+        id: `u${i}`,
+        text: `Turn ${i} question\nwith a second line`,
+        history: true
+      },
       { kind: 'assistant-text', messageId: `a${i}`, text: answer },
       { ...RESULT, isError: i === 2, text: answer }
     )

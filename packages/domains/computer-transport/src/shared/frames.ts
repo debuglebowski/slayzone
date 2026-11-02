@@ -530,7 +530,7 @@ export const ptySpawnParamsSchema = z
   })
 export type PtySpawnParams = z.infer<typeof ptySpawnParamsSchema>
 
-/** Only task/agent identity is permitted from hub into a computer PTY. */
+/** Only task/agent identity and validated appearance hints reach a computer PTY. */
 export const HUB_PTY_ENV_KEYS = [
   'SLAYZONE_TASK_ID',
   'SLAYZONE_PROJECT_ID',
@@ -542,6 +542,10 @@ export function pickHubPtyEnv(env?: Record<string, string>): Record<string, stri
   const picked: Record<string, string> = {}
   for (const key of HUB_PTY_ENV_KEYS) {
     if (env?.[key] !== undefined) picked[key] = env[key]
+  }
+  if (env?.TERM_BACKGROUND === 'dark' || env?.TERM_BACKGROUND === 'light') {
+    picked.TERM_BACKGROUND = env.TERM_BACKGROUND
+    picked.COLORFGBG = env.TERM_BACKGROUND === 'dark' ? '15;0' : '0;15'
   }
   return picked
 }

@@ -17,6 +17,29 @@ const diagnostic = {
 } as TimelineItem
 
 describe('activity view late diagnostics', () => {
+  const importedUser = {
+    kind: 'user-text',
+    id: 'imported',
+    text: 'Earlier question',
+    delivery: 'answered',
+    timestamp: 0
+  } as TimelineItem
+
+  it('keeps imported answers visible without a live result event', () => {
+    const view = activityView([importedUser, reply], false)
+    expect(view.rows).toEqual([importedUser, reply])
+    expect(view.turns.get(reply)?.final).toBe(reply)
+  })
+
+  it.each(['history-gap', 'interrupted'] as const)(
+    'does not promote imported progress across %s',
+    (kind) => {
+      const boundary = { kind, timestamp: 1 } as TimelineItem
+      const view = activityView([importedUser, reply, boundary], false)
+      expect([...view.turns.values()].every((turn) => turn.final === null)).toBe(true)
+    }
+  )
+
   it('keeps diagnostics after completion under the answer without another avatar', () => {
     const view = activityView([reply, result, diagnostic], false)
     expect(view.rows).toEqual([reply])

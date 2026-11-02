@@ -9,6 +9,7 @@ import {
   type RefObject
 } from 'react'
 import { useSubscription } from '@slayzone/transport/client'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type {
@@ -328,6 +329,7 @@ function cancelFrame(id: number): void {
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
     initialState({ agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns })
@@ -576,6 +578,15 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       at?: number
     }) => {
       if (tabId !== opts.tabId) return
+      const agentEvent = event as AgentEvent
+      if (agentEvent.kind === 'cli-models') {
+        const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
+        // The session can start before its model/list handshake finishes. Use
+        // the advertised list directly; an older empty DB query must not win.
+        void queryClient.cancelQueries({ queryKey }).then(() => {
+          queryClient.setQueryData(queryKey, agentEvent.models)
+        })
+      }
       if (!hydratedRef.current) {
         liveQueueRef.current.push({ event: event as AgentEvent, seq, live, at })
         return

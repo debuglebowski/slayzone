@@ -1,11 +1,11 @@
 /**
  * Claude Code chat token streaming (plan 3.2): a reply renders as its deltas
- * arrive, and the saved block replaces the live one in place — same DOM node, no
- * flicker, one row, saved once.
+ * arrive in the activity preview, then become one final answer, saved once.
  * Fake CLI streaming: packages/shared/test-utils/fake-claude/README.md (stream.ts).
  */
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, streamMessage, test } from '../fixtures/chat'
+import { expandActivities } from '../fixtures/chat-activity'
 
 const FINAL = 'Streaming answer arrives piece by piece.'
 
@@ -14,7 +14,7 @@ test.describe('Chat streaming: text', () => {
     await resetApp(mainWindow)
   })
 
-  test('a reply streams in and is finalized in place', async ({ chat }) => {
+  test('a reply streams in the preview and becomes one final answer', async ({ chat }) => {
     const t = await chat.openTask({
       title: 'Chat stream text',
       scenario: {
@@ -28,6 +28,7 @@ test.describe('Chat streaming: text', () => {
                   [{ text: ['Streaming ', 'answer ', 'arrives ', 'piece ', 'by ', 'piece.'] }],
                   { gapMs: 450 }
                 ),
+                step.sleep(800),
                 step.emit(ev.result({ text: FINAL }))
               ]
             ]
@@ -39,19 +40,21 @@ test.describe('Chat streaming: text', () => {
     expect((await t.run(0)).argv).toContain('--include-partial-messages')
 
     await t.send('stream please')
-    const row = t.panel.locator('[data-chat-text]')
+    const row = t.panel.getByRole('button', { name: 'Message', exact: true })
     // Partial text shows while the reply is still streaming.
     await expect(row).toContainText('Streaming answer', { timeout: 5_000 })
-    await expect(row).toHaveAttribute('data-streaming', 'true')
+    await expect(t.stopButton).toBeVisible()
     expect(await row.textContent()).not.toContain('piece.')
 
-    // Tag the live row's node: if the saved block re-mounted it, the tag is gone.
+    // Consolidating the saved block preserves the preview until turn completion.
     await row.evaluate((el) => el.setAttribute('data-probe', 'live-node'))
 
     await expect(row).toHaveText(FINAL, { timeout: 8_000 })
-    await expect(row).not.toHaveAttribute('data-streaming', 'true')
     await expect(row).toHaveAttribute('data-probe', 'live-node')
-    await expect(row).toHaveCount(1)
+    // Completion promotes the progress preview into the final answer.
+    await expect(t.panel.locator('[data-chat-text]')).toHaveText(FINAL)
+    await expect(t.panel.locator('[data-chat-text]')).toHaveCount(1)
+    await expect(row).toHaveCount(0)
 
     // Saved once, as the one consolidated block; fragments are never saved.
     const events = await t.events()
@@ -84,10 +87,11 @@ test.describe('Chat streaming: text', () => {
       }
     })
     await t.send('two blocks')
-    const rows = t.panel.locator('[data-chat-text]')
-    await expect(rows).toHaveCount(2, { timeout: 8_000 })
-    await expect(rows.nth(0)).toHaveText('First block.')
-    await expect(rows.nth(1)).toHaveText('Second block.')
+    await expect(t.panel.locator('[data-chat-text]')).toHaveText('Second block.', {
+      timeout: 8_000
+    })
+    await expandActivities(t.panel)
+    await expect(t.panel.getByLabel('Message', { exact: true })).toHaveText('First block.')
     await expect(t.panel.locator('[data-chat-text][data-streaming="true"]')).toHaveCount(0)
   })
 })

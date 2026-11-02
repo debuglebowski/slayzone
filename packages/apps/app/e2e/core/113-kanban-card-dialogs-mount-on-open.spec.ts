@@ -177,7 +177,7 @@ test.describe('Kanban card dialogs mount on open', () => {
     // Delete: AlertDialog confirm removes the card.
     menu = await openMenu(7)
     await menu.getByRole('menuitem', { name: 'Delete' }).click()
-    await expect(dialog('alertdialog')).toContainText('Delete "Dialog task 7"?')
+    await expect(dialog('alertdialog')).toContainText('Move "Dialog task 7" to Trash?')
     await dialog('alertdialog').getByRole('button', { name: 'Delete' }).click()
     await expect(card(7)).toHaveCount(0)
 

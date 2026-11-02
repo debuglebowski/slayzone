@@ -44,7 +44,7 @@ export function activityView(
   const hosts = new Map<TimelineItem, TimelineItem>()
   let segment: TimelineItem[] = []
   let completed = false
-  const flush = (active: boolean): void => {
+  const flush = (active: boolean, historyComplete = true): void => {
     if (!segment.length) return
     const activity = segment.filter(
       (item): item is ActivityItem =>
@@ -58,17 +58,26 @@ export function activityView(
     // Process diagnostics can arrive after the reply; they don't make it progress text.
     const last = activity.findLast((item) => item.kind !== 'stderr')
     const result = segment.find((item) => item.kind === 'result')
+    const user = segment.find((item) => item.kind === 'user-text')
+    // Session-file imports have answered user messages, but no live result events.
+    // Never infer completion through a page boundary or an explicit interruption.
+    const importedAnswer =
+      historyComplete &&
+      !active &&
+      user?.delivery === 'answered' &&
+      !segment.some((item) => item.kind === 'interrupted' || item.kind === 'turn-error')
     // A completed text block may still be progress. Only turn completion confirms
     // an answer; pauses, interruptions and history gaps must not promote it.
     const final =
-      result && !result.isError && last?.kind === 'text' && last.stream !== 'open' ? last : null
+      (result ? !result.isError : importedAnswer) && last?.kind === 'text' && last.stream !== 'open'
+        ? last
+        : null
     const entries = final ? activity.filter((item) => item !== final) : activity
     const files = segment.filter(
       (item): item is Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }> =>
         item.kind === 'files-changed' || item.kind === 'workspace-changes'
     )
     const hidden = new Set<TimelineItem>([...entries, ...files])
-    const user = segment.find((item) => item.kind === 'user-text')
     if (final && result) hidden.add(result)
     const kept = segment.filter((item) => !hidden.has(item))
     // Preserve a row as an anchor for assistant-initiated turns with no final reply.
@@ -102,7 +111,7 @@ export function activityView(
     // diagnostics with that turn, stopping at any new content or history boundary.
     if (completed && item.kind !== 'stderr') flush(false)
     if (item.kind === 'history-gap' || item.kind === 'conversation-branch') {
-      flush(false)
+      flush(false, false)
       output.push(item)
     } else if (item.kind === 'user-text') {
       flush(false)

@@ -13,7 +13,7 @@ test.describe('Chat delivery', () => {
     await resetApp(mainWindow)
   })
 
-  test('a message is sent with its id, shown as received once the CLI confirms, quiet once answered', async ({
+  test('a message is sent with its id; confirmed and answered delivery stay quiet', async ({
     chat
   }) => {
     const t = await chat.openTask({
@@ -24,7 +24,15 @@ test.describe('Chat delivery', () => {
     })
     await t.send('do the thing')
     const status = t.panel.locator('[data-delivery]')
-    await expect(t.panel.locator('[data-delivery="delivered"]')).toBeVisible()
+    await expect
+      .poll(async () =>
+        (await t.events()).some(
+          (e) => e.event.kind === 'user-message-delivery' && e.event.state === 'delivered'
+        )
+      )
+      .toBe(true)
+    // Confirmed delivery is quiet; only pending or failed delivery needs a badge.
+    await expect(status).toHaveCount(0)
     await expect(t.panel.getByText('all done')).toBeVisible()
     await expect(status).toHaveCount(0)
 

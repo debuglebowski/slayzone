@@ -12,18 +12,23 @@
  */
 import type { Page } from '@playwright/test'
 import { openTaskById, resetApp, seed } from '../fixtures/electron'
+import { expandActivities } from '../fixtures/chat-activity'
 import { ev, expect, step, streamMessage, test, type ChatHarness } from '../fixtures/chat'
 import {
   FIRST_PROMPT,
   LAST_REPLY,
   NEEDLE,
   PROBE_COMMAND,
-  longSessionEvents
+  answeredLongSessionEvents
 } from '../fixtures/chat-long-session'
 
 /** Mounted rows: what virtualization bounds (plan budget: render.mountedRowsMax). */
 const MOUNTED_MAX = 80
-const session = () => longSessionEvents()
+const CONVERSATION = '16500000-0000-4000-8000-000000000001'
+const session = () =>
+  answeredLongSessionEvents().map((event) =>
+    event.kind === 'turn-init' ? { ...event, sessionId: CONVERSATION } : event
+  )
 
 /** Mounted row count of the visible chat panel's timeline. */
 function mountedRows(page: Page): Promise<number> {
@@ -55,6 +60,7 @@ function topRow(page: Page) {
 async function openLong(chat: ChatHarness, title: string) {
   const t = await chat.openTask({
     title,
+    conversationId: CONVERSATION,
     spawn: 'on-send',
     seedEvents: session(),
     scenario: { processes: [] }
@@ -170,6 +176,8 @@ test.describe('Claude chat: a 10,000-event session', () => {
     test.setTimeout(120_000)
     const { t } = await openLong(chat, 'Long session row state')
     const probe = t.panel.getByTestId('tool-bash').filter({ hasText: PROBE_COMMAND })
+    await expandActivities(t.panel)
+    await probe.getByRole('button').first().click()
     const output = probe.getByTestId('bash-output')
     await expect(output).toBeVisible() // Bash cards start open
     await probe.getByRole('button').first().click()
@@ -180,6 +188,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
     await expect(t.panel.getByText(FIRST_PROMPT)).toBeVisible({ timeout: 10_000 })
     await expect(probe).toHaveCount(0) // unmounted
     await t.page.keyboard.press('Meta+ArrowDown')
+    await expandActivities(t.panel)
     await expect(probe).toBeVisible({ timeout: 10_000 })
     await expect(output).toHaveCount(0) // still collapsed
 
@@ -193,6 +202,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
     await t.page.getByRole('menuitem', { name: 'Collapse all expanded blocks' }).click()
     await t.composer.focus()
     await t.page.keyboard.press('Meta+ArrowDown')
+    await expandActivities(t.panel)
     await expect(probe).toBeVisible({ timeout: 10_000 })
     await expect(output).toHaveCount(0)
   })
@@ -204,6 +214,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
     const words = Array.from({ length: 40 }, (_, i) => `word${i}\n\n`)
     const t = await chat.openTask({
       title: 'Long session stream',
+      conversationId: CONVERSATION,
       seedEvents: session(),
       scenario: {
         processes: [
@@ -211,7 +222,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
             turns: [
               [
                 step.emit(ev.init()),
-                ...streamMessage('msg_165', [{ text: words }], { gapMs: 60 }),
+                ...streamMessage('msg_165', [{ text: words }], { gapMs: 200 }),
                 step.emit(ev.result({ text: words.join('') }))
               ]
             ]
@@ -231,13 +242,21 @@ test.describe('Claude chat: a 10,000-event session', () => {
       const el = panel!.querySelector<HTMLElement>('[data-testid="chat-timeline-scroller"]')!
       const gaps: number[] = []
       w.__gaps165 = gaps
-      const ro = new ResizeObserver(() =>
-        gaps.push(el.scrollHeight - el.scrollTop - el.clientHeight)
-      )
+      const ro = new ResizeObserver(() => {
+        // Follow aligns the message end; composer breathing room stays scrollable.
+        const content = el.querySelector<HTMLElement>('[data-chat-scroll-content]')
+        const padding = content
+          ? Number.parseFloat(getComputedStyle(content).paddingBottom) || 0
+          : 0
+        gaps.push(Math.max(0, el.scrollHeight - padding - el.clientHeight) - el.scrollTop)
+      })
       ro.observe(el.firstElementChild!)
       w.__stop165 = () => ro.disconnect()
     })
     await t.send('stream a long one')
+    const progress = t.panel.getByLabel('Message', { exact: true })
+    await expect(progress).toBeVisible({ timeout: 5_000 })
+    if (await progress.evaluate((el) => el.tagName === 'BUTTON')) await progress.click()
     await expect(t.panel.getByText('word39')).toBeVisible({ timeout: 20_000 })
     await expect(t.panel.locator('[data-chat-text][data-streaming="true"]')).toHaveCount(0, {
       timeout: 10_000

@@ -7,6 +7,7 @@
 import { resetApp } from '../fixtures/electron'
 import type { CodexChatTask } from '../fixtures/chat-codex'
 import { codexEchoTurn, cstep, cx, expect, streamReply, test } from '../fixtures/chat-codex'
+import { expandActivities } from '../fixtures/chat-activity'
 
 /** Today's Stop (chat-handlers `stopTurn` without `liveInterrupt`): SIGTERM + respawn. */
 
@@ -45,11 +46,13 @@ test.describe('Codex chat stop', () => {
       }
     })
     await t.send('a long job')
+    await expandActivities(t.panel)
     await expect(t.panel.getByText('working on it')).toBeVisible()
     await t.stopButton.click()
 
     await stopReached(t)
     await expect(t.sendButton).toBeVisible()
+    await expandActivities(t.panel)
     await expect(t.panel.getByText('working on it')).toBeVisible()
     await expect
       .poll(async () => (await t.events()).some((e) => e.event.kind === 'interrupted'))

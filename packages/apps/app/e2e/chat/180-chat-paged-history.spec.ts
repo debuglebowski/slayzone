@@ -11,7 +11,7 @@
 import type { Page } from '@playwright/test'
 import { resetApp } from '../fixtures/electron'
 import { expect, test, type ChatHarness } from '../fixtures/chat'
-import { FIRST_PROMPT, LAST_REPLY, NEEDLE, longSessionEvents } from '../fixtures/chat-long-session'
+import { FIRST_PROMPT, LAST_REPLY, NEEDLE, answeredLongSessionEvents } from '../fixtures/chat-long-session'
 
 const EVENTS = 100_000
 /** Rows a page of the projection holds (`TIMELINE_PAGE_ROWS`). */
@@ -46,7 +46,7 @@ async function openPaged(chat: ChatHarness, title: string) {
   const t = await chat.openTask({
     title,
     spawn: 'on-send',
-    seedEvents: longSessionEvents(EVENTS),
+    seedEvents: answeredLongSessionEvents(EVENTS),
     scenario: { processes: [] }
   })
   await expect(t.panel.getByText(LAST_REPLY)).toBeVisible({ timeout: 60_000 })

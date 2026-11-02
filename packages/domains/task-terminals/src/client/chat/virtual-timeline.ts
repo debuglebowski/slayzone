@@ -11,7 +11,7 @@ import type { Key } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import type { RevealTimelineItem } from './timeline-reveal'
 import type { CallbackRef, FollowBottomApi } from './useFollowBottom'
-import { getFollowBottomOffset } from './useFollowBottom'
+import { getFollowBottomOffset, isUserSelectingInside } from './useFollowBottom'
 
 /** Space above the first row (what `pt-4` was before the list was virtual). */
 export const TIMELINE_PADDING_TOP = 16
@@ -246,6 +246,14 @@ export function createVirtualTimelineController(
     if (detachInput === null && scrollRef.current) detachInput = watchUserInput(scrollRef.current)
     virtualizer._willUpdate()
     keepAnchor()
+    // Row measurements can commit another list height after the content's
+    // ResizeObserver ran. Align this commit before paint, rather than waiting
+    // for its next observer delivery. Reveals and text selection keep their place.
+    const el = getScrollElement()
+    if (el && el.clientHeight > 0 && follow.isStuck() && !isUserSelectingInside(el)) {
+      const target = getFollowBottomOffset(el)
+      if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target
+    }
   }
 
   /** The anchored row back where it was in the view (rows above it changed). */

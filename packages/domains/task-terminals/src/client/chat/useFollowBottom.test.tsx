@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, renderHook } from '@testing-library/react'
 import { useFollowBottom } from './useFollowBottom'
 
-type ResizeCallback = (entries: Array<{ contentRect: { height: number } }>) => void
+type ResizeCallback = (entries: Array<{ target: Element; contentRect: { height: number } }>) => void
 interface FakeObserver {
   cb: ResizeCallback
   observed: Element[]
@@ -28,6 +28,9 @@ beforeEach(() => {
       }
       observe(el: Element): void {
         this.rec.observed.push(el)
+      }
+      unobserve(el: Element): void {
+        this.rec.observed = this.rec.observed.filter((target) => target !== el)
       }
       disconnect(): void {
         this.rec.disconnect()
@@ -90,7 +93,7 @@ function setup(init: Partial<Dims> = {}, autoScroll = true) {
 /** Content grew to `height`; the box's scrollHeight grows with it. */
 function grow(dims: Dims, height: number, observer = observers.at(-1)) {
   dims.scrollHeight = height
-  act(() => observer?.cb([{ contentRect: { height } }]))
+  act(() => observer?.cb([{ target: observer.observed[0], contentRect: { height } }]))
 }
 
 function scrollTo(el: HTMLElement, dims: Dims, top: number) {
@@ -101,6 +104,23 @@ function scrollTo(el: HTMLElement, dims: Dims, top: number) {
 const bottom = (dims: Dims) => dims.scrollHeight - dims.clientHeight
 
 describe('chat bottom scroll padding', () => {
+  it('keeps following when the composer shrinks the viewport without content growth', () => {
+    const { el, dims } = setup()
+    expect(observers[0].observed).toContain(el)
+    dims.clientHeight -= 95
+    act(() => observers[0].cb([{ target: el, contentRect: { height: dims.clientHeight } }]))
+    expect(dims.scrollTop).toBe(bottom(dims))
+  })
+
+  it('keeps the reading position during viewport changes after scrolling up', () => {
+    const { el, dims } = setup()
+    fireEvent.wheel(el, { deltaY: -50 })
+    dims.scrollTop = 100
+    dims.clientHeight -= 95
+    act(() => observers[0].cb([{ target: el, contentRect: { height: dims.clientHeight } }]))
+    expect(dims.scrollTop).toBe(100)
+  })
+
   function paddedSetup() {
     const hook = setup()
     hook.content.dataset.chatScrollContent = ''
@@ -332,6 +352,21 @@ describe('useFollowBottom refs', () => {
     expect(dims.scrollTop).toBe(0)
   })
 
+  it('follows first growth when the attached content has padding', () => {
+    const { result } = renderHook(() => useFollowBottom())
+    const { el, dims } = scrollBox()
+    const content = contentBox(el, 1200)
+    content.style.paddingBottom = '200px'
+    act(() => {
+      result.current.scrollRef(el)
+      result.current.contentRef(content)
+    })
+    // ResizeObserver reports the content box, excluding the padding present
+    // in getBoundingClientRect. The content grew from 1000 to 1100.
+    grow(dims, 1100)
+    expect(dims.scrollTop).toBe(bottom(dims))
+  })
+
   it('compares growth against the attached height', () => {
     const { result } = renderHook(() => useFollowBottom())
     const { el, dims } = scrollBox()
@@ -375,9 +410,9 @@ describe('useFollowBottom refs', () => {
     const next = contentBox(el)
     act(() => result.current.contentRef(next))
     expect(observers).toHaveLength(2)
-    expect(observers[0].observed).toEqual([content])
+    expect(observers[0].observed).toEqual([content, el])
     expect(observers[0].disconnect).toHaveBeenCalledTimes(1)
-    expect(observers[1].observed).toEqual([next])
+    expect(observers[1].observed).toEqual([next, el])
   })
 
   it('disconnects the observer when the content detaches', () => {

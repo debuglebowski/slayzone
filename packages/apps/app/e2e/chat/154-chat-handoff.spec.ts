@@ -118,7 +118,11 @@ test.describe('Chat hand-off and live settings', () => {
         processes: [
           // The second message reaches the conversation, but its acks never arrive
           // before the process is replaced.
-          { defaultTurn: echoTurn(), ackDelayMs: 60_000, ackDelayFrom: 1 },
+          {
+            defaultTurn: echoTurn(),
+            ackDelayMs: 60_000,
+            ackDelayFrom: 1
+          },
           { defaultTurn: echoTurn() }
         ]
       }
@@ -132,10 +136,7 @@ test.describe('Chat hand-off and live settings', () => {
       .filter((m) => m.type === 'user')
       .at(-1)?.uuid
     // A respawn while the message is unconfirmed: it is sent again, same uuid.
-    await t.page.evaluate(
-      (o) => window.getTrpcVanillaClient().chat.setMode.mutate({ ...o, chatMode: 'bypass' }),
-      t.opts()
-    )
+    await t.page.evaluate((o) => window.getTrpcVanillaClient().chat.restart.mutate(o), t.opts())
     const second = await t.run(1, (r) => r.duplicateUserUuids().length === 1)
     expect(second.resumed).toBe(true)
     expect(second.duplicateUserUuids()).toEqual([uuid])

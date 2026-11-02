@@ -2510,7 +2510,13 @@ export async function stopTurn(
   const popped = opts.restorePrompt ? popTrailingUserMessage(tab) : null
   // How far the popped message got: never written → nothing of it can come back.
   const reach = popped?.id ? tab.outbox.reach(popped.id) : null
-  if (!popped) recordInterrupted(tabId)
+  if (!popped) {
+    // Baseline capture/attachment preparation may still hold the first write.
+    // Interrupting the CLI cannot stop bytes it has not received yet.
+    const pending = tab.outbox.oldestInFlight()
+    if (pending && tab.outbox.state(pending) === 'queued') tab.outbox.cancel(pending)
+    recordInterrupted(tabId)
+  }
 
   if (!proc || !caps.liveInterrupt || !proc.driver.applyControl) {
     await respawn(tabId, await opts.respawnOpts())

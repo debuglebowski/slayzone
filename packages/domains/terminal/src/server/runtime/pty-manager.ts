@@ -1198,6 +1198,11 @@ function stopTitlePolling(session: PtySession): void {
  *  must never inherit the host's hub address/creds/task-identity. Per-spawn
  *  identity is re-added afterward via `mcpEnv` (buildMcpEnv), so a terminal for
  *  task B never carries task A's SLAYZONE_TASK_ID and a bare shell has none. */
+function buildAppearanceEnv(): Record<string, string> {
+  const dark = getPtyHostBridge().isDarkTheme()
+  return { COLORFGBG: dark ? '15;0' : '0;15', TERM_BACKGROUND: dark ? 'dark' : 'light' }
+}
+
 export function buildBaseEnv(): Record<string, string> {
   return {
     ...sanitizeSpawnEnv(process.env),
@@ -1205,8 +1210,7 @@ export function buildBaseEnv(): Record<string, string> {
     HOME: process.env.HOME || homedir(),
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    COLORFGBG: getPtyHostBridge().isDarkTheme() ? '15;0' : '0;15',
-    TERM_BACKGROUND: getPtyHostBridge().isDarkTheme() ? 'dark' : 'light'
+    ...buildAppearanceEnv()
   } as Record<string, string>
 }
 
@@ -1645,7 +1649,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       }
     }
 
-    const baseEnv = computerId != null ? {} : buildBaseEnv()
+    const baseEnv = computerId != null ? buildAppearanceEnv() : buildBaseEnv()
 
     // Check for docker/ssh transport wrapping
     const transport = buildTransportSpawn(

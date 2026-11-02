@@ -57,7 +57,7 @@ interface FollowBottomController {
   dispose: () => void
 }
 
-function isUserSelectingInside(root: HTMLElement): boolean {
+export function isUserSelectingInside(root: HTMLElement): boolean {
   const sel = typeof window !== 'undefined' ? window.getSelection() : null
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false
   const node = sel.getRangeAt(0).commonAncestorContainer
@@ -125,6 +125,7 @@ function createFollowBottomController(
       const prev = ref.current
       if (prev === el) return
       if (prev) {
+        resizeObserverRef.current?.unobserve(prev)
         prev.removeEventListener('scroll', handleScroll)
         prev.removeEventListener('wheel', handleWheel)
         prev.removeEventListener('touchmove', handleTouchMove)
@@ -133,6 +134,7 @@ function createFollowBottomController(
       }
       ref.current = el
       if (el) {
+        resizeObserverRef.current?.observe(el)
         el.addEventListener('scroll', handleScroll, { passive: true })
         el.addEventListener('wheel', handleWheel, { passive: true })
         el.addEventListener('touchmove', handleTouchMove, { passive: true })
@@ -165,19 +167,30 @@ function createFollowBottomController(
       resizeObserverRef.current = null
       ref.current = el
       if (!el) return
-      let prevHeight = el.getBoundingClientRect().height
+      // ResizeObserver reports the content box. Comparing its first delivery
+      // with the border box would miss growth smaller than the bottom padding.
+      const style = getComputedStyle(el)
+      const inset = [
+        style.paddingTop,
+        style.paddingBottom,
+        style.borderTopWidth,
+        style.borderBottomWidth
+      ].reduce((sum, value) => sum + (Number.parseFloat(value) || 0), 0)
+      let prevHeight = Math.max(0, el.getBoundingClientRect().height - inset)
       const ro = new ResizeObserver((entries) => {
-        const entry = entries[0]
-        if (!entry) return
-        const height = entry.contentRect.height
-        const grew = height > prevHeight
-        prevHeight = height
-        if (!grew) return
+        const entry = entries.find((entry) => entry.target === el)
+        const grew = entry !== undefined && entry.contentRect.height > prevHeight
+        if (entry) prevHeight = entry.contentRect.height
+        // Composer growth shrinks the viewport without growing the content.
+        // Following must survive that resize too; reading history stays put.
+        const viewportChanged = entries.some((entry) => entry.target === scrollRef.current)
+        if (!grew && !viewportChanged) return
         if (!autoScrollRef.current || !stuckRef.current) return
         if (isUserSelectingInside(el)) return
         scrollNow()
       })
       ro.observe(el)
+      if (scrollRef.current) ro.observe(scrollRef.current)
       resizeObserverRef.current = ro
       if (autoScrollRef.current && stuckRef.current) scrollNow()
     }) as CallbackRef<HTMLElement>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import {
@@ -78,10 +78,6 @@ export function ProcessDialog({
     setSaveError(null)
     setSaving(false)
   }
-
-  useEffect(() => {
-    if (open) setTimeout(() => labelRef.current?.focus(), 50)
-  }, [open])
 
   const isValid = form.label.trim() && form.command.trim()
 
@@ -188,7 +184,13 @@ export function ProcessDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent style={{ maxWidth: 520 }}>
+      <DialogContent
+        style={{ maxWidth: 520 }}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          labelRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{process ? 'Edit Process' : 'New Process'}</DialogTitle>
         </DialogHeader>

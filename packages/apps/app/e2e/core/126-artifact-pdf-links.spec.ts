@@ -48,14 +48,14 @@ test.describe('PDF artifact links', () => {
   let taskId: string
 
   const LINK_URL = 'https://example.com/pdf-link'
-  let linkAt: { x: number; y: number } | null = null
+  let opened: Promise<void> | null = null
   const openOnce = async (app: ElectronApplication, page: Page) =>
-    (linkAt ??= await openLinkPdf(app, page, 'links.pdf', LINK_URL))
+    (opened ??= openLinkPdf(app, page, 'links.pdf', LINK_URL))
   const countCalls = async (app: ElectronApplication) =>
     (await linkCalls(app)).filter((u) => u === LINK_URL).length
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {
-    linkAt = null
+    opened = null
     await resetApp(mainWindow)
     await electronApp.evaluate(({ shell }) => {
       const g = globalThis as Record<string, unknown>
@@ -171,9 +171,6 @@ test.describe('PDF artifact links', () => {
         { timeout: 15_000 }
       )
       .toBe(true)
-    const box = await pdfFrame(page).boundingBox()
-    expect(box).not.toBeNull()
-    return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }
   }
 
   /**
@@ -181,13 +178,16 @@ test.describe('PDF artifact links', () => {
    * `modifiers` don't reach MouseEvent flags in Electron. Retried because the
    * viewer can still be painting the page when the bridge is already in.
    */
-  async function clickUntil(
-    page: Page,
-    at: { x: number; y: number },
-    keys: string[],
-    done: () => Promise<void>
-  ) {
+  async function clickUntil(page: Page, keys: string[], done: () => Promise<void>) {
     await expect(async () => {
+      const box = await pdfFrame(page).boundingBox()
+      expect(box).not.toBeNull()
+      // The portrait fixture fills its page with one link. A narrow page can
+      // end above the iframe's center; the center of its top square stays on it.
+      const at = {
+        x: box!.x + box!.width / 2,
+        y: box!.y + Math.min(box!.width, box!.height) / 2
+      }
       for (const k of keys) await page.keyboard.down(k)
       try {
         await page.mouse.click(at.x, at.y)
@@ -199,9 +199,9 @@ test.describe('PDF artifact links', () => {
   }
 
   test('bare click on a PDF link opens it externally', async ({ electronApp, mainWindow }) => {
-    const at = await openOnce(electronApp, mainWindow)
+    await openOnce(electronApp, mainWindow)
     const before = await countCalls(electronApp)
-    await clickUntil(mainWindow, at, [], async () => {
+    await clickUntil(mainWindow, [], async () => {
       expect(await countCalls(electronApp)).toBeGreaterThan(before)
     })
     // The app window itself did not navigate to the link.
@@ -210,9 +210,9 @@ test.describe('PDF artifact links', () => {
   })
 
   test('⌘⇧ click on a PDF link opens it externally', async ({ electronApp, mainWindow }) => {
-    const at = await openOnce(electronApp, mainWindow)
+    await openOnce(electronApp, mainWindow)
     const before = await countCalls(electronApp)
-    await clickUntil(mainWindow, at, ['Meta', 'Shift'], async () => {
+    await clickUntil(mainWindow, ['Meta', 'Shift'], async () => {
       expect(await countCalls(electronApp)).toBeGreaterThan(before)
     })
     expect(await browserTabUrls(mainWindow)).not.toContain(LINK_URL)
@@ -223,9 +223,9 @@ test.describe('PDF artifact links', () => {
     electronApp,
     mainWindow
   }) => {
-    const at = await openOnce(electronApp, mainWindow)
+    await openOnce(electronApp, mainWindow)
     const before = await countCalls(electronApp)
-    await clickUntil(mainWindow, at, ['Meta'], async () => {
+    await clickUntil(mainWindow, ['Meta'], async () => {
       expect(await browserTabUrls(mainWindow)).toContain(LINK_URL)
     })
     expect(await countCalls(electronApp)).toBe(before)

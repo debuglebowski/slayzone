@@ -5,15 +5,14 @@
  */
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, streamEv, streamMessage, test } from '../fixtures/chat'
+import { expandActivities, openActivityTool } from '../fixtures/chat-activity'
 
 test.describe('Chat streaming: thinking and tool input', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
   })
 
-  test('thinking shows a live timer, then its text; the row is finalized in place', async ({
-    chat
-  }) => {
+  test('thinking shows a live timer, then remains available under Activities', async ({ chat }) => {
     const t = await chat.openTask({
       title: 'Chat stream thinking',
       scenario: {
@@ -59,7 +58,6 @@ test.describe('Chat streaming: thinking and tool input', () => {
     await expect(thinking).toHaveAttribute('data-streaming', 'true')
     const elapsed = thinking.getByTestId('thinking-elapsed')
     await expect(elapsed).toHaveText(/^[12]s$/, { timeout: 3_000 })
-    await thinking.evaluate((el) => el.setAttribute('data-probe', 'live-node'))
 
     // Expanded, the summarized text shows as it streams.
     await thinking.getByRole('button', { name: /Thinking/ }).click()
@@ -69,9 +67,10 @@ test.describe('Chat streaming: thinking and tool input', () => {
     await expect(t.panel.locator('[data-chat-text]')).toHaveText('Done thinking.', {
       timeout: 8_000
     })
-    await expect(thinking).not.toHaveAttribute('data-streaming', 'true')
-    await expect(thinking).toHaveAttribute('data-probe', 'live-node')
-    await expect(thinking).toHaveCount(1)
+    await expandActivities(t.panel)
+    await expect(t.panel.getByLabel('Thinking', { exact: true })).toContainText(
+      'I should list the files.'
+    )
     const saved = (await t.events()).filter((e) => e.event.kind === 'assistant-thinking')
     expect(saved.map((e) => e.event.text)).toEqual(['I should list the files.'])
   })
@@ -117,15 +116,15 @@ test.describe('Chat streaming: thinking and tool input', () => {
       }
     })
     await t.send('list components')
-    const card = t.panel.getByTestId('tool-bash')
+    const card = await openActivityTool(t.panel, 'tool-bash')
     const command = card.getByTestId('bash-command')
     // The partial input already names the command…
     await expect(command).toHaveText(/^ls( -la)?$/, { timeout: 5_000 })
-    await card.evaluate((el) => el.setAttribute('data-probe', 'live-node'))
     // …and grows until the call is final.
     await expect(command).toHaveText('ls -la src/components', { timeout: 6_000 })
+    await expect(t.panel.getByText('Listed.', { exact: true })).toBeVisible()
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toContainText('Button.tsx', { timeout: 6_000 })
-    await expect(card).toHaveAttribute('data-probe', 'live-node')
     await expect(t.panel.getByTestId('tool-bash')).toHaveCount(1)
   })
 })

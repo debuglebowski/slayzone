@@ -7,6 +7,7 @@
  * Against the scripted fake CLI (2.1.312 behaviour, chat-a real-CLI checks R4).
  */
 import { resetApp } from '../fixtures/electron'
+import { expandActivities } from '../fixtures/chat-activity'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
 
 test.describe('Chat Stop as a live interrupt', () => {
@@ -33,6 +34,7 @@ test.describe('Chat Stop as a live interrupt', () => {
 
     await t.stopButton.click()
     await expect(t.sendButton).toBeVisible()
+    await expandActivities(t.panel)
     const run = await t.run(0, (r) => r.controlRequests('interrupt').length === 1)
     await expect
       .poll(async () => (await t.events()).filter((e) => e.event.kind === 'interrupted').length)

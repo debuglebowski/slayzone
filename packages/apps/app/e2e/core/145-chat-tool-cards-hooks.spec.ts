@@ -11,6 +11,7 @@
 import path from 'node:path'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { expandActivities, openActivityCard } from '../fixtures/chat-activity'
 
 const MODEL = 'claude-haiku-5-5'
 const at = (f: string) => path.join(TEST_PROJECT_PATH, f)
@@ -230,10 +231,16 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
     })
   })
 
+  test.beforeEach(async ({ mainWindow }) => {
+    await expandActivities(mainWindow.locator('[data-chat-panel]:visible'))
+  })
+
   test('Write: a new file as code with its path; an overwrite as a diff', async ({
     mainWindow
   }) => {
     const panel = mainWindow.locator('[data-chat-panel]:visible')
+    await openActivityCard(panel, /^Write.*new\.py/)
+    await openActivityCard(panel, /^Write.*notes\.txt/)
     const created = panel.locator('[data-testid="tool-write"][data-write-type="create"]')
     await expect(created).toContainText('New file')
     await expect(created.getByTestId('tool-file-link')).toContainText('new.py')
@@ -246,6 +253,8 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
 
   test('MultiEdit and NotebookEdit show their diffs', async ({ mainWindow }) => {
     const panel = mainWindow.locator('[data-chat-panel]:visible')
+    await openActivityCard(panel, /^MultiEdit/)
+    await openActivityCard(panel, /^NotebookEdit/)
     await expect(panel.getByRole('button', { name: /MultiEdit.*a\.ts · 2 edits/ })).toBeVisible()
     await expect(panel.getByTestId('tool-multiedit')).toContainText('gamma')
     await expect(panel.getByTestId('tool-multiedit')).toContainText('delta')
@@ -283,10 +292,10 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
     mainWindow
   }) => {
     const panel = mainWindow.locator('[data-chat-panel]:visible')
-    // A blocked call shows the block on its own card; the hook row folds into it.
+    // Grouped cards can be collapsed, so the standalone hook warning stays visible.
     await expect(
       panel.locator('[data-testid="chat-hook-output"][data-effect="blocked"]')
-    ).toHaveCount(0)
+    ).toHaveCount(1)
     const blocked = panel
       .getByTestId('tool-bash')
       .filter({ hasText: 'echo forbidden' })
@@ -294,7 +303,7 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
     await expect(blocked).toContainText('PreToolUse:Bash hook blocked the tool call')
     await expect(blocked).toContainText('Sent to Claude')
     await expect(blocked).toContainText('Blocked by policy: never echo the word forbidden')
-    await expect(panel.getByText(/never echo the word forbidden/)).toHaveCount(1)
+    await expect(panel.getByText(/never echo the word forbidden/)).toHaveCount(2)
     const failed = panel.locator('[data-testid="chat-hook-output"][data-effect="failed"]')
     await expect(failed).toContainText('PostToolUse:Bash hook failed (exit 1)')
     await expect(failed).toContainText('post hook crashed: lint server unreachable')

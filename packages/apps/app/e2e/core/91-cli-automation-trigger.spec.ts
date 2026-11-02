@@ -66,7 +66,11 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
       encoding: 'utf8'
     })
 
-  const openDb = () => new DatabaseSync(dbPath)
+  const openDb = () => {
+    const db = new DatabaseSync(dbPath)
+    db.exec('PRAGMA busy_timeout = 5000')
+    return db
+  }
 
   const insertAutomation = (opts: {
     name: string

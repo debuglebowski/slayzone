@@ -3,6 +3,7 @@
  * Harness + scenario API: fixtures/chat.ts, packages/shared/test-utils/fake-claude/README.md.
  */
 import { resetApp } from '../fixtures/electron'
+import { openActivityTool } from '../fixtures/chat-activity'
 import { echoTurn, ev, expect, reply, step, test } from '../fixtures/chat'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -43,6 +44,7 @@ test.describe('Chat turn', () => {
 
     await t.send('say hi')
     await expect(t.panel.getByText('All done: hi')).toBeVisible()
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(t.panel.getByText('echo hi').first()).toBeVisible()
 
     // The spawn honours the chat transport's contract (claude-code-adapter.ts).
@@ -85,7 +87,8 @@ test.describe('Chat turn', () => {
     // `--permission-mode` was passed — the CLI started in `default` while the
     // pill said Auto-accept. The pills now own mode/model/effort flags.
     expect(run.flag('--permission-mode')).toBe('acceptEdits')
-    expect(run.argv).not.toContain('--allow-dangerously-skip-permissions')
+    // Allowing a later live bypass switch does not activate bypass at startup.
+    expect(run.argv).toContain('--allow-dangerously-skip-permissions')
   })
 
   test('a send that spawns the agent reaches it (lazy spawn, manual startup)', async ({ chat }) => {

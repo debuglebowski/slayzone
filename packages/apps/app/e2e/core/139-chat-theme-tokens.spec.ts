@@ -13,10 +13,30 @@
 import type { Locator, Page, TestInfo } from '@playwright/test'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { expandActivities } from '../fixtures/chat-activity'
 
 const TASK = 'Chat theme tokens task'
 const EMPTY_TASK = 'Chat theme empty task'
 const OVERRIDE_THEME = 'dracula'
+
+async function revealFixture(page: Page): Promise<void> {
+  const panel = page.locator('[data-chat-panel]:visible')
+  await expandActivities(panel, 'first')
+  await expandActivities(panel)
+  const ids = await panel
+    .locator('[data-tool-use-id]')
+    .evaluateAll((cards) => cards.map((card) => card.getAttribute('data-tool-use-id')!))
+  for (const id of ids) {
+    const toggle = panel.locator(`[data-tool-use-id=${JSON.stringify(id)}] > div > button`).first()
+    if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
+  }
+  const diagnostics = panel.getByRole('button', { name: 'Agent diagnostics' })
+  if (await diagnostics.count()) await diagnostics.click()
+  const jobs = page
+    .getByTestId('background-jobs-banner')
+    .getByRole('button', { name: /jobs? running/ })
+  if ((await jobs.getAttribute('aria-expanded')) === 'false') await jobs.click()
+}
 
 const result = (overrides: Record<string, unknown>) => ({
   kind: 'result',
@@ -42,6 +62,13 @@ const result = (overrides: Record<string, unknown>) => ({
 
 /** One of every timeline row that carries a status / tone colour. */
 const EVENTS: Record<string, unknown>[] = [
+  {
+    kind: 'turn-init',
+    sessionId: 'theme-fixture',
+    model: 'claude-haiku-5-5',
+    cwd: TEST_PROJECT_PATH,
+    tools: []
+  },
   { kind: 'user-message', text: 'theme-fixture-first-message' },
   {
     kind: 'assistant-thinking',
@@ -253,10 +280,8 @@ async function createChatTask(mainWindow: Page, projectId: string, title: string
 }
 
 /** The scroll container of the chat that shows `text`. */
-function chatScroller(mainWindow: Page, text: string): Locator {
-  return mainWindow
-    .getByText(text, { exact: true })
-    .locator('xpath=ancestor::div[contains(@class, "overflow-y-auto")][1]')
+function chatScroller(mainWindow: Page): Locator {
+  return mainWindow.locator('[data-chat-panel]:visible').getByTestId('chat-timeline-scroller')
 }
 
 /** Screenshot the chat viewport (incl. overlays like the jobs banner) in scroll slices. */
@@ -371,18 +396,18 @@ test.describe('Chat theme tokens', () => {
       timeout: 10_000
     })
     await openTaskViaSearch(mainWindow, TASK)
-    const scroller = chatScroller(mainWindow, 'theme-fixture-first-message')
+    const scroller = chatScroller(mainWindow)
     await expect(scroller).toBeVisible({ timeout: 10_000 })
+    await revealFixture(mainWindow)
     for (const text of [
       'Assistant reply fixture',
       '+ seeded-new-string',
       'In-flight sub-agent fixture',
       'Pick a colour fixture?',
-      'Approve plan?',
+      'Final plan',
       'Turn interrupted',
       'stderr fixture line',
-      'Plan explanation fixture',
-      'BACKGROUND JOBS'
+      'Plan explanation fixture'
     ]) {
       await expect(mainWindow.getByText(text).first(), text).toBeVisible()
     }
@@ -436,15 +461,16 @@ test.describe('Chat theme tokens', () => {
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })
     await openTaskViaSearch(mainWindow, TASK)
-    const scroller = chatScroller(mainWindow, 'theme-fixture-first-message')
+    const scroller = chatScroller(mainWindow)
     await expect(scroller).toBeVisible({ timeout: 10_000 })
+    await revealFixture(mainWindow)
 
     const checks: Array<[string, Locator, 'color' | 'background-color', string]> = [
       [
-        'done icon',
+        'model icon',
         scroller.locator('button', { hasText: '$0.0123' }).locator('svg').first(),
         'color',
-        '--success'
+        '--agent-foreground'
       ],
       ['retry banner text', scroller.getByText(/API retry 1\/5/), 'color', '--warning-foreground'],
       [
@@ -472,9 +498,7 @@ test.describe('Chat theme tokens', () => {
       expect(r.expected, `${label}: override theme differs from app theme`).not.toBe(r.atRoot)
     }
 
-    const avatar = scroller.locator('.bg-gradient-to-br').first()
-    const gradient = await resolved(avatar, 'background-image', '--agent')
-    expect(gradient.actual, 'agent avatar gradient uses --agent').toContain(gradient.expected)
+    await expect(scroller.getByTestId('chat-agent-avatar')).toHaveCount(0)
 
     await captureChat(mainWindow, scroller, testInfo, `chat-${OVERRIDE_THEME}`)
   })

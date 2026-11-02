@@ -8,6 +8,7 @@
 import type { Locator, Page } from '@playwright/test'
 import { resetApp, seed } from '../fixtures/electron'
 import { codexReply, commandTurn, cstep, cx, expect, test } from '../fixtures/chat-codex'
+import { expandActivities, openActivityTool } from '../fixtures/chat-activity'
 
 /** The card in light and dark, attached to the test (`<name>-light.png`, `-dark.png`). */
 async function captureBothThemes(page: Page, card: Locator, name: string): Promise<void> {
@@ -59,7 +60,7 @@ test.describe('Codex tool cards', () => {
     })
     await t.send('run the tests')
     await expect(t.panel.getByText('The suite passed.')).toBeVisible()
-    const ok = t.panel.getByTestId('tool-codex-command').first()
+    const ok = await openActivityTool(t.panel, 'tool-codex-command')
     await expect(ok.getByTestId('codex-command')).toHaveText('npm test')
     await expect(ok.getByTestId('codex-command-output')).toContainText('PASS  3 tests')
     await expect(ok.getByTestId('codex-command-exit')).toHaveText('exit 0')
@@ -67,7 +68,7 @@ test.describe('Codex tool cards', () => {
 
     await t.send('lint it')
     await expect(t.panel.getByText('Lint failed.')).toBeVisible()
-    const failed = t.panel.getByTestId('tool-codex-command').nth(1)
+    const failed = await openActivityTool(t.panel, 'tool-codex-command', 1)
     await expect(failed.getByTestId('codex-command-exit')).toHaveText('exit 1')
     await expect(failed).toHaveAttribute('data-status', 'failed')
 
@@ -100,7 +101,7 @@ test.describe('Codex tool cards', () => {
       }
     })
     await t.send('build it')
-    const card = t.panel.getByTestId('tool-codex-command')
+    const card = await openActivityTool(t.panel, 'tool-codex-command')
     await expect(card.getByTestId('codex-command')).toHaveText('npm run build')
     // While it runs: the timer and the output so far (the command task's buffer).
     await expect(card.getByTestId('codex-command-elapsed')).toBeVisible()
@@ -109,6 +110,7 @@ test.describe('Codex tool cards', () => {
     })
     await captureBothThemes(t.page, card, 'codex-command-card-running')
     await expect(t.panel.getByText('Built.')).toBeVisible({ timeout: 10_000 })
+    await openActivityTool(t.panel, 'tool-codex-command')
     await expect(card.getByTestId('codex-command-output')).toContainText('step 3 of 3')
   })
 
@@ -142,7 +144,7 @@ test.describe('Codex tool cards', () => {
     })
     await t.send('edit things')
     await expect(t.panel.getByText('Edited two files.')).toBeVisible()
-    const card = t.panel.getByTestId('tool-codex-file-change')
+    const card = await openActivityTool(t.panel, 'tool-codex-file-change')
     await expect(card).toContainText('2 files')
     await expect(card.getByTestId('codex-file-change-file')).toHaveCount(2)
     await expect(card.getByText('hello codex', { exact: true })).toBeVisible()
@@ -174,6 +176,7 @@ test.describe('Codex tool cards', () => {
     })
     await t.send('look it up')
     await expect(t.panel.getByText('Looked it up.')).toBeVisible()
+    await expandActivities(t.panel)
     const mcp = t.panel.getByRole('button', { name: /echo.*slz_echo/ })
     await expect(mcp).toBeVisible()
     await mcp.click()

@@ -457,17 +457,53 @@ test.describe('Trailing PTY output on exit', () => {
   })
 
   test('captures final output from a fast-exiting process', async ({ mainWindow }) => {
-    const marker = `TRAILING_${Date.now()}`
+    const token = String(Date.now())
+    const marker = `TRAILING_${token}`
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Trailing output task' })
 
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(mainWindow, sessionId)
 
-    // Run a command that outputs a marker and exits immediately.
-    // Without the delayed session cleanup, the final onData may be dropped.
-    await runCommand(mainWindow, sessionId, `echo ${marker} && exit 0`)
-    await waitForBufferContains(mainWindow, sessionId, marker)
-    await waitForNoPtySession(mainWindow, sessionId)
+    // Subscribe before the exit: the hub's short drain buffer may already be
+    // reaped when a polling RPC arrives. The delivered stream must retain it.
+    await mainWindow.evaluate(
+      (id) =>
+        new Promise<void>((resolve, reject) => {
+          const w = window as unknown as {
+            __trailingOutput: string
+            __stopTrailingOutput: () => void
+          }
+          w.__trailingOutput = ''
+          const sub = window.getTrpcVanillaClient().pty.onData.subscribe(
+            { sessionIds: [id] },
+            {
+              onStarted: () => resolve(),
+              onError: reject,
+              onData: ({ data }) => {
+                w.__trailingOutput += data
+              }
+            }
+          )
+          w.__stopTrailingOutput = () => sub.unsubscribe()
+        }),
+      sessionId
+    )
+    const delivered = () =>
+      mainWindow.evaluate(
+        () => (window as unknown as { __trailingOutput: string }).__trailingOutput
+      )
+    try {
+      // Prove the shell executes input, rather than matching echoed command text.
+      await runCommand(mainWindow, sessionId, `printf 'TRAILING_READY_%s\\n' '${token}'`)
+      await expect.poll(delivered, { timeout: 10_000 }).toContain(`TRAILING_READY_${token}`)
+      await runCommand(mainWindow, sessionId, `printf 'TRAILING_%s\\n' '${token}' && exit 0`)
+      await expect.poll(delivered, { timeout: 10_000 }).toContain(marker)
+      await waitForNoPtySession(mainWindow, sessionId)
+    } finally {
+      await mainWindow.evaluate(() =>
+        (window as unknown as { __stopTrailingOutput: () => void }).__stopTrailingOutput()
+      )
+    }
   })
 })

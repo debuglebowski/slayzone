@@ -3,6 +3,7 @@
  * change between turns (model, mode: applied per turn/start, no respawn).
  */
 import { resetApp } from '../fixtures/electron'
+import { expandActivities } from '../fixtures/chat-activity'
 import { codexEchoTurn, codexReply, cstep, expect, streamReply, test } from '../fixtures/chat-codex'
 
 test.describe('Codex chat restart', () => {
@@ -31,12 +32,15 @@ test.describe('Codex chat restart', () => {
       }
     })
     await t.send('do the thing')
+    await expandActivities(t.panel)
     await expect(t.panel.getByText('about to crash')).toBeVisible()
     const first = await t.run(0, (r) => r.exit()?.code === 1)
 
     const restart = t.panel.getByRole('button', { name: /Session ended, click to restart/ })
     await expect(restart).toBeVisible()
     await expect(t.composer).toBeDisabled()
+    await expandActivities(t.panel)
+    await t.panel.getByRole('button', { name: 'Agent diagnostics' }).click()
     await expect(t.panel.getByText('panic: fake-codex crashed on purpose')).toBeVisible()
 
     await restart.click()
@@ -63,7 +67,18 @@ test.describe('Codex chat restart', () => {
     const t = await codexChat.openTask({
       title: 'Codex clean exit',
       scenario: {
-        processes: [{ turns: [[...codexReply('bye now'), cstep.sleep(200), cstep.exit(0)]] }]
+        processes: [
+          {
+            turns: [
+              [
+                ...codexReply('bye now'),
+                cstep.endTurn('completed'),
+                cstep.sleep(200),
+                cstep.exit(0)
+              ]
+            ]
+          }
+        ]
       }
     })
     await t.send('say bye')

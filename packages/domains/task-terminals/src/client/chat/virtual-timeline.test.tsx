@@ -92,6 +92,37 @@ describe('virtual timeline', () => {
     expect(api!.follow.isAtBottom).toBe(true)
   })
 
+  it('pins appended rows in their layout commit, before ResizeObserver', async () => {
+    const items = rows(1_000)
+    const { rerender } = render(<Harness items={items} />)
+    await settle(layout)
+    const scroller = layout.scroller()!
+    const appended = rows(2).map((item, i) => ({ ...item, messageId: `appended-${i}` }))
+    rerender(<Harness items={[...items, ...appended]} />)
+    expect(
+      Math.abs(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop)
+    ).toBeLessThanOrEqual(1)
+  })
+
+  it('does not pull selected text away when rows are appended', async () => {
+    const items = rows(1_000)
+    const { container, rerender } = render(<Harness items={items} />)
+    await settle(layout)
+    const scroller = layout.scroller()!
+    const before = scroller.scrollTop
+    const selection = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(container.querySelector('p')!)
+    selection.addRange(range)
+    try {
+      const appended = rows(2).map((item, i) => ({ ...item, messageId: `selected-${i}` }))
+      rerender(<Harness items={[...items, ...appended]} />)
+      expect(scroller.scrollTop).toBe(before)
+    } finally {
+      selection.removeAllRanges()
+    }
+  })
+
   it('reveals a row far away by its key, and stops following the bottom', async () => {
     const items = rows(10_000)
     const { container } = render(<Harness items={items} />)

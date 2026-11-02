@@ -42,8 +42,18 @@ export interface NodePtyInstallState {
 export function pendingBuildsFrom(modulesYaml: string): string[] | null {
   try {
     const parsed: unknown = JSON.parse(modulesYaml)
-    const pending = (parsed as { pendingBuilds?: unknown } | null)?.pendingBuilds
-    return Array.isArray(pending) && pending.every((p) => typeof p === 'string') ? pending : null
+    const manifest = parsed as {
+      pendingBuilds?: unknown
+      allowBuilds?: Record<string, unknown>
+    } | null
+    const pending = manifest?.pendingBuilds
+    if (!Array.isArray(pending) || !pending.every((p) => typeof p === 'string')) return null
+    // pnpm 12 also leaves deliberately disabled scripts in pendingBuilds.
+    // Only explicit false entries are exempt; root and unknown builds still count.
+    return pending.filter((id) => {
+      const name = /^(@[^/]+\/[^@]+|[^@]+)@/.exec(id)?.[1]
+      return !name || manifest?.allowBuilds?.[name] !== false
+    })
   } catch {
     return null
   }
