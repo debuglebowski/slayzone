@@ -78,7 +78,7 @@ it('opens saved workspace diffs independently of native edit tools', async () =>
   })
 })
 
-it('never labels unavailable tracking as zero changed files', () => {
+it('hides a failed capture with no recorded edits: "unavailable" says nothing', () => {
   const client = new QueryClient()
   render(
     <QueryClientProvider client={client}>
@@ -96,7 +96,8 @@ it('never labels unavailable tracking as zero changed files', () => {
       />
     </QueryClientProvider>
   )
-  expect(screen.getByText('Changes unavailable')).toBeTruthy()
+  expect(screen.queryByTestId('chat-files-changed')).toBeNull()
+  expect(screen.queryByText('Changes unavailable')).toBeNull()
   expect(screen.queryByText('0 files')).toBeNull()
 })
 
@@ -221,7 +222,35 @@ it('reviews shell changes in the same panel and preserves tool attribution', asy
   expect(screen.queryByText(/Workspace changes during this turn/)).toBeNull()
 })
 
-it('retains a true zero count when recorded edits were reverted', () => {
+it('hides a zero-change turn that recorded no edits', () => {
   render(<WorkspaceChangesRow item={{ ...workspace, fileCount: 0 }} />)
+  expect(screen.queryByTestId('chat-files-changed')).toBeNull()
+})
+
+it('retains a true zero count when recorded edits were reverted', () => {
+  const zero = { ...workspace, fileCount: 0 }
+  render(
+    <ChatViewContext.Provider
+      value={{
+        ...defaultChatView,
+        timeline: [
+          { kind: 'user-text', id: 'u', text: 'edit', timestamp: 0 },
+          {
+            kind: 'files-changed',
+            id: 'files:t',
+            timestamp: 2,
+            shellCommands: 0,
+            files: [
+              { path: '/repo/a.ts', additions: 1, deletions: 0, created: false, toolUseIds: ['t'] }
+            ]
+          },
+          { kind: 'result', isError: false, timestamp: 2 } as TimelineItem,
+          zero
+        ]
+      }}
+    >
+      <WorkspaceChangesRow item={zero} />
+    </ChatViewContext.Provider>
+  )
   expect(screen.getByRole('button', { name: /0 files changed/ })).toBeTruthy()
 })

@@ -147,13 +147,16 @@ export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; emb
   if (item.status === 'unavailable' && recorded) {
     return <FilesChangedRow item={recorded} embedded={embedded} captureId={item.captureId} />
   }
+  // Failed capture + no recorded edits = nothing to show. An agent-cut turn keeps its card:
+  // it is that turn's only "Turn interrupted" signal.
+  if (item.status === 'unavailable' && !item.interrupted) return null
+  // Nothing changed and nothing was edited: no card. Reverted edits keep their true zero.
+  if (item.status === 'complete' && item.fileCount === 0 && !recorded) return null
   const label =
     item.status === 'pending'
       ? 'Checking changes…'
       : item.status === 'unavailable'
-        ? item.interrupted
-          ? 'Turn interrupted'
-          : 'Changes unavailable'
+        ? 'Turn interrupted'
         : `${item.fileCount} file${item.fileCount === 1 ? '' : 's'} changed${item.status === 'partial' ? ' · partial' : ''}`
   return (
     <div className={embedded ? 'contents' : 'px-10 py-1'} data-testid="chat-files-changed">
