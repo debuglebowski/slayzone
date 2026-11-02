@@ -33,6 +33,11 @@ const DEV_PREFILL = __DEV__
     }
   : { hub: '', email: '', password: '' }
 const DEV_AUTO_SUBMIT = Boolean(DEV_PREFILL.hub && DEV_PREFILL.email && DEV_PREFILL.password)
+/**
+ * Submitted once per app launch: the sign-in screen after a sign-out (or leaving the
+ * demo) must stay, or signing out could never be done in such a bundle.
+ */
+let devAutoSubmitted = false
 
 /** How long the hub address must stay unchanged before the hub is asked what it offers. */
 const PROBE_DELAY_MS = 400
@@ -61,7 +66,7 @@ export function SignInScreen({
   onCancel?: () => void
   /** Offer the demo (the first sign-in): open the app on sample data. */
   onTryDemo?: () => void
-  /** Dev bundles only: submit the `EXPO_PUBLIC_SPIKE_*` prefill once (first sign-in). */
+  /** Dev bundles only: submit the `EXPO_PUBLIC_SPIKE_*` prefill (once per launch). */
   devAutoSubmit?: boolean
 }) {
   const theme = useTheme()
@@ -107,7 +112,8 @@ export function SignInScreen({
   const submitMicrosoft = (): void => run(() => signInWithMicrosoft(hub))
 
   useEffect(() => {
-    if (!DEV_AUTO_SUBMIT || !devAutoSubmit) return
+    if (!DEV_AUTO_SUBMIT || !devAutoSubmit || devAutoSubmitted) return
+    devAutoSubmitted = true
     void signIn(DEV_PREFILL.hub, DEV_PREFILL.email, DEV_PREFILL.password).then((result) => {
       if (result.ok) onSignedIn(result.session)
       else setError(result.error)
