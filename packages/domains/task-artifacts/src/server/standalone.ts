@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { SlayzoneDb, PreparedBridge, BatchOp } from '@slayzone/platform'
 import { createArtifactStore } from './artifact-store'
 import { artifactsTxns } from './artifact-store-txns'
+import { ensureArtifactBlobPins } from './blob-pins'
 
 /** Artifact-owned schema: computers reuse the full artifact implementation without hub tables. */
 export function createStandaloneArtifacts(
@@ -10,6 +11,7 @@ export function createStandaloneArtifacts(
   beforeWrite: () => void = () => undefined
 ) {
   raw.pragma('foreign_keys=ON')
+  ensureArtifactBlobPins(raw)
   raw.exec(`
  CREATE TABLE IF NOT EXISTS artifact_storage_schema(version INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS artifact_folders (
@@ -82,11 +84,12 @@ export function createStandaloneArtifacts(
           'task-artifacts:versions:resolve',
           'task-artifacts:versions:current',
           'task-artifacts:versions:diff',
+          'task-artifacts:files:recover',
           'task-artifacts:search'
         ].includes(name)
       )
         beforeWrite()
-      return raw.transaction(() => implementation(raw, params)).immediate()
+      return implementation(raw, params)
     }) as SlayzoneDb['namedTxn'],
     backup: async (destination) => {
       await raw.backup(destination)

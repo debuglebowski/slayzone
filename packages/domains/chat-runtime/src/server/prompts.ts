@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto'
 import {
   agentHookPrompt,
   isPromptCaptureMode,
-  chatModeForTerminal,
   isSyntheticChatPrompt,
   type ResolvedAgentHook
 } from '@slayzone/terminal-contracts'
 import type { ChatStorage } from './storage'
+import { chatStorageMode } from './storage-mode'
 interface LocalPrompt {
   id: string
   taskId: string
@@ -78,8 +78,13 @@ export function createLocalPrompts(store: ChatStorage) {
           FROM events e JOIN conversations c ON c.id=e.conversation_id
           WHERE c.task_id=? AND c.state='active'
             AND json_extract(e.event,'$.kind') IN ('turn-init','conversation-branch','user-message')
-          ORDER BY e.conversation_id,e.seq`)
-          .iterate(taskId) as Iterable<{
+          UNION ALL
+          SELECT r.conversation_id,json_extract(r.value,'$.seq'),r.saved_at,
+            'turn-init',json_extract(r.value,'$.sessionId'),NULL,NULL,NULL
+          FROM records r JOIN conversations c ON c.id=r.conversation_id
+          WHERE c.task_id=? AND c.state='active' AND r.kind='settings' AND r.id GLOB 'session-anchor:*'
+          ORDER BY storage_id,seq`)
+          .iterate(taskId, taskId) as Iterable<{
           storage_id: string
           seq: number
           saved_at: number
@@ -147,7 +152,7 @@ export function createLocalPrompts(store: ChatStorage) {
       if (!taskId || !text || !isPromptCaptureMode(hook.agentId)) return
       if (store.conversation(`task-tombstone:${taskId}`)?.state === 'deleted')
         throw new Error('Task chat history was deleted')
-      const mode = chatModeForTerminal(hook.mode) ?? 'claude-chat'
+      const mode = chatStorageMode(hook.mode)
       const existing = store
         .listForTask(taskId)
         .find(
@@ -156,13 +161,17 @@ export function createLocalPrompts(store: ChatStorage) {
             r.identity.mode === mode &&
             !store.getRecord(r.identity.id, 'settings', 'inbox')
         )
-      const identity = existing?.identity ?? {
-        id: `hook-inbox:${taskId}`,
-        taskId,
-        tabId: `hook-inbox:${taskId}`,
-        mode,
-        epoch: 1
-      }
+      const inbox = store.conversation(`hook-inbox:${taskId}`)
+      const identity = existing?.identity ??
+        inbox?.identity ?? {
+          id: `hook-inbox:${taskId}`,
+          taskId,
+          tabId: `hook-inbox:${taskId}`,
+          // One task inbox accepts hooks from several providers; provider identity
+          // belongs to each prompt, not this storage-only container.
+          mode: 'claude-chat',
+          epoch: 1
+        }
       store.transaction(() => {
         if (!existing) {
           store.createConversation(identity)

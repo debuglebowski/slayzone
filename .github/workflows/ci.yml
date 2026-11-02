@@ -101,6 +101,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # Rolling-upgrade regression bundles the actual pre-migration host.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6.1.0
 

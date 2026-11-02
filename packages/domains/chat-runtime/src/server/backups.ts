@@ -26,15 +26,42 @@ import type {
   AgentEvent,
   ChatAttachment
 } from '@slayzone/terminal-contracts'
-import type { ChatStorage } from './storage'
+import { CHAT_STORAGE_SCHEMA_VERSION, type ChatStorage } from './storage'
+import { captureArtifactWorkingFiles } from './artifact-backup'
+import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+const activeBackupStaging = new Set<string>()
+
+function collectAbandonedStaging(root: string) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const match = /^\.pending-(?:(\d+)-)?([a-f0-9-]{36})$/.exec(entry.name)
+    if (!match || !UUID.test(match[2])) continue
+    const path = join(root, entry.name)
+    if (activeBackupStaging.has(path)) continue
+    const pid = match[1] ? Number(match[1]) : null
+    if (pid && pid !== process.pid) {
+      try {
+        process.kill(pid, 0)
+        continue
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue
+      }
+    }
+    // Unpublished legacy directories have no PID. Host handover has already
+    // stopped their old writer before this per-hub service can be opened.
+    rmSync(path, { recursive: true, force: true })
+  }
+}
 interface FileEntry {
   path: string
   hash: string
   size: number
 }
 interface Manifest {
-  version: 1
+  version: 1 | 2
+  artifactFiles?: number
+  workingFiles?: number
   scope: string
   backup: ComputerChatBackup
   files: FileEntry[]
@@ -46,6 +73,7 @@ const backupSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   events: z.number().int().nonnegative(),
   conversations: z.number().int().nonnegative(),
+  deferredConversations: z.number().int().nonnegative().optional(),
   readOnlyRestore: z.literal(true),
   providerResumable: z.literal(false)
 })
@@ -121,6 +149,8 @@ export function createChatBackups(store: ChatStorage) {
     scope = basename(store.dir)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   mkdirSync(archiveDir, { recursive: true, mode: 0o700 })
+  collectAbandonedStaging(dir)
+  collectAbandonedStaging(archiveDir)
   const folder = (root: string, id: string) => {
     if (!UUID.test(id)) throw new Error('Invalid backup id')
     const path = join(root, id)
@@ -132,7 +162,9 @@ export function createChatBackups(store: ChatStorage) {
     const path = folder(root, id),
       value = z
         .object({
-          version: z.literal(1),
+          version: z.union([z.literal(1), z.literal(2)]),
+          artifactFiles: z.number().int().nonnegative().optional(),
+          workingFiles: z.number().int().nonnegative().optional(),
           scope: z.literal(scope),
           backup: backupSchema,
           files: z.array(
@@ -146,7 +178,9 @@ export function createChatBackups(store: ChatStorage) {
         .parse(JSON.parse(readFileSync(fileWithin(path, 'manifest.json'), 'utf8')))
     if (
       (root === dir && value.backup.id !== id) ||
-      new Set(value.files.map((f) => f.path)).size !== value.files.length
+      new Set(value.files.map((f) => f.path)).size !== value.files.length ||
+      (value.version === 2 &&
+        (value.artifactFiles === undefined || value.workingFiles === undefined))
     )
       throw new Error('Backup scope or format mismatch')
     return value
@@ -184,6 +218,137 @@ export function createChatBackups(store: ChatStorage) {
         throw new Error('Backup database integrity failure')
       if ((db.pragma('foreign_key_check') as unknown[]).length)
         throw new Error('Backup reference integrity failure')
+      const version = db.pragma('user_version', { simple: true }) as number
+      if (version < 2 || version > CHAT_STORAGE_SCHEMA_VERSION)
+        throw new Error('Unsupported backup database schema')
+      // Integrity/FKs alone do not prove that the archive reader can open its data.
+      db.prepare('SELECT id,task_id,tab_id,mode,epoch,state FROM conversations LIMIT 0').all()
+      db.prepare('SELECT conversation_id,seq,saved_at,event FROM events LIMIT 0').all()
+      db.prepare('SELECT conversation_id,kind,id,value,saved_at FROM records LIMIT 0').all()
+      db.prepare('SELECT conversation_id,id,hash,state,result FROM receipts LIMIT 0').all()
+      if (
+        db
+          .prepare(`SELECT 1 FROM events WHERE NOT json_valid(event) OR
+        json_type(event)<>'object' OR COALESCE(json_type(event,'$.kind'),'')<>'text' OR
+        seq<0 OR typeof(seq)<>'integer' OR typeof(saved_at)<>'integer' LIMIT 1`)
+          .get() ||
+        db.prepare('SELECT 1 FROM records WHERE NOT json_valid(value) LIMIT 1').get() ||
+        db.prepare('SELECT 1 FROM receipts WHERE NOT json_valid(result) LIMIT 1').get()
+      )
+        throw new Error('Backup content JSON integrity failure')
+      const files = new Map(m.files.map((file) => [file.path, file]))
+      function requireBlob(relative: string, hash: string, size: number) {
+        const file = files.get(relative)
+        if (!/^[a-f0-9]{64}$/.test(hash) || !file || file.hash !== hash || file.size !== size)
+          throw new Error('Backup blob reference is missing or invalid')
+      }
+      for (const row of db
+        .prepare("SELECT value FROM records WHERE kind='attachment'")
+        .iterate() as Iterable<{ value: string }>) {
+        const ref = JSON.parse(row.value) as ChatAttachment
+        requireBlob(`blobs/${ref.contentHash}`, ref.contentHash ?? '', ref.size)
+      }
+      const pins =
+        db.prepare(`SELECT value FROM records WHERE conversation_id=? AND kind='attachment'
+        AND json_extract(value,'$.artifactId')=? AND (? IS NULL OR json_extract(value,'$.contentHash')=?)`)
+      const checked = new Set<string>()
+      function verifyReferences(conversationId: string, refs: ChatAttachment[]) {
+        for (const ref of refs) {
+          const key = JSON.stringify([conversationId, ref])
+          if (checked.has(key)) continue
+          const matches = (
+            pins.all(
+              conversationId,
+              ref.artifactId,
+              ref.contentHash ?? null,
+              ref.contentHash ?? null
+            ) as Array<{ value: string }>
+          ).map((row) => JSON.parse(row.value) as ChatAttachment)
+          if (
+            new Set(matches.map((pin) => pin.contentHash)).size !== 1 ||
+            !matches.length ||
+            matches[0].size !== ref.size ||
+            matches[0].kind !== ref.kind ||
+            matches[0].mediaType !== ref.mediaType
+          )
+            throw new Error('Backup attachment reference has no unambiguous owning pin')
+          checked.add(key)
+        }
+      }
+      for (const row of db
+        .prepare(`SELECT conversation_id,event FROM events
+        WHERE json_extract(event,'$.kind')='user-message'`)
+        .iterate() as Iterable<{ conversation_id: string; event: string }>)
+        verifyReferences(
+          row.conversation_id,
+          eventAttachmentReferences(JSON.parse(row.event) as AgentEvent)
+        )
+      for (const row of db
+        .prepare(`SELECT conversation_id,kind,id,value FROM records WHERE
+        kind IN ('draft','queue') OR (kind='settings' AND id GLOB 'attachment-message:*')`)
+        .iterate() as Iterable<{
+        conversation_id: string
+        kind: 'draft' | 'queue' | 'settings'
+        id: string
+        value: string
+      }>)
+        verifyReferences(
+          row.conversation_id,
+          recordAttachmentReferences({ ...row, value: JSON.parse(row.value) })
+        )
+      const artifactTables = ['artifact_versions', 'task_artifacts', 'artifact_owners'].map(
+        (name) =>
+          !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)
+      )
+      if (artifactTables.some(Boolean) && !artifactTables.every(Boolean))
+        throw new Error('Backup artifact schema is incomplete')
+      const hasWorking = !!db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'")
+        .get()
+      if (m.version === 2) {
+        if (artifactTables.every(Boolean)) {
+          if (!hasWorking) throw new Error('Backup working originals table is missing')
+          const count = (
+            db.prepare("SELECT count(*) n FROM artifact_owners WHERE kind='artifact'").get() as {
+              n: number
+            }
+          ).n
+          const working = (
+            db.prepare('SELECT count(*) n FROM artifact_working_files').get() as { n: number }
+          ).n
+          if (count !== m.artifactFiles || working !== m.workingFiles)
+            throw new Error('Backup original file inventory is incomplete')
+        } else if (m.artifactFiles || m.workingFiles)
+          throw new Error('Backup original file schema is missing')
+      }
+      if (
+        artifactTables.every(Boolean) &&
+        db
+          .prepare(`SELECT 1 FROM task_artifacts a
+        JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
+        WHERE NOT EXISTS(SELECT 1 FROM artifact_versions v WHERE v.artifact_id=a.id)
+        ${hasWorking ? 'AND NOT EXISTS(SELECT 1 FROM artifact_working_files w WHERE w.artifact_id=a.id)' : ''} LIMIT 1`)
+          .get()
+      )
+        throw new Error('Backup artifact has no recoverable version or working original')
+      if (artifactTables.every(Boolean))
+        for (const row of db
+          .prepare('SELECT content_hash,size FROM artifact_versions')
+          .iterate() as Iterable<{ content_hash: string; size: number }>)
+          requireBlob(
+            `blobs/${row.content_hash.slice(0, 2)}/${row.content_hash.slice(2)}`,
+            row.content_hash,
+            row.size
+          )
+      if (hasWorking)
+        for (const row of db
+          .prepare('SELECT content_hash,size FROM artifact_working_files')
+          .iterate() as Iterable<{ content_hash: string; size: number }>)
+          requireBlob(
+            `blobs/${row.content_hash.slice(0, 2)}/${row.content_hash.slice(2)}`,
+            row.content_hash,
+            row.size
+          )
     } finally {
       db.close()
     }
@@ -250,21 +415,64 @@ export function createChatBackups(store: ChatStorage) {
     const running = pending.get(id)
     if (running) return running
     const work = (async () => {
-      const temp = join(dir, `.pending-${id}`)
-      rmSync(temp, { recursive: true, force: true })
+      const temp = join(dir, `.pending-${process.pid}-${randomUUID()}`)
       mkdirSync(temp, { mode: 0o700 })
       const lease = store.acquireBlobLease(id, 60_000),
         renew = setInterval(() => store.acquireBlobLease(id, 60_000), 20_000)
       renew.unref()
+      activeBackupStaging.add(temp)
+      let originals: Awaited<ReturnType<typeof captureArtifactWorkingFiles>> | undefined
       try {
+        originals = await captureArtifactWorkingFiles(store, join(temp, '.working'))
         await store.backupTo(join(temp, 'chat.sqlite'))
         chmodSync(join(temp, 'chat.sqlite'), 0o600)
-        await syncFile(join(temp, 'chat.sqlite'))
-        const db = new Database(join(temp, 'chat.sqlite'), { readonly: true, fileMustExist: true }),
-          refs = new Set<string>()
+        const db = new Database(join(temp, 'chat.sqlite'), { fileMustExist: true }),
+          refs = new Set<string>(),
+          sources = new Map<string, string>()
         let events = 0,
-          conversations = 0
+          conversations = 0,
+          deferredConversations = 0,
+          artifactFiles = 0,
+          workingFiles = 0
         try {
+          // An unfinished migration is recoverable at its source, not from a
+          // half-received destination. Defer it without disabling healthy backups.
+          db.pragma('secure_delete = ON')
+          deferredConversations = (
+            db.prepare("SELECT count(*) AS n FROM conversations WHERE state='prepared'").get() as {
+              n: number
+            }
+          ).n
+          db.transaction(() => {
+            for (const table of ['events', 'records', 'receipts'])
+              db.prepare(
+                `DELETE FROM ${table} WHERE conversation_id IN(SELECT id FROM conversations WHERE state='prepared')`
+              ).run()
+            db.prepare(
+              "DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.id') IN(SELECT id FROM conversations WHERE state='prepared')"
+            ).run()
+            db.prepare("DELETE FROM conversations WHERE state='prepared'").run()
+          })()
+          for (const file of originals.apply(db)) {
+            refs.add(file.path)
+            sources.set(file.path, file.source)
+          }
+          if (
+            db
+              .prepare(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'"
+              )
+              .get()
+          ) {
+            artifactFiles = (
+              db.prepare("SELECT count(*) n FROM artifact_owners WHERE kind='artifact'").get() as {
+                n: number
+              }
+            ).n
+            workingFiles = (
+              db.prepare('SELECT count(*) n FROM artifact_working_files').get() as { n: number }
+            ).n
+          }
           events = (db.prepare('SELECT count(*) AS n FROM events').get() as { n: number }).n
           conversations = (
             db
@@ -298,6 +506,7 @@ export function createChatBackups(store: ChatStorage) {
         } finally {
           db.close()
         }
+        await syncFile(join(temp, 'chat.sqlite'))
         const files: FileEntry[] = [
           {
             path: 'chat.sqlite',
@@ -306,7 +515,7 @@ export function createChatBackups(store: ChatStorage) {
           }
         ]
         for (const relative of [...refs].sort()) {
-          const source = fileWithin(store.dir, relative),
+          const source = sources.get(relative) ?? fileWithin(store.dir, relative),
             destination = join(temp, relative)
           mkdirSync(resolve(destination, '..'), { recursive: true, mode: 0o700 })
           await copyDurable(source, destination)
@@ -322,15 +531,21 @@ export function createChatBackups(store: ChatStorage) {
           sizeBytes: files.reduce((n, f) => n + f.size, 0),
           events,
           conversations,
+          deferredConversations,
           readOnlyRestore: true,
           providerResumable: false
         }
-        durableJson(join(temp, 'manifest.json'), {
-          version: 1,
+        const complete = {
+          version: 2,
+          artifactFiles,
+          workingFiles,
           scope,
           backup,
           files
-        } satisfies Manifest)
+        } satisfies Manifest
+        await verifyContent(complete, temp)
+        originals.dispose()
+        durableJson(join(temp, 'manifest.json'), complete)
         await syncDir(temp)
         renameSync(temp, target)
         await syncDir(dir)
@@ -339,8 +554,13 @@ export function createChatBackups(store: ChatStorage) {
         rmSync(temp, { recursive: true, force: true })
         throw error
       } finally {
-        clearInterval(renew)
-        lease.release()
+        try {
+          originals?.dispose()
+        } finally {
+          activeBackupStaging.delete(temp)
+          clearInterval(renew)
+          lease.release()
+        }
       }
     })().finally(() => {
       pending.delete(id)
@@ -428,9 +648,9 @@ export function createChatBackups(store: ChatStorage) {
           return existing
         }
         const m = await verify(dir, backupId),
-          temp = join(archiveDir, `.pending-${id}`)
-        rmSync(temp, { recursive: true, force: true })
+          temp = join(archiveDir, `.pending-${process.pid}-${randomUUID()}`)
         mkdirSync(temp, { mode: 0o700 })
+        activeBackupStaging.add(temp)
         try {
           for (const file of m.files) {
             const dest = join(temp, file.path)
@@ -455,6 +675,8 @@ export function createChatBackups(store: ChatStorage) {
         } catch (error) {
           rmSync(temp, { recursive: true, force: true })
           throw error
+        } finally {
+          activeBackupStaging.delete(temp)
         }
       })().finally(() => {
         restoring.delete(id)
@@ -528,23 +750,37 @@ export function createChatBackups(store: ChatStorage) {
         const hasArtifacts = !!db
           .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_owners'")
           .get()
+        const hasWorking = !!db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'"
+          )
+          .get()
+        const stride = hasWorking ? 3 : 2
         const artifactRows = hasArtifacts
           ? ` UNION ALL
-          SELECT v.rowid*2+1 AS cursor,'artifact-version' AS kind,v.id,
+          SELECT v.rowid*${stride}+1 AS cursor,'artifact-version' AS kind,v.id,
             json_object('artifactId',a.id,'name',a.title,'contentHash',v.content_hash,'size',v.size,
               'versionNum',v.version_num,'versionName',v.name,'createdAt',v.created_at) AS value
           FROM artifact_versions v JOIN task_artifacts a ON a.id=v.artifact_id
           JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
           WHERE o.conversation_id=?`
           : ''
+        const workingRows = hasWorking
+          ? ` UNION ALL
+          SELECT w.rowid*3+2 AS cursor,'artifact-original' AS kind,w.artifact_id AS id,
+            json_object('artifactId',a.id,'name',a.title,'contentHash',w.content_hash,'size',w.size,'workingCopy',json('true')) AS value
+          FROM artifact_working_files w JOIN task_artifacts a ON a.id=w.artifact_id
+          JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact' WHERE o.conversation_id=?`
+          : ''
         for (const row of db
           .prepare(`SELECT * FROM (
-            SELECT rowid*2 AS cursor,kind,id,value FROM records WHERE conversation_id=? AND
-              (kind IN ('draft','prompt','workspace','thread') OR (kind='settings' AND id LIKE 'diagnostic:%'))
-            ${artifactRows}) WHERE cursor>? ORDER BY cursor LIMIT 101`)
+            SELECT rowid*${stride} AS cursor,kind,id,value FROM records WHERE conversation_id=? AND
+              (kind IN ('draft','queue','prompt','workspace','thread') OR (kind='settings' AND (id LIKE 'diagnostic:%' OR id LIKE 'legacy-turn-preview:%')))
+            ${artifactRows}${workingRows}) WHERE cursor>? ORDER BY cursor LIMIT 101`)
           .iterate(
             conversationId,
             ...(hasArtifacts ? [conversationId] : []),
+            ...(hasWorking ? [conversationId] : []),
             afterCursor
           ) as Iterable<{
           cursor: number
@@ -571,13 +807,18 @@ export function createChatBackups(store: ChatStorage) {
         const rows = db
           .prepare("SELECT value FROM records WHERE conversation_id=? AND kind='attachment'")
           .all(conversationId) as Array<{ value: string }>
-        const record = rows
+        const matching = rows
           .map((r) => JSON.parse(r.value) as ChatAttachment)
-          .find(
+          .filter(
             (r) =>
               r.artifactId === ref.artifactId &&
               (!ref.contentHash || r.contentHash === ref.contentHash)
           )
+        if (!ref.contentHash && new Set(matching.map((ref) => ref.contentHash)).size > 1)
+          throw new Error(
+            'Archive attachment version is ambiguous; select an explicit saved version'
+          )
+        const record = matching[0]
         if (!record?.contentHash)
           throw new Error('Attachment does not belong to this archive conversation')
         const file = fileWithin(folder(archiveDir, id), `blobs/${record.contentHash}`)
@@ -589,14 +830,30 @@ export function createChatBackups(store: ChatStorage) {
     file(id: string, conversationId: string, artifactId: string, contentHash: string) {
       if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Invalid archive file hash')
       return withArchive(id, (db) => {
+        const hasWorking = !!db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'"
+          )
+          .get()
         const row = db
           .prepare(`SELECT a.title AS name,v.size FROM task_artifacts a
           JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
           JOIN artifact_versions v ON v.artifact_id=a.id
-          WHERE o.conversation_id=? AND a.id=? AND v.content_hash=?`)
-          .get(conversationId, artifactId, contentHash) as
-          | { name: string; size: number }
-          | undefined
+          WHERE o.conversation_id=? AND a.id=? AND v.content_hash=?
+          ${
+            hasWorking
+              ? `UNION ALL SELECT a.title,w.size FROM task_artifacts a
+            JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
+            JOIN artifact_working_files w ON w.artifact_id=a.id
+            WHERE o.conversation_id=? AND a.id=? AND w.content_hash=?`
+              : ''
+          }`)
+          .get(
+            conversationId,
+            artifactId,
+            contentHash,
+            ...(hasWorking ? [conversationId, artifactId, contentHash] : [])
+          ) as { name: string; size: number } | undefined
         if (!row) throw new Error('File does not belong to this archive conversation')
         const path = fileWithin(
           folder(archiveDir, id),

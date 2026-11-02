@@ -46,6 +46,24 @@ const taskOperations = new Set([
 /** Validate ownership before touching runtime state, including when serving a cached receipt. */
 export function createChatInvoker(runtime: Runtime) {
   const inFlight = new Map<string, Promise<unknown>>()
+  // Side answers belong to the renderer, not durable chat history. A short,
+  // bounded cache still lets a disconnected caller recover its response without
+  // billing another provider request. The durable receipt fences retries after
+  // eviction/restart, when the answer can no longer be delivered.
+  const ephemeralResults = new Map<string, { result: unknown; at: number; bytes: number }>()
+  let ephemeralBytes = 0
+  const expireEphemeral = () => {
+    for (const [key, entry] of ephemeralResults) {
+      if (
+        entry.at + 300_000 > Date.now() &&
+        ephemeralBytes <= 4 * 1024 * 1024 &&
+        ephemeralResults.size <= 100
+      )
+        break
+      ephemeralResults.delete(key)
+      ephemeralBytes -= entry.bytes
+    }
+  }
   return async function invoke(input: unknown): Promise<unknown> {
     const req = parseChatInvocation(input),
       owner = runtime.storage.conversation(req.route.id)
@@ -73,7 +91,11 @@ export function createChatInvoker(runtime: Runtime) {
         (first !== identity.taskId || req.args[1] !== identity.mode)
       )
         throw new Error('Chat task ownership mismatch')
-    } else if (['list', 'push', 'clear'].includes(req.method)) {
+    } else if (
+      ['list', 'push', 'clear', 'reserve', 'renewReservation', 'cancelReservation'].includes(
+        req.method
+      )
+    ) {
       if (first !== identity.tabId) throw new Error('Chat queue tab ownership mismatch')
     } else {
       const tab = await runtime.local.queue.getTabIdForItem(first as string)
@@ -111,6 +133,12 @@ export function createChatInvoker(runtime: Runtime) {
       const running = inFlight.get(flightKey)
       if (running) return running
       const previous = runtime.storage.receipt(identity.id, operationId)!
+      if (req.method === 'askSideQuestion' && previous.state === 'delivered') {
+        expireEphemeral()
+        const cached = ephemeralResults.get(flightKey)
+        if (cached) return cached.result
+        throw new Error('Ephemeral operation result is unavailable; operation was not repeated')
+      }
       if (previous.resultExpired)
         throw new Error('Operation result expired under chat retention; operation was not repeated')
       if (previous.state === 'delivered') return previous.result
@@ -122,7 +150,19 @@ export function createChatInvoker(runtime: Runtime) {
       .then(() => operation(...req.args))
       .then((result) => {
         const saved = result ?? null
-        runtime.storage.completeCommand(identity.id, identity.epoch, operationId, saved)
+        const ephemeral = req.method === 'askSideQuestion'
+        runtime.storage.completeCommand(
+          identity.id,
+          identity.epoch,
+          operationId,
+          ephemeral ? null : saved
+        )
+        if (ephemeral) {
+          const bytes = Buffer.byteLength(JSON.stringify(saved))
+          ephemeralResults.set(flightKey, { result: saved, at: Date.now(), bytes })
+          ephemeralBytes += bytes
+          expireEphemeral()
+        }
         return saved
       })
     inFlight.set(flightKey, run)

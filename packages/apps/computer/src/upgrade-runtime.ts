@@ -41,6 +41,50 @@ const CONNECT_TIMEOUT_MS = 90_000
 const WORKER_ENV = 'SLAYZONE_COMPUTER_UPGRADE_WORKER'
 export const isUpgradeWorker = (): boolean => process.env[WORKER_ENV] === '1' && !!process.send
 
+interface RuntimeContract {
+  min: number
+  max: number
+  fullChatMin?: number
+  maintenanceMin?: number
+  version?: string
+  buildId?: string
+}
+async function probeRuntimeContract(entry: string, signal?: AbortSignal): Promise<RuntimeContract> {
+  const probe = await exec(process.execPath, [entry, '--runtime-contract'], {
+    timeout: 30_000,
+    signal
+  })
+  const contract = JSON.parse(probe.stdout) as RuntimeContract
+  if (
+    !Number.isSafeInteger(contract.min) ||
+    !Number.isSafeInteger(contract.max) ||
+    contract.min > contract.max ||
+    (contract.fullChatMin !== undefined &&
+      (!Number.isSafeInteger(contract.fullChatMin) ||
+        contract.fullChatMin < contract.min ||
+        contract.fullChatMin > contract.max)) ||
+    (contract.maintenanceMin !== undefined &&
+      (!Number.isSafeInteger(contract.maintenanceMin) ||
+        contract.maintenanceMin < 1 ||
+        contract.maintenanceMin > contract.min)) ||
+    (contract.buildId !== undefined && typeof contract.buildId !== 'string') ||
+    (contract.version !== undefined &&
+      (typeof contract.version !== 'string' || !RELEASE.test(contract.version)))
+  )
+    throw new Error('invalid connector runtime contract')
+  return contract
+}
+function canBridgeMaintenance(contract: RuntimeContract, host: number): boolean {
+  return (
+    host >= contract.min &&
+    host >= (contract.maintenanceMin ?? contract.min) &&
+    host < (contract.fullChatMin ?? contract.min)
+  )
+}
+function needsHostMaintenance(contract: RuntimeContract, host: number): boolean {
+  return host < (contract.fullChatMin ?? contract.min) || host > contract.max
+}
+
 /** Stable public liveness endpoint, deliberately outside protocol/auth negotiation.
  * Never follow redirects to another origin; CA/hostname verification stays enabled.
  * Multi-hub computers upgrade only when every configured hub agrees on the release.
@@ -496,6 +540,7 @@ async function initializeUpgradeSupervisor(
   const incompatibleHostTargets = new Map<string, UpgradeRelease>()
   const desiredHostConfig = hostConfigurationKey(config)
   const hostInfo = await control.rpc.request<import('./session-host').HostHealth>('health')
+  let hostBuildChanged = false
   let hostConfigurationChanged =
     hostInfo.configKey !== undefined && hostInfo.configKey !== desiredHostConfig
   const sharedInstalls = new Map<string, Promise<string>>()
@@ -573,8 +618,30 @@ async function initializeUpgradeSupervisor(
       let worker: UpgradeWorker | undefined
       let failure: Error | undefined
       let cancelled = false
-      const starting = control.rpc
-        .request<ConnectorGrant>('reserve', { hubUrl })
+      // Initial launches need the same compatibility check as staged upgrades.
+      // Do it before reserve: reserving revokes the still-working old connector.
+      const starting = probeRuntimeContract(entry, abort.signal)
+        .then(async (contract) => {
+          hostBuildChanged =
+            hostInfo.buildId !== undefined &&
+            contract.buildId !== undefined &&
+            hostInfo.buildId !== contract.buildId
+          if (needsHostMaintenance(contract, hostInfo.contract)) {
+            incompatibleHostTargets.set(hubUrl, {
+              entry,
+              version: contract.version ?? initial.version
+            })
+            if (!canBridgeMaintenance(contract, hostInfo.contract))
+              throw new HostMaintenanceRequired(
+                'Connector requires session host maintenance; waiting for running work to finish'
+              )
+          }
+          const grant = await control.rpc.request<ConnectorGrant>('reserve', { hubUrl })
+          return {
+            ...grant,
+            ...(canBridgeMaintenance(contract, hostInfo.contract) ? { maintenance: true } : {})
+          }
+        })
         .then((grant) => {
           worker = launchUpgradeWorker(
             entry,
@@ -605,7 +672,13 @@ async function initializeUpgradeSupervisor(
           (failure && !(failure instanceof HostMaintenanceRequired)) || worker?.exited?.() === true,
         connected: async () => (await starting).connected(),
         drain: async () => {
-          await starting
+          try {
+            await starting
+          } catch (err) {
+            // A refused initial connector never acquired a lease. A different,
+            // compatible target may replace it without draining host sessions.
+            if (!(err instanceof HostMaintenanceRequired)) throw err
+          }
           return true
         },
         activate: async () => (await starting).activate?.(),
@@ -633,22 +706,14 @@ async function initializeUpgradeSupervisor(
         },
         install,
         validate: async (release) => {
-          const probe = await exec(process.execPath, [release.entry, '--runtime-contract'], {
-            timeout: 30_000,
-            signal: abort.signal
-          })
-          const contract = JSON.parse(probe.stdout) as { min: number; max: number }
-          if (
-            !Number.isSafeInteger(contract.min) ||
-            !Number.isSafeInteger(contract.max) ||
-            contract.min > contract.max
-          )
-            throw new Error('invalid connector runtime contract')
-          if (hostInfo.contract < contract.min || hostInfo.contract > contract.max) {
+          const contract = await probeRuntimeContract(release.entry, abort.signal)
+          if (needsHostMaintenance(contract, hostInfo.contract)) {
             incompatibleHostTargets.set(hubUrl, release)
-            throw new HostMaintenanceRequired(
-              'Connector requires session host maintenance; waiting for running work to finish'
-            )
+            if (!canBridgeMaintenance(contract, hostInfo.contract))
+              throw new HostMaintenanceRequired(
+                'Connector requires session host maintenance; waiting for running work to finish'
+              )
+            return
           }
           incompatibleHostTargets.delete(hubUrl)
         },
@@ -669,7 +734,7 @@ async function initializeUpgradeSupervisor(
                   maintenanceReason:
                     'Session host configuration changed; waiting for running work to finish'
                 }
-              : hostInfo.version !== displayedVersion
+              : hostInfo.version !== displayedVersion || hostBuildChanged
                 ? { maintenanceReason: 'Session host update waits for running work to finish' }
                 : {}),
             currentVersion: displayedVersion,
@@ -726,19 +791,28 @@ async function initializeUpgradeSupervisor(
         await stop(false)
         process.exit(75)
       }
-      if (config.autoUpgrade === false) return
       const stillWanted = async (): Promise<boolean> => {
         if (!deferred) return true
         if (incompatibleHostTargets.get(deferred[0]) !== deferred[1]) return false
-        const target = await discoverHubRelease([deferred[0]], abort.signal)
+        const target =
+          config.autoUpgrade === false
+            ? committed.get(deferred[0])?.version
+            : await discoverHubRelease([deferred[0]], abort.signal)
         if (target === deferred[1].version)
           return incompatibleHostTargets.get(deferred[0]) === deferred[1]
         incompatibleHostTargets.delete(deferred[0])
         return false
       }
       if (!(await stillWanted()) || (deferred && !liveHost.idle)) return
+      if (config.autoUpgrade === false && !deferred && primary.version !== original.version) return
+      const primaryContract = await probeRuntimeContract(primary.entry, abort.signal)
       const supervisorChange = primary.version !== original.version
-      const hostChange = primary.version !== liveHost.version
+      const hostChange =
+        primary.version !== liveHost.version ||
+        needsHostMaintenance(primaryContract, liveHost.contract) ||
+        (liveHost.buildId !== undefined &&
+          primaryContract.buildId !== undefined &&
+          liveHost.buildId !== primaryContract.buildId)
       if (!supervisorChange && (!hostChange || !liveHost.idle)) return
       const role = supervisorChange ? 'supervisor' : 'host'
       try {

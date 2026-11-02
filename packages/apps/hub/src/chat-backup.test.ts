@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { sanitizeHubChatBackup } from './chat-backup'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
+import { createChatOwnershipStore } from '../../../domains/chat-runtime/src/server/hub-ownership'
 
 test('new hub snapshots contain metadata and general artifacts, no chat content or freed-page remnants', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'hub-backup-private-'))
@@ -51,6 +53,50 @@ test('new hub snapshots contain metadata and general artifacts, no chat content 
     clean.close()
     expect(readFileSync(path).includes(Buffer.from('CHAT-PRIVATE-CONTENT-'))).toBe(false)
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('mixed hub snapshots retain only pending recovery sources and erase committed content', async () => {
+  const h = await createTestHarness()
+  const dir = mkdtempSync(join(tmpdir(), 'hub-backup-transition-'))
+  const path = join(dir, 'backup.sqlite')
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('pending','p','Pending'),('owned','p','Owned'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('pending-tab','pending','claude-chat',0),('owned-tab','owned','claude-chat',0)"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    for (const id of ['pending', 'owned']) {
+      h.db
+        .prepare('INSERT INTO chat_events(tab_id,seq,event,saved_at) VALUES(?,0,?,1)')
+        .run(
+          `${id}-tab`,
+          JSON.stringify({ kind: 'assistant-text', messageId: 'm', text: `${id}-private-payload` })
+        )
+      await owners.register({
+        id,
+        taskId: id,
+        tabId: `${id}-tab`,
+        mode: 'claude-chat',
+        computerId: id === 'owned' ? 'pc' : null,
+        epoch: 1
+      })
+    }
+    await h.db.backup(path)
+    await sanitizeHubChatBackup(path)
+    const snapshot = new Database(path, { readonly: true })
+    try {
+      expect(snapshot.prepare('SELECT tab_id FROM chat_events').all()).toEqual([
+        { tab_id: 'pending-tab' }
+      ])
+      expect(h.db.prepare('SELECT count(*) AS n FROM chat_events').get()).toEqual({ n: 2 })
+    } finally {
+      snapshot.close()
+    }
+    expect(readFileSync(path).includes(Buffer.from('owned-private-payload'))).toBe(false)
+    expect(readFileSync(path).includes(Buffer.from('pending-private-payload'))).toBe(true)
+  } finally {
+    h.cleanup()
     rmSync(dir, { recursive: true, force: true })
   }
 })

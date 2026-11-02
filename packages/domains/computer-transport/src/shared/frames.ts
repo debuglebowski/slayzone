@@ -53,6 +53,9 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 /**
  * Bump on any breaking change to the frames below.
  *
+ * v6: durable queue admissions and explicit chat runtime readiness. A restricted
+ * connector can stop work on an old host without advertising full chat support.
+ *
  * v5: computers own chat processes, history, drafts, files and backups. The hub
  * relays normalized events and metadata only. Both peers must upgrade together.
  *
@@ -68,7 +71,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 5
+export const COMPUTER_PROTOCOL_VERSION = 6
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {
@@ -175,6 +178,7 @@ const hostIdField = z.string().min(1).optional()
 
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
+  chatRuntimeReady: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -201,6 +205,7 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
+  chatRuntimeReady: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

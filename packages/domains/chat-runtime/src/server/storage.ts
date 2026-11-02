@@ -1,9 +1,10 @@
 import { isDeepStrictEqual } from 'node:util'
 import Database from 'better-sqlite3'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
+import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
 import type {
   ChatMigrationSnapshot,
   ChatTransferManifest,
@@ -43,6 +44,8 @@ interface OwnerRow {
   migration_hash: string | null
 }
 
+export const CHAT_STORAGE_SCHEMA_VERSION = 4
+
 /** One database per authenticated hub namespace. Never accepts a caller-supplied disk path. */
 export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   if (!opts.hubScope.trim()) throw new Error('Hub storage scope is required')
@@ -58,10 +61,11 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   db.pragma('busy_timeout = 5000')
   db.pragma('secure_delete = ON')
   const schema = db.pragma('user_version', { simple: true }) as number
-  if (schema > 3) {
+  if (schema > CHAT_STORAGE_SCHEMA_VERSION) {
     db.close()
     throw new Error('Chat storage was created by a newer version')
   }
+  let redactedSideAnswers = 0
   db.transaction(() => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (
@@ -70,6 +74,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         migration_id TEXT, migration_hash TEXT
       );
       CREATE INDEX IF NOT EXISTS conversations_task ON conversations(task_id);
+      CREATE INDEX IF NOT EXISTS conversations_tab ON conversations(tab_id);
       CREATE TABLE IF NOT EXISTS events (
         conversation_id TEXT NOT NULL REFERENCES conversations(id), seq INTEGER NOT NULL,
         saved_at INTEGER NOT NULL, event TEXT NOT NULL, PRIMARY KEY(conversation_id, seq)
@@ -92,6 +97,12 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       CREATE TABLE IF NOT EXISTS retention_policy(id INTEGER PRIMARY KEY CHECK(id=1),days INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS events_retention ON events(conversation_id,saved_at,seq);
       CREATE INDEX IF NOT EXISTS records_retention ON records(conversation_id,saved_at);
+      CREATE INDEX IF NOT EXISTS records_kind_id ON records(kind,id,conversation_id);
+      CREATE TABLE IF NOT EXISTS provider_configs (
+        task_id TEXT NOT NULL, mode TEXT NOT NULL, revision INTEGER NOT NULL,
+        value TEXT NOT NULL, PRIMARY KEY(task_id,mode)
+      );
+      CREATE TABLE IF NOT EXISTS storage_maintenance (id TEXT PRIMARY KEY);
     `)
     if (schema < 3) {
       db.exec(
@@ -103,8 +114,27 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         "DELETE FROM migration_checkpoints WHERE EXISTS(SELECT 1 FROM conversations c WHERE c.id=json_extract(migration_checkpoints.identity,'$.id') AND c.state='active' AND c.migration_id=migration_checkpoints.migration_id)"
       )
     }
-    db.pragma('user_version = 3')
+    if (
+      !(db.pragma('table_info(receipts)') as Array<{ name: string }>).some(
+        (column) => column.name === 'method'
+      )
+    )
+      db.exec('ALTER TABLE receipts ADD COLUMN method TEXT')
+    if (schema <= 3) {
+      // Across the complete v2/v3 mutation result union, only SideAnswer had
+      // exactly {text: string|null}. Preserve hashes/states to fence provider
+      // retries; ordinary text-bearing results have other required fields.
+      redactedSideAnswers = db
+        .prepare(`UPDATE receipts SET result='null',result_expired=1,method='askSideQuestion'
+        WHERE state='delivered' AND (method IS NULL OR method='askSideQuestion') AND
+          CASE WHEN json_valid(result) THEN json_type(result)='object' AND
+            json_type(result,'$.text') IN ('text','null') AND
+            (SELECT count(*) FROM json_each(result))=1 ELSE 0 END`)
+        .run().changes
+    }
+    db.pragma(`user_version = ${CHAT_STORAGE_SCHEMA_VERSION}`)
   })()
+  if (redactedSideAnswers) db.pragma('wal_checkpoint(TRUNCATE)')
   const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
   const row = (id: string) =>
@@ -139,13 +169,20 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         .all(id, afterSeq, beforeSeq) as Array<{ seq: number; saved_at: number; event: string }>
     ).map((r) => ({ seq: r.seq, at: r.saved_at, event: JSON.parse(r.event) as AgentEvent }))
   }
-  function records(id: string): ChatRecord[] {
+  function records(id: string, kind?: ChatRecord['kind']): ChatRecord[] {
     return (
       db
         .prepare(
-          'SELECT kind,id,value,saved_at FROM records WHERE conversation_id=? ORDER BY kind,id'
+          'SELECT kind,id,value,saved_at FROM records WHERE conversation_id=?' +
+            (kind ? ' AND kind=?' : '') +
+            ' ORDER BY kind,id'
         )
-        .all(id) as Array<{ kind: ChatRecord['kind']; id: string; value: string; saved_at: number }>
+        .all(id, ...(kind ? [kind] : [])) as Array<{
+        kind: ChatRecord['kind']
+        id: string
+        value: string
+        saved_at: number
+      }>
     ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
   }
   type ReceiptRow = {
@@ -155,10 +192,18 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     result: string
     at: number
     resultExpired: number
+    method: string | null
   }
-  const receiptColumns = 'id,hash,state,result,saved_at AS at,result_expired AS resultExpired'
+  const receiptColumns =
+    'id,hash,state,result,saved_at AS at,result_expired AS resultExpired,method'
   function decodeReceipt(r: ReceiptRow): CommandReceipt {
-    return { ...r, result: JSON.parse(r.result), resultExpired: !!r.resultExpired }
+    const { method, ...rest } = r
+    return {
+      ...rest,
+      ...(method ? { method } : {}),
+      result: JSON.parse(r.result),
+      resultExpired: !!r.resultExpired
+    }
   }
   function receipts(id: string): CommandReceipt[] {
     return (
@@ -179,6 +224,74 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       )
       .get(id) as { value: string } | undefined
     return Math.max(last, floor ? Number(JSON.parse(floor.value)) : 0)
+  }
+  /** Every durable content reference owns its pin, even when imported from a sibling. */
+  function pinAttachments(id: string, value: unknown, at: number, recoverStoredReference = false) {
+    const target = row(id)
+    if (!target) throw new Error('Unknown attachment destination')
+    const pending: unknown[] = [value]
+    const seen = new Set<string>()
+    while (pending.length) {
+      const item = pending.pop()
+      if (!item || typeof item !== 'object') continue
+      const ref = item as Partial<ChatAttachment>
+      if (
+        typeof ref.artifactId === 'string' &&
+        typeof ref.name === 'string' &&
+        typeof ref.kind === 'string' &&
+        typeof ref.mediaType === 'string' &&
+        typeof ref.size === 'number'
+      ) {
+        const key = `${ref.artifactId}:${ref.contentHash ?? ''}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        const pins = db
+          .prepare(`SELECT r.id,r.value FROM records r
+          JOIN conversations c ON c.id=r.conversation_id
+          WHERE c.task_id=? AND c.state IN ('active','frozen') AND r.kind='attachment'
+            AND json_extract(r.value,'$.artifactId')=?
+            AND (? IS NULL OR json_extract(r.value,'$.contentHash')=?)`)
+          .all(
+            target.task_id,
+            ref.artifactId,
+            ref.contentHash ?? null,
+            ref.contentHash ?? null
+          ) as Array<{ id: string; value: string }>
+        const hashes = new Set(pins.map((p) => (JSON.parse(p.value) as ChatAttachment).contentHash))
+        if ((hashes.size !== 1 || !pins.length) && !(recoverStoredReference && ref.contentHash))
+          throw new Error('Attachment reference is unavailable or ambiguous')
+        // A sealed reference already committed in this owner's history is itself
+        // ownership proof during upgrade repair, even if its old source pin expired.
+        const pin = pins.length
+          ? (JSON.parse(pins[0].value) as ChatAttachment)
+          : (ref as ChatAttachment)
+        if (!pin.contentHash || !/^[a-f0-9]{64}$/.test(pin.contentHash))
+          throw new Error('Attachment pin is not sealed')
+        const pinId = `${pin.artifactId}:${pin.contentHash}`
+        if (
+          !db
+            .prepare("SELECT 1 FROM records WHERE conversation_id=? AND kind='attachment' AND id=?")
+            .get(id, pinId)
+        ) {
+          const file = join(dir, 'blobs', pin.contentHash)
+          if (!lstatSync(file).isFile()) throw new Error('Attachment is not a regular file')
+          const bytes = readFileSync(file)
+          if (
+            bytes.length !== pin.size ||
+            createHash('sha256').update(bytes).digest('hex') !== pin.contentHash
+          )
+            throw new Error('Attachment pin integrity failure')
+          db.prepare("INSERT INTO records VALUES(?,'attachment',?,?,?)").run(
+            id,
+            pinId,
+            JSON.stringify({ ...pin, taskId: target.task_id }),
+            at
+          )
+        }
+      }
+      for (const child of Object.values(item))
+        if (child && typeof child === 'object') pending.push(child)
+    }
   }
   function verify(snapshot: ChatMigrationSnapshot): void {
     const { hash, ...body } = snapshot
@@ -266,6 +379,13 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         .get(tabId) as { id: string } | undefined
       return found ? api.conversation(found.id) : null
     },
+    isTabDeleted(taskId: string, tabId: string): boolean {
+      return !!db
+        .prepare(
+          "SELECT 1 FROM conversations WHERE task_id=? AND tab_id=? AND state='deleted' LIMIT 1"
+        )
+        .get(taskId, tabId)
+    },
     getRecord<T>(id: string, kind: ChatRecord['kind'], key: string): T | null {
       const found = db
         .prepare('SELECT value FROM records WHERE conversation_id=? AND kind=? AND id=?')
@@ -274,15 +394,26 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     findRecords(
       kind: ChatRecord['kind'],
-      taskId?: string
+      taskId?: string,
+      filter: { id?: string; idPrefix?: string; limit?: number } = {}
     ): Array<ChatRecord & { conversationId: string }> {
       const found = db
         .prepare(
           "SELECT r.*,c.id AS conversation_id FROM records r JOIN conversations c ON c.id=r.conversation_id WHERE r.kind=? AND c.state<>'deleted'" +
             (taskId ? ' AND c.task_id=?' : '') +
-            ' ORDER BY r.saved_at,r.id'
+            (filter.id !== undefined ? ' AND r.id=?' : '') +
+            (filter.idPrefix !== undefined ? ' AND r.id>=? AND r.id<?' : '') +
+            (filter.limit
+              ? " ORDER BY r.conversation_id,json_extract(r.value,'$.sequence') LIMIT ?"
+              : ' ORDER BY r.saved_at,r.id')
         )
-        .all(...(taskId ? [kind, taskId] : [kind])) as Array<{
+        .all(
+          kind,
+          ...(taskId ? [taskId] : []),
+          ...(filter.id !== undefined ? [filter.id] : []),
+          ...(filter.idPrefix !== undefined ? [filter.idPrefix, filter.idPrefix + '\uffff'] : []),
+          ...(filter.limit ? [filter.limit] : [])
+        ) as Array<{
         conversation_id: string
         kind: ChatRecord['kind']
         id: string
@@ -308,6 +439,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         requireOwner(id, epoch)
         if (seq < (api.getRecord<number>(id, 'settings', 'event-sequence-floor') ?? 0))
           return 'clash'
+        if (db.prepare('SELECT 1 FROM events WHERE conversation_id=? AND seq=?').get(id, seq))
+          return 'clash'
+        pinAttachments(id, eventAttachmentReferences(event), at)
         const result = db
           .prepare('INSERT INTO events VALUES(?,?,?,?) ON CONFLICT(conversation_id,seq) DO NOTHING')
           .run(id, seq, at, JSON.stringify(event))
@@ -330,6 +464,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       return db.transaction(() => {
         requireOwner(id, epoch)
         const seq = nextSeq(id)
+        pinAttachments(id, eventAttachmentReferences(event), at)
         db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(id, seq, at, JSON.stringify(event))
         return { seq, at, event }
       })()
@@ -337,9 +472,77 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     read,
     records,
     nextSeq,
+    repairAttachmentPins() {
+      if (db.prepare("SELECT 1 FROM storage_maintenance WHERE id='attachment-pins-v4'").get())
+        return { unresolved: 0 }
+      let unresolved = 0
+      for (const [table, column, filter] of [
+        ['events', 'event', ''],
+        [
+          'records',
+          'value',
+          "AND (r.kind IN ('draft','queue') OR (r.kind='settings' AND r.id GLOB 'attachment-message:*'))"
+        ]
+      ]) {
+        let cursor = 0
+        for (;;) {
+          const batch = db
+            .prepare(`SELECT r.rowid AS cursor,r.conversation_id AS id,r.${column} AS value,r.saved_at AS at
+            ,${table === 'events' ? 'NULL AS kind,NULL AS record_id' : 'r.kind,r.id AS record_id'}
+            FROM ${table} r JOIN conversations c ON c.id=r.conversation_id
+            WHERE c.state='active' AND r.rowid>? AND r.${column} LIKE '%"artifactId"%' ${filter}
+            ORDER BY r.rowid LIMIT 100`)
+            .all(cursor) as Array<{
+            cursor: number
+            id: string
+            value: string
+            at: number
+            kind: ChatRecord['kind']
+            record_id: string
+          }>
+          for (const record of batch) {
+            cursor = record.cursor
+            try {
+              const parsed = JSON.parse(record.value)
+              const refs =
+                table === 'events'
+                  ? eventAttachmentReferences(parsed as AgentEvent)
+                  : recordAttachmentReferences({
+                      kind: record.kind,
+                      id: record.record_id,
+                      value: parsed
+                    })
+              api.transaction(() => pinAttachments(record.id, refs, record.at, true))
+            } catch {
+              unresolved++
+            }
+          }
+          if (batch.length < 100) break
+        }
+      }
+      if (!unresolved)
+        db.prepare("INSERT INTO storage_maintenance VALUES('attachment-pins-v4')").run()
+      return { unresolved }
+    },
+    hasConversationContent(id: string): boolean {
+      return !!db
+        .prepare(`SELECT 1 FROM events WHERE conversation_id=? UNION ALL
+        SELECT 1 FROM records WHERE conversation_id=? AND
+          (kind IN ('queue','thread','workspace','timeline') OR
+           (kind='settings' AND id IN ('metadata-state:agent-state','metadata-state:activity')) OR (kind='draft' AND
+            (COALESCE(json_extract(value,'$.draft.text'),'')<>'' OR
+             COALESCE(json_array_length(value,'$.draft.attachments'),0)>0))) LIMIT 1`)
+        .get(id, id)
+    },
     putRecord(id: string, epoch: number, record: ChatRecord): void {
       db.transaction(() => {
         requireOwner(id, epoch)
+        if (
+          record.kind === 'draft' ||
+          record.kind === 'queue' ||
+          (record.kind === 'settings' && record.id.startsWith('attachment-message:'))
+        )
+          pinAttachments(id, recordAttachmentReferences(record), record.at)
         db.prepare(
           'INSERT INTO records VALUES(?,?,?,?,?) ON CONFLICT(conversation_id,kind,id) DO UPDATE SET value=excluded.value,saved_at=excluded.saved_at'
         ).run(id, record.kind, record.id, JSON.stringify(record.value), record.at)
@@ -371,9 +574,16 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           if (previous.hash !== hash) throw new Error('Operation id reused with different input')
           return 'duplicate'
         }
+        const method =
+          input &&
+          typeof input === 'object' &&
+          'method' in input &&
+          typeof input.method === 'string'
+            ? input.method
+            : null
         db.prepare(
-          "INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at) VALUES(?,?,?,'accepted','null',?)"
-        ).run(id, operationId, hash, Date.now())
+          "INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,method) VALUES(?,?,?,'accepted','null',?,?)"
+        ).run(id, operationId, hash, Date.now(), method)
         return 'accepted'
       })()
     },
@@ -382,7 +592,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         requireOwner(id, epoch)
         const changed = db
           .prepare(
-            "UPDATE receipts SET state='delivered',result=? WHERE conversation_id=? AND id=?"
+            "UPDATE receipts SET state='delivered',result=CASE WHEN method='askSideQuestion' THEN 'null' ELSE ? END WHERE conversation_id=? AND id=?"
           )
           .run(JSON.stringify(result ?? null), id, operationId)
         if (!changed.changes) throw new Error('Unknown operation')
@@ -528,7 +738,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             )
               throw new Error('Transfer receipt integrity mismatch')
             db.prepare(
-              'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired) VALUES(?,?,?,?,?,?,?)'
+              'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired,method) VALUES(?,?,?,?,?,?,?,?)'
             ).run(
               i.id,
               r.id,
@@ -536,7 +746,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
               r.state,
               JSON.stringify(r.result ?? null),
               r.at ?? Date.now(),
-              r.resultExpired ? 1 : 0
+              r.resultExpired ? 1 : 0,
+              r.method ?? null
             )
             receipts++
           } else throw new Error('Transfer record kind integrity mismatch')
@@ -593,7 +804,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           )
         for (const r of snapshot.receipts)
           db.prepare(
-            'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired) VALUES(?,?,?,?,?,?,?)'
+            'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired,method) VALUES(?,?,?,?,?,?,?,?)'
           ).run(
             i.id,
             r.id,
@@ -601,7 +812,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             r.state,
             JSON.stringify(r.result),
             r.at ?? Date.now(),
-            r.resultExpired ? 1 : 0
+            r.resultExpired ? 1 : 0,
+            r.method ?? null
           )
       })()
     },
@@ -648,7 +860,27 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         if (previous) {
           if (digest(JSON.parse(previous.identity)) !== digest(value))
             throw new Error('Migration checkpoint identity mismatch')
-          return JSON.parse(previous.value) as ChatRecord[]
+          const saved = JSON.parse(previous.value) as ChatRecord[]
+          const manifest = (r: ChatRecord) =>
+            r.kind === 'settings' && r.id === 'legacy-attachment-manifest'
+          if (candidate?.some(manifest) && !saved.some(manifest)) {
+            if (
+              (owner && ['prepared', 'active', 'deleted'].includes(owner.state)) ||
+              candidate.length !== saved.length + 1 ||
+              !manifest(candidate[saved.length]) ||
+              digest(candidate.slice(0, -1)) !== digest(saved)
+            )
+              throw new Error('Migration checkpoint cannot replace frozen content')
+            const encoded = JSON.stringify(candidate)
+            if (Buffer.byteLength(encoded) > 16 * 1024 * 1024)
+              throw new Error('Migration metadata is too large')
+            db.prepare('UPDATE migration_checkpoints SET value=? WHERE migration_id=?').run(
+              encoded,
+              migrationId
+            )
+            return JSON.parse(encoded) as ChatRecord[]
+          }
+          return saved
         }
         if (!candidate) return null
         const encoded = JSON.stringify(candidate)
@@ -736,12 +968,17 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             "DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.taskId')=?"
           ).run(value.taskId)
         } else {
+          db.prepare(
+            "DELETE FROM records WHERE kind='thread' AND id=? AND conversation_id IN(SELECT id FROM conversations WHERE task_id=?)"
+          ).run(value.tabId, value.taskId)
           for (const table of ['events', 'records', 'receipts'])
             db.prepare(`DELETE FROM ${table} WHERE conversation_id=?`).run(value.id)
           db.prepare("DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.id')=?").run(
             value.id
           )
         }
+        if (taskDeleted)
+          db.prepare('DELETE FROM provider_configs WHERE task_id=?').run(value.taskId)
       })
     },
     deleteConversation(id: string, epoch: number): void {

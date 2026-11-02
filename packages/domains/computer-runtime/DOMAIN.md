@@ -26,3 +26,9 @@ hook journal and CLI capabilities. Connectors and supervisors can be replaced
 without disposing it. Host replacement requires an atomic idle/drain check; active
 work always defers automatic host maintenance. Explicit service stops retain their
 existing termination behavior.
+
+An explicitly negotiated maintenance connector can expose safe controls for a
+busy older host while declaring chat unavailable. It cannot start new work. Build
+identity also detects same-release host rebuilds, which are applied only at idle.
+Only native hooks use the durable notification journal; chat events replay from
+their owning content/outbox store.

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { expect, it, vi } from 'vitest'
+import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 
 it('discards an incompatible release canceled by the hub before idle maintenance', async () => {
@@ -31,7 +32,7 @@ it('discards an incompatible release canceled by the hub before idle maintenance
   mkdirSync(dirname(candidate), { recursive: true })
   writeFileSync(
     candidate,
-    "if(process.argv.includes('--upgrade-probe'))process.stdout.write('2.0.0');else if(process.argv.includes('--runtime-contract'))process.stdout.write(JSON.stringify({min:2,max:2}));else process.exit(1)"
+    `if(process.argv.includes('--upgrade-probe'))process.stdout.write('2.0.0');else if(process.argv.includes('--runtime-contract'))process.stdout.write(JSON.stringify({min:${HOST_CONTRACT_VERSION + 1},max:${HOST_CONTRACT_VERSION + 1}}));else process.exit(1)`
   )
   writeFileSync(join(runtime, 'supervisor.json'), JSON.stringify({ current: original }))
   let release = '1.0.0'

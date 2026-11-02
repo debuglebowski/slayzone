@@ -1,4 +1,8 @@
-import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
+import {
+  HOST_CONTRACT_VERSION,
+  HOST_MAINTENANCE_MIN_CONTRACT_VERSION
+} from '@slayzone/computer-runtime'
+import { HubToComputerMethods, RpcError } from '@slayzone/computer-transport/shared'
 import { stageComputerHooks } from './agent-hooks'
 import {
   HubDialer,
@@ -7,8 +11,38 @@ import {
   type ComputerIdentity
 } from '@slayzone/computer-transport/client'
 import type { ComputerConfig } from './config'
+import { parseChatInvocation } from '@slayzone/chat-runtime/shared'
 import { COMPUTER_VERSION, type ComputerHandle } from './main'
 import { connectorHost, type ConnectorGrant } from './session-host'
+
+const maintenanceMethods = new Set<string>([
+  HubToComputerMethods.ping,
+  HubToComputerMethods.computerShutdown,
+  HubToComputerMethods.computerSetAllowedRoots,
+  HubToComputerMethods.projectList,
+  HubToComputerMethods.projectResolvePath,
+  HubToComputerMethods.projectSetPath,
+  HubToComputerMethods.projectForgetPath,
+  HubToComputerMethods.ptyList,
+  HubToComputerMethods.ptyResize,
+  HubToComputerMethods.ptyWarmList,
+  HubToComputerMethods.ptyWarmKill,
+  HubToComputerMethods.ptyKill,
+  HubToComputerMethods.procList,
+  HubToComputerMethods.procKill
+])
+
+function isMaintenanceChatStop(method: string, params: unknown): boolean {
+  if (method !== HubToComputerMethods.chatRequest || !params || typeof params !== 'object')
+    return false
+  const body = params as { kind?: unknown; value?: unknown }
+  if (body.kind !== 'invoke') return false
+  const call = parseChatInvocation(body.value)
+  return (
+    (call.target === 'ops' && call.method === 'kill') ||
+    (call.target === 'queue' && call.method === 'clear')
+  )
+}
 
 /** Replaceable network adapter. It never owns or disposes the host's work. */
 export async function startConnector(
@@ -17,7 +51,12 @@ export async function startConnector(
   grant: ConnectorGrant,
   paused = false
 ): Promise<ComputerHandle> {
-  if (grant.health.contract !== HOST_CONTRACT_VERSION)
+  // Historical supervisors cannot attach a maintenance flag. Derive readiness
+  // from the host contract, then verify that contract/epoch against its identity.
+  const maintenance =
+    grant.health.contract >= HOST_MAINTENANCE_MIN_CONTRACT_VERSION &&
+    grant.health.contract < HOST_CONTRACT_VERSION
+  if (grant.health.contract !== HOST_CONTRACT_VERSION && !maintenance)
     throw new Error('session host contract incompatible; maintenance required')
   let dialer: HubDialer
   let activate = (): void => undefined
@@ -29,6 +68,11 @@ export async function startConnector(
   const host = await connectorHost(root, grant, config.hubUrl, {
     request: async (method, raw) => {
       if (method === 'event-deliver') {
+        // The old host cannot persist prompt capture in the new chat store.
+        // Keep its native hooks unacknowledged on disk until the replacement
+        // host can replay them; the hub's generic event ACK is not storage ACK.
+        if (maintenance)
+          throw new Error('Computer update pending; native hooks retained for replay')
         const event = raw as { id: string; params: unknown }
         try {
           return await dialer.request('computer.event', event)
@@ -53,7 +97,13 @@ export async function startConnector(
       dialer?.notify(event.method, event.params)
     }
   })
-  const identity = await host.rpc.request<ComputerIdentity>('identity')
+  const identity = await host.rpc.request<ComputerIdentity & { contract: number; epoch: string }>(
+    'identity'
+  )
+  if (identity.contract !== grant.health.contract || identity.epoch !== grant.health.epoch) {
+    host.close()
+    throw new Error('session host protocol incompatible; maintenance required')
+  }
   const hookDirectory = await stageComputerHooks(root, COMPUTER_VERSION)
   const activateHooks = async (): Promise<void> => {
     await host.rpc.request('hooks', { directory: hookDirectory })
@@ -61,13 +111,21 @@ export async function startConnector(
   }
   dialer = new HubDialer({
     url: config.hubUrl,
-    identity: { ...identity, version: COMPUTER_VERSION },
+    // The wire belongs to this connector. The separately checked local contract
+    // proves that the host implements its dispatch methods; compatible connector
+    // releases can still replace one another without stopping native sessions.
+    identity: { ...identity, version: COMPUTER_VERSION, chatRuntimeReady: !maintenance },
     epoch: grant.health.epoch,
     connectorGeneration: grant.generation,
     credentialStore: createFileCredentialStore(hubHostFromUrl(config.hubUrl)),
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
     onHubRequest: async (method, params, actor) => {
       await ready
+      if (maintenance && !maintenanceMethods.has(method) && !isMaintenanceChatStop(method, params))
+        throw new RpcError(
+          -32001,
+          'Computer update pending. Stop its running agents to finish the update; chat and new work are unavailable until then.'
+        )
       return host.rpc.request('dispatch', { method, params, actor })
     },
     log: (message, meta) =>

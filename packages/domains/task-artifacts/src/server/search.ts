@@ -54,6 +54,8 @@ export interface ArtifactSearchOptions {
   caseSensitive?: boolean
   limit?: number
   maxMatches?: number
+  /** Internal routing exclusion: locator rows are not files on this backend. */
+  excludeArtifactIds?: readonly string[]
 }
 
 /** A content scan above this many bytes is skipped rather than read. */
@@ -123,6 +125,7 @@ interface ArtifactScanRow {
   task_id: string
   title: string
   render_mode: string | null
+  updated_at: string
 }
 
 /**
@@ -158,14 +161,18 @@ export function searchArtifacts(
     )
     params.push(...opts.projectIds)
   }
-  sqlParts.push('ORDER BY updated_at DESC')
+  if (opts.excludeArtifactIds?.length) {
+    sqlParts.push('AND id NOT IN (SELECT value FROM json_each(?))')
+    params.push(JSON.stringify(opts.excludeArtifactIds))
+  }
+  sqlParts.push('ORDER BY julianday(updated_at) DESC, id ASC')
   const artifacts = db.prepare(sqlParts.join(' ')).all(...params) as ArtifactScanRow[]
 
   const results: ArtifactSearchResult[] = []
   const skippedLarge: SkippedLargeArtifact[] = []
   let truncated = false
 
-  for (const a of artifacts) {
+  for (const [index, a] of artifacts.entries()) {
     const matches: ArtifactSearchMatch[] = []
     if (!opts.contentOnly && matcher.test(a.title)) {
       matches.push({ type: 'title', snippet: sanitizeSnippet(a.title) })
@@ -180,9 +187,15 @@ export function searchArtifacts(
       }
     }
     if (matches.length > 0) {
-      results.push({ artifactId: a.id, taskId: a.task_id, title: a.title, matches })
+      results.push({
+        artifactId: a.id,
+        taskId: a.task_id,
+        title: a.title,
+        matches,
+        updatedAt: a.updated_at
+      })
       if (results.length >= limit) {
-        truncated = artifacts.length > results.length
+        truncated = index < artifacts.length - 1
         break
       }
     }

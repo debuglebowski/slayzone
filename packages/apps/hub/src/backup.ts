@@ -5,6 +5,10 @@ import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { containedPath } from '@slayzone/platform/safe-path'
 import type { BackupInfo, BackupSettings } from '@slayzone/types'
+import {
+  createArtifactBackupProtection,
+  type ArtifactBackupProtection
+} from '@slayzone/task-artifacts/storage'
 
 /**
  * Backup, owned by the process that owns the database.
@@ -23,6 +27,31 @@ import type { BackupInfo, BackupSettings } from '@slayzone/types'
  */
 
 const DB_SUFFIXES = ['-wal', '-shm'] as const
+const activeHubSnapshots = new Set<string>()
+
+function collectAbandonedHubSnapshots(dataRoot: string) {
+  const dir = backupsDir(dataRoot),
+    pending = new Map<string, string | undefined>()
+  for (const name of fs.readdirSync(dir)) {
+    const match = /^(\.pending-(?:(\d+)-)?[a-f0-9-]{36}\.sqlite)(?:-(?:wal|shm))?$/.exec(name)
+    if (match) pending.set(match[1], match[2])
+  }
+  for (const [name, pid] of pending) {
+    const file = path.join(dir, name)
+    if (activeHubSnapshots.has(file)) continue
+    if (pid && Number(pid) !== process.pid) {
+      try {
+        process.kill(Number(pid), 0)
+        continue
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue
+      }
+    }
+    // Legacy staging had no PID. Only the current hub owns this database; its
+    // predecessor is stopped before a replacement can begin writing backups.
+    for (const suffix of ['', ...DB_SUFFIXES]) fs.rmSync(file + suffix, { force: true })
+  }
+}
 
 const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
   autoEnabled: false,
@@ -42,6 +71,7 @@ const BACKUP_REGEX =
 
 export type BackupDeps = {
   sanitizeSnapshot?: (path: string) => Promise<void>
+  artifactProtection?: ArtifactBackupProtection
   db: SlayzoneDb
   /** Hub data root; backups live in `<dataRoot>/backups`. */
   dataRoot: string
@@ -72,9 +102,14 @@ function filenamePrefix(dbPath: string): string {
   return path.basename(dbPath).replace(/\.sqlite$/, '')
 }
 
-function buildBackupFilename(dbPath: string, type: 'auto' | 'manual' | 'migration'): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  return `${filenamePrefix(dbPath)}.${timestamp}.${type}.sqlite`
+function syncBackupDirectory(dir: string) {
+  if (process.platform === 'win32') return
+  const fd = fs.openSync(dir, 'r')
+  try {
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
 }
 
 function parseBackupFilename(
@@ -163,7 +198,19 @@ function resolveInsideBackups(dataRoot: string, filename: string): string {
 
 export function buildBackupOps(deps: BackupDeps) {
   const { db, dataRoot } = deps
+  collectAbandonedHubSnapshots(dataRoot)
   let autoTimer: ReturnType<typeof setInterval> | null = null
+  let lastSnapshotAt = 0,
+    restoring = false
+  const creations = new Set<Promise<BackupInfo>>()
+  const protection =
+    deps.artifactProtection ??
+    createArtifactBackupProtection(db, dataRoot, (name) => parseBackupFilename(name) !== null)
+  // Starts its guard before migration GC can run during composition.
+  const prepared = protection.prepare()
+  void prepared.catch(() => {
+    /* Creation/startup await this same failure. */
+  })
 
   const stopAuto = (): void => {
     if (autoTimer) {
@@ -172,16 +219,35 @@ export function buildBackupOps(deps: BackupDeps) {
     }
   }
 
-  const create = async (type: 'auto' | 'manual', name?: string): Promise<BackupInfo> => {
-    const filename = buildBackupFilename(deps.dbPath, type)
-    const destPath = path.join(backupsDir(dataRoot), filename)
-    const pendingPath = path.join(backupsDir(dataRoot), `.pending-${randomUUID()}.sqlite`)
+  const createSnapshot = async (type: 'auto' | 'manual', name?: string): Promise<BackupInfo> => {
+    let filename: string, destPath: string
+    do {
+      lastSnapshotAt = Math.max(Date.now(), lastSnapshotAt + 1)
+      filename = `${filenamePrefix(deps.dbPath)}.${new Date(lastSnapshotAt).toISOString().replace(/[:.]/g, '-')}.${type}.sqlite`
+      destPath = path.join(backupsDir(dataRoot), filename)
+    } while (fs.existsSync(destPath))
+    const pendingPath = path.join(
+      backupsDir(dataRoot),
+      `.pending-${process.pid}-${randomUUID()}.sqlite`
+    )
+    await prepared
+    const protectedSnapshot = await protection.begin(filename)
+    activeHubSnapshots.add(pendingPath)
+    let published = false
     try {
       await db.backup(pendingPath)
       await (deps.sanitizeSnapshot ?? sanitizeHubChatBackup)(pendingPath)
+      await protectedSnapshot.pinSnapshot(pendingPath)
       fs.renameSync(pendingPath, destPath)
+      published = true
+      syncBackupDirectory(backupsDir(dataRoot))
     } finally {
-      for (const suffix of ['', ...DB_SUFFIXES]) fs.rmSync(pendingPath + suffix, { force: true })
+      try {
+        for (const suffix of ['', ...DB_SUFFIXES]) fs.rmSync(pendingPath + suffix, { force: true })
+      } finally {
+        activeHubSnapshots.delete(pendingPath)
+        await protectedSnapshot.finish(published)
+      }
     }
     const settings = await getBackupSettings(db)
     const backupName = name || `Backup ${settings.nextBackupNumber}`
@@ -197,10 +263,22 @@ export function buildBackupOps(deps: BackupDeps) {
       sizeBytes: fs.statSync(destPath).size
     }
   }
+  const create = (type: 'auto' | 'manual', name?: string): Promise<BackupInfo> => {
+    if (restoring) return Promise.reject(new Error('Hub restore is in progress'))
+    const work = createSnapshot(type, name).finally(() => {
+      creations.delete(work)
+    })
+    creations.add(work)
+    return work
+  }
 
   const remove = async (filename: string): Promise<void> => {
     const filePath = resolveInsideBackups(dataRoot, filename)
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+      syncBackupDirectory(backupsDir(dataRoot))
+    }
+    await protection.forget(filename)
     const names = await getBackupNames(db)
     delete names[filename]
     await writeBackupNames(db, names)
@@ -224,6 +302,7 @@ export function buildBackupOps(deps: BackupDeps) {
   }
 
   const startAuto = async (): Promise<void> => {
+    await prepared
     stopAuto()
     const settings = await getBackupSettings(db)
     if (!settings.autoEnabled) return
@@ -260,6 +339,9 @@ export function buildBackupOps(deps: BackupDeps) {
     if (!fs.existsSync(backupPath)) throw new Error('Backup file not found')
 
     stopAuto()
+    restoring = true
+    await Promise.all(creations)
+    await protection.close()
     await deps.closeDb()
     fs.copyFileSync(backupPath, deps.dbPath)
     for (const suffix of DB_SUFFIXES) {
@@ -288,6 +370,12 @@ export function buildBackupOps(deps: BackupDeps) {
     revealInFinder: (): void => deps.shellOpenPath(backupsDir(dataRoot)),
     startAuto,
     stopAuto,
+    prepare: () => prepared,
+    close: async () => {
+      stopAuto()
+      await Promise.allSettled(creations)
+      await protection.close()
+    },
     runAutoBackup,
     autoRunning: (): boolean => autoTimer !== null
   }

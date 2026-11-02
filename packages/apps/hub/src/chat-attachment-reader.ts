@@ -14,10 +14,17 @@ import { readFile } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { BlobStore, createArtifactStore } from '@slayzone/task-artifacts/server'
 import type { ChatAttachmentReader } from '@slayzone/terminal/server'
+import { createChatMigrationAttachmentReader } from '@slayzone/chat-runtime/server'
 
-export function createChatAttachmentReader(db: SlayzoneDb, dataRoot: string): ChatAttachmentReader {
+export function createChatAttachmentReader(
+  db: SlayzoneDb,
+  dataRoot: string
+): ChatAttachmentReader & {
+  readForMigration: ReturnType<typeof createChatMigrationAttachmentReader>
+} {
   const blobs = new BlobStore(dataRoot)
   return {
+    readForMigration: createChatMigrationAttachmentReader(db, dataRoot),
     read: async ({ artifactId, contentHash }) => {
       const row = await db.get<{ hash: string | null }>(
         contentHash
@@ -26,7 +33,8 @@ export function createChatAttachmentReader(db: SlayzoneDb, dataRoot: string): Ch
                LEFT JOIN artifact_versions v ON v.id = a.current_version_id WHERE a.id = ?`,
         contentHash ? [artifactId, contentHash] : [artifactId]
       )
-      if (row?.hash) return readFile(blobs.blobPath(row.hash))
+      if (row?.hash) return blobs.read(row.hash)
+      if (contentHash) throw new Error(`artifact ${artifactId} version not found`)
       // No version history (a row from before it existed): its working file.
       const path = await createArtifactStore(dataRoot).getArtifactPath(db, artifactId)
       if (!path) throw new Error(`artifact ${artifactId} not found`)

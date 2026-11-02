@@ -35,6 +35,11 @@ const mimeOf = (title: string) =>
     '.txt': 'text/plain',
     '.md': 'text/markdown'
   })[extname(title).toLowerCase()] ?? 'application/octet-stream'
+const modifiedAt = (value?: string) => {
+  const normalized = value?.replace(' ', 'T') ?? ''
+  const parsed = Date.parse(/(?:Z|[+-]\d\d:\d\d)$/.test(normalized) ? normalized : `${normalized}Z`)
+  return Number.isNaN(parsed) ? -Infinity : parsed
+}
 
 /** One artifact API; each ID stays on the store that created it. No file cache on hub. */
 export function createComputerArtifactStorage(opts: {
@@ -44,7 +49,12 @@ export function createComputerArtifactStorage(opts: {
   request: ChatComputerRequest
 }): ArtifactStore {
   const { db, local, chat } = opts
+  async function assertFolderResolved(id: string | null | undefined) {
+    if (id && (await db.get('SELECT 1 FROM chat_folder_placeholders WHERE folder_id=?', [id])))
+      throw new Error('Folder unavailable until its owning computer reconnects')
+  }
   async function location(id: string, folder = false) {
+    if (folder) await assertFolderResolved(id)
     const row = await db.get<{ conversation_id: string }>(
       `SELECT conversation_id FROM ${folder ? 'chat_folder_locations' : 'chat_artifact_locations'} WHERE ${folder ? 'folder_id' : 'artifact_id'}=?`,
       [id]
@@ -81,6 +91,7 @@ export function createComputerArtifactStorage(opts: {
     return result
   }
   async function ensureFolder(owner: HubChatOwnership, id: string): Promise<void> {
+    await assertFolderResolved(id)
     const folder = await db.get<{
       id: string
       task_id: string
@@ -105,8 +116,28 @@ export function createComputerArtifactStorage(opts: {
       [taskId]
     )
     const ids = new Set(locators.map((r) => r.id)),
-      result = rows.filter((r) => !ids.has(r.id)),
       computers = new Map(locators.map((r) => [r.computer_id, r.conversation_id]))
+    const unresolved = new Set(
+      folder
+        ? (
+            await db.all<{ folder_id: string }>(
+              'SELECT folder_id FROM chat_folder_placeholders WHERE task_id=?',
+              [taskId]
+            )
+          ).map((row) => row.folder_id)
+        : []
+    )
+    const result = rows
+      .filter((r) => !ids.has(r.id))
+      .map((row) =>
+        'parent_id' in row && unresolved.has(row.id)
+          ? {
+              ...row,
+              name: 'Chat files · awaiting computer',
+              storage: { computerId: null, available: false }
+            }
+          : row
+      )
     for (const [computerId, conversationId] of computers) {
       const owner = await chat.ownership.get(conversationId)
       if (!owner) continue
@@ -146,7 +177,11 @@ export function createComputerArtifactStorage(opts: {
     }
     return result.sort((a, b) => a.order - b.order || a.created_at.localeCompare(b.created_at))
   }
-  async function upload(data: Parameters<ArtifactStore['uploadArtifactBlob']>[1]) {
+  async function upload(
+    data: Parameters<ArtifactStore['uploadArtifactBlob']>[1],
+    useDefaultFolder = true
+  ) {
+    await assertFolderResolved(data.folderId)
     let owner = data.chatTabId
       ? await chat.relay.ensureTab(data.chatTabId)
       : data.folderId
@@ -157,7 +192,7 @@ export function createComputerArtifactStorage(opts: {
     if (owner.taskId !== data.taskId) throw new Error('Upload chat tab belongs to another task')
     const operationId = data.operationId ?? randomUUID()
     let folderId = data.folderId
-    if (!folderId) {
+    if (!folderId && useDefaultFolder) {
       const folder = (await call(
         owner,
         'getOrCreateFolderByName',
@@ -201,6 +236,7 @@ export function createComputerArtifactStorage(opts: {
           upload(data)
       if (key === 'deleteFolder')
         return async (_db: SlayzoneDb, id: string) => {
+          await assertFolderResolved(id)
           const folder = await db.get<{ task_id: string }>(
             'SELECT task_id FROM artifact_folders WHERE id=?',
             [id]
@@ -219,6 +255,7 @@ export function createComputerArtifactStorage(opts: {
         }
       if (key === 'copyArtifacts')
         return async (_db: SlayzoneDb, data: Parameters<ArtifactStore['copyArtifacts']>[1]) => {
+          await assertFolderResolved(data.destFolderId)
           const result: TaskArtifact[] = []
           for (const id of data.artifactIds) {
             const source = await location(id),
@@ -227,13 +264,16 @@ export function createComputerArtifactStorage(opts: {
             const bytes = await (receiver as ArtifactStore).readArtifactBytes(db, id)
             if (source) {
               const target = await chat.artifactOwner(data.destTaskId)
-              const copy = await upload({
-                taskId: data.destTaskId,
-                title: a.title,
-                bytes,
-                folderId: data.destFolderId,
-                chatTabId: target.tabId
-              })
+              const copy = await upload(
+                {
+                  taskId: data.destTaskId,
+                  title: a.title,
+                  bytes,
+                  folderId: data.destFolderId,
+                  chatTabId: target.tabId
+                },
+                false
+              )
               if (copy) result.push(copy)
             } else {
               const copy = await (receiver as ArtifactStore).uploadArtifactBlob(db, {
@@ -308,7 +348,6 @@ export function createComputerArtifactStorage(opts: {
         }
       if (key === 'searchArtifacts')
         return async (_db: SlayzoneDb, data: Parameters<ArtifactStore['searchArtifacts']>[1]) => {
-          const report = await local.searchArtifacts(db, data)
           const remoteIds = new Set(
             (
               await db.all<{ artifact_id: string }>(
@@ -316,7 +355,10 @@ export function createComputerArtifactStorage(opts: {
               )
             ).map((r) => r.artifact_id)
           )
-          report.results = report.results.filter((r) => !remoteIds.has(r.artifactId))
+          const report = await local.searchArtifacts(db, {
+            ...data,
+            excludeArtifactIds: [...remoteIds]
+          })
           const tasks = await db.all<{ task_id: string }>(
             data.taskId
               ? 'SELECT DISTINCT task_id FROM task_artifacts WHERE task_id=?'
@@ -348,10 +390,39 @@ export function createComputerArtifactStorage(opts: {
               report.truncated ||= remote.truncated
             }
           }
+          const unique = [...new Map(report.results.map((r) => [r.artifactId, r])).values()]
+          unique.sort(
+            (a, b) =>
+              modifiedAt(b.updatedAt) - modifiedAt(a.updatedAt) ||
+              a.artifactId.localeCompare(b.artifactId)
+          )
+          const limit = data.limit ?? 50
+          report.truncated ||= unique.length > limit
+          report.results = unique.slice(0, limit)
           return report
         }
       if (passthrough.has(key)) {
         const value = Reflect.get(target, key, receiver)
+        if (
+          typeof value === 'function' &&
+          (key === 'pasteArtifactFiles' || key === 'uploadArtifactDir')
+        )
+          return async (
+            _db: SlayzoneDb,
+            data: { destFolderId?: string | null; parentFolderId?: string | null }
+          ) => {
+            await assertFolderResolved(data.destFolderId ?? data.parentFolderId)
+            return value.call(target, db, data)
+          }
+        if (key === 'getOrCreateFolderByName')
+          return async (_db: SlayzoneDb, data: { taskId: string; name: string }) => {
+            const existing = await db.get<{ id: string }>(
+              'SELECT id FROM artifact_folders WHERE task_id=? AND name=? AND parent_id IS NULL',
+              [data.taskId, data.name]
+            )
+            if (existing) await assertFolderResolved(existing.id)
+            return value.call(target, db, data)
+          }
         return typeof value === 'function' ? value.bind(target) : value
       }
       const base = Reflect.get(target, key, receiver)
@@ -360,6 +431,8 @@ export function createComputerArtifactStorage(opts: {
       return async (_db: SlayzoneDb, ...args: any[]) => {
         const first = args[0],
           id = typeof first === 'string' ? first : (first?.artifactId ?? first?.id)
+        if (first && typeof first === 'object')
+          await assertFolderResolved(first.folderId ?? first.parentId)
         if (!id) return base.apply(target, [db, ...args])
         const owner = await location(id, key === 'updateFolder' || key === 'deleteFolder')
         if (!owner) return base.apply(target, [db, ...args])

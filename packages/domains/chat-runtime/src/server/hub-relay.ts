@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { TypedEmitter } from '@slayzone/platform/events'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -15,11 +15,14 @@ import {
   type ChatCatalog,
   type ChatCatalogOperation,
   type ChatCatalogContext,
-  type ChatDataOps
+  type ChatDataOps,
+  type QueueAdmission,
+  type ChatQueuePushOptions
 } from '@slayzone/terminal/runtime'
 import {
   chatOperationSchemas,
   chatQueueOperationSchemas,
+  parseChatInvocation,
   CHAT_READ_OPERATIONS,
   type ChatOperation,
   type ChatQueueOperation
@@ -28,6 +31,9 @@ import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './
 import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 import { createChatFolderDeletions } from './hub-folders'
+import { createHubProviderConfigStore } from './hub-provider-config'
+import { chatStorageMode } from './storage-mode'
+import { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
 
 const trimUnsetArgs = (args: unknown[]) => {
   let end = args.length
@@ -36,6 +42,8 @@ const trimUnsetArgs = (args: unknown[]) => {
 }
 
 type TabRow = { id: string; task_id: string; mode: string }
+// Storage migration must not depend on which native/chat handoffs the UI
+// currently exposes. Dormant Codex chat exists even when handoff is disabled.
 const taskMethods = new Set([
   'inspectPermissions',
   'getMode',
@@ -62,12 +70,15 @@ export function createHubChatRelay(opts: {
   db: SlayzoneDb
   ownership: ChatOwnershipStore
   request: ChatComputerRequest
+  /** Pure stop controls skip lifecycle/recovery frames unsupported by an old host. */
+  stopRequest?: ChatComputerRequest
+  chatRuntimeReady?(computerId: string): boolean
   hasLegacyTaskContent?(taskId: string): Promise<boolean>
   resolveMigrationComputer?(owner: HubChatOwnership): Promise<string | null>
   resolveComputer(taskId: string): Promise<string | null>
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
-  recoverComputer?(computerId: string): Promise<void>
+  recoverComputer?(computerId: string, force?: boolean): Promise<void>
   bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap>
   migrate(id: string, computerId: string): Promise<HubChatOwnership>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
@@ -82,6 +93,7 @@ export function createHubChatRelay(opts: {
 }) {
   const { db, ownership } = opts
   const folderDeletions = createChatFolderDeletions(db)
+  const providerConfig = createHubProviderConfigStore(db)
   const events = new TypedEmitter<ChatEventMap>(),
     queueEvents = new TypedEmitter<ChatQueueEventMap>()
   const sessionMirror = new Map<
@@ -90,13 +102,68 @@ export function createHubChatRelay(opts: {
   >()
   const taskMigrations = new Map<string, Promise<void>>()
   const registrations = new Map<string, Promise<HubChatOwnership>>()
+  const queueIngress = new Map<string, Promise<void>>()
+  function enterQueue(tabId: string) {
+    const ready = queueIngress.get(tabId) ?? Promise.resolve()
+    let release!: () => void
+    let released = false
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const tail = ready.then(() => current)
+    queueIngress.set(tabId, tail)
+    return {
+      ready,
+      release: () => {
+        if (released) return
+        released = true
+        release()
+        void tail.then(() => {
+          if (queueIngress.get(tabId) === tail) queueIngress.delete(tabId)
+        })
+      }
+    }
+  }
+  async function initialize(owner: HubChatOwnership) {
+    const reservation = await ownership.bootstrapReservation(owner.id)
+    if (!reservation) {
+      const current = await ownership.get(owner.id)
+      if (!current || current.state !== 'active')
+        throw new Error('Chat initialization is no longer available')
+      return current
+    }
+    await opts.gate?.(reservation.computerId, owner.taskId)
+    const value = await opts.bootstrap({
+      ...owner,
+      computerId: reservation.computerId,
+      state: 'active'
+    })
+    const reply = (await opts.request(reservation.computerId, { kind: 'bootstrap', value })) as {
+      ok: boolean
+      identity?: ChatBootstrap['identity']
+    }
+    if (
+      !reply?.ok ||
+      !reply.identity ||
+      ['id', 'taskId', 'tabId', 'mode', 'epoch'].some(
+        (key) =>
+          reply.identity![key as keyof ChatBootstrap['identity']] !==
+          value.identity[key as keyof ChatBootstrap['identity']]
+      )
+    )
+      throw new Error('Invalid chat initialization acknowledgement')
+    return ownership.activateBootstrap(owner.id, reservation.computerId, reservation.epoch)
+  }
   async function createTab(tab: TabRow) {
     const existing = await ownership.forTab(tab.id)
-    if (existing) return existing
+    if (existing)
+      return (await ownership.bootstrapReservation(existing.id)) ? initialize(existing) : existing
     const legacy =
       (await db.get(
-        `SELECT 1 WHERE EXISTS(SELECT 1 FROM chat_events WHERE tab_id=?) OR EXISTS(SELECT 1 FROM chat_tab_state WHERE tab_id=?) OR EXISTS(SELECT 1 FROM chat_queue WHERE tab_id=?) OR EXISTS(SELECT 1 FROM chat_threads WHERE id=? OR parent_tab_id=?) OR EXISTS(SELECT 1 FROM chat_workspace_changes WHERE tab_id=?) OR EXISTS(SELECT 1 FROM agent_prompts WHERE task_id=?) OR EXISTS(SELECT 1 FROM chat_cli_snapshots WHERE project_id=(SELECT project_id FROM tasks WHERE id=?) AND mode=?)`,
-        [tab.id, tab.id, tab.id, tab.id, tab.id, tab.id, tab.task_id, tab.task_id, tab.mode]
+        `SELECT 1 FROM terminal_tabs t JOIN tasks task ON task.id=t.task_id WHERE t.id=? AND
+          (${legacyChatTabContentSql()} OR ${legacyChatTaskContentSql()} OR EXISTS(
+            SELECT 1 FROM chat_cli_snapshots WHERE project_id=task.project_id AND mode=?))`,
+        [tab.id, chatStorageMode(tab.mode)]
       )) || (await opts.hasLegacyTaskContent?.(tab.task_id))
     const pc = legacy ? null : await opts.resolveComputer(tab.task_id)
     if (!legacy && !pc) throw new Error('Chat computer unavailable. Connect its computer.')
@@ -104,28 +171,17 @@ export function createHubChatRelay(opts: {
       id: randomUUID(),
       taskId: tab.task_id,
       tabId: tab.id,
-      mode: chatModeForTerminal(tab.mode) ?? tab.mode,
+      mode: chatStorageMode(tab.mode),
       computerId: pc,
       epoch: 1
     }
     if (pc) {
       await opts.gate?.(pc, tab.task_id)
-      const provisional: HubChatOwnership = {
-        ...value,
-        state: 'active',
-        migrationId: null,
-        destinationComputerId: null,
-        sourceComputerId: null,
-        manifestHash: null,
-        cleanupPending: false,
-        settingsRevision: 0,
-        settingsHash: null
-      }
-      // Persist the new store before publishing an active hub locator. Recovery
-      // can adopt a computer commit if the hub disappears between these steps.
-      await opts.request(pc, { kind: 'bootstrap', value: await opts.bootstrap(provisional) })
+      // The durable reservation/binding exists before the first RPC. Tab deletion
+      // can therefore fence both an absent store and a delayed successful reply.
+      return initialize(await ownership.reserveBootstrap({ ...value, computerId: pc }))
     }
-    return ownership.register(value)
+    return ownership.register(value, !tab.id.startsWith('prompt-history:'))
   }
   function registerTab(tab: TabRow) {
     const running = registrations.get(tab.id)
@@ -139,12 +195,18 @@ export function createHubChatRelay(opts: {
     if (existing) return existing
     const work = (async () => {
       const tabs = await db.all<TabRow>(
-        `SELECT id,task_id,mode FROM terminal_tabs WHERE task_id=? AND mode IN ('claude-chat','codex-chat') ORDER BY CASE WHEN EXISTS(SELECT 1 FROM chat_threads WHERE id=terminal_tabs.id) THEN 1 ELSE 0 END,created_at,id`,
+        `SELECT t.id,t.task_id,t.mode FROM terminal_tabs t WHERE t.task_id=? AND (
+          t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql()})
+          ORDER BY CASE WHEN EXISTS(SELECT 1 FROM chat_threads WHERE id=t.id) THEN 1 ELSE 0 END,t.created_at,t.id`,
         [taskId]
       )
       for (const tab of tabs) await registerTab(tab)
       for (const owner of await ownership.forTask(taskId)) {
         if (owner.state === 'deleted') continue
+        if (await ownership.bootstrapReservation(owner.id)) {
+          await initialize(owner)
+          continue
+        }
         if (owner.state === 'active' && !owner.cleanupPending) continue
         const pc =
           owner.destinationComputerId ??
@@ -173,18 +235,27 @@ export function createHubChatRelay(opts: {
         owner?.computerId ??
         owner?.destinationComputerId ??
         (taskId ? await opts.resolveComputer(taskId) : null)
-      if (pc) await opts.recoverComputer(pc)
+      if (pc) await opts.recoverComputer(pc, !!(owner && (await ownership.unavailable(owner.id))))
       owner = await ownership.forTab(tabId)
     }
     if (!owner) {
       const tab = await db.get<TabRow>('SELECT id,task_id,mode FROM terminal_tabs WHERE id=?', [
         tabId
       ])
-      if (!tab || !supportsChatMode(chatModeForTerminal(tab.mode) ?? tab.mode))
+      if (
+        !tab ||
+        (!supportsChatMode(chatStorageMode(tab.mode)) &&
+          !(await db.get(
+            `SELECT 1 FROM terminal_tabs t WHERE t.id=? AND ${legacyChatTabContentSql()}`,
+            [tab.id]
+          )))
+      )
         throw new Error('Unknown chat tab')
       owner = await registerTab(tab)
     }
     if (owner.state === 'deleted') throw new Error('Chat conversation deleted')
+    const unavailable = await ownership.unavailable(owner.id)
+    if (unavailable) throw new Error(unavailable.reason)
     if (owner.state !== 'active' || owner.cleanupPending) {
       await migrateTask(owner.taskId)
       owner = (await ownership.get(owner.id))!
@@ -207,8 +278,22 @@ export function createHubChatRelay(opts: {
   }
   async function ensurePromptTask(taskId: string) {
     const pc = await opts.resolveComputer(taskId)
-    if (pc) await opts.recoverComputer?.(pc)
+    const known = await ownership.forTask(taskId)
+    const missing = new Set<string>()
+    for (const owner of known)
+      if (owner.computerId && (await ownership.unavailable(owner.id))) missing.add(owner.computerId)
+    for (const computer of new Set([
+      ...(pc ? [pc] : []),
+      ...known.flatMap((owner) =>
+        owner.state === 'active' && owner.computerId ? [owner.computerId] : []
+      )
+    ]))
+      await opts.recoverComputer?.(computer, missing.has(computer))
     const owners = (await ownership.forTask(taskId)).filter((o) => o.state !== 'deleted')
+    for (const owner of owners) {
+      const unavailable = await ownership.unavailable(owner.id)
+      if (unavailable) throw new Error(unavailable.reason)
+    }
     if (owners.length) {
       for (const owner of owners)
         if (owner.state !== 'active' || owner.cleanupPending) {
@@ -221,16 +306,19 @@ export function createHubChatRelay(opts: {
     if (!computerId) throw new Error('Prompt history computer unavailable')
     await opts.gate?.(computerId, taskId)
     const legacy =
-      (await db.get('SELECT 1 FROM agent_prompts WHERE task_id=? LIMIT 1', [taskId])) ||
-      (await opts.hasLegacyTaskContent?.(taskId))
-    const owner = await ownership.register({
-      id: randomUUID(),
-      taskId,
-      tabId: `prompt-history:${taskId}`,
-      mode: 'claude-chat',
-      computerId: legacy ? null : computerId,
-      epoch: 1
-    })
+      (await db.get(`SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql()}`, [
+        taskId
+      ])) || (await opts.hasLegacyTaskContent?.(taskId))
+    const owner = legacy
+      ? await ownership.register({
+          id: randomUUID(),
+          taskId,
+          tabId: `prompt-history:${taskId}`,
+          mode: 'claude-chat',
+          computerId: null,
+          epoch: 1
+        })
+      : await registerTab({ id: `prompt-history:${taskId}`, task_id: taskId, mode: 'claude-chat' })
     if (legacy) {
       await migrateTask(taskId)
       return (await ownership.forTask(taskId)).filter((o) => o.state === 'active')
@@ -244,7 +332,12 @@ export function createHubChatRelay(opts: {
   }
   async function route(target: 'ops' | 'queue', method: string, args: unknown[]) {
     const first = args[0]
-    if (target === 'queue' && !['list', 'push', 'clear'].includes(method)) {
+    if (
+      target === 'queue' &&
+      !['list', 'push', 'clear', 'reserve', 'renewReservation', 'cancelReservation'].includes(
+        method
+      )
+    ) {
       const owner = await ownership.forQueueItem(String(first))
       if (!owner) throw new Error('Unknown queued message')
       return ensureTab(owner.tabId)
@@ -285,32 +378,70 @@ export function createHubChatRelay(opts: {
       )
       if (existingTab && existingTab.task_id !== raw.taskId)
         throw new Error('Thread tab belongs to another task')
-      await db.run(
-        `INSERT INTO terminal_tabs(id,task_id,label,mode,position,group_id) VALUES(?,?,'Thread',?,-1,?) ON CONFLICT(id) DO NOTHING`,
-        [raw.tabId, raw.taskId, value.mode, raw.tabId]
-      )
-      current = await ownership.register({
-        id: raw.conversationId,
-        taskId: raw.taskId,
-        tabId: raw.tabId,
-        mode: value.mode,
-        computerId,
-        epoch: raw.epoch
-      })
-      await db.run(
-        `INSERT INTO chat_threads(id,parent_tab_id,task_id,mode,parent_conversation_id,answer_id,source_message_id,source_uuid,title,created_at) VALUES(?,?,?,?,?,?,?,?,'Thread',?) ON CONFLICT(id) DO NOTHING`,
-        [
-          raw.tabId,
-          value.parentTabId,
-          raw.taskId,
-          value.mode,
-          value.parentConversationId ?? '',
-          value.answerId ?? '',
-          value.sourceMessageId ?? '',
-          value.sourceUuid ?? '',
-          value.createdAt ?? Date.now()
-        ]
-      )
+      // Publish UI row, ownership and binding together. A close immediately
+      // after the row becomes visible must already have a durable delete target.
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_ownership(id,task_id,tab_id,mode,computer_id,epoch,state)
+          SELECT ?,?,?,?,?,?,'active' FROM chat_ownership p WHERE p.id=? AND p.task_id=? AND p.computer_id=? AND p.epoch=? AND p.state='active'
+          AND NOT EXISTS(SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted')
+          AND NOT EXISTS(SELECT 1 FROM chat_tab_bindings WHERE tab_id=? AND conversation_id<>?)
+          AND NOT EXISTS(SELECT 1 FROM terminal_tabs WHERE id=? AND task_id<>?) ON CONFLICT(id) DO NOTHING`,
+          params: [
+            raw.conversationId,
+            raw.taskId,
+            raw.tabId,
+            value.mode,
+            computerId,
+            raw.epoch,
+            parent.id,
+            raw.taskId,
+            computerId,
+            parent.epoch,
+            raw.taskId,
+            raw.tabId,
+            raw.conversationId,
+            raw.tabId,
+            raw.taskId
+          ]
+        },
+        {
+          type: 'run',
+          sql: `INSERT INTO terminal_tabs(id,task_id,label,mode,position,group_id)
+          SELECT tab_id,task_id,'Thread',mode,-1,tab_id FROM chat_ownership WHERE id=? AND task_id=? AND tab_id=? AND mode=? AND computer_id=? AND epoch=? AND state='active'
+          ON CONFLICT(id) DO NOTHING`,
+          params: [raw.conversationId, raw.taskId, raw.tabId, value.mode, computerId, raw.epoch]
+        },
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_tab_bindings(tab_id,conversation_id)
+          SELECT o.tab_id,o.id FROM chat_ownership o JOIN terminal_tabs t ON t.id=o.tab_id AND t.task_id=o.task_id
+          WHERE o.id=? AND o.task_id=? AND o.tab_id=? AND o.mode=? AND o.computer_id=? AND o.epoch=? AND o.state='active'
+          ON CONFLICT(tab_id) DO NOTHING`,
+          params: [raw.conversationId, raw.taskId, raw.tabId, value.mode, computerId, raw.epoch]
+        },
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_threads(id,parent_tab_id,task_id,mode,parent_conversation_id,answer_id,source_message_id,source_uuid,title,created_at)
+          SELECT ?,?,?,?,?,?,?,?,'Thread',? WHERE EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id
+            WHERE b.tab_id=? AND o.id=? AND o.state='active') ON CONFLICT(id) DO NOTHING`,
+          params: [
+            raw.tabId,
+            value.parentTabId,
+            raw.taskId,
+            value.mode,
+            value.parentConversationId ?? '',
+            value.answerId ?? '',
+            value.sourceMessageId ?? '',
+            value.sourceUuid ?? '',
+            value.createdAt ?? Date.now(),
+            raw.tabId,
+            raw.conversationId
+          ]
+        }
+      ])
+      current = await ownership.get(raw.conversationId)
     }
     if (
       !current ||
@@ -337,13 +468,16 @@ export function createHubChatRelay(opts: {
         key = String(value.key)
       if (
         !allowed.has(key) ||
-        !['claude-chat', 'claude-code', 'codex-chat', 'codex'].includes(mode)
+        (!['claude-chat', 'claude-code', 'codex-chat', 'codex'].includes(mode) &&
+          mode !== current.mode)
       )
         throw new Error('Invalid provider metadata')
-      const path = `$.${JSON.stringify(mode)}`
-      await db.run(
-        `UPDATE tasks SET provider_config=(SELECT json_set(json_set(cfg,?,CASE WHEN json_type(cfg,?)='object' THEN json(json_extract(cfg,?)) ELSE json('{}') END),?,json(?)) FROM (SELECT CASE WHEN json_valid(provider_config) THEN provider_config ELSE '{}' END cfg)) WHERE id=?`,
-        [path, path, path, `${path}.${key}`, JSON.stringify(value.value), current.taskId]
+      await providerConfig.apply(
+        current.taskId,
+        mode,
+        key,
+        value.value,
+        value.revision === undefined ? 0 : Number(value.revision)
       )
     } else if (raw.kind === 'conversation') {
       const input = value as unknown as {
@@ -372,7 +506,9 @@ export function createHubChatRelay(opts: {
           | 'conversationId'
           | 'chatConversationId'
           | undefined,
-        mirrorProviderConfig: advance
+        // Current provider settings have their own task/provider revision.
+        // Session history replay must never bypass that authority.
+        mirrorProviderConfig: false
       })
       if (input.conversationId)
         await ownership.bindProvider(current.id, input.conversationId, input.mode)
@@ -424,7 +560,17 @@ export function createHubChatRelay(opts: {
       `SELECT a.task_id,o.computer_id FROM ${table} a LEFT JOIN ${locations} l ON l.${idColumn}=a.id LEFT JOIN chat_ownership o ON o.id=l.conversation_id WHERE a.id=?`,
       [id]
     )
-    if (previous && (previous.task_id !== current.taskId || previous.computer_id !== computerId))
+    const provisional =
+      isFolder &&
+      previous?.computer_id === null &&
+      (await db.get('SELECT 1 FROM chat_folder_placeholders WHERE folder_id=? AND task_id=?', [
+        id,
+        current.taskId
+      ]))
+    if (
+      previous &&
+      (previous.task_id !== current.taskId || (previous.computer_id !== computerId && !provisional))
+    )
       throw new Error('Artifact locator belongs to another owner')
     if (kind.endsWith('deleted')) {
       if (isFolder) await folderDeletions.record(current.taskId, [id])
@@ -457,8 +603,8 @@ export function createHubChatRelay(opts: {
           },
           {
             type: 'run',
-            sql: 'INSERT INTO chat_folder_locations(folder_id,conversation_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM artifact_folders WHERE id=? AND task_id=?) ON CONFLICT(folder_id) DO NOTHING',
-            params: [parent, current.id, parent, current.taskId]
+            sql: 'INSERT INTO chat_folder_placeholders(folder_id,task_id) SELECT ?,? WHERE changes()=1 ON CONFLICT(folder_id) DO NOTHING',
+            params: [parent, current.taskId]
           }
         ])
     }
@@ -481,6 +627,7 @@ export function createHubChatRelay(opts: {
       `INSERT INTO ${locations}(${idColumn},conversation_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM ${table} WHERE id=? AND task_id=?) ON CONFLICT(${idColumn}) DO NOTHING`,
       [id, current.id, id, current.taskId]
     )
+    if (isFolder) await db.run('DELETE FROM chat_folder_placeholders WHERE folder_id=?', [id])
   }
   const metadataChains = new Map<string, Promise<void>>()
   async function recoverMetadataNow(computerId: string, id: string) {
@@ -609,18 +756,22 @@ export function createHubChatRelay(opts: {
   async function drainMetadata(computerId: string, restore = false) {
     if (restore) {
       const owners = await db.all<{ id: string }>(
-        "SELECT id FROM chat_ownership WHERE computer_id=? AND state='active' ORDER BY id",
+        `SELECT id FROM chat_ownership o WHERE computer_id=? AND state='active' AND NOT EXISTS(
+          SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
         [computerId]
       )
       for (const owner of owners) await recoverMetadata(computerId, owner.id)
     }
-    const updates = (await opts.request(computerId, {
-      kind: 'pendingMetadata'
-    })) as ChatMetadataUpdate[]
-    updates.sort(
-      (a, b) => a.conversationId.localeCompare(b.conversationId) || a.sequence - b.sequence
-    )
-    for (const update of updates) await reconcileMetadata(computerId, update)
+    for (;;) {
+      const updates = (await opts.request(computerId, {
+        kind: 'pendingMetadata'
+      })) as ChatMetadataUpdate[]
+      updates.sort(
+        (a, b) => a.conversationId.localeCompare(b.conversationId) || a.sequence - b.sequence
+      )
+      for (const update of updates) await reconcileMetadata(computerId, update)
+      if (updates.length < 500) return
+    }
   }
   async function invoke(
     target: 'ops' | 'queue',
@@ -629,6 +780,7 @@ export function createHubChatRelay(opts: {
     operationId?: string
   ): Promise<unknown> {
     args = trimUnsetArgs(args)
+    if (target === 'queue' && method === 'push') args = structuredClone(args)
     if (target === 'ops' && method === 'supports') return supportsChatMode(String(args[0]))
     if (target === 'ops' && method === 'testSetWatchdogTimings') {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
@@ -639,27 +791,174 @@ export function createHubChatRelay(opts: {
     }
     if (target === 'ops' && catalogMethods.has(method))
       return catalogCall(method as ChatCatalogOperation, {}, args)
-    const owner = await route(target, method, args)
-    await sync(owner)
-    await opts.beforeInvoke?.(owner, method, args)
-    const read =
-      target === 'queue' ? method === 'list' : CHAT_READ_OPERATIONS.has(method as ChatOperation)
-    const result = await opts.request(owner.computerId!, {
-      kind: 'invoke',
-      value: {
-        route: { id: owner.id, epoch: owner.epoch },
-        target,
-        method,
-        args,
-        ...(!read ? { operationId: operationId ?? randomUUID() } : {})
-      }
-    })
-    if (!read) {
-      await drainMetadata(owner.computerId!)
-      if (['continueInTerminal', 'releaseConversation', 'remove', 'kill'].includes(method))
-        await refreshSessions(owner.computerId!)
+    // Take the entry fence before scope/bootstrap awaits can reorder callers.
+    // Push releases after its durable reservation ACK; clear/reset/stop retain
+    // the fence through mutation so later user submissions survive the clear.
+    const clearsQueue =
+      (target === 'queue' && method === 'clear') ||
+      (target === 'ops' && ['abortAndPop', 'reset', 'remove'].includes(method))
+    const ordered = (target === 'queue' && method === 'push') || clearsQueue
+    const first = args[0]
+    const entry = ordered
+      ? enterQueue(
+          first && typeof first === 'object' && 'tabId' in first
+            ? String(first.tabId)
+            : String(first)
+        )
+      : undefined
+    let owner: HubChatOwnership | undefined
+    const commandId = operationId ?? randomUUID()
+    let admission: QueueAdmission | undefined
+    let renewal: ReturnType<typeof setInterval> | undefined
+    let renewing = false
+    const queueControl = (name: string, values: unknown[], id: string = randomUUID()) => {
+      if (!owner?.computerId) throw new Error('Queue ownership unavailable')
+      return opts.request(owner.computerId, {
+        kind: 'invoke',
+        value: {
+          route: { id: owner.id, epoch: owner.epoch },
+          target: 'queue',
+          method: name,
+          args: values,
+          operationId: id
+        }
+      })
     }
-    return result
+    try {
+      if (entry) await entry.ready
+      if (
+        (target === 'ops' && ['kill', 'abortAndPop'].includes(method)) ||
+        (target === 'queue' && method === 'clear')
+      ) {
+        const tabId =
+          first && typeof first === 'object' && 'tabId' in first
+            ? String(first.tabId)
+            : String(first)
+        const existing = await ownership.forTab(tabId)
+        if (existing?.computerId && opts.chatRuntimeReady?.(existing.computerId) === false) {
+          await opts.gate?.(existing.computerId, existing.taskId)
+          if (existing.state !== 'active')
+            throw new Error('Chat stop ownership is not active during the computer update')
+          const call = parseChatInvocation({
+            route: { id: existing.id, epoch: existing.epoch },
+            target,
+            method,
+            args,
+            operationId: commandId
+          })
+          const context = call.args[0]
+          if (
+            context &&
+            typeof context === 'object' &&
+            'tabId' in context &&
+            (context.tabId !== existing.tabId ||
+              !('taskId' in context) ||
+              context.taskId !== existing.taskId ||
+              !('mode' in context) ||
+              context.mode !== existing.mode)
+          )
+            throw new Error('Chat stop ownership mismatch')
+          const stop = opts.stopRequest ?? opts.request
+          const request = (stopTarget: 'ops' | 'queue', stopMethod: string, id: string) =>
+            stop(existing.computerId!, {
+              kind: 'invoke',
+              value: {
+                route: call.route,
+                target: stopTarget,
+                method: stopMethod,
+                args: [existing.tabId],
+                operationId: id
+              }
+            })
+          if (method === 'clear') return request('queue', 'clear', commandId)
+          if (method === 'abortAndPop')
+            await request(
+              'queue',
+              'clear',
+              createHash('sha256')
+                .update('maintenance-stop-clear:' + commandId)
+                .digest('hex')
+            )
+          const result = await request('ops', 'kill', commandId)
+          // The old abort operation may spawn a new process. Only stop here;
+          // retain the in-flight user message for the replacement host to read.
+          return method === 'abortAndPop'
+            ? { popped: false, text: null, id: null, content: null }
+            : result
+        }
+      }
+      owner = await route(target, method, args)
+      await sync(owner)
+      if (target === 'queue' && method === 'push') {
+        // Reserve order before transferring files. Later requests can commit
+        // behind this slot, but the computer cannot drain past its pending head.
+        const inputHash = createHash('sha256').update(JSON.stringify(args)).digest('hex')
+        const key = createHash('sha256').update(commandId).digest('hex')
+        const supplied = structuredClone((args[3] ?? {}) as ChatQueuePushOptions)
+        const id = supplied.id ?? commandId
+        const reservationId = createHash('sha256')
+          .update('queue-reserve:' + commandId)
+          .digest('hex')
+        admission = (await queueControl(
+          'reserve',
+          [owner.tabId, id, key, inputHash],
+          reservationId
+        )) as QueueAdmission
+        args[3] = { ...supplied, id, admission: { key: admission.key, token: admission.token } }
+        renewal = setInterval(() => {
+          if (renewing) return
+          renewing = true
+          void queueControl('renewReservation', [
+            owner!.tabId,
+            { key: admission!.key, token: admission!.token }
+          ])
+            .catch(() => {
+              /* Expired leases are fenced by the final push. */
+            })
+            .finally(() => {
+              renewing = false
+            })
+        }, 30_000)
+        renewal.unref?.()
+        entry?.release()
+      }
+      await opts.beforeInvoke?.(owner, method, args)
+      const read =
+        target === 'queue' ? method === 'list' : CHAT_READ_OPERATIONS.has(method as ChatOperation)
+      const result = await opts.request(owner.computerId!, {
+        kind: 'invoke',
+        value: {
+          route: { id: owner.id, epoch: owner.epoch },
+          target,
+          method,
+          args,
+          ...(!read ? { operationId: commandId } : {})
+        }
+      })
+      if (!read) {
+        await drainMetadata(owner.computerId!)
+        if (['continueInTerminal', 'releaseConversation', 'remove', 'kill'].includes(method))
+          await refreshSessions(owner.computerId!)
+      }
+      return result
+    } catch (error) {
+      if (admission) {
+        const cancellationId = createHash('sha256')
+          .update('queue-cancel:' + commandId)
+          .digest('hex')
+        await queueControl(
+          'cancelReservation',
+          [owner!.tabId, { key: admission.key, token: admission.token }],
+          cancellationId
+        ).catch(() => {
+          /* The computer's bounded lease also releases a lost caller. */
+        })
+      }
+      throw error
+    } finally {
+      if (renewal) clearInterval(renewal)
+      entry?.release()
+    }
   }
   async function catalogCall(
     method: ChatCatalogOperation,
@@ -760,6 +1059,10 @@ export function createHubChatRelay(opts: {
     ensureTab,
     ensureTask,
     ensurePromptTask,
+    initializeOwner: initialize,
+    async resumeInitializations(computerId: string) {
+      for (const owner of await ownership.pendingBootstraps(computerId)) await initialize(owner)
+    },
     drainMetadata,
     reconcileMetadata,
     recoverMetadata,

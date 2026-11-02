@@ -40,7 +40,7 @@ export function createLocalWorkspaceStore(
         const o = store.forTab(tabId)
         if (!o) return []
         const events: WorkspaceChangesEvent[] = []
-        for (const row of store.records(o.identity.id)) {
+        for (const row of store.records(o.identity.id, 'workspace')) {
           if (row.kind !== 'workspace') continue
           const r = row.value as Record
           if (r.status !== 'pending' && !r.needsRecoveryEvent) continue

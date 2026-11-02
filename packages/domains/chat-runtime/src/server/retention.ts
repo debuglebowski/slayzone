@@ -96,9 +96,17 @@ export function createChatRetention(opts: {
               if (!valid()) return 0
               const events = db
                 .prepare(
-                  'SELECT seq FROM events WHERE conversation_id=? AND saved_at<? ORDER BY saved_at,seq LIMIT ?'
+                  `SELECT seq,json_extract(event,'$.kind') AS kind,
+                    json_extract(event,'$.sessionId') AS session_id,
+                    json_extract(event,'$.conversationId') AS branch_id
+                    FROM events WHERE conversation_id=? AND saved_at<? ORDER BY saved_at,seq LIMIT ?`
                 )
-                .all(i.id, cutoff, BATCH) as { seq: number }[]
+                .all(i.id, cutoff, BATCH) as {
+                seq: number
+                kind: string
+                session_id: string | null
+                branch_id: string | null
+              }[]
               if (!events.length) return 0
               store.putRecord(i.id, i.epoch, {
                 kind: 'settings',
@@ -111,7 +119,22 @@ export function createChatRetention(opts: {
                 i.id
               )
               const remove = db.prepare('DELETE FROM events WHERE conversation_id=? AND seq=?')
-              for (const e of events) remove.run(i.id, e.seq)
+              for (const e of events) {
+                const sessionId =
+                  e.kind === 'turn-init'
+                    ? e.session_id
+                    : e.kind === 'conversation-branch'
+                      ? e.branch_id
+                      : null
+                if (sessionId)
+                  store.putRecord(i.id, i.epoch, {
+                    kind: 'settings',
+                    id: `session-anchor:${e.seq}`,
+                    value: { seq: e.seq, sessionId },
+                    at: now
+                  })
+                remove.run(i.id, e.seq)
+              }
               return events.length
             })
             report.events += n
@@ -126,7 +149,7 @@ export function createChatRetention(opts: {
                 .prepare(`SELECT kind,id,value,saved_at FROM records WHERE conversation_id=? AND saved_at<? AND (
                 kind IN ('draft','queue','prompt','workspace') OR
                 (kind='thread' AND COALESCE(json_extract(value,'$.title'),'')<>'Thread') OR
-                (kind='settings' AND (id LIKE 'attachment-message:%' OR id LIKE 'diagnostic:%' OR id IN ('cli-snapshot','cli-models','cli-details')))
+                (kind='settings' AND (id LIKE 'attachment-message:%' OR id LIKE 'diagnostic:%' OR id LIKE 'legacy-turn-preview:%' OR id IN ('cli-snapshot','cli-models','cli-details')))
               ) ORDER BY saved_at,kind,id LIMIT ?`)
                 .all(i.id, cutoff, BATCH) as {
                 kind: ChatRecord['kind']

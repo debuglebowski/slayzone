@@ -4562,6 +4562,65 @@ export const migrations: Migration[] = [
         PRIMARY KEY(task_id,computer_id)
       );`)
     }
+  },
+  {
+    version: 189,
+    up(db) {
+      db.exec(`CREATE TABLE chat_bootstrap_reservations (
+        conversation_id TEXT PRIMARY KEY REFERENCES chat_ownership(id),
+        computer_id TEXT NOT NULL, epoch INTEGER NOT NULL CHECK(epoch > 0)
+      );
+      CREATE TABLE chat_folder_placeholders (
+        folder_id TEXT PRIMARY KEY REFERENCES artifact_folders(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL
+      );
+      CREATE TABLE chat_provider_config_revisions (
+        task_id TEXT NOT NULL,mode TEXT NOT NULL,revision INTEGER NOT NULL,config_hash TEXT,
+        PRIMARY KEY(task_id,mode)
+      );
+      CREATE TABLE chat_unavailable_owners (
+        conversation_id TEXT PRIMARY KEY REFERENCES chat_ownership(id),
+        computer_id TEXT NOT NULL,epoch INTEGER NOT NULL,reason TEXT NOT NULL
+      );`)
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_turns'").get())
+        db.exec(
+          `CREATE INDEX chat_legacy_turn_previews_task ON agent_turns(task_id) WHERE prompt_preview<>'';
+          CREATE TRIGGER agent_turns_ownership_delete BEFORE DELETE ON agent_turns
+          WHEN OLD.prompt_preview<>'' AND EXISTS(SELECT 1 FROM chat_ownership o WHERE o.task_id=OLD.task_id AND o.state IN ('copying','verified'))
+          BEGIN SELECT RAISE(ABORT,'Chat turn preview migration is pending'); END;`
+        )
+    }
+  },
+  {
+    version: 190,
+    up(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS artifact_blob_pins(
+        scope TEXT NOT NULL,owner_id TEXT NOT NULL,token TEXT NOT NULL,reference_key TEXT NOT NULL,
+        task_id TEXT NOT NULL,artifact_id TEXT NOT NULL,owner_epoch INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,size INTEGER NOT NULL,
+        PRIMARY KEY(scope,owner_id,token,reference_key)
+      );
+      CREATE INDEX IF NOT EXISTS artifact_blob_pins_hash ON artifact_blob_pins(content_hash);
+      CREATE TABLE IF NOT EXISTS artifact_blob_leases(id TEXT PRIMARY KEY,expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS artifact_blob_gc_pending(id INTEGER PRIMARY KEY CHECK(id=1));
+      CREATE TABLE IF NOT EXISTS artifact_blob_gc_generation(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL);
+      INSERT OR IGNORE INTO artifact_blob_gc_generation VALUES(1,0);
+      CREATE TRIGGER IF NOT EXISTS artifact_blob_gc_requested BEFORE INSERT ON artifact_blob_gc_pending
+      BEGIN UPDATE artifact_blob_gc_generation SET version=version+1 WHERE id=1; END;
+      CREATE TRIGGER chat_owner_blob_pins_deleted AFTER UPDATE OF state ON chat_ownership
+      WHEN NEW.state='deleted' BEGIN
+        INSERT OR IGNORE INTO artifact_blob_gc_pending SELECT 1 WHERE EXISTS(SELECT 1 FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND owner_id=NEW.id);
+        DELETE FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND owner_id=NEW.id;
+      END;
+      CREATE TRIGGER chat_owner_blob_pins_removed AFTER DELETE ON chat_ownership BEGIN
+        INSERT OR IGNORE INTO artifact_blob_gc_pending SELECT 1 WHERE EXISTS(SELECT 1 FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND owner_id=OLD.id);
+        DELETE FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND owner_id=OLD.id;
+      END;
+      CREATE TRIGGER chat_task_blob_pins_deleted AFTER DELETE ON tasks BEGIN
+        INSERT OR IGNORE INTO artifact_blob_gc_pending SELECT 1 WHERE EXISTS(SELECT 1 FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND task_id=OLD.id);
+        DELETE FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND task_id=OLD.id;
+      END;`)
+    }
   }
 ]
 

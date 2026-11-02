@@ -2,7 +2,11 @@
 import { connect, type Socket } from 'node:net'
 import { DuplexRpc, LineDecoder, RpcError } from '@slayzone/computer-transport/shared'
 
-export const HOST_CONTRACT_VERSION = 1
+// v2 adds computer-owned chat dispatch and content-safe notification delivery.
+// A v1 host is available only through an explicitly unready, stop-only bridge.
+export const HOST_CONTRACT_VERSION = 2
+/** v1 can only be bridged for inspecting/stopping work before an idle upgrade. */
+export const HOST_MAINTENANCE_MIN_CONTRACT_VERSION = 1
 export class ConnectorLease {
   private generation = 0
   claim(generation: number): boolean {

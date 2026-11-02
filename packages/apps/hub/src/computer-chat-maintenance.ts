@@ -5,6 +5,16 @@ const controls = new Set<string>([
   HubToComputerMethods.chatRequest,
   HubToComputerMethods.ping,
   HubToComputerMethods.computerShutdown,
+  // Stopping existing work cannot create a competing writer. Keep these usable
+  // while recovery is blocked so operators can safely reach host maintenance.
+  // Gateway authentication, project access and session ownership still apply.
+  HubToComputerMethods.ptyKill,
+  HubToComputerMethods.procKill,
+  HubToComputerMethods.ptyList,
+  HubToComputerMethods.procList,
+  HubToComputerMethods.ptyResize,
+  HubToComputerMethods.ptyWarmList,
+  HubToComputerMethods.ptyWarmKill,
   HubToComputerMethods.computerSetAllowedRoots,
   HubToComputerMethods.projectList,
   HubToComputerMethods.projectResolvePath,

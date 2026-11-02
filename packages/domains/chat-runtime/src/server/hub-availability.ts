@@ -8,6 +8,7 @@ export function createChatAvailability(opts: {
   ownership: ChatOwnershipStore
   resolveComputer(taskId: string): Promise<string | null>
   connected(computerId: string): boolean
+  chatRuntimeReady?(computerId: string): boolean
   hasLiveTask(taskId: string): Promise<boolean>
   gate?(computerId: string, taskId: string): Promise<void>
 }) {
@@ -40,7 +41,10 @@ export function createChatAvailability(opts: {
     if (tab.state === 'paused') return { state: 'paused', computer }
     if (!computer) return { state: 'unassigned', computer: null }
     if (!opts.connected(computer.id)) return { state: 'offline', computer }
+    if (opts.chatRuntimeReady?.(computer.id) === false) return { state: 'upgrading', computer }
     if (!owner) return { state: 'preparing', computer }
+    if (await opts.ownership.unavailable(owner.id)) return { state: 'unavailable', computer }
+    if (await opts.ownership.bootstrapReservation(owner.id)) return { state: 'preparing', computer }
     if (owner.state !== 'active' || owner.cleanupPending)
       return { state: 'migrating', computer, waitingForAgents: await opts.hasLiveTask(tab.task_id) }
     return { state: 'ready', computer }

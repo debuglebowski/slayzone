@@ -8,6 +8,113 @@ import { createLegacyChatSource } from './legacy-source'
 import { openChatStorage } from './storage'
 import { createChatTransfers } from './transfers'
 
+test('legacy migration preserves opaque attachment-shaped tool payloads in events and timeline projections', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const metadata = {
+      artifactId: 'external-object',
+      name: 'tool.txt',
+      kind: 'text',
+      mediaType: 'text/plain',
+      size: 7
+    }
+    const event = {
+      kind: 'tool-result',
+      toolUseId: 'call',
+      isError: false,
+      rawContent: metadata,
+      structured: { nested: metadata }
+    }
+    h.db
+      .prepare("INSERT INTO chat_events(tab_id,seq,event,saved_at) VALUES('tab',0,?,123)")
+      .run(JSON.stringify(event))
+    const row = {
+      kind: 'tool',
+      invocation: {
+        id: 'call',
+        name: 'external',
+        input: metadata,
+        status: 'done',
+        result: { rawContent: metadata }
+      },
+      timestamp: 123
+    }
+    const rows = JSON.stringify([row]),
+      data = JSON.stringify({
+        v: '10',
+        rowCount: 1,
+        tailFrom: 0,
+        tail: [row],
+        state: { arbitrary: metadata }
+      })
+    h.db
+      .prepare(
+        "INSERT INTO chat_timeline_pages(tab_id,page,start_row,end_row,rows,summary,search_text) VALUES('tab',0,0,0,?,'{}','')"
+      )
+      .run(rows)
+    h.db
+      .prepare(
+        "INSERT INTO chat_timeline_checkpoints(tab_id,version,seq,data,updated_at) VALUES('tab','10.1',0,?,123)"
+      )
+      .run(data)
+    const ownership = createChatOwnershipStore(h.slayDb)
+    const owner = await ownership.register({
+      id: 'store',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      epoch: 1,
+      computerId: null
+    })
+    const source = createLegacyChatSource({
+      db: h.slayDb,
+      quiesce: async () => {},
+      bootstrap: async () => ({
+        identity: { id: 'store', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 2 },
+        projectId: 'p',
+        cwd: '/tmp',
+        revision: 0,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }),
+      readAttachment: async () => {
+        throw new Error('Tool metadata is not a chat attachment')
+      }
+    })
+    const exported = await source.open(owner, 'move')
+    const chunks: Uint8Array[] = []
+    for await (const chunk of exported.chunks(0)) chunks.push(chunk)
+    const items = Buffer.concat(chunks)
+      .toString()
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map((line) => JSON.parse(line))
+    expect(items.find((item) => item.kind === 'event').value.event).toEqual(event)
+    expect(
+      items.find(
+        (item) =>
+          item.kind === 'record' && item.value.kind === 'timeline' && item.value.id === 'page:0'
+      ).value.value.rows
+    ).toBe(rows)
+    expect(
+      items.find(
+        (item) =>
+          item.kind === 'record' && item.value.kind === 'timeline' && item.value.id === 'checkpoint'
+      ).value.value.data
+    ).toBe(data)
+    expect(items.some((item) => item.kind === 'record' && item.value.kind === 'attachment')).toBe(
+      false
+    )
+  } finally {
+    h.cleanup()
+  }
+})
+
 test('legacy export preserves content and timestamps; cleanup leaves metadata only', async () => {
   const h = await createTestHarness(),
     dir = mkdtempSync(join(tmpdir(), 'chat-legacy-'))

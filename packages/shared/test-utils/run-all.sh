@@ -135,6 +135,8 @@ run_harness packages/apps/hub/src/processes-bad-input.test.ts
 # process) and that restore is refused on a hub the client merely connects to.
 run_harness packages/apps/hub/src/backup.test.ts
 run_harness packages/apps/hub/src/chat-backup.test.ts
+run_harness packages/apps/hub/src/backup-blobs.test.ts
+run_harness packages/apps/hub/src/backup-pins-review.test.ts
 # The E2E-only raw-SQL route. The GATE is the point: arbitrary SQL on a listener
 # that faces the internet in remote mode, so its absence must be asserted.
 run_harness packages/apps/hub/src/dev-sql.test.ts
@@ -675,6 +677,28 @@ run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
+# Migration, recovery and failure-atomicity regressions from the storage audits.
+run_harness packages/apps/hub/src/computer-chat-stability-audit.test.ts
+run_harness packages/apps/hub/src/artifacts-second-pass.test.ts
+run_harness packages/apps/hub/src/runtime-second-pass.test.ts
+run_harness packages/apps/hub/src/artifact-api-third-pass.test.ts
+run_harness packages/apps/hub/src/remote-third-pass.test.ts
+run_harness packages/apps/hub/src/historical-supervisor.test.ts
+run_harness packages/apps/hub/src/historical-chat-migration.test.ts
+# Optional private snapshots are supplied explicitly; default runs never read live state.
+run_harness packages/apps/hub/src/real-corpus-stability-audit.test.ts
+run_harness packages/apps/hub/src/real-metadata-stability-audit.test.ts
+run_harness packages/apps/hub/src/storage-stability-audit.test.ts
+run_harness packages/apps/hub/src/migration-stability-audit.test.ts
+run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
+run_harness packages/apps/hub/src/recovery-second-pass.test.ts
+run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
+run_harness packages/apps/hub/src/content-third-pass.test.ts
+run_harness packages/domains/chat-runtime/src/server/storage-recovery-fixes.test.ts
+run_harness packages/domains/chat-runtime/src/server/artifact-backup.test.ts
+run_harness packages/domains/chat-runtime/src/server/attachment-pin-review.test.ts
+run_harness packages/domains/chat-runtime/src/server/migration-attachment-pins.test.ts
+run_harness packages/domains/chat-runtime/src/server/queue-admission.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-ownership.test.ts
 run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
 run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
@@ -977,6 +1001,7 @@ skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.tes
 #
 # A few non-jsdom node suites ride along here for other reasons (vi.mock, node:sqlite).
 run_vitest_files "vitest (jsdom client suites)" \
+  packages/domains/task-terminals/src/client/chat/ChatStorageNotice.stability-audit.test.tsx \
   packages/apps/app/src/main/task-windows.test.ts \
   packages/apps/app/src/renderer/src/react-compiler-canary.test.tsx \
   packages/apps/app/src/main/boot-config.test.ts \

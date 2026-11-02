@@ -42,7 +42,11 @@ import { fork } from 'node:child_process'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
 import { atomicRuntimeJson, startSessionHost } from './session-host'
 import { startConnector } from './connector'
-import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
+import {
+  HOST_CONTRACT_VERSION,
+  HOST_MAINTENANCE_MIN_CONTRACT_VERSION
+} from '@slayzone/computer-runtime'
+import { COMPUTER_BUILD_ID } from './build-identity'
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -144,7 +148,16 @@ async function maybeInteractiveSetup(): Promise<{
 async function main(): Promise<void> {
   if (process.argv.includes('--runtime-contract')) {
     process.stdout.write(
-      JSON.stringify({ min: HOST_CONTRACT_VERSION, max: HOST_CONTRACT_VERSION }) + '\n'
+      JSON.stringify({
+        // Old supervisors understand only min/max. This connector can bridge
+        // v1 safely, while fullChatMin tells new supervisors to replace its host.
+        min: HOST_MAINTENANCE_MIN_CONTRACT_VERSION,
+        max: HOST_CONTRACT_VERSION,
+        fullChatMin: HOST_CONTRACT_VERSION,
+        maintenanceMin: HOST_MAINTENANCE_MIN_CONTRACT_VERSION,
+        buildId: COMPUTER_BUILD_ID,
+        version: COMPUTER_VERSION
+      }) + '\n'
     )
     return
   }

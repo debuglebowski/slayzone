@@ -10,7 +10,14 @@ import {
   isReadyForQueuedMessage,
   registerChatQueueDrainer
 } from './chat-transport-manager'
-import { createDbChatQueueData, type ChatQueueData } from './chat-queue-data'
+import {
+  createDbChatQueueData,
+  type ChatQueueData,
+  type ChatQueueAdmissions,
+  type ChatQueuePushOptions,
+  type QueueAdmission
+} from './chat-queue-data'
+import { randomUUID } from 'node:crypto'
 import { admitAttachments, type AttachmentLookup } from './chat-attachment-guard'
 import { createDbAttachmentLookup } from './chat-data-ops'
 import { getPtyHostBridge } from '../pty-host'
@@ -106,6 +113,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
 
   /** One drain at a time per tab: concurrent triggers queue up behind it. */
   const draining = new Map<string, Promise<void>>()
+  const admissionTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let closing = false
 
   /**
@@ -248,9 +256,37 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
    */
   function createChatQueueOps(
     db: SlayzoneDb,
-    data: ChatQueueData = createDbChatQueueData(db),
+    data: ChatQueueData & Partial<ChatQueueAdmissions> = createDbChatQueueData(db),
     lookup: AttachmentLookup = createDbAttachmentLookup(db)
   ) {
+    const admissionKey = (tabId: string, key: string) => JSON.stringify([tabId, key])
+    const clearAdmissionTimer = (tabId: string, key: string) => {
+      const timerKey = admissionKey(tabId, key)
+      const timer = admissionTimers.get(timerKey)
+      if (timer) clearTimeout(timer)
+      admissionTimers.delete(timerKey)
+    }
+    const watchAdmission = (tabId: string, admission: QueueAdmission): QueueAdmission => {
+      if (closing) return admission
+      clearAdmissionTimer(tabId, admission.key)
+      const key = admissionKey(tabId, admission.key)
+      const timer = setTimeout(
+        () => {
+          if (admissionTimers.get(key) !== timer) return
+          admissionTimers.delete(key)
+          if (closing) return
+          if (Date.now() < admission.expiresAt) {
+            watchAdmission(tabId, admission)
+            return
+          }
+          void drainChatQueue(db, tabId, data)
+        },
+        Math.max(1, admission.expiresAt - Date.now() + 1)
+      )
+      timer.unref?.()
+      admissionTimers.set(key, timer)
+      return admission
+    }
     // Wire drain into the transport so state transitions can pull from queue.
     // drainChatQueue is async; the drainer slot is fire-and-forget (invoked via
     // setImmediate in the transport), so float the promise explicitly.
@@ -275,27 +311,97 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
     return {
       list: (tabId: string): Promise<QueuedChatMessage[]> => data.list(tabId),
 
+      reserve: async (
+        tabId: string,
+        id: string,
+        key: string,
+        inputHash?: string
+      ): Promise<QueueAdmission> => {
+        if (!data.reserve) throw new Error('Queue admission unavailable')
+        return watchAdmission(tabId, await data.reserve(tabId, id, key, inputHash))
+      },
+      renewReservation: async (
+        tabId: string,
+        admission: Pick<QueueAdmission, 'key' | 'token'>
+      ): Promise<QueueAdmission> => {
+        if (!data.renewReservation) throw new Error('Queue admission unavailable')
+        return watchAdmission(tabId, await data.renewReservation(tabId, admission))
+      },
+      cancelReservation: async (
+        tabId: string,
+        admission: Pick<QueueAdmission, 'key' | 'token'>
+      ): Promise<void> => {
+        if (!data.cancelReservation) throw new Error('Queue admission unavailable')
+        await data.cancelReservation(tabId, admission)
+        clearAdmissionTimer(tabId, admission.key)
+        await drainChatQueue(db, tabId, data)
+      },
+
       push: async (
         tabId: string,
         send: string,
         original: string,
-        opts?: { id?: string; content?: UserContentBlock[]; expectedConversationId?: string }
+        opts?: ChatQueuePushOptions
       ): Promise<QueuedChatMessage> => {
-        const content = opts?.content ? await admit(tabId, opts.content) : undefined
-        const msg = await data.push(tabId, send, original, {
-          ...(opts?.id ? { id: opts.id } : {}),
-          ...(opts?.expectedConversationId
-            ? { expectedConversationId: opts.expectedConversationId }
-            : {}),
-          ...(content ? { content } : {})
-        })
-        broadcast('chat:queue-changed', tabId)
-        // Belt-and-suspenders drain: if the session is already idle when push
-        // lands (renderer's inFlight mirror lags the transport), no fresh
-        // state transition is coming — kick the drainer so the queue doesn't
-        // sit. drainChatQueue itself gates on idle so this is safe.
-        await drainChatQueue(db, tabId, data)
-        return msg
+        const id = opts?.id ?? randomUUID()
+        const admission =
+          opts?.admission ??
+          (data.reserve
+            ? watchAdmission(tabId, await data.reserve(tabId, id, randomUUID()))
+            : undefined)
+        let settled = false
+        let renewing = false
+        const renewal =
+          admission && !opts?.admission && data.renewReservation
+            ? setInterval(() => {
+                if (renewing || closing) return
+                renewing = true
+                void data.renewReservation!(tabId, admission)
+                  .then((next) => {
+                    watchAdmission(tabId, next)
+                  })
+                  .catch(() => {
+                    /* Final push checks the durable lease. */
+                  })
+                  .finally(() => {
+                    renewing = false
+                  })
+              }, 30_000)
+            : undefined
+        renewal?.unref?.()
+        try {
+          const content = opts?.content ? await admit(tabId, opts.content) : undefined
+          const msg = await data.push(tabId, send, original, {
+            id,
+            ...(admission ? { admission } : {}),
+            ...(opts?.expectedConversationId
+              ? { expectedConversationId: opts.expectedConversationId }
+              : {}),
+            ...(content ? { content } : {})
+          })
+          settled = true
+          broadcast('chat:queue-changed', tabId)
+          // Belt-and-suspenders drain: if the session is already idle when push
+          // lands (renderer's inFlight mirror lags the transport), no fresh
+          // state transition is coming — kick the drainer so the queue doesn't
+          // sit. drainChatQueue itself gates on idle so this is safe.
+          await drainChatQueue(db, tabId, data)
+          return msg
+        } catch (error) {
+          if (admission && data.cancelReservation) {
+            try {
+              await data.cancelReservation(tabId, admission)
+              settled = true
+              await drainChatQueue(db, tabId, data)
+            } catch {
+              /* The bounded lease retries cleanup after expiry. */
+            }
+          }
+          throw error
+        } finally {
+          if (renewal) clearInterval(renewal)
+          if (admission && settled) clearAdmissionTimer(tabId, admission.key)
+        }
       },
 
       /**
@@ -381,6 +487,8 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
   }
   async function close() {
     closing = true
+    for (const timer of admissionTimers.values()) clearTimeout(timer)
+    admissionTimers.clear()
     for (const tabId of holds.keys()) dropHolds(tabId)
     await Promise.allSettled(draining.values())
   }

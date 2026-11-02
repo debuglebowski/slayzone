@@ -7,6 +7,8 @@ export interface ComputerChatBackup {
   sizeBytes: number
   events: number
   conversations: number
+  /** Incomplete incoming migrations deferred to a later completed snapshot. */
+  deferredConversations?: number
   readOnlyRestore: true
   providerResumable: false
   error?: string
@@ -52,6 +54,14 @@ export interface ArchivedArtifactVersion {
   versionName: string | null
   createdAt: string
 }
+/** Current saved working bytes, captured without inventing a history version. */
+export interface ArchivedArtifactOriginal {
+  artifactId: string
+  name: string
+  contentHash: string
+  size: number
+  workingCopy: true
+}
 export interface ChatComputerOps {
   listBackups(computerId: string): Promise<ComputerChatBackup[]>
   createBackup(computerId: string, id: string): Promise<ComputerChatBackup>
@@ -93,7 +103,16 @@ export interface ChatComputerOps {
 }
 
 export interface ChatAvailability {
-  state: 'ready' | 'offline' | 'preparing' | 'migrating' | 'unassigned' | 'paused' | 'deleted'
+  state:
+    | 'ready'
+    | 'offline'
+    | 'preparing'
+    | 'migrating'
+    | 'unassigned'
+    | 'paused'
+    | 'deleted'
+    | 'unavailable'
+    | 'upgrading'
   computer: { id: string; name: string } | null
   waitingForAgents?: boolean
 }
@@ -108,6 +127,17 @@ export function chatAvailabilityMessage(
       return {
         title: `${name} is offline`,
         detail: 'Chat is stored there. Connect that computer to load history and send messages.'
+      }
+    case 'unavailable':
+      return {
+        title: 'Chat history unavailable',
+        detail: `${name} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
+      }
+    case 'upgrading':
+      return {
+        title: `${name} update waiting`,
+        detail:
+          'Finish or stop its running work to complete the update. Stopping for this update keeps the current message in history. Chat opens after the computer updates.'
       }
     case 'preparing':
       return {

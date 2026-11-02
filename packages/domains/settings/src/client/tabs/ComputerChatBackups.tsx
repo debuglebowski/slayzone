@@ -29,8 +29,10 @@ import {
 import {
   userMessageAttachments,
   type ArchivedArtifactVersion,
+  type ArchivedArtifactOriginal,
   type ChatAttachment,
-  type AgentEvent
+  type AgentEvent,
+  type QueuedChatMessage
 } from '@slayzone/terminal-contracts'
 import { useTRPC, useTRPCClient } from '../trpc'
 
@@ -216,6 +218,12 @@ function ComputerBackupList({ computerId, usable }: { computerId: string; usable
             <p className="text-xs text-muted-foreground">
               {backup.conversations} conversations · {(backup.sizeBytes / 1048576).toFixed(1)} MB
             </p>
+            {!!backup.deferredConversations && (
+              <p className="text-xs text-muted-foreground">
+                {backup.deferredConversations} incoming migrations deferred until transfer
+                completes.
+              </p>
+            )}
             {backup.error && (
               <p role="alert" className="text-destructive">
                 {backup.error}
@@ -373,7 +381,7 @@ function ArchiveConversation(target: {
       toast.error(errorMessage(e))
     }
   }
-  const saveFile = async (version: ArchivedArtifactVersion) => {
+  const saveFile = async (version: ArchivedArtifactVersion | ArchivedArtifactOriginal) => {
     try {
       const file = await api.chat.archives.file.query({
         ...target,
@@ -421,12 +429,32 @@ function ArchiveConversation(target: {
         </div>
       ))}
       {records.map((record) =>
-        record.kind === 'artifact-version' ? (
+        record.kind === 'artifact-version' || record.kind === 'artifact-original' ? (
           <ArchivedFileVersion
             key={record.cursor}
-            version={record.value as ArchivedArtifactVersion}
+            version={record.value as ArchivedArtifactVersion | ArchivedArtifactOriginal}
             onDownload={saveFile}
           />
+        ) : record.kind === 'queue' ? (
+          <div key={record.cursor} className="rounded border p-2 text-sm">
+            <p className="text-xs text-muted-foreground">Unsent queued message · read-only</p>
+            <p className="whitespace-pre-wrap break-words">
+              {(record.value as QueuedChatMessage).original ||
+                (record.value as QueuedChatMessage).send}
+            </p>
+            {userMessageAttachments((record.value as QueuedChatMessage).content ?? []).map(
+              (ref) => (
+                <Button
+                  key={`${ref.artifactId}:${ref.contentHash}`}
+                  size="sm"
+                  variant="link"
+                  onClick={() => void saveAttachment(ref)}
+                >
+                  {ref.name}
+                </Button>
+              )
+            )}
+          </div>
         ) : (
           <details key={record.cursor}>
             <summary className="text-sm">Saved {record.kind}</summary>
@@ -454,16 +482,18 @@ function ArchivedFileVersion({
   version,
   onDownload
 }: {
-  version: ArchivedArtifactVersion
-  onDownload: (version: ArchivedArtifactVersion) => Promise<void>
+  version: ArchivedArtifactVersion | ArchivedArtifactOriginal
+  onDownload: (version: ArchivedArtifactVersion | ArchivedArtifactOriginal) => Promise<void>
 }) {
   return (
     <div className="flex items-center justify-between gap-2 rounded border p-2 text-sm">
       <div>
         <p>{version.name}</p>
         <p className="text-xs text-muted-foreground">
-          Version {version.versionNum}
-          {version.versionName ? ` · ${version.versionName}` : ''} · {version.size} bytes
+          {'versionNum' in version
+            ? `Version ${version.versionNum}${version.versionName ? ` · ${version.versionName}` : ''}`
+            : 'Working copy'}{' '}
+          · {version.size} bytes
         </p>
       </div>
       <Button size="sm" variant="outline" onClick={() => void onDownload(version)}>
@@ -503,14 +533,21 @@ async function exportArchivedConversation(
       const draft = record.value as { draft?: { attachments?: ChatAttachment[] } }
       for (const ref of draft.draft?.attachments ?? [])
         refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
+    } else if (record.kind === 'queue') {
+      for (const ref of userMessageAttachments((record.value as QueuedChatMessage).content ?? []))
+        refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
     }
   const attachments: Array<{ ref: ChatAttachment; data: string }> = []
   for (const ref of refs.values())
     attachments.push({ ref, ...(await api.chat.archives.attachment.query({ ...target, ref })) })
-  const files: Array<{ version: ArchivedArtifactVersion; name: string; data: string }> = []
+  const files: Array<{
+    version: ArchivedArtifactVersion | ArchivedArtifactOriginal
+    name: string
+    data: string
+  }> = []
   for (const record of allRecords) {
-    if (record.kind !== 'artifact-version') continue
-    const version = record.value as ArchivedArtifactVersion
+    if (record.kind !== 'artifact-version' && record.kind !== 'artifact-original') continue
+    const version = record.value as ArchivedArtifactVersion | ArchivedArtifactOriginal
     files.push({
       version,
       ...(await api.chat.archives.file.query({

@@ -55,6 +55,9 @@ export function createComputerChatRuntime(opts: {
   }
   const prompts = createLocalPrompts(storage)
   const local = createLocalChatData(storage, opts.onMetadata)
+  // A restarted runtime has no in-flight admission to renew these slots. Cancel
+  // them before draining so a lost hub/host cannot block later accepted messages.
+  local.cancelPendingQueueAdmissions()
   const transfers = createChatTransfers(storage)
   transfers.collectActivated()
   const attachments = createLocalAttachments(storage, local)
@@ -193,10 +196,16 @@ export function createComputerChatRuntime(opts: {
     queueEvents: queueRuntime.chatQueueEvents,
     bootstrap: local.bootstrap,
     async deleteConversation(identity: import('../shared').ConversationIdentity) {
+      const parents = storage
+        .findRecords('thread', identity.taskId)
+        .filter((r) => r.id === identity.tabId)
+        .map((r) => storage.conversation(r.conversationId)?.identity.tabId)
       const closing = transport.removeSession(identity.tabId)
       storage.applyTombstone(identity)
       await closing
+      transfers.removeConversation(identity.id)
       attachments.collectGarbage()
+      for (const parent of parents) if (parent) transport.chatEvents.emit('threads-changed', parent)
       storage.checkpoint()
     },
     async applyTaskLifecycle(
@@ -237,6 +246,7 @@ export function createComputerChatRuntime(opts: {
       await backups.close()
       await queueRuntime.close()
       await transport.shutdownAll()
+      transfers.close()
       storage.close()
     }
   }

@@ -4,9 +4,10 @@ import type {
   ChatAttachment,
   ChatThread,
   AgentEvent,
-  WorkspaceChangesRecord
+  WorkspaceChangesRecord,
+  ChatTabState,
+  QueuedChatMessage
 } from '@slayzone/terminal-contracts'
-import { userMessageAttachments } from '@slayzone/terminal-contracts'
 import type {
   ChatRecord,
   ChatTransferHeader,
@@ -17,6 +18,12 @@ import { sessionRecordKey, type ChatBootstrap } from './local-data'
 import type { HubChatOwnership } from './hub-ownership'
 import type { ChatMigrationSource } from './migration'
 import { TRANSFER_CHUNK_BYTES } from './transfers'
+import { legacyChatTabContentSql } from './legacy-census'
+import { migrationAttachmentScope } from './migration-attachments'
+import {
+  LEGACY_CHAT_BLOB_PIN_SCOPE,
+  type MigrationAttachmentScope
+} from './migration-attachment-txns'
 
 const timestamp = (value: string) =>
   Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : value + 'Z')
@@ -43,6 +50,8 @@ export function createLegacyChatSource(opts: {
     candidate?: ChatRecord[]
   ): Promise<ChatRecord[] | null>
   readAttachment(owner: HubChatOwnership, ref: ChatAttachment): Promise<Uint8Array>
+  readPinnedAttachment?(scope: MigrationAttachmentScope, ref: ChatAttachment): Promise<Uint8Array>
+  collectReleasedAttachments?(): Promise<unknown>
 }): ChatMigrationSource {
   const { db } = opts
   async function* rows<T>(sql: string, params: unknown[]): AsyncGenerator<T> {
@@ -62,7 +71,10 @@ export function createLegacyChatSource(opts: {
   async function leader(taskId: string) {
     return (
       await db.get<{ id: string }>(
-        `SELECT id FROM terminal_tabs WHERE task_id=? AND mode IN ('claude-chat','codex-chat') AND NOT EXISTS(SELECT 1 FROM chat_threads WHERE id=terminal_tabs.id) ORDER BY created_at,id LIMIT 1`,
+        `SELECT id FROM terminal_tabs WHERE task_id=? AND (mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql('terminal_tabs')}
+          OR EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id
+            WHERE b.tab_id=terminal_tabs.id AND o.state<>'deleted'))
+          AND NOT EXISTS(SELECT 1 FROM chat_threads WHERE id=terminal_tabs.id) ORDER BY created_at,id LIMIT 1`,
         [taskId]
       )
     )?.id
@@ -165,20 +177,10 @@ export function createLegacyChatSource(opts: {
       }
     }
   }
-  async function* items(owner: HubChatOwnership, metadata: ChatRecord[]): AsyncGenerator<Item> {
-    const refs = new Map<string, ChatAttachment>()
-    const remember = (attachments: ChatAttachment[]) => {
-      for (const ref of attachments) refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-    }
+  async function* rawItems(owner: HubChatOwnership, metadata: ChatRecord[]): AsyncGenerator<Item> {
     for (const value of metadata) yield { kind: 'record', value }
-    for await (const r of rows<{
-      seq: number
-      event: string
-      saved_at: number | null
-      created_at: string
-    }>('SELECT seq+1 AS _rowid,* FROM chat_events WHERE tab_id=?', [owner.tabId])) {
+    for await (const r of eventRows(owner.tabId)) {
       const event = JSON.parse(r.event) as AgentEvent
-      if (event.kind === 'user-message') remember(userMessageAttachments(event.content ?? []))
       yield {
         kind: 'event',
         value: { seq: r.seq, at: r.saved_at ?? timestamp(r.created_at), event }
@@ -193,7 +195,6 @@ export function createLegacyChatSource(opts: {
     }>('SELECT * FROM chat_tab_state WHERE tab_id=?', [owner.tabId])
     if (draft) {
       const attachments = JSON.parse(draft.draft_attachments ?? '[]') as ChatAttachment[]
-      remember(attachments)
       yield record(
         'draft',
         'state',
@@ -214,7 +215,6 @@ export function createLegacyChatSource(opts: {
       conversation_id: string | null
     }>('SELECT rowid AS _rowid,* FROM chat_queue WHERE tab_id=?', [owner.tabId])) {
       const content = JSON.parse(r.content ?? '[]')
-      remember(userMessageAttachments(content))
       yield record(
         'queue',
         r.id,
@@ -312,6 +312,31 @@ export function createLegacyChatSource(opts: {
           yield { kind: 'record', value }
       for await (const r of rows<{
         id: string
+        terminal_tab_id: string
+        worktree_path: string
+        snapshot_sha: string
+        head_sha_at_snap: string | null
+        prompt_preview: string
+        created_at: number
+      }>("SELECT rowid AS _rowid,* FROM agent_turns WHERE task_id=? AND prompt_preview<>''", [
+        owner.taskId
+      ]))
+        yield record(
+          'settings',
+          `legacy-turn-preview:${r.id}`,
+          {
+            id: r.id,
+            tabId: r.terminal_tab_id,
+            worktreePath: r.worktree_path,
+            snapshotSha: r.snapshot_sha,
+            headShaAtSnap: r.head_sha_at_snap,
+            promptPreview: r.prompt_preview,
+            createdAt: r.created_at
+          },
+          r.created_at
+        )
+      for await (const r of rows<{
+        id: string
         agent_id: string
         cli_session_id: string | null
         text: string
@@ -335,30 +360,210 @@ export function createLegacyChatSource(opts: {
         [owner.taskId]
       )) {
         const attachments = JSON.parse(r.attachments) as ChatAttachment[]
-        remember(attachments)
         yield record('settings', `attachment-message:${r.message_id}`, attachments)
       }
     }
-    // A sealed reference pins the historical version, independent of later artifact edits.
-    const sealedIds = new Set<string>()
-    for (const ref of refs.values()) {
-      const version = ref.contentHash
-        ? { content_hash: ref.contentHash }
-        : await db.get<{ content_hash: string }>(
-            `SELECT v.content_hash FROM task_artifacts a JOIN artifact_versions v ON v.id=a.current_version_id WHERE a.id=? AND a.task_id=?`,
-            [ref.artifactId, owner.taskId]
-          )
-      if (!version?.content_hash) throw new Error('Migration attachment version is missing')
-      const sealedId = `${ref.artifactId}:${version.content_hash}`
-      if (sealedIds.has(sealedId)) continue
-      sealedIds.add(sealedId)
-      const sealed = { ...ref, contentHash: version.content_hash, taskId: owner.taskId }
-      yield record('attachment', `${ref.artifactId}:${version.content_hash}`, sealed)
+  }
+  async function* eventRows(tabId: string) {
+    let after = -1
+    for (;;) {
+      const batch = await db.all<{
+        seq: number
+        event: string
+        saved_at: number | null
+        created_at: string
+      }>(
+        'SELECT seq,event,saved_at,created_at FROM chat_events WHERE tab_id=? AND seq>? ORDER BY seq LIMIT 256',
+        [tabId, after]
+      )
+      if (!batch.length) return
+      for (const row of batch) {
+        after = row.seq
+        yield row
+      }
     }
   }
-  return {
+  const attachmentKey = (ref: ChatAttachment) => `${ref.artifactId}:${ref.contentHash ?? ''}`
+  function visitItem(item: Item, attachment: (ref: ChatAttachment) => ChatAttachment): Item {
+    const content = (blocks: import('@slayzone/terminal-contracts').UserContentBlock[]) =>
+      blocks.map((block) =>
+        block.type === 'attachment' ? { ...block, attachment: attachment(block.attachment) } : block
+      )
+    if (item.kind === 'event') {
+      const event = item.value.event
+      return event.kind === 'user-message' && event.content
+        ? {
+            ...item,
+            value: { ...item.value, event: { ...event, content: content(event.content) } }
+          }
+        : item
+    }
+    if (item.value.kind === 'draft') {
+      const value = item.value.value as ChatTabState
+      return {
+        ...item,
+        value: {
+          ...item.value,
+          value: {
+            ...value,
+            draft: { ...value.draft, attachments: value.draft.attachments.map(attachment) }
+          }
+        }
+      }
+    }
+    if (item.value.kind === 'queue') {
+      const value = item.value.value as QueuedChatMessage
+      return value.content
+        ? {
+            ...item,
+            value: { ...item.value, value: { ...value, content: content(value.content) } }
+          }
+        : item
+    }
+    if (item.value.kind === 'settings' && item.value.id.startsWith('attachment-message:'))
+      return {
+        ...item,
+        value: { ...item.value, value: (item.value.value as ChatAttachment[]).map(attachment) }
+      }
+    if (item.kind === 'record' && item.value.kind === 'timeline') {
+      const value = { ...(item.value.value as Record<string, unknown>) }
+      for (const key of ['rows', 'data'])
+        if (typeof value[key] === 'string') {
+          let changed = false
+          const row = (input: unknown) => {
+            if (!input || typeof input !== 'object') return input
+            const record = input as Record<string, unknown>
+            if (record.kind !== 'user-text' || !Array.isArray(record.attachments)) return input
+            return {
+              ...record,
+              attachments: record.attachments.map((ref: ChatAttachment) => {
+                const next = attachment(ref)
+                changed ||= next !== ref
+                return next
+              })
+            }
+          }
+          const decoded = JSON.parse(value[key]) as unknown
+          let mapped = decoded
+          if (key === 'rows' && Array.isArray(decoded)) mapped = decoded.map(row)
+          else if (key === 'data' && decoded && typeof decoded === 'object') {
+            const checkpoint = decoded as Record<string, unknown>
+            mapped = {
+              ...checkpoint,
+              ...(Array.isArray(checkpoint.tail) ? { tail: checkpoint.tail.map(row) } : {}),
+              ...(Array.isArray(checkpoint.timeline)
+                ? { timeline: checkpoint.timeline.map(row) }
+                : {})
+            }
+          }
+          if (changed) value[key] = JSON.stringify(mapped)
+        }
+      return { ...item, value: { ...item.value, value } }
+    }
+    return item
+  }
+  type AttachmentMap = Record<string, ChatAttachment>
+  async function attachmentManifest(
+    owner: HubChatOwnership,
+    metadata: ChatRecord[],
+    migrationId: string
+  ): Promise<AttachmentMap> {
+    const refs = new Map<string, ChatAttachment>()
+    for await (const item of rawItems(owner, metadata))
+      visitItem(item, (ref) => {
+        refs.set(attachmentKey(ref), ref)
+        return ref
+      })
+    if (!refs.size) return {}
+    const sealed = await db.namedTxn('chat-migration:pin-attachments', {
+      scope: await migrationAttachmentScope(db, owner, migrationId),
+      refs: [...refs.values()]
+    })
+    return Object.fromEntries([...refs.keys()].map((key, index) => [key, sealed[index]]))
+  }
+  async function* items(owner: HubChatOwnership, metadata: ChatRecord[]): AsyncGenerator<Item> {
+    const mapping = metadata.find(
+      (r) => r.kind === 'settings' && r.id === 'legacy-attachment-manifest'
+    )?.value as AttachmentMap | undefined
+    if (!mapping) throw new Error('Migration attachment manifest is missing')
+    for await (const item of rawItems(owner, metadata))
+      if (
+        !(
+          item.kind === 'record' &&
+          item.value.kind === 'settings' &&
+          item.value.id === 'legacy-attachment-manifest'
+        )
+      )
+        yield visitItem(item, (ref) => {
+          // The map may itself contain already sealed references.
+          const sealed =
+            mapping[attachmentKey(ref)] ??
+            Object.values(mapping).find(
+              (r) => r.artifactId === ref.artifactId && r.contentHash === ref.contentHash
+            )
+          if (!sealed) throw new Error('Migration attachment reference changed after checkpoint')
+          return { ...ref, contentHash: sealed.contentHash, size: sealed.size }
+        })
+    const emitted = new Set<string>()
+    for (const ref of Object.values(mapping)) {
+      const key = attachmentKey(ref)
+      if (emitted.has(key)) continue
+      emitted.add(key)
+      yield record('attachment', key, { ...ref, taskId: owner.taskId })
+    }
+  }
+  const source: ChatMigrationSource = {
     quiesce: opts.quiesce,
-    readAttachment: opts.readAttachment,
+    async pinAttachments(owner, refs) {
+      if (!refs.length) return
+      const scope = await migrationAttachmentScope(db, owner)
+      const validate = async () => {
+        for (const ref of refs)
+          await db.namedTxn('chat-migration:read-attachment-pin', { scope, ref })
+      }
+      try {
+        await validate()
+      } catch (error) {
+        const existing = await db.get(
+          `SELECT 1 FROM artifact_blob_pins WHERE scope=? AND owner_id=? AND token=? LIMIT 1`,
+          [LEGACY_CHAT_BLOB_PIN_SCOPE, owner.id, scope.migrationId]
+        )
+        if (existing) throw error // An established frozen scope cannot grow from a remote missing-list.
+        // Historical prepared transfers used bare embedded refs and no frozen
+        // map. Prove membership from genuine local source containers instead of
+        // rewriting their already verified transfer stream/checkpoint.
+        const metadata = (await opts.freezeMetadata?.(owner, scope.migrationId)) ?? []
+        const genuine: ChatAttachment[] = []
+        for await (const item of rawItems(owner, metadata))
+          visitItem(item, (ref) => {
+            genuine.push(ref)
+            return ref
+          })
+        const mapping = metadata.find(
+          (record) => record.kind === 'settings' && record.id === 'legacy-attachment-manifest'
+        )?.value as AttachmentMap | undefined
+        for (const requested of refs) {
+          const member = genuine.find(
+            (candidate) =>
+              candidate.artifactId === requested.artifactId &&
+              (!candidate.contentHash || candidate.contentHash === requested.contentHash) &&
+              (!mapping || mapping[attachmentKey(candidate)]?.contentHash === requested.contentHash)
+          )
+          if (!member) throw new Error('Prepared attachment is outside this frozen source')
+        }
+        // This still requires artifact/task/version provenance for every new
+        // pin. An arbitrary hash from a remote missing-list grants no access.
+        await db.namedTxn('chat-migration:pin-attachments', { scope, refs })
+        await validate()
+      }
+    },
+    async readAttachment(owner, ref) {
+      const scope = await migrationAttachmentScope(db, owner)
+      await db.namedTxn('chat-migration:read-attachment-pin', { scope, ref })
+      return opts.readPinnedAttachment
+        ? opts.readPinnedAttachment(scope, ref)
+        : opts.readAttachment(owner, ref)
+    },
     async open(owner, migrationId) {
       if (owner.computerId) throw new Error('Legacy source cannot export computer-owned history')
       let metadata = (await opts.freezeMetadata?.(owner, migrationId)) ?? null
@@ -366,8 +571,53 @@ export function createLegacyChatSource(opts: {
         const candidate: ChatRecord[] = []
         for await (const item of mutableMetadata(owner, await opts.bootstrap(owner)))
           if (item.kind === 'record') candidate.push(item.value)
+        candidate.push({
+          kind: 'settings',
+          id: 'legacy-attachment-manifest',
+          value: await attachmentManifest(owner, candidate, migrationId),
+          at: 0
+        })
         metadata = (await opts.freezeMetadata?.(owner, migrationId, candidate)) ?? candidate
       }
+      if (!metadata.some((r) => r.kind === 'settings' && r.id === 'legacy-attachment-manifest')) {
+        const upgraded: ChatRecord[] = [
+          ...metadata,
+          {
+            kind: 'settings',
+            id: 'legacy-attachment-manifest',
+            value: await attachmentManifest(owner, metadata, migrationId),
+            at: 0
+          }
+        ]
+        metadata = (await opts.freezeMetadata?.(owner, migrationId, upgraded)) ?? upgraded
+        if (!metadata.some((r) => r.kind === 'settings' && r.id === 'legacy-attachment-manifest'))
+          throw new Error(
+            'Computer cannot freeze the legacy attachment manifest; update the computer before retrying migration'
+          )
+      }
+      const mapping = metadata.find(
+        (record) => record.kind === 'settings' && record.id === 'legacy-attachment-manifest'
+      )!.value as AttachmentMap
+      const originals = new Map<string, ChatAttachment>()
+      for await (const item of rawItems(owner, metadata))
+        visitItem(item, (ref) => {
+          originals.set(attachmentKey(ref), ref)
+          return ref
+        })
+      if (Object.keys(mapping).some((key) => !originals.has(key)))
+        throw new Error('Frozen attachment map contains a reference outside this source')
+      const expected = [...originals].map(([key, ref]) => {
+        const pinned = mapping[key]
+        if (!pinned?.contentHash || pinned.artifactId !== ref.artifactId)
+          throw new Error('Frozen attachment map is incomplete or changed')
+        return { contentHash: pinned.contentHash, size: pinned.size }
+      })
+      if (originals.size)
+        await db.namedTxn('chat-migration:pin-attachments', {
+          scope: await migrationAttachmentScope(db, owner, migrationId),
+          refs: [...originals.values()],
+          expected
+        })
       const header: ChatTransferHeader = {
         format: 'slayzone-chat',
         version: 1,
@@ -446,6 +696,13 @@ export function createLegacyChatSource(opts: {
         authoritative.migration_id !== owner.migrationId
       )
         throw new Error('Legacy cleanup ownership changed')
+      // Membership must remain stable after deleting the native tab's last
+      // content row, including a retry after SQL cleanup already committed.
+      const ownsTaskContent =
+        owner.tabId === (await leader(owner.taskId)) ||
+        owner.tabId === `prompt-history:${owner.taskId}`
+      const diagnosticsCutoff =
+        opts.diagnostics && ownsTaskContent ? await opts.diagnostics.freeze(owner.taskId) : null
       await db.get('PRAGMA secure_delete=ON')
       const ops: BatchOp[] = [
         'chat_events',
@@ -459,10 +716,7 @@ export function createLegacyChatSource(opts: {
         sql: `DELETE FROM ${table} WHERE tab_id=?`,
         params: [owner.tabId]
       }))
-      if (
-        owner.tabId === (await leader(owner.taskId)) ||
-        owner.tabId === `prompt-history:${owner.taskId}`
-      ) {
+      if (ownsTaskContent) {
         ops.push(
           { type: 'run', sql: 'DELETE FROM agent_prompts WHERE task_id=?', params: [owner.taskId] },
           {
@@ -493,9 +747,21 @@ export function createLegacyChatSource(opts: {
       for (const table of ['chat_cli_snapshots', 'chat_cli_models', 'chat_cli_command_details'])
         ops.push({
           type: 'run',
-          sql: `DELETE FROM ${table} WHERE project_id=(SELECT project_id FROM tasks WHERE id=?) AND mode=? AND NOT EXISTS(SELECT 1 FROM terminal_tabs t JOIN tasks task ON task.id=t.task_id LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE task.project_id=(SELECT project_id FROM tasks WHERE id=?) AND t.mode=? AND (o.state IS NULL OR o.state<>'active'))`,
+          sql: `DELETE FROM ${table} WHERE project_id=(SELECT project_id FROM tasks WHERE id=?) AND mode=? AND NOT EXISTS(SELECT 1 FROM terminal_tabs t JOIN tasks task ON task.id=t.task_id LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE task.project_id=(SELECT project_id FROM tasks WHERE id=?)
+            AND COALESCE(o.mode,CASE t.mode WHEN 'claude-code' THEN 'claude-chat' WHEN 'codex' THEN 'codex-chat' ELSE t.mode END)=?
+            AND (o.state IS NULL OR o.state NOT IN ('active','deleted')))`,
           params: [owner.taskId, owner.mode, owner.taskId, owner.mode]
         })
+      ops.push({
+        type: 'run',
+        sql: 'DELETE FROM artifact_blob_pins WHERE scope=? AND owner_id=? AND token=?',
+        params: [LEGACY_CHAT_BLOB_PIN_SCOPE, owner.id, owner.migrationId]
+      })
+      ops.push({
+        type: 'run',
+        sql: 'INSERT OR IGNORE INTO artifact_blob_gc_pending VALUES(1)',
+        params: []
+      })
       ops.push({
         type: 'run',
         sql: "INSERT INTO settings(key,value) VALUES('computer_chat_compaction_generation','2') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(settings.value AS INTEGER)+1 AS TEXT)",
@@ -504,12 +770,11 @@ export function createLegacyChatSource(opts: {
       await db.batchTxn(ops)
       const checkpoint = await db.get<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
       if (checkpoint?.busy) throw new Error('Hub cleanup checkpoint is busy; retry cleanup')
-      if (
-        opts.diagnostics &&
-        (owner.tabId === (await leader(owner.taskId)) ||
-          owner.tabId === `prompt-history:${owner.taskId}`)
-      )
-        await opts.diagnostics.cleanup(owner.taskId, await opts.diagnostics.freeze(owner.taskId))
+      if (opts.diagnostics && diagnosticsCutoff !== null)
+        await opts.diagnostics.cleanup(owner.taskId, diagnosticsCutoff)
+      // A durable GC marker survives I/O failures; the reader's maintenance loop retries.
+      await opts.collectReleasedAttachments?.()
     }
   }
+  return source
 }

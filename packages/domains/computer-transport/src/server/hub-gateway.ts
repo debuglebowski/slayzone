@@ -61,6 +61,8 @@ import { wsDataByteLength, wsDataToText } from '../shared/ws-data'
 import { auditedHubCall } from './hub-audit'
 
 export interface ComputerDescriptor {
+  /** Explicitly false while an older host is connected only for maintenance. */
+  chatRuntimeReady?: boolean
   computerId: string
   name?: string
   platform?: string
@@ -646,6 +648,9 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
     const descriptor: ComputerDescriptor = {
       computerId: minted.computerId,
+      ...(parsed.data.chatRuntimeReady !== undefined
+        ? { chatRuntimeReady: parsed.data.chatRuntimeReady }
+        : {}),
       name: parsed.data.name,
       platform: parsed.data.platform,
       version: parsed.data.version,
@@ -786,6 +791,9 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
     const descriptor: ComputerDescriptor = {
       computerId: identity.computerId,
+      ...(parsed.data.chatRuntimeReady !== undefined
+        ? { chatRuntimeReady: parsed.data.chatRuntimeReady }
+        : {}),
       name: identity.name,
       platform: identity.platform,
       version: parsed.data.version ?? identity.version,

@@ -10,12 +10,16 @@ import {
   writeFileSync,
   openSync,
   closeSync,
-  fsyncSync
+  fsyncSync,
+  linkSync,
+  createReadStream
 } from 'node:fs'
 import path from 'node:path'
 import { containedPath } from '@slayzone/platform/safe-path'
 import type { ContentHash } from '../shared/types'
 import { VersionError } from './errors'
+
+const activeStaging = new Set<string>()
 
 export interface BlobWriteResult {
   hash: ContentHash
@@ -54,10 +58,16 @@ export class BlobStore {
 
   read(hash: ContentHash | string): Buffer {
     const p = this.blobPath(hash)
+    this.restoreDeleted(hash)
     if (!existsSync(p)) {
       throw new VersionError('BLOB_MISSING', `Blob not found: ${hash}`, { hash })
     }
-    return readFileSync(p)
+    const bytes = readFileSync(p)
+    if (createHash('sha256').update(bytes).digest('hex') !== hash)
+      throw new VersionError('BLOB_HASH_MISMATCH', `Blob hash integrity check failed: ${hash}`, {
+        hash
+      })
+    return bytes
   }
 
   /** Returns 0 if the blob is missing — caller must guard if that matters. */
@@ -75,21 +85,22 @@ export class BlobStore {
     const buf = typeof bytes === 'string' ? Buffer.from(bytes, 'utf-8') : bytes
     const hash = createHash('sha256').update(buf).digest('hex') as ContentHash
     const finalPath = this.blobPath(hash)
-    if (existsSync(finalPath)) {
+    if (existsSync(finalPath) && this.verify(hash)) {
       return { hash, size: buf.length, created: false }
     }
     mkdirSync(this.dirFor(hash), { recursive: true, mode: 0o700 })
     const tmpDir = path.join(this.rootDir, '.tmp')
     mkdirSync(tmpDir, { recursive: true, mode: 0o700 })
-    const tmpPath = path.join(tmpDir, randomUUID())
-    const fd = openSync(tmpPath, 'wx', 0o600)
+    const tmpPath = path.join(tmpDir, `${process.pid}-${randomUUID()}`)
+    activeStaging.add(tmpPath)
     try {
-      writeFileSync(fd, buf)
-      fsyncSync(fd)
-    } finally {
-      closeSync(fd)
-    }
-    try {
+      const fd = openSync(tmpPath, 'wx', 0o600)
+      try {
+        writeFileSync(fd, buf)
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
       renameSync(tmpPath, finalPath)
       if (process.platform !== 'win32') {
         for (const dir of [this.dirFor(hash), this.rootDir]) {
@@ -108,8 +119,36 @@ export class BlobStore {
         // ignore
       }
       throw err
+    } finally {
+      activeStaging.delete(tmpPath)
     }
     return { hash, size: buf.length, created: true }
+  }
+
+  /** Remove abandoned writes; never race a write owned by a live foreign process. */
+  collectStaging(): number {
+    const dir = path.join(this.rootDir, '.tmp')
+    if (!existsSync(dir)) return 0
+    let removed = 0
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const match = /^(?:(\d+)-)?[a-f0-9-]{36}$/.exec(entry.name)
+      if (!match) continue
+      const file = path.join(dir, entry.name)
+      if (activeStaging.has(file)) continue
+      const pid = match[1] ? Number(match[1]) : null
+      if (pid && pid !== process.pid) {
+        try {
+          process.kill(pid, 0)
+          continue
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ESRCH') continue
+        }
+      }
+      rmSync(file, { force: true })
+      removed++
+    }
+    return removed
   }
 
   delete(hash: ContentHash | string): boolean {
@@ -117,6 +156,63 @@ export class BlobStore {
     if (!existsSync(p)) return false
     rmSync(p, { force: true })
     return true
+  }
+
+  /** Keep a durable link until a later GC observes the committed database. */
+  stageDelete(hash: ContentHash | string): void {
+    const source = this.blobPath(hash)
+    if (!existsSync(source)) return
+    const dir = path.join(this.rootDir, '.gc')
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const saved = containedPath(dir, hash)
+    if (!existsSync(saved)) linkSync(source, saved)
+    if (process.platform !== 'win32') {
+      for (const target of [dir, this.rootDir]) {
+        const fd = openSync(target, 'r')
+        try {
+          fsyncSync(fd)
+        } finally {
+          closeSync(fd)
+        }
+      }
+    }
+  }
+
+  restoreDeleted(hash: ContentHash | string): void {
+    const destination = this.blobPath(hash)
+    const saved = containedPath(path.join(this.rootDir, '.gc'), hash)
+    if (existsSync(destination) || !existsSync(saved)) return
+    mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 })
+    linkSync(saved, destination)
+    if (process.platform !== 'win32') {
+      const fd = openSync(path.dirname(destination), 'r')
+      try {
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+    }
+  }
+
+  collectDeleted(referenced: ReadonlySet<string>): number {
+    const dir = path.join(this.rootDir, '.gc')
+    if (!existsSync(dir)) return 0
+    let removed = 0
+    for (const hash of readdirSync(dir)) {
+      if (!/^[a-f0-9]{64}$/.test(hash)) continue
+      if (referenced.has(hash)) this.restoreDeleted(hash)
+      rmSync(path.join(dir, hash), { force: true })
+      removed++
+    }
+    return removed
+  }
+
+  /** Restoring committed references is safe even while a backup leases blobs. */
+  restoreReferenced(referenced: ReadonlySet<string>): void {
+    const dir = path.join(this.rootDir, '.gc')
+    if (!existsSync(dir)) return
+    for (const hash of readdirSync(dir))
+      if (/^[a-f0-9]{64}$/.test(hash) && referenced.has(hash)) this.restoreDeleted(hash)
   }
 
   /**
@@ -145,6 +241,16 @@ export class BlobStore {
     if (!existsSync(p)) return false
     const actual = createHash('sha256').update(readFileSync(p)).digest('hex')
     return actual === hash
+  }
+
+  /** Path/stream consumers can verify large historical files without buffering them. */
+  async verifyAsync(hash: ContentHash | string): Promise<boolean> {
+    this.restoreDeleted(hash)
+    const file = this.blobPath(hash)
+    if (!existsSync(file)) return false
+    const digest = createHash('sha256')
+    for await (const chunk of createReadStream(file)) digest.update(chunk)
+    return digest.digest('hex') === hash
   }
 }
 

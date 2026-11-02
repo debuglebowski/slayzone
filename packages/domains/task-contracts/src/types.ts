@@ -666,7 +666,8 @@ export interface UpdateArtifactInput {
 }
 
 export interface ArtifactFolder {
-  storage?: { computerId: string; available: boolean }
+  /** Null while reconnect recovery knows the folder ID but not its original computer. */
+  storage?: { computerId: string | null; available: boolean }
 
   id: string
   task_id: string

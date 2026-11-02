@@ -7,7 +7,9 @@ export const chatIdentitySchema = z.object({
   id,
   taskId: id,
   tabId: id,
-  mode: z.enum(['claude-chat', 'codex-chat']),
+  // Historical storage can outlive a supported provider/backend. Execution
+  // schemas below still constrain which modes may start an agent.
+  mode: z.string().min(1).max(200),
   epoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 })
 export const chatRouteSchema = z.object({
@@ -207,11 +209,15 @@ const queueOptions = z
   .object({
     id: id.optional(),
     content: chatContentSchema.optional(),
+    admission: z.object({ key: id, token: id }).optional(),
     expectedConversationId: id.optional()
   })
   .optional()
 export const chatQueueOperationSchemas = {
   list: tab,
+  reserve: z.tuple([id, id, id, id.optional()]),
+  renewReservation: z.tuple([id, z.object({ key: id, token: id })]),
+  cancelReservation: z.tuple([id, z.object({ key: id, token: id })]),
   push: z.tuple([id, text, text, queueOptions]),
   update: z.tuple([id, z.object({ send: text, original: text, content: chatContentSchema })]),
   move: z.tuple([id, z.number().int().nonnegative()]),
@@ -290,6 +296,13 @@ export const chatBootstrapSchema = z.object({
   defaultFlags: z.string().nullable(),
   settings: z.record(z.string(), z.string().nullable()).optional(),
   terminalProviderConfig: z.record(z.string(), z.unknown()).optional(),
+  providerConfigRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  terminalProviderConfigRevision: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
   honoredConversations: z.array(z.string()).optional(),
   honoredSessions: z.array(z.object({ mode: z.string(), conversationId: z.string() })).optional(),
   deletedConversations: z

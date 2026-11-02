@@ -61,7 +61,7 @@ test('metadata recovery preserves custom, removed and other native provider mode
         value: { ...update.value, mode }
       })
       expect(record).toHaveBeenLastCalledWith(
-        expect.objectContaining({ mode, createdAt: 123, mirrorProviderConfig: true })
+        expect.objectContaining({ mode, createdAt: 123, mirrorProviderConfig: false })
       )
     }
     await expect(
@@ -350,5 +350,72 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
     await pc.close()
     h.cleanup()
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('closing a newly visible answer thread atomically fences its first owner registration', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('parent','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'parent-store',
+      taskId: 'task',
+      tabId: 'parent',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    let closed = false
+    const closeVisibleChild = () => {
+      if (closed || !h.db.prepare("SELECT 1 FROM terminal_tabs WHERE id='child'").get()) return
+      closed = true
+      h.db.prepare("DELETE FROM terminal_tabs WHERE id='child'").run()
+    }
+    const run = h.slayDb.run.bind(h.slayDb),
+      batch = h.slayDb.batchTxn.bind(h.slayDb)
+    h.slayDb.run = async (sql, params) => {
+      const result = await run(sql, params)
+      if (sql.includes('INSERT INTO terminal_tabs')) closeVisibleChild()
+      return result
+    }
+    h.slayDb.batchTxn = async (operations) => {
+      const result = await batch(operations)
+      if (operations.some((op) => op.sql.includes('INSERT INTO terminal_tabs'))) closeVisibleChild()
+      return result
+    }
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      request: async () => null,
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      recordConversation: async () => {},
+      bootstrap: async () => {
+        throw new Error('No bootstrap expected')
+      },
+      migrate: async () => {
+        throw new Error('No migration expected')
+      }
+    })
+    await relay
+      .reconcileMetadata('pc', {
+        conversationId: 'child-store',
+        taskId: 'task',
+        tabId: 'child',
+        epoch: 1,
+        kind: 'thread-created',
+        operationId: 'thread-introduction',
+        sequence: 1,
+        value: { parentTabId: 'parent', mode: 'claude-chat' }
+      })
+      .catch(() => {})
+    expect(closed).toBe(true)
+    expect(h.db.prepare("SELECT 1 FROM terminal_tabs WHERE id='child'").get()).toBeUndefined()
+    expect(await ownership.get('child-store')).toMatchObject({ state: 'deleted', epoch: 2 })
+  } finally {
+    h.cleanup()
   }
 })

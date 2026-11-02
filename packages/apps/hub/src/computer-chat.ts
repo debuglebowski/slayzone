@@ -22,11 +22,16 @@ import {
   createChatOwnershipStore,
   createChatMigration,
   createLegacyChatSource,
+  legacyChatTabContentSql,
+  legacyChatTaskContentSql,
   createHubChatRelay,
+  createHubProviderConfigStore,
+  terminalStorageMode,
   type ChatComputerRequest,
   type HubChatOwnership,
   type ChatBootstrap,
-  type LegacyChatDiagnostics
+  type LegacyChatDiagnostics,
+  createChatMigrationAttachmentReader
 } from '@slayzone/chat-runtime/server'
 import {
   defaultConversationRegistry,
@@ -39,11 +44,14 @@ export function createComputerChatServices(opts: {
   db: SlayzoneDb
   diagnostics?: LegacyChatDiagnostics
   legacyData: ChatDataOps
-  attachments: ChatAttachmentReader
+  attachments: ChatAttachmentReader & {
+    readForMigration?: ReturnType<typeof createChatMigrationAttachmentReader>
+  }
   request: ChatComputerRequest
   resolveComputer(taskId: string): Promise<string | null>
   resolveAvailabilityComputer?(taskId: string): Promise<string | null>
   connected?(computerId: string): boolean
+  chatRuntimeReady?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   admitComputer?(computerId: string): Promise<void>
@@ -60,6 +68,7 @@ export function createComputerChatServices(opts: {
   ): void | Promise<void>
 }) {
   const ownership = createChatOwnershipStore(opts.db)
+  const providerConfigs = createHubProviderConfigStore(opts.db)
   const folderDeletions = createChatFolderDeletions(opts.db)
   const lifecycle = createChatLifecycle({ db: opts.db, request: opts.request })
   const request = lifecycle.request
@@ -71,11 +80,33 @@ export function createComputerChatServices(opts: {
     recoveryFinished.delete(computerId)
   }
   function recoverComputer(computerId: string, force = false) {
+    if (opts.chatRuntimeReady?.(computerId) === false) {
+      invalidateRecovery(computerId)
+      return Promise.reject(
+        new Error(
+          'Computer update pending. Stop its running agents to finish the update before opening chat.'
+        )
+      )
+    }
     if (force && recoveryFinished.has(computerId)) invalidateRecovery(computerId)
     const existing = recovered.get(computerId)
     if (existing) return existing
     const work = recovery
       .reconcile(computerId)
+      .then(() => lifecycle.sync(computerId))
+      .then(() => relay.resumeInitializations(computerId))
+      .then(async () => {
+        // A hub CAS can commit before the destination receives activation. Do
+        // not request active metadata from that still-prepared destination.
+        const owners = await opts.db.all<{ id: string }>(
+          `SELECT id FROM chat_ownership o WHERE (
+            (destination_computer_id=? AND state IN ('copying','verified')) OR
+            (computer_id=? AND state='active' AND cleanup_pending=1)) AND NOT EXISTS(
+              SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
+          [computerId, computerId]
+        )
+        for (const owner of owners) await migration.ensure(owner.id, computerId)
+      })
       .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
       .then(() => relay.drainMetadata(computerId, true))
       .then(() => lifecycle.sync(computerId))
@@ -123,7 +154,7 @@ export function createComputerChatServices(opts: {
       }
     const computerId = owner.destinationComputerId ?? owner.computerId
     if (!computerId) throw new Error('Chat computer is unassigned')
-    const terminalMode = terminalModeForChat(owner.mode) ?? owner.mode
+    const terminalMode = terminalStorageMode(owner.mode)
     const projectRoot = task.project_id
       ? await opts.legacyData.getProjectRoot(task.project_id, computerId)
       : null
@@ -161,9 +192,18 @@ export function createComputerChatServices(opts: {
         [owner.taskId, owner.mode, terminalMode]
       )
     }
+    // Capture values and their authority revision together after asynchronous
+    // environment/settings work. An old captured value cannot acquire a newer
+    // revision after a concurrent edit has already reached the computer.
+    const provider = await providerConfigs.snapshot(owner.taskId, owner.mode)
+    const terminal = await providerConfigs.snapshot(owner.taskId, terminalMode)
+    values.providerConfig = provider.value
+    values.terminalProviderConfig = terminal.value
     const hash = createHash('sha256').update(JSON.stringify(values)).digest('hex')
     return {
       ...values,
+      providerConfigRevision: provider.revision,
+      terminalProviderConfigRevision: terminal.revision,
       revision: (await ownership.get(owner.id))
         ? await ownership.settingsRevision(owner.id, hash)
         : 0
@@ -187,6 +227,8 @@ export function createComputerChatServices(opts: {
     db: opts.db,
     bootstrap: async (owner) => ({ ...(await bootstrap(owner)), env: {}, revision: 0 }),
     readAttachment: (_owner, ref) => opts.attachments.read(ref),
+    readPinnedAttachment: opts.attachments.readForMigration,
+    collectReleasedAttachments: opts.attachments.readForMigration?.collectGarbage,
     quiesce: async (owner) => {
       if (await opts.hasLiveTask(owner.taskId))
         throw new Error(
@@ -253,6 +295,7 @@ export function createComputerChatServices(opts: {
     ...opts,
     recordConversation: (input) => opts.legacyData.recordConversation(input),
     request,
+    stopRequest: opts.request,
     ownership,
     hasLegacyTaskContent: async (taskId) =>
       opts.diagnostics?.hasTask
@@ -296,7 +339,7 @@ export function createComputerChatServices(opts: {
             'This provider session belongs to another computer. Open its original chat to continue.'
           )
         if (defaultConversationRegistry.isConversationLive('terminal', owner.taskId, session)) {
-          if (['continueInChat', 'takeOver'].includes(method))
+          if (['continueInChat', 'takeOver', 'switchConversation'].includes(method))
             await defaultConversationRegistry.releaseConversation('terminal', owner.taskId, session)
           else if (
             ![
@@ -451,6 +494,7 @@ export function createComputerChatServices(opts: {
       ownership,
       resolveComputer: opts.resolveAvailabilityComputer ?? opts.resolveComputer,
       connected: opts.connected ?? (() => false),
+      chatRuntimeReady: opts.chatRuntimeReady,
       hasLiveTask: opts.hasLiveTask,
       gate: opts.gate
     }),
@@ -459,7 +503,10 @@ export function createComputerChatServices(opts: {
       const tasks = new Set(
         (
           await opts.db.all<{ task_id: string }>(
-            "SELECT DISTINCT t.task_id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE t.mode IN ('claude-chat','codex-chat') AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1) UNION SELECT DISTINCT task_id FROM agent_prompts"
+            `SELECT DISTINCT t.task_id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id
+              WHERE (t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql()})
+              AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1)
+              UNION SELECT task.id AS task_id FROM tasks task WHERE ${legacyChatTaskContentSql()}`
           )
         ).map((t) => t.task_id)
       )
@@ -477,7 +524,9 @@ export function createComputerChatServices(opts: {
         try {
           const owners = await ownership.forTask(taskId)
           const tab = await opts.db.get<{ id: string }>(
-            "SELECT t.id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE t.task_id=? AND t.mode IN ('claude-chat','codex-chat') AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1) ORDER BY t.created_at,t.id LIMIT 1",
+            `SELECT t.id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE t.task_id=?
+              AND (t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql()})
+              AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1) ORDER BY t.created_at,t.id LIMIT 1`,
             [taskId]
           )
           const recorded = tab
@@ -519,7 +568,11 @@ export function createComputerChatServices(opts: {
             (o) => o.state === 'active' && o.computerId && !o.tabId.startsWith('artifact-store:')
           )
           .map(async (owner) => {
-            await request(owner.computerId!, {
+            if (await ownership.unavailable(owner.id)) return
+            await opts.gate?.(owner.computerId!, owner.taskId)
+            const stop =
+              opts.chatRuntimeReady?.(owner.computerId!) === false ? opts.request : request
+            await stop(owner.computerId!, {
               kind: 'invoke',
               value: {
                 route: { id: owner.id, epoch: owner.epoch },
@@ -545,7 +598,11 @@ export function createComputerChatServices(opts: {
       const existing = (await ownership.forTask(taskId)).find(
         (o) => o.state === 'active' && o.computerId === pc && o.tabId.startsWith('artifact-store:')
       )
-      if (existing) return existing
+      if (existing) {
+        const unavailable = await ownership.unavailable(existing.id)
+        if (unavailable) throw new Error(unavailable.reason)
+        return existing
+      }
       const identity = {
         id: `artifact-store:${createHash('sha256')
           .update(JSON.stringify([taskId, pc]))
@@ -558,21 +615,8 @@ export function createComputerChatServices(opts: {
         epoch: 1,
         computerId: pc
       }
-      const provisional: HubChatOwnership = {
-        ...identity,
-        state: 'active',
-        migrationId: null,
-        destinationComputerId: null,
-        sourceComputerId: null,
-        manifestHash: null,
-        cleanupPending: false,
-        settingsRevision: 0,
-        settingsHash: null
-      }
       await lifecycle.track(taskId, pc)
-      await request(pc, { kind: 'bootstrap', value: await bootstrap(provisional) })
-      const owner = await ownership.register(identity)
-      return owner
+      return relay.initializeOwner(await ownership.reserveBootstrap(identity))
     },
     recoverComputer,
     ownership,
@@ -585,6 +629,14 @@ export function createComputerChatServices(opts: {
       taskId: string,
       context?: { mode?: string; conversationId?: string | null }
     ) {
+      const assertTaskHistory = async () => {
+        const missing = await opts.db.get<{ reason: string }>(
+          `SELECT u.reason FROM chat_unavailable_owners u JOIN chat_ownership o ON o.id=u.conversation_id
+          WHERE o.task_id=? AND o.state='active' AND o.computer_id=u.computer_id AND o.epoch=u.epoch LIMIT 1`,
+          [taskId]
+        )
+        if (missing) throw new Error(missing.reason)
+      }
       const lifecycleState = await opts.db.get<{ state: string }>(
         'SELECT state FROM chat_task_lifecycle WHERE task_id=?',
         [taskId]
@@ -609,6 +661,7 @@ export function createComputerChatServices(opts: {
         native && context?.mode ? await ownership.forProviderSession(native, context.mode) : null
       if (owner) {
         await recoverComputer(owner.computerId!)
+        await assertTaskHistory()
         await lifecycle.sync(owner.computerId!)
         if (owner.taskId !== taskId || owner.state !== 'active' || !owner.computerId)
           throw new Error('Provider session ownership is unavailable')
@@ -618,6 +671,7 @@ export function createComputerChatServices(opts: {
       const computerId = await opts.resolveComputer(taskId)
       if (computerId) {
         await recoverComputer(computerId)
+        await assertTaskHistory()
         await lifecycle.track(taskId, computerId)
         await lifecycle.sync(computerId)
       }

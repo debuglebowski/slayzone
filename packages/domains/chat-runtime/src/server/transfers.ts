@@ -7,6 +7,7 @@ import {
   writeSync,
   fsyncSync,
   statSync,
+  lstatSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -18,6 +19,7 @@ import {
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { ChatMigrationSnapshot, ChatTransferHeader, ChatTransferManifest } from '../shared'
+import { chatTransferManifestSchema } from '../shared'
 import type { ChatStorage } from './storage'
 export const TRANSFER_CHUNK_BYTES = 256 * 1024
 export function encodeTransfer(snapshot: ChatMigrationSnapshot) {
@@ -80,13 +82,106 @@ export function createChatTransfers(store: ChatStorage) {
   }
   function save(id: string, p: Progress) {
     const tmp = path(id, '.json.tmp')
-    writeFileSync(tmp, JSON.stringify(p), { mode: 0o600 })
+    const fd = openSync(tmp, 'w', 0o600)
+    try {
+      writeFileSync(fd, JSON.stringify(p))
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
     renameSync(tmp, path(id, '.json'))
+    syncDirectory()
   }
-  return {
+  function syncDirectory() {
+    if (process.platform === 'win32') return
+    const fd = openSync(dir, 'r')
+    try {
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+  }
+  function erase(id: string) {
+    // Keep the ownership-bearing descriptor until payload removal succeeds, so
+    // startup and deletion retries can finish an interrupted cleanup.
+    for (const suffix of ['.data', '.json.tmp', '.json'])
+      if (existsSync(path(id, suffix))) unlinkSync(path(id, suffix))
+    syncDirectory()
+  }
+  function entries() {
+    const result: Array<{ id: string; header: ChatTransferHeader; progress?: Progress }> = []
+    const ids = new Set(
+      readdirSync(dir)
+        .filter((name) => /^[a-f0-9]{64}\.(data|json(?:\.tmp)?)$/.test(name))
+        .map((name) => name.slice(0, 64))
+    )
+    for (const id of ids) {
+      let progress: Progress | undefined
+      for (const suffix of ['.json', '.json.tmp']) {
+        try {
+          const value = JSON.parse(readFileSync(path(id, suffix), 'utf8')) as Progress
+          const manifest = chatTransferManifestSchema.parse(value.manifest)
+          if (
+            Number.isSafeInteger(value.offset) &&
+            value.offset >= 0 &&
+            value.offset <= manifest.bytes
+          ) {
+            progress = { manifest, offset: value.offset }
+            break
+          }
+        } catch {
+          /* Recover identity from the self-describing payload below. */
+        }
+      }
+      if (progress) {
+        result.push({ id, progress, header: progress.manifest.header })
+        continue
+      }
+      // A crash can persist payload bytes before their progress descriptor. The
+      // bounded first line is sufficient to honor later owner/task tombstones.
+      try {
+        if (!lstatSync(path(id, '.data')).isFile()) continue
+        const fd = openSync(path(id, '.data'), 'r'),
+          buffer = Buffer.alloc(64 * 1024)
+        let bytes: number
+        try {
+          bytes = readSync(fd, buffer, 0, buffer.length, 0)
+        } finally {
+          closeSync(fd)
+        }
+        const newline = buffer.subarray(0, bytes).indexOf(10)
+        if (newline < 0) continue
+        const header = chatTransferManifestSchema.shape.header.parse(
+          JSON.parse(buffer.subarray(0, newline).toString('utf8'))
+        )
+        result.push({ id, header })
+      } catch {
+        // Unidentifiable damage cannot justify deleting another owner's data.
+      }
+    }
+    return result
+  }
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
+  function retryCleanup() {
+    if (closed || retryTimer) return
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined
+      if (closed) return
+      try {
+        api.collectActivated()
+      } catch {
+        retryCleanup()
+      }
+    }, 5000)
+    retryTimer.unref()
+  }
+  const api = {
     begin(manifest: ChatTransferManifest) {
       if (store.taskLifecycle(manifest.header.identity.taskId).state === 'deleted')
         throw new Error('Task chat history was deleted')
+      if (store.conversation(manifest.header.identity.id)?.state === 'deleted')
+        throw new Error('Conversation deleted')
       if (
         !/^[a-f0-9]{64}$/.test(manifest.hash) ||
         !Number.isSafeInteger(manifest.bytes) ||
@@ -112,6 +207,11 @@ export function createChatTransfers(store: ChatStorage) {
     },
     chunk(id: string, offset: number, bytes: Uint8Array) {
       const p = load(id)
+      if (
+        store.conversation(p.manifest.header.identity.id)?.state === 'deleted' ||
+        store.taskLifecycle(p.manifest.header.identity.taskId).state === 'deleted'
+      )
+        throw new Error('Conversation deleted')
       if (
         !Number.isSafeInteger(offset) ||
         offset < 0 ||
@@ -163,36 +263,71 @@ export function createChatTransfers(store: ChatStorage) {
       }
     },
     collectActivated() {
-      for (const name of readdirSync(dir)) {
-        if (!/^[a-f0-9]{64}\.json$/.test(name)) continue
-        const id = name.slice(0, -5)
-        let p: Progress
+      let pending = 0
+      for (const { id, header, progress: p } of entries()) {
         try {
-          p = load(id)
-          if (!p?.manifest?.header?.identity?.id || !p.manifest.hash) continue
+          const owner = store.conversation(header.identity.id)
+          if (
+            owner?.state === 'deleted' ||
+            store.taskLifecycle(header.identity.taskId).state === 'deleted'
+          ) {
+            erase(id)
+            continue
+          }
+          if (
+            owner?.state === 'active' &&
+            owner.migrationId === header.migrationId &&
+            owner.identity.epoch === header.identity.epoch + 1 &&
+            (!p || owner.migrationHash === p.manifest.hash) &&
+            existsSync(path(id, '.data'))
+          ) {
+            unlinkSync(path(id, '.data'))
+            syncDirectory()
+          }
         } catch {
-          continue
-        } // A damaged staging file cannot block readable live history.
-        const owner = store.conversation(p.manifest.header.identity.id)
-        if (
-          owner?.state === 'active' &&
-          owner.migrationId === p.manifest.header.migrationId &&
-          owner.migrationHash === p.manifest.hash &&
-          existsSync(path(id, '.data'))
-        )
-          unlinkSync(path(id, '.data'))
+          // Explicit deletion still throws on failure. Background cleanup keeps
+          // healthy history usable and retries without claiming deletion ACK.
+          pending++
+        }
       }
+      if (pending) retryCleanup()
+      return { pending }
     },
     removeTask(taskId: string) {
-      for (const name of readdirSync(dir))
-        if (/^[a-f0-9]{64}\.json$/.test(name)) {
-          const id = name.slice(0, -5),
-            p = load(id)
-          if (p.manifest.header.identity.taskId !== taskId) continue
-          for (const suffix of ['.data', '.json'])
-            if (existsSync(path(id, suffix))) unlinkSync(path(id, suffix))
-        }
+      for (const { id, header } of entries()) if (header.identity.taskId === taskId) erase(id)
     },
-    progress: (id: string) => load(id)
+    removeConversation(conversationId: string) {
+      for (const { id, header } of entries()) if (header.identity.id === conversationId) erase(id)
+    },
+    resume(conversationId: string): ChatTransferManifest | null {
+      const owner = store.conversation(conversationId)
+      if (owner?.state !== 'prepared') return null
+      for (const { progress: p } of entries()) {
+        if (!p) continue
+        const h = p.manifest.header
+        if (
+          h.identity.id !== conversationId ||
+          h.migrationId !== owner.migrationId ||
+          p.manifest.hash !== owner.migrationHash
+        )
+          continue
+        if (
+          h.identity.taskId !== owner.identity.taskId ||
+          h.identity.tabId !== owner.identity.tabId ||
+          h.identity.mode !== owner.identity.mode ||
+          h.identity.epoch + 1 !== owner.identity.epoch ||
+          p.offset !== p.manifest.bytes
+        )
+          throw new Error('Prepared transfer proof mismatch')
+        return p.manifest
+      }
+      return null
+    },
+    progress: (id: string) => load(id),
+    close() {
+      closed = true
+      if (retryTimer) clearTimeout(retryTimer)
+    }
   }
+  return api
 }

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import type {
   ChatDataOps,
   ChatQueueData,
+  ChatQueueAdmissions,
+  QueueAdmission,
   ProviderConfigEntry,
   TimelineWrite,
   ChatThreadStore
@@ -20,7 +22,6 @@ import type {
 } from '@slayzone/terminal-contracts'
 import {
   userMessageAttachments,
-  chatModeForTerminal,
   isSyntheticChatPrompt,
   chatCapabilitiesForMode,
   defaultChatModeSettingKey,
@@ -29,6 +30,7 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import type { ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
+import { chatStorageMode, terminalStorageMode } from './storage-mode'
 
 export const sessionRecordKey = (mode: string, conversationId: string | null): string =>
   `session:${JSON.stringify([mode, conversationId])}`
@@ -39,10 +41,12 @@ export interface ChatBootstrap {
   cwd: string
   revision: number
   providerConfig: ProviderConfigEntry
+  providerConfigRevision?: number
   defaultFlags: string | null
   settings?: Record<string, string | null>
   env: Record<string, string>
   terminalProviderConfig?: ProviderConfigEntry
+  terminalProviderConfigRevision?: number
   honoredConversations?: string[]
   honoredSessions?: Array<{ mode: string; conversationId: string }>
   deletedConversations?: Array<{ mode: string; conversationId: string }>
@@ -101,9 +105,9 @@ export function createLocalChatData(
       .listForTask(taskId)
       .filter(
         (r) =>
-          r.state !== 'deleted' &&
+          r.state === 'active' &&
           !store.getRecord(r.identity.id, 'settings', 'inbox') &&
-          (!mode || r.identity.mode === (chatModeForTerminal(mode) ?? mode))
+          (!mode || r.identity.mode === chatStorageMode(mode))
       )
     const root =
       choices.find((r) => !store.getRecord(r.identity.id, 'settings', 'thread-parent')) ??
@@ -140,22 +144,83 @@ export function createLocalChatData(
       })
     })
   }
+  function providerState(
+    taskId: string,
+    mode: string
+  ): { value: ProviderConfigEntry; revision: number } {
+    return store.transaction(() =>
+      store.compose((db) => {
+        const current = db
+          .prepare('SELECT value,revision FROM provider_configs WHERE task_id=? AND mode=?')
+          .get(taskId, mode) as { value: string; revision: number } | undefined
+        if (current) return { ...current, value: JSON.parse(current.value) as ProviderConfigEntry }
+        const tabId = taskTab(taskId, mode),
+          key = owner(tabId).mode === mode ? 'provider' : `provider:${mode}`
+        // Upgrade old per-tab caches once. Active edits carry the newest saved_at;
+        // a prepared sibling is never eligible to become task configuration.
+        const candidates = store
+          .findRecords('settings', taskId, { id: key })
+          .filter((r) => {
+            const o = store.conversation(r.conversationId)
+            return (
+              o?.state === 'active' &&
+              o.identity.mode === chatStorageMode(mode) &&
+              !store.getRecord(o.identity.id, 'settings', 'inbox')
+            )
+          })
+          .sort(
+            (a, b) =>
+              b.at - a.at ||
+              Number(b.conversationId === owner(tabId).id) -
+                Number(a.conversationId === owner(tabId).id)
+          )
+        const value = (candidates[0]?.value as ProviderConfigEntry | undefined) ?? {}
+        db.prepare('INSERT INTO provider_configs VALUES(?,?,0,?)').run(
+          taskId,
+          mode,
+          JSON.stringify(value)
+        )
+        return { value, revision: 0 }
+      })
+    )
+  }
   function provider(taskId: string, mode: string): ProviderConfigEntry {
-    const tabId = taskTab(taskId, mode)
-    return (
-      get<ProviderConfigEntry>(
-        tabId,
-        'settings',
-        owner(tabId).mode === mode ? 'provider' : `provider:${mode}`
-      ) ?? {}
+    return providerState(taskId, mode).value
+  }
+  function bootstrapProvider(
+    value: ChatBootstrap,
+    mode: string,
+    config: ProviderConfigEntry,
+    revision?: number
+  ) {
+    const current = providerState(value.identity.taskId, mode)
+    if (revision === undefined || revision <= current.revision) return
+    const localSession = current.value.chatConversationId
+    const next = {
+      ...config,
+      ...(localSession && !deleted(value.identity.taskId, mode, localSession)
+        ? { chatConversationId: localSession }
+        : {})
+    }
+    store.compose((db) =>
+      db
+        .prepare('UPDATE provider_configs SET value=?,revision=? WHERE task_id=? AND mode=?')
+        .run(JSON.stringify(next), revision, value.identity.taskId, mode)
     )
   }
   function patchSync(taskId: string, mode: string, key: keyof ProviderConfigEntry, value: unknown) {
     store.transaction(() => {
       const tabId = taskTab(taskId, mode),
-        next = { ...provider(taskId, mode), [key]: value }
+        current = providerState(taskId, mode),
+        next = { ...current.value, [key]: value },
+        revision = current.revision + 1
+      store.compose((db) =>
+        db
+          .prepare('UPDATE provider_configs SET value=?,revision=? WHERE task_id=? AND mode=?')
+          .run(JSON.stringify(next), revision, taskId, mode)
+      )
       set(tabId, 'settings', owner(tabId).mode === mode ? 'provider' : `provider:${mode}`, next)
-      metadata(tabId, 'provider-config', { mode, key, value })
+      metadata(tabId, 'provider-config', { mode, key, value, revision })
     })
   }
   async function patch(
@@ -171,7 +236,7 @@ export function createLocalChatData(
     return (
       !!id &&
       store
-        .findRecords('settings', taskId)
+        .findRecords('settings', taskId, { id: 'deleted-sessions' })
         .some(
           (r) =>
             r.id === 'deleted-sessions' &&
@@ -182,73 +247,116 @@ export function createLocalChatData(
     )
   }
   function bootstrap(value: ChatBootstrap) {
-    const existing = store.conversation(value.identity.id)
-    store.createConversation(value.identity)
-    if (value.identity.tabId.startsWith('artifact-store:'))
-      set(value.identity.tabId, 'settings', 'inbox', true)
-    store.transaction(() => {
-      const previous =
-        get<Array<{ mode: string; conversationId: string }>>(
+    return store.transaction(() => {
+      // Elect old computer-authoritative caches before this bootstrap can refresh
+      // a stale sibling's timestamp (including when the sibling is newly created).
+      for (const mode of [
+        value.identity.mode,
+        ...(value.terminalProviderConfig ? [terminalStorageMode(value.identity.mode)] : [])
+      ]) {
+        const present = store.compose((db) =>
+          db
+            .prepare('SELECT 1 FROM provider_configs WHERE task_id=? AND mode=?')
+            .get(value.identity.taskId, mode)
+        )
+        if (present) continue
+        const key = mode === chatStorageMode(mode) ? 'provider' : `provider:${mode}`
+        if (
+          store.findRecords('settings', value.identity.taskId, { id: key }).some((r) => {
+            const o = store.conversation(r.conversationId)
+            return (
+              o?.state === 'active' &&
+              o.identity.mode === chatStorageMode(mode) &&
+              !store.getRecord(o.identity.id, 'settings', 'inbox')
+            )
+          })
+        )
+          providerState(value.identity.taskId, mode)
+      }
+      const existing = store.conversation(value.identity.id)
+      store.createConversation(value.identity)
+      if (value.identity.tabId.startsWith('artifact-store:'))
+        set(value.identity.tabId, 'settings', 'inbox', true)
+      store.transaction(() => {
+        const previous =
+          get<Array<{ mode: string; conversationId: string }>>(
+            value.identity.tabId,
+            'settings',
+            'deleted-sessions'
+          ) ?? []
+        const all = new Map(previous.map((v) => [`${v.mode}:${v.conversationId}`, v]))
+        for (const v of value.deletedConversations ?? [])
+          all.set(`${v.mode}:${v.conversationId}`, v)
+        if (all.size) set(value.identity.tabId, 'settings', 'deleted-sessions', [...all.values()])
+      })
+      const previous = store.getRecord<ChatBootstrap>(value.identity.id, 'settings', 'bootstrap')
+      if (!previous || value.revision > previous.revision) {
+        if (value.settings) {
+          const settingsId = {
+            id: '__slz_settings__',
+            taskId: '__slz_settings__',
+            tabId: '__slz_settings__',
+            mode: 'claude-chat',
+            epoch: 1
+          }
+          store.createConversation(settingsId)
+          for (const [id, setting] of Object.entries(value.settings))
+            store.putRecord(settingsId.id, 1, {
+              kind: 'settings',
+              id,
+              value: setting,
+              at: Date.now()
+            })
+        }
+        set(value.identity.tabId, 'settings', 'bootstrap', value)
+        if (!existing || value.revision > (previous?.revision ?? -1)) {
+          // Session ids are computer-authoritative once an agent has confirmed them.
+          const local = get<ProviderConfigEntry>(value.identity.tabId, 'settings', 'provider')
+          set(value.identity.tabId, 'settings', 'provider', {
+            ...value.providerConfig,
+            ...(local?.chatConversationId &&
+            !deleted(value.identity.taskId, value.identity.mode, local.chatConversationId)
+              ? { chatConversationId: local.chatConversationId }
+              : {})
+          })
+        }
+      }
+      if (value.terminalProviderConfig) {
+        const mode = terminalStorageMode(value.identity.mode)
+        if (!previous || value.revision > previous.revision)
+          set(value.identity.tabId, 'settings', `provider:${mode}`, value.terminalProviderConfig)
+      }
+      if (!get(value.identity.tabId, 'settings', 'inbox'))
+        store.transaction(() => {
+          bootstrapProvider(
+            value,
+            value.identity.mode,
+            value.providerConfig,
+            value.providerConfigRevision
+          )
+          if (value.terminalProviderConfig)
+            bootstrapProvider(
+              value,
+              terminalStorageMode(value.identity.mode),
+              value.terminalProviderConfig,
+              value.terminalProviderConfigRevision
+            )
+        })
+      for (const id of value.honoredConversations ?? [])
+        if (!get(value.identity.tabId, 'settings', `session:${id}`))
+          set(value.identity.tabId, 'settings', `session:${id}`, { conversationId: id })
+      for (const session of value.honoredSessions ?? [])
+        set(
           value.identity.tabId,
           'settings',
-          'deleted-sessions'
-        ) ?? []
-      const all = new Map(previous.map((v) => [`${v.mode}:${v.conversationId}`, v]))
-      for (const v of value.deletedConversations ?? []) all.set(`${v.mode}:${v.conversationId}`, v)
-      if (all.size) set(value.identity.tabId, 'settings', 'deleted-sessions', [...all.values()])
+          `session-proof:${session.mode}:${session.conversationId}`,
+          true
+        )
     })
-    const previous = store.getRecord<ChatBootstrap>(value.identity.id, 'settings', 'bootstrap')
-    if (!previous || value.revision > previous.revision) {
-      if (value.settings) {
-        const settingsId = {
-          id: '__slz_settings__',
-          taskId: '__slz_settings__',
-          tabId: '__slz_settings__',
-          mode: 'claude-chat',
-          epoch: 1
-        }
-        store.createConversation(settingsId)
-        for (const [id, setting] of Object.entries(value.settings))
-          store.putRecord(settingsId.id, 1, {
-            kind: 'settings',
-            id,
-            value: setting,
-            at: Date.now()
-          })
-      }
-      set(value.identity.tabId, 'settings', 'bootstrap', value)
-      if (!existing || value.revision > (previous?.revision ?? -1)) {
-        // Session ids are computer-authoritative once an agent has confirmed them.
-        const local = get<ProviderConfigEntry>(value.identity.tabId, 'settings', 'provider')
-        set(value.identity.tabId, 'settings', 'provider', {
-          ...value.providerConfig,
-          ...(local?.chatConversationId &&
-          !deleted(value.identity.taskId, value.identity.mode, local.chatConversationId)
-            ? { chatConversationId: local.chatConversationId }
-            : {})
-        })
-      }
-    }
-    if (value.terminalProviderConfig) {
-      const mode = value.identity.mode === 'claude-chat' ? 'claude-code' : 'codex'
-      if (!previous || value.revision > previous.revision)
-        set(value.identity.tabId, 'settings', `provider:${mode}`, value.terminalProviderConfig)
-    }
-    for (const id of value.honoredConversations ?? [])
-      if (!get(value.identity.tabId, 'settings', `session:${id}`))
-        set(value.identity.tabId, 'settings', `session:${id}`, { conversationId: id })
-    for (const session of value.honoredSessions ?? [])
-      set(
-        value.identity.tabId,
-        'settings',
-        `session-proof:${session.mode}:${session.conversationId}`,
-        true
-      )
   }
   const queued = (tabId: string): QueuedChatMessage[] =>
     store
-      .records(owner(tabId).id)
-      .filter((r) => r.kind === 'queue')
+      .records(owner(tabId).id, 'queue')
       .map((r) => r.value as QueuedChatMessage)
       .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
   function queueItem(id: string) {
@@ -259,6 +367,107 @@ export function createLocalChatData(
     [K in keyof ChatQueueData]: (
       ...args: Parameters<ChatQueueData[K]>
     ) => Awaited<ReturnType<ChatQueueData[K]>>
+  }
+  type AdmissionRecord = QueueAdmission & {
+    id: string
+    inputHash?: string
+    position: number
+    state: 'pending' | 'cancelled'
+  }
+  const admissionPrefix = 'queue-admission:'
+  function queueAdmissions(tabId: string): AdmissionRecord[] {
+    return store.compose((db) =>
+      (
+        db
+          .prepare(
+            "SELECT value FROM records WHERE conversation_id=? AND kind='settings' AND id>=? AND id<?"
+          )
+          .all(owner(tabId).id, admissionPrefix, admissionPrefix + '\uffff') as Array<{
+          value: string
+        }>
+      ).map((r) => JSON.parse(r.value) as AdmissionRecord)
+    )
+  }
+  function pendingAdmissions(tabId: string): AdmissionRecord[] {
+    const pending: AdmissionRecord[] = []
+    for (const reservation of queueAdmissions(tabId)) {
+      if (reservation.state !== 'pending') continue
+      if (reservation.expiresAt <= Date.now())
+        remove(tabId, 'settings', admissionPrefix + reservation.key)
+      else pending.push(reservation)
+    }
+    return pending
+  }
+  function requireAdmission(
+    tabId: string,
+    value: Pick<QueueAdmission, 'key' | 'token'>
+  ): AdmissionRecord {
+    const found = get<AdmissionRecord>(tabId, 'settings', admissionPrefix + value.key)
+    if (
+      !found ||
+      found.token !== value.token ||
+      found.state !== 'pending' ||
+      found.expiresAt <= Date.now()
+    )
+      throw new Error('Queue admission was cancelled or expired; submit the message again')
+    return found
+  }
+  const reserveQueue: ChatQueueAdmissions['reserve'] = atomic((tabId, id, key, inputHash) => {
+    const old = get<AdmissionRecord>(tabId, 'settings', admissionPrefix + key)
+    if (old) {
+      const current = requireAdmission(tabId, old)
+      if (current.id !== id || current.inputHash !== inputHash)
+        throw new Error('Queue admission id conflict')
+      return current
+    }
+    const previous = queueItem(id)
+    if (previous && previous.tabId !== tabId) throw new Error('Queue operation id conflict')
+    const position =
+      [...queued(tabId), ...pendingAdmissions(tabId)].reduce(
+        (n, item) => Math.max(n, item.position),
+        -1
+      ) + 1
+    const reservation: AdmissionRecord = {
+      id,
+      ...(inputHash ? { inputHash } : {}),
+      key,
+      token: randomUUID(),
+      position,
+      state: 'pending',
+      expiresAt: Date.now() + 120_000
+    }
+    set(tabId, 'settings', admissionPrefix + key, reservation)
+    return reservation
+  })
+  const renewQueue: ChatQueueAdmissions['renewReservation'] = atomic((tabId, value) => {
+    const reservation = requireAdmission(tabId, value)
+    const next = { ...reservation, expiresAt: Date.now() + 120_000 }
+    set(tabId, 'settings', admissionPrefix + value.key, next)
+    return next
+  })
+  const cancelQueue: ChatQueueAdmissions['cancelReservation'] = atomic((tabId, value) => {
+    const reservation = get<AdmissionRecord>(tabId, 'settings', admissionPrefix + value.key)
+    if (!reservation) return
+    if (reservation.token !== value.token) throw new Error('Queue admission token mismatch')
+    remove(tabId, 'settings', admissionPrefix + value.key)
+  })
+  function cancelPendingQueueAdmissions() {
+    store.transaction(() => {
+      for (const record of store.findRecords('settings', undefined, {
+        idPrefix: admissionPrefix
+      })) {
+        const value = record.value as AdmissionRecord
+        if (value.state !== 'pending') continue
+        const conversation = store.conversation(record.conversationId)
+        if (conversation?.state !== 'active') continue
+        store.removeRecord(
+          record.conversationId,
+          conversation.identity.epoch,
+          'settings',
+          record.id
+        )
+      }
+    })
   }
   const queueSync: SyncQueueData = {
     list: (tabId) => queued(tabId),
@@ -272,15 +481,27 @@ export function createLocalChatData(
           JSON.stringify(previous.content) !== JSON.stringify(opts?.content)
         )
           throw new Error('Queue operation id conflict')
+        if (opts?.admission) {
+          const reservation = requireAdmission(tabId, opts.admission)
+          if (reservation.id !== id) throw new Error('Queue admission id conflict')
+          remove(tabId, 'settings', admissionPrefix + reservation.key)
+        }
         return previous
       }
+      const reservation = opts?.admission ? requireAdmission(tabId, opts.admission) : null
+      if (reservation && reservation.id !== id) throw new Error('Queue admission id conflict')
       const list = queued(tabId)
       const item: QueuedChatMessage = {
         id,
         tabId,
         send,
         original,
-        position: (list.at(-1)?.position ?? -1) + 1,
+        position:
+          reservation?.position ??
+          pendingAdmissions(tabId).reduce(
+            (n, item) => Math.max(n, item.position),
+            list.at(-1)?.position ?? -1
+          ) + 1,
         createdAt: new Date().toISOString(),
         ...(opts?.content ? { content: opts.content } : {}),
         ...(opts?.expectedConversationId
@@ -288,12 +509,18 @@ export function createLocalChatData(
           : {})
       }
       set(tabId, 'queue', id, item)
+      if (reservation) remove(tabId, 'settings', admissionPrefix + reservation.key)
       metadata(tabId, 'queue-item', { id, removed: false })
       return item
     },
     pop: (tabId, held = []) => {
       const item = queued(tabId)[0]
-      if (!item || held.includes(item.id)) return null
+      if (
+        !item ||
+        held.includes(item.id) ||
+        pendingAdmissions(tabId).some((r) => r.position <= item.position)
+      )
+        return null
       // Keep the row until its user-message event commits in the same transaction.
       return item
     },
@@ -306,6 +533,7 @@ export function createLocalChatData(
     move: (id, toIndex) => {
       const item = queueItem(id)
       if (!item) return false
+      if (pendingAdmissions(item.tabId).length) return false
       const list = queued(item.tabId).filter((i) => i.id !== id)
       list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, item)
       for (let n = 0; n < list.length; n++)
@@ -326,6 +554,7 @@ export function createLocalChatData(
       return true
     },
     clear: (tabId) => {
+      for (const r of pendingAdmissions(tabId)) remove(tabId, 'settings', admissionPrefix + r.key)
       const list = queued(tabId)
       for (const item of list) {
         remove(tabId, 'queue', item.id)
@@ -338,7 +567,10 @@ export function createLocalChatData(
   function atomic<A extends unknown[], R>(action: (...args: A) => R): (...args: A) => Promise<R> {
     return async (...args) => store.transaction(() => action(...args))
   }
-  const queue: ChatQueueData = {
+  const queue: ChatQueueData & ChatQueueAdmissions = {
+    reserve: reserveQueue,
+    renewReservation: renewQueue,
+    cancelReservation: cancelQueue,
     list: atomic(queueSync.list),
     push: atomic(queueSync.push),
     pop: atomic(queueSync.pop),
@@ -351,12 +583,15 @@ export function createLocalChatData(
   }
   const threads: ChatThreadStore = {
     get: async (id) =>
-      store.findRecords('thread').find((r) => r.id === id)?.value as ChatThread | undefined,
+      store.findRecords('thread', undefined, { id }).find((r) => {
+        const parent = store.conversation(r.conversationId)
+        return parent?.state === 'active' && !store.isTabDeleted(parent.identity.taskId, id)
+      })?.value as ChatThread | undefined,
     listForParent: async (tabId) =>
       store
-        .records(owner(tabId).id)
-        .filter((r) => r.kind === 'thread')
+        .records(owner(tabId).id, 'thread')
         .map((r) => r.value as ChatThread)
+        .filter((thread) => !store.isTabDeleted(owner(tabId).taskId, thread.id))
         .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)),
     list: async (tabId, conversationId) =>
       (await threads.listForParent(tabId)).filter((t) => t.parentConversationId === conversationId),
@@ -413,7 +648,7 @@ export function createLocalChatData(
       resolveDefaultChatMode(mode, await data.readSetting(defaultChatModeSettingKey(mode))),
     getModeDefaultFlags: async (mode) => {
       const tab = store
-        .findRecords('settings')
+        .findRecords('settings', undefined, { id: 'bootstrap' })
         .find((r) => r.id === 'bootstrap' && (r.value as ChatBootstrap).identity.mode === mode)
       return (tab?.value as ChatBootstrap | undefined)?.defaultFlags ?? null
     },
@@ -447,7 +682,7 @@ export function createLocalChatData(
     },
     getCurrentConversationId: async (t, m) => {
       const id =
-        (chatModeForTerminal(m)
+        (chatStorageMode(m) !== m
           ? provider(t, m).conversationId
           : provider(t, m).chatConversationId) ?? null
       return deleted(t, m, id) ? null : id
@@ -536,7 +771,7 @@ export function createLocalChatData(
         for (const e of store.read(o.identity.id, -1))
           if (e.event.kind === 'user-message' && e.event.id && ids.includes(e.event.id))
             found.set(e.event.id, e.event.content ?? [])
-      for (const r of store.findRecords('settings', taskId))
+      for (const r of store.findRecords('settings', taskId, { idPrefix: 'attachment-message:' }))
         if (r.id.startsWith('attachment-message:') && ids.includes(r.id.slice(19)))
           found.set(
             r.id.slice(19),
@@ -552,7 +787,7 @@ export function createLocalChatData(
       }),
     loadTimelineSummaries: async (tabId) =>
       store
-        .records(owner(tabId).id)
+        .records(owner(tabId).id, 'timeline')
         .filter((r) => r.kind === 'timeline' && r.id.startsWith('page:'))
         .map((r) => ({
           page: Number(r.id.slice(5)),
@@ -562,7 +797,7 @@ export function createLocalChatData(
     saveTimeline: async (tabId, write: TimelineWrite) =>
       store.transaction(() => {
         if (write.dropPagesFrom !== null)
-          for (const r of store.records(owner(tabId).id))
+          for (const r of store.records(owner(tabId).id, 'timeline'))
             if (
               r.kind === 'timeline' &&
               r.id.startsWith('page:') &&
@@ -575,7 +810,7 @@ export function createLocalChatData(
       }),
     searchTimelinePages: async (tabId, needle) =>
       store
-        .records(owner(tabId).id)
+        .records(owner(tabId).id, 'timeline')
         .filter(
           (r) =>
             r.kind === 'timeline' &&
@@ -585,7 +820,7 @@ export function createLocalChatData(
         .map((r) => Number(r.id.slice(5)))
         .sort((a, b) => a - b),
     clearTimeline: async (tabId) => {
-      for (const r of store.records(owner(tabId).id))
+      for (const r of store.records(owner(tabId).id, 'timeline'))
         if (r.kind === 'timeline') remove(tabId, 'timeline', r.id)
     },
     clearChatQueue: (tabId) => queue.clear(tabId),
@@ -596,7 +831,9 @@ export function createLocalChatData(
       get<ChatBootstrap>(taskTab(taskId), 'settings', 'bootstrap')?.projectId ?? null,
     getProjectRoot: async () => null,
     bumpAutocompleteUsage: async (source, name) => {
-      const tabId = store.findRecords('settings').find((r) => r.id === 'bootstrap')?.value as
+      const tabId = store
+        .findRecords('settings', undefined, { id: 'bootstrap' })
+        .find((r) => store.conversation(r.conversationId)?.state === 'active')?.value as
         | ChatBootstrap
         | undefined
       if (!tabId) return
@@ -610,7 +847,7 @@ export function createLocalChatData(
     },
     getAutocompleteUsage: async () => {
       const out: Record<string, Record<string, number>> = {}
-      for (const r of store.findRecords('settings'))
+      for (const r of store.findRecords('settings', undefined, { idPrefix: 'usage:' }))
         if (r.id.startsWith('usage:')) {
           const [, source, ...parts] = r.id.split(':')
           out[source] ??= {}
@@ -663,7 +900,22 @@ export function createLocalChatData(
       const o = store.conversation(id)
       if (!o || o.state !== 'active') throw new Error('Metadata snapshot owner is unavailable')
       const i = o.identity,
-        records = store.records(id),
+        records = store.compose((db) =>
+          (
+            db
+              .prepare(`SELECT kind,id,value,saved_at FROM records
+          WHERE conversation_id=? AND (kind='queue' OR (kind='settings' AND
+            (id='provider' OR id GLOB 'provider:*' OR id GLOB 'session:*' OR
+             id IN ('metadata-state:activity','metadata-state:agent-state'))))
+          ORDER BY kind,id`)
+              .all(id) as Array<{
+              kind: ChatRecordKind
+              id: string
+              value: string
+              saved_at: number
+            }>
+          ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
+        ),
         counter = store.getRecord<number>(id, 'settings', 'metadata-counter') ?? 0
       const updates: ChatMetadataUpdate[] = []
       if (i.tabId.startsWith('artifact-store:')) return { identity: i, counter, updates }
@@ -718,7 +970,8 @@ export function createLocalChatData(
         }
         if (r.kind === 'settings' && (r.id === 'provider' || r.id.startsWith('provider:'))) {
           const mode = r.id === 'provider' ? i.mode : r.id.slice(9),
-            cfg = r.value as ProviderConfigEntry
+            current = providerState(i.taskId, mode),
+            cfg = current.value
           for (const key of [
             'chatMode',
             'chatModel',
@@ -732,6 +985,7 @@ export function createLocalChatData(
               add('provider-config', `${r.id}:${key}`, {
                 mode,
                 key,
+                revision: current.revision,
                 value: deleted(i.taskId, mode, typeof cfg[key] === 'string' ? cfg[key] : null)
                   ? null
                   : cfg[key]
@@ -747,5 +1001,16 @@ export function createLocalChatData(
       return { identity: i, counter, updates }
     })
   }
-  return { data, queue, bootstrap, owner, get, set, remove, metadata, metadataSnapshot }
+  return {
+    data,
+    queue,
+    bootstrap,
+    owner,
+    get,
+    set,
+    remove,
+    metadata,
+    metadataSnapshot,
+    cancelPendingQueueAdmissions
+  }
 }

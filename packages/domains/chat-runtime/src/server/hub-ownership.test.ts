@@ -10,6 +10,7 @@ afterEach(() => {
 function fixture() {
   const db = new Database(':memory:')
   dbs.push(db)
+  db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY,deleted_at TEXT,archived_at TEXT)')
   for (const migration of migrations.filter((m) => m.version >= 187)) migration.up(db)
   return { db, store: createChatOwnershipStore(createSlayzoneDbAdapter(db)) }
 }

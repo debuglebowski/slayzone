@@ -1,0 +1,394 @@
+{
+  "baseline": "ed9673300",
+  "scope": "Independent second review; no production changes",
+  "newFeatureFindings": [
+    {
+      "id": "F14",
+      "priority": "P1",
+      "group": "lifecycle",
+      "title": "First prompt-history bootstrap can wedge the computer",
+      "trigger": "Open prompt history on a fresh native task; disconnect before bootstrap reaches the computer.",
+      "observed": "Hub already marks the prompt-history store active. Computer has no store. Reconnect metadata snapshot rejects; normal commands including terminal stop are blocked.",
+      "cause": "ensurePromptTask registers active ownership before remote bootstrap ACK. This has no migration to activate, unlike old F02.",
+      "fix": "Reserve a durable initializing owner before creation, fence task/tab deletion, bootstrap idempotently, publish active only after matching ACK. Recover incomplete initialization explicitly.",
+      "source": "hub-relay.ts:226\u2013238; computer-chat.ts:80",
+      "test": "recovery-second-pass.test.ts \u2014 interrupted first prompt-only bootstrap"
+    },
+    {
+      "id": "F15",
+      "priority": "P1",
+      "group": "runtime",
+      "title": "Reconnect overwrites current settings with stale sibling values",
+      "trigger": "Two active tabs share a provider. Change model/mode/session on selected root, then reconnect with an untouched sibling.",
+      "observed": "Actual endpoint tests revert plan \u2192 normal, opus \u2192 sonnet, and new-session \u2192 old-session. Both stores are active; this is distinct from old F07 prepared-store selection.",
+      "cause": "Each tab caches provider configuration. Recovery replays every sibling by storage ID into task-global settings, with no authority/revision rule. mirrorProviderConfig=false protects conversation records, not provider-config updates.",
+      "fix": "Define task/provider configuration authority and revision across bootstrap, edits and replay. Restore current state deterministically; do not disable recovery or rely on storage-ID order.",
+      "source": "hub-relay.ts:344\u2013346,524,612\u2013615; local-data.ts:153\u2013158,719\u2013737",
+      "test": "runtime-second-pass.test.ts \u2014 sibling snapshot rollback (three cases)"
+    },
+    {
+      "id": "F16",
+      "priority": "P2",
+      "group": "lifecycle",
+      "title": "Closing a tab during first bootstrap resurrects it",
+      "trigger": "Computer commits first bootstrap; hold reply. Delete the actual terminal tab while no hub owner exists. Release reply and reconnect.",
+      "observed": "Late registration publishes an active locator; recovery recreates the deleted visible tab.",
+      "cause": "Ordinary chat creates remote storage before publishing its locator. Delete trigger has no owner to tombstone in that interval. Simply reversing order causes F14-style missing-store failures.",
+      "fix": "Use initializing reservation plus per-tab deletion fence and a conditional post-ACK activation. Apply the protocol to all store creators, not just prompt history.",
+      "source": "hub-relay.ts:126\u2013128; hub-ownership.ts:101; hub-recovery.ts:105",
+      "test": "recovery-second-pass.test.ts \u2014 deleting a tab while its first bootstrap reply is pending"
+    },
+    {
+      "id": "F17",
+      "priority": "P2",
+      "group": "runtime",
+      "title": "Concurrent retries of one upload create two files",
+      "trigger": "Send two simultaneous strict artifact RPC requests with identical operation ID and input.",
+      "observed": "Both requests create different artifacts. Sequential retry correctly returns one cached result; concurrent reuse with different input is correctly rejected.",
+      "cause": "Artifact receipt is checked before asynchronous scope checks. acceptCommand later returns duplicate, but its result is ignored and both mutations continue.",
+      "fix": "Join identical in-flight operations using conversation + operation ID, while validating input hash before joining. Keep durable accepted-but-unconfirmed behavior after process death.",
+      "source": "artifacts.ts:264\u2013279,315\u2013319",
+      "test": "artifacts-second-pass.test.ts \u2014 concurrent duplicate artifact uploads"
+    },
+    {
+      "id": "F18",
+      "priority": "P2",
+      "group": "lifecycle",
+      "title": "Acknowledged tab deletion leaves raw transfer history",
+      "trigger": "Stage a migration, delete the tab before activation, deliver deletion and ACK, then restart computer.",
+      "observed": "Hub and computer are tombstoned; cleanupPending=false and source rows are gone. Raw transfers/*.data still contains deleted history indefinitely.",
+      "cause": "Conversation tombstone does not erase transfer staging; collectActivated only handles active stores.",
+      "fix": "Erase transfer state per conversation idempotently, retry on startup, and acknowledge deletion only after required cleanup completes. Preserve unrelated stores and deliberate backups.",
+      "source": "computer-runtime.ts:195\u2013200; transfers.ts:177",
+      "test": "recovery-second-pass.test.ts \u2014 deleting prepared chat tab erases staged bytes"
+    },
+    {
+      "id": "F19",
+      "priority": "P2",
+      "group": "lifecycle",
+      "title": "Failed uploads retain private temp bytes after deletion",
+      "trigger": "Partially write a sealed attachment then fail with ENOSPC. Permanently delete task, reopen, run both garbage collectors.",
+      "observed": "Flat .upload-* file retains partial private payload after deletion/restart. Sharded temp files have an inherited version of the same problem.",
+      "cause": "writeBlob closes the descriptor on failure but does not remove its staging file. Collector ignores filenames that are not complete hashes.",
+      "fix": "Clean every failed staging path; safely track/collect abandoned staging across restart and retry cleanup failures. Do not remove active uploads blindly.",
+      "source": "attachments.ts:60\u201368,177\u2013184",
+      "test": "durability-second-pass.test.ts \u2014 failed attachment staging retains no payload"
+    },
+    {
+      "id": "F20",
+      "priority": "P2",
+      "group": "runtime",
+      "title": "Session picker refuses supported native-to-chat handoff",
+      "trigger": "Select this task\u2019s running native conversation in Sessions picker.",
+      "observed": "New hub guard refuses before terminal-release callback; release called zero times. Explicit continueInChat control passes.",
+      "cause": "New beforeInvoke releases native lease for continueInChat/takeOver only. Existing switchConversation contract also requires release before dispatch.",
+      "fix": "Preserve explicit picker handoff under the same task/session ownership proofs. Await verified native release before starting chat; never allow two holders.",
+      "source": "computer-chat.ts:298\u2013300,328\u2013329; chat-handlers.ts:1178",
+      "test": "runtime-second-pass.test.ts \u2014 picker releases selected native holder"
+    },
+    {
+      "id": "F21",
+      "priority": "P2",
+      "group": "runtime",
+      "title": "Ephemeral /btw answers persist in SQLite receipts",
+      "trigger": "Complete a side question through real Claude driver with a fake child; close and reopen computer store.",
+      "observed": "Answer is absent from event/record history but survives verbatim in receipt.result. Domain contract explicitly says no DB persistence; answer should live only in renderer card.",
+      "cause": "Generic invoker persists every non-read operation result, including side-question text. Full SQLite backups include those rows by source inspection; separate backup extraction was not tested.",
+      "fix": "Separate idempotency/delivery receipts from response-content retention. Keep side-answer result ephemeral while preventing unintended duplicate provider calls.",
+      "source": "invocation.ts:123\u2013125; storage.ts:385\u2013387; terminal/DOMAIN.md:31\u201333",
+      "test": "runtime-second-pass.test.ts \u2014 /btw answer remains ephemeral"
+    }
+  ],
+  "expandedPriorFindings": [
+    {
+      "id": "F03",
+      "title": "Old-backup reconciliation is still broken",
+      "detail": "Independently reproduced using actual SQLite backups rather than manually rewound locators. Legacy snapshot + prepared destination conflicts. Snapshot predating locator creates a second storage ID; old prepared store remains and native admission rejects Task chat migration is pending. Copying snapshot + prepared destination is a passing control."
+    },
+    {
+      "id": "F11",
+      "title": "Archive verification needs semantic completeness",
+      "detail": "In addition to omitted blobs, unsupported schema, missing events table and malformed event JSON can become verified archives. Missing table/invalid JSON archives later fail reads. Malformed JSON came from the disposable live store before normal backup.create. These are expansions of F11, not three new defects."
+    }
+  ],
+  "inheritedRisks": [
+    {
+      "title": "Working original and committed HEAD diverge",
+      "detail": "ENOSPC or an invalid historical ref rejects the write after changing the visible original. Mutating old v1 can also leave original showing v1 while HEAD is v2. Survives reopen. Shared artifact-store transaction code predates this feature.",
+      "source": "task-artifacts/src/server/artifact-store-txns.ts:418,799"
+    },
+    {
+      "title": "Prune rollback cannot restore physically deleted blobs",
+      "detail": "Second unlink fails; SQLite restores all version rows, but first historical blob is already gone. Explicit version read returns ENOENT. Shared prune code is unchanged by migration.",
+      "source": "task-artifacts/src/server/prune.ts:25,71"
+    },
+    {
+      "title": "Explicit hashed version read returns corrupted bytes",
+      "detail": "Read uses saved content hash, not mutable working copy. Returned version claims original hash/size while bytes are corrupt. Shared read behavior is inherited; computer endpoint exposes it too. Flat sealed reads correctly reject corruption.",
+      "source": "chat-runtime/src/server/artifacts.ts:391; shared artifact readers"
+    },
+    {
+      "title": "Sharded blob staging leaks partial temp files",
+      "detail": "Partial write failure leaves blobs/.tmp payload after permanent deletion. Existing shared BlobStore write path already escaped cleanup; flat computer attachment case F19 is new.",
+      "source": "task-artifacts/src/server/blob-store.ts:86\u201394"
+    },
+    {
+      "title": "Slow attachment admission lets later queue entries overtake",
+      "detail": "Reproduced ordering inversion, but asynchronous admission existed before migration. New hub sealing adds delay; this is not counted as a new feature regression. Mobile draft-persistence absence is also uncounted.",
+      "source": "runtime-second-pass.test.ts \u2014 explicitly labeled preexisting FIFO case"
+    }
+  ],
+  "tests": {
+    "total": 47,
+    "passed": 25,
+    "failed": 22,
+    "failureBreakdown": {
+      "newFeatureCases": 10,
+      "priorFindingExtensions": 5,
+      "inheritedCases": 7
+    },
+    "cases": [
+      {
+        "file": "packages/apps/hub/src/artifacts-second-pass.test.ts",
+        "name": "concurrent duplicate artifact uploads return one durable result and create one file",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifacts-second-pass.test.ts",
+        "name": "sequential duplicate upload is a passing control",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifacts-second-pass.test.ts",
+        "name": "concurrent operation-id reuse with different input remains rejected",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: lost draft reply reuses its durable receipt after restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: distinct tab drafts and queue item routing survive restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: retrying a queue push after lost metadata acknowledgement does not duplicate its client id",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass: reconnect must not roll back current chatMode from an unused sibling tab snapshot",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass: reconnect must not roll back current chatModel from an unused sibling tab snapshot",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass: reconnect must not roll back current chatConversationId from an unused sibling tab snapshot",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: single-tab provider state is retained by reconnect metadata recovery",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass: selecting a live native conversation must await its terminal release before dispatch",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: continue-in-chat releases a live native conversation and persists handoff",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass preexisting: queue FIFO preserves first submission while its attachment is transferred",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass: /btw answers remain ephemeral after durable command completion",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: approval gates queue delivery and later messages remain FIFO",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: queued conclusions never enter a different native conversation",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/runtime-second-pass.test.ts",
+        "name": "second pass control: failed provider delivery remains retryable after restart without duplicating the saved message",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "control: actual SQLITE_FULL rejects append atomically and permits repair/retry",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "failed artifact blob write leaves visible original consistent with committed HEAD",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "rejected historical-version write cannot overwrite the original before validating its version ref",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "mutating a historical version keeps current file bytes aligned with its current HEAD",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "failed attachment blob staging cannot retain private payload after permanent deletion",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "failed artifact blob staging cannot retain private payload after permanent deletion",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "prune failure cannot restore committed version rows whose bytes were already removed",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "restore rejects unsupported or unreadable future-schema database before publishing a verified archive",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "restore rejects unsupported or unreadable missing-events-table database before publishing a verified archive",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "restore rejects unsupported or unreadable invalid-event-json database before publishing a verified archive",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "control: live database created by newer schema is rejected with prior history retained",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "control: original-artifact snapshots survive live mutation, deletion and GC while copying",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "corrupt original-artifact blob cannot be returned silently as verified version bytes",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "control: flat sealed attachments reject corruption and verified upload repairs the bytes",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/durability-second-pass.test.ts",
+        "name": "control: deleting a chat preserves its separately owned task original and exposes no names/content through metadata",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "new: interrupted first prompt-only bootstrap must not strand an active locator and block reconnect",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: interrupted first ordinary chat bootstrap leaves no locator and reconnect retries safely",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "new: deleting a tab while its first computer bootstrap reply is pending must prevent reconnect resurrection",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "new: permanently deleting a prepared chat tab must erase its raw staged transfer bytes across restart",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "restore matrix: real unregistered hub snapshot plus surviving prepared computer must remain usable",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "restore matrix: real legacy hub snapshot plus surviving prepared computer must remain usable",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "restore matrix: real copying hub snapshot plus surviving prepared computer must remain usable",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: concurrent reconnect invalidation preserves an existing tab tombstone against a captured active inventory",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: restarted tombstones fence late transfer/checkpoint/activation requests and remain scoped to one hub",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: true SIGKILL at checkpoint-commit resumes durable checkpoint, transfer, history, and ownership",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: true SIGKILL at chunk-data-fsync resumes durable checkpoint, transfer, history, and ownership",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: true SIGKILL at chunk-progress-rename resumes durable checkpoint, transfer, history, and ownership",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: true SIGKILL at stage-event-before-commit resumes durable checkpoint, transfer, history, and ownership",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: true SIGKILL at prepared-commit resumes durable checkpoint, transfer, history, and ownership",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/recovery-second-pass.test.ts",
+        "name": "control: true SIGKILL at activation-commit resumes durable checkpoint, transfer, history, and ownership",
+        "status": "passed"
+      }
+    ]
+  },
+  "limits": [
+    "Synthetic isolated stores and fake provider children",
+    "Six true process SIGKILL checkpoints, not hardware power loss",
+    "No new live corpus copy, live migrations, app restart, or paid-provider calls",
+    "Fixes not implemented; previous13 remain unresolved"
+  ]
+}

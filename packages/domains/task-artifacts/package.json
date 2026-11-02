@@ -20,6 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "@codemirror/view": "^6.43.13",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
@@ -47,7 +48,6 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "better-sqlite3": "^13.0.3",
     "vitest": "^5.0.2"
   }
 }

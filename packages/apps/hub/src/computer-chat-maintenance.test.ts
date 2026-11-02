@@ -21,6 +21,8 @@ test('normal computer commands await recovery and lifecycle; control frames cann
     'ping',
     'computer.shutdown',
     'computer.setAllowedRoots',
+    'pty.kill',
+    'proc.kill',
     'project.list'
   ])
     await barrier('pc', method)
@@ -36,6 +38,9 @@ test('normal computer commands await recovery and lifecycle; control frames cann
   expect(calls).toEqual(Array.from({ length: 5 }, () => ['recover:pc', 'lifecycle:pc']).flat())
   calls.length = 0
   fail = true
+  await barrier('pc', 'pty.kill')
+  await barrier('pc', 'proc.kill')
+  expect(calls).toEqual([])
   await expect(barrier('pc', 'fs.readFile')).rejects.toThrow('pending')
   expect(calls).toEqual(['recover:pc'])
 })

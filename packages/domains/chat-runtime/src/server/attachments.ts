@@ -23,6 +23,7 @@ import type { ChatStorage } from './storage'
 import type { createLocalChatData } from './local-data'
 
 const hashOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+const activeUploads = new Set<string>()
 /** An `attachment` record value: the ref plus its owning task (storage-only scope). */
 type StoredAttachment = ChatAttachment & { taskId?: string }
 /** Storage record → wire ref. Explicit pick, so no storage-only field leaks onto the wire. */
@@ -36,6 +37,27 @@ export function createLocalAttachments(
 ) {
   const dir = join(store.dir, 'blobs')
   mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // Repair pre-fix imported references before retention or GC can remove the
+  // original conversation's last pin. New writes pin atomically in storage.
+  store.repairAttachmentPins()
+  function collectStaging() {
+    for (const name of readdirSync(dir)) {
+      if (!/^\.upload-(?:\d+-)?[a-f0-9-]{36}$/.test(name)) continue
+      const path = join(dir, name)
+      if (activeUploads.has(path)) continue
+      const pid = /^\.upload-(\d+)-/.exec(name)?.[1]
+      if (pid && Number(pid) !== process.pid) {
+        try {
+          process.kill(Number(pid), 0)
+          continue
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue
+        }
+      }
+      if (lstatSync(path).isFile()) unlinkSync(path)
+    }
+  }
+  collectStaging()
   function blobPath(hash: string) {
     if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid attachment hash')
     return join(dir, hash)
@@ -57,31 +79,40 @@ export function createLocalAttachments(
         /* Verified caller bytes repair a corrupt local copy. */
       }
     }
-    const temp = join(dir, `.upload-${randomUUID()}`),
-      fd = openSync(temp, 'wx', 0o600)
+    const temp = join(dir, `.upload-${process.pid}-${randomUUID()}`)
+    activeUploads.add(temp)
     try {
-      writeFileSync(fd, bytes)
-      fsyncSync(fd)
-    } finally {
-      closeSync(fd)
-    }
-    renameSync(temp, path)
-    if (process.platform !== 'win32') {
-      const parent = openSync(dir, 'r')
+      const fd = openSync(temp, 'wx', 0o600)
       try {
-        fsyncSync(parent)
+        writeFileSync(fd, bytes)
+        fsyncSync(fd)
       } finally {
-        closeSync(parent)
+        closeSync(fd)
       }
+      renameSync(temp, path)
+      if (process.platform !== 'win32') {
+        const parent = openSync(dir, 'r')
+        try {
+          fsyncSync(parent)
+        } finally {
+          closeSync(parent)
+        }
+      }
+    } finally {
+      activeUploads.delete(temp)
+      if (existsSync(temp)) unlinkSync(temp)
     }
   }
   const reader: ChatAttachmentReader = {
     read: async (ref) => {
       const records = store.findRecords('attachment').map((r) => r.value as ChatAttachment)
-      const found = records.find(
+      const matching = records.filter(
         (a) =>
           a.artifactId === ref.artifactId && (!ref.contentHash || a.contentHash === ref.contentHash)
       )
+      if (!ref.contentHash && new Set(matching.map((a) => a.contentHash)).size > 1)
+        throw new Error('Attachment version is ambiguous; select an explicit saved version')
+      const found = matching[0]
       if (!found?.contentHash)
         throw new Error('Attachment artifact/version does not belong to this hub')
       return readBlob(found.contentHash)
@@ -131,8 +162,7 @@ export function createLocalAttachments(
     /** Wire refs (the hub sends each back as a strict `attachment.put` ref), not stored records. */
     missing(id: string): ChatAttachment[] {
       return store
-        .records(id)
-        .filter((r) => r.kind === 'attachment')
+        .records(id, 'attachment')
         .map((r) => attachmentRef(r.value as StoredAttachment))
         .filter((ref) => {
           try {
@@ -169,6 +199,7 @@ export function createLocalAttachments(
     },
     collectGarbage() {
       return store.transaction(() => {
+        collectStaging()
         if (store.hasBlobLeases()) return { removed: 0 }
         const referenced = new Set(
           store.findRecords('attachment').map((r) => (r.value as ChatAttachment).contentHash)

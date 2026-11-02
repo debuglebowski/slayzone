@@ -390,7 +390,9 @@ require_registered() {
   local dir file
   for dir in "$@"; do
     while IFS= read -r file; do
-      if ! printf '%s\n' "${RAN[@]}" ${SKIPPED[@]+"${SKIPPED[@]}"} ${SKIPPED_FILES[@]+"${SKIPPED_FILES[@]}"} | grep -qxF -- "$file"; then
+      # Consume the full list: grep -q closed a large registration pipe early,
+      # producing hundreds of misleading printf broken-pipe errors.
+      if ! printf '%s\n' "${RAN[@]}" ${SKIPPED[@]+"${SKIPPED[@]}"} ${SKIPPED_FILES[@]+"${SKIPPED_FILES[@]}"} | grep -xF -- "$file" >/dev/null; then
         echo "UNREGISTERED: $file (add it to the suite list, or skip_suite it with a reason)"
         FAIL=$((FAIL + 1))
         FAILED+=("unregistered: $file")

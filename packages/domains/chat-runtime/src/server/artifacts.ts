@@ -3,7 +3,6 @@ import {
   mkdtempSync,
   writeFileSync,
   rmSync,
-  readFileSync,
   existsSync,
   openSync,
   closeSync,
@@ -11,7 +10,12 @@ import {
 } from 'node:fs'
 import { z } from 'zod'
 import { join } from 'node:path'
-import { createStandaloneArtifacts, BlobStore } from '@slayzone/task-artifacts/storage'
+import {
+  createStandaloneArtifacts,
+  BlobStore,
+  referencedArtifactBlobHashes,
+  hasArtifactBlobLeases
+} from '@slayzone/task-artifacts/storage'
 import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import { chatAttachmentSchema, chatRouteSchema } from '../shared'
 import type { ChatStorage } from './storage'
@@ -23,6 +27,7 @@ const id = z.string().min(1).max(200),
   ref = z.union([z.string().max(200), z.number().int()])
 const artifact = id.transform((v) => v)
 const object = z.object({ artifactId: id })
+const author = z.object({ type: z.enum(['user', 'agent']).nullable(), id: z.string().nullable() })
 export const artifactMethodSchemas = {
   importFolder: z.tuple([z.object({ id, taskId: id, name: title, parentId: id.nullable() })]),
   listArtifactsByTask: z.tuple([id]),
@@ -71,7 +76,9 @@ export const artifactMethodSchemas = {
   readArtifactVersion: z.tuple([object.extend({ versionRef: ref })]),
   resolveArtifactVersion: z.tuple([object.extend({ versionRef: ref })]),
   getCurrentArtifactVersion: z.tuple([object]),
-  createArtifactVersion: z.tuple([object.extend({ name: title.nullish() })]),
+  createArtifactVersion: z.tuple([
+    object.extend({ name: title.nullish(), author: author.optional() })
+  ]),
   renameArtifactVersion: z.tuple([object.extend({ versionRef: ref, newName: title.nullable() })]),
   diffArtifactVersions: z.tuple([object.extend({ a: ref, b: ref.optional() })]),
   pruneArtifactVersions: z.tuple([
@@ -104,9 +111,7 @@ export const artifactMethodSchemas = {
       append: z.boolean().optional(),
       mutateCurrent: z.boolean().optional(),
       mutateRef: ref.optional(),
-      author: z
-        .object({ type: z.enum(['user', 'agent']).nullable(), id: z.string().nullable() })
-        .optional()
+      author: author.optional()
     })
   ]),
   readBytes: z.tuple([id, ref.optional()]),
@@ -184,6 +189,14 @@ export function createLocalArtifacts(
    `)
   })
   const blobs = new BlobStore(storage.dir)
+  if (!storage.compose((raw) => raw.inTransaction))
+    storage.transaction(() =>
+      storage.compose((raw) =>
+        hasArtifactBlobLeases(raw)
+          ? blobs.restoreReferenced(referencedArtifactBlobHashes(raw))
+          : blobs.collectDeleted(referencedArtifactBlobHashes(raw))
+      )
+    )
   async function checkArtifact(id: string, taskId: string) {
     const a = await store.getArtifact(db, id)
     if (!a || a.task_id !== taskId) throw new Error('Artifact is outside this task')
@@ -241,14 +254,14 @@ export function createLocalArtifacts(
       versionRef: ref.contentHash ?? 'current'
     })
     if (!blobPath) throw new Error('Local artifact blob path is missing')
-    const bytes = readFileSync(blobPath)
+    const bytes = blobs.read(version.content_hash)
     return attachments.put(
       tabId,
       { ...ref, name: a.title, contentHash: version.content_hash, size: version.size },
       bytes
     )
   }
-  async function invoke(raw: unknown): Promise<unknown> {
+  async function execute(raw: unknown): Promise<unknown> {
     const req = computerArtifactRequestSchema.parse(raw),
       owner = storage.conversation(req.route.id)
     if (!owner || owner.state !== 'active' || owner.identity.epoch !== req.route.epoch)
@@ -378,18 +391,14 @@ export function createLocalArtifacts(
       } else if (req.method === 'readBytes' || req.method === 'resolveArtifactVersion') {
         const artifactId = req.method === 'readBytes' ? first : first.artifactId,
           versionRef = req.method === 'readBytes' ? (args[1] ?? 'current') : first.versionRef
-        const { version, blobPath } = await store.resolveArtifactVersion(db, {
-          artifactId,
-          versionRef
-        })
-        if (!blobPath) throw new Error('Local artifact blob path is missing')
-        result = {
-          version,
-          data: Buffer.from(
-            req.method === 'readBytes' && (!args[1] || args[1] === 'current')
-              ? await store.readArtifactBytes(db, artifactId)
-              : readFileSync(blobPath)
-          ).toString('base64')
+        if (req.method === 'readBytes' && versionRef === 'current')
+          result = {
+            version: await store.getCurrentArtifactVersion(db, { artifactId }),
+            data: Buffer.from(await store.readArtifactBytes(db, artifactId)).toString('base64')
+          }
+        else {
+          const { version } = await store.resolveArtifactVersion(db, { artifactId, versionRef })
+          result = { version, data: blobs.read(version.content_hash).toString('base64') }
         }
       } else if (req.method === 'seal') result = await seal(tabId, first)
       else {
@@ -481,6 +490,29 @@ export function createLocalArtifacts(
       return result
     })
   }
+  const inFlight = new Map<string, { input: string; result: Promise<unknown> }>()
+  async function invoke(raw: unknown): Promise<unknown> {
+    const req = computerArtifactRequestSchema.parse(raw)
+    const owner = storage.conversation(req.route.id)
+    if (!owner || owner.state !== 'active' || owner.identity.epoch !== req.route.epoch)
+      throw new Error('Artifact ownership is unavailable or deleted')
+    if (reads.has(req.method) || !req.operationId) return execute(req)
+    const input = JSON.stringify({
+      method: req.method,
+      args: artifactMethodSchemas[req.method].parse(req.args)
+    })
+    const key = JSON.stringify([req.route.id, req.operationId])
+    const pending = inFlight.get(key)
+    if (pending) {
+      if (pending.input !== input) throw new Error('Operation id reused with different input')
+      return pending.result
+    }
+    const result = execute(req).finally(() => {
+      if (inFlight.get(key)?.result === result) inFlight.delete(key)
+    })
+    inFlight.set(key, { input, result })
+    return result
+  }
   return {
     invoke,
     deleteFolders,
@@ -499,21 +531,21 @@ export function createLocalArtifacts(
     store,
     db,
     collectGarbage() {
+      const nested = storage.compose((raw) => raw.inTransaction)
       return storage.transaction(() => {
         if (storage.hasBlobLeases()) return 0
-        let removed = 0
-        const hashes = storage.compose(
-          (raw) =>
-            new Set(
-              (
-                raw.prepare('SELECT DISTINCT content_hash FROM artifact_versions').all() as {
-                  content_hash: string
-                }[]
-              ).map((r) => r.content_hash)
-            )
-        )
-        for (const hash of blobs.listAllHashes())
-          if (!hashes.has(hash) && blobs.delete(hash)) removed++
+        if (storage.compose(hasArtifactBlobLeases)) return 0
+        let removed = blobs.collectStaging()
+        const hashes = storage.compose(referencedArtifactBlobHashes)
+        if (!nested) removed += blobs.collectDeleted(hashes)
+        const orphaned = blobs.listAllHashes().filter((hash) => !hashes.has(hash))
+        try {
+          for (const hash of orphaned) blobs.stageDelete(hash)
+          for (const hash of orphaned) if (blobs.delete(hash)) removed++
+        } catch (err) {
+          for (const hash of orphaned) blobs.restoreDeleted(hash)
+          throw err
+        }
         return removed
       })
     },

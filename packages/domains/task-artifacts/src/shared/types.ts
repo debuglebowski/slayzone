@@ -104,6 +104,8 @@ export interface ArtifactSearchResult {
   taskId: string
   title: string
   matches: ArtifactSearchMatch[]
+  /** Backend modification time used for stable merged search ordering. */
+  updatedAt?: string
 }
 
 /** An artifact whose CURRENT version exceeded the scan limit (`MAX_SCAN_BYTES`, server). */

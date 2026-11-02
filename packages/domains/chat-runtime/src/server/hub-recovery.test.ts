@@ -123,3 +123,44 @@ test('computer inventory cannot apply lifecycle or deletion before task authoriz
     h.cleanup()
   }
 })
+
+test('prompt-only phantom repair preserves a tab the user converted to a native terminal', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task'); INSERT INTO terminal_tabs(id,task_id,label,mode,position) VALUES('prompt-history:t','t','Chat','claude-code',0)"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    const identity = {
+      id: 'prompt-store',
+      taskId: 't',
+      tabId: 'prompt-history:t',
+      mode: 'claude-chat',
+      epoch: 1
+    }
+    await owners.register({ ...identity, computerId: 'pc' })
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [
+        {
+          identity,
+          state: 'active',
+          migrationId: null,
+          migrationHash: null,
+          bootstrapRevision: 1,
+          hasConversationContent: false
+        }
+      ]
+    })
+    await recovery.reconcile('pc')
+    expect(
+      h.db.prepare("SELECT id,mode FROM terminal_tabs WHERE id='prompt-history:t'").get()
+    ).toEqual({ id: 'prompt-history:t', mode: 'claude-code' })
+    expect(await owners.forTab('prompt-history:t')).toMatchObject({
+      id: 'prompt-store',
+      state: 'active'
+    })
+  } finally {
+    h.cleanup()
+  }
+})

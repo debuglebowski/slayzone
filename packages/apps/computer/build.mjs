@@ -7,6 +7,7 @@
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import * as esbuild from 'esbuild'
 import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
 import { watchBundleInputs } from '@slayzone/build-guards/watch-inputs'
@@ -76,9 +77,13 @@ const options = {
   metafile: true
 }
 
-const initialMetafile = process.argv.includes('--no-initial')
-  ? null
-  : (await esbuild.build(options)).metafile
+const build = () =>
+  esbuild.build({
+    ...options,
+    define: { ...options.define, __SLAYZONE_COMPUTER_BUILD_ID__: JSON.stringify(randomUUID()) }
+  })
+
+const initialMetafile = process.argv.includes('--no-initial') ? null : (await build()).metafile
 
 // Dev watch: rebuild when any bundled input changes — computer/src AND the
 // workspace code it inlines. Same shape as hub/build.mjs. A running computer
@@ -97,7 +102,7 @@ if (process.argv.includes('--watch')) {
     }
     building = true
     try {
-      watcher.update((await esbuild.build(options)).metafile)
+      watcher.update((await build()).metafile)
     } catch (err) {
       process.stderr.write(
         `[build] computer rebuild failed: ${err instanceof Error ? err.message : err}\n`

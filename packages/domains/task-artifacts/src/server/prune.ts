@@ -1,4 +1,10 @@
 import { BlobStore } from './blob-store'
+import {
+  artifactBlobReferenceSql,
+  referencedArtifactBlobHashes,
+  hasArtifactBlobLeases,
+  requestArtifactBlobGc
+} from './blob-pins'
 import type { DbLike, TxnRunner } from './db'
 import { getCurrentVersion, listVersions } from './resolve'
 import type {
@@ -9,21 +15,43 @@ import type {
   PruneReport
 } from '../shared/types'
 
+const inTransaction = (db: DbLike): boolean => {
+  const state = db as DbLike & { inTransaction?: boolean; isTransaction?: boolean }
+  return !!(state.inTransaction || state.isTransaction)
+}
+
 /**
  * Removes orphan blobs — files in the blob store with no version row pointing
  * to them. Safe to run any time. Caller must hold the txn boundary.
  */
 export function gcOrphanBlobs(db: DbLike, blobStore: BlobStore): number {
-  const orphans = db
-    .prepare(
-      `SELECT hash FROM artifact_blobs
-       WHERE hash NOT IN (SELECT DISTINCT content_hash FROM artifact_versions)`
-    )
+  if (hasArtifactBlobLeases(db)) {
+    requestArtifactBlobGc(db)
+    return 0
+  }
+  // Never release a prior prune's rollback links from inside another mutation.
+  const recorded = db
+    .prepare(`SELECT hash FROM artifact_blobs WHERE hash NOT IN (${artifactBlobReferenceSql(db)})`)
     .all() as { hash: string }[]
+  const referenced = referencedArtifactBlobHashes(db)
+  const orphans = [
+    ...new Set([
+      ...recorded.map((row) => row.hash),
+      ...blobStore
+        .listAllHashes()
+        .filter((hash) => /^[a-f0-9]{64}$/.test(hash) && !referenced.has(hash))
+    ])
+  ].map((hash) => ({ hash }))
   let deleted = 0
-  for (const { hash } of orphans) {
-    db.prepare('DELETE FROM artifact_blobs WHERE hash = ?').run(hash)
-    if (blobStore.delete(hash as ContentHash)) deleted++
+  try {
+    for (const { hash } of orphans) blobStore.stageDelete(hash)
+    for (const { hash } of orphans) {
+      db.prepare('DELETE FROM artifact_blobs WHERE hash = ?').run(hash)
+      if (blobStore.delete(hash as ContentHash)) deleted++
+    }
+  } catch (err) {
+    for (const { hash } of orphans) blobStore.restoreDeleted(hash)
+    throw err
   }
   return deleted
 }
@@ -74,6 +102,13 @@ export function pruneVersions(
     }
     deletedBlobs = gcOrphanBlobs(db, blobStore)
   })
+  if (!inTransaction(db) && !hasArtifactBlobLeases(db))
+    txn(() => {
+      // TxnRunner can use BEGIN DEFERRED. Establish the writer lock before
+      // releasing rollback links, including when another connection is active.
+      db.prepare('UPDATE artifact_blobs SET hash=hash WHERE 0').run()
+      blobStore.collectDeleted(referencedArtifactBlobHashes(db))
+    })
 
   return { deletedVersions: toDelete.length, deletedBlobs, keptNamed }
 }

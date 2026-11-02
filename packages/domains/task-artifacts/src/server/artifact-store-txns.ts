@@ -1,20 +1,8 @@
 import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import path from 'path'
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  copyFileSync,
-  readdirSync,
-  statSync
-} from 'fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { getExtensionFromTitle } from '@slayzone/task-contracts'
 import { uniqueName } from '@slayzone/file-editor/shared'
 import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import { artifactFilePathIn, artifactsDirOf } from '@slayzone/task/server/artifact-paths'
@@ -29,11 +17,18 @@ import {
   renameVersion
 } from './mutations'
 import { listVersions, resolveVersionRef, getCurrentVersion } from './resolve'
-import { pruneVersions } from './prune'
+import { pruneVersions, gcOrphanBlobs } from './prune'
 import { diffVersions } from './diff'
 import { searchArtifacts, InvalidSearchRegexError } from './search'
 import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 import { isVersionError } from './errors'
+import {
+  ensureArtifactBlobPins,
+  referencedArtifactBlobHashes,
+  hasArtifactBlobLeases,
+  requestArtifactBlobGc
+} from './blob-pins'
+import { ensureWorkingCopySchema, publishWorkingCopy, recoverWorkingCopies } from './working-copy'
 import type { ArtifactVersion, AuthorContext, VersionRef } from '../shared'
 
 /**
@@ -283,7 +278,23 @@ export interface FolderGetOrCreateTxnParams {
   name: string
 }
 
-export const artifactsTxns = {
+const implementations = {
+  'task-artifacts:blobs:collect': (
+    db: Database,
+    p: { dataDir: string }
+  ): { deletedBlobs: number; deferred: boolean; generation: number } => {
+    requestArtifactBlobGc(db)
+    const generation = (
+      db.prepare('SELECT version FROM artifact_blob_gc_generation WHERE id=1').get() as {
+        version: number
+      }
+    ).version
+    if (hasArtifactBlobLeases(db)) return { deletedBlobs: 0, deferred: true, generation }
+    const blobs = new BlobStore(p.dataDir)
+    blobs.collectStaging()
+    return { deletedBlobs: gcOrphanBlobs(db, blobs), deferred: false, generation }
+  },
+  'task-artifacts:files:recover': (_db: Database, _p: { dataDir: string }): null => null,
   'task-artifacts:create': (db: Database, p: CreateArtifactTxnParams): Row => {
     assertPathSafeId(p.taskId, 'taskId')
     const blobStore = new BlobStore(p.dataDir)
@@ -306,16 +317,9 @@ export const artifactsTxns = {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, p.taskId, folderId, p.title, p.renderMode ?? null, p.language ?? null, maxOrder + 1)
 
-    // Write content to disk. `sourcePath` (binary-safe staging file) wins over
-    // the utf-8 `content` string when present — see CreateArtifactTxnParams.
-    const filePath = artifactFilePath(p.dataDir, p.taskId, id, p.title)
-    mkdirSync(path.dirname(filePath), { recursive: true })
-    if (p.sourcePath) {
-      copyFileSync(p.sourcePath, filePath)
-    } else {
-      writeFileSync(filePath, Buffer.from(p.content ?? '', 'utf-8'))
-    }
-    const initialBytes = readFileSync(filePath)
+    const initialBytes = p.sourcePath
+      ? readFileSync(p.sourcePath)
+      : Buffer.from(p.content ?? '', 'utf-8')
 
     // Seed v1 for the new artifact.
     createVersion(db, versionTxn, blobStore, {
@@ -323,6 +327,12 @@ export const artifactsTxns = {
       bytes: initialBytes,
       author: uiAuthor
     })
+    publishWorkingCopy(
+      db,
+      p.dataDir,
+      { taskId: p.taskId, artifactId: id, previousTitle: p.title, title: p.title },
+      initialBytes
+    )
 
     return selectArtifact(db, id)
   },
@@ -379,48 +389,38 @@ export const artifactsTxns = {
       db.prepare(`UPDATE task_artifacts SET ${sets.join(', ')} WHERE id = ?`).run(...values)
     }
 
-    // If title changed and extension changed, rename file on disk.
-    //
-    // `renameSync`, NOT read-as-utf8 + write-as-utf8: the on-disk name derives
-    // from the title's extension, so renaming `blob.bin` → `blob.dat` moves the
-    // working copy of what may be a PNG/PDF. Decoding those bytes to a JS string
-    // replaces every invalid sequence with U+FFFD, silently corrupting the file
-    // that the title change was not supposed to touch at all. Same directory, so
-    // the rename is atomic; the copy+unlink fallback covers the (theoretical)
-    // cross-device EXDEV.
     const taskId = existing.task_id as string
     const oldTitle = existing.title as string
     const newTitle = has('title') ? (p.title as string) : oldTitle
-    if (has('title')) {
-      const oldExt = getExtensionFromTitle(oldTitle) || '.txt'
-      const newExt = getExtensionFromTitle(newTitle) || '.txt'
-      if (oldExt !== newExt) {
-        const oldPath = artifactFilePath(p.dataDir, taskId, p.id, oldTitle)
-        const newPath = artifactFilePath(p.dataDir, taskId, p.id, newTitle)
-        if (existsSync(oldPath)) {
-          try {
-            renameSync(oldPath, newPath)
-          } catch {
-            copyFileSync(oldPath, newPath)
-            unlinkSync(oldPath)
-          }
-        }
-      }
-    }
 
     // UI autosave: `saveCurrent` mutates current in place when mutable
     // (tip + unnamed) or auto-branches when locked. Explicit "Create
     // version" still uses `createVersion` to always create a row.
     if (has('content')) {
-      const filePath = artifactFilePath(p.dataDir, taskId, p.id, newTitle)
-      mkdirSync(path.dirname(filePath), { recursive: true })
       const bytes = Buffer.from(p.content as string, 'utf-8')
-      writeFileSync(filePath, bytes)
       if (p.mutateVersion) {
         saveCurrent(db, versionTxn, blobStore, { artifactId: p.id, bytes, author: uiAuthor })
       } else {
         createVersion(db, versionTxn, blobStore, { artifactId: p.id, bytes, author: uiAuthor })
       }
+      publishWorkingCopy(
+        db,
+        p.dataDir,
+        { taskId, artifactId: p.id, previousTitle: oldTitle, title: newTitle },
+        bytes
+      )
+    } else if (
+      artifactFilePath(p.dataDir, taskId, p.id, oldTitle) !==
+      artifactFilePath(p.dataDir, taskId, p.id, newTitle)
+    ) {
+      const oldPath = artifactFilePath(p.dataDir, taskId, p.id, oldTitle)
+      if (existsSync(oldPath))
+        publishWorkingCopy(
+          db,
+          p.dataDir,
+          { taskId, artifactId: p.id, previousTitle: oldTitle, title: newTitle },
+          { sourcePath: oldPath }
+        )
     }
 
     return selectArtifact(db, p.id)
@@ -444,16 +444,20 @@ export const artifactsTxns = {
       VALUES (?, ?, ?, ?)
     `).run(id, p.taskId, title, maxOrder + 1)
 
-    const filePath = artifactFilePath(p.dataDir, p.taskId, id, title)
-    mkdirSync(path.dirname(filePath), { recursive: true })
-    copyFileSync(p.sourcePath, filePath)
+    const bytes = readFileSync(p.sourcePath)
 
     // Seed v1 from uploaded bytes.
     createVersion(db, versionTxn, blobStore, {
       artifactId: id,
-      bytes: readFileSync(filePath),
+      bytes,
       author: uiAuthor
     })
+    publishWorkingCopy(
+      db,
+      p.dataDir,
+      { taskId: p.taskId, artifactId: id, previousTitle: title, title },
+      bytes
+    )
 
     return selectArtifact(db, id)
   },
@@ -525,15 +529,19 @@ export const artifactsTxns = {
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(newId, destTaskId, destFolderId, title, renderMode, language, maxOrder + 1)
 
-        const destFilePath = artifactFilePath(p.dataDir, destTaskId, newId, title)
-        mkdirSync(path.dirname(destFilePath), { recursive: true })
-        copyFileSync(srcPath, destFilePath)
+        const bytes = readFileSync(srcPath)
 
         createVersion(db, versionTxn, blobStore, {
           artifactId: newId,
-          bytes: readFileSync(destFilePath),
+          bytes,
           author: uiAuthor
         })
+        publishWorkingCopy(
+          db,
+          p.dataDir,
+          { taskId: destTaskId, artifactId: newId, previousTitle: title, title },
+          bytes
+        )
 
         const row = selectArtifact(db, newId)
         if (row) created.push(row)
@@ -579,16 +587,19 @@ export const artifactsTxns = {
       VALUES (?, ?, ?, ?, ?)
     `).run(id, p.taskId, folderId, title, maxOrder + 1)
 
-    const filePath = artifactFilePath(p.dataDir, p.taskId, id, title)
-    mkdirSync(path.dirname(filePath), { recursive: true })
     const buf = Buffer.from(p.bytes)
-    writeFileSync(filePath, buf)
 
     createVersion(db, versionTxn, blobStore, {
       artifactId: id,
       bytes: buf,
       author: uiAuthor
     })
+    publishWorkingCopy(
+      db,
+      p.dataDir,
+      { taskId: p.taskId, artifactId: id, previousTitle: title, title },
+      buf
+    )
 
     return selectArtifact(db, id)
   },
@@ -649,9 +660,12 @@ export const artifactsTxns = {
             VALUES (?, ?, ?, ?, ?)
           `).run(artifactId, p.taskId, parentFolderId, title, maxOrder + 1)
 
-          const filePath = artifactFilePath(p.dataDir, p.taskId, artifactId, title)
-          mkdirSync(path.dirname(filePath), { recursive: true })
-          copyFileSync(fullPath, filePath)
+          publishWorkingCopy(
+            db,
+            p.dataDir,
+            { taskId: p.taskId, artifactId, previousTitle: title, title },
+            { sourcePath: fullPath }
+          )
 
           createdArtifacts.push(selectArtifact(db, artifactId))
         }
@@ -751,19 +765,29 @@ export const artifactsTxns = {
       const versionTxn = betterSqliteTxn(db)
       const existing = selectArtifact(db, p.artifactId)
       if (!existing) throw new Error('Artifact not found')
-      const v = setCurrentVersion(db, versionTxn, p.artifactId, p.versionRef)
+      const target = resolveVersionRef(db, p.artifactId, p.versionRef)
       // Flush the switched version's bytes to disk so the editor reloads
       // the correct content. Without this, the on-disk file still reflects
       // the prior current and saves would diff against stale bytes.
-      const bytes = readVersionContent(blobStore, v)
+      const bytes = readVersionContent(blobStore, target)
+      const v = setCurrentVersion(db, versionTxn, p.artifactId, p.versionRef)
       const filePath = artifactFilePath(
         p.dataDir,
         existing.task_id as string,
         p.artifactId,
         existing.title as string
       )
-      mkdirSync(path.dirname(filePath), { recursive: true })
-      writeFileSync(filePath, bytes)
+      publishWorkingCopy(
+        db,
+        p.dataDir,
+        {
+          taskId: existing.task_id as string,
+          artifactId: p.artifactId,
+          previousTitle: existing.title as string,
+          title: existing.title as string
+        },
+        bytes
+      )
       return { version: v, filePath, bytes }
     }),
 
@@ -790,17 +814,9 @@ export const artifactsTxns = {
         p.artifactId,
         existing.title as string
       )
-      mkdirSync(path.dirname(filePath), { recursive: true })
-      // Copy/append the STAGED FILE rather than a string, so bytes that are not
-      // valid utf-8 land unchanged (see VersionsWriteTxnParams).
-      if (p.append) {
-        appendFileSync(filePath, readFileSync(p.sourcePath))
-      } else {
-        copyFileSync(p.sourcePath, filePath)
-      }
-      // Version the WHOLE file, which for append is prior content + the addition
-      // — the same "read the file back" the CLI did after its appendFileSync.
-      const bytes = readFileSync(filePath)
+      const source = readFileSync(p.sourcePath)
+      const previous = existsSync(filePath) ? readFileSync(filePath) : Buffer.alloc(0)
+      const bytes = p.append ? Buffer.concat([previous, source]) : source
 
       const author = p.author ?? uiAuthor
       const version =
@@ -818,6 +834,20 @@ export const artifactsTxns = {
                 bytes,
                 author
               })
+
+      // Rewriting a historical version must not replace the current working file.
+      if (getCurrentVersion(db, p.artifactId)?.id === version.id)
+        publishWorkingCopy(
+          db,
+          p.dataDir,
+          {
+            taskId: existing.task_id as string,
+            artifactId: p.artifactId,
+            previousTitle: existing.title as string,
+            title: existing.title as string
+          },
+          bytes
+        )
 
       db.prepare(`UPDATE task_artifacts SET updated_at = ? WHERE id = ?`).run(
         new Date().toISOString(),
@@ -846,7 +876,8 @@ export const artifactsTxns = {
         regex: p.regex,
         caseSensitive: p.caseSensitive,
         limit: p.limit,
-        maxMatches: p.maxMatches
+        maxMatches: p.maxMatches,
+        excludeArtifactIds: p.excludeArtifactIds
       })
     ),
 
@@ -901,6 +932,53 @@ export const artifactsTxns = {
     return selectFolder(db, id)
   }
 }
+
+// Own the full SQL boundary for every caller (hub, DB worker and computer).
+// Retain file journals across nested outer transactions; their commit markers
+// are only authoritative after the outermost commit.
+export const artifactsTxns = Object.fromEntries(
+  Object.entries(implementations).map(([name, implementation]) => [
+    name,
+    (db: Database, params: unknown) => {
+      const dataDir = (params as { dataDir?: string }).dataDir
+      if (dataDir) {
+        ensureWorkingCopySchema(db)
+        ensureArtifactBlobPins(db)
+      }
+      const nested = db.inTransaction
+      let gcComplete = false
+      let gcGeneration: number | undefined
+      try {
+        const result = db
+          .transaction(() => {
+            if (dataDir && !nested) recoverWorkingCopies(db, dataDir)
+            return (implementation as (db: Database, params: unknown) => unknown)(db, params)
+          })
+          .immediate()
+        gcComplete =
+          name === 'task-artifacts:blobs:collect' &&
+          (result as { deferred: boolean }).deferred === false
+        if (gcComplete) gcGeneration = (result as { generation: number }).generation
+        return result
+      } finally {
+        if (dataDir && !db.inTransaction)
+          db.transaction(() => {
+            recoverWorkingCopies(db, dataDir)
+            if (
+              (name === 'task-artifacts:versions:prune' || gcComplete) &&
+              !hasArtifactBlobLeases(db)
+            ) {
+              new BlobStore(dataDir).collectDeleted(referencedArtifactBlobHashes(db))
+              if (gcComplete)
+                db.prepare(
+                  'DELETE FROM artifact_blob_gc_pending WHERE id=1 AND EXISTS(SELECT 1 FROM artifact_blob_gc_generation WHERE id=1 AND version=?)'
+                ).run(gcGeneration)
+            }
+          }).immediate()
+      }
+    }
+  ])
+) as typeof implementations
 
 // Types `db.namedTxn(...)` for these names. Every file that calls one imports this
 // module (`import type {} from ...`), so any program that checks the call also loads

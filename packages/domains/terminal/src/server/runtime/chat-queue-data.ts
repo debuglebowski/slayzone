@@ -9,6 +9,27 @@ import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-con
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../chat-queue-txns'
 
+export interface QueueAdmission {
+  key: string
+  token: string
+  expiresAt: number
+}
+export interface ChatQueueAdmissions {
+  /** Reserve order before async file admission; no user content is stored here. */
+  reserve(tabId: string, id: string, key: string, inputHash?: string): Promise<QueueAdmission>
+  renewReservation(
+    tabId: string,
+    admission: Pick<QueueAdmission, 'key' | 'token'>
+  ): Promise<QueueAdmission>
+  cancelReservation(tabId: string, admission: Pick<QueueAdmission, 'key' | 'token'>): Promise<void>
+}
+export interface ChatQueuePushOptions {
+  id?: string
+  content?: UserContentBlock[]
+  expectedConversationId?: string
+  admission?: Pick<QueueAdmission, 'key' | 'token'>
+}
+
 /**
  * Data seam for the chat-queue runtime (hub/computer split, wave 1). The drain
  * loop + queue ops in `chat-queue-handlers.ts` consume this interface instead
@@ -25,7 +46,7 @@ export interface ChatQueueData {
     tabId: string,
     send: string,
     original: string,
-    opts?: { id?: string; content?: UserContentBlock[]; expectedConversationId?: string }
+    opts?: ChatQueuePushOptions
   ): Promise<QueuedChatMessage>
   /** Atomic pop of the queue head (select+delete in one txn); null when empty or the head is held. */
   pop(tabId: string, heldIds?: string[]): Promise<QueuedChatMessage | null>

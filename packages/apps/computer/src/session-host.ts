@@ -1,7 +1,14 @@
 /** Persistent process owner. Connector loss only detaches transport, never sessions. */
 import { createHmac, randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto'
 import { createServer, type Server } from 'node:net'
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+  readdirSync
+} from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -12,6 +19,8 @@ import {
 } from '@slayzone/computer-runtime'
 import { HubDialer, type HubDialerOptions } from '@slayzone/computer-transport/client'
 import { COMPUTER_VERSION, startComputer } from './main'
+import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import { COMPUTER_BUILD_ID } from './build-identity'
 import { effectiveHubUrls, hostConfigurationKey, type ComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
 
@@ -20,8 +29,21 @@ export function runtimeDir(root: string): string {
 }
 export function atomicRuntimeJson(path: string, value: unknown): void {
   const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  writeFileSync(temp, JSON.stringify(value) + '\n', { mode: 0o600 })
-  renameSync(temp, path)
+  try {
+    writeFileSync(temp, JSON.stringify(value) + '\n', { mode: 0o600 })
+    renameSync(temp, path)
+  } catch (error) {
+    try {
+      unlinkSync(temp)
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT')
+        throw new AggregateError(
+          [error, cleanupError],
+          'Runtime publication and staging cleanup failed'
+        )
+    }
+    throw error
+  }
 }
 export function hostEndpoint(root: string): string {
   const key = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 24)
@@ -54,11 +76,14 @@ export interface HostHealth {
   epoch: string
   pid: number
   version: string
+  buildId?: string
   idle: boolean
   configKey?: string
   hubUrls?: string[]
 }
 export interface ConnectorGrant {
+  /** Supervisor hint; connectors also derive restricted mode for old supervisors. */
+  maintenance?: boolean
   generation: number
   token: string
   health: HostHealth
@@ -68,6 +93,43 @@ interface Auth {
   hubUrl?: string
   generation?: number
   token: string
+}
+
+function isChatNotification(params: unknown): boolean {
+  return (
+    !!params && typeof params === 'object' && 'name' in params && params.name === 'chat-runtime'
+  )
+}
+
+/** Old hosts journaled normalized chat frames outside the chat lifecycle store.
+ * Scrub every configured or disconnected hub before opening transports. Native
+ * hooks retain their existing acknowledged-delivery journal.
+ */
+function scrubChatJournals(root: string): void {
+  for (const entry of readdirSync(runtimeDir(root), { withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    const path = join(runtimeDir(root), entry.name)
+    const staging = /^hooks-[a-f0-9]{16}\.json\.(\d+)\.[a-f0-9]{8}\.tmp$/.exec(entry.name)
+    if (staging) {
+      const pid = Number(staging[1])
+      if (!Number.isSafeInteger(pid) || pid < 1) continue
+      let dead = false
+      try {
+        process.kill(pid, 0)
+      } catch (error) {
+        dead = (error as NodeJS.ErrnoException).code === 'ESRCH'
+      }
+      // A temp was never published or acknowledged. The last renamed journal
+      // remains authoritative; do not parse a potentially partial private copy.
+      if (dead) unlinkSync(path)
+      continue
+    }
+    if (!/^hooks-[a-f0-9]{16}\.json$/.test(entry.name)) continue
+    const events: Array<{ params: unknown }> = JSON.parse(readFileSync(path, 'utf8'))
+    if (!Array.isArray(events)) throw new Error('Invalid host event journal')
+    const native = events.filter((event) => !isChatNotification(event.params))
+    if (native.length !== events.length) atomicRuntimeJson(path, native)
+  }
 }
 export async function hostControl(
   root: string,
@@ -168,7 +230,7 @@ class SessionTransport extends HubDialer {
     this.peer?.close()
   }
   override notify(method: string, params?: unknown): boolean {
-    if (method === 'event') {
+    if (method === 'event' && !isChatNotification(params)) {
       const entry = { id: randomUUID(), params }
       if (Buffer.byteLength(JSON.stringify(entry)) > 1024 * 1024) {
         this.logEvent('hook exceeds buffer size; dropped')
@@ -208,6 +270,7 @@ export async function startSessionHost(
   log: (message: string, meta?: Record<string, unknown>) => void = () => undefined
 ) {
   const secret = controlToken(root)
+  scrubChatJournals(root)
   const epoch = randomUUID()
   const transports = new Map<string, SessionTransport>()
   const controls = new Set<LocalPeer>()
@@ -245,6 +308,7 @@ export async function startSessionHost(
     epoch,
     pid: process.pid,
     version: COMPUTER_VERSION,
+    buildId: COMPUTER_BUILD_ID,
     idle: handle.isIdle(),
     configKey: hostConfigurationKey(config),
     hubUrls: effectiveHubUrls(config)
@@ -337,6 +401,7 @@ export async function startSessionHost(
             ...transport.options.identity,
             epoch,
             contract: HOST_CONTRACT_VERSION,
+            protocolVersion: COMPUTER_PROTOCOL_VERSION,
             version: COMPUTER_VERSION
           }
         if (method === 'hooks') {

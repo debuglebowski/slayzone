@@ -25,6 +25,8 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // can stream a version's bytes off disk instead of hauling them through the
 // worker boundary as a utf-8 string.
 import { BlobStore } from './blob-store'
+import { VersionError } from './errors'
+import { cleanupTaskWorkingCopies, workingCopyJournalDir } from './working-copy'
 import {
   artifactFilePathIn,
   artifactsDirOf,
@@ -92,6 +94,8 @@ export function createArtifactStore(dataDir: string) {
   }
 
   async function getRow(db: SlayzoneDb, id: string): Promise<Record<string, unknown> | undefined> {
+    if (existsSync(workingCopyJournalDir(dataDir)))
+      await db.namedTxn('task-artifacts:files:recover', { dataDir })
     return (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
@@ -329,6 +333,7 @@ export function createArtifactStore(dataDir: string) {
     cleanupTaskArtifacts(taskId: string): void {
       const taskDir = artifactTaskDir(artifactsDir, taskId)
       if (existsSync(taskDir)) rmSync(taskDir, { recursive: true, force: true })
+      cleanupTaskWorkingCopies(dataDir, taskId)
     },
 
     // --- Versions ---
@@ -379,7 +384,11 @@ export function createArtifactStore(dataDir: string) {
         artifactId: data.artifactId,
         versionRef: data.versionRef
       })) as ArtifactVersion
-      return { version, blobPath: new BlobStore(dataDir).blobPath(version.content_hash) }
+      const blobs = new BlobStore(dataDir)
+      // Resolved paths may be streamed by REST without another storage-layer read.
+      if (!(await blobs.verifyAsync(version.content_hash)))
+        throw new VersionError('BLOB_HASH_MISMATCH', 'Artifact version hash integrity check failed')
+      return { version, blobPath: blobs.blobPath(version.content_hash) }
     },
 
     async readArtifactBytes(
@@ -391,9 +400,8 @@ export function createArtifactStore(dataDir: string) {
         const path = await this.getArtifactPath(db, id)
         if (path && existsSync(path)) return readFileSync(path)
       }
-      const { blobPath } = await this.resolveArtifactVersion(db, { artifactId: id, versionRef })
-      if (!blobPath) throw new Error('Artifact version path is unavailable')
-      return readFileSync(blobPath)
+      const { version } = await this.resolveArtifactVersion(db, { artifactId: id, versionRef })
+      return new BlobStore(dataDir).read(version.content_hash)
     },
 
     /** The current (HEAD) version row, or null when the artifact has none. */

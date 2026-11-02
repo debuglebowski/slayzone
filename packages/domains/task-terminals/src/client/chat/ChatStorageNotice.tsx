@@ -11,7 +11,7 @@ export function ChatStorageNotice({
 }) {
   const message = status ? chatAvailabilityMessage(status) : null
   if (!message && !error) return null
-  const pending = status?.state === 'preparing' || status?.state === 'migrating'
+  const pending = !error && (status?.state === 'preparing' || status?.state === 'migrating')
   return (
     <div role="status" className="flex items-start gap-2 border-b bg-muted/40 px-3 py-2 text-xs">
       {pending ? (
@@ -23,8 +23,9 @@ export function ChatStorageNotice({
         <MonitorOff aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       )}
       <div className="min-w-0 flex-1">
-        <p className="font-medium">{message?.title ?? 'Chat unavailable'}</p>
-        <p className="text-muted-foreground">{message?.detail ?? error}</p>
+        <p className="font-medium">{error ? 'Chat unavailable' : message?.title}</p>
+        {message?.detail && <p className="text-muted-foreground">{message.detail}</p>}
+        {error && <p className="text-destructive">{error}</p>}
       </div>
       {status?.state !== 'deleted' && (
         <button

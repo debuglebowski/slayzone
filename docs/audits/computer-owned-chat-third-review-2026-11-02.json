@@ -1,0 +1,332 @@
+{
+  "baseline": "ed9673300",
+  "newFindings": [
+    {
+      "id": "F22",
+      "p": "P1",
+      "group": "upgrade",
+      "title": "Rolling upgrade falsely advertises a compatible computer",
+      "trigger": "Current supervisor/connector reuse a real prefeature session host while a harmless native job is still running.",
+      "observed": "Connector advertises wire protocol5, but retained host lacks chat.request and replies -32001. New recovery barrier blocks file access, terminal kill and the running job\u2019s proc.kill. Host maintenance waits for idle while normal stop controls are blocked.",
+      "cause": "Host contract stays1 across incompatible dispatch changes. Connector advertises its own protocol and release instead of proving the host can serve those methods. Host reuse/maintenance compares release version without build identity.",
+      "fix": "Negotiate/version host chat capability before connector handover. Never advertise unsupported protocol. Coordinate required maintenance and retain safe stop controls without bypassing ownership/deletion fences.",
+      "source": "computer-runtime/src/index.ts:5; connector.ts:20,64; hub-dialer.ts:311,348; upgrade-runtime.ts:348,647,742",
+      "test": "remote-third-pass.test.ts \u2014 rolling connector upgrade"
+    },
+    {
+      "id": "F23",
+      "p": "P1",
+      "group": "lifetime",
+      "title": "Imported native history does not acquire its own attachment pins",
+      "trigger": "Real Codex driver imports saved attachment references into a sibling conversation. Expire or delete the source chat.",
+      "observed": "Retained imported message still references the file, but source pin removal lets GC erase its sealed blob. Attachment becomes unreadable. Reproduced for both retention and source-tab deletion, with zero turn/start calls.",
+      "cause": "Native history enrichment reads task-wide saved content without creating a durable destination-owned attachment reference. Retention counts references only inside the source store owning the pin.",
+      "fix": "Acquire verified destination pins atomically with imported/forked history before exposing it. Blob lifetime must follow every retained reference, not only the first conversation that stored a pin.",
+      "source": "local-data.ts:533; codex-chat-session.ts:748,783; retention.ts:204,246; attachments.ts:173",
+      "test": "content-third-pass.test.ts \u2014 native import pins attachment (retention / deletion)"
+    },
+    {
+      "id": "F24",
+      "p": "P2",
+      "group": "lifetime",
+      "title": "Deleted chat text remains in the host notification journal",
+      "trigger": "Real session host buffers a normalized user-message while event delivery is unacknowledged. Permanently delete task and restart host.",
+      "observed": "Computer tombstone survives and SQLite events count is zero. hooks-*.json still contains full deleted message text. Successful event acknowledgement drains the journal in the control.",
+      "cause": "SessionTransport journals every event, including full chat-runtime payloads, outside the per-hub chat database. Chat deletion has no cleanup path for this copy.",
+      "fix": "Use durable storage/outbox replay for chat content and persist only necessary retry metadata. Safely migrate or erase existing journal copies by owner during deletion/retention; preserve unrelated native hook delivery.",
+      "source": "computer/src/session-host.ts:122,150\u2013152,170\u2013185; handlers/chat-runtime.ts:288\u2013300,337\u2013340",
+      "test": "journal-third-pass.test.ts \u2014 task deletion and host restart erase buffered notifications"
+    },
+    {
+      "id": "F25",
+      "p": "P2",
+      "group": "lifetime",
+      "title": "Retention breaks full session counts and first-prompt labels",
+      "trigger": "Codex session handshake anchor is old, but 601 user messages are still recent and retained.",
+      "observed": "After expiry, Sessions summary falls from601 to500 and first prompt becomes question101. The retained601 messages themselves remain present.",
+      "cause": "Retention removes turn-init/session anchor. Summary reconstruction cannot attribute remaining events and falls back to bounded500-item prompt recall.",
+      "fix": "Preserve compact session/range identity when expiring content anchors. Compute summaries from retained events without relying on composer recall limits.",
+      "source": "retention.ts:114; prompts.ts:108,118; composition.ts:908 \u2192 computer-chat.ts:626",
+      "test": "content-third-pass.test.ts \u2014 retained messages keep full summaries"
+    },
+    {
+      "id": "F26",
+      "p": "P2",
+      "group": "lifetime",
+      "title": "Read-only archive/export omits unsent queued text",
+      "trigger": "Create a valid backup containing an unsent message and attachment, delete live task, restore archive, read through supported archive API.",
+      "observed": "Snapshot has queue row, but archive.records whitelist omits it. UI JSON export uses that API and cannot expose unsent text or its attachment. Live queue behavior is unaffected.",
+      "cause": "Archive record projection includes draft/prompt/workspace/thread/diagnostics but excludes queue; export extracts attachments only from events and drafts.",
+      "fix": "Expose queued user content in read-only recovery/export without replaying operations or claiming provider resumability. Include its sealed attachments.",
+      "source": "backups.ts:543; ComputerChatBackups.tsx:491,497\u2013505",
+      "test": "content-third-pass.test.ts \u2014 read-only archive exposes unsent queue text"
+    },
+    {
+      "id": "F27",
+      "p": "P2",
+      "group": "lifetime",
+      "title": "A deleted child stays in the parent thread list",
+      "trigger": "Migrate parent and child, delete child via actual tab trigger, deliver lifecycle deletion and ACK, reopen runtime.",
+      "observed": "Parent still lists deleted child and its original title. Selecting the stale entry cannot open the tombstoned child. This is a dead-entry correctness issue, not a separate privacy-erasure claim.",
+      "cause": "Child tombstone clears child content but leaves parent\u2019s thread record; listForParent returns records without checking child liveness.",
+      "fix": "Reconcile parent thread references and notify parent after child deletion. Keep deletion fences durable and preserve valid parent history.",
+      "source": "storage.ts:739; local-data.ts:355,371; useAnswerThreads.ts:24",
+      "test": "content-third-pass.test.ts \u2014 acknowledged child deletion removes live-list entry"
+    },
+    {
+      "id": "F28",
+      "p": "P2",
+      "group": "artifact",
+      "title": "Search can hide a real hub match behind a placeholder",
+      "trigger": "Newer redacted PC locator and older real hub file both match query; request limit1.",
+      "observed": "Hub search consumes limit with placeholder; proxy then filters placeholder and PC search finds no real match. Final result is empty despite valid hub file.",
+      "cause": "Computer-owned IDs are removed after local search applies its limit.",
+      "fix": "Exclude routed placeholders before matching/limiting local results, then merge genuine backend results under one search policy.",
+      "source": "computer-artifacts.ts:311,319",
+      "test": "artifact-api-third-pass.test.ts \u2014 redacted locator hits cannot consume limit"
+    },
+    {
+      "id": "F29",
+      "p": "P2",
+      "group": "artifact",
+      "title": "Merged search ignores the requested result limit",
+      "trigger": "One matching hub artifact and one matching computer artifact; public search limit1.",
+      "observed": "Returns two results and scannedCount3 for two artifacts. Each backend received full limit and proxy concatenated results/counts.",
+      "cause": "No final global-per-hub limit/deduplication across local and computer results.",
+      "fix": "Apply one combined limit with correct truncation and distinct artifact accounting. Preserve filtering and stable ordering.",
+      "source": "computer-artifacts.ts:342",
+      "test": "artifact-api-third-pass.test.ts \u2014 one search limit across hub and computer"
+    },
+    {
+      "id": "F30",
+      "p": "P2",
+      "group": "artifact",
+      "title": "Copying a computer file to root puts it in Uploads",
+      "trigger": "Use public artifacts.copy with explicit destFolderId:null, matching UI cut/paste root destination.",
+      "observed": "Hub source copy stays at root; computer source copy lands inside Uploads.",
+      "cause": "Copy invokes chat upload routing, which treats explicit null destination as default-folder request.",
+      "fix": "Distinguish explicit root from unspecified upload destination; preserve requested placement for all storage backends.",
+      "source": "computer-artifacts.ts:230; default folder fallback:160",
+      "test": "artifact-api-third-pass.test.ts \u2014 copy to root preserves explicit destination"
+    },
+    {
+      "id": "F31",
+      "p": "P2",
+      "group": "artifact",
+      "title": "Restored folder membership depends on reconnect order",
+      "trigger": "Public APIs place A-owned file into B-owned folder; restore earlier hub snapshot and reconnect A before B.",
+      "observed": "File is temporarily shown at root with folder_id=null. B-first works. Another forced A recovery after B heals membership. File bytes survive throughout.",
+      "cause": "Recovery provisionally assigns missing parent to A, then A snapshot pruning deletes it and foreign key clears file membership before B arrives.",
+      "fix": "Keep unresolved parent ownership/reference metadata separate from complete authoritative snapshots. Do not prune a provisional cross-computer parent as stale A data.",
+      "source": "hub-relay.ts:460,540",
+      "test": "artifact-api-third-pass.test.ts \u2014 restored cross-computer folder order"
+    },
+    {
+      "id": "F32",
+      "p": "P2",
+      "group": "artifact",
+      "title": "Successful history pruning breaks raw file downloads",
+      "trigger": "Prune all saved versions using supported flags while working original still exists.",
+      "observed": "Computer editor/text read succeeds, but REST raw content returns500. Hub control returns200. There was no failed prune or rollback.",
+      "cause": "Computer readBytes resolves a historical version before attempting current working-file read, so history-less current files fail.",
+      "fix": "Serve supported current working originals without requiring a remaining history row. Keep explicit historical version reads validated and do not manufacture versions on reads.",
+      "source": "artifacts.ts:378\u2013390",
+      "test": "artifact-api-third-pass.test.ts \u2014 pruning all versions preserves raw current read"
+    },
+    {
+      "id": "F33",
+      "p": "P2",
+      "group": "artifact",
+      "title": "Creating a version changes agent attribution to user",
+      "trigger": "Real REST versions POST supplies agent/session author for a computer-owned original.",
+      "observed": "New version has user/null author. Equivalent hub-original request preserves agent attribution.",
+      "cause": "Computer method schema omits author, so parsing strips server-supplied context before shared version creation.",
+      "fix": "Forward and validate author context consistently across hub/computer backends. Preserve real caller attribution; do not guess defaults.",
+      "source": "artifacts.ts:74",
+      "test": "artifact-api-third-pass.test.ts \u2014 REST versions create preserves agent attribution"
+    }
+  ],
+  "tests": {
+    "total": 33,
+    "passed": 20,
+    "failed": 13,
+    "cases": [
+      {
+        "file": "packages/apps/computer/src/journal-third-pass.test.ts",
+        "name": "task deletion and host restart erase buffered full chat notifications from hook journal",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/computer/src/journal-third-pass.test.ts",
+        "name": "control: acknowledgement drains buffered notifications from durable hook journal",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass control: REST computer bytes, append, explicit versions and list are binary exact",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: REST versions create preserves agent attribution on computer originals",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: one search limit applies across hub and computer results without duplicate scan counts",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: redacted locator hits cannot consume the hub search limit and hide real hub matches",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass control: offline owner lists keep placeholders and preserve hub/other computer names",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass observation: global search returns an explicit error when an unrelated computer is offline",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: restored hub recovers cross-computer folders when a reconnects first",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: restored hub recovers cross-computer folders when b reconnects first",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: copy to root preserves the explicit root destination for computer originals",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass: pruning all versions preserves REST access to a surviving computer working file",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass control: REST stream create and mixed-owner folder download preserve bytes and tree names",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/artifact-api-third-pass.test.ts",
+        "name": "third-pass control: task computer changes preserve original ownership and mixed folder copy/move bytes",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/remote-third-pass.test.ts",
+        "name": "remote third control: real websocket refuses an older wire protocol before authentication",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/remote-third-pass.test.ts",
+        "name": "remote third: rolling connector upgrade refuses a prefeature session host before advertising protocol v5",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/remote-third-pass.test.ts",
+        "name": "remote third control: timed-out websocket draft commit replays one receipt across reconnect",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "new: retained messages keep full session summaries when their old session anchor expires",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "new: real native import pins its attachment in the destination before retention removes the source",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "new: real native import pins its attachment in the destination before source deletion removes the source",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: retention keeps a pinned version in its own tab while pruning an unreferenced old version",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: default-off retention preserves zero-clock migrated attachment pins and long queues across restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: long queue expiry crosses batches without dropping current entries or reopening sequence slots",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "new: read-only archive exposes unsent queue text and its attachment after live task deletion",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: public chat upload uses a task-file store that remains discoverable in archives after chat deletion",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: archive paging returns every sparse event and mixed record exactly once, including an oversized first record",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: sealed historical attachment survives original-version prune, original deletion, GC and reopen",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: reset clears events, queue and timeline, fences late old-child output, and preserves native session provenance",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: permanent deletion fences an accepted but not-yet-executed draft write across restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: fork and rewind preserve cached branch history and native provenance across computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "new: acknowledged child-tab deletion removes its private title from the live parent thread list",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: parent-tab deletion cascades child ownership fences while unrelated task store survives",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/content-third-pass.test.ts",
+        "name": "control: child drafts survive task Trash and undo; stale lifecycle revisions cannot reopen a purged task",
+        "status": "passed"
+      }
+    ]
+  },
+  "excluded": [
+    {
+      "case": "Offline computer makes global search fail rather than return partial hub results",
+      "reason": "Observed error is explicit; per-computer partial-results policy not established. Uncounted."
+    },
+    {
+      "case": "Archive hides originals created under ordinary chat owner",
+      "reason": "Low-level artificial ownership edge; normal public upload uses separate task-file store and passing control preserves discovery."
+    }
+  ],
+  "scope": "Three independent reviewers + primary journal tests; review only, production unchanged. No fresh private corpus copy. Fake providers only."
+}

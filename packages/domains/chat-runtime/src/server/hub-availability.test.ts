@@ -118,3 +118,31 @@ test('authorization precedes reading the computer name or availability', async (
     h.cleanup()
   }
 })
+
+test('maintenance bridge exposes upgrade waiting instead of ready history and resumes afterward', async () => {
+  const { h, owners } = await setup()
+  try {
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    let ready = false
+    const availability = createChatAvailability({
+      db: h.slayDb,
+      ownership: owners,
+      resolveComputer: async () => 'pc',
+      connected: () => true,
+      chatRuntimeReady: () => ready,
+      hasLiveTask: async () => false
+    })
+    expect(await availability('tab')).toMatchObject({ state: 'upgrading', computer: { id: 'pc' } })
+    ready = true
+    expect(await availability('tab')).toMatchObject({ state: 'ready' })
+  } finally {
+    h.cleanup()
+  }
+})

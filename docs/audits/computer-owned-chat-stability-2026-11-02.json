@@ -1,0 +1,438 @@
+{
+  "baseline": "ed9673300",
+  "findings": [
+    {
+      "id": "F01",
+      "p": "P1",
+      "group": "correctness",
+      "title": "A restored hub backup can activate empty history",
+      "impact": "Data loss reproduced on disposable copies",
+      "scenario": "Create a normal hub backup while ownership is legacy or copying, with no completed destination. Restore that snapshot, then run normal migration.",
+      "observed": "Backup sanitation removed the only source events while keeping the pending locator. Both hub and computer accept active ownership, epoch 2, with cleanup complete and zero original events.",
+      "cause": "Backup sanitation deletes all legacy content regardless of whether durable computer ownership exists. Restore has no proof that its now-empty source lost data.",
+      "fix": "Prevent publication of a supposedly recoverable snapshot that strands pending content. Preserve a valid transition recovery source or fail backup explicitly; reject empty cutover when required source proof is missing. Keep the post-cutover hub content-free.",
+      "source": "packages/apps/hub/src/chat-backup.ts:23",
+      "test": "storage-stability-audit.test.ts \u2014 restoring a new hub backup\u2026 (legacy / copying)"
+    },
+    {
+      "id": "F02",
+      "p": "P1",
+      "group": "correctness",
+      "title": "A disconnect after commit can wedge the entire computer",
+      "impact": "Chat reopen, another healthy task, and terminal stop all fail",
+      "scenario": "Hub commits active ownership, then connection drops before computer receives migration.activate. Restart computer and hub services.",
+      "observed": "Computer remains prepared. Recovery requests its metadata snapshot before resuming activation; snapshot rejects prepared owner. Every retry repeats the same ordering. Global barrier also blocks pty.kill.",
+      "cause": "recoverComputer drains metadata for active hub locators before reconciling their pending destination activation.",
+      "fix": "Reconcile committed activation before metadata recovery. Require matching identity/epoch/hash proof and activation ACK before source cleanup. Keep repair and stop paths usable without weakening deletion fences.",
+      "source": "packages/apps/hub/src/computer-chat.ts:80 \u00b7 hub-relay.ts:612 \u00b7 local-data.ts:664",
+      "test": "computer-chat-stability-audit.test.ts \u2014 interrupted activation (three failing cases + passing ordering control)"
+    },
+    {
+      "id": "F03",
+      "p": "P1",
+      "group": "correctness",
+      "title": "Restoring an older hub cannot resume its prepared destination",
+      "impact": "Permanent migration conflict despite intact source data",
+      "scenario": "Computer stages migration; restore an older hub locator from before beginMigration. Original source content remains intact. Restart and run ownership recovery.",
+      "observed": "Recovery ignores prepared inventory. Hub generates a fresh migration ID; destination refuses overwrite of its original prepared store. Fresh coordinator and restart do not resolve the conflict.",
+      "cause": "Prepared state is not reconciled against restored legacy ownership; migration identity is regenerated.",
+      "fix": "Recover matching uncommitted migration proof under authenticated task/computer ownership. Reuse the original stage, or safely discard only a proven uncommitted stale stage. Never overwrite an active owner.",
+      "source": "packages/domains/chat-runtime/src/server/hub-recovery.ts:77 \u00b7 migration.ts:38 \u00b7 storage.ts:454",
+      "test": "migration-stability-audit.test.ts \u2014 restoring pre-migration hub metadata\u2026"
+    },
+    {
+      "id": "F04",
+      "p": "P1",
+      "group": "correctness",
+      "title": "An attachment edit can permanently strand migration",
+      "impact": "Both normal reads and migration retries stay blocked",
+      "scenario": "A legacy attachment lacks a pinned hash. Destination stages history; transfer.finish reply is lost. Edit the source artifact, then retry and restart.",
+      "observed": "The same migration emits a different manifest because current_version_id changed. Prepared destination keeps original hash and rejects the replacement manifest. Source survives, but normal routing cannot open it.",
+      "cause": "Attachment versions are resolved from mutable artifact HEAD during repeated export passes and retries, outside the frozen metadata checkpoint.",
+      "fix": "Freeze the attachment version mapping before the first export. Use that same immutable mapping and manifest on every retry while allowing unrelated artifact editing to continue.",
+      "source": "packages/domains/chat-runtime/src/server/legacy-source.ts:344",
+      "test": "migration-stability-audit.test.ts \u2014 migration resumes prepared legacy attachment\u2026"
+    },
+    {
+      "id": "F05",
+      "p": "P1",
+      "group": "correctness",
+      "title": "Migration can return the wrong attachment bytes",
+      "impact": "Draft current version becomes an older version",
+      "scenario": "One artifact has two valid versions: an older pinned message reference and a current draft reference without contentHash. Migrate both versions.",
+      "observed": "Both blobs arrive correctly, but draft retains its bare reference. Computer attachment reader selects the first matching artifact record and returns older bytes. Reproduced with both artifact version rows present.",
+      "cause": "Export creates separate sealed attachment records without sealing references embedded in drafts/events/queues/settings. Bare reads are ambiguous across versions.",
+      "fix": "Rewrite all embedded references using the frozen version mapping. Preserve explicitly pinned history and reject unresolved ambiguous references.",
+      "source": "packages/domains/chat-runtime/src/server/legacy-source.ts:201 \u00b7 attachments.ts:80",
+      "test": "storage-stability-audit.test.ts \u2014 legacy draft attachment keeps current bytes\u2026"
+    },
+    {
+      "id": "F06",
+      "p": "P1",
+      "group": "correctness",
+      "title": "Old chat content on terminal-mode tabs never migrates",
+      "impact": "Privacy boundary remains incomplete indefinitely",
+      "scenario": "A tab contains old hub chat events/draft, but user previously continued it in Claude Code or Codex terminal. Run two idle migration sweeps and forced recovery.",
+      "observed": "All four synthetic cases retain source content without a computer owner. Real corpus contains 1,687 such events on 11 tabs. Prompt history can migrate successfully while these per-tab rows remain.",
+      "cause": "Migration census and tab selection filter current tab mode, rather than enumerating stored content by identity. These are hub chat rows, not provider-managed native transcripts.",
+      "fix": "Enumerate every legacy content-bearing tab across source tables. Preserve history identity independently of current display/agent mode; do not create unwanted visible chats.",
+      "source": "packages/apps/hub/src/computer-chat.ts:462,480 \u00b7 hub-relay.ts:142",
+      "test": "migration-stability-audit.test.ts \u2014 idle migration covers old chat rows\u2026 (four cases)"
+    },
+    {
+      "id": "F07",
+      "p": "P2",
+      "group": "reliability",
+      "title": "A prepared tab can steal an active tab\u2019s configuration",
+      "impact": "Wrong model read; configuration writes fail",
+      "scenario": "Active chat shares a task/provider with another prepared store whose storage ID sorts earlier.",
+      "observed": "Active tab reads prepared tab\u2019s model instead of its own. Writes throw Conversation prepared.",
+      "cause": "taskTab excludes deleted/inbox stores but includes prepared stores and chooses by storage ordering.",
+      "fix": "Restrict normal task operations to active eligible stores. Prefer explicit tab/root context when several stores share a task.",
+      "source": "packages/domains/chat-runtime/src/server/local-data.ts:104",
+      "test": "storage-stability-audit.test.ts \u2014 task configuration reads/writes\u2026 (two cases)"
+    },
+    {
+      "id": "F08",
+      "p": "P2",
+      "group": "reliability",
+      "title": "One incomplete transfer disables all computer backups",
+      "impact": "Unrelated healthy history cannot be backed up",
+      "scenario": "A prepared conversation references an attachment whose bytes have not arrived. Request a computer backup containing other active history.",
+      "observed": "Backup enumerates the prepared reference and fails ENOENT. Existing completed backups remain intact.",
+      "cause": "Backup creation includes incomplete staged records without a coherent completeness policy.",
+      "fix": "Snapshot complete recoverable stores consistently, or explicitly report deferred content without disabling backup of unrelated healthy history. Never publish a partial archive as complete.",
+      "source": "packages/domains/chat-runtime/src/server/backups.ts:276",
+      "test": "storage-stability-audit.test.ts \u2014 computer backup remains available\u2026"
+    },
+    {
+      "id": "F09",
+      "p": "P2",
+      "group": "reliability",
+      "title": "Reconnect creates unsolicited visible chat tabs",
+      "impact": "574 generated tabs already present in current snapshot",
+      "scenario": "A native-only task gets background prompt-history storage, then computer ownership recovery runs.",
+      "observed": "Storage-only prompt-history:<task> is materialized as a visible Claude Chat tab. Pre-upgrade snapshot had zero; current snapshot has 574. A fresh upgrade replay creates 567 on reconnect.",
+      "cause": "Recovery treats all non-artifact, non-inbox owners as displayable terminal tabs.",
+      "fix": "Represent storage purpose explicitly and suppress UI tab creation for prompt-only stores. Repair generated bindings without deleting history or discarding later user activity.",
+      "source": "packages/domains/chat-runtime/src/server/hub-recovery.ts:105",
+      "test": "computer-chat-stability-audit.test.ts \u2014 native-only prompt history\u2026; real-corpus-stability-audit.test.ts"
+    },
+    {
+      "id": "F10",
+      "p": "P2",
+      "group": "reliability",
+      "title": "Migration failure looks like normal progress",
+      "impact": "User sees an indefinite moving spinner instead of the error",
+      "scenario": "Chat availability is migrating and a read fails with an actionable migration error.",
+      "observed": "ChatStorageNotice shows generic status detail and omits the actual load error.",
+      "cause": "Status detail takes precedence over error even after migration has failed.",
+      "fix": "Show the failure reason and retry state alongside location/status; distinguish failed work from active progress. Preserve diagnostics privacy.",
+      "source": "packages/domains/task-terminals/src/client/chat/ChatStorageNotice.tsx:27",
+      "test": "ChatStorageNotice.stability-audit.test.tsx \u2014 migration failure must remain visible\u2026"
+    },
+    {
+      "id": "F11",
+      "p": "P2",
+      "group": "reliability",
+      "title": "An incomplete backup can be published as a verified archive",
+      "impact": "Restored archive claims verification but lacks attachment bytes",
+      "scenario": "Remove a blob file and its manifest entry while leaving its SQLite attachment reference intact.",
+      "observed": "Restore accepts and publishes the archive. Wrong scope, duplicate entries, missing database, and corrupt listed blobs are correctly rejected.",
+      "cause": "Verification hashes listed files and checks SQLite integrity/FKs, but does not prove that all database blob references are represented in the manifest.",
+      "fix": "Cross-check every attachment/artifact-version reference against the verified file set before archive publication. Keep previous archives intact on failure.",
+      "source": "packages/domains/chat-runtime/src/server/backups.ts:166",
+      "test": "lifecycle-stability-audit.test.ts \u2014 archive publication rejects an omitted blob\u2026"
+    },
+    {
+      "id": "F12",
+      "p": "P2",
+      "group": "performance",
+      "title": "An empty metadata poll takes over a second",
+      "impact": "Repeated synchronous work delays normal chat operations",
+      "scenario": "Call pendingMetadata on a private copy of the actual computer database with 72,920 settings records (~158 MiB retained JSON) and zero pending updates.",
+      "observed": "Three calls take 1,290 / 1,209 / 1,196 ms to return []. Largest owner snapshot reads ~33 MiB to return only 4.5 KiB of metadata. Synthetic 32 MiB control confirms scaling.",
+      "cause": "Handler loads/parses every settings value before filtering metadata:. Metadata snapshots similarly load all record kinds, including timelines/diagnostics. Post-write drains repeat this work.",
+      "fix": "Filter and project metadata/outbox records in SQL before decoding. Add appropriate indexes and bounded pagination; avoid retained content on control paths.",
+      "source": "packages/apps/computer/src/handlers/chat-runtime.ts:605 \u00b7 local-data.ts:667",
+      "test": "computer-chat-stability-audit.test.ts \u2014 metadata measurement; real-metadata-stability-audit.test.ts"
+    },
+    {
+      "id": "F13",
+      "p": "P2",
+      "group": "performance",
+      "title": "Large-history export repeatedly sorts the whole conversation",
+      "impact": "Migration cost grows faster than history size",
+      "scenario": "Export history in 256-row batches through the actual legacy source query.",
+      "observed": "SQLite uses a temporary sort for each batch across three export passes. Isolated synthetic benchmark: 10k\u219240k events costs 33\u2192427 ms; direct indexed seek costs 3\u219212 ms. Timing is illustrative; query-plan regression is deterministic.",
+      "cause": "seq+1 AS _rowid plus outer WHERE/ORDER BY prevents sequence range seek.",
+      "fix": "Page directly on (tab_id, seq) using the existing index. Preserve deterministic ordering and bounded transfer chunks.",
+      "source": "packages/domains/chat-runtime/src/server/legacy-source.ts:52,179",
+      "test": "migration-stability-audit.test.ts \u2014 legacy event pagination seeks\u2026"
+    }
+  ],
+  "synthetic": {
+    "numTotalTests": 43,
+    "numPassedTests": 21,
+    "numFailedTests": 22,
+    "cases": [
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit: normal reopen recovers a hub commit whose computer activation was interrupted",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit: native-only prompt history must not add a visible chat terminal on reconnect",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit: interrupted activation also blocks native stop through global command barrier",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit: local hook inbox preserves prompts from multiple native provider modes",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit: interrupted activation must not disable a different healthy task on same computer",
+        "status": "failed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit control: resuming committed migration before metadata recovery preserves content",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit control: re-enrollment with a new computer identity cannot appropriate old ownership",
+        "status": "passed"
+      },
+      {
+        "file": "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+        "name": "audit measurement: pending metadata reads scale with retained diagnostic payload",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "Trash and undo survive reconnect during a prepared attachment migration",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "permanent deletion of a prepared migration defeats an older restored hub and late activation",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "retention skips truly prepared and Trash content across restart while pruning other cold history",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "archive publication rejects malformed backup wrong-scope",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "archive publication rejects malformed backup duplicate-file",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "archive publication rejects malformed backup missing-database",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "archive publication rejects malformed backup corrupt-blob",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/lifecycle-stability-audit.test.ts",
+        "name": "archive publication rejects an omitted blob still referenced by the snapshot database",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost migration.checkpoint reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost migration.checkpoint reply 2 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost transfer.begin reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost transfer.chunk reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost transfer.chunk reply 2 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost transfer.finish reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost migration.verify reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost migration.verify reply 2 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost attachment.put reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration survives lost migration.activate reply 1 and computer restart",
+        "status": "passed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "migration resumes prepared legacy attachment after the source artifact is edited",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "legacy event pagination seeks by sequence without sorting the entire conversation per page",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "restoring pre-migration hub metadata can recover a prepared computer store",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "idle migration covers old chat rows on a tab now in claude-code mode, prompts=false",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "idle migration covers old chat rows on a tab now in claude-code mode, prompts=true",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "idle migration covers old chat rows on a tab now in codex mode, prompts=false",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/migration-stability-audit.test.ts",
+        "name": "idle migration covers old chat rows on a tab now in codex mode, prompts=true",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "task configuration reads choose active storage while another tab is only prepared",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "task configuration writes continue on an active tab while another tab is only prepared",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "hub backup never publishes unrecoverable legacy history",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "hub backup never publishes unrecoverable copying history",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "hub backup never publishes unrecoverable verified history",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "computer backup remains available for active history during an interrupted attachment transfer",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "legacy draft attachment keeps current bytes when a pinned older version shares its artifact id",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "restoring a new hub backup cannot activate empty history for a legacy conversation",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/chat-runtime/src/server/storage-stability-audit.test.ts",
+        "name": "restoring a new hub backup cannot activate empty history for a copying conversation",
+        "status": "failed"
+      },
+      {
+        "file": "packages/domains/task-terminals/src/client/chat/ChatStorageNotice.stability-audit.test.tsx",
+        "name": "audit: migration failure must remain visible beside the migration status",
+        "status": "failed"
+      }
+    ]
+  },
+  "replay": {
+    "nativeEvents": 1687,
+    "migrationMs": 101436,
+    "reconnectMs": 3270,
+    "requests": 11996,
+    "owners": [
+      {
+        "state": "active",
+        "n": 892
+      }
+    ],
+    "events": 129860,
+    "sourceOnly": 1687,
+    "missingOrDifferent": 0,
+    "errors": {},
+    "reconnectError": null,
+    "tabsBeforeReconnect": 0,
+    "tabsAfterReconnect": 567
+  },
+  "metadata": {
+    "settings": {
+      "n": 72920,
+      "bytes": 165795720
+    },
+    "pendingMetadataMs": [1290, 1209, 1196],
+    "pendingCount": 0,
+    "largestOwnerContentBytes": 34857126,
+    "largestSnapshotMs": 134,
+    "snapshotReplyBytes": 4627
+  },
+  "corpusComparison": {
+    "originalEvents": 131547,
+    "equalActiveComputer": 111333,
+    "equalPreparedComputer": 16278,
+    "equalRetainedHub": 3936,
+    "originalPromptsMatched": 15854,
+    "originalWorkspaceCapturesMatched": 638,
+    "existingSyntheticTabs": 574,
+    "hubQuickCheck": "ok",
+    "computerQuickCheck": "ok",
+    "preexistingActivityEventForeignKeyViolations": 2
+  }
+}

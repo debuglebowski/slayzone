@@ -1,5 +1,5 @@
-import { terminalModeForChat } from '@slayzone/terminal-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { terminalStorageMode } from './storage-mode'
 
 export interface HubChatOwnership {
   id: string
@@ -49,7 +49,7 @@ const fromRow = (r: Row): HubChatOwnership => ({
   settingsRevision: r.settings_revision,
   settingsHash: r.settings_hash
 })
-const providerMode = (mode: string) => terminalModeForChat(mode) ?? mode
+const providerMode = terminalStorageMode
 export function createChatOwnershipStore(db: SlayzoneDb) {
   const get = async (id: string) => {
     const row = await db.get<Row>('SELECT * FROM chat_ownership WHERE id=?', [id])
@@ -62,6 +62,29 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
   }
   const api = {
     get,
+    async unavailable(id: string) {
+      return db.get<{ reason: string }>(
+        `SELECT u.reason FROM chat_unavailable_owners u JOIN chat_ownership o ON o.id=u.conversation_id
+        WHERE u.conversation_id=? AND o.state='active' AND o.computer_id=u.computer_id AND o.epoch=u.epoch`,
+        [id]
+      )
+    },
+    async markUnavailable(id: string, computerId: string, epoch: number) {
+      await db.run(
+        `INSERT INTO chat_unavailable_owners(conversation_id,computer_id,epoch,reason)
+        SELECT id,computer_id,epoch,'Chat history unavailable. Computer did not return this conversation. Restore its chat backup or reconnect the original computer; no empty history was created.'
+        FROM chat_ownership WHERE id=? AND computer_id=? AND epoch=? AND state='active'
+        AND NOT EXISTS(SELECT 1 FROM chat_bootstrap_reservations WHERE conversation_id=chat_ownership.id)
+        ON CONFLICT(conversation_id) DO UPDATE SET computer_id=excluded.computer_id,epoch=excluded.epoch,reason=excluded.reason`,
+        [id, computerId, epoch]
+      )
+    },
+    async clearUnavailable(id: string, computerId: string, epoch: number) {
+      await db.run(
+        'DELETE FROM chat_unavailable_owners WHERE conversation_id=? AND computer_id=? AND epoch=?',
+        [id, computerId, epoch]
+      )
+    },
     async forTab(tabId: string) {
       const row = await db.get<Row>(
         'SELECT c.* FROM chat_ownership c JOIN chat_tab_bindings b ON b.conversation_id=c.id WHERE b.tab_id=?',
@@ -82,7 +105,8 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       return row ? fromRow(row) : null
     },
     async register(
-      value: Pick<HubChatOwnership, 'id' | 'taskId' | 'tabId' | 'mode' | 'computerId' | 'epoch'>
+      value: Pick<HubChatOwnership, 'id' | 'taskId' | 'tabId' | 'mode' | 'computerId' | 'epoch'>,
+      requireTab = false
     ) {
       if (
         await db.get("SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'", [
@@ -100,6 +124,8 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
           type: 'run',
           sql: `INSERT INTO chat_ownership(id,task_id,tab_id,mode,computer_id,epoch,state)
       SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM chat_tab_bindings WHERE tab_id=? AND conversation_id<>?)
+      AND NOT EXISTS(SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted')
+      ${requireTab ? 'AND EXISTS(SELECT 1 FROM terminal_tabs WHERE id=? AND task_id=?)' : ''}
       ON CONFLICT(id) DO NOTHING`,
           params: [
             value.id,
@@ -110,7 +136,9 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
             value.epoch,
             value.computerId ? 'active' : 'legacy',
             value.tabId,
-            value.id
+            value.id,
+            value.taskId,
+            ...(requireTab ? [value.tabId, value.taskId] : [])
           ]
         },
         {
@@ -139,6 +167,123 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       )
         throw new Error('Chat ownership conflict')
       return stored
+    },
+    async reserveBootstrap(
+      value: Pick<HubChatOwnership, 'id' | 'taskId' | 'tabId' | 'mode' | 'epoch'> & {
+        computerId: string
+      }
+    ) {
+      if (!Number.isSafeInteger(value.epoch) || value.epoch < 1)
+        throw new Error('Invalid chat ownership epoch')
+      const virtual =
+        value.tabId === `prompt-history:${value.taskId}` ||
+        value.tabId.startsWith('artifact-store:')
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_ownership(id,task_id,tab_id,mode,epoch,state,destination_computer_id)
+            SELECT ?,?,?,?,?,'legacy',? WHERE EXISTS(SELECT 1 FROM tasks WHERE id=?)
+            AND NOT EXISTS(SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted')
+            AND NOT EXISTS(SELECT 1 FROM chat_tab_bindings WHERE tab_id=? AND conversation_id<>?)
+            ${virtual ? '' : 'AND EXISTS(SELECT 1 FROM terminal_tabs WHERE id=? AND task_id=?)'}
+            ON CONFLICT(id) DO NOTHING`,
+          params: [
+            value.id,
+            value.taskId,
+            value.tabId,
+            value.mode,
+            value.epoch,
+            value.computerId,
+            value.taskId,
+            value.taskId,
+            value.tabId,
+            value.id,
+            ...(virtual ? [] : [value.tabId, value.taskId])
+          ]
+        },
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_tab_bindings(tab_id,conversation_id) SELECT tab_id,id FROM chat_ownership
+            WHERE id=? AND task_id=? AND tab_id=? AND mode=? AND epoch=? AND state='legacy'
+            AND computer_id IS NULL AND destination_computer_id=? AND migration_id IS NULL
+            ON CONFLICT(tab_id) DO NOTHING`,
+          params: [value.id, value.taskId, value.tabId, value.mode, value.epoch, value.computerId]
+        },
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_bootstrap_reservations(conversation_id,computer_id,epoch)
+            SELECT o.id,?,o.epoch FROM chat_ownership o JOIN chat_tab_bindings b ON b.conversation_id=o.id
+            WHERE o.id=? AND o.task_id=? AND o.tab_id=? AND o.mode=? AND o.epoch=? AND o.state='legacy'
+            AND o.computer_id IS NULL AND o.destination_computer_id=? AND o.migration_id IS NULL
+            ON CONFLICT(conversation_id) DO NOTHING`,
+          params: [
+            value.computerId,
+            value.id,
+            value.taskId,
+            value.tabId,
+            value.mode,
+            value.epoch,
+            value.computerId
+          ]
+        }
+      ])
+      const owner = await api.forTab(value.tabId)
+      const reservation = await api.bootstrapReservation(value.id)
+      if (!owner || owner.id !== value.id || owner.state === 'deleted')
+        throw new Error('Chat tab or task was deleted during initialization')
+      if (
+        owner.state === 'active' &&
+        owner.computerId === value.computerId &&
+        owner.epoch === value.epoch &&
+        owner.taskId === value.taskId &&
+        owner.tabId === value.tabId &&
+        owner.mode === value.mode
+      )
+        return owner
+      if (
+        !reservation ||
+        reservation.computerId !== value.computerId ||
+        reservation.epoch !== value.epoch
+      )
+        throw new Error('Chat initialization ownership conflict')
+      return owner
+    },
+    async bootstrapReservation(id: string) {
+      return db.get<{ computerId: string; epoch: number }>(
+        'SELECT computer_id AS computerId,epoch FROM chat_bootstrap_reservations WHERE conversation_id=?',
+        [id]
+      )
+    },
+    async pendingBootstraps(computerId: string) {
+      return (
+        await db.all<Row>(
+          `SELECT o.* FROM chat_ownership o JOIN chat_bootstrap_reservations r ON r.conversation_id=o.id
+          WHERE r.computer_id=? AND o.state<>'deleted' ORDER BY o.id`,
+          [computerId]
+        )
+      ).map(fromRow)
+    },
+    async activateBootstrap(id: string, computerId: string, epoch: number) {
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: `UPDATE chat_ownership SET state='active',computer_id=?,destination_computer_id=NULL
+            WHERE id=? AND epoch=? AND state IN ('legacy','active') AND migration_id IS NULL
+            AND EXISTS(SELECT 1 FROM chat_bootstrap_reservations r WHERE r.conversation_id=chat_ownership.id AND r.computer_id=? AND r.epoch=?)
+            AND NOT EXISTS(SELECT 1 FROM chat_task_lifecycle l WHERE l.task_id=chat_ownership.task_id AND l.state='deleted')`,
+          params: [computerId, id, epoch, computerId, epoch]
+        },
+        {
+          type: 'run',
+          sql: `DELETE FROM chat_bootstrap_reservations WHERE conversation_id=? AND EXISTS(
+            SELECT 1 FROM chat_ownership WHERE id=? AND state='active' AND computer_id=? AND epoch=?)`,
+          params: [id, id, computerId, epoch]
+        }
+      ])
+      const owner = await required(id)
+      if (owner.state !== 'active' || owner.computerId !== computerId || owner.epoch !== epoch)
+        throw new Error('Chat conversation was deleted or changed during initialization')
+      return owner
     },
     async settingsRevision(id: string, hash: string) {
       await db.run(

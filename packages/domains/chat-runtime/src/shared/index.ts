@@ -35,6 +35,7 @@ export interface CommandReceipt {
   result: unknown
   at?: number
   resultExpired?: boolean
+  method?: string
 }
 export interface ChatMigrationSnapshot {
   version: 1

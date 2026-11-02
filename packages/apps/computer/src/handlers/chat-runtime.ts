@@ -1,4 +1,4 @@
-import type { ResolvedAgentHook } from '@slayzone/terminal-contracts'
+import type { ResolvedAgentHook, ChatAttachment } from '@slayzone/terminal-contracts'
 import { rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
@@ -187,6 +187,7 @@ const requestSchema = z.discriminatedUnion('kind', [
     hash: z.string()
   }),
   z.object({ kind: z.literal('migration.verify'), id: z.string() }),
+  z.object({ kind: z.literal('migration.prepared'), id: z.string() }),
   z.object({
     kind: z.literal('attachment.put'),
     route: chatRouteSchema,
@@ -389,6 +390,7 @@ export function createChatRuntimeHandlers(opts: {
           .filter((o) => !o.identity.id.startsWith('__'))
           .map((o) => ({
             ...o,
+            hasConversationContent: r.storage.hasConversationContent(o.identity.id),
             bootstrapRevision:
               r.storage.getRecord<ChatBootstrap>(o.identity.id, 'settings', 'bootstrap')
                 ?.revision ?? 0,
@@ -513,6 +515,25 @@ export function createChatRuntimeHandlers(opts: {
         return r.transfers.finish(req.id)
       case 'migration.verify':
         return { missing: r.attachments.missing(req.id) }
+      case 'migration.prepared': {
+        const owner = r.storage.conversation(req.id)
+        const manifest = r.transfers.resume(req.id)
+        if (owner?.state !== 'prepared' || !manifest) return null
+        return {
+          migrationId: owner.migrationId,
+          epoch: owner.identity.epoch,
+          hash: owner.migrationHash,
+          manifest,
+          attachments: r.storage
+            .records(req.id, 'attachment')
+            .filter((record) => record.kind === 'attachment')
+            .map((record) => {
+              const { artifactId, contentHash, name, kind, mediaType, size } =
+                record.value as ChatAttachment
+              return { artifactId, contentHash, name, kind, mediaType, size }
+            })
+        }
+      }
       case 'migration.activate': {
         const owner = r.storage.conversation(req.id)
         if (owner?.state === 'prepared' && r.attachments.missing(req.id).length)
@@ -557,7 +578,7 @@ export function createChatRuntimeHandlers(opts: {
         const owner = r.storage.conversation(req.route.id)
         if (!owner || owner.identity.epoch !== req.route.epoch || owner.state === 'deleted')
           throw new Error('Attachment ownership mismatch')
-        const records = r.storage.records(req.route.id)
+        const records = r.storage.records(req.route.id, 'attachment')
         if (
           !records.some(
             (row) =>
@@ -604,8 +625,7 @@ export function createChatRuntimeHandlers(opts: {
         return r.storage.conversation(req.id)
       case 'pendingMetadata':
         return r.storage
-          .findRecords('settings')
-          .filter((r) => r.id.startsWith('metadata:'))
+          .findRecords('settings', undefined, { idPrefix: 'metadata:', limit: 500 })
           .map((r) => r.value)
       case 'ackMetadata': {
         const owner = r.storage.conversation(req.id)

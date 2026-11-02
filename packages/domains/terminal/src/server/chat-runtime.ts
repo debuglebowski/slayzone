@@ -13,7 +13,12 @@ export {
 } from './runtime/chat-handlers'
 export { createChatQueueRuntime, type ChatQueueRuntime } from './runtime/chat-queue-handlers'
 export type { ChatDataOps, ProviderConfigEntry } from './runtime/chat-data-ops'
-export type { ChatQueueData } from './runtime/chat-queue-data'
+export type {
+  ChatQueueData,
+  ChatQueueAdmissions,
+  ChatQueuePushOptions,
+  QueueAdmission
+} from './runtime/chat-queue-data'
 export type { ChatThreadStore } from './chat-threads-store'
 export type { TimelineWrite, TimelineCheckpointRow } from './chat-timeline-store'
 export type { ChatAttachmentReader } from './agents/chat-attachment-reader'

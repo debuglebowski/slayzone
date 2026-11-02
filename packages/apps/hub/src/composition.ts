@@ -517,6 +517,24 @@ export function composeServer(opts: {
   setAgentLifecycleEvents(agentLifecycleEvents)
   setAuthEvents(authEvents)
 
+  // Backup lives with the database now. `supervised` gates restore: on a hub a
+  // client merely connects to, a whole-DB overwrite plus an app relaunch is not
+  // something one client should be able to do to everyone.
+  const backupOps = buildBackupOps({
+    db,
+    dataRoot,
+    dbPath: getDatabasePathFromEnv(),
+    supervised: !opts.standalone,
+    closeDb: () => db.close(),
+    appRelaunch: () => bridge?.appDeps.appRelaunch(),
+    shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
+  })
+  setBackupOps(backupOps)
+  // Arm the auto-backup timer at boot. v0.35.0 did (`startAutoBackup(db)` in the host's
+  // boot); the hub refactor dropped the call, so the timer only started when someone
+  // touched the setting — a user with the switch ON silently stopped getting backups.
+  bootBestEffort('auto-backup-start', () => backupOps.startAuto())
+
   // --- Task ops --------------------------------------------------------------
   // Completion-event bus the task ops emit `db:tasks:*:done` on — handed to every
   // caller of the ops (tRPC via setTaskDeps, REST, MCP). Listeners: integration push
@@ -802,6 +820,7 @@ export function composeServer(opts: {
     // agent is never booted on a machine no task will land on.
     resolveComputerId: (projectId) => resolveComputerForProject(projectId)
   })
+
   // Chat content and provider processes belong to the owning computer.
   const legacyChatDiagnostics = opts.diagnostics
     ? createLegacyChatDiagnostics({
@@ -869,6 +888,9 @@ export function composeServer(opts: {
       }
     },
     connected: (id) => (execGateway?.listUsableComputers() ?? []).some((c) => c.computerId === id),
+    chatRuntimeReady: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatRuntimeReady !==
+      false,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
@@ -958,23 +980,6 @@ export function composeServer(opts: {
   // supervised mode — the host no longer opens this database, so if the hub skipped
   // it the integrations tables would simply never be created.
   ensureIntegrationSchema(db)
-  // Backup lives with the database now. `supervised` gates restore: on a hub a
-  // client merely connects to, a whole-DB overwrite plus an app relaunch is not
-  // something one client should be able to do to everyone.
-  const backupOps = buildBackupOps({
-    db,
-    dataRoot,
-    dbPath: getDatabasePathFromEnv(),
-    supervised: !opts.standalone,
-    closeDb: () => db.close(),
-    appRelaunch: () => bridge?.appDeps.appRelaunch(),
-    shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
-  })
-  setBackupOps(backupOps)
-  // Arm the auto-backup timer at boot. v0.35.0 did (`startAutoBackup(db)` in the host's
-  // boot); the hub refactor dropped the call, so the timer only started when someone
-  // touched the setting — a user with the switch ON silently stopped getting backups.
-  bootBestEffort('auto-backup-start', () => backupOps.startAuto())
   const integrationHandles = createIntegrationOps(db)
   setIntegrationOps(integrationHandles)
   // Push local task edits out to Linear/GitHub. Listens on `taskBus` — the SAME

@@ -15,6 +15,11 @@ export interface ChatMigrationSource {
     chunks(offset: number): AsyncIterable<Uint8Array>
   }>
   readAttachment(owner: HubChatOwnership, ref: ChatAttachment): Promise<Uint8Array>
+  pinAttachments?(
+    owner: HubChatOwnership,
+    refs: ChatAttachment[],
+    manifest: ChatTransferManifest
+  ): Promise<void>
   /** Idempotent; only source content is removed, never destination or routing metadata. */
   cleanup(owner: HubChatOwnership): Promise<void>
 }
@@ -54,36 +59,68 @@ export function createChatMigration(opts: {
       const gated = await current(id)
       if (gated.migrationId !== migrationId || gated.epoch !== owner.epoch)
         throw new Error('Chat ownership changed during quiesce')
-      const source = await opts.source.open(owner, migrationId)
-      const { manifest } = source
-      const start = (await opts.request(destination, { kind: 'transfer.begin', manifest })) as {
-        id: string
-        offset: number
+      const prepared = (await opts.request(destination, { kind: 'migration.prepared', id })) as
+        | {
+            migrationId: string
+            epoch: number
+            hash: string
+            manifest: ChatTransferManifest
+          }
+        | null
+        | undefined
+      let manifest: ChatTransferManifest
+      if (prepared) {
+        const i = prepared.manifest?.header.identity
+        if (
+          prepared.migrationId !== migrationId ||
+          prepared.epoch !== owner.epoch + 1 ||
+          prepared.hash !== prepared.manifest?.hash ||
+          prepared.manifest.header.migrationId !== migrationId ||
+          i?.id !== owner.id ||
+          i.taskId !== owner.taskId ||
+          i.tabId !== owner.tabId ||
+          i.mode !== owner.mode ||
+          i.epoch !== owner.epoch
+        )
+          throw new Error('Prepared destination migration proof mismatch')
+        manifest = prepared.manifest
+      } else {
+        const source = await opts.source.open(owner, migrationId)
+        manifest = source.manifest
+        const start = (await opts.request(destination, { kind: 'transfer.begin', manifest })) as {
+          id: string
+          offset: number
+        }
+        if (
+          !Number.isSafeInteger(start.offset) ||
+          start.offset < 0 ||
+          start.offset > manifest.bytes
+        )
+          throw new Error('Invalid destination transfer offset')
+        let offset = start.offset
+        for await (const bytes of source.chunks(offset)) {
+          if (!bytes.length) continue
+          const ack = (await opts.request(destination, {
+            kind: 'transfer.chunk',
+            id: start.id,
+            offset,
+            data: Buffer.from(bytes).toString('base64')
+          })) as { offset: number }
+          offset += bytes.length
+          if (ack.offset !== offset) throw new Error('Invalid destination chunk acknowledgement')
+        }
+        if (offset !== manifest.bytes) throw new Error('Source transfer length changed')
+        const staged = (await opts.request(destination, {
+          kind: 'transfer.finish',
+          id: start.id
+        })) as { id: string; epoch: number; hash: string }
+        if (staged.id !== id || staged.epoch !== owner.epoch + 1 || staged.hash !== manifest.hash)
+          throw new Error('Destination verification mismatch')
       }
-      if (!Number.isSafeInteger(start.offset) || start.offset < 0 || start.offset > manifest.bytes)
-        throw new Error('Invalid destination transfer offset')
-      let offset = start.offset
-      for await (const bytes of source.chunks(offset)) {
-        if (!bytes.length) continue
-        const ack = (await opts.request(destination, {
-          kind: 'transfer.chunk',
-          id: start.id,
-          offset,
-          data: Buffer.from(bytes).toString('base64')
-        })) as { offset: number }
-        offset += bytes.length
-        if (ack.offset !== offset) throw new Error('Invalid destination chunk acknowledgement')
-      }
-      if (offset !== manifest.bytes) throw new Error('Source transfer length changed')
-      const staged = (await opts.request(destination, {
-        kind: 'transfer.finish',
-        id: start.id
-      })) as { id: string; epoch: number; hash: string }
-      if (staged.id !== id || staged.epoch !== owner.epoch + 1 || staged.hash !== manifest.hash)
-        throw new Error('Destination verification mismatch')
       const verified = (await opts.request(destination, { kind: 'migration.verify', id })) as {
         missing: ChatAttachment[]
       }
+      await opts.source.pinAttachments?.(owner, verified.missing, manifest)
       for (const ref of verified.missing) {
         const bytes = await opts.source.readAttachment(owner, ref)
         await opts.request(destination, {

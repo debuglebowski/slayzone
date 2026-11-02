@@ -59,6 +59,14 @@ function ops(opts: { supervised?: boolean } = {}): ReturnType<typeof buildBackup
   return buildBackupOps({
     db,
     sanitizeSnapshot: async () => {},
+    // This sequence test writes a non-SQLite sentinel. Real snapshot/blob
+    // protection is exercised with SQLite by backup-blobs.test.ts.
+    artifactProtection: {
+      prepare: async () => {},
+      begin: async () => ({ pinSnapshot: async () => {}, finish: async () => {} }),
+      forget: async () => {},
+      close: async () => {}
+    },
     dataRoot,
     dbPath,
     supervised: opts.supervised ?? true,
