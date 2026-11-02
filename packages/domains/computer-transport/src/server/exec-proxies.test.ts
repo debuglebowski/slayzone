@@ -353,6 +353,58 @@ describe('createRoutingPtyBackend', () => {
     expect(chunks).toEqual(['late', 'next'])
   })
 
+  it('a frame arriving while the backfill is in flight waits for it — nothing skipped', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 9 }))
+    let release!: (v: unknown) => void
+    gateway.onMethod('pty.getBufferSince', () => new Promise((r) => (release = r)))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
+    const chunks: string[] = []
+    handle.onData((d) => chunks.push(d))
+    const frame = (seq: number, data: string) =>
+      gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq, data })
+    frame(0, 'zero ')
+    frame(3, 'three ') // gap 1-2: backfill
+    frame(4, 'four') // before the backfill replied
+    release({
+      frames: [
+        { seq: 1, data: 'one ' },
+        { seq: 2, data: 'two ' }
+      ]
+    })
+    await vi.waitFor(() => expect(chunks.join('')).toBe('zero one two three four'))
+  })
+
+  it('a failed backfill is retried, never taken as proof the frames are gone', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 9 }))
+    let attempts = 0
+    gateway.onMethod('pty.getBufferSince', () => {
+      attempts++
+      if (attempts === 1) throw new Error('request timed out')
+      return { frames: [{ seq: 1, data: 'one ' }] }
+    })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
+    const chunks: string[] = []
+    handle.onData((d) => chunks.push(d))
+    const frame = (seq: number, data: string) =>
+      gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq, data })
+    frame(0, 'zero ')
+    frame(2, 'two ')
+    await new Promise((r) => setTimeout(r, 5))
+    frame(3, 'three')
+    await vi.waitFor(() => expect(chunks.join('')).toBe('zero one two three'), { timeout: 3000 })
+    expect(attempts).toBe(2)
+  })
+
   it('delivers seq 0 — the computer numbers its FIRST chunk 0, not 1', async () => {
     // The computer's RingBuffer starts at `nextSeq = 0` (ring-buffer.ts), so the
     // very first chunk of every remote pty session carries seq 0. The hub used

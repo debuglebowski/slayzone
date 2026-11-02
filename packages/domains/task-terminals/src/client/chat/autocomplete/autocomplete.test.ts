@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest'
 import { createSkillsSource } from './sources/skills'
 import { createFilesSource } from './sources/files'
 import { expandCommandBody } from './sources/commands'
-import { filterBuiltins } from './builtins-registry'
+import { availableBuiltins, builtinArgumentHint, filterBuiltins } from './builtins-registry'
 import { spliceReplace } from './useAutocomplete'
 import { rankAcrossSources } from './ranking'
 import type { AcceptCtx, AutocompleteSource, BuiltinCommand } from './types'
@@ -304,11 +304,48 @@ describe('CLI commands source', () => {
   })
 })
 
+describe("/effort builtin: the chat model's own levels", () => {
+  const effortFor = (mode: string, effortLevels: string[]) =>
+    availableBuiltins({
+      cliCommandNames: new Set(),
+      capabilities: chatCapabilitiesForMode(mode),
+      effortLevels
+    }).find((b) => b.name === 'effort')!
+
+  test("Codex: description, ghost hint and toast list the model's levels, never Claude's", async () => {
+    const effort = effortFor('codex-chat', ['low', 'medium', 'ultra'])
+    expect(effort.description).toBe('Set reasoning effort — usage: /effort <low|medium|ultra>')
+    expect(effort.argumentHint).toBe('<low|medium|ultra>')
+    expect(builtinArgumentHint([effort], 'effort')).toBe('<low|medium|ultra>')
+    const toasts: string[] = []
+    await effort.run({ setDraft: () => {}, toast: (m: string) => toasts.push(m) } as never)
+    expect(toasts).toEqual(['effort: type level (low, medium, ultra) then Enter'])
+    expect(effort.description).not.toContain('max')
+  })
+
+  test('Claude: its fixed levels', () => {
+    const effort = effortFor('claude-chat', ['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(effort.description).toBe(
+      'Set reasoning effort — usage: /effort <low|medium|high|xhigh|max>'
+    )
+  })
+
+  test('a model with no levels (or none listed yet) says so instead of listing any', async () => {
+    const effort = effortFor('codex-chat', [])
+    expect(effort.description).toBe('Set reasoning effort — none for this model')
+    expect(effort.argumentHint).toBeUndefined()
+    const toasts: string[] = []
+    await effort.run({ setDraft: () => {}, toast: (m: string) => toasts.push(m) } as never)
+    expect(toasts).toEqual(['effort: this model has no effort levels'])
+  })
+})
+
 describe('builtins vs the CLI command list', () => {
   const names = async (cli: string[], mode: string): Promise<string[]> => {
     const src = createBuiltinsSource({
       cliCommandNames: new Set(cli),
-      capabilities: chatCapabilitiesForMode(mode)
+      capabilities: chatCapabilitiesForMode(mode),
+      effortLevels: []
     })
     return (await src.fetch({ cwd: '/r' })).map((b: BuiltinCommand) => b.name)
   }
@@ -333,7 +370,8 @@ describe('builtins vs the CLI command list', () => {
   test('filter ranks within the fetched items (hidden builtins stay hidden)', async () => {
     const src = createBuiltinsSource({
       cliCommandNames: new Set(['init']),
-      capabilities: chatCapabilitiesForMode('claude-chat')
+      capabilities: chatCapabilitiesForMode('claude-chat'),
+      effortLevels: []
     })
     const items = await src.fetch({ cwd: '/r' })
     expect(src.filter(items, 'init').map((b) => b.name)).not.toContain('init')

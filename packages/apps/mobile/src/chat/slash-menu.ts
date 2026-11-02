@@ -73,7 +73,15 @@ export function slashQuery(draft: string): string | null {
   return /\s/.test(rest) ? null : rest
 }
 
-export function slashItems(lists: SlashLists, caps: ChatCapabilities): SlashItem[] {
+/**
+ * `effortLevels`: the levels `/effort` takes on the chat's model
+ * (`ChatModelsView.effortChoices`) — its description lists them.
+ */
+export function slashItems(
+  lists: SlashLists,
+  caps: ChatCapabilities,
+  effortLevels: readonly string[]
+): SlashItem[] {
   const cliList = caps.nativeSlashCommands ? lists.cliList : null
   const cli = cliCommandItems(cliList)
   // Where the CLI runs command files itself it gets `/name args` under the name it
@@ -84,7 +92,8 @@ export function slashItems(lists: SlashLists, caps: ChatCapabilities): SlashItem
   const builtins = availableBuiltins({
     cliCommandNames: new Set(cli.map((c) => c.name)),
     // No side-question card (`/btw`) on mobile yet: its builtin stays desktop-only.
-    capabilities: { ...caps, sideQuestions: false }
+    capabilities: { ...caps, sideQuestions: false },
+    effortLevels
   })
   const items: SlashItem[] = [
     ...commands.map((c) => ({

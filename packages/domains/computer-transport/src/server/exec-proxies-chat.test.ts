@@ -238,6 +238,27 @@ describe('routed chat writes', () => {
     expect(unconfirmed[0]!.payload).toMatchObject({ computerId: 'computer-1' })
   })
 
+  it('an old computer: each process says so once to its chat (onWritesUnconfirmed)', async () => {
+    const gateway = new Gateway()
+    gateway.on('proc.write', () => ({ ok: true }))
+    const handle = await started(gateway)
+    const seen: unknown[] = []
+    handle.onWritesUnconfirmed?.((info) => seen.push(info))
+    await handle.write('a\n')
+    await handle.write('b\n')
+    expect(seen).toEqual([{ computerId: 'computer-1' }])
+  })
+
+  it('a computer that confirms writes never says so', async () => {
+    const gateway = new Gateway()
+    gateway.on('proc.write', () => ({ ok: true, delivered: true }))
+    const handle = await started(gateway)
+    const seen: unknown[] = []
+    handle.onWritesUnconfirmed?.((info) => seen.push(info))
+    await handle.write('a\n')
+    expect(seen).toEqual([])
+  })
+
   it('a kill names its attempt, so it can never hit a replacement', async () => {
     const gateway = new Gateway()
     const handle = await started(gateway)
@@ -277,5 +298,77 @@ describe('routed chat frames', () => {
     const after1 = count()
     for (let i = 1; i < 20; i++) handles.push(await backend.spawn(spec({ sessionId: `s:${i}` })))
     expect(count()).toBe(after1)
+  })
+})
+
+describe('routed chat stdout across a seq gap', () => {
+  const data = (gateway: Gateway, seq: number, text: string): void =>
+    gateway.events.emit('proc.data', {
+      computerId: 'computer-1',
+      sessionId: 'task-1:tab-1',
+      spawnId: spawnIdOf(gateway),
+      seq,
+      data: text
+    })
+
+  async function started(gateway: Gateway): Promise<{ handle: ChatProcHandle; out: string[] }> {
+    gateway.on('proc.spawn', () => ({ pid: 1 }))
+    const handle = await backendFor(gateway).spawn(spec())
+    const out: string[] = []
+    handle.onStdout((c) => out.push(c))
+    await vi.waitFor(() => expect(handle.pid).toBe(1))
+    return { handle, out }
+  }
+
+  it('a frame arriving while the backfill is in flight waits for it — nothing skipped', async () => {
+    const gateway = new Gateway()
+    const reply = deferred<{ frames: Array<{ seq: number; data: string }> }>()
+    gateway.on('proc.getBufferSince', () => reply.promise)
+    const { out } = await started(gateway)
+    data(gateway, 0, 'a\n')
+    data(gateway, 3, 'd\n') // gap: 1, 2 → backfill from 0
+    data(gateway, 4, 'e\n') // arrives before the backfill's reply
+    reply.resolve({
+      frames: [
+        { seq: 1, data: 'b\n' },
+        { seq: 2, data: 'c\n' }
+      ]
+    })
+    await vi.waitFor(() => expect(out.join('')).toBe('a\nb\nc\nd\ne\n'))
+  })
+
+  it('a failed backfill is retried, never taken as proof the frames are gone', async () => {
+    const gateway = new Gateway()
+    let attempts = 0
+    gateway.on('proc.getBufferSince', () => {
+      attempts++
+      if (attempts === 1) throw new Error('request timed out')
+      return { frames: [{ seq: 1, data: 'b\n' }] }
+    })
+    const { handle, out } = await started(gateway)
+    const gaps: unknown[] = []
+    handle.onGap?.((g) => gaps.push(g))
+    data(gateway, 0, 'a\n')
+    data(gateway, 2, 'c\n')
+    await tick(5)
+    data(gateway, 3, 'd\n') // a later frame after the failure must not skip seq 1
+    await vi.waitFor(() => expect(out.join('')).toBe('a\nb\nc\nd\n'), { timeout: 3000 })
+    expect(attempts).toBe(2)
+    expect(gaps).toEqual([])
+  })
+
+  it('frames the computer no longer holds: delivery goes on and the gap is reported', async () => {
+    const gateway = new Gateway()
+    gateway.on('proc.getBufferSince', () => ({ frames: [] }))
+    const { handle, out } = await started(gateway)
+    const gaps: unknown[] = []
+    handle.onGap?.((g) => gaps.push(g))
+    data(gateway, 0, '{"a":1}\n{"he')
+    data(gateway, 3, 'ad"}\n{"c":3}\n')
+    await vi.waitFor(() => expect(gaps).toEqual([{ fromSeq: 1, toSeq: 2 }]))
+    expect(out.join('')).toBe('{"a":1}\n{"head"}\n{"c":3}\n')
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({ event: 'computer.output_gap' })
+    )
   })
 })

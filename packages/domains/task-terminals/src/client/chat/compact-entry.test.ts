@@ -32,7 +32,11 @@ describe('Compact entry points', () => {
 
   test('the / menu offers /compact to Codex (no CLI command list); the CLI’s own wins for Claude', () => {
     const names = (caps: ReturnType<typeof codex>, cli: string[] = []) =>
-      availableBuiltins({ capabilities: caps, cliCommandNames: new Set(cli) }).map((b) => b.name)
+      availableBuiltins({
+        capabilities: caps,
+        cliCommandNames: new Set(cli),
+        effortLevels: []
+      }).map((b) => b.name)
     expect(names(codex(true))).toContain('compact')
     expect(names(codex(false))).not.toContain('compact')
     expect(

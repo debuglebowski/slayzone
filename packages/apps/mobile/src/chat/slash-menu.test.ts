@@ -57,6 +57,21 @@ describe('slashQuery', () => {
 })
 
 describe('slashItems', () => {
+  it("/effort's description lists the chat model's own levels (Codex), never Claude's", () => {
+    const effortOf = (caps: ChatCapabilities, levels: string[]) =>
+      slashItems({ skills: [], commands: [], agents: [], cliList: null }, caps, levels).find(
+        (i) => i.name === 'effort'
+      )!.description
+    const codexLevels = CODEX_MODELS.view.effortChoices(CODEX_MODELS.current)
+    expect(effortOf(CODEX, codexLevels)).toBe('Set reasoning effort — usage: /effort <low|ultra>')
+    expect(effortOf(CODEX, CODEX_MODELS.view.effortChoices('gpt-6.1-sol'))).toBe(
+      'Set reasoning effort — none for this model'
+    )
+    expect(effortOf(CLAUDE, CLAUDE_MODELS.view.effortChoices(CLAUDE_MODELS.current))).toBe(
+      'Set reasoning effort — usage: /effort <low|medium|high|xhigh|max>'
+    )
+  })
+
   it("lists desktop's sources, the CLI's own commands behind richer local entries", () => {
     const items = slashItems(
       {
@@ -65,7 +80,8 @@ describe('slashItems', () => {
         agents: [agent('reviewer')],
         cliList
       },
-      CLAUDE
+      CLAUDE,
+      []
     )
     const byName = (name: string) => items.filter((i) => i.name === name).map((i) => i.type)
     expect(byName('my-skill')).toEqual(['skill'])
@@ -79,7 +95,7 @@ describe('slashItems', () => {
   })
 
   it('offers no CLI commands where the provider does not run them', () => {
-    const items = slashItems({ skills: [], commands: [], agents: [], cliList }, CODEX)
+    const items = slashItems({ skills: [], commands: [], agents: [], cliList }, CODEX, [])
     expect(items.some((i) => i.type === 'cli')).toBe(false)
     expect(items.some((i) => i.name === 'model')).toBe(false)
   })
@@ -89,7 +105,8 @@ describe('rankSlash', () => {
   it('ranks by name, then description, usage breaking ties', () => {
     const items = slashItems(
       { skills: [skill('compose')], commands: [], agents: [], cliList },
-      CLAUDE
+      CLAUDE,
+      []
     )
     expect(rankSlash(items, 'compact', {})[0].name).toBe('compact')
     const tie = rankSlash(items, '', { skills: { compose: 9 } })
@@ -101,7 +118,8 @@ describe('acceptSlash (a tap on an entry)', () => {
   it('runs a builtin with the draft cleared', () => {
     const [clear] = slashItems(
       { skills: [], commands: [], agents: [], cliList: null },
-      CLAUDE
+      CLAUDE,
+      []
     ).filter((i) => i.name === 'clear')
     const action = acceptSlash(clear, '/cl', CLAUDE)
     expect(action.type).toBe('run')
@@ -111,7 +129,8 @@ describe('acceptSlash (a tap on an entry)', () => {
   it('parks /name for a skill, a CLI command or a command file', () => {
     const items = slashItems(
       { skills: [skill('s')], commands: [command('c', 'ship $ARGUMENTS')], agents: [], cliList },
-      CLAUDE
+      CLAUDE,
+      []
     )
     const pick = (name: string) => acceptSlash(items.find((i) => i.name === name)!, '/x', CLAUDE)
     expect(pick('s')).toEqual({ type: 'draft', draft: '/s ' })
@@ -126,7 +145,8 @@ describe('acceptSlash (a tap on an entry)', () => {
   it('starts an agent request', () => {
     const [reviewer] = slashItems(
       { skills: [], commands: [], agents: [agent('reviewer')], cliList: null },
-      CLAUDE
+      CLAUDE,
+      []
     ).filter((i) => i.type === 'agent')
     expect(acceptSlash(reviewer, '/rev', CLAUDE)).toEqual({
       type: 'draft',
@@ -137,7 +157,8 @@ describe('acceptSlash (a tap on an entry)', () => {
   it('expands a command file here where the provider does not run commands (Codex)', () => {
     const items = slashItems(
       { skills: [], commands: [command('hello', 'Say hello')], agents: [], cliList: null },
-      CODEX
+      CODEX,
+      []
     )
     expect(acceptSlash(items.find((i) => i.name === 'hello')!, '/he', CODEX)).toEqual({
       type: 'send',
@@ -150,7 +171,8 @@ describe('acceptSlash (a tap on an entry)', () => {
 describe('enterSlash (Send while the menu is open)', () => {
   const items = slashItems(
     { skills: [], commands: [command('deploy', 'ship $ARGUMENTS')], agents: [], cliList },
-    CLAUDE
+    CLAUDE,
+    []
   )
 
   it('runs the exact or completing entry the way the CLI would get it', () => {
@@ -232,7 +254,8 @@ describe('usageTarget', () => {
   it('names the entry a sent /command counts for, the picked one first', () => {
     const items = slashItems(
       { skills: [skill('x')], commands: [command('x')], agents: [], cliList: null },
-      CLAUDE
+      CLAUDE,
+      []
     )
     expect(usageTarget('/x go', items, null)).toEqual({ source: 'commands', name: 'x' })
     expect(usageTarget('/x go', items, { source: 'skills', name: 'x' })).toEqual({

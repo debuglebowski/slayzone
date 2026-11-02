@@ -5,6 +5,7 @@ import {
   inheritComputerLabel,
   NO_COMPUTERS_NOTE,
   OFFLINE_MARK,
+  outdatedComputerNote,
   runsOnLabel
 } from './computer-labels'
 
@@ -68,5 +69,24 @@ describe('choice labels', () => {
 
   it('marks a computer that cannot take work now', () => {
     expect(OFFLINE_MARK).toBe('offline')
+  })
+})
+
+describe('outdatedComputerNote', () => {
+  it('a computer older than confirmed chat writes (< 0.36.3): which one, why, what to do', () => {
+    expect(outdatedComputerNote({ name: 'linux-box', version: '0.36.2' })).toBe(
+      'linux-box runs SlayZone 0.36.2: messages to chat agents on it are not confirmed, so one lost on the way is not noticed. Update the SlayZone CLI on that machine, then run `slay computer restart linux-box`.'
+    )
+    expect(outdatedComputerNote({ name: 'a', version: '0.35.9' })).not.toBeNull()
+    expect(outdatedComputerNote({ name: 'a', version: 'v0.36.2-beta.4' })).not.toBeNull()
+  })
+
+  it('none for a computer that confirms writes, or one whose version is unknown', () => {
+    for (const version of ['0.36.3', '0.36.10', '0.37.0', '1.0.0', '0.36.3-beta.1']) {
+      expect(outdatedComputerNote({ name: 'a', version })).toBeNull()
+    }
+    for (const version of [null, undefined, '', 'dev', 'x.y.z']) {
+      expect(outdatedComputerNote({ name: 'a', version })).toBeNull()
+    }
   })
 })

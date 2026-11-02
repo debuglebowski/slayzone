@@ -154,6 +154,121 @@ export interface PtyExitEvent {
  * to it and stops buffering). Bridges the race where a remote data/exit frame
  * can arrive before the consumer has called `onData`/`onExit`.
  */
+/**
+ * Seq-gap recovery for a routed output stream (pty output, process stdout): the
+ * state both `drain`s share, and the one rule for when a gap may be SKIPPED.
+ *
+ * A gap is skipped only on proof the frames are gone: the computer ANSWERED a
+ * backfill for this position without them (evicted from its ring buffer, never
+ * sent). Not while that backfill is still in flight — a frame arriving meanwhile
+ * parks — and not when the request failed (timeout, link blip): that says nothing
+ * about the frames, so it is retried with backoff, up to
+ * {@link BACKFILL_MAX_ATTEMPTS} unanswered tries (then skipped: a visible gap
+ * beats a permanent stall). Skipping used to happen on both, dropping output the
+ * computer still held.
+ */
+interface SeqGapState {
+  lastSeq: number
+  pending: Map<number, string>
+  backfilledAt: number | null
+  /** A backfill request is out: its reply decides, nothing skips meanwhile. */
+  backfilling: boolean
+  /** Unanswered backfills at the current position. */
+  backfillFailures: number
+  backfillRetry: ReturnType<typeof setTimeout> | null
+  disposed: boolean
+  /** Computer unreachable: a failed backfill then waits for the reattach's own one. */
+  detached: boolean
+}
+
+/** Output lost for good: the seqs `fromSeq..toSeq` (inclusive) never reached the hub. */
+export interface OutputGap {
+  fromSeq: number
+  toSeq: number
+}
+
+const BACKFILL_MAX_ATTEMPTS = 5
+const BACKFILL_RETRY_BASE_MS = 200
+
+const seqGapInit = (): Omit<SeqGapState, 'disposed' | 'detached'> => ({
+  lastSeq: -1,
+  pending: new Map(),
+  backfilledAt: null,
+  backfilling: false,
+  backfillFailures: 0,
+  backfillRetry: null
+})
+
+/** What `drain` does about a gap it cannot fill from `pending`. */
+function seqGapNext(entry: SeqGapState): 'wait' | 'skip' | 'backfill' {
+  if (entry.backfilling) return 'wait'
+  if (entry.backfilledAt === entry.lastSeq) return 'skip'
+  entry.backfilledAt = entry.lastSeq
+  return 'backfill'
+}
+
+/**
+ * Settle a backfill: `answered` = the computer replied (its frames are merged).
+ * An unanswered one re-arms the position and retries after a backoff (`redrain`).
+ */
+function seqGapSettle(entry: SeqGapState, answered: boolean, redrain: () => void): void {
+  entry.backfilling = false
+  if (entry.backfillRetry) clearTimeout(entry.backfillRetry)
+  entry.backfillRetry = null
+  if (entry.disposed) return
+  if (!answered && entry.detached) {
+    // The link is down: reattaching backfills this position afresh (`resume`).
+    entry.backfilledAt = null
+    return
+  }
+  if (answered) {
+    entry.backfillFailures = 0
+  } else if (++entry.backfillFailures < BACKFILL_MAX_ATTEMPTS) {
+    entry.backfilledAt = null
+    const delay = BACKFILL_RETRY_BASE_MS * 2 ** (entry.backfillFailures - 1)
+    const timer = setTimeout(() => {
+      entry.backfillRetry = null
+      if (!entry.disposed) redrain()
+    }, delay)
+    timer.unref?.()
+    entry.backfillRetry = timer
+    return
+  } else {
+    // Out of tries: the latch stays at this position, so the drain below skips.
+    entry.backfillFailures = 0
+  }
+  redrain()
+}
+
+/** Skip an unrecoverable gap up to the lowest parked seq; the lost range, if any. */
+function seqGapSkip(entry: SeqGapState): OutputGap | null {
+  const lowest = Math.min(...entry.pending.keys())
+  if (lowest <= entry.lastSeq + 1) return null
+  const gap = { fromSeq: entry.lastSeq + 1, toSeq: lowest - 1 }
+  entry.lastSeq = lowest - 1
+  return gap
+}
+
+/** One diagnostic per lost range: output the hub can never show. */
+function reportOutputGap(
+  kind: 'pty' | 'process',
+  computerId: string,
+  sessionId: string,
+  gap: OutputGap
+): void {
+  try {
+    recordDiagnosticEvent({
+      level: 'warn',
+      source: kind === 'pty' ? 'pty' : 'main',
+      event: 'computer.output_gap',
+      message: `${kind} ${sessionId} on computer ${computerId}: output seq ${gap.fromSeq}–${gap.toSeq} is lost (the computer no longer holds it)`,
+      payload: { computerId, sessionId, kind, ...gap }
+    })
+  } catch {
+    // Diagnostics are best-effort; delivery goes on.
+  }
+}
+
 class BufferingEmitter<T> {
   private readonly listeners = new Set<(value: T) => void>()
   private buffer: T[] | null = []
@@ -742,7 +857,7 @@ export interface RoutingPtyBackendOptions {
   gate?: ComputerWorkGate
 }
 
-interface PtyEntry extends DetachableEntry {
+interface PtyEntry extends DetachableEntry, SeqGapState {
   key: string
   /**
    * Ask the computer to start this session next if its spawn is still waiting
@@ -816,35 +931,41 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     }
     if (entry.disposed || entry.pending.size === 0) return
     if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
-    if (entry.backfilledAt === entry.lastSeq) {
-      // A backfill already ran at this position and the gap is STILL unfilled, so
-      // the missing seq is unrecoverable — evicted from the computer's ring buffer,
-      // or never sent. Skip forward to the lowest pending seq and deliver rather
-      // than waiting for a frame that will never arrive: holding the line would
-      // stall the session permanently, which is strictly worse than a visible
-      // gap. (Reachable in normal operation now that delivery starts at seq -1:
-      // a session whose opening chunk aged out cannot produce seq 0.)
-      const lowest = Math.min(...entry.pending.keys())
-      if (lowest > entry.lastSeq + 1) {
-        entry.lastSeq = lowest - 1
-        drain(entry)
+    switch (seqGapNext(entry)) {
+      case 'wait':
+        return
+      case 'skip': {
+        // The computer answered a backfill at this position without the missing
+        // seqs (evicted from its ring buffer, or never sent), or never answered
+        // after every retry. Skip forward rather than wait for frames that will
+        // never arrive: holding the line would stall the session permanently,
+        // which is strictly worse than a visible gap. (Reachable in normal
+        // operation now that delivery starts at seq -1: a session whose opening
+        // chunk aged out cannot produce seq 0.)
+        const gap = seqGapSkip(entry)
+        if (gap) {
+          reportOutputGap('pty', entry.computerId, entry.sessionId, gap)
+          drain(entry)
+        }
+        return
       }
-      return
+      case 'backfill':
+        void backfill(entry)
     }
-    entry.backfilledAt = entry.lastSeq
-    void backfill(entry)
   }
 
   async function backfill(entry: PtyEntry): Promise<void> {
+    entry.backfilling = true
+    let answered = false
     try {
       const res = await gateway.request(entry.computerId, HubToComputerMethods.ptyGetBufferSince, {
         sessionId: entry.sessionId,
         ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
         seq: entry.lastSeq
       })
-      if (entry.disposed) return
       const parsed = ptyGetBufferSinceResultSchema.safeParse(res)
-      if (parsed.success) {
+      if (parsed.success && !entry.disposed) {
+        answered = true
         for (const frame of parsed.data.frames) {
           if (frame.seq > entry.lastSeq && !entry.pending.has(frame.seq)) {
             entry.pending.set(frame.seq, frame.data)
@@ -852,9 +973,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         }
       }
     } catch {
-      // Best-effort: a later frame re-triggers backfill once lastSeq advances.
+      // Says nothing about the frames: retried (seqGapSettle), never skipped on.
     }
-    if (!entry.disposed) drain(entry)
+    seqGapSettle(entry, answered, () => drain(entry))
   }
 
   function ingest(entry: PtyEntry, seq: number, data: string): void {
@@ -869,6 +990,12 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   function flushPending(entry: PtyEntry): void {
     for (const seq of [...entry.pending.keys()].sort((a, b) => a - b)) {
       if (seq <= entry.lastSeq) continue
+      if (seq > entry.lastSeq + 1) {
+        reportOutputGap('pty', entry.computerId, entry.sessionId, {
+          fromSeq: entry.lastSeq + 1,
+          toSeq: seq - 1
+        })
+      }
       entry.lastSeq = seq
       entry.dataEmitter.emit(entry.pending.get(seq)!)
     }
@@ -926,6 +1053,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       // session emitted while the hub was away, which is a different gap from
       // any this entry had already given up on.
       entry.backfilledAt = null
+      entry.backfillFailures = 0
       void backfill(entry)
     },
     settleExited: (entry, exit) => {
@@ -976,9 +1104,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       key,
       computerId,
       sessionId,
-      lastSeq: -1,
-      pending: new Map(),
-      backfilledAt: null,
+      ...seqGapInit(),
       disposed: false,
       detached: false,
       sealed,
@@ -1387,7 +1513,7 @@ export interface RoutingProcessBackendOptions {
   buildSpawnParams?: (spec: ProcSpawnSpec) => Record<string, unknown>
 }
 
-interface ProcEntry extends DetachableEntry {
+interface ProcEntry extends DetachableEntry, SeqGapState {
   key: string
   /** Highest contiguously-delivered stdout seq. Starts at **-1** for the same
    *  reason as {@link PtyEntry.lastSeq}: the computer's RingBuffer numbers its
@@ -1403,6 +1529,10 @@ interface ProcEntry extends DetachableEntry {
   /** Computer unreachable, outcome unknown — see {@link createDetachController}. */
   detached: boolean
   dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
+  /** stdout lost for good, in order with `dataEmitter` (emitted just before the frame after it). */
+  gapEmitter: BufferingEmitter<OutputGap>
+  /** The computer acked a write without confirming it (an older release): fired once. */
+  unconfirmedWrites: Latch<{ computerId: string }>
   exitEmitter: BufferingEmitter<{ code: number | null; signal: string | null }>
   /** The computer confirmed the process runs (its `proc.spawn` reply carried a pid). */
   spawned: Latch<{ pid: number }>
@@ -1424,6 +1554,10 @@ interface ProcOutcome {
 interface RoutedProc extends ProcHandle {
   readonly entry: ProcEntry
   onSpawned(cb: (e: { pid: number }) => void): ExecDisposable
+  /** stdout the computer no longer holds was skipped (see {@link SeqGapState}). */
+  onGap(cb: (gap: OutputGap) => void): ExecDisposable
+  /** Its computer acks writes without confirming them (older release); once per process. */
+  onWritesUnconfirmed(cb: (info: { computerId: string }) => void): ExecDisposable
   write(data: string, opts?: ChatWriteOptions): Promise<void>
 }
 
@@ -1501,6 +1635,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
   function flushPending(entry: ProcEntry): void {
     for (const seq of [...entry.pending.keys()].sort((a, b) => a - b)) {
       if (seq <= entry.lastSeq) continue
+      if (seq > entry.lastSeq + 1) lostOutput(entry, { fromSeq: entry.lastSeq + 1, toSeq: seq - 1 })
       entry.lastSeq = seq
       entry.dataEmitter.emit({
         chunk: entry.pending.get(seq)!,
@@ -1520,31 +1655,42 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     }
     if (entry.disposed || entry.pending.size === 0) return
     if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
-    if (entry.backfilledAt === entry.lastSeq) {
-      // A backfill already ran at this position and the gap is STILL unfilled, so
-      // the missing seq is unrecoverable (evicted from the computer's ring buffer,
-      // or never sent). Skip to the lowest pending seq rather than stalling the
-      // session forever — a visible gap beats a permanent hang.
-      const lowest = Math.min(...entry.pending.keys())
-      if (lowest > entry.lastSeq + 1) {
-        entry.lastSeq = lowest - 1
-        drain(entry)
+    switch (seqGapNext(entry)) {
+      case 'wait':
+        return
+      case 'skip': {
+        // Unrecoverable (see SeqGapState): skip to the lowest pending seq rather
+        // than stall the session forever — a visible gap beats a permanent hang.
+        // The consumer is told (`onGap`): the bytes on either side are halves of
+        // different lines, which a line reader must not join.
+        const gap = seqGapSkip(entry)
+        if (gap) {
+          lostOutput(entry, gap)
+          drain(entry)
+        }
+        return
       }
-      return
+      case 'backfill':
+        void backfill(entry)
     }
-    entry.backfilledAt = entry.lastSeq
-    void backfill(entry)
+  }
+
+  function lostOutput(entry: ProcEntry, gap: OutputGap): void {
+    reportOutputGap('process', entry.computerId, entry.sessionId, gap)
+    entry.gapEmitter.emit(gap)
   }
 
   async function backfill(entry: ProcEntry): Promise<void> {
+    entry.backfilling = true
+    let answered = false
     try {
       const res = await gateway.request(entry.computerId, HubToComputerMethods.procGetBufferSince, {
         sessionId: entry.sessionId,
         seq: entry.lastSeq
       })
-      if (entry.disposed) return
       const parsed = procGetBufferSinceResultSchema.safeParse(res)
-      if (parsed.success) {
+      if (parsed.success && !entry.disposed) {
+        answered = true
         for (const frame of parsed.data.frames) {
           if (frame.seq > entry.lastSeq && !entry.pending.has(frame.seq)) {
             entry.pending.set(frame.seq, frame.data)
@@ -1552,9 +1698,9 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
         }
       }
     } catch {
-      // Best-effort: a later frame re-triggers backfill once lastSeq advances.
+      // Says nothing about the frames: retried (seqGapSettle), never skipped on.
     }
-    if (!entry.disposed) drain(entry)
+    seqGapSettle(entry, answered, () => drain(entry))
   }
 
   /** A frame from another spawn attempt under the same session id (a replaced process). */
@@ -1604,6 +1750,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       entry.detached = false
       entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
       entry.backfilledAt = null
+      entry.backfillFailures = 0
       void backfill(entry)
     },
     settleExited: (entry, exit) => {
@@ -1635,12 +1782,12 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       key,
       computerId,
       sessionId: spec.id,
-      lastSeq: -1,
-      pending: new Map(),
-      backfilledAt: null,
+      ...seqGapInit(),
       disposed: false,
       detached: false,
       dataEmitter,
+      gapEmitter: new BufferingEmitter<OutputGap>(),
+      unconfirmedWrites: new Latch<{ computerId: string }>(),
       exitEmitter,
       spawned
     }
@@ -1663,6 +1810,8 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       onExit: (cb: (e: { code: number | null; signal: string | null }) => void): ExecDisposable =>
         exitEmitter.on(cb),
       onSpawned: (cb) => spawned.on(cb),
+      onGap: (cb) => entry.gapEmitter.on(cb),
+      onWritesUnconfirmed: (cb) => entry.unconfirmedWrites.on(cb),
       /**
        * Write to the routed child's stdin. Beyond the `ProcessBackend` seam
        * (background processes never needed stdin), but the routed CHAT backend
@@ -1692,10 +1841,10 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           .then(
             (res) => {
               const parsed = procWriteResultSchema.safeParse(res)
-              if (
-                !(parsed.success && parsed.data.delivered) &&
-                !unconfirmedWrites.has(computerId)
-              ) {
+              const confirmed = parsed.success && parsed.data.delivered === true
+              // The chat on this process is told (once): delivery there is unconfirmed.
+              if (!confirmed) entry.unconfirmedWrites.fire({ computerId })
+              if (!confirmed && !unconfirmedWrites.has(computerId)) {
                 // A computer older than confirmed writes acks everything — even a
                 // write it dropped. Say so once; the chat still works, unconfirmed.
                 unconfirmedWrites.add(computerId)
@@ -1941,6 +2090,8 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
           procHandle.onData((chunk, stream) => {
             if (stream === 'stderr') cb(chunk)
           }),
+        onGap: (cb) => procHandle.onGap(cb),
+        onWritesUnconfirmed: (cb) => procHandle.onWritesUnconfirmed(cb),
         onExit: (cb) => procHandle.onExit((e) => cb({ code: e.code, signal: e.signal })),
         onError: (cb) => failed.on(cb),
         write: (data, opts) => procHandle.write(data, opts),

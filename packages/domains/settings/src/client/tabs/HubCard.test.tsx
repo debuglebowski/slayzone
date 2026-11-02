@@ -23,6 +23,7 @@ type MockComputer = {
   connectedAt: number | null
   lastSeenAt: number | null
   createdAt: number
+  version?: string | null
 }
 
 /** What the card sends to `computers.mintJoinToken`. */
@@ -386,6 +387,20 @@ describe('HubCard', () => {
       fireEvent.click(screen.getByTestId('computer-token-dismiss'))
     })
     expect(screen.queryByTestId('computer-minted-token')).toBeNull()
+  })
+
+  it('says which computer runs a release that cannot confirm chat writes, and what to do', async () => {
+    computersByHub = {
+      local: [
+        makeComputer({ version: '0.36.4' }),
+        makeComputer({ id: 'r-2', name: 'linux-box', version: '0.36.2' })
+      ]
+    }
+    await renderLocal()
+    const notes = screen.getAllByTestId('computer-outdated')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.textContent).toContain('linux-box runs SlayZone 0.36.2')
+    expect(notes[0]!.textContent).toContain('slay computer restart linux-box')
   })
 
   it('renders enrolled computers as rows', async () => {

@@ -28,6 +28,21 @@ const CODEX: ChatModelInfo[] = [
 ]
 
 describe('chat models', () => {
+  test('effortChoices: the levels /effort takes on a model, the ones its check uses', () => {
+    const codex = chatModelsView('codex-chat', CODEX)
+    expect(codex.effortChoices('gpt-6-luna')).toEqual(['low', 'medium', 'ultra'])
+    expect(codex.effortChoices('gpt-6.1-sol')).toEqual([])
+    expect(codex.effortChoices(null)).toEqual([])
+    expect(chatModelsView('codex-chat', []).effortChoices('gpt-6-luna')).toEqual([])
+    expect(chatModelsView('claude-chat', undefined).effortChoices('opus')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max'
+    ])
+  })
+
   test('Codex: the served models, their own effort levels', () => {
     const v = chatModelsView('codex-chat', CODEX)
     expect(v.unlisted).toBe(false)

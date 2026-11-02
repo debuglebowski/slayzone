@@ -106,6 +106,30 @@ test('lines: several per chunk, one across chunks, CRLF (also split between chun
   expect(split(['x\r\n\r\n'])).toEqual(['x', ''])
 })
 
+test('an output gap drops the torn line on both sides, never merges them', () => {
+  const lines: string[] = []
+  const feed = createLineSplitter((l) => lines.push(l))
+  feed('{"a":1}\n{"head":')
+  // The frames between were lost: the head above and the tail below are halves of
+  // different lines, which joined would read as one (corrupt) line.
+  feed.gap()
+  feed('"tail"}\n{"c":3}\n')
+  expect(lines).toEqual(['{"a":1}', '{"c":3}'])
+})
+
+test('a gap right after a line end loses nothing of the next line... except its unknown head', () => {
+  const lines: string[] = []
+  const feed = createLineSplitter((l) => lines.push(l))
+  feed('{"a":1}\n')
+  feed.gap()
+  // Where the lost bytes ended is unknown, so text up to the next line end is torn.
+  feed('rest-of-lost-line\n{"b":2}\n')
+  feed.gap()
+  feed('no-newline-yet')
+  feed(' still\n{"c":3}\n')
+  expect(lines).toEqual(['{"a":1}', '{"b":2}', '{"c":3}'])
+})
+
 test('a huge line arrives whole', () => {
   const big = 'Q'.repeat(8 * 1024 * 1024)
   const chunks: string[] = []

@@ -25,6 +25,7 @@ import { npmCommand } from './npm-command'
 import { hostControl, hostEndpoint, runtimeDir, atomicRuntimeJson } from './session-host'
 import type { LocalPeer } from '@slayzone/computer-runtime'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
+import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import type { ConnectorGrant } from './session-host'
 import {
   effectiveHubUrls,
@@ -408,9 +409,12 @@ export async function ensureSessionHost(
       SLAYZONE_ROOT: root,
       SLAYZONE_NONINTERACTIVE: '1',
       SLAYZONE_SUPERVISED: '0',
+      // Authority only when it re-composes to the same url (hubAddrFromUrl): a wss://
+      // url to a loopback front end would otherwise be dialed as ws://. Without it the
+      // host reads the full url from its host-config.json seed.
       SLAYZONE_HUB_ADDRESS:
         new URL(config.hubUrl).pathname === '/computers' && !new URL(config.hubUrl).search
-          ? new URL(config.hubUrl).host
+          ? (hubAddrFromUrl(config.hubUrl) ?? undefined)
           : undefined,
       SLAYZONE_HUB_JOIN_TOKEN: config.joinToken
     },

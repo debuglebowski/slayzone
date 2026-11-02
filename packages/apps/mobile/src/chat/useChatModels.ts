@@ -6,7 +6,7 @@
  */
 import { type ChatModelsView, chatModelsView } from '@slayzone/terminal-contracts'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useTRPC } from '../trpc'
 import { useStableCallback } from './useStableCallback'
 
@@ -30,5 +30,5 @@ export function useChatModels({
   useEffect(() => {
     if (sessionKey) refresh()
   }, [sessionKey, refresh])
-  return chatModelsView(mode, data)
+  return useMemo(() => chatModelsView(mode, data), [mode, data])
 }

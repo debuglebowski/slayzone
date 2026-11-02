@@ -120,20 +120,28 @@ function ChatView({ target }: { target: ChatTarget }) {
   const { show: notify } = notice
   const session = useChatSession(target)
   const { state } = session
+  const settings = useChatSettings(target, state.permissionMode, notify)
+  const models = useChatModels({
+    taskId: target.taskId,
+    mode: target.mode,
+    sessionKey: state.sessionId
+  })
+  // `/effort`'s description: the levels the composer's check (`planSend`) accepts.
+  const effortLevels = useMemo(() => models.effortChoices(settings.model), [models, settings.model])
   const slash = useSlashCommands({
     taskId: target.taskId,
     mode: target.mode,
     cwd: target.cwd,
     caps,
     liveCliList: state.cliCommands,
-    liveCliDetails: state.cliCommandDetails
+    liveCliDetails: state.cliCommandDetails,
+    effortLevels
   })
   const queue = useChatQueue(target.tabId, (original) => {
     const token = /^\/([a-zA-Z0-9_:-]+)/.exec(original.trim())?.[1]
     const hit = token ? slash.items.find((i) => i.name === token) : undefined
     if (hit) slash.bump({ source: hit.source, name: hit.name })
   })
-  const settings = useChatSettings(target, state.permissionMode, notify)
   const codexPlanReview = useMemo(
     () =>
       target.mode === 'codex-chat'
@@ -144,11 +152,6 @@ function ChatView({ target }: { target: ChatTarget }) {
         : null,
     [target.mode, state.timeline, settings.collaboration]
   )
-  const models = useChatModels({
-    taskId: target.taskId,
-    mode: target.mode,
-    sessionKey: state.sessionId
-  })
 
   const [restarting, setRestarting] = useState(false)
   const ended = state.sessionEnded && !state.notStarted && !restarting
