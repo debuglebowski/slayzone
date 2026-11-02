@@ -2,12 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { turnOutlinePaletteCommands } from './turn-outline-palette'
 import type { TurnEntry } from './turn-outline'
 
-const turn = (i: number, title: string, status: TurnEntry['status'] = 'done'): TurnEntry => ({
+const turn = (i: number, title: string): TurnEntry => ({
   key: `user-text:u${i}`,
   index: i * 3,
-  title,
-  timestamp: 0,
-  status
+  title
 })
 
 describe('turn outline in the Cmd+K palette', () => {
@@ -15,7 +13,7 @@ describe('turn outline in the Cmd+K palette', () => {
     const reveal = vi.fn()
     const jump = vi.fn()
     const commands = turnOutlinePaletteCommands({
-      turns: [turn(0, 'Fix the login bug'), turn(1, 'Then break it', 'error')],
+      turns: [turn(0, 'Fix the login bug'), turn(1, 'Then break it')],
       reveal,
       jump
     })

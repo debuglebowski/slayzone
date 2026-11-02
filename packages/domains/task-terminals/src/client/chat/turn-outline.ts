@@ -1,11 +1,8 @@
 import type { Key } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 
-/** How a user's turn went, for the turn outline. */
-export type TurnStatus = 'running' | 'done' | 'error' | 'stopped' | 'sending' | 'failed'
-
 export interface TurnEntry {
-  /** The user message row's `itemKey`: what the outline reveals. */
+  /** The user message row's `itemKey`: what "Go to turn" reveals. */
   key: Key
   /** Its index in the displayed timeline (not loaded here: its placeholder's). */
   index: number
@@ -13,8 +10,6 @@ export interface TurnEntry {
   row?: number
   /** The message's first line (or its attachments' names). */
   title: string
-  timestamp: number
-  status: TurnStatus
 }
 
 const MAX_TITLE = 120
@@ -30,63 +25,29 @@ function titleOf(item: Extract<TimelineItem, { kind: 'user-text' }>): string {
 }
 
 /**
- * One entry per user turn of the displayed timeline (plan 4.3): its first
- * line, when it was sent, how it went. A turn is the rows from a user message
- * to the next one; its status comes from what ended it — a result (error or
- * not), a Stop, a turn error — or, for the last turn, whether the agent still
- * works (`turnOpen`). A message not delivered (yet) shows that instead.
+ * One entry per user turn of the displayed timeline (plan 4.3): where it is and
+ * its first line — for Cmd+K "Go to turn…" and previous / next turn.
  */
 export function selectTurnOutline(
   items: readonly TimelineItem[],
   itemKey: (item: TimelineItem, index: number) => Key,
   opts: {
-    turnOpen: boolean
     /** Item `i`'s display index (default `i`) and timeline row, when `items` stands in for more. */
     placeOf?: (i: number) => { index: number; row?: number }
-  }
+  } = {}
 ): TurnEntry[] {
   const turns: TurnEntry[] = []
-  let current: TurnEntry | null = null
-  /** The current message's delivery state, used only if nothing ended its turn. */
-  let delivery: TurnStatus | null = null
-  let ended = false
-  const close = (last: boolean): void => {
-    if (!current || ended) return
-    current.status = delivery ?? (last && opts.turnOpen ? 'running' : 'done')
-  }
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
-    if (item.kind === 'user-text') {
-      close(false)
-      ended = false
-      delivery =
-        item.delivery === 'failed'
-          ? 'failed'
-          : item.delivery === 'sending' || item.delivery === 'queued'
-            ? 'sending'
-            : null
-      const place = opts.placeOf?.(i) ?? { index: i }
-      current = {
-        key: itemKey(item, i),
-        index: place.index,
-        ...(place.row !== undefined ? { row: place.row } : {}),
-        title: titleOf(item),
-        timestamp: item.timestamp,
-        status: 'running'
-      }
-      turns.push(current)
-      continue
-    }
-    if (!current || ended) continue
-    // What ended the turn says how it went (it was delivered, whatever the
-    // message's own state reads).
-    if (item.kind === 'result') current.status = item.isError ? 'error' : 'done'
-    else if (item.kind === 'turn-error') current.status = 'error'
-    else if (item.kind === 'interrupted') current.status = 'stopped'
-    else continue
-    ended = true
+    if (item.kind !== 'user-text') continue
+    const place = opts.placeOf?.(i) ?? { index: i }
+    turns.push({
+      key: itemKey(item, i),
+      index: place.index,
+      ...(place.row !== undefined ? { row: place.row } : {}),
+      title: titleOf(item)
+    })
   }
-  close(true)
   return turns
 }
 

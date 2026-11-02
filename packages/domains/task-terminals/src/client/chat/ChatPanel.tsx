@@ -313,12 +313,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       [display.summary, display.conversationFolded]
     )
     const { search } = display
-    // The turn outline and its keys (jump to the previous / next user turn).
+    // The user turns: Cmd+K "Go to turn…" and the keys that jump to the previous / next one.
     const turnOutline = useTurnOutline({
       items: display.displayedTimeline,
       itemKey: display.itemKey,
       virtual: display.virtual,
-      turnOpen: inFlight,
       summary: display.summary,
       folded: display.folded,
       rowOf: display.rowOf,
@@ -813,7 +812,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         scrollRef={display.virtual.bindScroller}
                         itemKey={display.itemKey}
                         rowOf={display.rowOf}
-                        turns={turnOutline.turns}
                         contentRef={contentRef}
                         isAtBottom={isAtBottom}
                         scrollToBottom={scrollToBottom}

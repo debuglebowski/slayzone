@@ -1060,7 +1060,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/virtual-timeline.test.tsx \
   packages/domains/task-terminals/src/client/chat/row-ui-state.test.tsx \
   packages/domains/task-terminals/src/client/chat/timeline-reveal.test.tsx \
-  packages/domains/task-terminals/src/client/chat/ChatTurnOutline.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useTurnOutline.test.tsx \
   packages/domains/task-terminals/src/client/chat/prompts/PromptDock.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task-terminals/src/client/agent-sessions/TaskSessionsSource.test.tsx \

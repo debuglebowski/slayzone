@@ -12,7 +12,7 @@ const key = (item: TimelineItem, i: number) =>
   item.kind === 'user-text' && item.id ? `user-text:${item.id}` : `${item.kind}:${i}`
 
 describe('selectTurnOutline', () => {
-  it('one entry per user turn: its first line, time, status and row', () => {
+  it('one entry per user turn: its first line, index and key', () => {
     const items = [
       { kind: 'session-start', timestamp: 0 } as unknown as TimelineItem,
       user('a', '  Fix the login bug\n\nwith more detail'),
@@ -27,41 +27,20 @@ describe('selectTurnOutline', () => {
       user('d', 'And now?'),
       reply('m4')
     ]
-    const turns = selectTurnOutline(items, key, { turnOpen: true })
-    expect(turns.map((t) => [t.title, t.status, t.index, t.key])).toEqual([
-      ['Fix the login bug', 'done', 1, 'user-text:a'],
-      ['Then break it', 'error', 4, 'user-text:b'],
-      ['Stop this one', 'stopped', 7, 'user-text:c'],
-      ['And now?', 'running', 10, 'user-text:d']
-    ])
-    expect(turns[0].timestamp).toBe(1_000)
-  })
-
-  it('the last turn without a result is done once nothing runs; delivery states show', () => {
-    const items = [
-      user('a', 'sent'),
-      reply('m1'),
-      user('b', 'failed to send', { delivery: 'failed' }),
-      user('c', 'on its way', { delivery: 'sending' })
-    ]
-    expect(selectTurnOutline(items, key, { turnOpen: false }).map((t) => t.status)).toEqual([
-      'done',
-      'failed',
-      'sending'
+    expect(selectTurnOutline(items, key).map((t) => [t.title, t.index, t.key])).toEqual([
+      ['Fix the login bug', 1, 'user-text:a'],
+      ['Then break it', 4, 'user-text:b'],
+      ['Stop this one', 7, 'user-text:c'],
+      ['And now?', 10, 'user-text:d']
     ])
   })
 
-  it('a turn that ended says how — a delivery state from before does not override it', () => {
-    const items = [
-      user('a', 'answered', { delivery: 'failed' }),
-      reply('m1'),
-      result(),
-      user('b', 'failed turn', { delivery: 'failed' }),
-      result(true)
-    ]
-    expect(selectTurnOutline(items, key, { turnOpen: false }).map((t) => t.status)).toEqual([
-      'done',
-      'error'
+  it('placeOf: entries standing in for rows not loaded take their placeholder index and row', () => {
+    const items = [user('a', 'one'), user('b', 'two')]
+    const turns = selectTurnOutline(items, key, { placeOf: (i) => ({ index: 0, row: 10 + i }) })
+    expect(turns.map((t) => [t.index, t.row])).toEqual([
+      [0, 10],
+      [0, 11]
     ])
   })
 
@@ -70,7 +49,7 @@ describe('selectTurnOutline', () => {
       user('a', '', { attachments: [{ kind: 'image', name: 'shot.png' }] }),
       user('b', '   ')
     ]
-    expect(selectTurnOutline(items, key, { turnOpen: false }).map((t) => t.title)).toEqual([
+    expect(selectTurnOutline(items, key).map((t) => t.title)).toEqual([
       'shot.png',
       '(empty message)'
     ])

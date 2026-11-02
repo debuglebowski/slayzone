@@ -43,7 +43,6 @@ import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { ToolAutoOpenContext } from './tool-cards/card-shell'
 import { ChatSearchBar } from './ChatSearchBar'
-import { ChatTurnOutline } from './ChatTurnOutline'
 import { renderTimelineItem } from './renderers'
 import { useChatProvider } from './ChatViewContext'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
@@ -59,7 +58,6 @@ import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
 import { VirtualTimelineRows } from './VirtualTimelineRows'
 import type { VirtualTimelineController } from './virtual-timeline'
-import type { TurnEntry } from './turn-outline'
 
 const SUGGESTED_PROMPTS = [
   'Explain what this codebase does',
@@ -88,8 +86,6 @@ export interface ChatTimelineProps {
   itemKey: (item: TimelineItem, index: number) => Key
   /** A displayed row's index in the timeline (scroll anchors keep it). */
   rowOf?: (item: TimelineItem) => number | undefined
-  /** The user turns, for the turn outline (`useTurnOutline`). */
-  turns?: readonly TurnEntry[]
   contentRef: CallbackRef<HTMLElement>
   isAtBottom: boolean
   scrollToBottom: () => void
@@ -129,7 +125,6 @@ export function ChatTimeline({
   virtual,
   scrollRef,
   itemKey,
-  turns,
   contentRef,
   isAtBottom,
   scrollToBottom,
@@ -312,7 +307,6 @@ export function ChatTimeline({
             </div>
 
             {/* Overlays — sibling of the scroll viewport so they own their own layout */}
-            {!hydrating && turns && <ChatTurnOutline turns={turns} virtual={virtual} />}
             {hydrating && <HydratingState />}
             {!hydrating && isEmpty && !inFlight && (
               <EmptyState

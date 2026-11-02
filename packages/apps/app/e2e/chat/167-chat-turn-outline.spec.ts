@@ -1,6 +1,6 @@
 /**
- * Claude Code chat: jump between turns (plan 4.3). The turn outline lists one
- * entry per user turn — its first line, time and how it went — and picking one
+ * Claude Code chat: jump between turns (plan 4.3). Cmd+K → Chat… → "Go to
+ * turn…" lists one entry per user turn — its first line — and picking one
  * scrolls the (virtualized) timeline to that turn, even far up where its rows
  * were never mounted. Cmd+Alt+↑ / ↓ (macOS; Alt+PgUp / PgDn elsewhere) move to
  * the previous / next turn.
@@ -8,6 +8,7 @@
  */
 import type { Page } from '@playwright/test'
 import { resetApp } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import { expect, test } from '../fixtures/chat'
 
 const RESULT = {
@@ -52,7 +53,7 @@ function promptTop(page: Page, n: number) {
   }, n)
 }
 
-test.describe('Claude chat: turn outline', () => {
+test.describe('Claude chat: go to turn', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
   })
@@ -69,19 +70,20 @@ test.describe('Claude chat: turn outline', () => {
     await expect(t.panel.getByText('answer 59, line 7')).toBeVisible({ timeout: 10_000 })
     expect(await promptTop(t.page, 5)).toBeNull() // far up: not mounted
 
-    await t.panel.getByTestId('chat-turn-outline-toggle').click()
-    const outline = t.panel.getByTestId('chat-turn-outline')
-    const items = outline.getByTestId('chat-turn-outline-item')
+    const palette = t.page.locator('[cmdk-root]')
+    const row = (text: string) => palette.locator('[cmdk-item]').filter({ hasText: text })
+    await pressShortcut(t.page, 'search')
+    await expect(palette.locator('[cmdk-input]')).toBeFocused()
+    await row('Chat…').click()
+    await row('Go to turn…').click()
+    const items = palette.locator('[cmdk-item]')
     await expect(items).toHaveCount(60)
-    // First line only, and how the turn went.
-    await expect(items.nth(5)).toContainText('Turn 5 question')
-    await expect(items.nth(5)).not.toContainText('second line')
-    await expect(items.nth(2)).toHaveAttribute('title', /^Failed · Turn 2 question/)
-    await expect(items.nth(5)).toHaveAttribute('title', /^Done · /)
+    // First line only.
+    await expect(items.nth(5)).toHaveText('6. Turn 5 question')
 
     await items.nth(5).click()
+    await expect(palette).toHaveCount(0)
     await expect.poll(() => promptTop(t.page, 5), { timeout: 5_000 }).toBe(0)
-    await expect(items.nth(5)).toHaveAttribute('data-current', 'true')
 
     // Keys: previous / next turn from where the view is.
     await t.composer.focus()
@@ -91,7 +93,6 @@ test.describe('Claude chat: turn outline', () => {
     await expect.poll(() => promptTop(t.page, 5), { timeout: 5_000 }).toBe(0)
     await t.page.keyboard.press('Meta+Alt+ArrowUp')
     await expect.poll(() => promptTop(t.page, 4), { timeout: 5_000 }).toBe(0)
-    await expect(items.nth(4)).toHaveAttribute('data-current', 'true')
     // The composer kept its text and focus (keys did not type or move the caret away).
     await expect(t.composer).toBeFocused()
   })

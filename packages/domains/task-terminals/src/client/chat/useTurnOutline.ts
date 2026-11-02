@@ -8,7 +8,7 @@ import type { VirtualTimelineController } from './virtual-timeline'
 
 /**
  * What the outline reads: the displayed rows, a placeholder of rows not loaded
- * (paged history) standing for its user turns and turn ends from the summary.
+ * (paged history) standing for its user turns from the summary.
  */
 function outlineSource(
   items: readonly TimelineItem[],
@@ -36,16 +36,6 @@ function outlineSource(
     for (const u of summary.users) {
       if (inGap(u.row) && u.item.parentToolUseId == null && isRenderable(u.item)) rows.push(u)
     }
-    for (const e of summary.ends) {
-      if (!inGap(e.row)) continue
-      const end =
-        e.kind === 'result'
-          ? { kind: 'result', isError: e.isError }
-          : e.kind === 'turn-error'
-            ? { kind: 'turn-error' }
-            : { kind: 'interrupted' }
-      rows.push({ row: e.row, item: end as TimelineItem })
-    }
     rows.sort((a, b) => a.row - b.row)
     for (const r of rows) {
       out.push(r.item)
@@ -60,7 +50,7 @@ function outlineSource(
 }
 
 /**
- * The turn outline's data and its keyboard: the user turns of the whole
+ * The user turns and their keyboard: the user turns of the whole
  * history (rows not loaded: from the summary), and "jump to the previous /
  * next turn" from where the view is — a turn not loaded loads first.
  */
@@ -68,7 +58,6 @@ export function useTurnOutline({
   items,
   itemKey,
   virtual,
-  turnOpen,
   summary,
   folded,
   rowOf,
@@ -77,8 +66,6 @@ export function useTurnOutline({
   items: TimelineItem[]
   itemKey: (item: TimelineItem, index: number) => Key
   virtual: VirtualTimelineController
-  /** The agent is working (the last turn runs). */
-  turnOpen: boolean
   /** Paged history: the whole history's summary, the folded rows, rows' indexes. */
   summary?: TimelinePageSummary
   folded?: ReadonlySet<number>
@@ -89,10 +76,9 @@ export function useTurnOutline({
   const turns = useMemo(() => {
     const source = outlineSource(items, itemKey, summary, folded, rowOf)
     return selectTurnOutline(source.items, (_item, i) => source.keys[i], {
-      turnOpen,
       placeOf: (i) => source.places[i]
     })
-  }, [items, itemKey, turnOpen, summary, folded, rowOf])
+  }, [items, itemKey, summary, folded, rowOf])
   const jump = useStableCallback((dir: -1 | 1): void => {
     const to = turnToJumpTo(
       turns.map((t) => t.index),

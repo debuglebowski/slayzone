@@ -1,13 +1,14 @@
 /**
  * Paged chat history (chat F): the whole-history features of a 100,000-event
- * session whose older pages are not loaded — the turn outline lists every turn
- * and jumps to the first, the rewind picker offers the first message, the
+ * session whose older pages are not loaded — Cmd+K "Go to turn…" lists every
+ * turn and jumps to the first, the rewind picker offers the first message, the
  * files-changed count and panel cover every file, and "Copy entire
  * conversation" copies all of it (from summaries, or loading what it needs;
  * never a cap). Session data: @slayzone/test-utils/chat-long-session, with the
  * delivery states a real session saves (answered).
  */
 import { resetApp } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import { expect, test } from '../fixtures/chat'
 import { FIRST_PROMPT, LAST_REPLY, answeredLongSessionEvents } from '../fixtures/chat-long-session'
 
@@ -18,7 +19,7 @@ test.describe('Claude chat: paged history — whole-history features (100,000 ev
     await resetApp(mainWindow)
   })
 
-  test('outline, rewind picker, files changed and copy-all cover the whole history', async ({
+  test('go to turn, rewind picker, files changed and copy-all cover the whole history', async ({
     chat
   }) => {
     test.setTimeout(240_000)
@@ -42,18 +43,21 @@ test.describe('Claude chat: paged history — whole-history features (100,000 ev
       0
     )
 
-    // Turn outline: every turn (the oldest from page summaries); the first one
+    // Go to turn: every turn (the oldest from page summaries); the first one
     // loads and shows when picked.
-    await t.panel.getByTestId('chat-turn-outline-toggle').click()
-    const outline = t.panel.getByTestId('chat-turn-outline')
-    const items = outline.getByTestId('chat-turn-outline-item')
+    const palette = t.page.locator('[cmdk-root]')
+    const row = (text: string) => palette.locator('[cmdk-item]').filter({ hasText: text })
+    await pressShortcut(t.page, 'search')
+    await expect(palette.locator('[cmdk-input]')).toBeFocused()
+    await row('Chat…').click()
+    await row('Go to turn…').click()
+    const items = palette.locator('[cmdk-item]')
     await expect(items).toHaveCount(turns, { timeout: 20_000 })
     await expect(items.first()).toContainText(FIRST_PROMPT)
     await items.first().click()
-    // (In the timeline: the outline lists it too.)
+    await expect(palette).toHaveCount(0)
     const timeline = t.panel.getByTestId('chat-timeline-scroller')
     await expect(timeline.getByText(FIRST_PROMPT)).toBeVisible({ timeout: 20_000 })
-    await t.panel.getByTestId('chat-turn-outline-toggle').click()
 
     // Rewind picker (Esc Esc: idle, empty composer): the first message is offered.
     await t.composer.focus()

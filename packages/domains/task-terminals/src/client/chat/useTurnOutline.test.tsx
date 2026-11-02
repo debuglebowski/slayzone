@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 /**
- * The turn outline (plan 4.3): one entry per user turn; picking one scrolls the
- * virtualized timeline to it (mounted or not) through the reveal seam, and the
- * turn in view is marked. jsdom layout: `__tests__/timeline-layout.ts`.
+ * The user turns (plan 4.3) as Cmd+K "Go to turn…" and the previous / next keys
+ * use them: picking a turn scrolls the virtualized timeline to it (mounted or
+ * not) through the reveal seam. jsdom layout: `__tests__/timeline-layout.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { installTimelineLayout, type TimelineLayout } from './__tests__/timeline-layout'
-import { ChatTurnOutline } from './ChatTurnOutline'
-import { TimelineRevealContext } from './timeline-reveal'
+import { turnOutlinePaletteCommands } from './turn-outline-palette'
+import type { PaletteCommand } from '@slayzone/ui'
 import { useFollowBottom } from './useFollowBottom'
 import { useTurnOutline } from './useTurnOutline'
 import { useVirtualTimeline } from './useVirtualTimeline'
@@ -44,15 +44,21 @@ const itemKey = (item: TimelineItem, index: number) =>
   item.kind === 'user-text' ? `user-text:${item.id}` : `${item.kind}:${index}`
 
 let jump: ((dir: -1 | 1) => void) | null = null
+/** The chat's Cmd+K commands for the turns, as ChatPanel builds them. */
+let commands: PaletteCommand[] = []
 
 function Harness({ items }: { items: TimelineItem[] }) {
   const follow = useFollowBottom()
   const virtual = useVirtualTimeline(follow)
-  const outline = useTurnOutline({ items, itemKey, virtual, turnOpen: false })
+  const outline = useTurnOutline({ items, itemKey, virtual })
   jump = outline.jump
+  commands = turnOutlinePaletteCommands({
+    turns: outline.turns,
+    reveal: virtual.revealKey,
+    jump: outline.jump
+  })
   return (
-    <TimelineRevealContext.Provider value={virtual.revealKey}>
-      <ChatTurnOutline turns={outline.turns} virtual={virtual} />
+    <>
       <TimelineScroller scrollRef={virtual.bindScroller} contentRef={follow.contentRef}>
         <VirtualTimelineRows
           controller={virtual}
@@ -61,7 +67,7 @@ function Harness({ items }: { items: TimelineItem[] }) {
           renderRow={(item) => <p>{(item as { text?: string }).text ?? 'result'}</p>}
         />
       </TimelineScroller>
-    </TimelineRevealContext.Provider>
+    </>
   )
 }
 
@@ -80,12 +86,13 @@ const topOf = (text: string): number | null => {
   const row = Array.from(rows).find((r) => r.textContent === text)
   return row ? Math.round(row.getBoundingClientRect().top) : null
 }
-const current = () =>
-  screen
-    .getAllByTestId('chat-turn-outline-item')
-    .findIndex((el) => el.getAttribute('data-current') === 'true')
+/** The "Go to turn…" page's entries. */
+const goToTurn = (): PaletteCommand[] => {
+  const page = commands.find((c) => c.id === 'chat-turn-goto')?.page
+  return page?.kind === 'list' ? page.items : []
+}
 
-describe('ChatTurnOutline', () => {
+describe('useTurnOutline + Go to turn', () => {
   beforeEach(() => {
     layout = installTimelineLayout({ viewport: 600, rowHeight: () => 50 })
   })
@@ -93,31 +100,26 @@ describe('ChatTurnOutline', () => {
     cleanup()
     layout.restore()
     jump = null
+    commands = []
   })
 
-  it('lists the turns; picking one far up scrolls it to the top of the view and marks it', async () => {
+  it('lists the turns; picking one far up scrolls it to the top of the view', async () => {
     render(<Harness items={session(400)} />)
     await settle()
-    expect(screen.queryByTestId('chat-turn-outline')).toBeNull()
-    fireEvent.click(screen.getByTestId('chat-turn-outline-toggle'))
-    const entries = screen.getAllByTestId('chat-turn-outline-item')
+    const entries = goToTurn()
     expect(entries).toHaveLength(400)
-    expect(entries[3].textContent).toContain('question 3')
-    // At the bottom: the turn of the row at the top of the view (the last turn is short).
-    expect(current()).toBe(398)
+    expect(entries[3].label).toBe('4. question 3')
 
     expect(topOf('question 3')).toBeNull() // not mounted
-    fireEvent.click(entries[3])
+    act(() => void entries[3].run?.())
     await settle()
     expect(topOf('question 3')).toBe(0)
-    expect(current()).toBe(3)
   })
 
   it('previous / next turn from where the view is', async () => {
     render(<Harness items={session(50)} />)
     await settle()
-    fireEvent.click(screen.getByTestId('chat-turn-outline-toggle'))
-    fireEvent.click(screen.getAllByTestId('chat-turn-outline-item')[30])
+    act(() => void goToTurn()[30].run?.())
     await settle()
     expect(topOf('question 30')).toBe(0)
     act(() => jump!(-1))
@@ -141,6 +143,6 @@ describe('ChatTurnOutline', () => {
   it('shows nothing without a user turn', async () => {
     render(<Harness items={[]} />)
     await settle()
-    expect(screen.queryByTestId('chat-turn-outline-toggle')).toBeNull()
+    expect(commands).toEqual([])
   })
 })
