@@ -333,7 +333,7 @@ export function ChatComposer({
           className={
             compact && !displaySessionEnded
               ? 'hidden'
-              : 'flex items-center gap-3 mt-1.5 px-1 text-[10px] text-muted-foreground/60'
+              : 'flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 px-1 text-[10px] text-muted-foreground/60 whitespace-nowrap [&>*]:shrink-0'
           }
         >
           {displaySessionEnded ? (

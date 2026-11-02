@@ -299,11 +299,26 @@ export function useChatComposer({
 
   // Autosize textarea. Height follows scrollHeight up to 240px; no artificial min —
   // an empty draft renders as a single-line input.
+  // Width changes re-wrap the text (and the placeholder), so re-measure on resize too —
+  // else a height measured in a narrow pane sticks after the pane widens.
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    el.style.height = '0px'
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
+    const fit = (): void => {
+      el.style.height = '0px'
+      el.style.height = `${Math.min(el.scrollHeight, 240)}px`
+    }
+    fit()
+    // Absent only in jsdom, where nothing has a width anyway.
+    if (typeof ResizeObserver === 'undefined') return
+    let width = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      fit()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [draft])
 
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
