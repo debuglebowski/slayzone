@@ -58,7 +58,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   db.pragma('busy_timeout = 5000')
   db.pragma('secure_delete = ON')
   const schema = db.pragma('user_version', { simple: true }) as number
-  if (schema > 1) {
+  if (schema > 2) {
     db.close()
     throw new Error('Chat storage was created by a newer version')
   }
@@ -84,7 +84,12 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         hash TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL,
         PRIMARY KEY(conversation_id, id)
       );
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS blob_leases (id TEXT PRIMARY KEY,expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS task_lifecycle (task_id TEXT PRIMARY KEY,state TEXT NOT NULL,revision INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS migration_checkpoints (
+        migration_id TEXT PRIMARY KEY, identity TEXT NOT NULL, value TEXT NOT NULL
+      );
+      PRAGMA user_version = 2;
     `)
   })()
   let closed = false
@@ -167,7 +172,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     dir,
     path,
     transaction<T>(action: () => T): T {
-      return db.transaction(action)()
+      return db.transaction(action).immediate()
     },
     close() {
       if (!closed) {
@@ -186,6 +191,11 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           }
         : null
     },
+    inventory(): ChatOwnership[] {
+      return (
+        db.prepare('SELECT id FROM conversations ORDER BY task_id,rowid').all() as { id: string }[]
+      ).map((r) => api.conversation(r.id)!)
+    },
     listForTask(taskId: string): ChatOwnership[] {
       return (
         db
@@ -195,6 +205,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     createConversation(value: ConversationIdentity): void {
       requireEpoch(value.epoch)
+      if (row(`task-tombstone:${value.taskId}`)?.state === 'deleted')
+        throw new Error('Task chat history was deleted')
       const existing = row(value.id)
       if (existing) {
         if (existing.state === 'deleted') throw new Error('Conversation deleted')
@@ -377,6 +389,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     stageTransfer(manifest: ChatTransferManifest, lines: Iterable<string>): void {
       const h = manifest.header
+      if (row(`task-tombstone:${h.identity.taskId}`)?.state === 'deleted')
+        throw new Error('Task chat history was deleted')
       requireEpoch(h.identity.epoch + 1)
       if (
         h.format !== 'slayzone-chat' ||
@@ -491,6 +505,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       })()
     },
     stage(snapshot: ChatMigrationSnapshot): void {
+      if (row(`task-tombstone:${snapshot.identity.taskId}`)?.state === 'deleted')
+        throw new Error('Task chat history was deleted')
       verify(snapshot)
       db.transaction(() => {
         const r = row(snapshot.identity.id)
@@ -554,6 +570,127 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         db.prepare("UPDATE conversations SET state='active' WHERE id=?").run(id)
       })()
     },
+    migrationCheckpoint(
+      value: ConversationIdentity,
+      migrationId: string,
+      candidate?: ChatRecord[]
+    ): ChatRecord[] | null {
+      requireEpoch(value.epoch)
+      if (!migrationId) throw new Error('Migration id is required')
+      const tombstone = row(`task-tombstone:${value.taskId}`),
+        owner = row(value.id)
+      if (tombstone?.state === 'deleted' || owner?.state === 'deleted')
+        throw new Error('Conversation deleted')
+      if (
+        owner &&
+        (owner.task_id !== value.taskId ||
+          owner.tab_id !== value.tabId ||
+          owner.mode !== value.mode ||
+          owner.epoch > value.epoch + 1)
+      )
+        throw new Error('Migration checkpoint ownership mismatch')
+      return db.transaction(() => {
+        const previous = db
+          .prepare('SELECT identity,value FROM migration_checkpoints WHERE migration_id=?')
+          .get(migrationId) as { identity: string; value: string } | undefined
+        if (previous) {
+          if (digest(JSON.parse(previous.identity)) !== digest(value))
+            throw new Error('Migration checkpoint identity mismatch')
+          return JSON.parse(previous.value) as ChatRecord[]
+        }
+        if (!candidate) return null
+        const encoded = JSON.stringify(candidate)
+        if (Buffer.byteLength(encoded) > 16 * 1024 * 1024)
+          throw new Error('Migration metadata is too large')
+        db.prepare('INSERT INTO migration_checkpoints VALUES(?,?,?)').run(
+          migrationId,
+          JSON.stringify(value),
+          encoded
+        )
+        return JSON.parse(encoded) as ChatRecord[]
+      })()
+    },
+    taskLifecycle(taskId: string): { state: 'active' | 'paused' | 'deleted'; revision: number } {
+      return (
+        (db.prepare('SELECT state,revision FROM task_lifecycle WHERE task_id=?').get(taskId) as
+          | { state: 'active' | 'paused' | 'deleted'; revision: number }
+          | undefined) ?? { state: 'active', revision: 0 }
+      )
+    },
+    applyTaskLifecycle(taskId: string, state: 'active' | 'paused' | 'deleted', revision: number) {
+      requireEpoch(revision)
+      return api.transaction(() => {
+        const previous = api.taskLifecycle(taskId)
+        if (previous.state === 'deleted') {
+          if (state === 'deleted' && revision > previous.revision) {
+            db.prepare('UPDATE task_lifecycle SET revision=? WHERE task_id=?').run(revision, taskId)
+            return { state, revision }
+          }
+          return previous
+        }
+        if (previous.revision >= revision) return previous
+        db.prepare(
+          'INSERT INTO task_lifecycle VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET state=excluded.state,revision=excluded.revision'
+        ).run(taskId, state, revision)
+        if (state === 'deleted') {
+          api.applyTombstone(
+            {
+              id: `task-tombstone:${taskId}`,
+              taskId,
+              tabId: `task-tombstone:${taskId}`,
+              mode: 'claude-chat',
+              epoch: revision
+            },
+            true
+          )
+        }
+        return { state, revision }
+      })
+    },
+    applyTombstone(value: ConversationIdentity, taskDeleted = false): void {
+      requireEpoch(value.epoch)
+      api.transaction(() => {
+        const existing = row(value.id)
+        if (
+          existing &&
+          (existing.task_id !== value.taskId ||
+            existing.tab_id !== value.tabId ||
+            existing.mode !== value.mode)
+        )
+          throw new Error('Deletion ownership mismatch')
+        if (existing && existing.epoch > value.epoch && existing.state !== 'deleted')
+          throw new Error('Stale deletion epoch')
+        const epoch = Math.max(existing?.epoch ?? 0, value.epoch)
+        db.prepare(
+          "INSERT INTO conversations(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,?,?,'deleted') ON CONFLICT(id) DO UPDATE SET state='deleted',epoch=excluded.epoch"
+        ).run(value.id, value.taskId, value.tabId, value.mode, epoch)
+        if (taskDeleted) {
+          const id = `task-tombstone:${value.taskId}`
+          db.prepare(
+            "INSERT INTO conversations(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,'claude-chat',1,'deleted') ON CONFLICT(id) DO UPDATE SET state='deleted'"
+          ).run(id, value.taskId, id)
+          db.prepare(
+            "INSERT INTO task_lifecycle VALUES(?,'deleted',?) ON CONFLICT(task_id) DO UPDATE SET state='deleted',revision=MAX(task_lifecycle.revision,excluded.revision)"
+          ).run(value.taskId, value.epoch)
+          db.prepare(
+            "UPDATE conversations SET state='deleted',epoch=epoch+CASE WHEN state='deleted' THEN 0 ELSE 1 END WHERE task_id=?"
+          ).run(value.taskId)
+          for (const table of ['events', 'records', 'receipts'])
+            db.prepare(
+              `DELETE FROM ${table} WHERE conversation_id IN(SELECT id FROM conversations WHERE task_id=?)`
+            ).run(value.taskId)
+          db.prepare(
+            "DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.taskId')=?"
+          ).run(value.taskId)
+        } else {
+          for (const table of ['events', 'records', 'receipts'])
+            db.prepare(`DELETE FROM ${table} WHERE conversation_id=?`).run(value.id)
+          db.prepare("DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.id')=?").run(
+            value.id
+          )
+        }
+      })
+    },
     deleteConversation(id: string, epoch: number): void {
       requireEpoch(epoch)
       db.transaction(() => {
@@ -564,6 +701,23 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         for (const table of ['events', 'records', 'receipts'])
           db.prepare(`DELETE FROM ${table} WHERE conversation_id=?`).run(id)
       })()
+    },
+    backupTo(destination: string) {
+      return db.backup(destination)
+    },
+    acquireBlobLease(id: string, ttlMs: number) {
+      if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) throw new Error('Invalid blob lease')
+      db.prepare(
+        'INSERT INTO blob_leases VALUES(?,?) ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at'
+      ).run(id, Date.now() + ttlMs)
+      return {
+        release: () => {
+          db.prepare('DELETE FROM blob_leases WHERE id=?').run(id)
+        }
+      }
+    },
+    hasBlobLeases() {
+      return !!db.prepare('SELECT 1 FROM blob_leases WHERE expires_at>? LIMIT 1').get(Date.now())
     },
     checkpoint(): void {
       db.pragma('wal_checkpoint(TRUNCATE)')

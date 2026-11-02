@@ -676,6 +676,17 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.onContentChanged': streamed(onValue('artifact')),
 
   // ── chat ──
+  'chat.backups.list': checked(computer('computerId')),
+  'chat.backups.create': checked(computer('computerId')),
+  'chat.backups.delete': checked(computer('computerId')),
+  'chat.backups.restore': checked(computer('computerId')),
+  'chat.backups.settings': checked(computer('computerId')),
+  'chat.backups.configure': checked(computer('computerId')),
+  'chat.archives.list': checked(computer('computerId')),
+  'chat.archives.conversations': checked(computer('computerId')),
+  'chat.archives.read': checked(computer('computerId')),
+  'chat.archives.records': checked(computer('computerId')),
+  'chat.archives.attachment': checked(computer('computerId')),
   'chat.supports': none('a terminal mode id'),
   'chat.workspaceChanges.get': checked(tab('tabId')),
   'chat.workspaceChanges.getFileDiff': checked(tab('tabId')),

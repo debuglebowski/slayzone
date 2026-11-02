@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { createComputerChatRuntime, type ChatBootstrap } from '@slayzone/chat-runtime/server'
 import {
+  chatIdentitySchema,
   chatBootstrapSchema,
   parseChatInvocation,
   chatRouteSchema,
@@ -33,6 +34,67 @@ import type { ProjectPathStore } from '../project-paths'
 import type { SpawnAdmission } from '../spawn-admission'
 
 const requestSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('inventory') }),
+  z.object({ kind: z.literal('metadata.snapshot'), id: z.string() }),
+  z.object({ kind: z.literal('backup.list') }),
+  z.object({ kind: z.literal('backup.create'), id: z.string().uuid() }),
+  z.object({ kind: z.literal('backup.delete'), id: z.string().uuid() }),
+  z.object({
+    kind: z.literal('backup.restore'),
+    backupId: z.string().uuid(),
+    archiveId: z.string().uuid()
+  }),
+  z.object({ kind: z.literal('backup.settings') }),
+  z.object({
+    kind: z.literal('backup.configure'),
+    settings: z.object({
+      autoEnabled: z.boolean(),
+      intervalMinutes: z.number().int().min(15),
+      maxAutoBackups: z.number().int().nonnegative()
+    })
+  }),
+  z.object({ kind: z.literal('archive.list') }),
+  z.object({ kind: z.literal('archive.conversations'), archiveId: z.string().uuid() }),
+  z.object({
+    kind: z.literal('archive.read'),
+    archiveId: z.string().uuid(),
+    conversationId: z.string(),
+    afterSeq: z.number().int()
+  }),
+  z.object({
+    kind: z.literal('archive.records'),
+    archiveId: z.string().uuid(),
+    conversationId: z.string(),
+    afterCursor: z.number().int().nonnegative()
+  }),
+  z.object({
+    kind: z.literal('archive.attachment'),
+    archiveId: z.string().uuid(),
+    conversationId: z.string(),
+    ref: chatAttachmentSchema
+  }),
+
+  z.object({
+    kind: z.literal('task.lifecycle'),
+    taskId: z.string(),
+    state: z.enum(['active', 'paused', 'deleted']),
+    revision: z.number().int().positive()
+  }),
+  z.object({
+    kind: z.literal('migration.checkpoint'),
+    identity: chatIdentitySchema,
+    migrationId: z.string(),
+    candidate: z
+      .array(
+        z.object({
+          kind: z.enum(['settings']),
+          id: z.string(),
+          value: z.unknown(),
+          at: z.number().int()
+        })
+      )
+      .optional()
+  }),
   z.object({
     kind: z.literal('attachment.has'),
     route: chatRouteSchema,
@@ -211,8 +273,10 @@ export function createChatRuntimeHandlers(opts: {
       },
       onMetadata: (update) => publish('metadata', { update })
     })
-    instance.transport.setAgentStateTabRecorder((tabId, state) =>
-      instance?.local.metadata(tabId, 'agent-state', { state })
+    instance.transport.setAgentStateTabRecorder(
+      (tabId, state) =>
+        instance?.storage.forTab(tabId)?.state === 'active' &&
+        instance.local.metadata(tabId, 'agent-state', { state })
     )
     instance.events.on('event', (tabId, event, seq, live, at) =>
       publish('event', { tabId, event, seq, live, at })
@@ -231,6 +295,51 @@ export function createChatRuntimeHandlers(opts: {
     const req = requestSchema.parse(raw),
       r = runtime()
     switch (req.kind) {
+      case 'inventory':
+        return r.storage
+          .inventory()
+          .filter((o) => !o.identity.id.startsWith('__'))
+          .map((o) => ({
+            ...o,
+            bootstrapRevision:
+              r.storage.getRecord<ChatBootstrap>(o.identity.id, 'settings', 'bootstrap')
+                ?.revision ?? 0,
+            inbox: !!r.storage.getRecord(o.identity.id, 'settings', 'inbox'),
+            lifecycle: r.storage.taskLifecycle(o.identity.taskId)
+          }))
+      case 'metadata.snapshot':
+        return r.local.metadataSnapshot(req.id)
+      case 'backup.list':
+        return r.backups.list()
+      case 'backup.create':
+        return r.backups.create('manual', req.id)
+      case 'backup.delete':
+        r.backups.delete(req.id)
+        return null
+      case 'backup.restore':
+        return r.backups.restore(req.backupId, req.archiveId)
+      case 'backup.settings':
+        return r.backups.settings()
+      case 'backup.configure':
+        r.backups.configure(req.settings)
+        return null
+      case 'archive.list':
+        return r.backups.listArchives()
+      case 'archive.conversations':
+        return r.backups.conversations(req.archiveId)
+      case 'archive.read':
+        return r.backups.read(req.archiveId, req.conversationId, req.afterSeq)
+      case 'archive.records':
+        return r.backups.records(req.archiveId, req.conversationId, req.afterCursor)
+      case 'archive.attachment':
+        return {
+          data: r.backups.attachment(req.archiveId, req.conversationId, req.ref).toString('base64')
+        }
+
+      case 'task.lifecycle':
+        return r.applyTaskLifecycle(req.taskId, req.state, req.revision)
+      case 'migration.checkpoint':
+        return r.storage.migrationCheckpoint(req.identity, req.migrationId, req.candidate)
       case 'prompts':
         return r.prompts(req.taskId, req.agentId, req.excluded)
       case 'sessions':

@@ -4447,6 +4447,17 @@ export const migrations: Migration[] = [
           id TEXT PRIMARY KEY, tab_id TEXT NOT NULL,
           conversation_id TEXT NOT NULL REFERENCES chat_ownership(id)
         );
+        CREATE TABLE chat_task_lifecycle (
+          task_id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('active','paused','deleted')),
+          revision INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE chat_task_computers (
+          task_id TEXT NOT NULL, computer_id TEXT NOT NULL, PRIMARY KEY(task_id,computer_id)
+        );
+        CREATE TABLE chat_lifecycle_acks (
+          task_id TEXT NOT NULL, computer_id TEXT NOT NULL, revision INTEGER NOT NULL,
+          PRIMARY KEY(task_id,computer_id)
+        );
         CREATE TABLE chat_metadata_progress (
           conversation_id TEXT PRIMARY KEY REFERENCES chat_ownership(id),
           sequence INTEGER NOT NULL DEFAULT 0
@@ -4460,6 +4471,31 @@ export const migrations: Migration[] = [
       `)
       const exists = (table: string) =>
         db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      for (const action of ['INSERT', 'UPDATE'])
+        db.exec(`CREATE TRIGGER chat_ownership_targets_${action.toLowerCase()} AFTER ${action} ON chat_ownership BEGIN
+        INSERT INTO chat_task_computers SELECT NEW.task_id,NEW.computer_id WHERE NEW.computer_id IS NOT NULL ON CONFLICT(task_id,computer_id) DO NOTHING;
+        INSERT INTO chat_task_computers SELECT NEW.task_id,NEW.source_computer_id WHERE NEW.source_computer_id IS NOT NULL ON CONFLICT(task_id,computer_id) DO NOTHING;
+        INSERT INTO chat_task_computers SELECT NEW.task_id,NEW.destination_computer_id WHERE NEW.destination_computer_id IS NOT NULL ON CONFLICT(task_id,computer_id) DO NOTHING;
+      END;`)
+      if (exists('tasks')) {
+        db.exec(`INSERT INTO chat_task_lifecycle(task_id,state) SELECT id,CASE WHEN deleted_at IS NULL AND archived_at IS NULL THEN 'active' ELSE 'paused' END FROM tasks;
+          CREATE TRIGGER chat_task_insert AFTER INSERT ON tasks BEGIN
+            INSERT OR IGNORE INTO chat_task_lifecycle(task_id,state) VALUES(NEW.id,CASE WHEN NEW.deleted_at IS NULL AND NEW.archived_at IS NULL THEN 'active' ELSE 'paused' END);
+          END;
+          CREATE TRIGGER chat_task_soft_delete AFTER UPDATE OF deleted_at,archived_at ON tasks WHEN OLD.deleted_at IS NOT NEW.deleted_at OR OLD.archived_at IS NOT NEW.archived_at BEGIN
+            INSERT INTO chat_task_lifecycle(task_id,state) VALUES(NEW.id,CASE WHEN NEW.deleted_at IS NULL AND NEW.archived_at IS NULL THEN 'active' ELSE 'paused' END)
+            ON CONFLICT(task_id) DO UPDATE SET state=CASE WHEN state='deleted' THEN 'deleted' ELSE excluded.state END,revision=revision+1;
+          END;
+          CREATE TRIGGER chat_task_purge BEFORE DELETE ON tasks BEGIN
+            INSERT INTO chat_task_lifecycle(task_id,state) VALUES(OLD.id,'deleted')
+            ON CONFLICT(task_id) DO UPDATE SET state='deleted',revision=revision+CASE WHEN state='deleted' THEN 0 ELSE 1 END;
+            UPDATE chat_ownership SET state='deleted',epoch=epoch+1,cleanup_pending=1 WHERE task_id=OLD.id AND state<>'deleted';
+            INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch)
+              SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE o.task_id=OLD.id
+              ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END;
+          END;
+        `)
+      }
       // Fencing lives in SQLite too: an old in-flight handler or retention sweep
       // cannot mutate the source after its durable migration gate closes.
       for (const table of [

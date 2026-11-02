@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { sanitizeHubChatBackup } from './chat-backup'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { containedPath } from '@slayzone/platform/safe-path'
@@ -39,6 +41,7 @@ const BACKUP_REGEX =
   /^slayzone(?:\.dev)?(?:\.data)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration)\.sqlite$/
 
 export type BackupDeps = {
+  sanitizeSnapshot?: (path: string) => Promise<void>
   db: SlayzoneDb
   /** Hub data root; backups live in `<dataRoot>/backups`. */
   dataRoot: string
@@ -172,7 +175,14 @@ export function buildBackupOps(deps: BackupDeps) {
   const create = async (type: 'auto' | 'manual', name?: string): Promise<BackupInfo> => {
     const filename = buildBackupFilename(deps.dbPath, type)
     const destPath = path.join(backupsDir(dataRoot), filename)
-    await db.backup(destPath)
+    const pendingPath = path.join(backupsDir(dataRoot), `.pending-${randomUUID()}.sqlite`)
+    try {
+      await db.backup(pendingPath)
+      await (deps.sanitizeSnapshot ?? sanitizeHubChatBackup)(pendingPath)
+      fs.renameSync(pendingPath, destPath)
+    } finally {
+      for (const suffix of ['', ...DB_SUFFIXES]) fs.rmSync(pendingPath + suffix, { force: true })
+    }
     const settings = await getBackupSettings(db)
     const backupName = name || `Backup ${settings.nextBackupNumber}`
     const names = await getBackupNames(db)

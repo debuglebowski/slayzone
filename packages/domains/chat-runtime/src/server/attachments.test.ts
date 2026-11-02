@@ -54,3 +54,40 @@ test('caller cannot register a false hash or read another artifact by bare hash'
     r.attachments.reader.read({ ...ref, contentHash: '../chat.sqlite' })
   ).rejects.toThrow()
 })
+
+test('blob collection keeps shared references and removes bytes after final deletion', () => {
+  const r = runtime(),
+    first = r.attachments.put('tab', attachment, bytes)
+  r.bootstrap({
+    identity: {
+      id: 'second',
+      taskId: 'second-task',
+      tabId: 'second-tab',
+      mode: 'claude-chat',
+      epoch: 1
+    },
+    projectId: null,
+    cwd: '/tmp',
+    revision: 1,
+    providerConfig: {},
+    defaultFlags: null,
+    env: {}
+  })
+  const second = r.attachments.put(
+    'second-tab',
+    { ...attachment, artifactId: 'second-file' },
+    bytes
+  )
+  r.storage.applyTombstone(
+    { id: 'storage', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 2 },
+    true
+  )
+  expect(r.attachments.collectGarbage()).toEqual({ removed: 0 })
+  expect(Buffer.from(r.attachments.readBlob(first.contentHash!))).toEqual(bytes)
+  r.storage.applyTombstone(
+    { id: 'second', taskId: 'second-task', tabId: 'second-tab', mode: 'claude-chat', epoch: 2 },
+    true
+  )
+  expect(r.attachments.collectGarbage()).toEqual({ removed: 1 })
+  expect(() => r.attachments.readBlob(second.contentHash!)).toThrow()
+})

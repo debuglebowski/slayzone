@@ -1,5 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+  openSync,
+  closeSync,
+  fsyncSync,
+  unlinkSync,
+  readdirSync
+} from 'node:fs'
 import { join } from 'node:path'
 import {
   attachmentSizeError,
@@ -28,6 +40,34 @@ export function createLocalAttachments(
     if (hashOf(bytes) !== hash) throw new Error('Attachment hash integrity failure')
     return bytes
   }
+  function writeBlob(hash: string, bytes: Uint8Array) {
+    const path = blobPath(hash)
+    if (existsSync(path)) {
+      try {
+        readBlob(hash)
+        return
+      } catch {
+        /* Verified caller bytes repair a corrupt local copy. */
+      }
+    }
+    const temp = join(dir, `.upload-${randomUUID()}`),
+      fd = openSync(temp, 'wx', 0o600)
+    try {
+      writeFileSync(fd, bytes)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(temp, path)
+    if (process.platform !== 'win32') {
+      const parent = openSync(dir, 'r')
+      try {
+        fsyncSync(parent)
+      } finally {
+        closeSync(parent)
+      }
+    }
+  }
   const reader: ChatAttachmentReader = {
     read: async (ref) => {
       const records = store.findRecords('attachment').map((r) => r.value as ChatAttachment)
@@ -45,27 +85,26 @@ export function createLocalAttachments(
     reader,
     readBlob,
     putPrepared(id: string, epoch: number, ref: ChatAttachment, bytes: Uint8Array): void {
-      const owner = store.conversation(id)
-      if (!owner || owner.identity.epoch !== epoch || owner.state !== 'prepared')
-        throw new Error('Migration attachment ownership mismatch')
-      const record = store.getRecord<ChatAttachment>(
-        id,
-        'attachment',
-        `${ref.artifactId}:${ref.contentHash}`
-      )
-      if (
-        !record ||
-        !ref.contentHash ||
-        record.contentHash !== ref.contentHash ||
-        hashOf(bytes) !== ref.contentHash
-      )
-        throw new Error('Migration attachment hash mismatch')
-      const limit = attachmentSizeError(ref.kind, ref.name, bytes.length)
-      if (limit) throw new Error(limit)
-      const path = blobPath(ref.contentHash),
-        temp = join(dir, `.upload-${randomUUID()}`)
-      writeFileSync(temp, bytes, { mode: 0o600, flag: 'wx' })
-      renameSync(temp, path)
+      store.transaction(() => {
+        const owner = store.conversation(id)
+        if (!owner || owner.identity.epoch !== epoch || owner.state !== 'prepared')
+          throw new Error('Migration attachment ownership mismatch')
+        const record = store.getRecord<ChatAttachment>(
+          id,
+          'attachment',
+          `${ref.artifactId}:${ref.contentHash}`
+        )
+        if (
+          !record ||
+          !ref.contentHash ||
+          record.contentHash !== ref.contentHash ||
+          hashOf(bytes) !== ref.contentHash
+        )
+          throw new Error('Migration attachment hash mismatch')
+        const limit = attachmentSizeError(ref.kind, ref.name, bytes.length)
+        if (limit) throw new Error(limit)
+        writeBlob(ref.contentHash, bytes)
+      })
     },
     missing(id: string): ChatAttachment[] {
       return store
@@ -81,32 +120,47 @@ export function createLocalAttachments(
         })
     },
     put(tabId: string, ref: ChatAttachment, bytes: Uint8Array): ChatAttachment {
-      const owner = local.owner(tabId),
-        hash = hashOf(bytes)
-      if (ref.contentHash && ref.contentHash !== hash) throw new Error('Attachment hash mismatch')
-      const sniff = sniffAttachment(bytes, ref.name)
-      if (
-        sniff.kind === 'unsupported' ||
-        sniff.kind !== ref.kind ||
-        sniff.mediaType !== ref.mediaType
-      )
-        throw new Error('Attachment content does not match its type')
-      const limit = attachmentSizeError(ref.kind, ref.name, bytes.length)
-      if (limit) throw new Error(limit)
-      const path = blobPath(hash)
-      if (!existsSync(path)) {
-        const temp = join(dir, `.upload-${randomUUID()}`)
-        writeFileSync(temp, bytes, { mode: 0o600, flag: 'wx' })
-        renameSync(temp, path)
-      } else readBlob(hash)
-      const sealed = { ...ref, size: bytes.length, contentHash: hash }
-      store.putRecord(owner.id, owner.epoch, {
-        kind: 'attachment',
-        id: `${ref.artifactId}:${hash}`,
-        value: { ...sealed, taskId: owner.taskId },
-        at: Date.now()
+      return store.transaction(() => {
+        const owner = local.owner(tabId),
+          hash = hashOf(bytes)
+        if (ref.contentHash && ref.contentHash !== hash) throw new Error('Attachment hash mismatch')
+        const sniff = sniffAttachment(bytes, ref.name)
+        if (
+          sniff.kind === 'unsupported' ||
+          sniff.kind !== ref.kind ||
+          sniff.mediaType !== ref.mediaType
+        )
+          throw new Error('Attachment content does not match its type')
+        const limit = attachmentSizeError(ref.kind, ref.name, bytes.length)
+        if (limit) throw new Error(limit)
+        writeBlob(hash, bytes)
+        const sealed = { ...ref, size: bytes.length, contentHash: hash }
+        store.putRecord(owner.id, owner.epoch, {
+          kind: 'attachment',
+          id: `${ref.artifactId}:${hash}`,
+          value: { ...sealed, taskId: owner.taskId },
+          at: Date.now()
+        })
+        return sealed
       })
-      return sealed
+    },
+    collectGarbage() {
+      return store.transaction(() => {
+        if (store.hasBlobLeases()) return { removed: 0 }
+        const referenced = new Set(
+          store.findRecords('attachment').map((r) => (r.value as ChatAttachment).contentHash)
+        )
+        let removed = 0
+        for (const name of readdirSync(dir))
+          if (/^[a-f0-9]{64}$/.test(name) && !referenced.has(name)) {
+            const path = blobPath(name)
+            if (lstatSync(path).isFile()) {
+              unlinkSync(path)
+              removed++
+            }
+          }
+        return { removed }
+      })
     }
   }
 }

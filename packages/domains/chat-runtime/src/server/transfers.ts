@@ -11,7 +11,9 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  renameSync
+  renameSync,
+  readdirSync,
+  unlinkSync
 } from 'node:fs'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
@@ -83,6 +85,8 @@ export function createChatTransfers(store: ChatStorage) {
   }
   return {
     begin(manifest: ChatTransferManifest) {
+      if (store.taskLifecycle(manifest.header.identity.taskId).state === 'deleted')
+        throw new Error('Task chat history was deleted')
       if (
         !/^[a-f0-9]{64}$/.test(manifest.hash) ||
         !Number.isSafeInteger(manifest.bytes) ||
@@ -150,6 +154,16 @@ export function createChatTransfers(store: ChatStorage) {
         hash: p.manifest.hash,
         epoch: p.manifest.header.identity.epoch + 1
       }
+    },
+    removeTask(taskId: string) {
+      for (const name of readdirSync(dir))
+        if (/^[a-f0-9]{64}\.json$/.test(name)) {
+          const id = name.slice(0, -5),
+            p = load(id)
+          if (p.manifest.header.identity.taskId !== taskId) continue
+          for (const suffix of ['.data', '.json'])
+            if (existsSync(path(id, suffix))) unlinkSync(path(id, suffix))
+        }
     },
     progress: (id: string) => load(id)
   }

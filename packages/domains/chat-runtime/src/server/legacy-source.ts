@@ -18,6 +18,9 @@ import type { HubChatOwnership } from './hub-ownership'
 import type { ChatMigrationSource } from './migration'
 import { TRANSFER_CHUNK_BYTES } from './transfers'
 
+const timestamp = (value: string) =>
+  Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : value + 'Z')
+
 type Item = { kind: 'event'; value: StoredChatEvent } | { kind: 'record'; value: ChatRecord }
 
 /** Reads existing hub history without creating another on-disk hub copy. */
@@ -25,6 +28,11 @@ export function createLegacyChatSource(opts: {
   db: SlayzoneDb
   quiesce(owner: HubChatOwnership): Promise<void>
   bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap>
+  freezeMetadata?(
+    owner: HubChatOwnership,
+    migrationId: string,
+    candidate?: ChatRecord[]
+  ): Promise<ChatRecord[] | null>
   readAttachment(owner: HubChatOwnership, ref: ChatAttachment): Promise<Uint8Array>
 }): ChatMigrationSource {
   const { db } = opts
@@ -50,15 +58,14 @@ export function createLegacyChatSource(opts: {
       )
     )?.id
   }
-  async function* items(owner: HubChatOwnership, bootstrap: ChatBootstrap): AsyncGenerator<Item> {
-    const record = (kind: ChatRecord['kind'], id: string, value: unknown, at = 0): Item => ({
-      kind: 'record',
-      value: { kind, id, value, at }
-    })
-    const refs = new Map<string, ChatAttachment>()
-    const remember = (attachments: ChatAttachment[]) => {
-      for (const ref of attachments) refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-    }
+  const record = (kind: ChatRecord['kind'], id: string, value: unknown, at = 0): Item => ({
+    kind: 'record',
+    value: { kind, id, value, at }
+  })
+  async function* mutableMetadata(
+    owner: HubChatOwnership,
+    bootstrap: ChatBootstrap
+  ): AsyncGenerator<Item> {
     yield record('settings', 'bootstrap', bootstrap)
     yield record('settings', 'provider', bootstrap.providerConfig)
     const canonicalMode =
@@ -79,7 +86,7 @@ export function createLegacyChatSource(opts: {
       origin: string
       created_at: number
     }>(
-      `SELECT rowid AS _rowid,* FROM task_conversations WHERE task_id=? AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn')`,
+      `SELECT rowid AS _rowid,* FROM task_conversations c WHERE task_id=? AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn') AND rowid=(SELECT max(d.rowid) FROM task_conversations d WHERE d.task_id=c.task_id AND d.conversation_id=c.conversation_id AND d.origin NOT IN ('foreign-observed','pending-spawn'))`,
       [owner.taskId]
     ))
       yield record(
@@ -116,7 +123,13 @@ export function createLegacyChatSource(opts: {
         if (row) yield record('settings', key, JSON.parse(row[column]))
       }
     }
-
+  }
+  async function* items(owner: HubChatOwnership, metadata: ChatRecord[]): AsyncGenerator<Item> {
+    const refs = new Map<string, ChatAttachment>()
+    const remember = (attachments: ChatAttachment[]) => {
+      for (const ref of attachments) refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
+    }
+    for (const value of metadata) yield { kind: 'record', value }
     for await (const r of rows<{
       seq: number
       event: string
@@ -127,7 +140,7 @@ export function createLegacyChatSource(opts: {
       if (event.kind === 'user-message') remember(userMessageAttachments(event.content ?? []))
       yield {
         kind: 'event',
-        value: { seq: r.seq, at: r.saved_at ?? Date.parse(r.created_at + 'Z'), event }
+        value: { seq: r.seq, at: r.saved_at ?? timestamp(r.created_at), event }
       }
     }
     const draft = await db.get<{
@@ -174,7 +187,7 @@ export function createLegacyChatSource(opts: {
           ...(r.content ? { content } : {}),
           ...(r.conversation_id ? { expectedConversationId: r.conversation_id } : {})
         },
-        Date.parse(r.created_at + 'Z')
+        timestamp(r.created_at)
       )
     }
     const checkpoint = await db.get<{ version: string; seq: number; data: string }>(
@@ -280,6 +293,7 @@ export function createLegacyChatSource(opts: {
       }
     }
     // A sealed reference pins the historical version, independent of later artifact edits.
+    const sealedIds = new Set<string>()
     for (const ref of refs.values()) {
       const version = ref.contentHash
         ? { content_hash: ref.contentHash }
@@ -288,6 +302,9 @@ export function createLegacyChatSource(opts: {
             [ref.artifactId, owner.taskId]
           )
       if (!version?.content_hash) throw new Error('Migration attachment version is missing')
+      const sealedId = `${ref.artifactId}:${version.content_hash}`
+      if (sealedIds.has(sealedId)) continue
+      sealedIds.add(sealedId)
       const sealed = { ...ref, contentHash: version.content_hash, taskId: owner.taskId }
       yield record('attachment', `${ref.artifactId}:${version.content_hash}`, sealed)
     }
@@ -297,7 +314,13 @@ export function createLegacyChatSource(opts: {
     readAttachment: opts.readAttachment,
     async open(owner, migrationId) {
       if (owner.computerId) throw new Error('Legacy source cannot export computer-owned history')
-      const bootstrap = await opts.bootstrap(owner)
+      let metadata = (await opts.freezeMetadata?.(owner, migrationId)) ?? null
+      if (!metadata) {
+        const candidate: ChatRecord[] = []
+        for await (const item of mutableMetadata(owner, await opts.bootstrap(owner)))
+          if (item.kind === 'record') candidate.push(item.value)
+        metadata = (await opts.freezeMetadata?.(owner, migrationId, candidate)) ?? candidate
+      }
       const header: ChatTransferHeader = {
         format: 'slayzone-chat',
         version: 1,
@@ -313,13 +336,13 @@ export function createLegacyChatSource(opts: {
         records: 0,
         receipts: 0
       }
-      for await (const item of items(owner, bootstrap)) {
+      for await (const item of items(owner, metadata!)) {
         if (item.kind === 'event') header.events++
         else header.records++
       }
       async function* buffers() {
         yield Buffer.from(JSON.stringify(header) + '\n')
-        for await (const item of items(owner, bootstrap))
+        for await (const item of items(owner, metadata!))
           yield Buffer.from(JSON.stringify(item) + '\n')
       }
       const hash = createHash('sha256')

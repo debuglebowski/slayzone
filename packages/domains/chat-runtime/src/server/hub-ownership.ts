@@ -84,6 +84,12 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
     async register(
       value: Pick<HubChatOwnership, 'id' | 'taskId' | 'tabId' | 'mode' | 'computerId' | 'epoch'>
     ) {
+      if (
+        await db.get("SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'", [
+          value.taskId
+        ])
+      )
+        throw new Error('Task chat history was deleted')
       if (!Number.isSafeInteger(value.epoch) || value.epoch < 1)
         throw new Error('Invalid chat ownership epoch')
       const binding = await api.forTab(value.tabId)
@@ -212,6 +218,11 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
     },
     async deleteForTask(taskId: string) {
       await db.batchTxn([
+        {
+          type: 'run',
+          sql: "INSERT INTO chat_task_lifecycle(task_id,state) VALUES(?,'deleted') ON CONFLICT(task_id) DO UPDATE SET state='deleted',revision=revision+CASE WHEN state='deleted' THEN 0 ELSE 1 END",
+          params: [taskId]
+        },
         {
           type: 'run',
           sql: "UPDATE chat_ownership SET state='deleted',epoch=epoch+1,cleanup_pending=1 WHERE task_id=? AND state<>'deleted'",

@@ -58,6 +58,7 @@ function ops(opts: { supervised?: boolean } = {}): ReturnType<typeof buildBackup
   trace = []
   return buildBackupOps({
     db,
+    sanitizeSnapshot: async () => {},
     dataRoot,
     dbPath,
     supervised: opts.supervised ?? true,

@@ -119,3 +119,38 @@ test('idempotency does not depend on object key insertion order', () => {
   store.acceptCommand(identity.id, 1, 'op', { a: 1, b: 2 })
   expect(store.acceptCommand(identity.id, 1, 'op', { b: 2, a: 1 })).toBe('duplicate')
 })
+
+test('migration metadata checkpoints survive restart and never overwrite their first snapshot', () => {
+  const { store, root } = open()
+  const records = [
+    { kind: 'settings' as const, id: 'provider', at: 0, value: { chatModel: 'old' } }
+  ]
+  expect(store.migrationCheckpoint(identity, 'move')).toBeNull()
+  expect(store.migrationCheckpoint(identity, 'move', records)).toEqual(records)
+  store.close()
+  const next = open(root).store
+  expect(
+    next.migrationCheckpoint(identity, 'move', [{ ...records[0], value: { chatModel: 'new' } }])
+  ).toEqual(records)
+  expect(() => next.migrationCheckpoint({ ...identity, id: 'another' }, 'move', records)).toThrow(
+    /ownership|identity/i
+  )
+})
+
+test('an offline deletion creates a tombstone before history arrives and fences the whole task', () => {
+  const { store, root } = open()
+  store.applyTombstone({ ...identity, epoch: 4 }, true)
+  expect(store.conversation(identity.id)).toMatchObject({
+    state: 'deleted',
+    identity: { epoch: 4 }
+  })
+  store.close()
+  const next = open(root).store
+  expect(() => next.createConversation({ ...identity, epoch: 5 })).toThrow(/deleted/i)
+  expect(() =>
+    next.createConversation({ ...identity, id: 'new-child', tabId: 'new-child', epoch: 1 })
+  ).toThrow(/deleted/i)
+  expect(() => next.applyTombstone({ ...identity, epoch: 3 }, true)).not.toThrow()
+  next.createConversation({ ...identity, id: 'other', taskId: 'another-task', tabId: 'other' })
+  expect(next.conversation('other')).toMatchObject({ state: 'active' })
+})

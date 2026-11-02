@@ -127,7 +127,84 @@ const rewindOpts = chatCreateOpts.extend({
   scope: z.enum(['before', 'after'])
 })
 
+const computer = () => {
+  const value = getChatDeps().computers
+  if (!value) throw new Error('Computer chat storage is unavailable')
+  return value
+}
+const backupTarget = z.object({ computerId: z.string().min(1) })
+const backupId = backupTarget.extend({ id: z.string().uuid() })
+const archiveTarget = backupTarget.extend({ archiveId: z.string().uuid() })
+const archiveConversation = archiveTarget.extend({ conversationId: z.string().min(1) })
 export const chatRouter = router({
+  backups: router({
+    list: publicProcedure
+      .input(backupTarget)
+      .query(({ input }) => computer().listBackups(input.computerId)),
+    create: publicProcedure
+      .input(backupId)
+      .mutation(({ input }) => computer().createBackup(input.computerId, input.id)),
+    delete: publicProcedure
+      .input(backupId)
+      .mutation(({ input }) => computer().deleteBackup(input.computerId, input.id)),
+    restore: publicProcedure
+      .input(backupTarget.extend({ backupId: z.string().uuid(), archiveId: z.string().uuid() }))
+      .mutation(({ input }) =>
+        computer().restoreBackup(input.computerId, input.backupId, input.archiveId)
+      ),
+    settings: publicProcedure
+      .input(backupTarget)
+      .query(({ input }) => computer().backupSettings(input.computerId)),
+    configure: publicProcedure
+      .input(
+        backupTarget.extend({
+          settings: z.object({
+            autoEnabled: z.boolean(),
+            intervalMinutes: z.number().int().min(15),
+            maxAutoBackups: z.number().int().nonnegative()
+          })
+        })
+      )
+      .mutation(({ input }) => computer().configureBackups(input.computerId, input.settings))
+  }),
+  archives: router({
+    list: publicProcedure
+      .input(backupTarget)
+      .query(({ input }) => computer().listArchives(input.computerId)),
+    conversations: publicProcedure
+      .input(archiveTarget)
+      .query(({ input }) => computer().archiveConversations(input.computerId, input.archiveId)),
+    read: publicProcedure
+      .input(archiveConversation.extend({ afterSeq: z.number().int().default(-1) }))
+      .query(({ input }) =>
+        computer().archiveRead(
+          input.computerId,
+          input.archiveId,
+          input.conversationId,
+          input.afterSeq
+        )
+      ),
+    records: publicProcedure
+      .input(archiveConversation.extend({ afterCursor: z.number().int().nonnegative().default(0) }))
+      .query(({ input }) =>
+        computer().archiveRecords(
+          input.computerId,
+          input.archiveId,
+          input.conversationId,
+          input.afterCursor
+        )
+      ),
+    attachment: publicProcedure
+      .input(archiveConversation.extend({ ref: chatAttachment }))
+      .query(({ input }) =>
+        computer().archiveAttachment(
+          input.computerId,
+          input.archiveId,
+          input.conversationId,
+          input.ref
+        )
+      )
+  }),
   workspaceChanges: router({
     get: publicProcedure
       .input(z.object({ tabId: z.string(), captureId: z.string().max(200) }))

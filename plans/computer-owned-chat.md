@@ -75,3 +75,24 @@ Checkpoint validation: 34 chat-runtime tests; 88 hook tests; 35 desktop send/rou
 tests; 26 mobile session tests (20s test deadline); 1,093 service/owner-policy tests.
 Hub/computer bundles build; hub/computer/task-terminals typechecks pass. Mobile
 shared-node environment typing corrected; rerun its full typecheck.
+
+
+## Backup / lifecycle checkpoint
+
+Computer backups now snapshot SQLite plus referenced blobs under a GC lease,
+verify hashes, and restore into separate read-only archives. Settings exposes
+computer selection, scheduling, archive paging, attachment download and JSON
+export. New hub snapshots strip chat content and VACUUM unpublished copies before
+publication; old backups stay intact. Task pause/deletion is durable, synced before
+chat commands, and retried after reconnect. Deletion GC retries after partial failure.
+
+Restored hubs recover newer committed computer ownership and permanent task
+tombstones. Metadata snapshots rebuild settings/session proofs/queue routes after
+acknowledged outbox data is missing from an older hub snapshot. Legacy exports
+freeze mutable metadata on destination, deduplicate native sessions and attachment
+versions, and preserve UTC timestamps.
+
+Validation: 60 storage/migration/relay/service/backup tests; hub, computer,
+chat-runtime and settings typechecks pass. Still incomplete: new upload forwarding,
+full artifact compatibility, diagnostics/cache cleanup, retention, background
+migration, availability UI, E2E reset/coverage and integration with latest main.

@@ -1,3 +1,4 @@
+import { createChatBackups } from './backups'
 import { createLocalPrompts } from './prompts'
 import { createChatTransfers } from './transfers'
 import { createLocalWorkspaceStore } from './workspace-store'
@@ -28,10 +29,27 @@ export function createComputerChatRuntime(opts: {
   const local = createLocalChatData(storage, opts.onMetadata)
   const transfers = createChatTransfers(storage)
   const attachments = createLocalAttachments(storage, local)
+  const backups = createChatBackups(storage)
   const workspaceStore = createLocalWorkspaceStore(storage, local)
   const conversations = createConversationRegistry()
+  const backend = opts.transport?.backend
   const transport = createChatTransport(
-    { ...opts.transport, attachmentReader: attachments.reader, workspaceStore },
+    {
+      ...opts.transport,
+      ...(backend
+        ? {
+            backend: {
+              spawn: (spec) => {
+                if (storage.taskLifecycle(spec.taskId).state !== 'active')
+                  throw new Error('Task chat is paused or deleted')
+                return backend.spawn(spec)
+              }
+            }
+          }
+        : {}),
+      attachmentReader: attachments.reader,
+      workspaceStore
+    },
     conversations
   )
   const queueRuntime = createChatQueueRuntime(transport)
@@ -58,6 +76,7 @@ export function createComputerChatRuntime(opts: {
     storage,
     transfers,
     attachments,
+    backups,
     workspaceStore,
     local,
     transport,
@@ -67,9 +86,39 @@ export function createComputerChatRuntime(opts: {
     events: transport.chatEvents,
     queueEvents: queueRuntime.chatQueueEvents,
     bootstrap: local.bootstrap,
+    async applyTaskLifecycle(
+      taskId: string,
+      state: 'active' | 'paused' | 'deleted',
+      revision: number
+    ) {
+      const previous = storage.taskLifecycle(taskId)
+      if (previous.state === 'deleted') {
+        const applied = storage.applyTaskLifecycle(taskId, state, revision)
+        transfers.removeTask(taskId)
+        attachments.collectGarbage()
+        storage.checkpoint()
+        return applied
+      }
+      if (previous.revision >= revision) return previous
+      // Close tabs synchronously before awaiting projection flushes. No late
+      // subprocess output or queued command can restart this task after the fence.
+      const closing =
+        state !== 'active'
+          ? storage.listForTask(taskId).map((o) => transport.removeSession(o.identity.tabId))
+          : []
+      const applied = storage.applyTaskLifecycle(taskId, state, revision)
+      await Promise.all(closing)
+      if (applied.state === 'deleted') {
+        transfers.removeTask(taskId)
+        attachments.collectGarbage()
+        storage.checkpoint()
+      }
+      return applied
+    },
     async close() {
       if (closed) return
       closed = true
+      await backups.close()
       await queueRuntime.close()
       await transport.shutdownAll()
       storage.close()

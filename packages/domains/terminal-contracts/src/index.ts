@@ -54,3 +54,13 @@ export {
   type ResolvedAgentHook,
   type HookAgentId
 } from './agent-hook'
+
+export type {
+  ComputerChatBackup,
+  ComputerChatArchive,
+  ComputerChatBackupPolicy,
+  ArchivedChatConversation,
+  ArchivedChatPage,
+  ArchivedChatRecordPage,
+  ChatComputerOps
+} from './computer-chat'

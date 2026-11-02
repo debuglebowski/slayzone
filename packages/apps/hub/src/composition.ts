@@ -780,7 +780,20 @@ export function composeServer(opts: {
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request) => {
       if (!execGateway) throw new Error('Chat computer gateway is starting')
-      return execGateway.request(computerId, HubToComputerMethods.chatRequest, request)
+      return execGateway.request(
+        computerId,
+        HubToComputerMethods.chatRequest,
+        request,
+        typeof request === 'object' &&
+          request !== null &&
+          'kind' in request &&
+          ['backup.create', 'backup.restore'].includes(String(request.kind))
+          ? 120_000
+          : undefined
+      )
+    },
+    admitComputer: async (computerId) => {
+      await placement.forTarget({ computerId })
     },
     resolveComputer: resolveComputerForTask,
     defaultComputer: () => placement.forCaller(),
@@ -792,10 +805,18 @@ export function composeServer(opts: {
         notifyGlobalStateListeners(sessionId, state, previous)
     }
   })
-  setChatDeps(computerChat.relay)
+  setChatDeps({ ...computerChat.relay, computers: computerChat.computers })
   setChatSessionSource(computerChat.relay.sessions)
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
+  const syncChatLifecycle = (): void => {
+    for (const computer of execGateway?.listUsableComputers() ?? [])
+      void computerChat.lifecycle.sync(computer.computerId).catch(() => {})
+  }
+  notifyEvents.on('tasks-changed', syncChatLifecycle)
+  // SQL cascades and startup purges may have no renderer notification.
+  const chatLifecycleTimer = setInterval(syncChatLifecycle, 10_000)
+  chatLifecycleTimer.unref()
 
   // --- AI config / context manager --------------------------------------------
   // Build the ai-config + marketplace ops singletons that back the tRPC
@@ -1560,8 +1581,8 @@ export function composeServer(opts: {
     // reconcile against the computer's own list on every (re)connect and reap
     // whatever this hub is no longer tracking.
     computerGateway.events.on('computer-connected', ({ computer }) => {
-      void computerChat.relay
-        .drainMetadata(computer.computerId)
+      void computerChat
+        .recoverComputer(computer.computerId, true)
         .then(() => computerChat.relay.refreshSessions(computer.computerId))
         .catch(() => console.error('[chat] computer metadata reconciliation pending'))
       void reapOrphanWarms(computer.computerId)

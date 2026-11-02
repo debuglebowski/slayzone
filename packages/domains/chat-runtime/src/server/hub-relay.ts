@@ -23,7 +23,7 @@ import {
   type ChatOperation,
   type ChatQueueOperation
 } from '../shared'
-import type { ChatBootstrap, ChatMetadataUpdate } from './local-data'
+import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 
@@ -57,6 +57,7 @@ export function createHubChatRelay(opts: {
   resolveComputer(taskId: string): Promise<string | null>
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
+  recoverComputer?(computerId: string): Promise<void>
   bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap>
   migrate(id: string, computerId: string): Promise<HubChatOwnership>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
@@ -109,6 +110,18 @@ export function createHubChatRelay(opts: {
   }
   async function ensureTab(tabId: string) {
     let owner = await ownership.forTab(tabId)
+    if (opts.recoverComputer) {
+      const taskId =
+        owner?.taskId ??
+        (await db.get<{ task_id: string }>('SELECT task_id FROM terminal_tabs WHERE id=?', [tabId]))
+          ?.task_id
+      const pc =
+        owner?.computerId ??
+        owner?.destinationComputerId ??
+        (taskId ? await opts.resolveComputer(taskId) : null)
+      if (pc) await opts.recoverComputer(pc)
+      owner = await ownership.forTab(tabId)
+    }
     if (!owner) {
       const tab = await db.get<TabRow>('SELECT id,task_id,mode FROM terminal_tabs WHERE id=?', [
         tabId
@@ -139,6 +152,8 @@ export function createHubChatRelay(opts: {
     return ensureTab(tab.id)
   }
   async function ensurePromptTask(taskId: string) {
+    const pc = await opts.resolveComputer(taskId)
+    if (pc) await opts.recoverComputer?.(pc)
     const owners = (await ownership.forTask(taskId)).filter((o) => o.state !== 'deleted')
     if (owners.length) {
       for (const owner of owners)
@@ -184,7 +199,7 @@ export function createHubChatRelay(opts: {
       return ensureTask(String(first), String(args[1]))
     return ensureTab(String(first))
   }
-  async function applyMetadata(computerId: string, raw: ChatMetadataUpdate) {
+  async function applyMetadata(computerId: string, raw: ChatMetadataUpdate, advance = true) {
     const owner = await ownership.get(raw.conversationId)
     // thread-created is the only notification that may introduce a new binding.
     let current = owner
@@ -311,9 +326,55 @@ export function createHubChatRelay(opts: {
     } else if (raw.kind === 'queue-item') {
       await ownership.setQueueRoute(String(value.id), current.id, value.removed === true)
     } else if (raw.kind !== 'thread-created') throw new Error('Unknown chat metadata kind')
+    if (advance)
+      await db.run(
+        'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
+        [current.id, raw.sequence]
+      )
+  }
+  async function recoverMetadata(computerId: string, id: string) {
+    const snapshot = (await opts.request(computerId, {
+      kind: 'metadata.snapshot',
+      id
+    })) as ChatMetadataSnapshot
+    const owner = await ownership.get(id)
+    if (
+      !owner ||
+      owner.computerId !== computerId ||
+      owner.state !== 'active' ||
+      snapshot.identity.id !== id ||
+      snapshot.identity.taskId !== owner.taskId ||
+      snapshot.identity.tabId !== owner.tabId ||
+      snapshot.identity.epoch !== owner.epoch ||
+      !Number.isSafeInteger(snapshot.counter) ||
+      snapshot.counter < 0
+    )
+      throw new Error('Invalid metadata snapshot ownership')
+    await opts.gate?.(computerId, owner.taskId)
+    const consumed =
+      (
+        await db.get<{ sequence: number }>(
+          'SELECT sequence FROM chat_metadata_progress WHERE conversation_id=?',
+          [id]
+        )
+      )?.sequence ?? 0
+    if (snapshot.counter < consumed) throw new Error('Computer metadata is behind the hub')
+    await db.run('DELETE FROM chat_queue_routes WHERE conversation_id=?', [id])
+    // Idempotent metadata writes precede the high-water mark. A crash replays them.
+    for (const update of snapshot.updates) {
+      if (
+        update.sequence !== snapshot.counter ||
+        update.conversationId !== id ||
+        update.taskId !== owner.taskId ||
+        update.tabId !== owner.tabId ||
+        update.epoch !== owner.epoch
+      )
+        throw new Error('Invalid metadata snapshot entry')
+      await applyMetadata(computerId, update, false)
+    }
     await db.run(
       'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
-      [current.id, raw.sequence]
+      [id, snapshot.counter]
     )
   }
   const metadataChains = new Map<string, Promise<void>>()
@@ -325,14 +386,23 @@ export function createHubChatRelay(opts: {
       .then(async () => {
         if (!Number.isSafeInteger(update.sequence) || update.sequence < 1)
           throw new Error('Invalid chat metadata sequence')
-        const consumed =
+        let consumed =
           (
             await db.get<{ sequence: number }>(
               'SELECT sequence FROM chat_metadata_progress WHERE conversation_id=?',
               [key]
             )
           )?.sequence ?? 0
-        if (update.sequence > consumed + 1) throw new Error('Chat metadata replay is required')
+        if (update.sequence > consumed + 1) {
+          await recoverMetadata(computerId, key)
+          consumed =
+            (
+              await db.get<{ sequence: number }>(
+                'SELECT sequence FROM chat_metadata_progress WHERE conversation_id=?',
+                [key]
+              )
+            )?.sequence ?? 0
+        }
         if (update.sequence > consumed) await applyMetadata(computerId, update)
         else {
           const owner = await ownership.get(key)
@@ -355,7 +425,14 @@ export function createHubChatRelay(opts: {
     metadataChains.set(key, next)
     return next
   }
-  async function drainMetadata(computerId: string) {
+  async function drainMetadata(computerId: string, restore = false) {
+    if (restore) {
+      const owners = await db.all<{ id: string }>(
+        "SELECT id FROM chat_ownership WHERE computer_id=? AND state='active' ORDER BY id",
+        [computerId]
+      )
+      for (const owner of owners) await recoverMetadata(computerId, owner.id)
+    }
     const updates = (await opts.request(computerId, {
       kind: 'pendingMetadata'
     })) as ChatMetadataUpdate[]
@@ -388,7 +465,7 @@ export function createHubChatRelay(opts: {
         ...(!read ? { operationId: operationId ?? randomUUID() } : {})
       }
     })
-    await drainMetadata(owner.computerId!)
+    if (!read) await drainMetadata(owner.computerId!)
     return result
   }
   async function catalogCall(
@@ -484,6 +561,7 @@ export function createHubChatRelay(opts: {
     ensurePromptTask,
     drainMetadata,
     reconcileMetadata,
+    recoverMetadata,
     async receive(computerId: string, payload: unknown) {
       const p = payload as Record<string, unknown>
       if (p.type === 'metadata')

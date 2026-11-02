@@ -212,3 +212,68 @@ test('terminal hook prompts survive before a tab bootstrap and never enter metad
     await b.close()
   }
 })
+
+test('Trash pauses chat without losing drafts or queue; final purge cannot be undone by old state', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  await r.ops.saveTabDraft('tab-a', { text: 'undo keeps this', attachments: [] })
+  await r.queueOps.push('tab-a', 'queued prompt', 'queued prompt', { id: 'queued' })
+  await r.applyTaskLifecycle('task-a', 'paused', 1)
+  await expect(
+    r.invoke({
+      route: { id: 'storage-a', epoch: 1 },
+      target: 'ops',
+      method: 'saveTabDraft',
+      operationId: 'paused-write',
+      args: ['tab-a', { text: 'should fail', attachments: [] }]
+    })
+  ).rejects.toThrow(/paused/i)
+  expect(await r.ops.getTabState('tab-a')).toMatchObject({ draft: { text: 'undo keeps this' } })
+  expect(await r.queueOps.list('tab-a')).toHaveLength(1)
+  await r.applyTaskLifecycle('task-a', 'active', 2)
+  expect(
+    await r.invoke({
+      route: { id: 'storage-a', epoch: 1 },
+      target: 'ops',
+      method: 'saveTabDraft',
+      operationId: 'restored-write',
+      args: ['tab-a', { text: 'restored', attachments: [] }]
+    })
+  ).toEqual({ rev: 2 })
+  await r.applyTaskLifecycle('task-a', 'deleted', 3)
+  expect(await r.applyTaskLifecycle('task-a', 'active', 4)).toMatchObject({ state: 'deleted' })
+  expect(r.storage.conversation('storage-a')).toMatchObject({ state: 'deleted' })
+  expect(r.prompts('task-a')).toEqual([])
+  expect(() =>
+    r.captureHook({
+      agentId: 'claude-code',
+      mode: 'claude-code',
+      taskId: 'task-a',
+      hookEvent: 'UserPromptSubmit',
+      raw: { prompt: 'late prompt' }
+    })
+  ).toThrow(/deleted/i)
+})
+
+test('deleted native sessions remain excluded after newer and stale bootstraps', async () => {
+  const { r } = runtime()
+  r.bootstrap({
+    ...bootstrap,
+    honoredConversations: ['native'],
+    providerConfig: { chatConversationId: 'native' }
+  })
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(true)
+  r.bootstrap({
+    ...bootstrap,
+    revision: 2,
+    providerConfig: {},
+    deletedConversations: [{ mode: 'claude-chat', conversationId: 'native' }]
+  })
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
+  r.bootstrap({
+    ...bootstrap,
+    honoredConversations: ['native'],
+    providerConfig: { chatConversationId: 'native' }
+  })
+  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
+})

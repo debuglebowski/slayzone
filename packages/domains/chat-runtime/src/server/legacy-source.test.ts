@@ -38,6 +38,21 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
         "INSERT INTO agent_turns(id,task_id,worktree_path,terminal_tab_id,snapshot_sha,prompt_preview,created_at) VALUES('turn','task','/project','tab','abc','private preview',12340)"
       )
       .run()
+    h.db
+      .prepare(
+        'INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?)'
+      )
+      .run('session-1', 'task', 'claude-chat', 'native', 'user-selected', 1)
+    h.db
+      .prepare(
+        'INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?)'
+      )
+      .run('session-2', 'task', 'claude-chat', 'native', 'user-selected', 2)
+    h.db
+      .prepare(
+        "INSERT INTO chat_events(tab_id,seq,event,created_at) VALUES('tab',10,?,'2026-01-01T12:00:00Z')"
+      )
+      .run(JSON.stringify({ kind: 'notice', text: 'timestamp' }))
     const ownership = createChatOwnershipStore(h.slayDb),
       owner = await ownership.register({
         id: 'c',
@@ -47,7 +62,13 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
         epoch: 1,
         computerId: null
       })
+    let model = 'old',
+      checkpoint: import('../shared').ChatRecord[] | null = null
     const source = createLegacyChatSource({
+      freezeMetadata: async (_o, _id, value) => {
+        if (!checkpoint && value) checkpoint = structuredClone(value)
+        return checkpoint
+      },
       db: h.slayDb,
       quiesce: async () => {},
       bootstrap: async (o) => ({
@@ -55,15 +76,16 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
         projectId: 'p',
         cwd: '/project',
         revision: 1,
-        providerConfig: {},
+        providerConfig: { chatModel: model },
         defaultFlags: null,
         env: {}
       }),
       readAttachment: async () => new Uint8Array()
     })
     await source.quiesce(owner)
-    const export1 = await source.open(owner, 'move'),
-      export2 = await source.open(owner, 'move')
+    const export1 = await source.open(owner, 'move')
+    model = 'new'
+    const export2 = await source.open(owner, 'move')
     expect(export1.manifest).toEqual(export2.manifest)
     const transfers = createChatTransfers(dest),
       start = transfers.begin(export1.manifest)
@@ -75,7 +97,7 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
     }
     transfers.finish(start.id)
     dest.activate('c', 'move', 2, export1.manifest.hash)
-    expect(dest.read('c', -1)).toMatchObject([
+    expect(dest.read('c', -1).slice(0, 1)).toMatchObject([
       { seq: 9, at: 12345, event: { text: 'private answer' } }
     ])
     expect(dest.getRecord('c', 'draft', 'state')).toMatchObject({
@@ -84,6 +106,10 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
     expect(dest.getRecord('c', 'prompt', 'prompt')).toMatchObject({
       text: 'private prompt',
       createdAt: 12340
+    })
+    expect(dest.read('c', 9)[0].at).toBe(Date.parse('2026-01-01T12:00:00Z'))
+    expect(dest.getRecord('c', 'settings', 'session:native')).toMatchObject({
+      conversationId: 'native'
     })
     // Source cleanup itself requires a committed receipt, even if called incorrectly.
     await expect(source.cleanup(owner)).rejects.toThrow(/committed/i)

@@ -51,6 +51,7 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
         )
         return { ok: true }
       }
+      if (raw.kind === 'metadata.snapshot') return pc.local.metadataSnapshot(raw.id)
       if (raw.kind === 'inspect') return pc.storage.conversation(raw.id)
       throw new Error(raw.kind)
     })
@@ -103,6 +104,24 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
       provider_config: string
     }
     expect(JSON.parse(task.provider_config)['claude-chat'].chatModel).toBe('new-model')
+    h.db.prepare('DELETE FROM chat_metadata_progress').run()
+    h.db.prepare("UPDATE tasks SET provider_config='{}'").run()
+    await relay.drainMetadata('pc-a', true)
+    expect(
+      JSON.parse(
+        (h.db.prepare('SELECT provider_config FROM tasks').get() as { provider_config: string })
+          .provider_config
+      )['claude-chat'].chatModel
+    ).toBe('new-model')
+    h.db.prepare('DELETE FROM chat_metadata_progress').run()
+    await pc.local.data.writeChatModel('task', 'claude-chat', 'after-restore')
+    await relay.drainMetadata('pc-a')
+    expect(
+      JSON.parse(
+        (h.db.prepare('SELECT provider_config FROM tasks').get() as { provider_config: string })
+          .provider_config
+      )['claude-chat'].chatModel
+    ).toBe('after-restore')
     expect(gate).toHaveBeenCalledWith('pc-a', 'task')
     expect((await ownership.forTab('tab'))?.computerId).toBe('pc-a')
     await expect(

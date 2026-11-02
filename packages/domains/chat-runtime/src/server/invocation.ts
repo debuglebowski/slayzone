@@ -87,6 +87,12 @@ export function createChatInvoker(runtime: Runtime) {
       req.target === 'queue'
         ? req.method === 'list'
         : CHAT_READ_OPERATIONS.has(req.method as ChatOperation)
+    if (
+      runtime.storage.taskLifecycle(identity.taskId).state !== 'active' &&
+      !read &&
+      !['hydrate', 'kill', 'remove'].includes(req.method)
+    )
+      throw new Error('Task chat is paused or deleted')
     if (read) return operation(...req.args)
     if (
       runtime.ops.getInfo(identity.tabId)?.storageUnavailable &&

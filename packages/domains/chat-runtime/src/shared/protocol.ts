@@ -272,6 +272,9 @@ export const chatBootstrapSchema = z.object({
   defaultFlags: z.string().nullable(),
   terminalProviderConfig: z.record(z.string(), z.unknown()).optional(),
   honoredConversations: z.array(z.string()).optional(),
+  deletedConversations: z
+    .array(z.object({ mode: z.string(), conversationId: z.string() }))
+    .optional(),
   env: z.record(z.string(), z.string())
 })
 export const chatTransferManifestSchema = z.object({

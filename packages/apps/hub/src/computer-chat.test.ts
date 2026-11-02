@@ -197,3 +197,40 @@ test('existing task artifacts are sealed onto the computer before saving a draft
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('Trash state and final deletion remain durable after task rows disappear', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
+    h.db.prepare("INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task')").run()
+    h.db
+      .prepare(
+        "INSERT INTO chat_ownership(id,task_id,tab_id,mode,computer_id,epoch,state) VALUES('c','task','tab','claude-chat','pc',1,'active')"
+      )
+      .run()
+    h.db.prepare("UPDATE tasks SET deleted_at=datetime('now') WHERE id='task'").run()
+    expect(
+      h.db.prepare("SELECT state FROM chat_task_lifecycle WHERE task_id='task'").get()
+    ).toEqual({ state: 'paused' })
+    expect(h.db.prepare("SELECT state FROM chat_ownership WHERE id='c'").get()).toEqual({
+      state: 'active'
+    })
+    h.db.prepare("UPDATE tasks SET deleted_at=NULL WHERE id='task'").run()
+    expect(
+      h.db.prepare("SELECT state FROM chat_task_lifecycle WHERE task_id='task'").get()
+    ).toEqual({ state: 'active' })
+    h.db.prepare("DELETE FROM tasks WHERE id='task'").run()
+    expect(
+      h.db.prepare("SELECT state FROM chat_task_lifecycle WHERE task_id='task'").get()
+    ).toEqual({ state: 'deleted' })
+    expect(h.db.prepare("SELECT state,epoch FROM chat_ownership WHERE id='c'").get()).toEqual({
+      state: 'deleted',
+      epoch: 2
+    })
+    expect(h.db.prepare('SELECT computer_id,epoch FROM chat_deletion_targets').all()).toEqual([
+      { computer_id: 'pc', epoch: 2 }
+    ])
+  } finally {
+    h.cleanup()
+  }
+})

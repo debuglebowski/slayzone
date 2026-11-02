@@ -8,7 +8,7 @@ import type { NotifyMounts } from '@slayzone/notify/server'
 import type { ProjectsMounts } from '@slayzone/projects/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
 import type { TagsMounts } from '@slayzone/tags/server'
-import type { AppUsageMounts } from '@slayzone/terminal/server'
+import type { ChatMounts, AppUsageMounts } from '@slayzone/terminal/server'
 import type { AppBackupMounts } from '../server/backup-router'
 import type { AppExportImportMounts } from '../server/export-import-router'
 
@@ -19,7 +19,8 @@ import type { AppExportImportMounts } from '../server/export-import-router'
  * `projects`, `tags`, `notify`, `app.meta` and `app.usage`.
  */
 export const { useTRPC, useTRPCClient } = typedTrpc<
-  SettingsMounts &
+  ChatMounts &
+    SettingsMounts &
     AppBackupMounts &
     AppExportImportMounts &
     ComputersMounts &

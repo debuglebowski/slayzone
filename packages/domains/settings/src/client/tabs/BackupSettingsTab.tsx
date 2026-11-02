@@ -30,6 +30,7 @@ import {
 import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 import { useTrack } from '@slayzone/telemetry/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
+import { ComputerChatBackups } from './ComputerChatBackups'
 
 const INTERVAL_OPTIONS = [
   { value: '15', label: '15 minutes' },
@@ -148,10 +149,16 @@ export function BackupSettingsTab() {
   return (
     <div className="space-y-6">
       <SettingsTabIntro
-        title="Backup"
-        description="Create and manage SQLite database backups. Restoring a backup will restart the app."
+        title="Backups"
+        description="Back up hub metadata and computer chat history separately. Older hub backups may contain conversations saved before migration."
       />
 
+      <ComputerChatBackups />
+      <h3 className="font-medium">Hub metadata backups</h3>
+      <p className="text-sm text-muted-foreground">
+        Tasks, projects and settings. New hub backups exclude chat history and drafts. Restoring
+        restarts the app.
+      </p>
       <div className="flex items-center gap-2">
         <Button variant="outline" onClick={handleCreate} disabled={creating}>
           {creating ? (
@@ -170,7 +177,7 @@ export function BackupSettingsTab() {
       <Card>
         <CardHeader>
           <CardTitle>Auto-Backup</CardTitle>
-          <CardDescription>Automatically back up your database on a schedule.</CardDescription>
+          <CardDescription>Automatically back up hub metadata on a schedule.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">

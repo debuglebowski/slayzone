@@ -134,6 +134,7 @@ run_harness packages/apps/hub/src/processes-bad-input.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_harness packages/apps/hub/src/backup.test.ts
+run_harness packages/apps/hub/src/chat-backup.test.ts
 # The E2E-only raw-SQL route. The GATE is the point: arbitrary SQL on a listener
 # that faces the internet in remote mode, so its absence must be asserted.
 run_harness packages/apps/hub/src/dev-sql.test.ts
@@ -656,6 +657,9 @@ run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
 run_harness packages/apps/hub/src/computer-chat.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
+run_harness packages/domains/chat-runtime/src/server/backups.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-recovery.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
