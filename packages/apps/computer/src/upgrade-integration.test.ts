@@ -482,7 +482,12 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
       // process tree, including its detached host, rather than orphaning it.
       const { promisify } = await import('node:util')
       const { execFile } = await import('node:child_process')
-      await promisify(execFile)('taskkill', ['/PID', String(child.pid), '/T', '/F'])
+      // taskkill may report a descendant that exited during tree enumeration.
+      await promisify(execFile)('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        timeout: 10_000
+      }).catch(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      })
     } else child.kill('SIGTERM')
     const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
     await exit

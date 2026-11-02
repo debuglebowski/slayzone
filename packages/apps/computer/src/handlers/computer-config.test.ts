@@ -37,7 +37,7 @@ let home: string
 // `updateComputerConfigFile` resolves its path from the computer ROOT, which derives
 // from HOME. Point both at a tmpdir so the test never writes the real config.
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), 'computer-cfg-')))
+  dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'computer-cfg-')))
   home = join(dir, 'home')
   mkdirSync(home, { recursive: true })
   vi.stubEnv('HOME', home)
@@ -169,7 +169,7 @@ describe('standalone live folder policy', () => {
     (file) => {
       const { root, wide, path, config } = fixture()
       writeFileSync(path, JSON.stringify(file))
-      expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync(root)])
+      expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync.native(root)])
       const fs = createFsHandlers({ config, dialer, log: () => {} }).handlers
       expect(() => fs[HubToComputerMethods.fsPathExists]({ path: wide })).toThrow(/allowedRoots/)
       expect(fs[HubToComputerMethods.fsPathExists]({ path: root })).toEqual({ exists: true })
@@ -180,7 +180,7 @@ describe('standalone live folder policy', () => {
     const { root, path, config } = fixture()
     writeFileSync(path, JSON.stringify({ allowedRoots: config.allowedRoots }))
     unlinkSync(path)
-    expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync(root)])
+    expect(reloadLocalRootsFromFile(config, path, root)).toEqual([realpathSync.native(root)])
   })
 
   it('live adoption prevents legacy policy revival on the next boot', () => {
@@ -241,7 +241,7 @@ describe('standalone live folder policy', () => {
         { userId: null, route: null }
       )) as { pid: number }
       writeFileSync(path, '{}')
-      await vi.waitFor(() => expect(config.allowedRoots).toEqual([realpathSync(root)]), {
+      await vi.waitFor(() => expect(config.allowedRoots).toEqual([realpathSync.native(root)]), {
         timeout: 6000
       })
       expect(() => process.kill(result.pid, 0)).not.toThrow()
@@ -249,7 +249,7 @@ describe('standalone live folder policy', () => {
         dispatch('fs.pathExists', { path: wide }, { userId: null, route: null })
       ).rejects.toThrow(/allowedRoots/)
       expect(log).toHaveBeenCalledWith('allowedRoots reloaded from local config', {
-        applied: [realpathSync(root)]
+        applied: [realpathSync.native(root)]
       })
     } finally {
       await handle.stop()

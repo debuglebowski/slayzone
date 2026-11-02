@@ -149,7 +149,7 @@ async function main(): Promise<void> {
     return
   }
   if (process.argv.includes('--upgrade-probe')) {
-    await probeNativeTerminal()
+    await probeNativeTerminal((stage) => process.stderr.write(`[computer-probe] ${stage}\n`))
     process.stdout.write(COMPUTER_VERSION + '\n')
     return
   }
