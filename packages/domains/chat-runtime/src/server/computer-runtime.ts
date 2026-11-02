@@ -18,6 +18,7 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 import { openChatStorage } from './storage'
 import { createLocalChatData, type ChatMetadataUpdate } from './local-data'
+import { randomUUID } from 'node:crypto'
 
 export function createComputerChatRuntime(opts: {
   stateDir: string
@@ -29,6 +30,29 @@ export function createComputerChatRuntime(opts: {
   onMetadata?: (update: ChatMetadataUpdate) => void
 }) {
   const storage = openChatStorage(opts)
+  const diagnosticsConfig = () =>
+    storage.getRecord<{ enabled: boolean; verbose: boolean }>(
+      '__slz_settings__',
+      'settings',
+      'diagnostics-config'
+    ) ?? { enabled: true, verbose: false }
+  const configureDiagnostics = (value: { enabled: boolean; verbose: boolean }) => {
+    storage.transaction(() => {
+      storage.createConversation({
+        id: '__slz_settings__',
+        taskId: '__slz_settings__',
+        tabId: '__slz_settings__',
+        mode: 'claude-chat',
+        epoch: 1
+      })
+      storage.putRecord('__slz_settings__', 1, {
+        kind: 'settings',
+        id: 'diagnostics-config',
+        value,
+        at: Date.now()
+      })
+    })
+  }
   const prompts = createLocalPrompts(storage)
   const local = createLocalChatData(storage, opts.onMetadata)
   const transfers = createChatTransfers(storage)
@@ -42,6 +66,24 @@ export function createComputerChatRuntime(opts: {
   const transport = createChatTransport(
     {
       ...opts.transport,
+      diagnostic: (tabId, event) => {
+        const config = diagnosticsConfig()
+        if (!config.enabled || (event.level === 'debug' && !config.verbose)) return
+        const owner = storage.forTab(tabId)
+        if (
+          !owner ||
+          owner.state !== 'active' ||
+          storage.taskLifecycle(owner.identity.taskId).state !== 'active'
+        )
+          return
+        storage.putRecord(owner.identity.id, owner.identity.epoch, {
+          kind: 'settings',
+          id: `diagnostic:${randomUUID()}`,
+          value: event,
+          at: event.tsMs ?? Date.now()
+        })
+        opts.transport?.diagnostic?.(tabId, event)
+      },
       ...(backend
         ? {
             backend: {
@@ -118,6 +160,8 @@ export function createComputerChatRuntime(opts: {
   })
   const retentionService = retention
   return {
+    diagnosticsConfig,
+    configureDiagnostics,
     invoke: async (input: unknown) =>
       retentionService.access(parseChatInvocation(input).route.id, () => invoke(input)),
     retention: retentionService,

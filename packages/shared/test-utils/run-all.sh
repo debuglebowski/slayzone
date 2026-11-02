@@ -255,6 +255,7 @@ run_harness packages/domains/diagnostics/src/electron/service.test.ts
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
 # Write-queue flush timer never holds a process open; beforeExit flushes what it held.
 run_harness packages/domains/diagnostics/src/server/flush-on-exit.test.ts
+run_harness packages/domains/diagnostics/src/server/chat-privacy.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_harness packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel

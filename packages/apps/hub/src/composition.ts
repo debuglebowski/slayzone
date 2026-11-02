@@ -2,7 +2,7 @@ import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
 import { setChatSessionSource } from '@slayzone/terminal/server'
 import { setAgentPromptReader } from '@slayzone/agent-turns/server'
-import { createLegacyChatDiagnostics } from './chat-diagnostics'
+import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
@@ -153,6 +153,7 @@ import {
 import {
   recordDiagnosticEvent,
   bindDiagnosticsDbs,
+  getDiagnosticsConfig,
   clearConfigCache as clearDiagnosticsConfigCache
 } from '@slayzone/diagnostics/server'
 import {
@@ -425,6 +426,15 @@ export function composeServer(opts: {
       // client's local diagnostics config stays whatever that client set.
       onConfigChanged: (next) => {
         void bridge?.appDeps.diagnosticsConfigChanged(next)
+        for (const computer of computerGatewayRef?.listComputers() ?? []) {
+          void computerGatewayRef
+            ?.request(computer.computerId, HubToComputerMethods.chatRequest, {
+              kind: 'diagnostics.configure',
+              enabled: next.enabled,
+              verbose: next.verbose
+            })
+            .catch(() => console.error('[chat] diagnostic policy sync pending'))
+        }
       }
     })
   }
@@ -791,16 +801,31 @@ export function composeServer(opts: {
   })
   // Chat content and provider processes belong to the owning computer.
   const legacyChatDiagnostics = opts.diagnostics
-    ? createLegacyChatDiagnostics({ db: opts.diagnostics.db, blobDir: opts.diagnostics.blobDir })
+    ? createLegacyChatDiagnostics({
+        db: opts.diagnostics.db,
+        blobDir: opts.diagnostics.blobDir,
+        resolveTask: createDiagnosticTaskResolver(db)
+      })
     : undefined
   if (legacyChatDiagnostics)
-    bootBestEffort('chat-privacy-boundary', legacyChatDiagnostics.initialize)
+    bootBestEffort('chat-privacy-boundary', async () => {
+      await legacyChatDiagnostics.initialize()
+      const count = await legacyChatDiagnostics.unassigned()
+      if (count)
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'server',
+          event: 'chat.legacy_diagnostics_unassigned',
+          payload: { count }
+        })
+    })
   const chatCompaction = createChatCompaction(db)
   const chatRetentionPolicy = readHubSessionRetentionDays()
   if (!chatRetentionPolicy.ok) throw new Error(chatRetentionPolicy.message)
   const computerChat = createComputerChatServices({
     db,
     retentionDays: chatRetentionPolicy.days,
+    diagnosticsConfig: getDiagnosticsConfig,
     diagnostics: legacyChatDiagnostics,
     legacyData: createDbChatDataOps(db, taskSessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),

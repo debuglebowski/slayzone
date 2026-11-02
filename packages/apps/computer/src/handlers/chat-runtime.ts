@@ -40,6 +40,11 @@ import type { SpawnAdmission } from '../spawn-admission'
 
 const requestSchema = z.discriminatedUnion('kind', [
   z.object({
+    kind: z.literal('diagnostics.configure'),
+    enabled: z.boolean(),
+    verbose: z.boolean()
+  }),
+  z.object({
     kind: z.literal('retention.configure'),
     days: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
   }),
@@ -392,6 +397,9 @@ export function createChatRuntimeHandlers(opts: {
       case 'retention.configure':
         r.retention.configure(req.days)
         return { days: r.retention.days }
+      case 'diagnostics.configure':
+        r.configureDiagnostics({ enabled: req.enabled, verbose: req.verbose })
+        return r.diagnosticsConfig()
       case 'backup.configure':
         r.backups.configure(req.settings)
         return null

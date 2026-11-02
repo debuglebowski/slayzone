@@ -40,6 +40,74 @@ test('drafts persist on computer and restore without a hub database', async () =
   expect((await next.ops.getTabState('tab-a'))?.draft.text).toBe('private draft')
 })
 
+test('computer diagnostic opt-out persists independently for each hub', async () => {
+  const { r, stateDir } = runtime()
+  r.configureDiagnostics({ enabled: false, verbose: true })
+  await r.close()
+  expect(runtime(stateDir).r.diagnosticsConfig()).toEqual({ enabled: false, verbose: true })
+  expect(runtime(stateDir, 'hub-b').r.diagnosticsConfig()).toEqual({
+    enabled: true,
+    verbose: false
+  })
+})
+
+test.each([true, false])(
+  'transport diagnostics stay on their computer and respect opt-out (%s)',
+  async (enabled) => {
+    const { fakeChild, until } = await import(
+      '../../../terminal/src/server/runtime/chat-transport-testkit'
+    )
+    const root = mkdtempSync(join(tmpdir(), 'chat-local-diagnostics-'))
+    dirs.push(root)
+    const child = fakeChild({ exitOnKill: true }),
+      metadata: unknown[] = []
+    const a = createComputerChatRuntime({
+        stateDir: root,
+        hubScope: 'a',
+        computerId: 'pc',
+        onMetadata: (value) => metadata.push(value),
+        transport: {
+          spawn: () => {
+            setImmediate(() => child.child.emit('spawn'))
+            return child.child
+          },
+          whichBinary: async () => '/fake/claude'
+        }
+      }),
+      b = createComputerChatRuntime({ stateDir: root, hubScope: 'b', computerId: 'pc' })
+    runtimes.push(a, b)
+    a.configureDiagnostics({ enabled, verbose: false })
+    a.bootstrap(bootstrap)
+    await a.ops.hydrate(createOpts)
+    // A conflicting seq makes the transport emit a diagnostic without losing the saved event.
+    a.local.data.persistChatEventSync!(
+      'tab-a',
+      0,
+      { kind: 'assistant-text', messageId: 'old', text: 'saved' },
+      1
+    )
+    await a.transport.ensureSpawned('tab-a')
+    if (enabled)
+      await until(() =>
+        a.storage.findRecords('settings').some((row) => row.id.startsWith('diagnostic:'))
+      )
+    else await new Promise<void>((resolve) => setImmediate(resolve))
+    const records = a.storage
+      .findRecords('settings')
+      .filter((row) => row.id.startsWith('diagnostic:'))
+    expect(records).toHaveLength(enabled ? 1 : 0)
+    if (enabled)
+      expect(records[0].value).toMatchObject({
+        event: 'chat.event_seq_clash',
+        message: expect.stringContaining('kept the existing row')
+      })
+    expect(
+      b.storage.findRecords('settings').filter((row) => row.id.startsWith('diagnostic:'))
+    ).toEqual([])
+    expect(JSON.stringify(metadata)).not.toContain('kept the existing row')
+  }
+)
+
 test('chat prompt recall keeps the latest 500 entries without truncating conversation history', () => {
   const { r } = runtime()
   r.bootstrap(bootstrap)

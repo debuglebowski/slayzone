@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { offloadPayloadBlobs, type BlobWriter } from './payload-blobs'
+import { chatSafeDiagnostic } from './chat-privacy'
 import type {
   ClientDiagnosticEventInput,
   ClientErrorEventInput,
@@ -17,7 +18,7 @@ import type {
 // queue / one cache regardless of transport. No `electron` import — keeps the
 // transport server graph portable (local + remote).
 
-export const REDACTION_VERSION = 1
+export const REDACTION_VERSION = 2
 
 export const CONFIG_KEYS = {
   enabled: 'diagnostics_enabled',
@@ -367,6 +368,7 @@ export function buildPayloadJson(payload: unknown): string | null {
 }
 
 export function recordDiagnosticEvent(event: DiagnosticEvent): void {
+  event = chatSafeDiagnostic(event)
   if (!diagnosticsDb) {
     // Buffer until bindDiagnosticsDbs wires the DB. Stamp tsMs at queue time so
     // events retain their original timestamp on flush.

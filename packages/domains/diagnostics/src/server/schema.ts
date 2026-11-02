@@ -47,5 +47,9 @@ export function createDiagnosticsSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_diag_level_ts ON diagnostics_events(level, ts_ms);
     CREATE INDEX IF NOT EXISTS idx_diag_trace ON diagnostics_events(trace_id);
     CREATE INDEX IF NOT EXISTS idx_diag_source_event_ts ON diagnostics_events(source, event, ts_ms);
+    CREATE TABLE IF NOT EXISTS diagnostic_content_holds (
+      event_id TEXT PRIMARY KEY,
+      blob_paths TEXT NOT NULL DEFAULT '[]'
+    );
   `)
 }

@@ -691,7 +691,7 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
     expect(denials(before)).toEqual([])
   })
 
-  test('hooks: POST /api/agent-hook is reported as the caller', async () => {
+  test('hooks: POST checks caller ownership and refuses hub prompt fallback without a computer', async () => {
     const post = (token: string, payload: unknown) =>
       rest(hub, token, {
         method: 'POST',
@@ -709,9 +709,10 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
     expect(byAdmin.status, 'admin').toBe(404)
     const byA = await post(a.token, prompt(A, 'H9'))
     await sleep(100)
-    expect(byA.status, `A: ${byA.text}`).toBe(200)
-    // only A’s own prompt was captured
-    expect(promptsFor(A.task)).toBe(aPrompts + 1)
+    expect(byA.status, `A: ${byA.text}`).toBe(503)
+    expect(byA.body).toEqual({ ok: false, error: 'Prompt storage computer unavailable' })
+    // A passes ownership, but this fixture has no connected storage computer.
+    expect(promptsFor(A.task)).toBe(aPrompts)
   })
 
   // ── attribution of REST refresh pings ──

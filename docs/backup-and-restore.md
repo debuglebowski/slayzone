@@ -56,6 +56,18 @@ Operation IDs survive expiry to prevent delayed retries from resending messages.
 Expired cached results return an explicit error. Receipts created before timestamps
 were tracked receive a full retention window from upgrade, since their age is unknown.
 
+Chat transport diagnostics also stay on their computer. The hub and desktop save
+only diagnostic IDs, states, counters and stack positions for chat/renderer failures;
+they do not save chat text or screenshots. Recording opt-out and verbose settings
+propagate to connected computers and reconcile on reconnect.
+
+Legacy diagnostic content moves only when recorded task/tab/session IDs establish
+one owner. Conflicting or missing ownership remains held on the original hub,
+including referenced screenshots, rather than being assigned to another computer
+or erased by retention. The `chat.legacy_diagnostics_unassigned` diagnostic reports
+the pending count. Those held legacy rows remain an explicit migration exception
+until ownership can be established; they are not proof of a completed cleanup.
+
 ## Upgrading from v0.35.0
 
 v0.35.0 kept its data in the Electron app-data folder (macOS:

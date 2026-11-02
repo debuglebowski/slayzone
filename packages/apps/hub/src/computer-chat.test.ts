@@ -64,6 +64,11 @@ test('first chat read migrates legacy history then all writes stay on its comput
       draft: { text: 'legacy-private', rev: 3 }
     })
     expect(requests).toContainEqual({ kind: 'retention.configure', days: 2 })
+    expect(requests).toContainEqual({
+      kind: 'diagnostics.configure',
+      enabled: true,
+      verbose: false
+    })
     expect(h.db.prepare('SELECT count(*) AS n FROM chat_tab_state').get()).toEqual({ n: 0 })
     await services.relay.ops.saveTabDraft('tab', { text: 'new-private', attachments: [] })
     expect(await services.relay.ops.getTabState('tab')).toMatchObject({
@@ -115,6 +120,18 @@ test('first chat read migrates legacy history then all writes stay on its comput
     expect(JSON.stringify(h.db.prepare('SELECT * FROM chat_ownership').all())).not.toContain(
       'private'
     )
+    await services.captureHook({
+      agentId: 'claude-code',
+      mode: 'claude-code',
+      hookEvent: 'UserPromptSubmit',
+      taskId: 'task',
+      sessionId: 'provider',
+      raw: { prompt: 'computer-only hook marker' }
+    })
+    expect(await pc.request({ kind: 'prompts', taskId: 'task' })).toMatchObject([
+      { text: 'computer-only hook marker' }
+    ])
+    expect(h.db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
   } finally {
     await pc.close()
     h.cleanup()

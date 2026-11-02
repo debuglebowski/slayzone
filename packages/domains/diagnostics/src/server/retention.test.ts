@@ -64,6 +64,20 @@ function rowCount(db: Database.Database): number {
 }
 
 describe('runRetentionChunk — cheap row-count proxy + bigger chunks', () => {
+  test('migration holds preserve old rows while ordinary retention continues', async () => {
+    const raw = makeDb()
+    try {
+      seed(raw, 2, 1)
+      raw.exec(
+        "CREATE TABLE diagnostic_content_holds(event_id TEXT PRIMARY KEY,blob_paths TEXT NOT NULL DEFAULT '[]'); INSERT INTO diagnostic_content_holds(event_id) VALUES('r-1')"
+      )
+      const result = await runRetentionChunk(createSlayzoneDbAdapter(raw), CONFIG, Date.now())
+      expect(result.deleted).toBe(1)
+      expect(raw.prepare('SELECT id FROM diagnostics_events').all()).toEqual([{ id: 'r-1' }])
+    } finally {
+      raw.close()
+    }
+  })
   // 1. Empty DB → no work
   test('empty DB → no work', async () => {
     const db = makeDb()
@@ -185,6 +199,45 @@ describe('runBlobRetention — payload blobs pruned with the rows', () => {
 })
 
 describe('scheduler — retention is independent of recording', () => {
+  test('durable migration holds protect rows and screenshots across scheduler restarts', async () => {
+    const raw = makeDb(),
+      removed: string[] = []
+    try {
+      seed(raw, 2, 1)
+      raw.exec(
+        "CREATE TABLE diagnostic_content_holds(event_id TEXT PRIMARY KEY,blob_paths TEXT NOT NULL); INSERT INTO diagnostic_content_holds VALUES('r-1','null')"
+      )
+      const deps = {
+        getDb: () => createSlayzoneDbAdapter(raw),
+        getConfig: () => CONFIG,
+        now: () => Date.now(),
+        blobFs: {
+          list: () =>
+            ['held.png', 'ordinary.png']
+              .filter((name) => !removed.includes(name))
+              .map((name) => ({ name, sizeBytes: 1, mtimeMs: 0 })),
+          remove: (name: string) => {
+            removed.push(name)
+          }
+        }
+      }
+      startRetentionScheduler(deps)
+      await runScheduledRetentionNow()
+      expect(rowCount(raw)).toBe(1)
+      expect(removed).toEqual([])
+      raw
+        .prepare('UPDATE diagnostic_content_holds SET blob_paths=?')
+        .run(JSON.stringify(['/blobs/held.png']))
+      stopRetentionScheduler()
+      startRetentionScheduler(deps)
+      await runScheduledRetentionNow()
+      expect(rowCount(raw)).toBe(1)
+      expect(removed).toEqual(['ordinary.png'])
+    } finally {
+      stopRetentionScheduler()
+      raw.close()
+    }
+  })
   // 10. Turning recording OFF must not freeze what was already recorded: `enabled`
   //     gates new events, retention bounds the disk. Skipping the pass while
   //     disabled kept every row and blob of someone who opted out, forever.

@@ -40,6 +40,7 @@ import { getBackend } from '../agents/registry'
 import { getPtyHostBridge } from '../pty-host'
 import { whichBinary as realWhichBinary } from '../shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import type { DiagnosticEvent } from '@slayzone/diagnostics/shared'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
@@ -101,6 +102,7 @@ export interface ChatEventStore {
 
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
 export interface TransportDeps {
+  diagnostic?: (tabId: string, event: DiagnosticEvent) => void
   attachmentReader?: ChatAttachmentReader
   /**
    * LOCAL spawn primitive. Still `ChildProcess`-shaped: it is what the in-process
@@ -676,7 +678,7 @@ export function createChatTransport(
     payload: Record<string, unknown> = {}
   ): void {
     try {
-      recordDiagnosticEvent({
+      const record: DiagnosticEvent = {
         level,
         source: 'main',
         event,
@@ -684,9 +686,12 @@ export function createChatTransport(
         sessionId: stateKey(tab),
         message,
         payload: { tabId: tab.tabId, mode: tab.mode, ...payload }
-      })
-    } catch (err) {
-      console.error(`[chat-transport] ${event}: recordDiagnosticEvent threw:`, err)
+      }
+      if (deps.diagnostic) deps.diagnostic(tab.tabId, record)
+      else recordDiagnosticEvent(record)
+    } catch {
+      // A diagnostic failure must not copy private content into a fallback log.
+      console.error(`[chat-transport] ${event}: diagnostic persistence failed`)
     }
   }
 
@@ -2023,7 +2028,13 @@ export function createChatTransport(
           if (tab.proc !== p || tab.closed) return
           // The FIRST event of this process's contribution: lets the renderer
           // invalidate process-children resources (bg shells) of the previous one.
-          routeHostEvent(tab, { kind: 'session-spawn', spawnId: p.spawnId })
+          try {
+            routeHostEvent(tab, { kind: 'session-spawn', spawnId: p.spawnId })
+          } catch {
+            // The log's write-error handler already fenced/stopped this process.
+            // Never let a storage failure escape the native spawn callback.
+            return
+          }
           if (tab.terminalState === 'starting') transitionState(tab, 'idle')
         },
         onEvent: (p, event) => handleProcessEvent(tab, p, event),

@@ -86,6 +86,16 @@ test('computer endpoints persist drafts and reject foreign tab commands', async 
     })
   ).toMatchObject({ draft: { text: 'local only' } })
 })
+
+test('diagnostic policy accepts only explicit booleans', async () => {
+  const { h } = setup()
+  expect(await h.request({ kind: 'diagnostics.configure', enabled: false, verbose: true })).toEqual(
+    { enabled: false, verbose: true }
+  )
+  await expect(
+    h.request({ kind: 'diagnostics.configure', enabled: 'false', verbose: true })
+  ).rejects.toThrow()
+})
 test('file listing still obeys the computer allowed-roots guard', async () => {
   const { h } = setup()
   await h.request({ kind: 'bootstrap', value: bootstrap })

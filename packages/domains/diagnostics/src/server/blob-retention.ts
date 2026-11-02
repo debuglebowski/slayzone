@@ -36,6 +36,8 @@ export interface BlobFileSystem {
 }
 
 export interface PruneBlobsOptions {
+  /** Verified migration must release these before ordinary expiry can remove them. */
+  protectedNames?: ReadonlySet<string>
   /** Blobs with `mtimeMs` older than this are unreferenced and removed. */
   cutoffMs: number
   /** Ceiling on total bytes retained; excess is removed oldest-first. */
@@ -134,6 +136,10 @@ export function pruneBlobs(fs: BlobFileSystem, opts: PruneBlobsOptions): PruneBl
   const survivors: BlobFileInfo[] = []
   const undeletable = new Set<string>()
   for (const file of sorted) {
+    if (opts.protectedNames?.has(file.name)) {
+      survivors.push(file)
+      continue
+    }
     if (file.mtimeMs < opts.cutoffMs && !drop(file)) {
       undeletable.add(file.name)
       survivors.push(file)
@@ -145,7 +151,7 @@ export function pruneBlobs(fs: BlobFileSystem, opts: PruneBlobsOptions): PruneBl
   let total = survivors.reduce((sum, f) => sum + f.sizeBytes, 0)
   for (const file of survivors) {
     if (total <= opts.maxTotalBytes) break
-    if (undeletable.has(file.name)) continue
+    if (undeletable.has(file.name) || opts.protectedNames?.has(file.name)) continue
     if (drop(file)) total -= file.sizeBytes
   }
 

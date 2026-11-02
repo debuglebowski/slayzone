@@ -47,6 +47,7 @@ export function createComputerChatServices(opts: {
   gate?(computerId: string, taskId: string): Promise<void>
   admitComputer?(computerId: string): Promise<void>
   retentionDays?: number
+  diagnosticsConfig?(): { enabled: boolean; verbose: boolean }
   hasLiveTask(taskId: string): Promise<boolean>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
   onTasksChanged?(taskId: string): void
@@ -73,6 +74,10 @@ export function createComputerChatServices(opts: {
       .then(() => relay.drainMetadata(computerId, true))
       .then(() => lifecycle.sync(computerId))
       .then(async () => {
+        await opts.request(computerId, {
+          kind: 'diagnostics.configure',
+          ...(opts.diagnosticsConfig?.() ?? { enabled: true, verbose: false })
+        })
         await opts.request(computerId, {
           kind: 'retention.configure',
           days: opts.retentionDays ?? 0

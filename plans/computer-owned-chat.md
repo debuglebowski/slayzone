@@ -21,13 +21,35 @@ edits. Integrate latest main and validate before fast-forwarding it. No remote p
 - [x] Shared invocation validation, durable command receipts, attachment CAS,
       local workspace store, atomic queue handoff and cache writes.
 - [x] Hub metadata ownership registry, routing facade, and owner-policy integration.
-- [ ] Attachment upload/read forwarding, artifact compatibility, and blob GC.
-- [ ] Prompt hooks/history, workspace diffs, and metadata reconciliation.
+- [x] Attachment upload/read forwarding, artifact compatibility, and blob GC.
+- [x] Prompt hooks/history, workspace diffs, and metadata reconciliation.
 - [x] Consistent history/blob backups, export and safe restore.
-- [ ] Task delete/undo, offline tombstones, retention policy.
-- [ ] Resumable migration, fenced cutover, cleanup and old-backup reconciliation.
+- [x] Task delete/undo, offline tombstones, retention policy.
+- [x] Resumable migration, fenced cutover, cleanup and old-backup reconciliation.
 - [x] Desktop/mobile availability and migration-state UI.
 - [ ] Packaging, full parity/failure/performance validation and main integration.
+
+## Active checkpoint: diagnostics privacy
+
+Chat transport diagnostics persist in the owning computer's per-hub database.
+Hub/desktop chat, renderer and crash diagnostics retain metadata only, before
+queueing or screenshot offloading. Diagnostic opt-out/verbosity persists per hub
+on computers, updates online and reconciles before later commands after reconnect.
+
+Legacy diagnostics use exact task/tab/provider-session evidence. Durable holds
+protect pending rows and shared screenshot files from retention before verified
+copy/cleanup. Ambiguous ownership remains preserved on the original hub; a
+metadata-only diagnostic reports the unassigned count. This is an explicit pending
+migration exception, not a completed privacy cleanup for those rows.
+
+Validation: 261 broad tests passed; one old REST fixture expected hub prompt
+fallback. Corrected to assert 503 without a connected computer; both affected
+suites passed on rerun (17 tests), including successful computer-only hook capture.
+Five affected typechecks, both bundles, changed-file lint and suite registration
+checks pass. Remaining: computer-owned E2E seed/read ports, packaged desktop/mobile
+parity, full privacy-marker audit, long-session budgets, final rebase/review/merge.
+
+Unresolved questions: none.
 
 ## Migration invariants
 

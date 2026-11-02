@@ -30,6 +30,17 @@ const MB = 1024 * 1024
 const HUGE = 1000 * MB
 
 describe('pruneBlobs', () => {
+  test('migration holds override age and size without protecting unrelated files', () => {
+    const fs = fakeFs([
+      { name: 'held.png', sizeBytes: MB, mtimeMs: 1 },
+      { name: 'ordinary.png', sizeBytes: MB, mtimeMs: 1 }
+    ])
+    expect(
+      pruneBlobs(fs, { cutoffMs: 100, maxTotalBytes: 0, protectedNames: new Set(['held.png']) })
+        .deleted
+    ).toBe(1)
+    expect(fs.remaining()).toEqual(['held.png'])
+  })
   test('removes blobs older than the cutoff', () => {
     const fs = fakeFs([
       { name: 'old.png', sizeBytes: MB, mtimeMs: 1_000 },

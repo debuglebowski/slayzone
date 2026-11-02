@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { basename } from 'node:path'
 import type { DiagnosticsConfig } from '../shared'
 import {
   createFilesystemBlobFs,
@@ -41,14 +42,23 @@ export async function runRetentionChunk(
   config: DiagnosticsConfig,
   nowMs: number = Date.now()
 ): Promise<{ deleted: number; moreWork: boolean }> {
-  const count = await approxRowCount(db)
+  const holds = await db.get(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='diagnostic_content_holds'"
+  )
+  const eligible = holds
+    ? 'NOT EXISTS(SELECT 1 FROM diagnostic_content_holds h WHERE h.event_id=d.id)'
+    : '1'
+  const held = holds
+    ? ((await db.get<{ n: number }>('SELECT COUNT(*) AS n FROM diagnostic_content_holds'))?.n ?? 0)
+    : 0
+  const count = Math.max(0, (await approxRowCount(db)) - held)
 
   if (count > HARD_EVENT_CAP) {
     const limit = Math.min(count - HARD_EVENT_CAP, CHUNK_LIMIT)
     const res = await db
       .prepare(`
         DELETE FROM diagnostics_events
-        WHERE id IN (SELECT id FROM diagnostics_events ORDER BY ts_ms ASC LIMIT ?)
+        WHERE id IN (SELECT id FROM diagnostics_events d WHERE ${eligible} ORDER BY ts_ms ASC LIMIT ?)
       `)
       .run(limit)
     const deleted = Number(res.changes)
@@ -61,8 +71,8 @@ export async function runRetentionChunk(
     .prepare(`
       DELETE FROM diagnostics_events
       WHERE id IN (
-        SELECT id FROM diagnostics_events
-        WHERE ts_ms < ?
+        SELECT id FROM diagnostics_events d
+        WHERE ts_ms < ? AND ${eligible}
         ORDER BY ts_ms ASC
         LIMIT ?
       )
@@ -88,7 +98,8 @@ export async function runRetentionChunk(
 export function runBlobRetention(
   config: DiagnosticsConfig,
   nowMs: number,
-  blobFs?: BlobFileSystem
+  blobFs?: BlobFileSystem,
+  protectedNames?: ReadonlySet<string>
 ): { deleted: number; freedBytes: number; failed: number } {
   let fs = blobFs
   if (!fs) {
@@ -100,7 +111,8 @@ export function runBlobRetention(
   try {
     const result = pruneBlobs(fs, {
       cutoffMs: nowMs - config.retentionDays * 24 * 60 * 60 * 1000,
-      maxTotalBytes: DEFAULT_MAX_BLOB_BYTES
+      maxTotalBytes: DEFAULT_MAX_BLOB_BYTES,
+      protectedNames
     })
     if (result.failed > 0) {
       console.warn(`[diagnostics retention] ${result.failed} blob(s) could not be deleted`)
@@ -110,6 +122,31 @@ export function runBlobRetention(
     // pruneBlobs isolates per-file fs errors itself; this is the last resort.
     console.error('[diagnostics retention] blob prune failed:', err)
     return { deleted: 0, freedBytes: 0, failed: 0 }
+  }
+}
+
+async function protectedBlobNames(db: SlayzoneDb): Promise<Set<string>> {
+  const names = new Set<string>()
+  if (
+    !(await db.get(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='diagnostic_content_holds'"
+    ))
+  )
+    return names
+  let after = ''
+  for (;;) {
+    const rows = await db.all<{ event_id: string; blob_paths: string }>(
+      'SELECT event_id,blob_paths FROM diagnostic_content_holds WHERE event_id>? ORDER BY event_id LIMIT 256',
+      [after]
+    )
+    if (!rows.length) return names
+    for (const row of rows) {
+      after = row.event_id
+      const paths: unknown = JSON.parse(row.blob_paths)
+      if (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string'))
+        throw new Error('Invalid diagnostic migration hold')
+      for (const path of paths) names.add(basename(path))
+    }
   }
 }
 
@@ -205,7 +242,12 @@ async function tick(deps: RetentionDeps): Promise<void> {
     console.error('[diagnostics retention] chunk failed:', err)
   }
 
-  runBlobRetention(config, now(), deps.blobFs)
+  try {
+    runBlobRetention(config, now(), deps.blobFs, await protectedBlobNames(db))
+  } catch {
+    // Fail closed: an unreadable hold must not destroy an unfinished migration.
+    console.error('[diagnostics retention] migration holds unavailable')
+  }
 
   if (currentDeps !== deps) return
   scheduleNext(deps, moreWork ? TICK_WORK_MS : TICK_IDLE_MS)
