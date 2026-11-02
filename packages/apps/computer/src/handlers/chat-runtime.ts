@@ -201,6 +201,7 @@ export function createChatRuntimeHandlers(opts: {
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
   hasTaskWork?(taskId: string): boolean
+  stopTask?(taskId: string): Promise<void>
 }) {
   let closed = false,
     resetting = false
@@ -410,8 +411,11 @@ export function createChatRuntimeHandlers(opts: {
           data: r.backups.attachment(req.archiveId, req.conversationId, req.ref).toString('base64')
         }
 
-      case 'task.lifecycle':
-        return r.applyTaskLifecycle(req.taskId, req.state, req.revision)
+      case 'task.lifecycle': {
+        const applied = await r.applyTaskLifecycle(req.taskId, req.state, req.revision)
+        if (applied.state !== 'active') await opts.stopTask?.(req.taskId)
+        return applied
+      }
       case 'migration.checkpoint':
         return r.storage.migrationCheckpoint(req.identity, req.migrationId, req.candidate)
       case 'prompts':
@@ -581,6 +585,13 @@ export function createChatRuntimeHandlers(opts: {
   }
   return {
     request,
+    assertTaskActive(taskId: string) {
+      const r = runtime()
+      if (r.storage.taskLifecycle(taskId).state !== 'active')
+        throw new Error('Task chat is paused or deleted')
+      if (r.storage.listForTask(taskId).some((c) => c.state === 'frozen' || c.state === 'prepared'))
+        throw new Error('Task chat migration is pending')
+    },
     captureHook: (hook: ResolvedAgentHook) => runtime().captureHook(hook),
     async close() {
       if (closed) return

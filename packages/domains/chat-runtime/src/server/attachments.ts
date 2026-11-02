@@ -101,6 +101,21 @@ export function createLocalAttachments(
           hashOf(bytes) !== ref.contentHash
         )
           throw new Error('Migration attachment hash mismatch')
+        if (
+          record.size !== bytes.length ||
+          ref.size !== record.size ||
+          ref.name !== record.name ||
+          ref.kind !== record.kind ||
+          ref.mediaType !== record.mediaType
+        )
+          throw new Error('Migration attachment metadata does not match its saved bytes')
+        const sniff = sniffAttachment(bytes, record.name)
+        if (
+          sniff.kind === 'unsupported' ||
+          sniff.kind !== record.kind ||
+          sniff.mediaType !== record.mediaType
+        )
+          throw new Error('Migration attachment content does not match its saved type')
         const limit = attachmentSizeError(ref.kind, ref.name, bytes.length)
         if (limit) throw new Error(limit)
         writeBlob(ref.contentHash, bytes)

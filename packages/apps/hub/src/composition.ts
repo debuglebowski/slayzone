@@ -6,7 +6,10 @@ import { createLegacyChatDiagnostics } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
-import { createComputerChatMaintenance } from './computer-chat-maintenance'
+import {
+  createComputerChatMaintenance,
+  createComputerChatCommandBarrier
+} from './computer-chat-maintenance'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
@@ -1621,7 +1624,14 @@ export function composeServer(opts: {
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
     let syncComputerProjects: (computerId: string) => Promise<void> = async () => undefined
+    const chatCommandBarrier = createComputerChatCommandBarrier({
+      recover: computerChat.recoverComputer,
+      lifecycle: computerChat.lifecycle.sync
+    })
     const computerGateway = createHubComputerGateway({
+      beforeRequest: async (computerId, method) => {
+        if (!resettingForTest) await chatCommandBarrier(computerId, method)
+      },
       verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
       ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
       // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
@@ -1679,6 +1689,7 @@ export function composeServer(opts: {
     syncComputerChatLifecycle = (id) => asComputerOwner(id, () => computerChat.lifecycle.sync(id))
     drainComputerChatMaintenance = () => chatMaintenance.drain()
     computerGateway.events.on('computer-connected', ({ computer }) => {
+      computerChat.invalidateRecovery(computer.computerId)
       if (!resettingForTest)
         void maintainComputerChat(computer.computerId).catch(() =>
           console.error('[chat] computer reconciliation pending')

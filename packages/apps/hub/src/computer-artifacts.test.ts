@@ -110,6 +110,26 @@ test('new chat files and versions stay on owner; general artifacts stay on hub',
       title: 'general.txt'
     })
     expect(existsSync(join(hubDir, 'blobs'))).toBe(true)
+    const second = await store.uploadArtifactBlob(h.slayDb, {
+      taskId: 't',
+      title: 'second.txt',
+      bytes: Buffer.from('second'),
+      chatTabId: 'tab'
+    })
+    const fileOrder = [second!.id, general!.id, a!.id, copies[0].id]
+    await store.reorderArtifacts(h.slayDb, fileOrder)
+    expect((await store.listArtifactsByTask(h.slayDb, 't')).map((file) => file.id)).toEqual(
+      fileOrder
+    )
+    expect((await store.listArtifactsByTask(h.slayDb, 't')).map((file) => file.order)).toEqual([
+      0, 1, 2, 3
+    ])
+    const uploads = (await store.listFoldersByTask(h.slayDb, 't')).find((f) => f.id !== folder!.id)!
+    await store.reorderFolders(h.slayDb, { parentId: null, folderIds: [folder!.id, uploads.id] })
+    expect((await store.listFoldersByTask(h.slayDb, 't')).map((f) => [f.id, f.order])).toEqual([
+      [folder!.id, 0],
+      [uploads.id, 1]
+    ])
   } finally {
     await pc.close()
     h.cleanup()

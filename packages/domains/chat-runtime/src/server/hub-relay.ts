@@ -399,9 +399,17 @@ export function createHubChatRelay(opts: {
           if (folder && folder.task_id !== current.taskId)
             throw new Error('Folder locator task mismatch')
           if (!folder)
-            await db.run("INSERT INTO artifact_folders(id,task_id,name) VALUES(?,?,'Chat files')", [
-              parent,
-              current.taskId
+            await db.batchTxn([
+              {
+                type: 'run',
+                sql: "INSERT INTO artifact_folders(id,task_id,name) VALUES(?,?,'Chat files')",
+                params: [parent, current.taskId]
+              },
+              {
+                type: 'run',
+                sql: 'INSERT INTO chat_folder_locations(folder_id,conversation_id) VALUES(?,?)',
+                params: [parent, current.id]
+              }
             ])
         }
         if (isFolder)
@@ -494,7 +502,9 @@ export function createHubChatRelay(opts: {
   function recoverMetadata(computerId: string, id: string) {
     const previous = metadataChains.get(id) ?? Promise.resolve()
     const next = previous
-      .catch(() => {})
+      .catch(() => {
+        /* Retry after a failed predecessor; each caller still receives its own error. */
+      })
       .then(() => recoverMetadataNow(computerId, id))
       .finally(() => {
         if (metadataChains.get(id) === next) metadataChains.delete(id)
@@ -506,7 +516,9 @@ export function createHubChatRelay(opts: {
     const key = update.conversationId,
       previous = metadataChains.get(key) ?? Promise.resolve()
     const next = previous
-      .catch(() => {})
+      .catch(() => {
+        /* Metadata retry must not inherit a previous delivery failure. */
+      })
       .then(async () => {
         if (!Number.isSafeInteger(update.sequence) || update.sequence < 1)
           throw new Error('Invalid chat metadata sequence')

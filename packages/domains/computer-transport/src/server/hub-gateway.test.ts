@@ -309,6 +309,66 @@ describe('hub → computer requests', () => {
   })
 })
 
+describe('request barriers', () => {
+  it('waits before sending; a failed barrier never sends the command', async () => {
+    let release!: () => void
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let refuse = false
+    const gate = vi.fn(async () => {
+      if (refuse) throw new Error('Reconciliation pending')
+      await barrier
+    })
+    const hub = await startHub({ beforeRequest: gate })
+    const commands = vi.fn(async () => ({ ok: true }))
+    const dialer = makeDialer(hub.url, { onHubRequest: commands })
+    dialer.start()
+    await dialer.events.once('connected')
+    const pending = hub.gateway.request('computer-1', 'fs.writeFile', {
+      path: '/x',
+      content: 'data'
+    })
+    await vi.waitFor(() => expect(gate).toHaveBeenCalled())
+    expect(commands).not.toHaveBeenCalled()
+    release()
+    await expect(pending).resolves.toEqual({ ok: true })
+    refuse = true
+    await expect(hub.gateway.request('computer-1', 'proc.spawn', {})).rejects.toThrow(
+      'Reconciliation pending'
+    )
+    expect(commands).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not send a waiting command to a replacement connection', async () => {
+    let release!: () => void
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const hub = await startHub({ beforeRequest: async () => barrier })
+    const store = createMemoryCredentialStore(),
+      commands = vi.fn(async () => null)
+    const original = makeDialer(hub.url, { credentialStore: store, onHubRequest: commands })
+    original.start()
+    await original.events.once('connected')
+    const pending = hub.gateway.request('computer-1', 'fs.writeFile', {})
+    // Attach the rejection handler before intentionally closing the socket.
+    const outcome = pending.then(
+      () => null,
+      (error: unknown) => error
+    )
+    await original.stop()
+    const replacement = makeDialer(hub.url, { credentialStore: store, onHubRequest: commands })
+    replacement.start()
+    await replacement.events.once('connected')
+    release()
+    expect(await outcome).toEqual(
+      expect.objectContaining({ message: expect.stringMatching(/connection.*changed|disconnect/i) })
+    )
+    expect(commands).not.toHaveBeenCalled()
+  })
+})
+
 describe('computer → hub notifications', () => {
   it('pty.data seq is preserved end-to-end and in order', async () => {
     const hub = await startHub()

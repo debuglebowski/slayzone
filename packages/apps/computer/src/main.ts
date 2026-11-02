@@ -189,6 +189,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   void cliReady?.catch(() => log('CLI relay is unavailable'))
 
   const pty = createPtyHandlers(ctx, deps.getProjectPaths, {
+    assertTaskActive: (taskId) => chat.assertTaskActive(taskId),
     ...(deps.admission ? { admission: deps.admission } : {}),
     ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
   })
@@ -206,7 +207,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     computerId: deps.getComputerId ?? (() => null),
     getProjectPaths: deps.getProjectPaths ?? (() => null),
     admission: deps.admission,
-    hasTaskWork: pty.hasTaskWork
+    hasTaskWork: pty.hasTaskWork,
+    stopTask: pty.stopTask
   })
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {

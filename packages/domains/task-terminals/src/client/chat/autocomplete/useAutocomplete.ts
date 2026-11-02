@@ -394,7 +394,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
       // Refresh usage map so the next ranking sees the new counts.
       await refreshUsage(trpcClient, setUsage, context)
     },
-    [sources, itemsBySource, trpcClient]
+    [sources, itemsBySource, trpcClient, context]
   )
 
   return {

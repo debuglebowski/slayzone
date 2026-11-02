@@ -159,7 +159,8 @@ export interface PtyBackend {
     computerId: string,
     warmId: string,
     sessionId: string,
-    processName: string
+    processName: string,
+    taskId?: string
   ): Promise<PtyHandle>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing

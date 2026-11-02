@@ -109,6 +109,8 @@ export type ComputerGatewayEvents = {
 }
 
 export interface HubComputerGatewayOptions {
+  /** Wait for durable reconciliation before normal commands. Control methods can return immediately. */
+  beforeRequest?: (computerId: string, method: string, params: unknown) => Promise<void>
   /**
    * Validate a join token and mint credentials for a new computer. Throw (or
    * reject) to refuse — an `RpcError` propagates its code, anything else maps
@@ -1074,7 +1076,16 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         userId: ctx?.actor ? ctx.actor.slice(0, 200) : null,
         route: ctx?.route ? ctx.route.slice(0, 200) : null
       }
-      const sent = conn.rpc.request<T>(method, params, timeoutMs, actor)
+      const send = () => {
+        if (getConnection(computerId) !== conn || conn.closed)
+          throw new Error('Computer connection changed before command delivery')
+        return conn.rpc.request<T>(method, params, timeoutMs, actor)
+      }
+      const sent = options.beforeRequest
+        ? Promise.resolve()
+            .then(() => options.beforeRequest!(computerId, method, params))
+            .then(send)
+        : conn.rpc.request<T>(method, params, timeoutMs, actor)
       if (!audited) {
         // An unaudited method (a read, a probe) still leaves a line when the computer
         // REFUSES it by its own policy (T-27) — a jail refusal is worth seeing.

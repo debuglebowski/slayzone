@@ -23,10 +23,10 @@ edits. Integrate latest main and validate before fast-forwarding it. No remote p
 - [x] Hub metadata ownership registry, routing facade, and owner-policy integration.
 - [ ] Attachment upload/read forwarding, artifact compatibility, and blob GC.
 - [ ] Prompt hooks/history, workspace diffs, and metadata reconciliation.
-- [ ] Consistent history/blob backups, export and safe restore.
+- [x] Consistent history/blob backups, export and safe restore.
 - [ ] Task delete/undo, offline tombstones, retention policy.
 - [ ] Resumable migration, fenced cutover, cleanup and old-backup reconciliation.
-- [ ] Desktop/mobile availability and migration-state UI.
+- [x] Desktop/mobile availability and migration-state UI.
 - [ ] Packaging, full parity/failure/performance validation and main integration.
 
 ## Migration invariants
@@ -231,5 +231,32 @@ Validation: 1,313 runtime/protocol/relay/router/authorization tests pass, includ
 eight backup tests. Four affected typechecks, both bundles and changed-file lint
 pass. Remaining: artifact edges, lifecycle command barriers, draft isolation audit,
 full desktop/mobile E2E/privacy/performance checks, main integration.
+
+Unresolved questions: none.
+
+## Artifact and command-fence checkpoint
+
+Out-of-order folder metadata records parent ownership before later parent updates.
+Mixed hub/computer reorder preserves global positions for both files and folders;
+folder order updates reach hub locators. Prepared migration attachments must match
+saved size/name/type and sniffed bytes before publication. Clipboard state updates
+no longer write refs during render.
+
+Normal computer requests await ownership recovery and pending lifecycle/deletion
+fences. Reconciliation, discovery and repair/control frames remain available. A
+waiting command cannot cross onto a replacement connection. Reconnect invalidates
+recovery caches; overlapping forced recovery shares its in-flight operation.
+
+Native PTY spawn/adoption carries task identity independently of pooled session IDs.
+Computer checks task state at request time and actual spawn after queue waits. Task
+pause/delete cancels queued starts, fences replacements, stops its native processes
+and waits for their exits before acknowledging. Other tasks continue. Native work
+is visible to retention guards.
+
+Validation: 281 tests across 24 runtime/artifact/gateway/native/PTY suites pass; six
+affected typechecks and hub/computer bundles pass. Final lint/compiler checks are
+being completed before the next main rebase. Remaining: cross-store folder deletion,
+draft journal hub isolation, prompt-history cap parity, full privacy/E2E/performance
+validation and safe main integration.
 
 Unresolved questions: none.

@@ -387,76 +387,7 @@ function ArchiveConversation(target: {
   }
   const exportHistory = async () => {
     setBusy(true)
-    try {
-      const allEvents: typeof events = [],
-        allRecords: typeof records = []
-      let afterSeq = -1,
-        afterCursor = 0
-      for (;;) {
-        const page = await api.chat.archives.read.query({ ...target, afterSeq })
-        allEvents.push(...page.events)
-        if (!page.hasMore) break
-        afterSeq = page.nextSeq
-      }
-      for (;;) {
-        const page = await api.chat.archives.records.query({ ...target, afterCursor })
-        allRecords.push(...page.records)
-        if (!page.hasMore) break
-        afterCursor = page.nextCursor
-      }
-      const refs = new Map<string, ChatAttachment>()
-      for (const { event } of allEvents)
-        if (event.kind === 'user-message')
-          for (const ref of userMessageAttachments(event.content ?? []))
-            refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-      for (const record of allRecords)
-        if (record.kind === 'draft') {
-          const draft = record.value as { draft?: { attachments?: ChatAttachment[] } }
-          for (const ref of draft.draft?.attachments ?? [])
-            refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-        }
-      const attachments = []
-      for (const ref of refs.values())
-        attachments.push({ ref, ...(await api.chat.archives.attachment.query({ ...target, ref })) })
-      const files = []
-      for (const record of allRecords) {
-        if (record.kind !== 'artifact-version') continue
-        const version = record.value as ArchivedArtifactVersion
-        files.push({
-          version,
-          ...(await api.chat.archives.file.query({
-            ...target,
-            artifactId: version.artifactId,
-            contentHash: version.contentHash
-          }))
-        })
-      }
-      download(
-        new Blob(
-          [
-            JSON.stringify(
-              {
-                format: 'slayzone-chat-archive',
-                version: 1,
-                readOnly: true,
-                providerResumable: false,
-                ...target,
-                events: allEvents,
-                records: allRecords,
-                attachments,
-                files
-              },
-              null,
-              2
-            )
-          ],
-          { type: 'application/json' }
-        ),
-        `chat-${target.conversationId}.json`
-      )
-    } catch (e) {
-      setError(errorMessage(e))
-    }
+    await exportArchivedConversation(api, target).catch((e: unknown) => setError(errorMessage(e)))
     setBusy(false)
   }
   return (
@@ -539,5 +470,77 @@ function ArchivedFileVersion({
         Download
       </Button>
     </div>
+  )
+}
+
+async function exportArchivedConversation(
+  api: ReturnType<typeof useTRPCClient>,
+  target: { computerId: string; archiveId: string; conversationId: string }
+) {
+  const allEvents: Array<{ seq: number; at: number; event: AgentEvent }> = [],
+    allRecords: Array<{ cursor: number; kind: string; id: string; value: unknown }> = []
+  let afterSeq = -1,
+    afterCursor = 0
+  while (true) {
+    const page = await api.chat.archives.read.query({ ...target, afterSeq })
+    allEvents.push(...page.events)
+    if (!page.hasMore) break
+    afterSeq = page.nextSeq
+  }
+  while (true) {
+    const page = await api.chat.archives.records.query({ ...target, afterCursor })
+    allRecords.push(...page.records)
+    if (!page.hasMore) break
+    afterCursor = page.nextCursor
+  }
+  const refs = new Map<string, ChatAttachment>()
+  for (const { event } of allEvents)
+    if (event.kind === 'user-message')
+      for (const ref of userMessageAttachments(event.content ?? []))
+        refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
+  for (const record of allRecords)
+    if (record.kind === 'draft') {
+      const draft = record.value as { draft?: { attachments?: ChatAttachment[] } }
+      for (const ref of draft.draft?.attachments ?? [])
+        refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
+    }
+  const attachments = []
+  for (const ref of refs.values())
+    attachments.push({ ref, ...(await api.chat.archives.attachment.query({ ...target, ref })) })
+  const files = []
+  for (const record of allRecords) {
+    if (record.kind !== 'artifact-version') continue
+    const version = record.value as ArchivedArtifactVersion
+    files.push({
+      version,
+      ...(await api.chat.archives.file.query({
+        ...target,
+        artifactId: version.artifactId,
+        contentHash: version.contentHash
+      }))
+    })
+  }
+  download(
+    new Blob(
+      [
+        JSON.stringify(
+          {
+            format: 'slayzone-chat-archive',
+            version: 1,
+            readOnly: true,
+            providerResumable: false,
+            ...target,
+            events: allEvents,
+            records: allRecords,
+            attachments,
+            files
+          },
+          null,
+          2
+        )
+      ],
+      { type: 'application/json' }
+    ),
+    `chat-${target.conversationId}.json`
   )
 }

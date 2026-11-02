@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { createChatRuntimeHandlers } from './chat-runtime'
 const dirs: string[] = [],
   handles: Array<ReturnType<typeof createChatRuntimeHandlers>> = []
@@ -18,11 +18,12 @@ const bootstrap = {
   defaultFlags: null,
   env: {}
 }
-function setup() {
+function setup(extra: Partial<Parameters<typeof createChatRuntimeHandlers>[0]> = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), 'slz-chat-rpc-'))
   dirs.push(stateDir)
   const notifications: unknown[] = []
   const h = createChatRuntimeHandlers({
+    ...extra,
     ctx: {
       config: {
         hubUrl: 'ws://hub/computers',
@@ -155,4 +156,30 @@ test('retention policy accepts whole days, supports disabling and refuses malfor
   expect(await h.request({ kind: 'retention.configure', days: 0 })).toEqual({ days: 0 })
   for (const days of [-1, 1.2, '14'])
     await expect(h.request({ kind: 'retention.configure', days })).rejects.toThrow()
+})
+
+test('lifecycle fences native starts before awaiting their stop acknowledgement', async () => {
+  let release!: () => void
+  const stopping = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const stopTask = vi.fn(async () => stopping)
+  const { h } = setup({ stopTask })
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  let acknowledged = false
+  const pause = h
+    .request({ kind: 'task.lifecycle', taskId: 'task', state: 'paused', revision: 1 })
+    .then(() => {
+      acknowledged = true
+    })
+  expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
+  await vi.waitFor(() => expect(stopTask).toHaveBeenCalledWith('task'))
+  expect(acknowledged).toBe(false)
+  release()
+  await pause
+  await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'active', revision: 2 })
+  expect(() => h.assertTaskActive('task')).not.toThrow()
+  await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'deleted', revision: 3 })
+  expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
+  expect(() => h.assertTaskActive('other')).not.toThrow()
 })

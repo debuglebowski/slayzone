@@ -241,7 +241,7 @@ describe('createRoutingPtyBackend', () => {
     // Start the adopt but do not await it yet, so we can emit a live frame while
     // the request is still in flight — the real race, since the computer begins
     // streaming the instant it rekeys.
-    const pending = backend.adopt!('computer-1', 'warm-1', 'sess-warm', 'bash')
+    const pending = backend.adopt!('computer-1', 'warm-1', 'sess-warm', 'bash', 'task-warm')
     gateway.emit('pty.data', {
       computerId: 'computer-1',
       sessionId: 'sess-warm',
@@ -265,7 +265,8 @@ describe('createRoutingPtyBackend', () => {
     expect(gateway.requestsOf('pty.spawn')).toHaveLength(0)
     expect(requireCall(gateway, 'pty.warmAdopt').params).toEqual({
       warmId: 'warm-1',
-      sessionId: 'sess-warm'
+      sessionId: 'sess-warm',
+      taskId: 'task-warm'
     })
 
     // Seq continues from the seed's high-water mark rather than restarting, so a

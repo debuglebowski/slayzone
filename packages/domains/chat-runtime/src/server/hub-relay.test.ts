@@ -7,6 +7,60 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createHubChatRelay } from './hub-relay'
 
+test('folder locators recover when child metadata arrives before its parent', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      request: async () => null,
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      bootstrap: async () => {
+        throw new Error('Metadata must not bootstrap')
+      },
+      migrate: async () => {
+        throw new Error('Metadata must not migrate')
+      }
+    })
+    for (const [sequence, value] of [
+      { id: 'child', parentId: 'parent', order: 2 },
+      { id: 'parent', parentId: null, order: 1 }
+    ].entries()) {
+      await relay.reconcileMetadata('pc', {
+        conversationId: 'c',
+        taskId: 'task',
+        tabId: 'tab',
+        epoch: 1,
+        operationId: `folder-${sequence}`,
+        sequence: sequence + 1,
+        kind: 'folder-changed',
+        value
+      })
+    }
+    expect(
+      h.db.prepare('SELECT folder_id FROM chat_folder_locations ORDER BY folder_id').all()
+    ).toEqual([{ folder_id: 'child' }, { folder_id: 'parent' }])
+    expect(h.db.prepare('SELECT parent_id FROM artifact_folders WHERE id=?').get('child')).toEqual({
+      parent_id: 'parent'
+    })
+  } finally {
+    h.cleanup()
+  }
+})
+
 test('hub forwards drafts to original owner; reassignment cannot move history', async () => {
   const h = await createTestHarness(),
     dir = mkdtempSync(join(tmpdir(), 'chat-relay-'))
@@ -30,9 +84,9 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
     })
     const request = vi.fn(async (computerId: string, p: unknown): Promise<unknown> => {
       expect(computerId).toBe('pc-a')
-      const raw = p as { kind: string; value: any; id: string; operationId: string }
+      const raw = p as { kind: string; value: unknown; id: string; operationId: string }
       if (raw.kind === 'bootstrap') {
-        pc.bootstrap(raw.value)
+        pc.bootstrap(raw.value as Parameters<typeof pc.bootstrap>[0])
         return { ok: true }
       }
       if (raw.kind === 'invoke') return pc.invoke(raw.value)
@@ -96,8 +150,11 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
     await pc.local.data.writeChatModel('task', 'claude-chat', 'new-model')
     const oldUpdate = pc.storage
       .findRecords('settings')
-      .find((r) => r.id.startsWith('metadata:') && (r.value as any).value.value === 'old-model')!
-      .value as import('./local-data').ChatMetadataUpdate
+      .find(
+        (r) =>
+          r.id.startsWith('metadata:') &&
+          (r.value as { value: { value: unknown } }).value.value === 'old-model'
+      )!.value as import('./local-data').ChatMetadataUpdate
     await relay.drainMetadata('pc-a')
     await relay.reconcileMetadata('pc-a', oldUpdate)
     const task = h.db.prepare('SELECT provider_config FROM tasks WHERE id=?').get('task') as {

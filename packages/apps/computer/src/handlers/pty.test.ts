@@ -31,6 +31,96 @@ function controlledPty(pid: number) {
 }
 
 describe('remote session ownership', () => {
+  it('warm adoption checks and records the task independently of its pooled id', async () => {
+    const { ctx } = makeCtx(),
+      child = controlledPty(9994)
+    let paused = true
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn,
+      assertTaskActive: () => {
+        if (paused) throw new Error('Task paused')
+      }
+    })
+    await pty.handlers['pty.warmSpawn']({ warmId: 'warm', command: 'cat', cwd: process.cwd() })
+    expect(() =>
+      pty.handlers['pty.warmAdopt']({ warmId: 'warm', sessionId: 'opaque', taskId: 'task' })
+    ).toThrow('Task paused')
+    paused = false
+    await pty.handlers['pty.warmAdopt']({ warmId: 'warm', sessionId: 'opaque', taskId: 'task' })
+    expect(pty.hasTaskWork('task')).toBe(true)
+    child.exit()
+    pty.disposeAll()
+  })
+  it('checks task state again after a queued start is admitted', async () => {
+    const { ctx } = makeCtx()
+    const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 60000 })
+    let holder!: { release(): void },
+      paused = false
+    admission.enqueue('foreground', (slot) => {
+      holder = slot
+    })
+    const spawnPty = vi.fn(() => controlledPty(9991).proc) as unknown as typeof nodePty.spawn
+    const pty = createPtyHandlers(ctx, undefined, {
+      admission,
+      spawnPty,
+      assertTaskActive: (taskId) => {
+        expect(taskId).toBe('task')
+        if (paused) throw new Error('Task paused')
+      }
+    })
+    const work = Promise.resolve(
+      pty.handlers['pty.spawn']({
+        sessionId: 'opaque-pool-id',
+        taskId: 'task',
+        admission: 'background',
+        command: 'cat',
+        cwd: process.cwd()
+      })
+    )
+    expect(pty.hasTaskWork('task')).toBe(true)
+    paused = true
+    holder.release()
+    await expect(work).rejects.toThrow('Task paused')
+    expect(spawnPty).not.toHaveBeenCalled()
+    expect(pty.hasTaskWork('task')).toBe(false)
+    pty.disposeAll()
+  })
+
+  it('task stop awaits its opaque native session exit and preserves other tasks', async () => {
+    const { ctx } = makeCtx(),
+      first = controlledPty(9992),
+      other = controlledPty(9993)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: vi.fn().mockReturnValueOnce(first.proc).mockReturnValueOnce(other.proc)
+    })
+    await pty.handlers['pty.spawn']({
+      sessionId: 'pool-one',
+      taskId: 'task',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    await pty.handlers['pty.spawn']({
+      sessionId: 'pool-two',
+      taskId: 'other',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    expect(pty.hasTaskWork('task')).toBe(true)
+    let stopped = false
+    const stopping = pty.stopTask('task').then(() => {
+      stopped = true
+    })
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+    expect(first.proc.kill).toHaveBeenCalled()
+    expect(other.proc.kill).not.toHaveBeenCalled()
+    first.exit()
+    await stopping
+    expect(pty.hasTaskWork('task')).toBe(false)
+    expect(pty.hasTaskWork('other')).toBe(true)
+    other.exit()
+    pty.disposeAll()
+  })
   it('acknowledges kill only after the process exits', async () => {
     const { ctx } = makeCtx()
     const child = controlledPty(9001)

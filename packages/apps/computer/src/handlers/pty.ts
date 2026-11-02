@@ -94,6 +94,7 @@ interface PtySession {
    * keep emitting under the dead `warmId` after that swap.
    */
   id: string
+  taskId?: string
   /** Set for a warm (unadopted) session; cleared on adopt. */
   warm?: { cwd: string; startedAt: number }
   /** The hub's idempotency key for the spawn attempt that started this process. */
@@ -122,6 +123,7 @@ interface PtySession {
 interface QueuedSpawn {
   /** Session key (`sessionId`, or `warmId` for a warm spawn). */
   id: string
+  taskId?: string
   spawnId?: string
   ticket: AdmissionTicket
   cols?: number
@@ -137,6 +139,7 @@ interface QueuedSpawn {
 export interface PtyHandlers {
   hasWork(): boolean
   hasTaskWork(taskId: string): boolean
+  stopTask(taskId: string): Promise<void>
   handlers: HubMethodTable
   /** Kill every live pty (called on computer shutdown). */
   disposeAll(): void
@@ -150,6 +153,8 @@ export interface PtyHandlers {
 }
 
 export interface PtyHandlerOptions {
+  /** Rechecked at the actual start/adoption, after admission waits. */
+  assertTaskActive?(taskId: string): void
   /**
    * Agent-start admission queue. Production passes ONE instance shared by every
    * hub connection (the contention is the machine's); absent, this handler set
@@ -211,16 +216,22 @@ export function createPtyHandlers(
   const queued = new Map<string, QueuedSpawn>()
   const starts = new Map<
     string,
-    { spawnId?: string; promise: Promise<unknown>; cancelled: boolean }
+    { spawnId?: string; taskId?: string; promise: Promise<unknown>; cancelled: boolean }
   >()
 
   function serializeStart<T>(
     id: string,
     spawnId: string | undefined,
+    taskId: string | undefined,
     run: (assertActive: () => void) => Promise<T>
   ): Promise<T> {
     const prior = starts.get(id)?.promise ?? Promise.resolve()
-    const record = { spawnId, promise: undefined as unknown as Promise<T>, cancelled: false }
+    const record = {
+      spawnId,
+      taskId,
+      promise: undefined as unknown as Promise<T>,
+      cancelled: false
+    }
     const assertActive = (): void => {
       if (record.cancelled) throw new Error(`pty ${id}: spawn killed before start`)
     }
@@ -335,8 +346,10 @@ export function createPtyHandlers(
       warm?: { cwd: string; startedAt: number }
       spawnId?: string
       startupTimeoutMs?: number
+      taskId?: string
     }
   ): PtySession {
+    if (opts.taskId) options.assertTaskActive?.(opts.taskId)
     const cwd = resolveCwd(opts)
     if (sessions.has(id)) throw new Error(`pty ${id}: old process still live`)
 
@@ -363,6 +376,7 @@ export function createPtyHandlers(
       proc,
       buffer,
       id,
+      ...(opts.taskId ? { taskId: opts.taskId } : {}),
       exited,
       resolveExit,
       ...(opts.warm ? { warm: opts.warm } : {}),
@@ -557,7 +571,7 @@ export function createPtyHandlers(
   function enqueueSpawn(
     id: string,
     lane: AdmissionLane,
-    spec: { spawnId?: string; cols?: number; rows?: number },
+    spec: { spawnId?: string; taskId?: string; cols?: number; rows?: number },
     run: (slot: AdmissionSlot, item: QueuedSpawn) => unknown
   ): Promise<unknown> {
     const prior = queued.get(id)
@@ -572,6 +586,7 @@ export function createPtyHandlers(
     })
     const item: QueuedSpawn = {
       id,
+      ...(spec.taskId ? { taskId: spec.taskId } : {}),
       ...(spec.spawnId !== undefined ? { spawnId: spec.spawnId } : {}),
       ...(spec.cols !== undefined ? { cols: spec.cols } : {}),
       ...(spec.rows !== undefined ? { rows: spec.rows } : {}),
@@ -615,6 +630,14 @@ export function createPtyHandlers(
 
   function spawn(rawParams: unknown): SpawnReply | Promise<unknown> {
     const params = ptySpawnParamsSchema.parse(rawParams)
+    if (
+      params.taskId &&
+      params.env?.SLAYZONE_TASK_ID &&
+      params.taskId !== params.env.SLAYZONE_TASK_ID
+    )
+      throw new Error('PTY task identity mismatch')
+    params.taskId ??= params.env?.SLAYZONE_TASK_ID
+    if (params.taskId) options.assertTaskActive?.(params.taskId)
     const starting = starts.get(params.sessionId)
     if (starting && params.spawnId !== undefined && starting.spawnId === params.spawnId) {
       return starting.promise
@@ -644,11 +667,16 @@ export function createPtyHandlers(
       const prior = queued.get(params.sessionId)
       const reply =
         sessions.has(params.sessionId) || starts.has(params.sessionId)
-          ? serializeStart(params.sessionId, params.spawnId, async (assertActive) => {
-              await stopBeforeReplacement(params.sessionId)
-              assertActive()
-              return startSession(params)
-            })
+          ? serializeStart(
+              params.sessionId,
+              params.spawnId,
+              params.taskId,
+              async (assertActive) => {
+                await stopBeforeReplacement(params.sessionId)
+                assertActive()
+                return startSession(params)
+              }
+            )
           : startSession(params)
       if (prior) {
         queued.delete(params.sessionId)
@@ -658,15 +686,20 @@ export function createPtyHandlers(
       return reply
     }
     return enqueueSpawn(params.sessionId, params.admission, params, async (slot, item) => {
-      const reply = await serializeStart(params.sessionId, params.spawnId, async (assertActive) => {
-        await stopBeforeReplacement(params.sessionId)
-        assertActive()
-        return startSession({
-          ...params,
-          ...(item.cols !== undefined ? { cols: item.cols } : {}),
-          ...(item.rows !== undefined ? { rows: item.rows } : {})
-        })
-      })
+      const reply = await serializeStart(
+        params.sessionId,
+        params.spawnId,
+        params.taskId,
+        async (assertActive) => {
+          await stopBeforeReplacement(params.sessionId)
+          assertActive()
+          return startSession({
+            ...params,
+            ...(item.cols !== undefined ? { cols: item.cols } : {}),
+            ...(item.rows !== undefined ? { rows: item.rows } : {})
+          })
+        }
+      )
       const session = sessions.get(params.sessionId)!
       session.admissionSlot = slot
       // Input the hub sent while this waited, in order — where it would have
@@ -786,7 +819,10 @@ export function createPtyHandlers(
     seq: number
   } {
     const params = ptyWarmAdoptParamsSchema.parse(rawParams)
+    if (params.taskId) options.assertTaskActive?.(params.taskId)
     const adopted = sessions.get(params.sessionId)
+    if (adopted?.taskId && params.taskId && adopted.taskId !== params.taskId)
+      throw new Error('PTY task identity mismatch')
     if (adopted?.spawnId === params.warmId) {
       return {
         pid: adopted.proc.pid,
@@ -816,6 +852,7 @@ export function createPtyHandlers(
     }
     sessions.delete(params.warmId)
     session.id = params.sessionId
+    session.taskId = params.taskId
     delete session.warm
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
@@ -1034,12 +1071,26 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyWarmList]: warmList
   }
 
+  const belongsToTask = (id: string, taskId: string, recordedTask?: string) =>
+    recordedTask ? recordedTask === taskId : id === taskId || id.startsWith(taskId + ':')
   return {
     hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
     hasTaskWork: (taskId: string) =>
-      [...sessions.keys(), ...queued.keys()].some(
-        (id) => id === taskId || id.startsWith(taskId + ':')
-      ),
+      [...sessions.values(), ...queued.values()].some((s) =>
+        belongsToTask(s.id, taskId, s.taskId)
+      ) || [...starts.entries()].some(([id, s]) => belongsToTask(id, taskId, s.taskId)),
+    async stopTask(taskId) {
+      const waiting = [...starts.entries()].filter(([id, s]) => belongsToTask(id, taskId, s.taskId))
+      for (const [, s] of waiting) s.cancelled = true
+      for (const s of [...queued.values()])
+        if (belongsToTask(s.id, taskId, s.taskId)) cancelQueued(s.id, 'task-paused')
+      await Promise.all(
+        [...sessions.values()]
+          .filter((s) => belongsToTask(s.id, taskId, s.taskId))
+          .map((s) => stopPty(s))
+      )
+      await Promise.allSettled(waiting.map(([, s]) => s.promise))
+    },
     handlers,
     disposeAll,
     dropQueued

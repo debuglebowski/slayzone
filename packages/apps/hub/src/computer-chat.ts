@@ -56,8 +56,13 @@ export function createComputerChatServices(opts: {
   const request = lifecycle.request
   const recovery = createChatRecovery({ db: opts.db, request: opts.request, gate: opts.gate })
   const recovered = new Map<string, Promise<void>>()
+  const recoveryFinished = new Set<string>()
+  function invalidateRecovery(computerId: string) {
+    recovered.delete(computerId)
+    recoveryFinished.delete(computerId)
+  }
   function recoverComputer(computerId: string, force = false) {
-    if (force) recovered.delete(computerId)
+    if (force && recoveryFinished.has(computerId)) invalidateRecovery(computerId)
     const existing = recovered.get(computerId)
     if (existing) return existing
     const work = recovery
@@ -69,9 +74,10 @@ export function createComputerChatServices(opts: {
           kind: 'retention.configure',
           days: opts.retentionDays ?? 0
         })
+        if (recovered.get(computerId) === work) recoveryFinished.add(computerId)
       })
       .catch((error) => {
-        recovered.delete(computerId)
+        if (recovered.get(computerId) === work) invalidateRecovery(computerId)
         throw error
       })
     recovered.set(computerId, work)
@@ -454,6 +460,7 @@ export function createComputerChatServices(opts: {
     },
     async resetForTest() {
       recovered.clear()
+      recoveryFinished.clear()
       await relay.resetCaches()
     },
     async artifactOwner(taskId: string, preferredComputer?: string) {
@@ -495,6 +502,7 @@ export function createComputerChatServices(opts: {
     },
     recoverComputer,
     ownership,
+    invalidateRecovery,
     migration,
     relay,
     lifecycle,

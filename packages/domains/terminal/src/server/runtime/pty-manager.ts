@@ -1840,7 +1840,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         opts.adoptPty.computerId,
         opts.adoptPty.warmId,
         sessionId,
-        spawnFile
+        spawnFile,
+        taskId || undefined
       )) as unknown as pty.IPty
     } else if (computerId != null) {
       // Remote session: await the computer spawn. No local -l / interactive-shell

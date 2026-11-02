@@ -495,6 +495,8 @@ export type PtySpawnAdmission = z.infer<typeof ptySpawnAdmissionSchema>
 export const ptySpawnParamsSchema = z
   .object({
     sessionId: z.string().min(1),
+    /** Durable task identity, independent of a pooled session id. */
+    taskId: z.string().min(1).optional(),
     spawnId: spawnIdField,
     admission: ptySpawnAdmissionSchema.optional(),
     /**
@@ -767,6 +769,7 @@ export type PtyWarmSpawnResult = z.infer<typeof ptyWarmSpawnResultSchema>
 /** Promote a warm session to a real one. Rekeys in place — no respawn. */
 export const ptyWarmAdoptParamsSchema = z.object({
   warmId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
   sessionId: z.string().min(1)
 })
 export type PtyWarmAdoptParams = z.infer<typeof ptyWarmAdoptParamsSchema>

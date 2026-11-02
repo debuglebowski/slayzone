@@ -238,12 +238,15 @@ export function createComputerArtifactStorage(opts: {
           return a
         }
       if (key === 'reorderArtifacts' || key === 'reorderFolders')
-        return async (_db: SlayzoneDb, data: any) => {
+        return async (
+          _db: SlayzoneDb,
+          data: string[] | { artifactIds?: string[]; folderIds?: string[] }
+        ) => {
           const ids: string[] = Array.isArray(data)
             ? data
             : key === 'reorderFolders'
-              ? data.folderIds
-              : data.artifactIds
+              ? (data.folderIds ?? [])
+              : (data.artifactIds ?? [])
           const groups = new Map<string, { owner: HubChatOwnership; ids: string[] }>(),
             localIds: string[] = []
           for (const id of ids) {
@@ -263,10 +266,11 @@ export function createComputerArtifactStorage(opts: {
               }))
             )
           for (const { owner, ids: remoteIds } of groups.values())
-            await call(owner, key, [
-              key === 'reorderFolders'
-                ? { parentId: data.parentId, folderIds: remoteIds }
-                : remoteIds
+            await call(owner, 'reorderEntries', [
+              {
+                kind: key === 'reorderFolders' ? 'folder' : 'artifact',
+                entries: remoteIds.map((id) => ({ id, order: ids.indexOf(id) }))
+              }
             ])
         }
       if (key === 'searchArtifacts')
@@ -319,6 +323,7 @@ export function createComputerArtifactStorage(opts: {
       }
       const base = Reflect.get(target, key, receiver)
       if (typeof base !== 'function') return base
+      // biome-ignore lint/suspicious/noExplicitAny: Heterogeneous ArtifactStore tuples are validated by the computer method schemas.
       return async (_db: SlayzoneDb, ...args: any[]) => {
         const first = args[0],
           id = typeof first === 'string' ? first : (first?.artifactId ?? first?.id)

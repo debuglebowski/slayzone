@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { useDepsChanged, toast } from '@slayzone/ui'
@@ -46,7 +46,9 @@ export function useArtifactClipboard({
     paths?: string[]
   } | null>(null)
   const clipboardRef = useRef(clipboard)
-  clipboardRef.current = clipboard
+  useLayoutEffect(() => {
+    clipboardRef.current = clipboard
+  }, [clipboard])
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
     queryClient
@@ -123,7 +125,9 @@ export function useArtifactClipboard({
       if (!ids.length) return
       setClipboard({ ids, mode: 'copy' })
       clipboardWrite.current = clipboardWrite.current
-        .catch(() => {})
+        .catch(() => {
+          /* A failed previous copy must not block the next one. */
+        })
         .then(async () => {
           const paths = await writeArtifactsToOsClipboard(ids)
           clipboardRef.current = { ids, mode: 'copy', paths }
@@ -141,7 +145,9 @@ export function useArtifactClipboard({
       if (!ids.length) return
       setClipboard({ ids, mode: 'cut' })
       clipboardWrite.current = clipboardWrite.current
-        .catch(() => {})
+        .catch(() => {
+          /* A failed previous cut must not block the next one. */
+        })
         .then(async () => {
           const paths = await writeArtifactsToOsClipboard(ids)
           clipboardRef.current = { ids, mode: 'cut', paths }

@@ -1268,7 +1268,13 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       return ptyWarmListResultSchema.parse(res).warms
     },
 
-    async adopt(computerId: string, warmId: string, sessionId: string, processName: string) {
+    async adopt(
+      computerId: string,
+      warmId: string,
+      sessionId: string,
+      processName: string,
+      taskId?: string
+    ) {
       // Before anything is tracked: a refused adopt leaves no session behind.
       if (gate) await gate(computerId, { kind: 'session', id: sessionId })
       if (sessions.has(sessionKey(computerId, sessionId))) {
@@ -1279,7 +1285,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       try {
         const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
           warmId,
-          sessionId
+          sessionId,
+          ...(taskId ? { taskId } : {})
         })
         const parsed = ptyWarmAdoptResultSchema.parse(res)
         setPid(parsed.pid)
@@ -1334,6 +1341,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         const requestsDeadline = spec.startupTimeoutMs !== undefined
         const params = {
           sessionId: spec.sessionId,
+          ...(spec.taskId ? { taskId: spec.taskId } : {}),
           spawnId,
           ...(requestsDeadline ? { startupTimeoutMs: spec.startupTimeoutMs } : {}),
           // An agent start waits on the computer for an admission slot; the reply

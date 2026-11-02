@@ -89,6 +89,12 @@ export const artifactMethodSchemas = {
   updateFolder: z.tuple([z.object({ id, name: title.optional(), parentId: id.nullish() })]),
   deleteFolder: z.tuple([id]),
   reorderFolders: z.tuple([z.object({ parentId: id.nullable(), folderIds: z.array(id) })]),
+  reorderEntries: z.tuple([
+    z.object({
+      kind: z.enum(['artifact', 'folder']),
+      entries: z.array(z.object({ id, order: z.number().int().nonnegative() })).max(10000)
+    })
+  ]),
   writeArtifactContent: z.tuple([
     object.extend({
       data: z
@@ -237,6 +243,10 @@ export function createLocalArtifacts(
     } else if (req.method === 'reorderFolders') {
       for (const id of first.folderIds) await checkFolder(id, taskId)
       await checkFolder(first.parentId, taskId)
+    } else if (req.method === 'reorderEntries') {
+      for (const entry of first.entries)
+        if (first.kind === 'folder') await checkFolder(entry.id, taskId)
+        else await checkArtifact(entry.id, taskId)
     } else if (req.method === 'updateFolder' || req.method === 'deleteFolder') {
       await checkFolder(typeof first === 'string' ? first : first.id, taskId)
       if (typeof first !== 'string') await checkFolder(first.parentId, taskId)
@@ -298,7 +308,16 @@ export function createLocalArtifacts(
               !!raw.prepare("SELECT 1 FROM artifact_owners WHERE id=? AND kind='folder'").get(f.id)
           )
         )
-      else if (req.method === 'uploadArtifactBlob')
+      else if (req.method === 'reorderEntries') {
+        await db.batchTxn(
+          first.entries.map((entry: { id: string; order: number }) => ({
+            type: 'run' as const,
+            sql: `UPDATE ${first.kind === 'folder' ? 'artifact_folders' : 'task_artifacts'} SET "order"=? WHERE id=?`,
+            params: [entry.order, entry.id]
+          }))
+        )
+        result = null
+      } else if (req.method === 'uploadArtifactBlob')
         result = await store.uploadArtifactBlob(db, {
           ...first,
           bytes: Buffer.from(first.data, 'base64')
@@ -343,13 +362,15 @@ export function createLocalArtifacts(
             ? [String((result as { id: string }).id)]
             : req.method === 'updateArtifact'
               ? [first.id]
-              : req.method === 'reorderArtifacts'
-                ? Array.isArray(first)
-                  ? first
-                  : first.artifactIds
-                : first?.artifactId
-                  ? [first.artifactId]
-                  : []
+              : req.method === 'reorderEntries' && first.kind === 'artifact'
+                ? first.entries.map((e: { id: string }) => e.id)
+                : req.method === 'reorderArtifacts'
+                  ? Array.isArray(first)
+                    ? first
+                    : first.artifactIds
+                  : first?.artifactId
+                    ? [first.artifactId]
+                    : []
         for (const id of artifactIds) {
           const a = await store.getArtifact(db, id)
           if (!a) continue
@@ -384,6 +405,24 @@ export function createLocalArtifacts(
             parentId: f.parent_id,
             order: f.order
           })
+        }
+        const folderIds =
+          req.method === 'reorderFolders'
+            ? first.folderIds
+            : req.method === 'reorderEntries' && first.kind === 'folder'
+              ? first.entries.map((e: { id: string }) => e.id)
+              : []
+        for (const id of folderIds) {
+          const f = await db.get<{ id: string; parent_id: string | null; order: number }>(
+            "SELECT f.* FROM artifact_folders f JOIN artifact_owners o ON o.id=f.id AND o.kind='folder' WHERE f.id=?",
+            [id]
+          )
+          if (f)
+            local.metadata(tabId, 'folder-changed', {
+              id: f.id,
+              parentId: f.parent_id,
+              order: f.order
+            })
         }
         if (req.method === 'deleteArtifact')
           local.metadata(tabId, 'artifact-deleted', { id: first })
