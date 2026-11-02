@@ -1,11 +1,11 @@
-import { GitBranch, Pencil, Undo2 } from 'lucide-react'
+import { Pencil, Undo2 } from 'lucide-react'
 import { IconButton } from '@slayzone/ui'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { useChatView } from './ChatViewContext'
 
 /**
  * Hover / focus actions on a past user message (chat A, plan 3.3): edit &
- * resend, rewind to here, fork from here. Only on messages the conversation
+ * resend, rewind to here. Only on messages the conversation
  * still holds; a message from before messages carried an id can't be named to
  * the CLI, so it says so instead.
  */
@@ -22,7 +22,7 @@ export function UserMessageActions({
     return (
       <span
         className={`shrink-0 text-[10px] text-muted-foreground ${reveal}`}
-        title="Edit, rewind and fork work on messages sent since they carry an id."
+        title="Edit and rewind work on messages sent since they carry an id."
       >
         No rewind for older messages
       </span>
@@ -57,18 +57,6 @@ export function UserMessageActions({
           onClick={() => conversation.begin('rewind', message)}
         >
           <Undo2 className="size-3.5" />
-        </IconButton>
-      )}
-      {conversation.canFork && (
-        <IconButton
-          variant="ghost"
-          className="size-6"
-          aria-label="Fork from here"
-          title="Fork from here"
-          disabled={disabled}
-          onClick={() => conversation.begin('fork', message)}
-        >
-          <GitBranch className="size-3.5" />
         </IconButton>
       )}
     </div>

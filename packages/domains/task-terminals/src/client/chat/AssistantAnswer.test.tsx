@@ -162,8 +162,38 @@ describe('assistant answer presentation', () => {
   })
 })
 
-describe('interrupted assistant answer', () => {
+describe('assistant answer fork', () => {
   const user: TimelineItem = { kind: 'user-text', id: 'question', text: 'Question?', timestamp: 0 }
+  const turn = activityView([user, reply, result], false).turns.get(reply)!
+  function mount(
+    overrides: Partial<ConversationActionsView> = {},
+    answer = reply,
+    answerTurn = turn
+  ) {
+    const conversation: ConversationActionsView = {
+      canRewind: true,
+      canFork: true,
+      activeIds: new Set(['question']),
+      lastActiveId: 'question',
+      busy: false,
+      begin: vi.fn(),
+      ...overrides
+    }
+    render(
+      <ChatViewContext.Provider value={{ ...defaultChatView, conversation }}>
+        <AssistantAnswer item={answer} turn={answerTurn} />
+      </ChatViewContext.Provider>
+    )
+    return conversation
+  }
+
+  it('forks the selected answer’s turn using its user message id', () => {
+    const conversation = mount({ canRewind: false })
+    const toolbar = screen.getByRole('toolbar', { name: 'Answer actions' })
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Fork from here' }))
+    expect(conversation.begin).toHaveBeenCalledWith('fork', { id: 'question', text: 'Yes.' })
+  })
+
   it.each([true, false])('keeps interrupted turns actionable (has output: %s)', (hasOutput) => {
     const interrupted: Extract<TimelineItem, { kind: 'interrupted' }> = {
       kind: 'interrupted',
@@ -197,5 +227,29 @@ describe('interrupted assistant answer', () => {
       text: hasOutput ? 'Yes.' : ''
     })
     expect(screen.queryByRole('button', { name: 'Start thread' })).toBeNull()
+  })
+
+  it.each([
+    ['unsupported provider', { canFork: false }],
+    ['folded conversation', { activeIds: new Set<string>() }]
+  ] as const)('hides fork for %s', (_, overrides) => {
+    mount(overrides)
+    expect(screen.queryByRole('button', { name: 'Fork from here' })).toBeNull()
+  })
+
+  it('hides fork for streaming answers or answers without a source message', () => {
+    mount({}, { ...reply, stream: 'open' })
+    expect(screen.queryByRole('button', { name: 'Fork from here' })).toBeNull()
+    cleanup()
+    mount({}, reply, { ...turn, userMessageId: undefined })
+    expect(screen.queryByRole('button', { name: 'Fork from here' })).toBeNull()
+  })
+
+  it('disables fork while another conversation action is pending', () => {
+    const conversation = mount({ busy: true })
+    const fork = screen.getByRole('button', { name: 'Fork from here' }) as HTMLButtonElement
+    expect(fork.disabled).toBe(true)
+    fireEvent.click(fork)
+    expect(conversation.begin).not.toHaveBeenCalled()
   })
 })

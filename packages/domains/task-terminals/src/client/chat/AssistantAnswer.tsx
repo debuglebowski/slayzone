@@ -64,10 +64,10 @@ export function AssistantAnswer({
         (!turn?.userMessageId || thread.sourceMessageId === turn.userMessageId)
     ) ?? []
   const forkMessageId =
-    item.kind === 'interrupted' &&
     conversation?.canFork &&
     turn?.userMessageId &&
-    conversation.activeIds.has(turn.userMessageId)
+    conversation.activeIds.has(turn.userMessageId) &&
+    (!answer || (answer.stream !== 'open' && answer.parentToolUseId == null))
       ? turn.userMessageId
       : null
   const [menuOpen, setMenuOpen] = useState(false)

@@ -48,13 +48,13 @@ function conversation(over: Partial<ConversationActionsView> = {}): Conversation
 }
 
 describe('UserMessageActions', () => {
-  it('offers edit, rewind and fork on a message the conversation holds', () => {
+  it('offers edit and rewind, without fork, on a message the conversation holds', () => {
     const conv = conversation()
     withView({ conversation: conv }, <UserMessageActions item={user('one', 'u1')} />)
     fireEvent.click(screen.getByRole('button', { name: 'Rewind to here' }))
     expect(conv.begin).toHaveBeenCalledWith('rewind', { id: 'u1', text: 'one' })
     expect(screen.getByRole('button', { name: 'Edit & resend' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Fork from here' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Fork from here' })).toBeNull()
   })
 
   it('no "rewind to here" on the newest message; nothing on a folded one; a note on an id-less one', () => {

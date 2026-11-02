@@ -115,7 +115,7 @@ export interface ChatViewState {
    */
   onOpenFile?: (filePath: string, line?: number, col?: number) => void
   onOpenArtifact?: (artifactId: string) => void
-  /** Edit & resend / rewind / fork on past user messages (absent: the provider can't). */
+  /** Edit / rewind on user messages, fork on assistant answers (absent: the provider can't). */
   conversation?: ConversationActionsView
   /** Folds of `conversation-branch` items: open (shown) or not. */
   branches?: { isOpen: (id: string) => boolean; toggle: (id: string) => void }

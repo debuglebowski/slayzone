@@ -6,20 +6,8 @@
  * Sessions, one click away (its history comes back from its session file).
  * Against the scripted fake CLI (2.1.312 shapes; chat-a checks R3, R3b).
  */
-import type { Locator } from '@playwright/test'
 import { resetApp } from '../fixtures/electron'
-import {
-  echoTurn,
-  expect,
-  fileSha256,
-  readSessionFile,
-  test,
-  type ChatTask
-} from '../fixtures/chat'
-
-function bubble(t: ChatTask, text: string): Locator {
-  return t.panel.locator('div.group').filter({ has: t.page.getByText(text, { exact: true }) })
-}
+import { echoTurn, expect, fileSha256, readSessionFile, test } from '../fixtures/chat'
 
 const userTexts = (records: Array<Record<string, unknown>>): string[] =>
   records
@@ -58,8 +46,9 @@ test.describe('Chat fork', () => {
     const turnOneAnswer = readSessionFile(originalFile).filter((r) => r.type === 'assistant')[0]
       .uuid
 
-    await bubble(t, 'one').hover()
-    await bubble(t, 'one').getByRole('button', { name: 'Fork from here' }).click()
+    const answer = t.panel.getByTestId('chat-assistant-answer').filter({ hasText: 'echo: one' })
+    await answer.hover()
+    await answer.getByRole('button', { name: 'Fork from here' }).click()
     const dialog = t.page.getByTestId('rewind-dialog')
     await expect(dialog).toBeVisible()
     await dialog.getByTestId('rewind-confirm').click()
