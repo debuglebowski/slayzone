@@ -394,6 +394,7 @@ run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.tes
 # v179 (paged chat history, chat F): saved_at + timeline checkpoints/pages.
 run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
 run_harness packages/shared/db-migrations/src/v182-chat-attachment-messages-migration.test.ts
+run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -512,6 +513,7 @@ run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_harness packages/domains/agent-turns/src/server/agent-turns-router.test.ts
+run_harness packages/domains/agent-turns/src/server/workspace-capture.test.ts
 run_harness packages/domains/terminal/src/server/chat-router.test.ts
 run_harness packages/domains/terminal/src/server/chat-threads-store.test.ts
 # pty.onData's server-side sessionIds filter — the web-bandwidth fix (§2.6).
@@ -862,6 +864,10 @@ run_harness packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
 # Timeline checkpoint: decode + rest of events = full replay; reducer version hash guard.
 run_harness packages/domains/terminal/src/shared/chat-timeline-checkpoint.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-timeline-projection.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-workspace-tracker.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-workspace.integration.test.ts
+run_harness packages/domains/terminal/src/server/workspace-changes-store.test.ts
+run_harness packages/domains/terminal/src/shared/workspace-changes.test.ts
 run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts
@@ -1052,6 +1058,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.final-plan.test.tsx \
+  packages/domains/task-terminals/src/client/chat/renderers.renderable.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/tool-cards.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/BashCard.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-cards/codex-cards.test.tsx \

@@ -71,6 +71,23 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       observed_at INTEGER NOT NULL,
       PRIMARY KEY (project_id, mode)
     );
+    CREATE TABLE chat_workspace_changes (
+      id TEXT PRIMARY KEY,
+      tab_id TEXT NOT NULL REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+      message_id TEXT NOT NULL,
+      computer_id TEXT,
+      root_path TEXT NOT NULL,
+      status TEXT NOT NULL,
+      reason TEXT,
+      files TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE chat_workspace_diffs (
+      capture_id TEXT NOT NULL REFERENCES chat_workspace_changes(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      diff TEXT NOT NULL,
+      PRIMARY KEY (capture_id, path)
+    );
     CREATE TABLE chat_cli_command_details (
       project_id TEXT NOT NULL,
       mode TEXT NOT NULL,

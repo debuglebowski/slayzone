@@ -572,9 +572,10 @@ describe('CodexChatSession — side questions (/btw)', () => {
       approvalPolicy: 'never',
       sandboxPolicy: { type: 'readOnly' }
     })
-    expect(run.requests('thread/unsubscribe').map((r) => r.params.threadId)).toEqual([
-      side.params.threadId
-    ])
+    // Sent before the answer resolves, but the fake records it over stdio: poll.
+    await expect
+      .poll(() => run.requests('thread/unsubscribe').map((r) => r.params.threadId))
+      .toEqual([side.params.threadId])
     // Nothing of the fork reaches the main timeline.
     expect(l.events.slice(before)).toEqual([])
   })
