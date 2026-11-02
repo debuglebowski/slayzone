@@ -40,6 +40,29 @@ test('drafts persist on computer and restore without a hub database', async () =
   expect((await next.ops.getTabState('tab-a'))?.draft.text).toBe('private draft')
 })
 
+test('chat prompt recall keeps the latest 500 entries without truncating conversation history', () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  r.storage.transaction(() => {
+    for (let i = 0; i < 501; i++)
+      r.local.data.persistChatEventSync!(
+        'tab-a',
+        i,
+        {
+          kind: 'user-message',
+          id: `message-${i}`,
+          text: `prompt ${i}`
+        },
+        1000 + i
+      )
+  })
+  const prompts = r.prompts('task-a', 'claude-chat')
+  expect(prompts).toHaveLength(500)
+  expect(prompts[0].text).toBe('prompt 1')
+  expect(prompts.at(-1)?.text).toBe('prompt 500')
+  expect(r.storage.read(bootstrap.identity.id, -1, 1000)).toHaveLength(501)
+})
+
 test('two hubs can use the same task and tab ids without sharing chat content', async () => {
   const a = runtime(),
     b = runtime(a.stateDir, 'hub-b')

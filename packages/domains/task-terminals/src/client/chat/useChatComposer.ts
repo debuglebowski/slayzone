@@ -200,6 +200,18 @@ export function useChatComposer({
     attachments,
     paused: browsingHistory
   })
+  const recoverLegacyDraft = useStableCallback(() => {
+    const recovered = persistence.recoverLegacy({ text: draft, attachments })
+    if (!recovered) {
+      toast.error('Draft no longer available on this device.')
+      return
+    }
+    setHistoryNav(HISTORY_IDLE)
+    setDraft(recovered.text)
+    setAttachments(recovered.attachments)
+    setCursorPos(recovered.text.length)
+    textareaRef.current?.focus()
+  })
   // Restore once, as soon as the saved draft is known — adjusted during render,
   // so the first painted frame already shows it.
   const [restored, setRestored] = useState(false)
@@ -667,6 +679,8 @@ export function useChatComposer({
   return {
     draft,
     retryDraftSave: persistence.retry,
+    legacyDraftAvailable: persistence.legacyAvailable,
+    recoverLegacyDraft,
     setDraft,
     clearDraft,
     setCursorPos,

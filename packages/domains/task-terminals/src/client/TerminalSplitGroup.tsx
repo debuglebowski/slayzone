@@ -8,6 +8,7 @@ import {
   Suspense
 } from 'react'
 import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/LazyTerminal'
+import { useHubId } from '@slayzone/transport/client'
 import type { TerminalTab } from '../shared/types'
 import { isChatSupported } from '../shared/chat-modes'
 import { TerminalContextMenu } from './TerminalContextMenu'
@@ -85,6 +86,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     { panes, isActive, paused, onAttached, onOpenUrl, onOpenFile, onOpenArtifact },
     ref
   ) {
+    const hubId = useHubId()
     const [sizes, setSizes] = useState<number[]>(() => panes.map(() => 100 / panes.length))
     const containerRef = useRef<HTMLDivElement>(null)
     const draggingRef = useRef<{ index: number; startX: number; startSizes: number[] } | null>(null)
@@ -171,7 +173,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           <Suspense fallback={<ChatPanelSkeleton />}>
             <ChatPanel
               ref={handleRefFor(chatRefs, pane.tab.id)}
-              key={pane.tab.id}
+              key={JSON.stringify([hubId, pane.taskId, pane.tab.id])}
               tabId={pane.tab.id}
               taskId={pane.taskId}
               mode={pane.tab.mode}

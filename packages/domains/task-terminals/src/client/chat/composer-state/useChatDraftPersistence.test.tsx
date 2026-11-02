@@ -5,11 +5,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ChatDraft, ChatTabState } from '@slayzone/terminal-contracts'
 
 const server = vi.hoisted(() => ({
+  hubId: 'local',
   state: null as ChatTabState | null,
   saves: [] as Array<{ tabId: string; draft: ChatDraft }>,
   fail: false,
+  delays: new Map<string, Promise<void>>(),
   rev: 0
 }))
+
+vi.mock('@slayzone/transport/client', () => ({ useHubId: () => server.hubId }))
 
 vi.mock('../../trpc', () => ({
   useTRPC: () => ({
@@ -32,7 +36,9 @@ vi.mock('../../trpc', () => ({
           mutate: async ({ tabId, draft }: { tabId: string; draft: ChatDraft }) => {
             server.saves.push({ tabId, draft })
             if (server.fail) throw new Error('Computer offline')
+            await server.delays.get(draft.text)
             server.rev += 1
+            server.state = { draft: { ...draft, rev: server.rev }, scroll: null }
             return { rev: server.rev }
           }
         }
@@ -66,9 +72,11 @@ function setup(initial: { draft: ChatDraft; enabled?: boolean; paused?: boolean 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   server.state = null
+  server.hubId = 'local'
   server.saves = []
   server.rev = 0
   server.fail = false
+  server.delays.clear()
   localStorage.clear()
 })
 afterEach(() => {
@@ -77,6 +85,101 @@ afterEach(() => {
 })
 
 describe('useChatDraftPersistence', () => {
+  it('serializes slow saves so an older attachment edit cannot overwrite newer typing', async () => {
+    let release!: () => void
+    server.delays.set(
+      'older',
+      new Promise<void>((resolve) => {
+        release = resolve
+      })
+    )
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    h.rerender({ draft: { text: 'older', attachments: [] } })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    h.rerender({ draft: { text: 'newer', attachments: [] } })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves.map((s) => s.draft.text)).toEqual(['older'])
+    await act(async () => {
+      release()
+      await Promise.resolve()
+    })
+    await vi.waitFor(() => expect(server.state?.draft.text).toBe('newer'))
+    expect(localStorage.getItem(draftJournalKey('tab-1'))).toBeNull()
+  })
+  it('saves a return to the acknowledged draft while a different save is still in flight', async () => {
+    let release!: () => void
+    server.delays.set(
+      'different',
+      new Promise<void>((resolve) => {
+        release = resolve
+      })
+    )
+    const initial = { text: 'initial', attachments: [] }
+    server.state = { draft: { ...initial, rev: 1 }, scroll: null }
+    server.rev = 1
+    const h = setup({ draft: initial })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    h.rerender({ draft: { text: 'different', attachments: [] } })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    h.rerender({ draft: initial })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    await act(async () => {
+      release()
+      await Promise.resolve()
+    })
+    await vi.waitFor(() => expect(server.state?.draft.text).toBe('initial'))
+    expect(localStorage.getItem(draftJournalKey('tab-1'))).toBeNull()
+  })
+  it('isolates local journals for identical tab IDs on different hubs', async () => {
+    server.hubId = 'hub-a'
+    const privateDraft = { text: 'only hub a', attachments: [] }
+    localStorage.setItem(
+      draftJournalKey('tab-1', 'hub-a'),
+      JSON.stringify({ ...privateDraft, baseRev: 0, savedAt: Date.now() })
+    )
+    const a = setup({ draft: empty })
+    await vi.waitFor(() => expect(a.result.current.saved).toEqual(privateDraft))
+    a.unmount()
+    server.hubId = 'hub-b'
+    const b = setup({ draft: empty })
+    await vi.waitFor(() => expect(b.result.current.loaded).toBe(true))
+    expect(b.result.current.saved).toBeNull()
+    b.rerender({ draft: { text: 'only hub b', attachments: [] } })
+    expect(JSON.parse(localStorage.getItem(draftJournalKey('tab-1', 'hub-a'))!).text).toBe(
+      'only hub a'
+    )
+    expect(JSON.parse(localStorage.getItem(draftJournalKey('tab-1', 'hub-b'))!).text).toBe(
+      'only hub b'
+    )
+  })
+
+  it('keeps an unscoped legacy journal until explicitly recovered, preserving the current draft', async () => {
+    const legacyKey = 'slayzone:chat-draft:tab-1'
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ text: 'old unsaved text', attachments: [], baseRev: 0, savedAt: Date.now() })
+    )
+    const current = { text: 'current text', attachments: [] }
+    server.state = { draft: { ...current, rev: 1 }, scroll: null }
+    server.rev = 1
+    const h = setup({ draft: current })
+    await vi.waitFor(() => expect(h.result.current.legacyAvailable).toBe(true))
+    expect(h.result.current.saved).toEqual(current)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    expect(localStorage.getItem(legacyKey)).not.toBeNull()
+    let recovered: ChatDraft | null = null
+    act(() => {
+      recovered = h.result.current.recoverLegacy(current)
+    })
+    expect(recovered).toEqual({ text: 'current text\n\nold unsaved text', attachments: [] })
+    h.rerender({ draft: recovered! })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves.at(-1)?.draft).toEqual(recovered)
+    expect(localStorage.getItem(legacyKey)).toBeNull()
+    expect(h.result.current.legacyAvailable).toBe(false)
+  })
   it('loads the saved draft once (what the composer restores)', async () => {
     server.state = { draft: { text: 'half a thought', attachments: [], rev: 4 }, scroll: null }
     server.rev = 4

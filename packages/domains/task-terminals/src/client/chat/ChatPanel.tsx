@@ -344,8 +344,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           return true
         },
         focus: () => composer.textareaRef.current?.focus(),
-        // A chat has no scrollback buffer to clear.
-        clearBuffer: async () => {}
+        clearBuffer: async () => {
+          // A chat has no scrollback buffer to clear.
+        }
       })
     })
     useEffect(() => {
@@ -954,6 +955,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           >
                             <CornerDownLeft className="size-3" />
                             Send to main
+                          </button>
+                        </div>
+                      )}
+                      {composer.legacyDraftAvailable && (
+                        <div
+                          role="status"
+                          className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs"
+                        >
+                          <p className="text-muted-foreground">
+                            Older unsaved draft on this device. Recover adds it to this chat.
+                          </p>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
+                            onClick={composer.recoverLegacyDraft}
+                          >
+                            Recover draft
                           </button>
                         </div>
                       )}

@@ -28,6 +28,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import type { ChatStorage } from './storage'
+import { trimLocalPromptHistory } from './prompts'
 
 export interface ChatBootstrap {
   identity: ConversationIdentity
@@ -456,7 +457,7 @@ export function createLocalChatData(
           !isSyntheticChatPrompt(event.text)
         ) {
           const cap = chatCapabilitiesForMode(i.mode)
-          if (cap.promptHistory || cap.sessions)
+          if (cap.promptHistory || cap.sessions) {
             set(tabId, 'prompt', event.id, {
               id: event.id,
               taskId: i.taskId,
@@ -465,6 +466,8 @@ export function createLocalChatData(
               text: event.text,
               createdAt: at
             })
+            trimLocalPromptHistory(store, i.taskId, i.mode)
+          }
         }
         if (outcome === 'inserted' && event.kind === 'workspace-changes') {
           const record = store.getRecord<{ needsRecoveryEvent?: boolean }>(

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useHubId } from '@slayzone/transport/client'
 import type { ChatAttachment, ChatDraft, ChatTabState } from '@slayzone/terminal-contracts'
 import { useTRPC, useTRPCClient } from '../../trpc'
 
@@ -19,8 +20,8 @@ const SAVE_DELAY_MS = 300
 const JOURNAL_PREFIX = 'slayzone:chat-draft:'
 const JOURNAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
-export function draftJournalKey(tabId: string): string {
-  return `${JOURNAL_PREFIX}${tabId}`
+export function draftJournalKey(tabId: string, hubId = 'local'): string {
+  return `${JOURNAL_PREFIX}${JSON.stringify([hubId, tabId])}`
 }
 
 interface Journal extends ChatDraft {
@@ -29,15 +30,28 @@ interface Journal extends ChatDraft {
   savedAt: number
 }
 
-function readJournal(tabId: string): Journal | null {
+function readJournal(key: string): Journal | null {
   try {
-    const raw = localStorage.getItem(draftJournalKey(tabId))
+    const raw = localStorage.getItem(key)
     if (!raw) return null
     const j = JSON.parse(raw) as Partial<Journal>
     if (
       typeof j.text !== 'string' ||
       !Array.isArray(j.attachments) ||
-      typeof j.baseRev !== 'number'
+      !Number.isSafeInteger(j.baseRev) ||
+      typeof j.savedAt !== 'number' ||
+      !Number.isFinite(j.savedAt) ||
+      !j.attachments.every(
+        (a) =>
+          a &&
+          typeof a === 'object' &&
+          typeof a.artifactId === 'string' &&
+          typeof a.name === 'string' &&
+          typeof a.kind === 'string' &&
+          typeof a.mediaType === 'string' &&
+          typeof a.size === 'number' &&
+          Number.isFinite(a.size)
+      )
     ) {
       return null
     }
@@ -47,12 +61,14 @@ function readJournal(tabId: string): Journal | null {
   }
 }
 
-function writeJournal(tabId: string, journal: Journal | null): void {
+function writeJournal(key: string, journal: Journal | null): boolean {
   try {
-    if (journal) localStorage.setItem(draftJournalKey(tabId), JSON.stringify(journal))
-    else localStorage.removeItem(draftJournalKey(tabId))
+    if (journal) localStorage.setItem(key, JSON.stringify(journal))
+    else localStorage.removeItem(key)
+    return true
   } catch {
     /* storage unavailable (private window, quota): the server save still runs */
+    return false
   }
 }
 
@@ -65,7 +81,7 @@ function sweepOldJournals(now: number): void {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i)
       if (!key?.startsWith(JOURNAL_PREFIX)) continue
-      const j = readJournal(key.slice(JOURNAL_PREFIX.length))
+      const j = readJournal(key)
       if (!j || now - j.savedAt > JOURNAL_MAX_AGE_MS) localStorage.removeItem(key)
     }
   } catch {
@@ -101,12 +117,12 @@ interface Resolved {
   stale: boolean
 }
 
-function resolveSaved(tabId: string, server: ChatTabState | null): Resolved {
+function resolveSaved(key: string, server: ChatTabState | null): Resolved {
   const rev = server?.draft.rev ?? 0
   const persisted = server
     ? { text: server.draft.text, attachments: server.draft.attachments }
     : EMPTY
-  const journal = readJournal(tabId)
+  const journal = readJournal(key)
   if (journal && journal.baseRev === rev) {
     return {
       draft: { text: journal.text, attachments: journal.attachments },
@@ -129,6 +145,9 @@ export interface ChatDraftPersistence {
   saved: ChatDraft | null
   /** Retry saving the current draft after its computer reconnects. Never sends a message. */
   retry: () => void
+  legacyAvailable: boolean
+  /** Explicitly import a journal whose original hub is unknown, keeping current text/files. */
+  recoverLegacy: (current: ChatDraft) => ChatDraft | null
 }
 
 export function useChatDraftPersistence({
@@ -147,6 +166,8 @@ export function useChatDraftPersistence({
   paused: boolean
 }): ChatDraftPersistence {
   const trpc = useTRPC()
+  const key = draftJournalKey(tabId, useHubId() ?? 'local')
+  const legacyKey = `${JOURNAL_PREFIX}${tabId}`
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const queryOptions = trpc.chat.tabState.get.queryOptions({ tabId }, { enabled })
@@ -156,6 +177,7 @@ export function useChatDraftPersistence({
   // Journal vs server, decided ONCE per mount (later cache updates — our own
   // saves — must not re-decide it). Adjusted during render: no extra frame.
   const [resolved, setResolved] = useState<Resolved | null>(null)
+  const [legacyAvailable, setLegacyAvailable] = useState(false)
   const [retryEpoch, setRetryEpoch] = useState(0)
   const retry = useCallback(() => {
     if (!enabled) return
@@ -163,7 +185,7 @@ export function useChatDraftPersistence({
     setRetryEpoch((epoch) => epoch + 1)
   }, [enabled, resolved, refetch])
   if (!resolved && loaded) {
-    setResolved(resolveSaved(tabId, (data as ChatTabState | null | undefined) ?? null))
+    setResolved(resolveSaved(key, (data as ChatTabState | null | undefined) ?? null))
   }
 
   // Written in effects only (React Compiler): the last revision the server
@@ -171,6 +193,8 @@ export function useChatDraftPersistence({
   const revRef = useRef(0)
   const persistedRef = useRef<ChatDraft>(EMPTY)
   const pendingRef = useRef<ChatDraft | null>(null)
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const savingRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveRef = useRef<(draft: ChatDraft) => void>(() => undefined)
 
@@ -180,6 +204,38 @@ export function useChatDraftPersistence({
   const dirtyRef = useRef(false)
   const awaitingRestoreRef = useRef(false)
   const handledRef = useRef<Resolved | null>(null)
+  const recoverLegacy = useCallback(
+    (current: ChatDraft) => {
+      if (!resolved) return null
+      const journal = readJournal(legacyKey)
+      if (!journal) return null
+      const recovered = {
+        text:
+          !current.text || current.text === journal.text
+            ? journal.text
+            : journal.text
+              ? `${current.text}\n\n${journal.text}`
+              : current.text,
+        attachments: [...current.attachments]
+      }
+      for (const attachment of journal.attachments)
+        if (
+          !recovered.attachments.some(
+            (a) =>
+              a.artifactId === attachment.artifactId && a.contentHash === attachment.contentHash
+          )
+        )
+          recovered.attachments.push(attachment)
+      // Never discard the only copy if this browser cannot write the scoped journal.
+      if (writeJournal(key, { ...recovered, baseRev: revRef.current, savedAt: Date.now() }))
+        writeJournal(legacyKey, null)
+      dirtyRef.current = true
+      awaitingRestoreRef.current = false
+      setLegacyAvailable(false)
+      return recovered
+    },
+    [resolved, legacyKey, key, setLegacyAvailable]
+  )
 
   useEffect(() => {
     if (!resolved || handledRef.current === resolved) return
@@ -188,7 +244,8 @@ export function useChatDraftPersistence({
     revRef.current = resolved.rev
     // A journal is not an acknowledgement from the computer. Save it once restored.
     persistedRef.current = resolved.persisted
-    if (resolved.stale) writeJournal(tabId, null)
+    if (resolved.stale) writeJournal(key, null)
+    setLegacyAvailable(readJournal(legacyKey) !== null)
     const atLoad = { text, attachments }
     baselineRef.current = atLoad
     awaitingRestoreRef.current =
@@ -197,19 +254,20 @@ export function useChatDraftPersistence({
     dirtyRef.current =
       !sameDraft(atLoad, persistedRef.current) &&
       (!sameDraft(atLoad, EMPTY) || (resolved.draft !== null && sameDraft(atLoad, resolved.draft)))
-  }, [resolved, tabId, text, attachments])
+  }, [resolved, key, legacyKey, text, attachments])
 
   useEffect(() => {
     saveRef.current = (draft) => {
       pendingRef.current = null
-      trpcClient.chat.tabState.saveDraft.mutate({ tabId, draft }).then(
-        (res) => {
+      savingRef.current += 1
+      const persist = () =>
+        trpcClient.chat.tabState.saveDraft.mutate({ tabId, draft }).then((res) => {
           if (!res) return // the tab is gone
           revRef.current = res.rev
           persistedRef.current = draft
-          const journal = readJournal(tabId)
-          if (journal && sameDraft(journal, draft)) writeJournal(tabId, null)
-          else if (journal) writeJournal(tabId, { ...journal, baseRev: res.rev })
+          const journal = readJournal(key)
+          if (journal && sameDraft(journal, draft)) writeJournal(key, null)
+          else if (journal) writeJournal(key, { ...journal, baseRev: res.rev })
           queryClient.setQueryData(
             queryOptions.queryKey,
             (old: ChatTabState | null | undefined) => ({
@@ -217,12 +275,18 @@ export function useChatDraftPersistence({
               scroll: old?.scroll ?? null
             })
           )
-        },
-        (err: unknown) => {
+        })
+      // Attachment sealing may take longer than a subsequent text-only edit.
+      // Preserve user edit order all the way to the owning computer.
+      writeQueueRef.current = writeQueueRef.current
+        .then(persist, persist)
+        .catch(() => {
           // The journal keeps the text; reconnect or the next edit retries the save.
-          console.error('[chat] saving the draft failed:', err)
-        }
-      )
+          console.error('[chat] saving the draft failed')
+        })
+        .finally(() => {
+          savingRef.current -= 1
+        })
     }
   })
 
@@ -238,15 +302,20 @@ export function useChatDraftPersistence({
       if (sameDraft(draft, baselineRef.current)) return
       dirtyRef.current = true
     }
-    if (sameDraft(draft, persistedRef.current) && pendingRef.current === null) return
-    writeJournal(tabId, { ...draft, baseRev: revRef.current, savedAt: Date.now() })
+    if (
+      sameDraft(draft, persistedRef.current) &&
+      pendingRef.current === null &&
+      savingRef.current === 0
+    )
+      return
+    writeJournal(key, { ...draft, baseRev: revRef.current, savedAt: Date.now() })
     pendingRef.current = draft
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       timerRef.current = null
       if (pendingRef.current) saveRef.current(pendingRef.current)
     }, SAVE_DELAY_MS)
-  }, [enabled, resolved, paused, text, attachments, tabId, retryEpoch])
+  }, [enabled, resolved, paused, text, attachments, key, retryEpoch])
 
   // Leaving (remount, tab closed, page unload): save what is waiting now.
   useEffect(() => {
@@ -265,5 +334,11 @@ export function useChatDraftPersistence({
   // `loaded` waits for `resolved`, not the query: in the render pass that sets
   // `resolved` (re-run at once), a caller that restores during render would
   // otherwise see "loaded, nothing saved" and settle on an empty draft.
-  return { loaded: !enabled || resolved !== null, saved: resolved?.draft ?? null, retry }
+  return {
+    loaded: !enabled || resolved !== null,
+    saved: resolved?.draft ?? null,
+    retry,
+    legacyAvailable,
+    recoverLegacy
+  }
 }

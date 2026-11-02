@@ -260,3 +260,28 @@ draft journal hub isolation, prompt-history cap parity, full privacy/E2E/perform
 validation and safe main integration.
 
 Unresolved questions: none.
+
+## Latest main and client parity checkpoint
+
+Rebased onto main `3888ff8cf`; kept native-session host fixes, chat injection
+shortcuts and new sub-agent rows/turn triggers. Combined timeline projection is
+version 8. Post-rebase: 579 tests across 30 suites, nine affected typechecks, both
+bundles and the React Compiler check pass.
+
+Draft journals now use hub+tab identity. Chat panes remount on scope changes. Legacy
+journals without hub provenance are retained for explicit recovery into the selected
+chat; recovery keeps current text/files and copies locally before removing the old
+entry. Draft saves run in edit order, including returning to an acknowledged draft
+while another save is in flight. Error logging does not copy remote draft errors.
+Chat prompt recall now shares the existing 500-entry cap with hook capture, without
+truncating saved conversation events.
+
+Validation: 102 runtime/retention/draft/composer tests pass. Four affected typechecks,
+both bundles, changed-file lint and React Compiler checks pass.
+
+Remaining: durable cross-store folder deletion/mirror cleanup; privacy audit of
+orphan diagnostics and hub DB/backups/log markers; computer-owned E2E seeding (the
+current helper inserts hub `chat_events` directly); desktop/mobile E2E and long-session
+budgets; packaging/full lint/registered suites; final rebase/review and safe main merge.
+
+Unresolved questions: none.

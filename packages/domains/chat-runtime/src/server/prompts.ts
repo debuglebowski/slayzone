@@ -14,6 +14,18 @@ interface LocalPrompt {
   text: string
   createdAt: number
 }
+/** Same recall limit as the legacy prompt store; the event history remains intact. */
+export function trimLocalPromptHistory(store: ChatStorage, taskId: string, agentId: string) {
+  store.compose((raw) =>
+    raw
+      .prepare(`DELETE FROM records WHERE rowid IN (
+    SELECT r.rowid FROM records r JOIN conversations c ON c.id=r.conversation_id
+    WHERE c.task_id=? AND c.state='active' AND r.kind='prompt' AND json_extract(r.value,'$.agentId')=?
+    ORDER BY json_extract(r.value,'$.createdAt') DESC,r.id DESC LIMIT -1 OFFSET 500
+  )`)
+      .run(taskId, agentId)
+  )
+}
 export function createLocalPrompts(store: ChatStorage) {
   function list(
     taskId: string,
@@ -91,12 +103,7 @@ export function createLocalPrompts(store: ChatStorage) {
           value: prompt,
           at: prompt.createdAt
         })
-        const history = list(taskId, hook.mode)
-        for (const p of history.slice(0, Math.max(0, history.length - 500))) {
-          const record = store.findRecords('prompt', taskId).find((r) => r.id === p.id)!,
-            owner = store.conversation(record.conversationId)!
-          store.removeRecord(record.conversationId, owner.identity.epoch, 'prompt', p.id)
-        }
+        trimLocalPromptHistory(store, taskId, hook.mode)
       })
     }
   }
