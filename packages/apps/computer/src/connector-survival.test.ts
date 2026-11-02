@@ -39,6 +39,24 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
     }
     connector = await launch()
     const id = hub.gateway.listComputers()[0].computerId
+    await hub.gateway.request(id, 'chat.request', {
+      kind: 'bootstrap',
+      value: {
+        identity: {
+          id: 'chat-store',
+          taskId: 'task',
+          tabId: 'chat-tab',
+          mode: 'claude-chat',
+          epoch: 1
+        },
+        projectId: null,
+        cwd: root,
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }
+    })
     await hub.gateway.request(id, 'pty.spawn', {
       sessionId: 'shell',
       command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
@@ -77,7 +95,14 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
         (
           await fetch(env.SLAYZONE_AGENT_HOOK_URL, {
             method: 'POST',
-            body: JSON.stringify({ index })
+            body: JSON.stringify({
+              agentId: 'claude-code',
+              mode: 'claude-code',
+              hookEvent: 'UserPromptSubmit',
+              taskId: 'task',
+              sessionId: `hook-${index}`,
+              raw: { prompt: `private-hook-marker-${index}` }
+            })
           })
         ).status
       ).toBe(200)
@@ -108,7 +133,17 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
       seq: -1
     })
     expect(JSON.stringify(replay)).toContain('output-during-handover')
-    expect(hooks).toMatchObject([{ payload: { index: 1 } }, { payload: { index: 2 } }])
+    expect(hooks).toMatchObject([
+      { payload: { sessionId: 'hook-1' } },
+      { payload: { sessionId: 'hook-2' } }
+    ])
+    expect(JSON.stringify(hooks)).not.toContain('private-hook-marker')
+    expect(
+      await hub.gateway.request(id, 'chat.request', { kind: 'prompts', taskId: 'task' })
+    ).toMatchObject([
+      { cli_session_id: 'hook-1', text: 'private-hook-marker-1' },
+      { cli_session_id: 'hook-2', text: 'private-hook-marker-2' }
+    ])
     expect(hub.auth.enrollCalls).toHaveLength(1)
   } finally {
     await connector?.stop()

@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, expect, it, vi } from 'vitest'
+import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { createUpgradeController, type UpgradeWorker } from './auto-upgrade'
 import { launchUpgradeWorker, releaseEntry, superviseUpgrades } from './upgrade-runtime'
@@ -63,22 +64,25 @@ it('hub protocol upgrade → fatal old hello → exact release → same enrollme
     )
   writeFileSync(
     oldEntry,
-    versioned('1.0.0').replace('COMPUTER_PROTOCOL_VERSION = 4;', 'COMPUTER_PROTOCOL_VERSION = 3;')
+    versioned('1.0.0').replace(
+      `COMPUTER_PROTOCOL_VERSION = ${COMPUTER_PROTOCOL_VERSION};`,
+      `COMPUTER_PROTOCOL_VERSION = ${COMPUTER_PROTOCOL_VERSION - 1};`
+    )
   )
   writeFileSync(newEntry, versioned('2.0.0'))
   writeFileSync(badEntry, 'process.exit(1)')
   const hub = await startLoopbackHub({ floodLimits: false })
   cleanups.push(() => hub.close())
   let upgraded = false
-  // Before the upgrade the hub speaks v3; afterwards its real v4 gate rejects it.
+  // Before the upgrade the hub speaks the previous protocol; its current gate rejects it.
   // This shim translates only handshake versions, preserving real auth/RPC/storage.
   hub.wss.prependListener('connection', (socket) => {
     const emit = socket.emit.bind(socket)
     socket.emit = ((event: string, ...args: unknown[]) => {
       if (event === 'message' && !upgraded) {
         const frame = JSON.parse(String(args[0]))
-        if (frame.params?.protocolVersion === 3) {
-          frame.params.protocolVersion = 4
+        if (frame.params?.protocolVersion === COMPUTER_PROTOCOL_VERSION - 1) {
+          frame.params.protocolVersion = COMPUTER_PROTOCOL_VERSION
           args[0] = Buffer.from(JSON.stringify(frame))
         }
       }
@@ -88,8 +92,8 @@ it('hub protocol upgrade → fatal old hello → exact release → same enrollme
     socket.send = ((data: string, ...args: unknown[]) => {
       if (!upgraded) {
         const frame = JSON.parse(String(data))
-        if (frame.result?.protocolVersion === 4) {
-          frame.result.protocolVersion = 3
+        if (frame.result?.protocolVersion === COMPUTER_PROTOCOL_VERSION) {
+          frame.result.protocolVersion = COMPUTER_PROTOCOL_VERSION - 1
           data = JSON.stringify(frame)
         }
       }
@@ -314,7 +318,7 @@ it('hub upgrade, failed candidate, retry and supervisor restart preserve active 
         const frame = JSON.parse(String(args[0]))
         generation = frame.params?.connectorGeneration ?? generation
         if (release === '2.0.0' && generation === 1 && frame.method === 'hello') {
-          frame.params.protocolVersion = 3
+          frame.params.protocolVersion = COMPUTER_PROTOCOL_VERSION - 1
           args[0] = Buffer.from(JSON.stringify(frame))
         }
       }
@@ -324,7 +328,7 @@ it('hub upgrade, failed candidate, retry and supervisor restart preserve active 
       const frame = JSON.parse(String(data))
       if (generation === 2 && frame.result?.protocolVersion && failCandidate) {
         failCandidate = false
-        frame.result.protocolVersion = 5
+        frame.result.protocolVersion = COMPUTER_PROTOCOL_VERSION + 1
         data = JSON.stringify(frame)
       }
       return (send as (...args: unknown[]) => void)(data, ...args)

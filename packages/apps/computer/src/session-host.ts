@@ -105,6 +105,10 @@ export async function connectorHost(
 class SessionTransport extends HubDialer {
   peer?: LocalPeer
   hubOnline = false
+  authenticatedComputerId: string | null = null
+  override get computerId(): string | null {
+    return this.authenticatedComputerId
+  }
   private eventsQueue: Array<{ id: string; params: unknown }> = []
   private delivering = false
   private closed = false
@@ -345,6 +349,11 @@ export async function startSessionHost(
           return { ok: true }
         }
         if (method === 'connected') {
+          if (typeof params.computerId !== 'string' || !params.computerId)
+            throw new Error('authenticated computer identity is required')
+          // The connector authenticates for this transport; the inherited dialer never starts.
+          // Keep its last proven identity available to local storage while disconnected.
+          transport.authenticatedComputerId = params.computerId
           transport.hubOnline = true
           void transport.deliverEvents()
           transport.events.emit('connected', {

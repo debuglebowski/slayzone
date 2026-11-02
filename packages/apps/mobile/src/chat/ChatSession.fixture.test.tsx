@@ -19,7 +19,18 @@ import { type FakeHub, fakeHub } from './fake-hub'
 
 // The ids the recorded client minted, in the order this UI mints them.
 const mockIds = {
-  list: ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-q1', 'msg-5', 'msg-6', 'msg-7', 'msg-8', 'msg-9'],
+  list: [
+    'msg-1',
+    'msg-2',
+    'msg-3',
+    'msg-4',
+    'msg-q1',
+    'msg-5',
+    'msg-6',
+    'msg-7',
+    'msg-8',
+    'msg-9'
+  ].flatMap((id) => (id === 'msg-q1' ? [id] : [id, `operation-${id}`])),
   next: 0
 }
 jest.mock('./ids', () => ({
@@ -161,8 +172,10 @@ describe('ChatSession against a recorded hub session', () => {
       expect(textOf(/Done in/)).toBe(true)
       expect(inputs[0].input).toEqual({
         tabId: fixture.tabId,
+        operationId: expect.any(String),
         message: { id: 'msg-1', content: [{ type: 'text', text: 'Say hello and list the files' }] }
       })
+      expect(inputs[0].input).not.toMatchObject({ operationId: 'msg-1' })
 
       // 2. A Bash permission request, allowed ("Yes").
       await type(sentText(2))

@@ -95,7 +95,7 @@ const ELECTRON_BIN = resolve(
 const NODE_BIN = process.env.SLZ_TEST_NODE ?? 'node'
 
 /** Pid-unique so a developer's real computers can never be listed or removed by us. */
-const NAME_PREFIX = `slztest-${process.pid}-`
+const NAME_PREFIX = `slztest-computer-${process.pid}-`
 
 /** Newest mtime under a dir tree (stale-build detection). */
 function newestMtime(dir: string): number {

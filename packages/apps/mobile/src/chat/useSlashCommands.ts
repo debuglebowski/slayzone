@@ -87,7 +87,7 @@ export function useSlashCommands({
         .then(() => queryClient.invalidateQueries(trpc.chat.getAutocompleteUsage.queryFilter()))
         .catch(() => undefined)
     },
-    [client, queryClient, trpc]
+    [client, queryClient, trpc, taskId]
   )
   return {
     items,

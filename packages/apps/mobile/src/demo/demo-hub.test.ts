@@ -9,6 +9,7 @@ import { downloadArtifactFile } from '../artifacts/files'
 import { hubTarget } from '../artifacts/hub-rest'
 import { searchArtifacts } from '../artifacts/search'
 import { uploadArtifact } from '../artifacts/upload'
+import { PROJECT_COLORS } from '../theme'
 import { DEMO_ACCOUNT_EMAIL, DEMO_UNAVAILABLE, type DemoHub, openDemoHub } from './demo-hub'
 import { DEMO_IDS } from './seed'
 
@@ -141,7 +142,10 @@ describe('demo hub: tRPC', () => {
 
   it('creates a project, and archives a column’s tasks at once', async () => {
     const client = clientOf(demo())
-    const project = await client.projects.create.mutate({ name: 'Side quest', color: '#3b82f6' })
+    const project = await client.projects.create.mutate({
+      name: 'Side quest',
+      color: PROJECT_COLORS[0]
+    })
     expect((await client.projects.list.query()).map((p) => p.name)).toContain('Side quest')
     expect(project.name).toBe('Side quest')
 

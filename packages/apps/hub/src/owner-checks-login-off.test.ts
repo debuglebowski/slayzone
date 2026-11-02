@@ -88,11 +88,13 @@ describe('T-17 owner checks: the desktop app’s hub (login off) is unchanged', 
       id: string
     }
     expect(art?.id, 'artifacts.get').toBe(B.artifact)
-    const prompts = await procedureAt(c.client, 'agentPrompts.list').query({
-      taskId: A.task,
-      agentId: 'claude-code'
-    })
-    expect(JSON.stringify(prompts ?? null), 'agentPrompts.list').toContain('A_SECRET_PROMPT_TEXT')
+    // Authorization remains open; unavailable computer storage must not fall back to hub content.
+    await expect(
+      procedureAt(c.client, 'agentPrompts.list').query({
+        taskId: A.task,
+        agentId: 'claude-code'
+      })
+    ).rejects.toThrow(/computer|available/i)
   })
 
   test('every list holds both owners’ rows, unfiltered', async () => {

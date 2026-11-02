@@ -363,6 +363,7 @@ describe('DiagnosticsSettingsTab', () => {
 
 describe('BackupSettingsTab', () => {
   it('seeds the backup settings from the query', async () => {
+    results['computers.list'] = []
     results['app.backup.list'] = []
     results['app.backup.getSettings'] = {
       autoEnabled: true,
@@ -374,7 +375,7 @@ describe('BackupSettingsTab', () => {
     expect(screen.getAllByRole('switch')[0].getAttribute('aria-checked')).toBe('false')
     await flush()
     expect(screen.getAllByRole('switch')[0].getAttribute('aria-checked')).toBe('true')
-    expect(selectValues().slice(0, 2)).toEqual(['30', '5'])
+    expect(selectValues()).toEqual(['', '30', '5'])
   })
 })
 
