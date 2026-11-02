@@ -6,7 +6,8 @@
   "main": "./src/main.ts",
   "types": "./src/main.ts",
   "exports": {
-    ".": "./src/main.ts"
+    ".": "./src/main.ts",
+    "./cli-relay": "./src/cli-relay.ts"
   },
   "bin": {
     "slayzone-computer": "./dist/bin.cjs"

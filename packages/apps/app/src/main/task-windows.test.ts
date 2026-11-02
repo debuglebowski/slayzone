@@ -58,7 +58,10 @@ describe('primary panel ownership lifecycle', () => {
       ]
     })
     taskWindowsOps.claimPanel('t1', 'terminal', 2)
-    expect(taskWindowsOps.getOwnership('t1')).toContainEqual({ panelId: 'terminal', ownerWindowId: 2 })
+    expect(taskWindowsOps.getOwnership('t1')).toContainEqual({
+      panelId: 'terminal',
+      ownerWindowId: 2
+    })
     taskWindowsOps.releaseAllForTask('t1', 2)
     taskWindowsOps.releaseAllForTask('t1', 9)
     next.win.emit('closed')

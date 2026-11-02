@@ -11,7 +11,12 @@
 import type { Page } from '@playwright/test'
 import { resetApp } from '../fixtures/electron'
 import { expect, test, type ChatHarness } from '../fixtures/chat'
-import { FIRST_PROMPT, LAST_REPLY, NEEDLE, answeredLongSessionEvents } from '../fixtures/chat-long-session'
+import {
+  FIRST_PROMPT,
+  LAST_REPLY,
+  NEEDLE,
+  answeredLongSessionEvents
+} from '../fixtures/chat-long-session'
 
 const EVENTS = 100_000
 /** Rows a page of the projection holds (`TIMELINE_PAGE_ROWS`). */

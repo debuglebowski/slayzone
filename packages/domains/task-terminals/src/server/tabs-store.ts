@@ -39,7 +39,9 @@ export function rowToTab(row: TabRow): TerminalTab {
  *  the `taskTerminals.list` tRPC query. */
 export async function listTabsForTask(db: SlayzoneDb, taskId: string): Promise<TerminalTab[]> {
   const rows = (await db
-    .prepare('SELECT * FROM terminal_tabs WHERE task_id = ? AND id NOT IN (SELECT id FROM chat_threads) ORDER BY position ASC')
+    .prepare(
+      'SELECT * FROM terminal_tabs WHERE task_id = ? AND id NOT IN (SELECT id FROM chat_threads) ORDER BY position ASC'
+    )
     .all(taskId)) as TabRow[]
 
   return rows.map(rowToTab)

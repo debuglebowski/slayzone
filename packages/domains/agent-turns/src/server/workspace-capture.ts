@@ -1,10 +1,8 @@
 /** Portable Git observation: runs on the machine owning the workspace, never changes its index. */
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { childProcessEnv } from '@slayzone/platform'
+import { writeWorkspaceTree } from './workspace-tree'
 import type {
   WorkspaceCaptureBegin,
   WorkspaceCaptureRequest,
@@ -118,21 +116,6 @@ async function snapshot(git: Git, ref: string): Promise<string> {
     throw new Error('Could not pin workspace snapshot')
   }
   return sha
-}
-
-/** Shared by legacy turn snapshots and chat observations; the user's index is never selected. */
-export async function writeWorkspaceTree(git: Git, head: string | null): Promise<string> {
-  const temp = await mkdtemp(join(tmpdir(), 'slayzone-workspace-'))
-  try {
-    const env = { GIT_INDEX_FILE: join(temp, 'index') }
-    await git(['read-tree', ...(head ? [head] : ['--empty'])], env)
-    await git(['add', '-A'], env)
-    const tree = (await git(['write-tree'], env)).text.trim()
-    if (!tree) throw new Error('Could not write workspace tree')
-    return tree
-  } finally {
-    await rm(temp, { recursive: true, force: true })
-  }
 }
 
 function changedFiles(text: string): WorkspaceFileDiff[] {

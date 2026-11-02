@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { writeWorkspaceTree } from './workspace-capture'
+import { writeWorkspaceTree } from './workspace-tree'
 import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 

@@ -48,8 +48,14 @@ export function useDevServerDetection({
   }, [taskId, task?.dev_url_toast_dismissed])
   useEffect(() => {
     devUrlDismissedRef.current.clear()
-    setDetectedDevUrl(null)
   }, [taskId])
+  // A detected URL belongs to its task: cleared while rendering the new task, not in an
+  // effect (react-hooks/set-state-in-effect).
+  const [urlTaskId, setUrlTaskId] = useState(taskId)
+  if (urlTaskId !== taskId) {
+    setUrlTaskId(taskId)
+    setDetectedDevUrl(null)
+  }
   const browserOpenRef = useRef(browserVisible)
   useEffect(() => {
     browserOpenRef.current = browserVisible

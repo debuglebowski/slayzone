@@ -298,17 +298,20 @@ test('Codex chat session count and title recover from saved chat events', async 
     origin: 'slay-spawned-fresh',
     createdAt: 1000
   })
-  raw.prepare(`INSERT INTO terminal_tabs (id, task_id, mode) VALUES ('chat-tab', 'CHAT', 'codex-chat')`).run()
+  raw
+    .prepare(
+      `INSERT INTO terminal_tabs (id, task_id, mode) VALUES ('chat-tab', 'CHAT', 'codex-chat')`
+    )
+    .run()
   const events = [
     { kind: 'turn-init', sessionId: 'THREAD' },
     { kind: 'user-message', text: 'first question' },
     { kind: 'user-message', text: 'second question' }
   ]
   for (const [seq, event] of events.entries()) {
-    raw.prepare(`INSERT INTO chat_events (tab_id, seq, event) VALUES ('chat-tab', ?, ?)`).run(
-      seq,
-      JSON.stringify(event)
-    )
+    raw
+      .prepare(`INSERT INTO chat_events (tab_id, seq, event) VALUES ('chat-tab', ?, ?)`)
+      .run(seq, JSON.stringify(event))
   }
   const sessions = await listTaskSessions(db, 'CHAT', 'codex-chat')
   const session = sessions.find((s) => s.conversationId === 'THREAD')!

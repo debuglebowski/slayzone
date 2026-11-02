@@ -362,9 +362,7 @@ export function AppearanceSettingsTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-            <SettingLabel tip="Horizontal width of agent chat messages">
-              Width
-            </SettingLabel>
+            <SettingLabel tip="Horizontal width of agent chat messages">Width</SettingLabel>
             <Select
               value={chatWidth}
               onValueChange={(v) => {

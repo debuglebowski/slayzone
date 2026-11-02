@@ -917,6 +917,9 @@ importers:
       '@slayzone/build-guards':
         specifier: workspace:*
         version: link:../../shared/build-guards
+      '@slayzone/computer':
+        specifier: workspace:*
+        version: link:../computer
       '@slayzone/test-utils':
         specifier: workspace:*
         version: link:../../shared/test-utils
@@ -3009,6 +3012,9 @@ importers:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
     devDependencies:
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../agent-turns
       '@slayzone/test-utils':
         specifier: workspace:*
         version: link:../../shared/test-utils

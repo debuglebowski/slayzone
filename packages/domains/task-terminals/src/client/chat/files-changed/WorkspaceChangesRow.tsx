@@ -105,10 +105,10 @@ function SavedFile({
         </span>
         <span className="text-muted-foreground">{file.kind}</span>
         {file.additions !== null && (
-          <span className="text-green-600 dark:text-green-400">+{file.additions}</span>
+          <span className="text-diff-added-foreground">+{file.additions}</span>
         )}
         {file.deletions !== null && (
-          <span className="text-red-600 dark:text-red-400">−{file.deletions}</span>
+          <span className="text-diff-removed-foreground">−{file.deletions}</span>
         )}
       </button>
       {open && toolFile && (!finalOnly || renderRecordedFile) && (

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
 import { createHubCliRelay } from './cli-relay'
-import { createComputerCliRelay } from '../../computer/src/cli-relay'
+import { createComputerCliRelay } from '@slayzone/computer/cli-relay'
 import { restPrincipalOf, restComputerOf } from '@slayzone/api'
 import { withRestAuth } from './rest-auth'
 
