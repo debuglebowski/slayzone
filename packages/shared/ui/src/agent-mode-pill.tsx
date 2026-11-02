@@ -45,10 +45,10 @@ const AMBER = {
   text: 'text-amber-700 dark:text-amber-300'
 }
 
-const NEUTRAL = {
-  chip: 'bg-muted text-foreground ring-border',
-  chipHover: 'hover:bg-accent',
-  text: 'text-foreground'
+const INDIGO = {
+  chip: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 ring-indigo-500/30',
+  chipHover: 'hover:bg-indigo-500/25',
+  text: 'text-indigo-600 dark:text-indigo-300'
 }
 
 /**
@@ -70,7 +70,7 @@ const MODE_META: Record<string, ModeMeta> = {
     short: 'Ask',
     description: 'Claude asks before each edit and command; you answer in the chat.',
     icon: ShieldQuestion,
-    ...NEUTRAL
+    ...INDIGO
   },
   'auto-accept': {
     label: 'Auto-accept edits',
@@ -236,17 +236,17 @@ export function AgentModePill({
               }}
               className={cn(
                 'flex items-start gap-2 py-2',
-                selected && 'bg-accent/40',
+                selected && itemMeta.chip,
                 itemDisabled && 'opacity-50'
               )}
             >
-              <ItemIcon className="size-4 mt-0.5 shrink-0" />
+              <ItemIcon className={cn('size-4 mt-0.5 shrink-0', itemMeta.text)} />
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium">{itemMeta.label}</div>
+                <div className={cn('text-xs font-medium', itemMeta.text)}>{itemMeta.label}</div>
                 <div className="text-[11px] text-muted-foreground leading-snug">{description}</div>
               </div>
               {selected && (
-                <span className="text-[10px] text-muted-foreground self-center">current</span>
+                <span className={cn('text-[10px] self-center', itemMeta.text)}>current</span>
               )}
             </DropdownMenuItem>
           )
