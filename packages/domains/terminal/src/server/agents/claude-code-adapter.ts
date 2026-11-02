@@ -163,6 +163,10 @@ export const claudeCodeAdapter: AgentAdapter = {
     })
   },
 
+  serializeControlCancelRequest({ requestId }): string {
+    return JSON.stringify({ type: 'control_cancel_request', request_id: requestId })
+  },
+
   serializeControlResponse({ requestId, response, isError, error }): string {
     if (isError) {
       return JSON.stringify({
@@ -415,6 +419,9 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
   if (subtype === 'hook_started' || subtype === 'hook_progress' || subtype === 'task_progress') {
     return null
   }
+  // Progress of a host control request still running (a side question: `started`,
+  // API retries) — plumbing for that request, not a timeline event.
+  if (subtype === 'control_request_progress') return null
   return { kind: 'unknown', reason: 'unknown-type', raw: obj }
 }
 

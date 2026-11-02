@@ -82,6 +82,12 @@ const turnQueue = []
 let turnRunning = false
 let turnAbort = null
 let exiting = false
+/**
+ * Ephemeral forks (`thread/fork {ephemeral}`, how chat answers a side question):
+ * id → { source, abort }. Never saved, never `ctx.threadId`; their turns run
+ * beside the main thread's queue, every notification naming the fork's id.
+ */
+const ephemeralThreads = new Map()
 
 // --- signals + stdin ------------------------------------------------------------
 
@@ -176,9 +182,18 @@ async function onRequest(msg) {
         return threadResponse(params)
       })
     case 'turn/start':
+      if (ephemeralThreads.has(params?.threadId)) return startSideTurn(id, params)
       return startTurn(id, params)
     case 'turn/interrupt':
+      if (ephemeralThreads.has(params?.threadId)) return interruptSideTurn(id, params)
       return interrupt(id, params)
+    case 'thread/unsubscribe':
+      return respondWith(id, override, () => {
+        log('unsubscribe', { threadId: params?.threadId ?? null })
+        ephemeralThreads.get(params?.threadId)?.abort?.abort()
+        ephemeralThreads.delete(params?.threadId)
+        return { status: 'unsubscribed' }
+      })
     case 'model/list':
       return respondWith(id, override, () => ({ data: DEFAULT_MODELS, nextCursor: null }))
     case 'thread/turns/list':
@@ -186,6 +201,12 @@ async function onRequest(msg) {
     case 'thread/revert':
       return respondWith(id, override, () => revertThread(params))
     case 'thread/fork':
+      if (params?.ephemeral) {
+        return respondWith(id, override, () => forkEphemeral(params)).then((ok) => {
+          const fork = ok ? lastEphemeral : null
+          if (fork) return emit({ method: 'thread/started', params: { thread: fork } })
+        })
+      }
       return respondWith(id, override, () => forkThread(params))
     case 'thread/compact/start':
       return compactThread(id, params, override)
@@ -323,7 +344,7 @@ function turnsPage(params) {
   }
   const data = turns.map((t) => ({
     id: t.id,
-    status: 'completed',
+    status: turnRunning && t.id === ctx.turnId ? 'inProgress' : 'completed',
     error: null,
     itemsView: 'full',
     items: [
@@ -378,6 +399,104 @@ function forkThread(params) {
   saveTurns(ctx.threadId, keep)
   log('fork', { from: source, threadId: ctx.threadId, kept: keep.length })
   return { ...threadResponse(params), thread: { ...threadObject(), forkedFromId: source } }
+}
+
+let lastEphemeral = null
+
+/** `thread/fork {ephemeral}`: a fork that lives only in this process (never `ctx.threadId`). */
+function forkEphemeral(params) {
+  const source = params?.threadId
+  if (threadTurns(source) === null)
+    return { error: { code: -32600, message: `no rollout found for thread id ${source}` } }
+  const id = randomUUID()
+  ephemeralThreads.set(id, { source, abort: null })
+  log('fork-ephemeral', {
+    from: source,
+    threadId: id,
+    lastTurnId: params.lastTurnId ?? null,
+    excludeTurns: params.excludeTurns ?? null,
+    developerInstructions: params.developerInstructions ?? null,
+    approvalPolicy: params.approvalPolicy ?? null,
+    sandbox: params.sandbox ?? null
+  })
+  lastEphemeral = { ...threadObject(), id, sessionId: id, forkedFromId: source, ephemeral: true }
+  return { ...threadResponse(params), thread: lastEphemeral }
+}
+
+/**
+ * A turn on an ephemeral fork (live 0.166.0: turn/started, an agentMessage item
+ * streamed by word, turn/completed — all with the fork's `threadId`). Runs at
+ * once, beside a main turn. `script.sideTurn`: `{ reply?, delayMs?, hang? }`.
+ */
+async function startSideTurn(id, params) {
+  const threadId = params.threadId
+  const side = ephemeralThreads.get(threadId)
+  const turnId = randomUUID()
+  const text = (params?.input ?? [])
+    .map((b) => (typeof b?.text === 'string' ? b.text : ''))
+    .join('')
+  log('side-turn', {
+    threadId,
+    turnId,
+    text,
+    approvalPolicy: params.approvalPolicy ?? null,
+    sandboxPolicy: params.sandboxPolicy ?? null
+  })
+  await writeMessage({ id, result: { turn: turnObject(turnId, 'inProgress') } })
+  const spec = script.sideTurn ?? {}
+  const abort = new AbortController()
+  side.abort = abort
+  side.turnId = turnId
+  const started = Date.now()
+  const completed = (status) => ({
+    method: 'turn/completed',
+    params: {
+      threadId,
+      turn: turnObject(turnId, status, {
+        itemsView: 'summary',
+        startedAt: Math.floor(started / 1000),
+        completedAt: Math.floor(Date.now() / 1000),
+        durationMs: Date.now() - started
+      })
+    }
+  })
+  await emit({
+    method: 'turn/started',
+    params: { threadId, turn: turnObject(turnId, 'inProgress') }
+  })
+  try {
+    if (spec.hang) await sleep(2 ** 31 - 1, abort.signal)
+    if (spec.delayMs) await sleep(spec.delayMs, abort.signal)
+    const reply = spec.reply ?? `side answer: ${text}`
+    const itemId = randomUUID()
+    const agentItem = (t) => ({
+      type: 'agentMessage',
+      id: itemId,
+      text: t,
+      phase: 'final_answer',
+      memoryCitation: null,
+      delivery: null,
+      questions: null
+    })
+    await emit({ method: 'item/started', params: { item: agentItem(''), threadId, turnId } })
+    for (const delta of reply.match(/\S+\s*|\s+/g) ?? [reply])
+      await emit({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId, delta } })
+    await emit({ method: 'item/completed', params: { item: agentItem(reply), threadId, turnId } })
+    await emit(completed('completed'))
+  } catch (err) {
+    if (!(err instanceof Aborted)) throw err
+    log('side-turn-interrupted', { threadId, turnId })
+    if (ephemeralThreads.has(threadId)) await emit(completed('interrupted'))
+  } finally {
+    side.abort = null
+  }
+}
+
+async function interruptSideTurn(id, params) {
+  const side = ephemeralThreads.get(params.threadId)
+  log('side-interrupt', { threadId: params.threadId, turnId: params?.turnId ?? null })
+  await writeMessage({ id, result: {} })
+  if (side?.abort && params?.turnId === side.turnId) side.abort.abort()
 }
 
 /**

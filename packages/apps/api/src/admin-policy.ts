@@ -432,6 +432,8 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.setFastMode': 'user',
   'chat.setMode': 'user',
   'chat.setModel': 'user',
+  'chat.sideQuestion.ask': 'user',
+  'chat.sideQuestion.cancel': 'user',
   'chat.start': 'user',
   'chat.stopCommandTask': 'user',
   'chat.supports': 'user',

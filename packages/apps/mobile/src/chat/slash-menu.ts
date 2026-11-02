@@ -83,7 +83,8 @@ export function slashItems(lists: SlashLists, caps: ChatCapabilities): SlashItem
     : [...(lists.commands ?? [])]
   const builtins = availableBuiltins({
     cliCommandNames: new Set(cli.map((c) => c.name)),
-    capabilities: caps
+    // No side-question card (`/btw`) on mobile yet: its builtin stays desktop-only.
+    capabilities: { ...caps, sideQuestions: false }
   })
   const items: SlashItem[] = [
     ...commands.map((c) => ({

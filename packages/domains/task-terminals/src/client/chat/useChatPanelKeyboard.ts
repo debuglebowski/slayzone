@@ -24,6 +24,11 @@ export interface UseChatPanelKeyboardOpts {
    * answers the prompt instead of stopping the turn).
    */
   promptKeysRef?: RefObject<PromptKeyHandler | null>
+  /**
+   * The side-question card (`/btw`) is open: Esc closes it — after a pending
+   * prompt had its turn, before Esc stops a running turn.
+   */
+  onDismissSideQuestion?: () => void
   /** The composer's textarea: Esc Esc counts from it, or from no field at all. */
   composerRef?: RefObject<HTMLTextAreaElement | null>
   /** The composer holds nothing (no text, no files). */
@@ -52,7 +57,8 @@ export interface UseChatPanelKeyboardOpts {
  *     (Ctrl+Alt+arrows is the desktop's workspace switch on Windows / Linux)
  *   - Shift+Tab → cycle agent permission mode (terminal-mode parity; skipped
  *     while in flight or while autocomplete owns Tab)
- *   - Esc → stop the in-flight turn (defers to autocomplete's own Esc)
+ *   - Esc → close an open side question (`/btw`), else stop the in-flight turn
+ *     (defers to autocomplete's own Esc)
  *   - Esc Esc (within 800 ms, no turn running, empty composer, from the composer
  *     or no field) → rewind (`onDoubleEscape`), like the TUI. A nonempty
  *     composer instead clears its draft (`onClearDraft`).
@@ -77,6 +83,7 @@ export function useChatPanelKeyboard({
   handleStop,
   mode,
   promptKeysRef,
+  onDismissSideQuestion,
   composerRef,
   draftEmpty = false,
   onClearDraft,
@@ -186,6 +193,12 @@ export function useChatPanelKeyboard({
           armedAt = 0
           return
         }
+        if (onDismissSideQuestion && !e.defaultPrevented) {
+          armedAt = 0
+          e.preventDefault()
+          onDismissSideQuestion()
+          return
+        }
         if (inFlight) {
           armedAt = 0
           e.preventDefault()
@@ -223,6 +236,7 @@ export function useChatPanelKeyboard({
     handleStop,
     mode,
     promptKeysRef,
+    onDismissSideQuestion,
     composerRef,
     draftEmpty,
     onClearDraft,

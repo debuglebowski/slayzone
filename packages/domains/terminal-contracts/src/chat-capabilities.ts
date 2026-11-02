@@ -71,6 +71,12 @@ export interface ChatCapabilities {
   /** `/compact` compacts the conversation: the chat offers Compact (Cmd+K, the `/` menu). */
   compact: boolean
   /**
+   * `/btw <question>`: a side question answered from the conversation — while a
+   * turn runs too — that never enters it (Claude: `side_question` control
+   * request; Codex: an ephemeral fork of the thread).
+   */
+  sideQuestions: boolean
+  /**
    * The provider starts turns by itself (Claude Code answers a finished
    * background task or a hook with init, output and a result — no user
    * message): the chat reads as working through such a turn. Codex never
@@ -98,6 +104,7 @@ const NONE: ChatCapabilities = {
   diffComments: false,
   commandPalette: false,
   compact: false,
+  sideQuestions: false,
   agentStartedTurns: false
 }
 
@@ -121,6 +128,7 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     diffComments: true,
     commandPalette: true,
     compact: true,
+    sideQuestions: true,
     agentStartedTurns: true
   },
   'codex-chat': {
@@ -149,7 +157,9 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     // The Cmd+K Chat page is client-only; Compact lives on it.
     commandPalette: true,
     // `/compact` → `thread/compact/start` (the driver).
-    compact: true
+    compact: true,
+    // An ephemeral `thread/fork` + one turn on it, answered and dropped (the driver).
+    sideQuestions: true
   }
 }
 

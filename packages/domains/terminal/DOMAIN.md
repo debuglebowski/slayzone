@@ -26,6 +26,20 @@ Child events, drafts, queue entries, and processes use the ordinary chat runtime
 Returned conclusions bind queue entries to their source conversation (migration
 181); draining rechecks this scope after popping and preserves a mismatched entry.
 
+### Chat side questions (`/btw`)
+
+`chat.sideQuestion.ask` answers a question from the tab's conversation without
+adding it, mid-turn too. Nothing is persisted: no DB row, event, or transcript
+line. The answer lives in the renderer's side card until dismissed. Claude Code
+uses its `side_question` control request (one tool-less query that skips the
+transcript; `history` carries follow-ups; cancel = `control_cancel_request`).
+Codex forks the thread ephemerally (`thread/fork {ephemeral, excludeTurns,
+lastTurnId}` through the last finished turn), runs one read-only,
+approval-free turn on the fork, then `thread/unsubscribe`s it. The driver routes
+every notification of its forks away from the main timeline, late ones too.
+Codex 0.166's `thread/sample` refuses a thread with a running turn, so the fork
+is the one path. Live check: `agents/side-question.live.ts`.
+
 ### Codex background terminals
 
 The chat driver polls Codex's native `thread/backgroundTerminals/list` registry

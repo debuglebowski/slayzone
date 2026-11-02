@@ -504,6 +504,9 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.setFastMode': 'agent',
   'chat.setMode': 'agent',
   'chat.setModel': 'agent',
+  // `/btw`: a question to the running agent, like `send` — its answer never enters the chat.
+  'chat.sideQuestion.ask': 'agent',
+  'chat.sideQuestion.cancel': 'agent',
   'chat.start': 'never',
   'chat.stopCommandTask': 'agent',
   'chat.supports': 'agent',

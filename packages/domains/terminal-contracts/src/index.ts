@@ -34,6 +34,7 @@ export * from './spawn-conversation-ids'
 export type { ConversationOrigin } from './conversation-origin'
 export * from './bg-shell-helpers'
 export * from './chat-thread'
+export * from './chat-side-question'
 export * from './workspace-changes'
 
 /**

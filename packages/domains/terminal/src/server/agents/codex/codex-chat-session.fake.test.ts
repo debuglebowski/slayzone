@@ -528,3 +528,138 @@ describe('CodexChatSession — thread commands', () => {
     expect((res as { response: { error: string } }).response.error).toMatch(/Codex/)
   })
 })
+
+describe('CodexChatSession — side questions (/btw)', () => {
+  type SideDriver = CodexDriver &
+    Required<Pick<ChatSessionDriver, 'askSideQuestion' | 'cancelSideQuestion'>>
+  const forkRequests = () =>
+    fake
+      .current()
+      .run(0)!
+      .requests('thread/fork')
+      .filter((r) => r.params.ephemeral === true)
+  const sideTurnStarts = (mainThread: string) =>
+    fake
+      .current()
+      .run(0)!
+      .requests('turn/start')
+      .filter((r) => r.params.threadId !== mainThread)
+
+  it('idle: an ephemeral fork through the last turn answers one tool-less turn, then is dropped', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')] }] })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    const before = l.events.length
+    const answer = await (l.driver as SideDriver).askSideQuestion(
+      { requestId: 'q1', question: 'Why one?', history: [] },
+      5000
+    )
+    expect(answer).toEqual({ text: expect.stringContaining('Why one?') })
+    const run = fake.current().run(0)!
+    const main = run.threadId!
+    const [fork] = forkRequests()
+    expect(fork.params).toMatchObject({
+      threadId: main,
+      lastTurnId: run.turnIds()[0],
+      ephemeral: true,
+      excludeTurns: true,
+      approvalPolicy: 'never',
+      sandbox: 'read-only'
+    })
+    expect(fork.params.developerInstructions).toEqual(expect.stringMatching(/side question/i))
+    const [side] = sideTurnStarts(main)
+    expect(side.params).toMatchObject({
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'readOnly' }
+    })
+    expect(run.requests('thread/unsubscribe').map((r) => r.params.threadId)).toEqual([
+      side.params.threadId
+    ])
+    // Nothing of the fork reaches the main timeline.
+    expect(l.events.slice(before)).toEqual([])
+  })
+
+  it('mid-turn: answered from the last finished turn while the main turn keeps running', async () => {
+    const l = await live({
+      processes: [{ turns: [codexReply('one'), [...codexReply('working'), cstep.hang()]] }]
+    })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    l.driver.sendUserMessage('second')
+    await expect.poll(() => l.events.filter((e) => e.kind === 'stream-message-stop').length).toBe(2)
+    const before = l.events.length
+    const answer = await (l.driver as SideDriver).askSideQuestion(
+      { requestId: 'q2', question: 'Status?', history: [] },
+      5000
+    )
+    expect(answer.text).toContain('Status?')
+    const run = fake.current().run(0)!
+    expect(forkRequests()[0].params.lastTurnId).toBe(run.turnIds()[0])
+    expect(l.events.slice(before)).toEqual([])
+    expect(l.events.filter(isResult)).toHaveLength(1)
+  })
+
+  it('a follow-up carries the earlier exchanges in its prompt', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')] }] })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    await (l.driver as SideDriver).askSideQuestion(
+      {
+        requestId: 'q3',
+        question: 'And then?',
+        history: [{ question: 'What first?', answer: 'The parser.' }]
+      },
+      5000
+    )
+    const prompt = fake.current().run(0)!.userTexts().at(-1)!
+    expect(prompt).toContain('What first?')
+    expect(prompt).toContain('The parser.')
+    expect(prompt.indexOf('And then?')).toBeGreaterThan(prompt.indexOf('The parser.'))
+  })
+
+  it('cancel interrupts the fork turn, drops the fork, and rejects the question', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')], sideTurn: { hang: true } }] })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    const driver = l.driver as SideDriver
+    const answer = driver.askSideQuestion({ requestId: 'q4', question: 'Slow?', history: [] }, 5000)
+    const run = fake.current().run(0)!
+    await expect.poll(() => run.entries.filter((e) => e.kind === 'side-turn').length).toBe(1)
+    driver.cancelSideQuestion('q4')
+    await expect(answer).rejects.toThrow(/cancel/i)
+    await expect.poll(() => run.requests('thread/unsubscribe').length).toBe(1)
+    expect(run.entries.some((e) => e.kind === 'side-interrupt')).toBe(true)
+    expect(l.events.filter(isResult)).toHaveLength(1)
+  })
+
+  it('a new conversation (no turn yet) forks the whole thread', async () => {
+    const l = await live({ processes: [{ turns: [] }] })
+    const answer = await (l.driver as SideDriver).askSideQuestion(
+      { requestId: 'q5', question: 'Ready?', history: [] },
+      5000
+    )
+    expect(answer.text).toContain('Ready?')
+    expect(forkRequests()[0].params.lastTurnId).toBeUndefined()
+  })
+
+  it('the session ending rejects a question still running', async () => {
+    const l = await live({ processes: [{ turns: [codexReply('one')], sideTurn: { hang: true } }] })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    const answer = (l.driver as SideDriver).askSideQuestion(
+      { requestId: 'q6', question: 'Q', history: [] },
+      5000
+    )
+    await expect
+      .poll(
+        () =>
+          fake
+            .current()
+            .run(0)!
+            .entries.filter((e) => e.kind === 'side-turn').length
+      )
+      .toBe(1)
+    l.driver.dispose()
+    await expect(answer).rejects.toThrow(/ended/i)
+  })
+})

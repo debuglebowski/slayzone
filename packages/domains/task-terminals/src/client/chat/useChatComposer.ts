@@ -30,6 +30,7 @@ import { createCommandsSource } from './autocomplete/sources/commands'
 import { createCliCustomCommandsSource } from './autocomplete/sources/cli-custom-commands'
 import { createAgentsSource } from './autocomplete/sources/agents'
 import { createBuiltinsSource } from './autocomplete/sources/builtins'
+import { BUILTIN_ARGUMENT_HINTS } from './autocomplete/builtins-registry'
 import { createFilesSource } from './autocomplete/sources/files'
 import { cliCommandItems, createCliCommandsSource } from './autocomplete/sources/cli-commands'
 import { usePromptHistory } from './usePromptHistory'
@@ -76,6 +77,11 @@ export interface UseChatComposerOpts {
    * message goes next). Provided → queued messages get "Send now".
    */
   interruptTurn?: () => Promise<void>
+  /**
+   * `/btw <question>`: a side question — asked at once, mid-turn too, never sent
+   * or queued (`ChatCapabilities.sideQuestions`). Absent: `/btw` is plain text.
+   */
+  onSideQuestion?: (question: string) => void
 }
 
 /**
@@ -114,7 +120,8 @@ export function useChatComposer({
   handleModelChange,
   cliCommands,
   attachmentsUsedBytes = 0,
-  interruptTurn
+  interruptTurn,
+  onSideQuestion
 }: UseChatComposerOpts) {
   const trpcClient = useTRPCClient()
   const capabilities = chatCapabilitiesForMode(mode)
@@ -246,11 +253,11 @@ export function useChatComposer({
   // The CLI's own commands — only where the provider runs slash commands itself.
   const cliList = capabilities.nativeSlashCommands ? cliCommands : null
   // TUI parity: right after a parked `/name ` the command's argument hint shows
-  // as ghost text (from the CLI's `initialize` reply).
+  // as ghost text (an app builtin's own, else the CLI's `initialize` reply).
   const parked = /^\/(\S+) $/.exec(draft)
   const argumentHint =
     parked && cursorPos === draft.length
-      ? cliList?.details?.[parked[1]]?.argumentHint || null
+      ? BUILTIN_ARGUMENT_HINTS[parked[1]] || cliList?.details?.[parked[1]]?.argumentHint || null
       : null
   const sources = useMemo(
     () => [
@@ -341,6 +348,21 @@ export function useChatComposer({
         setDraft('')
         await handleModelChange(id)
         toast(`Model set to ${modelLabelForMode(mode, id)}`)
+        return
+      }
+
+      // Builtin `/btw <question>` — a side question: answered aside from the
+      // conversation, so it is neither sent nor queued, and a running turn stays.
+      // Attached files stay in the composer (the question carries text only).
+      const btwMatch = onSideQuestion ? /^\/btw(?:\s+([\s\S]*))?$/.exec(text) : null
+      if (btwMatch && onSideQuestion) {
+        const question = (btwMatch[1] ?? '').trim()
+        if (!question) {
+          toast('Type a question after /btw')
+          return
+        }
+        setDraft('')
+        onSideQuestion(question)
         return
       }
 
@@ -453,7 +475,8 @@ export function useChatComposer({
       mode,
       recordHistory,
       setDraft,
-      setAttachments
+      setAttachments,
+      onSideQuestion
     ]
   )
 

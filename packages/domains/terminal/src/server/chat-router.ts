@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { randomUUID } from 'node:crypto'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { CHAT_IMAGE_MEDIA_TYPES } from '@slayzone/terminal-contracts'
+import { CHAT_IMAGE_MEDIA_TYPES, SIDE_QUESTION_MAX_CHARS } from '@slayzone/terminal-contracts'
 import { getChatDeps } from './chat-router-deps'
 
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
@@ -207,6 +207,29 @@ export const chatRouter = router({
         })
       )
       .mutation(({ input }) => ops().createThread(input))
+  }),
+  // `/btw`: a side question answered from the conversation, never part of it.
+  sideQuestion: router({
+    // May start the agent: a mutation. Resolves with the answer (seconds).
+    ask: publicProcedure
+      .input(
+        chatCreateOpts.extend({
+          requestId: z.string().min(1).max(200),
+          question: z.string().trim().min(1).max(SIDE_QUESTION_MAX_CHARS),
+          history: z
+            .array(
+              z.object({
+                question: z.string().max(SIDE_QUESTION_MAX_CHARS),
+                answer: z.string().max(200_000)
+              })
+            )
+            .max(50)
+        })
+      )
+      .mutation(({ input }) => ops().askSideQuestion(input)),
+    cancel: publicProcedure
+      .input(z.object({ tabId: z.string(), requestId: z.string().min(1).max(200) }))
+      .mutation(({ input }) => ops().cancelSideQuestion(input))
   }),
   // Sessions picker: run another conversation of this task (this chat's, or the
   // terminal's — a hand-off) in the tab.

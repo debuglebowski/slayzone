@@ -3,7 +3,9 @@ import type {
   CommandTaskOutput,
   OutgoingUserMessage,
   UserContentBlock,
-  PermissionDecision
+  PermissionDecision,
+  SideAnswer,
+  SideQuestionRequest
 } from '@slayzone/terminal-contracts'
 import type { ChatWriteOptions } from '../runtime/chat-proc-handle'
 
@@ -126,6 +128,13 @@ export interface AgentAdapter {
     isError?: boolean
     error?: string
   }): string | null
+
+  /**
+   * Produce ONE NDJSON `control_cancel_request` envelope withdrawing a
+   * `control_request` the host sent and the CLI has not answered yet (the CLI
+   * answers it with an error `control_response`). Null: no cancel channel.
+   */
+  serializeControlCancelRequest?(args: { requestId: string }): string | null
 
   /**
    * If the event carries session/conversation id info, return it so the transport
@@ -252,6 +261,15 @@ export interface ChatSessionDriver {
    * acknowledges, rejects on timeout / unsupported / session exit.
    */
   applyControl?(request: Record<string, unknown>, timeoutMs: number): Promise<unknown>
+  /**
+   * Answer a side question (`/btw`) from the conversation without adding it to
+   * the conversation — while a turn runs too. Rejects on timeout, on
+   * `cancelSideQuestion`, on a provider refusal, or when the session ends.
+   * Absent: the provider has none (`ChatCapabilities.sideQuestions`).
+   */
+  askSideQuestion?(request: SideQuestionRequest, timeoutMs: number): Promise<SideAnswer>
+  /** Withdraw a running side question: its `askSideQuestion` rejects. Unknown ids are ignored. */
+  cancelSideQuestion?(requestId: string): void
   /**
    * Reply to an inbound permission request. Return false when unsupported, or
    * when the request is not (or no longer) pending. `optionId` names the prompt

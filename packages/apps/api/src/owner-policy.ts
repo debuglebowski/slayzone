@@ -686,6 +686,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.rewindPreview': chatOpts,
   'chat.rewind': chatOpts,
   'chat.fork': chatOpts,
+  'chat.sideQuestion.ask': chatOpts,
+  'chat.sideQuestion.cancel': checked(tab('tabId')),
   'chat.switchConversation': chatOpts,
   'chat.continueInTerminal': chatOpts,
   'chat.continueInChat': chatOpts,

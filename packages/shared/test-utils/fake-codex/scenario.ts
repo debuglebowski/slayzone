@@ -78,6 +78,12 @@ export interface CodexProcessScript {
   interrupt?: 'ignore' | 'error'
   /** Replaces the default interrupt output. */
   onInterrupt?: CodexStep[]
+  /**
+   * Turns on an ephemeral fork (`thread/fork {ephemeral}` — a side question):
+   * reply `reply` (default `side answer: <prompt>`) after `delayMs`, or `hang`
+   * until interrupted / unsubscribed. They run beside the main thread's turns.
+   */
+  sideTurn?: { reply?: string; delayMs?: number; hang?: boolean }
   /** Run on SIGTERM before exiting (default: exit at once, like 0.159.2). */
   onSigterm?: CodexStep[]
   sigtermExitCode?: number

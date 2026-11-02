@@ -11,6 +11,8 @@ import {
 import { CornerDownLeft } from 'lucide-react'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
+import { useSideQuestions } from './side-questions/useSideQuestions'
+import { SideQuestionCard } from './side-questions/SideQuestionCard'
 import { ChatThreadsPanel } from './ChatThreadsPanel'
 import {
   toast,
@@ -247,6 +249,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       folderName: 'Uploads'
     })
 
+    // `/btw`: side questions, answered aside — never part of the conversation.
+    const sideQuestions = useSideQuestions({ tabId, taskId, mode, cwd, providerFlagsOverride })
+
     const composer = useChatComposer({
       tabId,
       taskId,
@@ -270,7 +275,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       attachmentsUsedBytes: attachmentBytesOf(historyOfSession),
       // "Send now" on a queued message: a live interrupt keeps the queue, which
       // then drains that message next (`chat.interrupt` → stopTurn, no restore).
-      ...(chatCapabilitiesForMode(mode).liveInterrupt ? { interruptTurn: interrupt } : {})
+      ...(chatCapabilitiesForMode(mode).liveInterrupt ? { interruptTurn: interrupt } : {}),
+      ...(chatCapabilitiesForMode(mode).sideQuestions ? { onSideQuestion: sideQuestions.ask } : {})
     })
 
     const attachmentsApi = useChatAttachments({
@@ -467,6 +473,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       handleStop: composer.handleStop,
       mode,
       promptKeysRef,
+      ...(sideQuestions.open ? { onDismissSideQuestion: sideQuestions.dismiss } : {}),
       composerRef: composer.textareaRef,
       draftEmpty: composer.draft === '' && composer.attachments.length === 0,
       onClearDraft: composer.clearDraft,
@@ -829,6 +836,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         />
                       )}
                       <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
+                      {sideQuestions.open && (
+                        <SideQuestionCard
+                          exchanges={sideQuestions.exchanges}
+                          onDismiss={sideQuestions.dismiss}
+                        />
+                      )}
                       <RewindDialog dialog={conversation.dialog} />
                       <AlertDialog
                         open={resetConfirmOpen}

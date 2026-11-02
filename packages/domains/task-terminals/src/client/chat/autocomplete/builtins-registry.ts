@@ -158,6 +158,18 @@ export const builtinCommands: BuiltinCommand[] = [
     }
   },
   {
+    name: 'btw',
+    description: 'Ask a quick side question without interrupting the main conversation',
+    argumentHint: '<question>',
+    // The CLI's own /btw is a terminal overlay; here the app shows the answer.
+    cliCollision: 'app-wins',
+    available: (caps) => caps.sideQuestions,
+    run(ctx) {
+      // Park the draft; handleSend asks the question on Enter.
+      ctx.setDraft('/btw ')
+    }
+  },
+  {
     name: 'effort',
     description: 'Set reasoning effort — usage: /effort <low|medium|high|xhigh|max>',
     cliCollision: 'app-wins',
@@ -168,6 +180,15 @@ export const builtinCommands: BuiltinCommand[] = [
     }
   }
 ]
+
+/**
+ * Ghost text after a parked `/name ` for builtins that take an argument
+ * (`/btw <question>`). Availability is not checked: the hint only shows once
+ * that exact name was typed, and a builtin's hint wins over the CLI's.
+ */
+export const BUILTIN_ARGUMENT_HINTS: Readonly<Record<string, string>> = Object.fromEntries(
+  builtinCommands.flatMap((b) => (b.argumentHint ? [[b.name, b.argumentHint]] : []))
+)
 
 export function rankBuiltins(items: BuiltinCommand[], filter: string): BuiltinCommand[] {
   return rankByName(items, filter, {

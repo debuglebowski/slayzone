@@ -177,7 +177,7 @@ export function ChatComposer({
   const attaching = attachmentsApi.pending.length > 0
   return (
     <div className={`bg-background pb-1 ${hasPlanReview ? 'pt-0' : 'pt-6'}`}>
-      <div className="mx-auto w-full max-w-[60rem]">
+      <div data-testid="chat-composer-column" className="mx-auto w-full max-w-[60rem]">
         {backgroundJobs}
         <ChatQueueList items={queuedMessages} onRemove={removeQueue} {...queueApi} />
         {(attachments.length > 0 || attaching) && (

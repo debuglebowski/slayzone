@@ -32,6 +32,8 @@ import {
   rewindTab,
   forkTab,
   threadForkSource,
+  askSideQuestion,
+  cancelSideQuestion,
   confirmedConversation,
   releaseChatConversation,
   switchTabConversation,
@@ -73,7 +75,9 @@ import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/ter
 import type {
   AgentEvent,
   OutgoingUserMessage,
-  PermissionDecision
+  PermissionDecision,
+  SideAnswer,
+  SideQuestionExchange
 } from '@slayzone/terminal-contracts'
 import {
   rawPermissionModeToChatMode,
@@ -639,7 +643,7 @@ function refuseRespawnMidTurn(tabId: string, setting: string, cause: unknown): v
 /** Refuse an operation the mode's provider can't do (`ChatCapabilities`). */
 function assertCapability(
   mode: string,
-  capability: 'rewind' | 'fork' | 'sessions' | 'handoff'
+  capability: 'rewind' | 'fork' | 'sessions' | 'handoff' | 'sideQuestions'
 ): void {
   if (!chatCapabilitiesForMode(mode)[capability]) {
     throw new Error(`Chat mode "${mode}" does not support ${capability}`)
@@ -1062,6 +1066,28 @@ export function createChatOps(opts: ChatHandlerOpts) {
         messageId: o.messageId,
         respawnOpts: () => buildHydrateOpts(data, o, { fresh: false })
       })
+    },
+
+    /**
+     * A side question (`/btw`): answered from this tab's conversation — while a
+     * turn runs too — and never part of it. Starts the agent when the tab has
+     * none. Rejects on timeout, cancel, or the agent refusing.
+     */
+    askSideQuestion: async (
+      o: ChatCreateOpts & { requestId: string; question: string; history: SideQuestionExchange[] }
+    ): Promise<SideAnswer> => {
+      assertCapability(o.mode, 'sideQuestions')
+      await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      return askSideQuestion(o.tabId, {
+        requestId: o.requestId,
+        question: o.question,
+        history: o.history
+      })
+    },
+
+    /** Withdraw a running side question (no-op when it already ended). */
+    cancelSideQuestion: (o: { tabId: string; requestId: string }): void => {
+      cancelSideQuestion(o.tabId, o.requestId)
     },
 
     listThreads: async (o: ChatCreateOpts) => {

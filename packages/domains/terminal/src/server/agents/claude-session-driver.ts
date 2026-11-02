@@ -20,7 +20,9 @@ import type {
   CommandTaskOutput,
   CliCommandDetailsEvent,
   OutgoingUserMessage,
-  PermissionDecision
+  PermissionDecision,
+  SideAnswer,
+  SideQuestionRequest
 } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
 import { ClaudeCommandTasks } from './claude-command-tasks'
@@ -303,13 +305,42 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
   }
 
   /**
+   * `side_question` control request (2.1.316): the CLI answers from the live
+   * conversation in a one-turn, tool-less side query that skips the transcript —
+   * while a turn runs too. The caller's id is the request id, so a cancel names it.
+   */
+  async askSideQuestion(request: SideQuestionRequest, timeoutMs: number): Promise<SideAnswer> {
+    const data = await this.issueControl(
+      {
+        subtype: 'side_question',
+        question: request.question,
+        ...(request.history.length > 0
+          ? { history: request.history.map((h) => ({ question: h.question, response: h.answer })) }
+          : {})
+      },
+      timeoutMs,
+      request.requestId
+    ).response
+    const reply = (data as { response?: { response?: unknown } } | undefined)?.response
+    return { text: typeof reply?.response === 'string' ? reply.response : null }
+  }
+
+  /** `control_cancel_request`: the CLI aborts it and answers with an error (`askSideQuestion` rejects). */
+  cancelSideQuestion(requestId: string): void {
+    if (!this.pendingControl.has(requestId)) return
+    this.writeSafely(claudeCodeAdapter.serializeControlCancelRequest?.({ requestId }))
+  }
+
+  /**
    * Send a control_request: `written` settles with the write, `response` with
    * the CLI's control_response (or the timeout / the session ending). Callers
    * that only need one of them must still observe the other's rejection.
    */
   private issueControl(
     request: Record<string, unknown>,
-    timeoutMs: number
+    timeoutMs: number,
+    /** Caller-chosen id (one it can cancel by); default: a fresh one. */
+    id?: string
   ): { written: Promise<void>; response: Promise<unknown> } {
     const refuse = (msg: string): { written: Promise<void>; response: Promise<unknown> } => {
       const err = Promise.reject(new Error(msg))
@@ -317,8 +348,10 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     }
     if (!this.ctx) return refuse('driver not started')
     if (!claudeCodeAdapter.serializeControlRequest) return refuse('adapter has no control channel')
+    if (id !== undefined && this.pendingControl.has(id))
+      return refuse(`control_request ${id} is already in flight`)
     this.controlReqCounter++
-    const requestId = `req_${this.controlReqCounter}_${Date.now().toString(36)}`
+    const requestId = id ?? `req_${this.controlReqCounter}_${Date.now().toString(36)}`
     const line = claudeCodeAdapter.serializeControlRequest({ requestId, request })
     if (line == null) return refuse('adapter refused to serialize control_request')
     let written!: Promise<void>

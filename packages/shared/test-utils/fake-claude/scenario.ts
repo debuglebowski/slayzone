@@ -128,6 +128,11 @@ export interface ProcessScript {
   onInterrupt?: Step[]
   /** Unset → exit 143 at once. Set → keep running these steps, then exit 143. */
   onSigterm?: Step[]
+  /**
+   * `side_question` control requests (`/btw`): reply `reply` (default
+   * `side answer: <question>`) after `delayMs`, or `hang` until cancelled.
+   */
+  sideQuestion?: { reply?: string; delayMs?: number; hang?: boolean }
   /** How to answer the app's control requests. Default: `success` for all. */
   controlResponses?: Partial<Record<string, ControlReply>>
   /**

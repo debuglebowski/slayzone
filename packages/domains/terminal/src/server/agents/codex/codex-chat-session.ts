@@ -24,6 +24,8 @@ import {
   type CommandTaskStatus,
   type OutgoingUserMessage,
   type PermissionRequestEvent,
+  type SideAnswer,
+  type SideQuestionRequest,
   type UserContentBlock,
   type TokenUsage
 } from '@slayzone/terminal-contracts'
@@ -411,12 +413,47 @@ function installedPart(version: string | null): string {
   return version ? ` (installed Codex ${version})` : ''
 }
 
+/**
+ * How a side question's ephemeral fork is told what it is (`thread/fork
+ * developerInstructions`). Its turn runs read-only with no approvals, so a tool
+ * it tries anyway cannot change anything.
+ */
+const SIDE_QUESTION_INSTRUCTIONS =
+  'This turn is a side question about the conversation so far, asked while the main work may still be running. ' +
+  'Answer it directly and concisely from what the conversation already contains. ' +
+  'Do not run commands, use tools, or change files. Your answer is shown aside and is not part of the main conversation.'
+
+/** The side question's prompt: earlier exchanges of the same side discussion, then the question. */
+function sideQuestionPrompt(request: SideQuestionRequest): string {
+  if (request.history.length === 0) return request.question
+  const earlier = request.history
+    .map((h) => `Side question: ${h.question}\nYour answer: ${h.answer}`)
+    .join('\n\n')
+  return `Earlier side questions in this side discussion:\n\n${earlier}\n\nNext side question: ${request.question}`
+}
+
+/** A side question in flight: its ephemeral fork, the fork's turn, the answer so far. */
+interface SideRun {
+  readonly requestId: string
+  forkId: string | null
+  turnId: string | null
+  /** Streamed text of the reply message being written. */
+  streamed: string
+  /** Text of the last completed reply message (the final answer). */
+  answer: string | null
+  error: string | null
+  ended: boolean
+  readonly done: Deferred<SideAnswer>
+}
+
 class CodexChatSession implements ChatSessionDriver {
   private ctx: ChatDriverContext | null = null
   private client: CodexAppServerClient | null = null
   private threadId: string | null = null
   private currentTurnId: string | null = null
   private handshakeDone = false
+  /** The running handshake (`start`); a side question asked during it waits for it. */
+  private handshaking: Promise<void> | null = null
   private disposed = false
 
   /** User messages sent before the handshake resolved; flushed once it does. */
@@ -467,6 +504,16 @@ class CodexChatSession implements ChatSessionDriver {
   /** Turns that already ended (a late `turn/start` reply must not revive one). */
   private readonly endedTurns = new Set<string>()
 
+  /** Side questions in flight, by request id, and by their ephemeral fork's thread id. */
+  private readonly sideRuns = new Map<string, SideRun>()
+  private readonly sideByThread = new Map<string, SideRun>()
+  /**
+   * Every fork this process made for a side question: its notifications are
+   * never the main thread's — late ones after the fork was dropped included
+   * (an interrupted fork turn's `turn/completed` would end the MAIN turn).
+   */
+  private readonly sideThreads = new Set<string>()
+
   private model: string | null = null
   private effort: string | null = null
   private mode: string | null = null
@@ -487,7 +534,8 @@ class CodexChatSession implements ChatSessionDriver {
       onParseError: (line, err) =>
         console.warn('[codex-chat] unparseable app-server line:', err, line.slice(0, 200))
     })
-    return this.handshake(ctx)
+    this.handshaking = this.handshake(ctx)
+    return this.handshaking
   }
 
   private async handshake(ctx: ChatDriverContext): Promise<void> {
@@ -1181,6 +1229,8 @@ class CodexChatSession implements ChatSessionDriver {
 
   dispose(): void {
     this.disposed = true
+    for (const run of [...this.sideRuns.values()])
+      this.endSide(run, new Error('session ended before the side question was answered'))
     if (this.backgroundPoll) clearTimeout(this.backgroundPoll)
     this.backgroundPoll = null
     this.settlePendingInterrupt(undefined)
@@ -1191,11 +1241,208 @@ class CodexChatSession implements ChatSessionDriver {
     this.patchOutput.clear()
   }
 
+  // ---- side questions (/btw) ----
+
+  /**
+   * A side question, answered from an ephemeral fork of the thread through its
+   * last finished turn: one read-only, approval-free turn on the fork, then the
+   * fork is dropped (`thread/unsubscribe`; ephemeral = never on disk). Live
+   * 0.166.0: `thread/sample` refuses a thread with a running turn and an
+   * ephemeral fork, so a fork turn is the one path that works mid-turn too.
+   */
+  async askSideQuestion(request: SideQuestionRequest, timeoutMs: number): Promise<SideAnswer> {
+    if (!this.handshakeDone) await this.handshaking?.catch(() => undefined)
+    const client = this.client
+    const ctx = this.ctx
+    const threadId = this.threadId
+    if (!client || !ctx || !threadId || this.disposed || !this.handshakeDone)
+      throw new Error('Codex is not ready yet')
+    if (this.sideRuns.has(request.requestId))
+      throw new Error(`side question ${request.requestId} is already running`)
+    const run: SideRun = {
+      requestId: request.requestId,
+      forkId: null,
+      turnId: null,
+      streamed: '',
+      answer: null,
+      error: null,
+      ended: false,
+      done: deferred<SideAnswer>()
+    }
+    this.sideRuns.set(run.requestId, run)
+    const timer = setTimeout(() => {
+      this.stopSideTurn(run)
+      this.endSide(run, new Error(`Side question timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+    this.runSide(client, ctx, threadId, run, request).catch((err: unknown) =>
+      this.endSide(
+        run,
+        new Error(readableCodexError(err instanceof Error ? err.message : String(err)))
+      )
+    )
+    try {
+      return await run.done.promise
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** Interrupt the fork's turn and drop the fork: `askSideQuestion` rejects. */
+  cancelSideQuestion(requestId: string): void {
+    const run = this.sideRuns.get(requestId)
+    if (!run) return
+    this.stopSideTurn(run)
+    this.endSide(run, new Error('Side question cancelled'))
+  }
+
+  private async runSide(
+    client: CodexAppServerClient,
+    ctx: ChatDriverContext,
+    threadId: string,
+    run: SideRun,
+    request: SideQuestionRequest
+  ): Promise<void> {
+    const lastTurnId = await this.lastSettledTurnId(client, threadId)
+    if (run.ended) return
+    const model = this.turnModel()
+    const fork = await client.request<CodexThreadStartResponse>(
+      'thread/fork',
+      {
+        threadId,
+        ...(lastTurnId ? { lastTurnId } : {}),
+        ephemeral: true,
+        // Live 0.166.0: an ephemeral fork of a paginated thread requires it.
+        excludeTurns: true,
+        cwd: ctx.cwd,
+        approvalPolicy: 'never',
+        sandbox: 'read-only',
+        developerInstructions: SIDE_QUESTION_INSTRUCTIONS,
+        ...(model ? { model } : {})
+      },
+      HANDSHAKE_TIMEOUT_MS
+    )
+    run.forkId = fork.thread.id
+    this.sideThreads.add(run.forkId)
+    if (run.ended) {
+      this.dropSideFork(run)
+      return
+    }
+    this.sideByThread.set(run.forkId, run)
+    const effort = this.turnEffort()
+    const res = await client.request<CodexTurnStartResponse>(
+      'turn/start',
+      {
+        threadId: run.forkId,
+        input: [{ type: 'text', text: sideQuestionPrompt(request), text_elements: [] }],
+        approvalPolicy: 'never',
+        sandboxPolicy: { type: 'readOnly', networkAccess: false },
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {})
+      },
+      TURN_REQUEST_TIMEOUT_MS
+    )
+    run.turnId ??= res.turn.id
+    if (run.ended) this.stopSideTurn(run)
+  }
+
+  /** The newest turn that is not running (null: none yet). */
+  private async lastSettledTurnId(
+    client: CodexAppServerClient,
+    threadId: string
+  ): Promise<string | null> {
+    const res = await client.request<CodexTurnsListResponse>('thread/turns/list', {
+      threadId,
+      limit: 5,
+      itemsView: 'notLoaded'
+    })
+    return (res.data ?? []).find((t) => t.status !== 'inProgress')?.id ?? null
+  }
+
+  private onSideNotification(run: SideRun, method: string, params: unknown): void {
+    switch (method) {
+      case 'turn/started': {
+        const id = (params as CodexTurnNotification | undefined)?.turn?.id
+        if (id) run.turnId ??= id
+        return
+      }
+      case 'item/agentMessage/delta': {
+        const delta = (params as CodexDeltaNotification | undefined)?.delta
+        if (typeof delta === 'string') run.streamed += delta
+        return
+      }
+      case 'item/completed': {
+        const item = (params as CodexItemNotification | undefined)?.item as
+          | { type?: string; text?: unknown }
+          | undefined
+        if (item?.type === 'agentMessage' && typeof item.text === 'string') {
+          run.answer = item.text
+          run.streamed = ''
+        }
+        return
+      }
+      case 'error': {
+        const message = (params as CodexErrorNotification | undefined)?.error?.message
+        if (message) run.error = readableCodexError(message)
+        return
+      }
+      case 'turn/completed': {
+        const status = (params as CodexTurnNotification | undefined)?.turn?.status
+        if (status === 'completed') {
+          const text = (run.answer ?? run.streamed).trim()
+          this.endSide(run, { text: text || null })
+        } else {
+          this.endSide(
+            run,
+            new Error(
+              run.error ??
+                `The side question ${status === 'interrupted' ? 'was stopped' : 'failed'}`
+            )
+          )
+        }
+        return
+      }
+      default:
+        return
+    }
+  }
+
+  /** Stop the fork's turn if it runs (best effort: dropping the fork ends it too). */
+  private stopSideTurn(run: SideRun): void {
+    if (!run.forkId || !run.turnId || run.ended) return
+    this.client
+      ?.request('turn/interrupt', { threadId: run.forkId, turnId: run.turnId })
+      .catch(() => undefined)
+  }
+
+  private endSide(run: SideRun, outcome: SideAnswer | Error): void {
+    if (run.ended) return
+    run.ended = true
+    this.sideRuns.delete(run.requestId)
+    this.dropSideFork(run)
+    if (outcome instanceof Error) run.done.reject(outcome)
+    else run.done.resolve(outcome)
+  }
+
+  private dropSideFork(run: SideRun): void {
+    const forkId = run.forkId
+    if (!forkId) return
+    this.sideByThread.delete(forkId)
+    if (this.disposed) return
+    this.client?.request('thread/unsubscribe', { threadId: forkId }).catch(() => undefined)
+  }
+
   // ---- notification handling ----
 
   private onNotification(method: string, params: unknown): void {
     const ctx = this.ctx
     if (!ctx || this.disposed) return
+    // A side question's fork: its own thread id, never the main timeline.
+    const sideThread = (params as { threadId?: unknown } | undefined)?.threadId
+    if (typeof sideThread === 'string' && this.sideThreads.has(sideThread)) {
+      const run = this.sideByThread.get(sideThread)
+      if (run) this.onSideNotification(run, method, params)
+      return
+    }
     switch (method) {
       case 'turn/started': {
         const id = (params as CodexTurnNotification | undefined)?.turn?.id
@@ -1700,6 +1947,20 @@ class CodexChatSession implements ChatSessionDriver {
   private onServerRequest(method: string, params: unknown, id: JsonRpcId): void {
     const ctx = this.ctx
     if (!ctx) return
+    const sideThread = (params as { threadId?: unknown } | undefined)?.threadId
+    if (typeof sideThread === 'string' && this.sideThreads.has(sideThread)) {
+      // A side question asks nobody: refused, never a card in the main chat.
+      if (PROMPT_METHODS.has(method))
+        this.client?.respond(
+          id,
+          codexReplyFor(
+            { id, method, params: (params ?? {}) as Record<string, unknown> },
+            { behavior: 'deny', message: 'Side questions cannot use tools' }
+          )
+        )
+      else this.client?.respondError(id, -32601, `unhandled server request ${method}`)
+      return
+    }
     if (method === 'currentTime/read') {
       this.client?.respond(id, { currentTimeAt: Math.floor(Date.now() / 1000) })
       return

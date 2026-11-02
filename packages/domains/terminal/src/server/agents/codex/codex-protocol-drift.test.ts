@@ -435,6 +435,39 @@ describe('codex protocol drift: classification is complete and true', () => {
   })
 })
 
+/** What in `sent` the pinned surface would refuse: unknown requests or params, missing required ones, bad enum values. */
+function problemsIn(sent: Json[]): string[] {
+  const problems: string[] = []
+  for (const msg of sent) {
+    if (msg.method === undefined) continue
+    const method = String(msg.method)
+    if (msg.id === undefined) {
+      if (method !== 'initialized') problems.push(`unexpected notification ${method}`)
+      continue
+    }
+    const spec = surface.clientRequests[method]
+    if (!spec) {
+      problems.push(`unknown request ${method}`)
+      continue
+    }
+    const params = (msg.params ?? {}) as Json
+    for (const k of Object.keys(params))
+      if (!spec.properties.includes(k)) problems.push(`${method}: unknown param ${k}`)
+    for (const k of spec.required) if (!(k in params)) problems.push(`${method}: missing ${k}`)
+    if (
+      typeof params.approvalPolicy === 'string' &&
+      !surface.enums.AskForApproval.includes(params.approvalPolicy)
+    )
+      problems.push(`${method}: approvalPolicy ${params.approvalPolicy}`)
+    if (typeof params.sandbox === 'string' && !surface.enums.SandboxMode.includes(params.sandbox))
+      problems.push(`${method}: sandbox ${params.sandbox}`)
+    const collab = params.collaborationMode as { mode?: string } | undefined
+    if (collab?.mode && !surface.enums.ModeKind.includes(collab.mode))
+      problems.push(`${method}: collaborationMode ${collab.mode}`)
+  }
+  return problems
+}
+
 describe('codex protocol drift: what the driver sends', () => {
   async function sentFor(mode: string, resume: boolean): Promise<Json[]> {
     const h = await harness(
@@ -464,42 +497,42 @@ describe('codex protocol drift: what the driver sends', () => {
   for (const mode of chatModesForMode('codex-chat')) {
     for (const resume of [false, true]) {
       it(`${mode}${resume ? ' (resume)' : ''}: every request exists, every param is accepted, required ones are there`, async () => {
-        const problems: string[] = []
-        for (const msg of await sentFor(mode, resume)) {
-          if (msg.method === undefined) continue
-          const method = String(msg.method)
-          if (msg.id === undefined) {
-            if (method !== 'initialized') problems.push(`unexpected notification ${method}`)
-            continue
-          }
-          const spec = surface.clientRequests[method]
-          if (!spec) {
-            problems.push(`unknown request ${method}`)
-            continue
-          }
-          const params = (msg.params ?? {}) as Json
-          for (const k of Object.keys(params))
-            if (!spec.properties.includes(k)) problems.push(`${method}: unknown param ${k}`)
-          for (const k of spec.required)
-            if (!(k in params)) problems.push(`${method}: missing ${k}`)
-          if (
-            typeof params.approvalPolicy === 'string' &&
-            !surface.enums.AskForApproval.includes(params.approvalPolicy)
-          )
-            problems.push(`${method}: approvalPolicy ${params.approvalPolicy}`)
-          if (
-            typeof params.sandbox === 'string' &&
-            !surface.enums.SandboxMode.includes(params.sandbox)
-          )
-            problems.push(`${method}: sandbox ${params.sandbox}`)
-          const collab = params.collaborationMode as { mode?: string } | undefined
-          if (collab?.mode && !surface.enums.ModeKind.includes(collab.mode))
-            problems.push(`${method}: collaborationMode ${collab.mode}`)
-        }
-        expect(problems).toEqual([])
+        expect(problemsIn(await sentFor(mode, resume))).toEqual([])
       })
     }
   }
+
+  it('a side question (/btw): every request exists, every param is accepted, required ones are there', async () => {
+    const h = await harness()
+    const lastId = (method: string): unknown => h.sent.findLast((m) => m.method === method)?.id
+    const answer = h.driver.askSideQuestion!(
+      { requestId: 'q', question: 'Why?', history: [{ question: 'What?', answer: 'That.' }] },
+      5000
+    )
+    await flush()
+    await h.feed(
+      JSON.stringify({
+        id: lastId('thread/turns/list'),
+        result: { data: [{ id: 't1', status: 'completed' }] }
+      })
+    )
+    await h.feed(JSON.stringify({ id: lastId('thread/fork'), result: { thread: { id: 'fork' } } }))
+    await h.feed(JSON.stringify({ id: lastId('turn/start'), result: { turn: { id: 'ft' } } }))
+    const outcome = answer.catch((err: unknown) => err)
+    h.driver.cancelSideQuestion!('q')
+    await flush()
+    expect(String(await outcome)).toMatch(/cancelled/)
+    expect(h.sent.filter((m) => m.id !== undefined).map((m) => m.method)).toEqual(
+      expect.arrayContaining([
+        'thread/turns/list',
+        'thread/fork',
+        'turn/start',
+        'turn/interrupt',
+        'thread/unsubscribe'
+      ])
+    )
+    expect(problemsIn(h.sent)).toEqual([])
+  })
 
   const ALLOW: PermissionDecision = { behavior: 'allow' }
   const DENY: PermissionDecision = { behavior: 'deny', message: 'no' }

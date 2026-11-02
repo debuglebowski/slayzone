@@ -360,6 +360,12 @@ function onStdinLine(line) {
   }
   log('stdin', { msg })
   if (msg.type === 'control_request') return void onControlRequest(msg)
+  if (msg.type === 'control_cancel_request') {
+    // The app withdrew a request of its own (a side question): 2.1.316 aborts it.
+    log('control-cancel', { requestId: msg.request_id })
+    sideQuestions.get(msg.request_id)?.abort()
+    return
+  }
   if (msg.type === 'control_response') {
     const id = msg.response?.request_id
     const waiter = pendingRequests.get(id)
@@ -431,6 +437,51 @@ function nextUserMessage() {
   })
 }
 
+/** Side questions in flight: request_id → AbortController (`control_cancel_request`). */
+const sideQuestions = new Map()
+
+/**
+ * `side_question` as 2.1.316 answers it (recorded /tmp/btw-spike): progress
+ * `started`, then `{response, synthetic}` — or an error reply when cancelled.
+ * Never part of the transcript; runs beside a turn. `script.sideQuestion`:
+ * `{ reply?, delayMs?, hang? }` (default reply `side answer: <question>`).
+ */
+async function sideQuestion(msg) {
+  const { question, history } = msg.request
+  const spec = script.sideQuestion ?? {}
+  log('side-question', { requestId: msg.request_id, question, history: history ?? null })
+  const abort = new AbortController()
+  sideQuestions.set(msg.request_id, abort)
+  await writeLine({
+    type: 'system',
+    subtype: 'control_request_progress',
+    request_id: msg.request_id,
+    status: 'started',
+    uuid: randomUUID(),
+    session_id: ctx.sessionId
+  })
+  try {
+    if (spec.hang) await sleep(2 ** 31 - 1, abort.signal)
+    if (spec.delayMs) await sleep(spec.delayMs, abort.signal)
+    await writeLine({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: msg.request_id,
+        response: { response: spec.reply ?? `side answer: ${question}`, synthetic: false }
+      }
+    })
+  } catch (err) {
+    if (!(err instanceof Aborted)) throw err
+    await writeLine({
+      type: 'control_response',
+      response: { subtype: 'error', request_id: msg.request_id, error: 'Side question cancelled' }
+    })
+  } finally {
+    sideQuestions.delete(msg.request_id)
+  }
+}
+
 async function onControlRequest(msg) {
   const subtype = msg.request?.subtype
   const mode = script.controlResponses?.[subtype] ?? 'success'
@@ -448,6 +499,7 @@ async function onControlRequest(msg) {
     return
   }
   if (await taskSim.onControl(msg)) return
+  if (subtype === 'side_question') return sideQuestion(msg)
   // Reply payloads as the real CLI sends them (recorded: control-requests,
   // interrupt-* transcripts, chat-a real-CLI checks).
   let payload = {}

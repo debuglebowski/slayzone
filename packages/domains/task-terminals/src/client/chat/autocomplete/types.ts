@@ -179,5 +179,7 @@ export interface BuiltinCommand {
   cliCollision: 'app-wins' | 'cli-wins'
   /** Offered only when this returns true for the mode's capabilities (default: always). */
   available?: (caps: ChatCapabilities) => boolean
+  /** Ghost text after a parked `/name ` (e.g. `<question>`), like a CLI command's. */
+  argumentHint?: string
   run: (ctx: AcceptCtx) => void | Promise<void>
 }

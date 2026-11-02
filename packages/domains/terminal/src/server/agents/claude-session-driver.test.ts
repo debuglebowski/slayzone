@@ -676,3 +676,103 @@ describe('ClaudeSessionDriver — user turns with attachments', () => {
     expect(JSON.parse(lines.find((l) => l.writeId === 'm2')!.line).message.content).toBe('hi')
   })
 })
+
+describe('ClaudeSessionDriver — side questions (/btw)', () => {
+  const sideRequest = (written: unknown[]) =>
+    written.find(
+      (m) => (m as { request?: { subtype?: string } }).request?.subtype === 'side_question'
+    ) as { request_id: string; request: Record<string, unknown> } | undefined
+
+  test('asks with the side_question control request under the caller’s id and resolves its answer', async () => {
+    const { driver, written, emitted } = setup()
+    const answer = driver.askSideQuestion!(
+      {
+        requestId: 'btw-1',
+        question: 'Why that file?',
+        history: [{ question: 'What changed?', answer: 'The parser.' }]
+      },
+      5_000
+    )
+    expect(sideRequest(written)).toEqual({
+      type: 'control_request',
+      request_id: 'btw-1',
+      request: {
+        subtype: 'side_question',
+        question: 'Why that file?',
+        history: [{ question: 'What changed?', response: 'The parser.' }]
+      }
+    })
+    // Recorded 2.1.316: progress first, then the answer.
+    driver.handleLine(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'control_request_progress',
+        request_id: 'btw-1',
+        status: 'started',
+        uuid: 'u1',
+        session_id: 's1'
+      })
+    )
+    driver.handleLine(
+      JSON.stringify(controlResponse('btw-1', { response: 'Because it parses.', synthetic: false }))
+    )
+    await expect(answer).resolves.toEqual({ text: 'Because it parses.' })
+    expect(emitted).toEqual([])
+  })
+
+  test('no history: none is sent; a null response is no answer', async () => {
+    const { driver, written } = setup()
+    const answer = driver.askSideQuestion!(
+      { requestId: 'btw-2', question: 'Hm?', history: [] },
+      5_000
+    )
+    expect(sideRequest(written)?.request).toEqual({ subtype: 'side_question', question: 'Hm?' })
+    driver.handleLine(JSON.stringify(controlResponse('btw-2', { response: null })))
+    await expect(answer).resolves.toEqual({ text: null })
+  })
+
+  test('cancel writes control_cancel_request; the CLI’s error reply rejects the question', async () => {
+    const { driver, written } = setup()
+    const answer = driver.askSideQuestion!(
+      { requestId: 'btw-3', question: 'Long?', history: [] },
+      5_000
+    )
+    driver.cancelSideQuestion!('btw-3')
+    expect(written.at(-1)).toEqual({ type: 'control_cancel_request', request_id: 'btw-3' })
+    // Recorded 2.1.316.
+    driver.handleLine(
+      JSON.stringify({
+        type: 'control_response',
+        response: { subtype: 'error', request_id: 'btw-3', error: 'Side question cancelled' }
+      })
+    )
+    await expect(answer).rejects.toThrow('Side question cancelled')
+  })
+
+  test('cancelling an unknown or finished question writes nothing', async () => {
+    const { driver, written } = setup()
+    driver.cancelSideQuestion!('nope')
+    const answer = driver.askSideQuestion!(
+      { requestId: 'btw-4', question: 'Q', history: [] },
+      5_000
+    )
+    driver.handleLine(JSON.stringify(controlResponse('btw-4', { response: 'A' })))
+    await answer
+    const before = written.length
+    driver.cancelSideQuestion!('btw-4')
+    expect(written.length).toBe(before)
+    expect(written.some((m) => (m as { type?: string }).type === 'control_cancel_request')).toBe(
+      false
+    )
+  })
+
+  test('the session ending rejects a question still running', async () => {
+    const { driver } = setup()
+    const answer = driver.askSideQuestion!(
+      { requestId: 'btw-5', question: 'Q', history: [] },
+      5_000
+    )
+    driver.dispose()
+    await expect(answer).rejects.toThrow('session ended')
+  })
+})

@@ -254,6 +254,47 @@ describe('useChatComposer /effort builtin', () => {
   })
 })
 
+describe('useChatComposer /btw side question', () => {
+  it('asks the side question — mid-turn too — clears the text, keeps attachments, sends and queues nothing', async () => {
+    const onSideQuestion = vi.fn<(question: string) => void>()
+    setup({ onSideQuestion, inFlight: true })
+    attach([IMG_A])
+    type('/btw  why that file?\nand this one ')
+    await send()
+    expect(onSideQuestion).toHaveBeenCalledWith('why that file?\nand this one')
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([IMG_A])
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(mocks.queue.push).not.toHaveBeenCalled()
+  })
+
+  it('a bare /btw asks for the question and sends nothing', async () => {
+    const onSideQuestion = vi.fn<(question: string) => void>()
+    setup({ onSideQuestion })
+    type('/btw ')
+    await send()
+    expect(onSideQuestion).not.toHaveBeenCalled()
+    expect(mocks.toast).toHaveBeenCalledWith('Type a question after /btw')
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(composer.draft).toBe('/btw ')
+  })
+
+  it('without side questions (no handler) /btw is ordinary text', async () => {
+    setup()
+    type('/btw hi')
+    await send()
+    expect(sendMessage).toHaveBeenCalledWith('/btw hi')
+  })
+
+  it('/btwx is not /btw', async () => {
+    const onSideQuestion = vi.fn<(question: string) => void>()
+    setup({ onSideQuestion })
+    type('/btwx hi')
+    await send()
+    expect(onSideQuestion).not.toHaveBeenCalled()
+  })
+})
+
 describe('useChatComposer /effort on Codex', () => {
   const codex = chatModelsView('codex-chat', [
     {

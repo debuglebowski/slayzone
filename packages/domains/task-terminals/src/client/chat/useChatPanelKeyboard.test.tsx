@@ -213,6 +213,23 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
     expect(onDoubleEscape).not.toHaveBeenCalled()
   })
 
+  it('an open side question takes Esc first: it closes, the running turn keeps going', () => {
+    const onDismissSideQuestion = vi.fn()
+    const { handleStop, onDoubleEscape } = setup({ inFlight: true, onDismissSideQuestion })
+    const e = esc()
+    expect(onDismissSideQuestion).toHaveBeenCalledTimes(1)
+    expect(e.defaultPrevented).toBe(true)
+    expect(handleStop).not.toHaveBeenCalled()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('a pending prompt answers Esc before the side question closes', () => {
+    const onDismissSideQuestion = vi.fn()
+    setup({ onDismissSideQuestion, promptKeysRef: { current: (e) => e.key === 'Escape' } })
+    esc()
+    expect(onDismissSideQuestion).not.toHaveBeenCalled()
+  })
+
   it('a pending prompt takes Esc: no rewind', () => {
     const { onDoubleEscape } = setup({ promptKeysRef: { current: (e) => e.key === 'Escape' } })
     esc()

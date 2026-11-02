@@ -14,7 +14,10 @@ import type {
 import {
   chatCapabilitiesForMode,
   defaultChatModeForMode,
-  userMessageText
+  SIDE_QUESTION_TIMEOUT_MS,
+  userMessageText,
+  type SideAnswer,
+  type SideQuestionRequest
 } from '@slayzone/terminal-contracts'
 import {
   TIMELINE_PROJECTION_VERSION,
@@ -2171,6 +2174,29 @@ export function sendControlRequest(
   if (request.subtype === 'interrupt' || request.subtype === 'interrupt_and_wait')
     proc.interruptIssued = true
   return proc.driver.applyControl(request, timeoutMs)
+}
+
+/**
+ * Ask a side question (`/btw`) on the tab's agent process, started first when
+ * the tab has none (after a reload). The answer never enters the conversation,
+ * and a running turn keeps running. The tab must be hydrated.
+ */
+export async function askSideQuestion(
+  tabId: string,
+  request: SideQuestionRequest,
+  timeoutMs = SIDE_QUESTION_TIMEOUT_MS
+): Promise<SideAnswer> {
+  await ensureSpawned(tabId)
+  const proc = liveProcess(tabId)
+  if (!proc) throw new ChatTransportError('The agent is not running')
+  if (!proc.driver.askSideQuestion)
+    throw new ChatTransportError('This agent cannot answer side questions')
+  return proc.driver.askSideQuestion(request, timeoutMs)
+}
+
+/** Withdraw a running side question (its `askSideQuestion` rejects); no-op when it is gone. */
+export function cancelSideQuestion(tabId: string, requestId: string): void {
+  liveProcess(tabId)?.driver.cancelSideQuestion?.(requestId)
 }
 
 /** Permission transitions keep queued messages behind the continuation. */
