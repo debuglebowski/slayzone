@@ -151,7 +151,9 @@ export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; emb
     item.status === 'pending'
       ? 'Checking changes…'
       : item.status === 'unavailable'
-        ? 'Changes unavailable'
+        ? item.interrupted
+          ? 'Turn interrupted'
+          : 'Changes unavailable'
         : `${item.fileCount} file${item.fileCount === 1 ? '' : 's'} changed${item.status === 'partial' ? ' · partial' : ''}`
   return (
     <div className={embedded ? 'contents' : 'px-10 py-1'} data-testid="chat-files-changed">

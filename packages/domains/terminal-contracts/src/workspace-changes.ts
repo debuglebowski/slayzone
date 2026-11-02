@@ -37,6 +37,8 @@ export interface WorkspaceChangesEvent {
   status: 'pending' | WorkspaceCaptureResult['status']
   fileCount: number
   reason?: string
+  /** The agent's process ended mid-turn (replaced, exit unconfirmed, computer lost): the turn never finished. */
+  interrupted?: boolean
 }
 
 export interface WorkspaceChangesRecord extends WorkspaceCaptureResult {

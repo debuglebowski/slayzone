@@ -100,6 +100,29 @@ it('never labels unavailable tracking as zero changed files', () => {
   expect(screen.queryByText('0 files')).toBeNull()
 })
 
+it('labels a turn cut short by its agent ending as interrupted', () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <WorkspaceChangesRow
+        item={{
+          kind: 'workspace-changes',
+          tabId: 'tab',
+          captureId: 'cut',
+          messageId: 'm',
+          id: 'workspace:cut',
+          status: 'unavailable',
+          interrupted: true,
+          reason: 'Agent process was replaced.',
+          fileCount: 0,
+          timestamp: 1
+        }}
+      />
+    </QueryClientProvider>
+  )
+  expect(screen.getByText('Turn interrupted')).toBeTruthy()
+  expect(screen.queryByText('Changes unavailable')).toBeNull()
+})
+
 const workspace = {
   kind: 'workspace-changes' as const,
   tabId: 'tab',

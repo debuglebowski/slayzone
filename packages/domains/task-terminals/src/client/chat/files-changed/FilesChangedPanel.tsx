@@ -210,7 +210,9 @@ function SavedTurnSection({
     item.status === 'unavailable'
       ? recorded
         ? `${recorded.files.length} file${recorded.files.length === 1 ? '' : 's'} · recorded edits only`
-        : 'Changes unavailable'
+        : item.interrupted
+          ? 'Turn interrupted'
+          : 'Changes unavailable'
       : item.status === 'pending'
         ? 'Checking changes…'
         : `${item.fileCount} file${item.fileCount === 1 ? '' : 's'} changed${item.status === 'partial' ? ' · partial' : ''}`

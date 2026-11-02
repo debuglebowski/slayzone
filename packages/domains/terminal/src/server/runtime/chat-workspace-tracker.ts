@@ -167,7 +167,10 @@ export class ChatWorkspaceTracker {
         messageId: window.messageId,
         status,
         fileCount,
-        ...(reason ? { reason } : {})
+        ...(reason ? { reason } : {}),
+        ...(unavailableReason && !window.overlapped && status === 'unavailable'
+          ? { interrupted: true }
+          : {})
       })
     event('pending', 0)
     let result: WorkspaceCaptureResult

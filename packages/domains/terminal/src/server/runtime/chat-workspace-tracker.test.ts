@@ -67,6 +67,7 @@ it('reports failed baseline and unconfirmed exit without taking a misleading fin
   expect(finishes).toBe(0)
   expect(events.at(-1)).toMatchObject({
     status: 'unavailable',
+    interrupted: true,
     reason: 'Computer disconnected before turn completion.'
   })
 })
