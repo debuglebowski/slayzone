@@ -2,7 +2,7 @@
  * The demo, end to end: the app's real routes and root layout, its real hub
  * connections (`HubConnections` → `FederationProvider` → `HubScope`, the client runtime,
  * React Query) and the demo hub behind them — nothing between the screens and the demo
- * hub is mocked. "Try demo" on the sign-in screen opens every tab on the sample data;
+ * hub is mocked. "Try demo" on the sign-in screen opens the app (Board · Search · Settings) on the sample data;
  * "Exit demo" goes back to sign-in; the keychain is never touched.
  */
 import { userEvent } from '@testing-library/react-native'
@@ -60,8 +60,7 @@ jest.mock('../hub-session', () => ({
 const ROUTES = 'src/app'
 
 /** Queries inside one tab's stack (every tab stays mounted). */
-const tab = (name: 'agents' | 'tasks' | 'search' | 'hubs') =>
-  within(screen.getByTestId(`tab-${name}`))
+const tab = (name: 'board' | 'search' | 'settings') => within(screen.getByTestId(`tab-${name}`))
 
 beforeEach(() => {
   const window = { width: 390, height: 844, scale: 3, fontScale: 1 }
@@ -77,7 +76,7 @@ async function enterDemo() {
 }
 
 /** Switch tabs (the native tab bar is not in the test renderer; an unfocused tab takes no presses). */
-const openTab = (href: '/' | '/tasks' | '/artifacts' | '/hubs') =>
+const openTab = (href: '/' | '/artifacts' | '/settings') =>
   act(async () => {
     router.navigate(href)
   })
@@ -85,26 +84,40 @@ const openTab = (href: '/' | '/tasks' | '/artifacts' | '/hubs') =>
 const press = (element: Parameters<ReturnType<typeof userEvent.setup>['press']>[0]) =>
   userEvent.setup().press(element)
 
+/** The board's 🔔 sheet (desktop's agent status panel): open a task by its agent's row. */
+async function openFromBell(title: string) {
+  const board = tab('board')
+  await press(await board.findByTestId('bell'))
+  const sheet = within(await screen.findByTestId('attention-sheet'))
+  await press(await sheet.findByText(title))
+  await board.findByTestId('task-page')
+  return board
+}
+
 describe('the demo', () => {
-  it('opens from the sign-in screen on the Agents tab, with its agents', async () => {
+  it('opens from the sign-in screen on the Board, its agents behind the 🔔', async () => {
     await enterDemo()
-    expect(screen).toHaveSegments(['(tabs)', '(agents)'])
-    const agents = tab('agents')
-    expect(agents.getByTestId('demo-banner')).toBeOnTheScreen()
+    expect(screen).toHaveSegments(['(tabs)', '(board)'])
+    const board = tab('board')
+    expect(board.getByTestId('demo-banner')).toBeOnTheScreen()
+    expect(await board.findByText('API v2')).toBeOnTheScreen()
     // A running terminal agent, a finished chat agent waiting for review, an idle one.
-    expect(await agents.findByText('Search endpoint')).toBeOnTheScreen()
-    expect(agents.getByText('Auth refactor: session middleware')).toBeOnTheScreen()
-    expect(agents.getByText('Dark mode')).toBeOnTheScreen()
-    expect(agents.getAllByText(/Running/).length).toBeGreaterThan(0)
+    await press(board.getByTestId('bell'))
+    const sheet = within(await screen.findByTestId('attention-sheet'))
+    expect(await sheet.findByText('Search endpoint')).toBeOnTheScreen()
+    expect(sheet.getByText('Auth refactor: session middleware')).toBeOnTheScreen()
+    expect(sheet.getByText('Dark mode')).toBeOnTheScreen()
+    // Each row: its project and its agent's state.
+    expect(sheet.getAllByText(/API v2 · Active/).length).toBeGreaterThan(0)
     expect(mockKeychain.save).not.toHaveBeenCalled()
   })
 
   it('shows the banner on every tab, and Exit demo goes back to sign-in', async () => {
     await enterDemo()
-    for (const name of ['agents', 'tasks', 'search', 'hubs'] as const) {
+    for (const name of ['board', 'search', 'settings'] as const) {
       expect(tab(name).getByTestId('demo-banner')).toBeOnTheScreen()
     }
-    await press(tab('agents').getByTestId('exit-demo'))
+    await press(tab('board').getByTestId('exit-demo'))
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
     expect(screen).toHavePathname('/sign-in')
     expect(screen.queryByTestId('demo-banner')).toBeNull()
@@ -112,50 +125,47 @@ describe('the demo', () => {
     expect(mockKeychain.forget).not.toHaveBeenCalled()
   })
 
-  it('Tasks: the first project’s board, its columns and tasks', async () => {
+  it('Board: the first project’s columns and tasks', async () => {
     await enterDemo()
-    await openTab('/tasks')
-    expect(screen).toHavePathname('/tasks')
-    const tasks = tab('tasks')
-    expect(await tasks.findByText('API v2 ▾')).toBeOnTheScreen()
-    // Kanban: the columns with their counts, the first non-empty one shown.
-    expect(tasks.getByText(/^In Progress/)).toBeOnTheScreen()
-    expect(tasks.getByText('Upgrade to Node 24')).toBeOnTheScreen()
-    // List: every task of the project.
-    await press(tasks.getByTestId('view-list'))
-    expect(await tasks.findByText('Search endpoint')).toBeOnTheScreen()
-    expect(tasks.getByText('Rate limiting')).toBeOnTheScreen()
-    expect(tasks.getByText('Auth refactor: session middleware')).toBeOnTheScreen()
+    const board = tab('board')
+    expect(await board.findByText('API v2')).toBeOnTheScreen()
+    // Kanban: a column per status, with its count; a chip shows its column.
+    await press(await board.findByTestId('column-chip-in_progress'))
+    expect(await board.findByText('Search endpoint')).toBeOnTheScreen()
+    await press(board.getByTestId('column-chip-todo'))
+    expect(await board.findByText('Rate limiting')).toBeOnTheScreen()
+    await press(board.getByTestId('column-chip-review'))
+    expect(await board.findByText('Auth refactor: session middleware')).toBeOnTheScreen()
   })
 
-  it('Hubs: the demo hub, signed in as the demo account, with its computer', async () => {
+  it('Settings: the demo hub, signed in as the demo account, with its computer', async () => {
     await enterDemo()
-    const hubs = tab('hubs')
-    expect(await hubs.findByText('SlayZone demo')).toBeOnTheScreen()
+    await openTab('/settings')
+    const settings = tab('settings')
+    expect(await settings.findByText('SlayZone demo')).toBeOnTheScreen()
     // The banner's and the card's.
-    expect(hubs.getAllByText('Exit demo')).toHaveLength(2)
-    expect(await hubs.findByText('Signed in as demo@slay.zone')).toBeOnTheScreen()
-    expect(await hubs.findByText('MacBook Pro')).toBeOnTheScreen()
+    expect(settings.getAllByText('Exit demo')).toHaveLength(2)
+    expect(await settings.findByText('Signed in as demo@slay.zone')).toBeOnTheScreen()
+    expect(await settings.findByText('MacBook Pro')).toBeOnTheScreen()
   })
 
   it('a task: its subtasks, tags and artifacts; a markdown artifact with a diagram', async () => {
     await enterDemo()
-    await openTab('/tasks')
-    const tasks = tab('tasks')
-    await press(await tasks.findByTestId('view-list'))
-    await press(await tasks.findByText('Search endpoint'))
-    expect(await tasks.findByTestId(`subtask-${DEMO_IDS.searchIndex}`)).toBeOnTheScreen()
-    expect(tasks.getByText('Ranking tests')).toBeOnTheScreen()
-    expect(tasks.getByText('feature')).toBeOnTheScreen()
+    const board = await openFromBell('Search endpoint')
+    await press(board.getByTestId('segment-details'))
+    expect(await board.findByTestId(`subtask-${DEMO_IDS.searchIndex}`)).toBeOnTheScreen()
+    expect(board.getByText('Ranking tests')).toBeOnTheScreen()
+    // Under the title and in the Tags section.
+    expect(board.getAllByText('feature').length).toBeGreaterThan(0)
 
-    await press(await tasks.findByTestId('task-artifacts-link'))
-    expect(await tasks.findByTestId(`artifact-row-${DEMO_IDS.planArtifact}`)).toBeOnTheScreen()
-    expect(tasks.getByTestId(`artifact-row-${DEMO_IDS.screenshotArtifact}`)).toBeOnTheScreen()
-    expect(tasks.getByTestId(`artifact-folder-${DEMO_IDS.notesFolder}`)).toBeOnTheScreen()
+    await press(board.getByTestId('segment-artifacts'))
+    expect(await board.findByTestId(`artifact-row-${DEMO_IDS.planArtifact}`)).toBeOnTheScreen()
+    expect(board.getByTestId(`artifact-row-${DEMO_IDS.screenshotArtifact}`)).toBeOnTheScreen()
+    expect(board.getByTestId(`artifact-folder-${DEMO_IDS.notesFolder}`)).toBeOnTheScreen()
 
-    await press(tasks.getByTestId(`artifact-row-${DEMO_IDS.planArtifact}`))
+    await press(board.getByTestId(`artifact-row-${DEMO_IDS.planArtifact}`))
     // The page the web view shows: the markdown, its diagram drawn by mermaid.
-    await tasks.findByTestId('artifact-page-markdown')
+    await board.findByTestId('artifact-page-markdown')
     expect(markdownPage()).toContain('Search endpoint — plan')
     expect(markdownPage()).toContain('class="mermaid-block"')
     expect(markdownPage()).toContain('sequenceDiagram')
@@ -163,59 +173,53 @@ describe('the demo', () => {
 
   it('an agent’s chat: its conversation, and a message sent in the demo gets the demo’s answer', async () => {
     await enterDemo()
-    const agents = tab('agents')
-    await press(await agents.findByText('Auth refactor: session middleware'))
+    const board = await openFromBell('Auth refactor: session middleware')
     expect(
-      await agents.findByText(
+      await board.findByText(
         'Move the session checks out of the route handlers into one middleware. Keep the 401 body exactly as it is.'
       )
     ).toBeOnTheScreen()
 
     await userEvent
       .setup()
-      .type(agents.getByTestId('chat-input'), 'Also add a test for expired cookies')
-    await press(agents.getByLabelText('Send'))
-    expect(await agents.findByText('Also add a test for expired cookies')).toBeOnTheScreen()
+      .type(board.getByTestId('chat-input'), 'Also add a test for expired cookies')
+    await press(board.getByLabelText('Send'))
+    expect(await board.findByText('Also add a test for expired cookies')).toBeOnTheScreen()
     await act(async () => {
       jest.advanceTimersByTime(2000)
     })
-    await waitFor(() => expect(agents.getAllByText(/no agent runs here/).length).toBeGreaterThan(0))
+    await waitFor(() => expect(board.getAllByText(/no agent runs here/).length).toBeGreaterThan(0))
   })
 
   it('a terminal agent: its recorded output, and typed input echoed with the demo’s note', async () => {
     await enterDemo()
-    const agents = tab('agents')
-    await press(await agents.findByText('Search endpoint'))
+    const board = await openFromBell('Search endpoint')
     await waitFor(() =>
       expect(mockDom.written()).toContain('add full-text search to /api/v2/search')
     )
     expect(mockDom.written()).toContain('Running the rest of the suite')
 
-    await userEvent.setup().type(agents.getByLabelText('Message to the agent'), 'run lint too')
-    await press(agents.getByLabelText('Send'))
+    await userEvent.setup().type(board.getByLabelText('Message to the agent'), 'run lint too')
+    await press(board.getByLabelText('Send'))
     await waitFor(() => expect(mockDom.written()).toContain('No agent runs in the demo'))
   })
 
-  it('writes stay in the demo: a new task is gone after Exit demo and Try demo again', async () => {
+  it('writes stay in the demo: a new sub-task is gone after Exit demo and Try demo again', async () => {
     await enterDemo()
-    await openTab('/tasks')
-    const tasks = tab('tasks')
-    await press(await tasks.findByTestId('view-list'))
-    await press(await tasks.findByText('Search endpoint'))
-    await press(await tasks.findByText('Add subtask'))
-    await userEvent
-      .setup()
-      .type(tasks.getByTestId('new-subtask-title'), 'Benchmark on prod copy', {
-        submitEditing: true
-      })
-    expect(await tasks.findByText('Benchmark on prod copy')).toBeOnTheScreen()
+    let board = await openFromBell('Search endpoint')
+    await press(board.getByTestId('segment-details'))
+    await press(await board.findByTestId('add-subtask'))
+    await userEvent.setup().type(board.getByTestId('new-subtask-title'), 'Benchmark on prod copy', {
+      submitEditing: true
+    })
+    expect(await board.findByText('Benchmark on prod copy')).toBeOnTheScreen()
 
-    await press(tasks.getByTestId('exit-demo'))
+    await press(board.getByTestId('exit-demo'))
     await press(await screen.findByText('Try demo'))
-    await openTab('/tasks')
-    const again = tab('tasks')
-    expect(await again.findByText('Search endpoint')).toBeOnTheScreen()
-    expect(again.queryByText('Benchmark on prod copy')).toBeNull()
+    board = await openFromBell('Search endpoint')
+    await press(board.getByTestId('segment-details'))
+    expect(await board.findByTestId(`subtask-${DEMO_IDS.searchIndex}`)).toBeOnTheScreen()
+    expect(board.queryByText('Benchmark on prod copy')).toBeNull()
     expect(mockKeychain.save).not.toHaveBeenCalled()
   })
 })
