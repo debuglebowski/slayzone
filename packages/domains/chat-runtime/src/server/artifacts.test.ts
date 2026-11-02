@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
+import { chatAttachmentSchema } from '../shared/protocol'
 
 test('chat uploads remain computer-local, support editing, and seal historical versions', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'chat-upload-')),
@@ -212,3 +213,41 @@ test.each(['size', 'type', 'metadata'] as const)(
     }
   }
 )
+
+test('migration verify reports missing attachments as wire refs, not storage records', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-missing-')),
+    source = createComputerChatRuntime({ stateDir: dir, hubScope: 'source', computerId: 'pc' }),
+    target = createComputerChatRuntime({ stateDir: dir, hubScope: 'target', computerId: 'pc' })
+  try {
+    const identity = { id: 'c', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+      bytes = Buffer.from('plain text'),
+      contentHash = createHash('sha256').update(bytes).digest('hex'),
+      ref = {
+        artifactId: 'a',
+        contentHash,
+        name: 'saved.txt',
+        size: bytes.length,
+        kind: 'text' as const,
+        mediaType: 'text/plain' as const
+      }
+    source.storage.createConversation(identity)
+    // Stored attachment records carry their task (legacy source + put() both add it).
+    source.storage.putRecord('c', 1, {
+      kind: 'attachment',
+      id: `a:${contentHash}`,
+      at: 1,
+      value: { ...ref, taskId: 't' }
+    })
+    source.storage.freeze('c', 1, 'move')
+    target.storage.stage(source.storage.exportConversation('c', 1, 'move'))
+    const missing = target.attachments.missing('c')
+    // The hub echoes these back as `attachment.put` refs, which the strict schema parses.
+    expect(missing.map((m) => chatAttachmentSchema.parse(m))).toEqual([ref])
+    target.attachments.putPrepared('c', 2, missing[0]!, bytes)
+    expect(target.attachments.missing('c')).toEqual([])
+  } finally {
+    await source.close()
+    await target.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

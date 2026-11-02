@@ -23,6 +23,13 @@ import type { ChatStorage } from './storage'
 import type { createLocalChatData } from './local-data'
 
 const hashOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+/** An `attachment` record value: the ref plus its owning task (storage-only scope). */
+type StoredAttachment = ChatAttachment & { taskId?: string }
+/** Storage record → wire ref. Explicit pick, so no storage-only field leaks onto the wire. */
+function attachmentRef(stored: StoredAttachment): ChatAttachment {
+  const { artifactId, contentHash, name, kind, mediaType, size } = stored
+  return { artifactId, ...(contentHash ? { contentHash } : {}), name, kind, mediaType, size }
+}
 export function createLocalAttachments(
   store: ChatStorage,
   local: ReturnType<typeof createLocalChatData>
@@ -121,11 +128,12 @@ export function createLocalAttachments(
         writeBlob(ref.contentHash, bytes)
       })
     },
+    /** Wire refs (the hub sends each back as a strict `attachment.put` ref), not stored records. */
     missing(id: string): ChatAttachment[] {
       return store
         .records(id)
         .filter((r) => r.kind === 'attachment')
-        .map((r) => r.value as ChatAttachment)
+        .map((r) => attachmentRef(r.value as StoredAttachment))
         .filter((ref) => {
           try {
             return !ref.contentHash || readBlob(ref.contentHash).length !== ref.size
