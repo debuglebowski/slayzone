@@ -32,6 +32,12 @@ if ! dry_run; then
   echo "node $(node -v); electron's node $ELECTRON_NODE"
 fi
 
+# No suite reaches a hub/relay/task it did not start: every runner strips the caller's
+# SLAYZONE_* (caller-env.ts). Run from a task terminal, the CLI REST suites inherited
+# its live relay + task id and called the user's real hub. Proved end to end: a nested
+# harness run from a poisoned env spawns `slay`, and the sentinel must see no request.
+run_harness packages/shared/test-utils/caller-env.test.ts
+
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
 # in the Wave C2 split; repointed here.

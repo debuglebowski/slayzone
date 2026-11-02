@@ -1,7 +1,13 @@
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { defineConfig, type Plugin } from 'vitest/config'
+import { stripCallerSlayzoneEnv } from './caller-env.ts'
 import { fsModuleCacheOptions, fsModuleCacheResolutionKey } from './fs-module-cache.ts'
+
+// vitest's main process, before any worker forks: no worker, and nothing a suite
+// spawns, inherits the caller's SlayZone wiring (caller-env.ts). harness-setup.ts
+// repeats it per worker.
+stripCallerSlayzoneEnv()
 
 // Node-environment suites (`pnpm test:unit`, the "harness" group in run-all.sh).
 // Run under Electron's node (ELECTRON_RUN_AS_NODE=1): better-sqlite3 is rebuilt for

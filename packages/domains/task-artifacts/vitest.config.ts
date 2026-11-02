@@ -3,6 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { reactCompilerPlugin } from '@slayzone/react-compiler-config'
+import { stripCallerSlayzoneEnv } from '../../shared/test-utils/caller-env.ts'
+
+// No suite here inherits the caller's SlayZone wiring (see caller-env.ts): vitest's
+// main process, before any worker forks.
+stripCallerSlayzoneEnv()
 
 /**
  * Files below are vitest suites too, but they belong to run-all.sh's node harness group

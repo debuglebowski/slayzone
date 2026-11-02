@@ -23,6 +23,22 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 TEST_UTILS="packages/shared/test-utils"
 
+# No suite inherits the caller's SlayZone wiring (caller-env.ts): run from a task
+# terminal, its live hub/relay/task vars reached the user's real hub through the CLI
+# suites. Strip every SLAYZONE_* (bar the documented opt-in knobs) before any lane
+# starts, so every suite and everything it spawns starts clean. The names come from
+# stripCallerSlayzoneEnv itself, the one rule every runner config also applies. Fail
+# closed: no list, no run.
+if ! CALLER_SLAYZONE_ENV=$(node --no-warnings -e '
+  import("./packages/shared/test-utils/caller-env.ts").then((m) => {
+    for (const key of m.stripCallerSlayzoneEnv()) console.log(key)
+  })'); then
+  echo "runners.sh: cannot compute the SLAYZONE_* vars to strip (caller-env.ts)" >&2
+  exit 2
+fi
+for _var in $CALLER_SLAYZONE_ENV; do unset "$_var"; done
+unset CALLER_SLAYZONE_ENV _var
+
 PASS=0
 FAIL=0
 FAILED=()
