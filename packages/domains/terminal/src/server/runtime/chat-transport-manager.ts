@@ -986,6 +986,7 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
   switch (event.kind) {
     case 'command-lifecycle':
       tab.outbox.onLifecycle(proc.gen, event.commandUuid, event.state)
+      if (proc.lateTurnOf === event.commandUuid) onLateTurnLifecycle(tab, proc, event.state)
       noteAlive(tab)
       return
     case 'user-replay':
@@ -1064,10 +1065,14 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
   if (proc.discardTurn && DISCARDED_TURN_KINDS.has(shown.kind)) {
     if (shown.kind === 'result' || shown.kind === 'interrupted') {
       proc.discardTurn = false
+      proc.lateTurnOf = null
       proc.openTools.clear()
       tab.outbox.onResult(proc.gen)
       tab.pendingPrompts.clear()
       transitionState(tab, 'idle')
+    } else if (proc.lateTurnOf !== null) {
+      // The taken-back message's turn runs after all (no lifecycle said so).
+      interruptLateTurn(tab, proc)
     }
     return
   }
@@ -1092,6 +1097,51 @@ function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent):
   const split = tab.splitter.route(shown)
   for (const live of split.live) broadcastLive(tab, live)
   for (const saved of split.saved) commitEvent(tab, saved)
+}
+
+/**
+ * The CLI reports the message Stop took back before its turn started
+ * (`proc.lateTurnOf`): still queued → withdraw it; started → interrupt it;
+ * cancelled → it never ran, nothing of its turn will come.
+ */
+function onLateTurnLifecycle(
+  tab: ChatTab,
+  proc: ChatProcess,
+  state: 'queued' | 'started' | 'completed' | 'cancelled'
+): void {
+  const id = proc.lateTurnOf
+  if (id === null) return
+  if (state === 'queued') {
+    void withdrawQueued(tab, proc, id).then((withdrawn) => {
+      if (withdrawn && proc.lateTurnOf === id) settleLateTurn(tab, proc)
+    })
+  } else if (state === 'started') {
+    interruptLateTurn(tab, proc)
+  } else if (state === 'cancelled') {
+    settleLateTurn(tab, proc)
+  } else {
+    proc.lateTurnOf = null
+  }
+}
+
+/** Interrupt the turn of a message Stop took back (once). */
+function interruptLateTurn(tab: ChatTab, proc: ChatProcess): void {
+  proc.lateTurnOf = null
+  if (!proc.driver.applyControl) return
+  proc.driver
+    .applyControl({ subtype: 'interrupt' }, STOP_FOLLOW_UP_TIMEOUT_MS)
+    .catch((err: unknown) => {
+      diagnostic(tab, 'warn', 'chat.late_turn_interrupt_failed', 'late turn not interrupted', {
+        error: toErrorMessage(err)
+      })
+    })
+}
+
+/** The taken-back message never ran: no turn to drop, the tab is idle again. */
+function settleLateTurn(tab: ChatTab, proc: ChatProcess): void {
+  proc.lateTurnOf = null
+  proc.discardTurn = false
+  if (!tab.closed && tab.proc === proc && tab.outbox.inFlight() === 0) transitionState(tab, 'idle')
 }
 
 /** What a popped turn may still say: its output and its end. */
@@ -2046,6 +2096,9 @@ export function dispatchUserMessage(
     if (known === 'failed') tab.outbox.retry(message.id)
     return { id: message.id, state: tab.outbox.state(message.id) ?? known }
   }
+  // A message that opens a new turn: the last turn's output is not this one's
+  // (Stop before the write would otherwise refuse to give it back).
+  if (tab.outbox.inFlight() === 0 && tab.terminalState !== 'running') tab.turnProgress = false
   routeHostEvent(tab, {
     kind: 'user-message',
     id: message.id,
@@ -2429,6 +2482,8 @@ export async function stopTurn(
   const caps = chatCapabilitiesForMode(tab.mode)
   const proc = liveProcess(tabId)
   const popped = opts.restorePrompt ? popTrailingUserMessage(tab) : null
+  // How far the popped message got: never written → nothing of it can come back.
+  const reach = popped?.id ? tab.outbox.reach(popped.id) : null
   if (!popped) recordInterrupted(tabId)
 
   if (!proc || !caps.liveInterrupt || !proc.driver.applyControl) {
@@ -2438,8 +2493,11 @@ export async function stopTurn(
   }
 
   proc.interruptIssued = true
-  if (popped) proc.discardTurn = true
-  else tab.turnInterrupted = true
+  if (popped) {
+    if (reach?.sent !== false) proc.discardTurn = true
+    // Written, its turn not started: the interrupt may land before the CLI reads it.
+    if (popped.id && reach?.sent && !reach.started) proc.lateTurnOf = popped.id
+  } else tab.turnInterrupted = true
   // Messages the CLI holds queued would run right after the interrupt.
   for (const id of tab.outbox.heldByCli(proc.gen)) await withdrawQueued(tab, proc, id)
 

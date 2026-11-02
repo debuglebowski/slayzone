@@ -208,6 +208,7 @@ export function transportHarness(
     /** See each spawn's argv. */
     onSpawn?: (args: string[]) => void
     history?: Array<{ seq: number; event: AgentEvent; at?: number }>
+    deps?: Partial<mgr.TransportDeps>
   } = {}
 ): TransportHarness {
   mgr.__resetForTests()
@@ -250,7 +251,8 @@ export function transportHarness(
           .filter((r) => r.seq > after && r.seq < before)
           .sort((a, b) => a.seq - b.seq)
     },
-    ...(opts.timings ? { watchdogTimings: opts.timings } : {})
+    ...(opts.timings ? { watchdogTimings: opts.timings } : {}),
+    ...opts.deps
   })
   return h
 }

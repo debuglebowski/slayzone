@@ -327,3 +327,92 @@ test('the queue drainer is kicked when the gate opens after the result (late com
   await until(() => kicks.length > 0)
   mgr.registerChatQueueDrainer(() => {})
 })
+
+/** A finished turn with output: what the next turn's Stop must not count. */
+async function finishedTurn(f: Parameters<typeof sendAndStart>[0], id: string): Promise<void> {
+  await sendAndStart(f, id, 'first')
+  emitLine(f, sj.init('s'))
+  emitLine(f, sj.text('done'))
+  emitLine(f, sj.success('done'))
+  emitLine(f, sj.lifecycle(id, 'completed'))
+  await until(() => mgr.getSessionTerminalState(TAB_OPTS.tabId) === 'idle')
+}
+
+test('Stop while the next message waits for its baseline gives it back (the last turn had output)', async () => {
+  let release: (() => void) | null = null
+  let capturing = 0
+  const h = transportHarness({
+    deps: {
+      workspaceCapture: {
+        begin: () => {
+          capturing++
+          // The first turn's baseline is immediate; the second one is held.
+          if (capturing === 1) return Promise.resolve({ status: 'ready' })
+          return new Promise((resolve) => {
+            release = () => resolve({ status: 'ready' })
+          })
+        },
+        finish: async () => ({ status: 'complete', files: [] }),
+        discard: async () => {}
+      },
+      workspaceStore: { begin: async () => {}, save: async () => {}, get: async () => null }
+    }
+  })
+  await startTab()
+  const f = h.fakes[0]
+  await finishedTurn(f, 'u1')
+
+  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'u2', content: [{ type: 'text', text: 'second' }] })
+  await until(() => release !== null)
+  const result = await stop(true)
+  release!()
+  await wait(20)
+
+  expect(result).toMatchObject({ popped: true, text: 'second', id: 'u2' })
+  expect(f.stdin.some((m) => m.type === 'user' && m.uuid === 'u2')).toBe(false)
+  expect(h.savedKinds().filter((k) => k === 'interrupted')).toHaveLength(0)
+})
+
+test('Stop after the message is written but before the CLI starts it: given back, and the late turn is stopped', async () => {
+  const h = transportHarness()
+  await startTab()
+  const f = h.fakes[0]
+  await finishedTurn(f, 'u1')
+  f.answer('cancel_async_message', () => ({ success: { cancelled: false } }))
+  f.answer('rewind_conversation', () => ({
+    success: {
+      rewound: false,
+      prefillText: null,
+      precedingAssistantUuid: null,
+      reason: 'target_not_found'
+    }
+  }))
+  let interrupts = 0
+  f.answer('interrupt', () => {
+    interrupts++
+    // The second interrupt lands on the turn the CLI started late.
+    if (interrupts === 2) setImmediate(() => emitLine(f, sj.aborted()))
+    return { success: { still_queued: [] } }
+  })
+
+  // Written to the CLI; it has not read it yet (no lifecycle).
+  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'u2', content: [{ type: 'text', text: 'second' }] })
+  await until(() => f.stdin.some((m) => m.type === 'user' && m.uuid === 'u2'))
+
+  const result = await stop(true)
+  expect(result).toMatchObject({ popped: true, text: 'second', id: 'u2', via: 'interrupt' })
+
+  // The CLI reads the message only now and starts its turn.
+  emitLine(f, sj.lifecycle('u2', 'queued'))
+  emitLine(f, sj.lifecycle('u2', 'started'))
+  emitLine(f, sj.text('should never show', { id: 'msg_late' }))
+  await until(() => interrupts === 2)
+  await until(() => mgr.getSessionTerminalState(TAB_OPTS.tabId) === 'idle')
+  await wait(20)
+
+  expect(h.broadcasts.some((b) => JSON.stringify(b.event).includes('should never show'))).toBe(
+    false
+  )
+  expect(h.savedKinds().filter((k) => k === 'interrupted')).toHaveLength(0)
+  expect(mgr.__getOutboxStateForTests(TAB_OPTS.tabId, 'u2')).toBe('cancelled')
+})

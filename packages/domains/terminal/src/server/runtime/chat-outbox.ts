@@ -240,6 +240,16 @@ export class ChatOutbox {
     return null
   }
 
+  /**
+   * Where a message got to: `sent` once its write began (the CLI may have it),
+   * `started` once the CLI reported its turn started. Null: unknown id.
+   */
+  reach(id: string): { sent: boolean; started: boolean } | null {
+    const entry = this.entries.get(id)
+    if (!entry) return null
+    return { sent: entry.gen !== null, started: entry.cli === 'started' }
+  }
+
   /** Messages of `gen` the CLI holds queued (received, its turn not started yet). */
   heldByCli(gen: number): string[] {
     const ids: string[] = []

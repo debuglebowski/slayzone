@@ -80,6 +80,12 @@ export class ChatProcess implements OutboxProcess {
    * of the turn is dropped at the door, up to and including its end.
    */
   discardTurn = false
+  /**
+   * A message Stop took back after it was written but before the CLI started
+   * its turn: the interrupt found nothing to stop, so when the CLI picks the
+   * message up anyway it is withdrawn (still queued) or interrupted (started).
+   */
+  lateTurnOf: string | null = null
   /** A resume of this process was confirmed (or failed) — the guard is done with it. */
   resumeSettled = false
   resumeFailed = false
