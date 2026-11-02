@@ -138,3 +138,26 @@ describe('activity view: sub-agents', () => {
     expect([...view.turns.values()][0]).toMatchObject({ subAgents: [running], active: true })
   })
 })
+
+describe('activity view: empty blocks', () => {
+  const user = { kind: 'user-text', id: 'u1', text: 'Go', timestamp: 0 } as TimelineItem
+  // Claude's hidden (redacted / signature-only) thinking: a block with no text.
+  const emptyThinking = {
+    kind: 'thinking',
+    messageId: 'm0',
+    text: '',
+    timestamp: 0
+  } as TimelineItem
+
+  it('a block with no text is no activity (nothing to show) and no row', () => {
+    const view = activityView([user, emptyThinking, reply, result], false)
+    expect(view.rows).toEqual([user, reply])
+    expect(view.turns.get(reply)?.items).toEqual([])
+  })
+
+  it('one still streaming counts (its text is on its way)', () => {
+    const streaming = { ...emptyThinking, stream: 'open' } as TimelineItem
+    const view = activityView([user, streaming], true)
+    expect([...view.turns.values()][0]?.items).toEqual([streaming])
+  })
+})

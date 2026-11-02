@@ -49,14 +49,21 @@ export function activityView(
   let completed = false
   const flush = (active: boolean, historyComplete = true): void => {
     if (!segment.length) return
+    // A text / thinking block with no text shows nothing (Claude's hidden
+    // thinking is one): no activity, no row. One still streaming counts.
+    const empty = segment.filter(
+      (item) =>
+        (item.kind === 'text' || item.kind === 'thinking') && !item.text && item.stream !== 'open'
+    )
     const activity = segment.filter(
       (item): item is ActivityItem =>
-        item.kind === 'text' ||
-        item.kind === 'thinking' ||
-        item.kind === 'stderr' ||
-        (item.kind === 'tool' &&
-          item.invocation.name !== 'ExitPlanMode' &&
-          item.invocation.name !== 'AskUserQuestion')
+        !empty.includes(item) &&
+        (item.kind === 'text' ||
+          item.kind === 'thinking' ||
+          item.kind === 'stderr' ||
+          (item.kind === 'tool' &&
+            item.invocation.name !== 'ExitPlanMode' &&
+            item.invocation.name !== 'AskUserQuestion'))
     )
     // Process diagnostics can arrive after the reply; they don't make it progress text.
     const last = activity.findLast((item) => item.kind !== 'stderr')
@@ -81,7 +88,7 @@ export function activityView(
         item.kind === 'files-changed' || item.kind === 'workspace-changes'
     )
     const subAgents = segment.filter((item): item is SubAgentItem => item.kind === 'sub-agent')
-    const hidden = new Set<TimelineItem>([...entries, ...files, ...subAgents])
+    const hidden = new Set<TimelineItem>([...entries, ...files, ...subAgents, ...empty])
     if (final && result) hidden.add(result)
     const kept = segment.filter((item) => !hidden.has(item))
     // Preserve a row as an anchor for assistant-initiated turns with no final reply.
