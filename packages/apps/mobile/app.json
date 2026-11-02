@@ -10,7 +10,7 @@
     "updates": { "enabled": false },
     "ios": {
       "bundleIdentifier": "zone.slay.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": true,
       "infoPlist": {
         "NSAppTransportSecurity": {
