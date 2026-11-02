@@ -1160,6 +1160,56 @@ test('user default chat mode applies to tasks without a stored mode', async () =
   expect(args[args.indexOf('--permission-mode') + 1]).toBe('bypassPermissions')
 })
 
+// Model/effort pickers → "Set default": a task that never picked one starts
+// (and reports) in the user's default; one that picked keeps its own.
+test('user default chat model + effort apply to tasks without stored values', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('chat_default_model:claude-chat', 'haiku'), ('chat_default_effort:claude-chat', 'low')"
+  ).run()
+  seedTask(db, 'task-dm-1', null, 'tab-dm-1')
+  seedTask(
+    db,
+    'task-dm-2',
+    JSON.stringify({ 'claude-chat': { chatModel: 'sonnet', chatEffort: 'max' } }),
+    'tab-dm-2'
+  )
+  const spawnArgsLog: string[][] = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: (_cmd, args) => {
+      spawnArgsLog.push(args)
+      return makeFakeChild()
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  const ops = createChatOps(localChatOpts(db))
+  expect(await ops.getModel('task-dm-1', 'claude-chat')).toBe('haiku')
+  expect(await ops.getEffort('task-dm-1', 'claude-chat')).toBe('low')
+  expect(await ops.getModel('task-dm-2', 'claude-chat')).toBe('sonnet')
+  expect(await ops.getEffort('task-dm-2', 'claude-chat')).toBe('max')
+  await ipc.invoke('chat:start', {
+    tabId: 'tab-dm-1',
+    taskId: 'task-dm-1',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
+  const args = spawnArgsLog[0]
+  expect(args[args.indexOf('--model') + 1]).toBe('haiku')
+  expect(args[args.indexOf('--effort') + 1]).toBe('low')
+})
+
 // ---- chat A: live effort (3.11) ----
 
 async function liveEffortSetup(answer: 'success' | 'error') {

@@ -30,7 +30,7 @@ export function ChatPermissionMode({
   inFlight: boolean
   onChange: ReturnType<typeof useChatMode>['handleModeChange']
   autoCapability: AutoModeCapability
-  /** The provider's default mode (`useChatDefaultMode`); undefined until loaded. */
+  /** The provider's default mode (`useChatDefaults`); undefined until loaded. */
   defaultMode?: AgentMode
   onSetDefault?: (mode: AgentMode) => void
 }) {

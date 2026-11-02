@@ -46,7 +46,7 @@ import { ChatViewContext } from './ChatViewContext'
 import { RowUiStateContext, RowUiStateStore, collapseAllRows } from './row-ui-state'
 import { TimelineRevealContext } from './timeline-reveal'
 import { useChatMode } from './useChatMode'
-import { useChatDefaultMode } from './useChatDefaultMode'
+import { useChatDefaults } from './useChatDefaults'
 import { useChatModel } from './useChatModel'
 import { useChatModels } from './useChatModels'
 import { useChatEffort } from './useChatEffort'
@@ -183,8 +183,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       cwd,
       livePermissionMode: permissionMode
     })
-    const { defaultMode: defaultChatMode, setDefaultMode: setDefaultChatMode } =
-      useChatDefaultMode(mode)
+    const chatDefaults = useChatDefaults(mode)
     const { chatModel, modelChanging, handleModelChange } = useChatModel({
       taskId,
       mode,
@@ -919,8 +918,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         chatMode={chatMode}
                         handleModeChange={handleModeChange}
                         autoCapability={autoCapability}
-                        defaultChatMode={defaultChatMode}
-                        onSetDefaultChatMode={setDefaultChatMode}
+                        chatDefaults={chatDefaults}
                         chatModel={chatModel}
                         models={models}
                         handleModelChange={handleModelChange}

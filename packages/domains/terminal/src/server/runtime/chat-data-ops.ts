@@ -105,6 +105,8 @@ export interface ChatDataOps {
    * (`settings`, Settings → Providers) when valid, else the built-in default.
    */
   getDefaultChatMode(mode: string): Promise<string>
+  /** Raw `settings` value (null when unset) — the chat model/effort defaults. */
+  readSetting(key: string): Promise<string | null>
   /** Append to the task_conversations ledger (+ transition-slice dual-writes). */
   recordConversation(input: RecordConversationInput): Promise<void>
   /** Did this task run `conversationId` in `mode` (honored, not deleted)? */
@@ -351,6 +353,13 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
         .prepare('SELECT value FROM settings WHERE key = ?')
         .get(defaultChatModeSettingKey(mode))) as { value: string | null } | undefined
       return resolveDefaultChatMode(mode, row?.value)
+    },
+
+    readSetting: async (key) => {
+      const row = (await db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) as
+        | { value: string | null }
+        | undefined
+      return row?.value || null
     },
 
     recordConversation: (input) => taskStore.recordConversation(db, input),

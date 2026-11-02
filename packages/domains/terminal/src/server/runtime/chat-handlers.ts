@@ -90,7 +90,11 @@ import {
   modelsForMode,
   type ChatModelInfo
 } from '@slayzone/terminal-contracts'
-import { isValidChatModeForMode } from '@slayzone/terminal-contracts'
+import {
+  defaultChatEffortSettingKey,
+  defaultChatModelSettingKey,
+  isValidChatModeForMode
+} from '@slayzone/terminal-contracts'
 import { chatEffortToFlags, isChatEffort, type ChatEffort } from '@slayzone/terminal-contracts'
 import {
   isChatCollaborationMode,
@@ -395,9 +399,12 @@ async function buildHydrateOpts(
   const resolvedChatModel: string | null =
     chatModelOverride ??
     storedChatModel ??
+    (await userDefaultModel(data, opts.taskId, opts.mode)) ??
     (opts.mode === 'codex-chat' ? null : await resolveAccountDefaultModel())
   const resolvedChatEffort: string | null =
-    chatEffortOverride !== undefined ? chatEffortOverride : (providerCfg.chatEffort ?? null)
+    chatEffortOverride !== undefined
+      ? chatEffortOverride
+      : (providerCfg.chatEffort ?? (await userDefaultEffort(data, opts.taskId, opts.mode)))
   // Collaboration mode (Codex `plan`/`default`). Only codex-chat carries it;
   // for other providers it stays null and the driver omits `collaborationMode`.
   const resolvedChatCollaboration: ChatCollaborationMode | null = modeSupportsCollaboration(
@@ -573,6 +580,24 @@ async function codexModelOffered(
 
 /** Efforts Codex knows before its CLI listed any model's (0.159.2). */
 const CODEX_KNOWN_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+
+/**
+ * The user's default model for a mode (pickers' "Set default"), when the mode
+ * still offers it: Codex checks the models its CLI listed for the task's
+ * project, Claude its fixed catalog. null = unset or no longer offered.
+ */
+async function userDefaultModel(data: ChatDataOps, taskId: string, mode: string) {
+  const raw = await data.readSetting(defaultChatModelSettingKey(mode))
+  if (mode === 'codex-chat') return (await codexModelOffered(data, taskId, raw)) ? raw : null
+  return isValidModelForMode(mode, raw) ? raw : null
+}
+
+/** The user's default reasoning effort for a mode, when still valid; else null. */
+async function userDefaultEffort(data: ChatDataOps, taskId: string, mode: string) {
+  const raw = await data.readSetting(defaultChatEffortSettingKey(mode))
+  if (mode === 'codex-chat') return (await codexEffortOffered(data, taskId, raw)) ? raw : null
+  return isChatEffort(raw) ? raw : null
+}
 
 /** Whether `effort` is one a model of the project's Codex CLI offers (its last `model/list`). */
 async function codexEffortOffered(
@@ -1453,10 +1478,14 @@ export function createChatOps(opts: ChatHandlerOpts) {
       // for the project), the CLI then runs the account's own default.
       if (mode === 'codex-chat') {
         if (await codexModelOffered(data, taskId, stored)) return stored as string
+        const userDefault = await userDefaultModel(data, taskId, mode)
+        if (userDefault) return userDefault
         const models = await data.getCliModels(taskId, mode).catch(() => null)
         return (models?.find((m) => m.isDefault) ?? models?.[0])?.id ?? ''
       }
       if (isValidModelForMode(mode, stored)) return stored
+      const userDefault = await userDefaultModel(data, taskId, mode)
+      if (userDefault) return userDefault
       // No (or legacy/invalid) stored value → the account default from
       // `~/.claude/settings.json` (Pro → sonnet, Max → opus, …).
       return resolveAccountDefaultModel()
@@ -1519,9 +1548,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
       const cfg = await data.readProviderConfig(taskId, mode)
       const stored: unknown = cfg.chatEffort ?? null
       if (mode === 'codex-chat') {
-        return (await codexEffortOffered(data, taskId, stored)) ? (stored as string) : null
-      }
-      return isChatEffort(stored) ? stored : null
+        if (await codexEffortOffered(data, taskId, stored)) return stored as string
+      } else if (isChatEffort(stored)) return stored
+      return userDefaultEffort(data, taskId, mode)
     },
 
     // `chatEffort` is typed `string` (not `ChatEffort`) so the tRPC router can

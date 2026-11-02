@@ -44,3 +44,16 @@ export function defaultChatModeSettingKey(mode: string): string {
 export function resolveDefaultChatMode(mode: string, stored: unknown): string {
   return isValidChatModeForMode(mode, stored) ? stored : defaultChatModeForMode(mode)
 }
+
+/**
+ * `settings` keys holding the user's default chat model / reasoning effort for
+ * a terminal mode (the pickers' "Set default"). Apply to tasks that never
+ * picked one; validated against the mode's catalog where they are read.
+ */
+export function defaultChatModelSettingKey(mode: string): string {
+  return `chat_default_model:${mode}`
+}
+
+export function defaultChatEffortSettingKey(mode: string): string {
+  return `chat_default_effort:${mode}`
+}

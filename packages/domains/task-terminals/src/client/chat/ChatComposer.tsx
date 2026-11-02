@@ -35,6 +35,7 @@ import type { useChatModel } from './useChatModel'
 import type { useChatEffort } from './useChatEffort'
 import type { useChatCollaboration } from './useChatCollaboration'
 import type { useChatFastMode } from './useChatFastMode'
+import type { useChatDefaults } from './useChatDefaults'
 import { ChatPermissionMode } from './ChatPermissionMode'
 
 type ModeApi = ReturnType<typeof useChatMode>
@@ -92,9 +93,8 @@ export interface ChatComposerProps {
   chatMode: ModeApi['chatMode']
   handleModeChange: ModeApi['handleModeChange']
   autoCapability: ModeApi['autoCapability']
-  /** The provider's default permission mode (`useChatDefaultMode`). */
-  defaultChatMode?: string
-  onSetDefaultChatMode?: (mode: string) => void
+  /** The provider's default mode / model / effort (`useChatDefaults`). */
+  chatDefaults?: ReturnType<typeof useChatDefaults>
   chatModel: ModelApi['chatModel']
   /** The models (and their effort levels) the provider offers (`useChatModels`). */
   models: ChatModelsView
@@ -153,8 +153,7 @@ export function ChatComposer({
   chatMode,
   handleModeChange,
   autoCapability,
-  defaultChatMode,
-  onSetDefaultChatMode,
+  chatDefaults,
   chatModel,
   models,
   handleModelChange,
@@ -355,8 +354,8 @@ export function ChatComposer({
                 inFlight={inFlight}
                 onChange={handleModeChange}
                 autoCapability={autoCapability}
-                defaultMode={defaultChatMode}
-                onSetDefault={onSetDefaultChatMode}
+                defaultMode={chatDefaults?.defaultMode}
+                onSetDefault={chatDefaults?.setDefaultMode}
               />
               {/* Null until hydrated; '' = the provider's default (Codex before it listed models). */}
               {chatModel !== null && (
@@ -370,6 +369,8 @@ export function ChatComposer({
                   }}
                   disabled={modelChanging || inFlight}
                   variant="text"
+                  defaultModel={chatDefaults?.defaultModel}
+                  onSetDefault={chatDefaults?.setDefaultModel}
                 />
               )}
               {chatModel && models.supportsEffort(chatModel) && (
@@ -389,6 +390,8 @@ export function ChatComposer({
                   onFastModeChange={(next) => {
                     void handleFastModeChange(next)
                   }}
+                  defaultEffort={chatDefaults?.defaultEffort}
+                  onSetDefault={chatDefaults?.setDefaultEffort}
                 />
               )}
               {modeSupportsCollaboration(mode) && (

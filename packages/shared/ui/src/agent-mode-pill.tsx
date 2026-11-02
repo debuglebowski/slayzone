@@ -1,15 +1,8 @@
 import { useState } from 'react'
-import {
-  ChevronDown,
-  ShieldCheck,
-  ShieldQuestion,
-  Eye,
-  AlertTriangle,
-  Zap,
-  Info
-} from 'lucide-react'
+import { ChevronDown, ShieldCheck, ShieldQuestion, Eye, AlertTriangle, Zap } from 'lucide-react'
 import { cn } from './utils'
 import { AgentModeIllustration } from './agent-mode-illustration'
+import { PickerDefaultTag, PickerInfoButton, PickerInfoPane } from './picker-info'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -290,59 +283,32 @@ export function AgentModePill({
                     </div>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5 self-center">
-                  {m === defaultMode && (
-                    <span className="text-[10px] text-muted-foreground">default</span>
-                  )}
-                  <button
-                    type="button"
-                    aria-label={`About ${itemMeta.label}`}
-                    aria-pressed={infoMode === m}
-                    className={cn(
-                      'rounded p-0.5 text-muted-foreground opacity-50 transition-opacity hover:opacity-100',
-                      infoMode === m && 'opacity-100'
-                    )}
-                    onClick={(e) => {
-                      // Keep the menu item from selecting (and closing) on this click.
-                      e.stopPropagation()
-                      setInfoMode(infoMode === m ? null : m)
-                    }}
-                  >
-                    <Info className="size-3.5" />
-                  </button>
-                </div>
+                {m === defaultMode && <PickerDefaultTag />}
+                <PickerInfoButton
+                  label={itemMeta.label}
+                  active={infoMode === m}
+                  onToggle={() => setInfoMode(infoMode === m ? null : m)}
+                />
               </DropdownMenuItem>
             )
           })}
         </div>
         {infoMode && infoMeta && (
-          <div className="flex w-72 flex-col gap-3 border-l border-border p-3">
-            <div className={cn('flex items-center gap-2 text-xs font-medium', infoMeta.text)}>
-              <infoMeta.icon className="size-4 shrink-0" />
-              {infoMeta.label}
-            </div>
+          <PickerInfoPane
+            className={infoMeta.text}
+            title={
+              <>
+                <infoMeta.icon className="size-4 shrink-0" />
+                {infoMeta.label}
+              </>
+            }
+            details={infoMeta.details}
+            isDefault={infoMode === defaultMode}
+            onSetDefault={onSetDefault && (() => onSetDefault(infoMode))}
+            setDisabled={infoDisabled}
+          >
             <AgentModeIllustration mode={infoMode} className="h-16 w-full" />
-            <p className="text-[11px] leading-relaxed text-muted-foreground">{infoMeta.details}</p>
-            {onSetDefault && (
-              <div className="mt-auto flex items-center justify-end">
-                {infoMode === defaultMode ? (
-                  <span className="text-[10px] text-muted-foreground">Default for new chats</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={infoDisabled}
-                    className={cn(
-                      'rounded px-2 py-1 text-[11px] ring-1 ring-current/30 hover:bg-muted/60 disabled:opacity-50',
-                      infoMeta.text
-                    )}
-                    onClick={() => onSetDefault(infoMode)}
-                  >
-                    Set as default
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          </PickerInfoPane>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
