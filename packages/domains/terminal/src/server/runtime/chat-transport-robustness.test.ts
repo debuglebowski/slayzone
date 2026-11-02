@@ -509,3 +509,84 @@ test('a respawn of a tab whose conversation never started keeps its unused id', 
     spawned[0][spawned[0].indexOf('--session-id') + 1]
   )
 })
+
+test('an output gap on a routed agent: the torn line is dropped (never merged), a notice says so', async () => {
+  const {
+    transportHarness,
+    fakeChild,
+    startTab,
+    until: waitUntil,
+    sj,
+    TAB_OPTS
+  } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let reportGap: ((g: { fromSeq: number; toSeq: number }) => void) | undefined
+  const h = transportHarness({
+    deps: {
+      backend: {
+        spawn: async () => {
+          setImmediate(() => f.emitter.emit('spawn'))
+          return {
+            ...childProcessToHandle(f.child),
+            onGap: (cb: (g: { fromSeq: number; toSeq: number }) => void) => {
+              reportGap = cb
+              return { dispose: () => undefined }
+            }
+          }
+        }
+      }
+    }
+  })
+  await startTab()
+  await waitUntil(() => reportGap !== undefined)
+  f.stdout.write(JSON.stringify(sj.init('s1')) + '\n' + '{"type":"assistant","mess')
+  await wait(5)
+  reportGap!({ fromSeq: 4, toSeq: 6 })
+  f.stdout.write('age":{"id":"lost"}}\n' + JSON.stringify(sj.text('after the gap')) + '\n')
+  await waitUntil(() => h.saved().some((e) => e.kind === 'assistant-text'))
+  const notices = h.saved().filter((e) => e.kind === 'notice')
+  expect(notices).toContainEqual(expect.objectContaining({ code: 'output-gap', level: 'warning' }))
+  const texts = h.saved().flatMap((e) => (e.kind === 'assistant-text' ? [e.text] : []))
+  expect(texts).toEqual(['after the gap'])
+  expect(h.saved().some((e) => e.kind === 'error')).toBe(false)
+  await mgr.removeSession(TAB_OPTS.tabId)
+})
+
+test('an agent on a computer that cannot confirm writes: the chat says so once, with what to do', async () => {
+  const {
+    transportHarness,
+    fakeChild,
+    startTab,
+    until: waitUntil,
+    TAB_OPTS
+  } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let report: ((info: { computerId: string }) => void) | undefined
+  const h = transportHarness({
+    deps: {
+      backend: {
+        spawn: async () => {
+          setImmediate(() => f.emitter.emit('spawn'))
+          return {
+            ...childProcessToHandle(f.child),
+            onWritesUnconfirmed: (cb: (info: { computerId: string }) => void) => {
+              report = cb
+              return { dispose: () => undefined }
+            }
+          }
+        }
+      }
+    }
+  })
+  await startTab()
+  await waitUntil(() => report !== undefined)
+  report!({ computerId: 'computer-1' })
+  report!({ computerId: 'computer-1' })
+  await waitUntil(() => h.saved().some((e) => e.kind === 'notice'))
+  await wait(10)
+  const notices = h.saved().filter((e) => e.kind === 'notice' && e.code === 'computer-outdated')
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatchObject({ level: 'warning' })
+  expect((notices[0] as { text: string }).text).toContain('Settings')
+  await mgr.removeSession(TAB_OPTS.tabId)
+})

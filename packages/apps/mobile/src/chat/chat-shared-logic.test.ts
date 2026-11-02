@@ -83,7 +83,8 @@ describe('@slayzone/task-terminals/slash-commands', () => {
   it("offers desktop's builtins, minus the ones the CLI runs itself", () => {
     const names = availableBuiltins({
       cliCommandNames: new Set(cliCommandItems(cliList).map((c) => c.name)),
-      capabilities: chatCapabilitiesForMode('claude-chat')
+      capabilities: chatCapabilitiesForMode('claude-chat'),
+      effortLevels: []
     }).map((b) => b.name)
     expect(names).toContain('clear')
     expect(names).toContain('model')

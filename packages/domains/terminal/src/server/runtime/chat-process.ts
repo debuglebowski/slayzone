@@ -18,6 +18,7 @@
 import type { AgentEvent, OutgoingUserMessage } from '@slayzone/terminal-contracts'
 import { userMessageText } from '@slayzone/terminal-contracts'
 import type { ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from '../agents/types'
+import { randomUUID } from 'node:crypto'
 import { createLineSplitter, type ChatProcHandle } from './chat-proc-handle'
 import type { OpenToolBound } from './chat-watchdog'
 import type { OutboxProcess } from './chat-outbox'
@@ -181,12 +182,35 @@ export class ChatProcess implements OutboxProcess {
 
     // Framing stays hub-side; the driver owns parsing. A line that arrives
     // before the driver has its context waits for it (never dropped).
-    this.handle.onStdout(
-      createLineSplitter((line) => {
-        if (!this.driverHasContext) this.earlyLines.push(line)
-        else this.handleLine(line)
+    const lines = createLineSplitter((line) => {
+      if (!this.driverHasContext) this.earlyLines.push(line)
+      else this.handleLine(line)
+    })
+    this.handle.onStdout(lines)
+    // Routed output the computer no longer held: drop the torn line (never merge
+    // its halves into one corrupt line) and say what happened.
+    let toldUnconfirmed = false
+    this.handle.onWritesUnconfirmed?.(() => {
+      if (toldUnconfirmed) return
+      toldUnconfirmed = true
+      this.emit({
+        kind: 'notice',
+        id: randomUUID(),
+        level: 'warning',
+        code: 'computer-outdated',
+        text: 'This agent’s computer runs an older SlayZone that does not confirm messages, so one lost on the way is not noticed. Settings → Connections names the computer and how to update it.'
       })
-    )
+    })
+    this.handle.onGap?.(() => {
+      lines.gap()
+      this.emit({
+        kind: 'notice',
+        id: randomUUID(),
+        level: 'warning',
+        code: 'output-gap',
+        text: 'Part of the agent’s output was lost on the way from its computer; the reply above may be incomplete.'
+      })
+    })
     this.handle.onStderr((chunk) => this.bufferStderr(chunk))
     this.handle.onExit(({ code, signal }) => this.finish(code, signal, false))
     this.handle.onError((err) => {

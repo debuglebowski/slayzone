@@ -3,7 +3,7 @@ import {
   modelsForMode,
   type ChatCapabilities
 } from '@slayzone/terminal-contracts'
-import type { BuiltinCommand, AcceptCtx } from './types'
+import type { BuiltinCommand, BuiltinChatContext, AcceptCtx } from './types'
 import { rankByName } from './ranking'
 import { resetChat } from './chat-actions'
 
@@ -171,12 +171,33 @@ export const builtinCommands: BuiltinCommand[] = [
   },
   {
     name: 'effort',
-    description: 'Set reasoning effort — usage: /effort <low|medium|high|xhigh|max>',
+    // The levels are the chat model's own (`forChat`); these stand in without a chat.
+    description: 'Set reasoning effort',
     cliCollision: 'app-wins',
     run(ctx) {
-      // Park draft so user types the level, then handleSend intercepts on Enter.
       ctx.setDraft('/effort ')
-      ctx.toast('effort: type level (low, medium, high, xhigh, max) then Enter')
+    },
+    forChat: ({ effortLevels }) => {
+      // The same list handleSend / planSend check `/effort <level>` against.
+      if (effortLevels.length === 0) {
+        return {
+          description: 'Set reasoning effort — none for this model',
+          run(ctx) {
+            ctx.setDraft('/effort ')
+            ctx.toast('effort: this model has no effort levels')
+          }
+        }
+      }
+      const hint = `<${effortLevels.join('|')}>`
+      return {
+        description: `Set reasoning effort — usage: /effort ${hint}`,
+        argumentHint: hint,
+        run(ctx) {
+          // Park draft so user types the level, then handleSend intercepts on Enter.
+          ctx.setDraft('/effort ')
+          ctx.toast(`effort: type level (${effortLevels.join(', ')}) then Enter`)
+        }
+      }
     }
   }
 ]
@@ -186,9 +207,12 @@ export const builtinCommands: BuiltinCommand[] = [
  * (`/btw <question>`). Availability is not checked: the hint only shows once
  * that exact name was typed, and a builtin's hint wins over the CLI's.
  */
-export const BUILTIN_ARGUMENT_HINTS: Readonly<Record<string, string>> = Object.fromEntries(
-  builtinCommands.flatMap((b) => (b.argumentHint ? [[b.name, b.argumentHint]] : []))
-)
+export function builtinArgumentHint(
+  builtins: readonly BuiltinCommand[],
+  name: string
+): string | undefined {
+  return builtins.find((b) => b.name === name)?.argumentHint
+}
 
 export function rankBuiltins(items: BuiltinCommand[], filter: string): BuiltinCommand[] {
   return rankByName(items, filter, {
@@ -205,15 +229,22 @@ export interface BuiltinsSourceOpts {
   /** Commands the chat CLI runs itself (its list minus terminal-only ones); empty when unknown. */
   cliCommandNames: ReadonlySet<string>
   capabilities: ChatCapabilities
+  /** The levels `/effort` takes on the chat's model (`ChatModelsView.effortChoices`). */
+  effortLevels: BuiltinChatContext['effortLevels']
 }
 
-/** Builtins offered for this chat: available for the mode, and not shadowed by a CLI-native command. */
+/**
+ * Builtins offered for this chat: available for the mode, not shadowed by a CLI-native
+ * command, with their chat-dependent parts (`forChat`) applied.
+ */
 export function availableBuiltins(opts: BuiltinsSourceOpts): BuiltinCommand[] {
-  return builtinCommands.filter(
-    (b) =>
-      (b.available?.(opts.capabilities) ?? true) &&
-      !(b.cliCollision === 'cli-wins' && opts.cliCommandNames.has(b.name))
-  )
+  return builtinCommands
+    .filter(
+      (b) =>
+        (b.available?.(opts.capabilities) ?? true) &&
+        !(b.cliCollision === 'cli-wins' && opts.cliCommandNames.has(b.name))
+    )
+    .map((b) => (b.forChat ? { ...b, ...b.forChat({ effortLevels: opts.effortLevels }) } : b))
 }
 
 export type AcceptCtxRef = AcceptCtx

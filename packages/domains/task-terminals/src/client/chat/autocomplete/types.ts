@@ -182,4 +182,17 @@ export interface BuiltinCommand {
   /** Ghost text after a parked `/name ` (e.g. `<question>`), like a CLI command's. */
   argumentHint?: string
   run: (ctx: AcceptCtx) => void | Promise<void>
+  /**
+   * The parts that depend on the chat (e.g. `/effort`'s levels — the chat model's own),
+   * applied by `availableBuiltins` over the static ones.
+   */
+  forChat?: (
+    chat: BuiltinChatContext
+  ) => Partial<Pick<BuiltinCommand, 'description' | 'argumentHint' | 'run'>>
+}
+
+/** What a chat-dependent builtin reads (`BuiltinCommand.forChat`). */
+export interface BuiltinChatContext {
+  /** The levels `/effort` takes on the chat's model (`ChatModelsView.effortChoices`); empty: none. */
+  effortLevels: readonly string[]
 }

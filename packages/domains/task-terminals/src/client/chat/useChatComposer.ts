@@ -30,7 +30,7 @@ import { createCommandsSource } from './autocomplete/sources/commands'
 import { createCliCustomCommandsSource } from './autocomplete/sources/cli-custom-commands'
 import { createAgentsSource } from './autocomplete/sources/agents'
 import { createBuiltinsSource } from './autocomplete/sources/builtins'
-import { BUILTIN_ARGUMENT_HINTS } from './autocomplete/builtins-registry'
+import { availableBuiltins, builtinArgumentHint } from './autocomplete/builtins-registry'
 import { createFilesSource } from './autocomplete/sources/files'
 import { cliCommandItems, createCliCommandsSource } from './autocomplete/sources/cli-commands'
 import { usePromptHistory } from './usePromptHistory'
@@ -254,10 +254,21 @@ export function useChatComposer({
   const cliList = capabilities.nativeSlashCommands ? cliCommands : null
   // TUI parity: right after a parked `/name ` the command's argument hint shows
   // as ghost text (an app builtin's own, else the CLI's `initialize` reply).
+  const builtinsOpts = useMemo(
+    () => ({
+      cliCommandNames: new Set(cliCommandItems(cliList).map((c) => c.name)),
+      capabilities,
+      // `/effort`'s description, hint and toast: the levels handleSend checks against.
+      effortLevels: models.effortChoices(chatModel)
+    }),
+    [cliList, capabilities, models, chatModel]
+  )
   const parked = /^\/(\S+) $/.exec(draft)
   const argumentHint =
     parked && cursorPos === draft.length
-      ? BUILTIN_ARGUMENT_HINTS[parked[1]] || cliList?.details?.[parked[1]]?.argumentHint || null
+      ? builtinArgumentHint(availableBuiltins(builtinsOpts), parked[1]) ||
+        cliList?.details?.[parked[1]]?.argumentHint ||
+        null
       : null
   const sources = useMemo(
     () => [
@@ -268,14 +279,11 @@ export function useChatComposer({
         ? createCliCustomCommandsSource(listApi, cliList)
         : createCommandsSource((text) => submitPrompt(text, text).then(() => true), listApi),
       createAgentsSource(listApi),
-      createBuiltinsSource({
-        cliCommandNames: new Set(cliCommandItems(cliList).map((c) => c.name)),
-        capabilities
-      }),
+      createBuiltinsSource(builtinsOpts),
       createSkillsSource(listApi),
       createCliCommandsSource(cliList)
     ],
-    [submitPrompt, listApi, cliList, capabilities]
+    [submitPrompt, listApi, cliList, capabilities, builtinsOpts]
   ) as AutocompleteSource[]
 
   const autocomplete = useAutocomplete({

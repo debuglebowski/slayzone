@@ -33,7 +33,8 @@ export function useSlashCommands({
   cwd,
   caps,
   liveCliList,
-  liveCliDetails
+  liveCliDetails,
+  effortLevels
 }: {
   taskId: string
   mode: string
@@ -41,6 +42,8 @@ export function useSlashCommands({
   caps: ChatCapabilities
   liveCliList: CliCommandList | null
   liveCliDetails: CliCommandDetails | null
+  /** The levels `/effort` takes on the chat's model (`ChatModelsView.effortChoices`). */
+  effortLevels: readonly string[]
 }): SlashCommands {
   const trpc = useTRPC()
   const client = useTRPCClient()
@@ -72,9 +75,10 @@ export function useSlashCommands({
     () =>
       slashItems(
         { skills: skills.data, commands: commands.data, agents: agents.data, cliList },
-        caps
+        caps,
+        effortLevels
       ),
-    [skills.data, commands.data, agents.data, cliList, caps]
+    [skills.data, commands.data, agents.data, cliList, caps, effortLevels]
   )
   const bump = useCallback(
     (entry: { source: string; name: string }) => {

@@ -7,7 +7,7 @@ import { useTRPC, useTRPCClient } from '../trpc'
 // and then fails to resolve. Same constant, browser-safe module.
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 // The status words every client shows (the mobile app too): one implementation.
-import { computerStatus } from '@slayzone/computers/labels'
+import { computerStatus, outdatedComputerNote } from '@slayzone/computers/labels'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import { FolderCog, Loader2, Plus, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
 import { useComputerActions } from './ComputerActions'
@@ -512,6 +512,7 @@ export function HubCard({
                         </span>
                       )}
                     </div>
+                    <OutdatedNote computer={computer} />
                   </td>
                   {/* The same component the hub header uses, so the dot, the
                       truncation and the tone are identical rather than merely
@@ -746,5 +747,16 @@ export function HubCard({
         </>
       }
     />
+  )
+}
+
+/** A computer whose release cannot confirm chat writes: which, and what to do. */
+function OutdatedNote({ computer }: { computer: { name: string; version?: string | null } }) {
+  const note = outdatedComputerNote(computer)
+  if (!note) return null
+  return (
+    <div data-testid="computer-outdated" className="text-destructive mt-0.5 text-xs">
+      {note}
+    </div>
   )
 }

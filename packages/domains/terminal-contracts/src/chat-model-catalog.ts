@@ -96,6 +96,12 @@ export interface ChatModelsView {
    * none listed yet, refuses; Claude's fixed levels otherwise.
    */
   effortCommand: (model: string | null, level: string) => EffortCommandResult
+  /**
+   * The levels `/effort` takes on `model` — exactly the set {@link effortCommand}
+   * checks against, so every place that lists them (the `/effort` description, its
+   * ghost hint, the toast) says what the check accepts. Empty: none (yet).
+   */
+  effortChoices: (model: string | null) => string[]
 }
 
 /** `/effort <level>`: the level to set, or why not. */
@@ -111,6 +117,12 @@ export function chatModelsView(mode: string, served: ChatModelInfo[] | undefined
   const cliListed = CLI_LISTED_MODES.has(mode)
   const models: ChatModelInfo[] = served && served.length > 0 ? served : modelsForMode(mode)
   const find = (id: string) => models.find((m) => m.id === id)
+  function effortChoices(model: string | null): string[] {
+    const listed = model ? find(model)?.efforts : undefined
+    // A CLI-listed provider's levels are per model: never Claude's as a fallback.
+    if (listed) return listed.map((l) => l.id)
+    return cliListed ? [] : [...CHAT_EFFORTS]
+  }
   return {
     models,
     unlisted: cliListed && models.length === 0,
@@ -121,15 +133,10 @@ export function chatModelsView(mode: string, served: ChatModelInfo[] | undefined
       return cliListed ? false : modelSupportsEffortForMode(mode, id)
     },
     effortLevels: (id) => find(id)?.efforts,
+    effortChoices,
     effortCommand: (model, raw) => {
       const level = raw.toLowerCase()
-      const listed = model ? find(model)?.efforts : undefined
-      // A CLI-listed provider's levels are per model: never Claude's as a fallback.
-      const valid: readonly string[] = listed
-        ? listed.map((l) => l.id)
-        : cliListed
-          ? []
-          : CHAT_EFFORTS
+      const valid = effortChoices(model)
       if (valid.includes(level)) return { ok: true, level }
       if (valid.length > 0) {
         return { ok: false, message: `Invalid effort level "${level}". Use: ${valid.join(', ')}` }

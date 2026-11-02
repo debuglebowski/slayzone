@@ -122,6 +122,18 @@ export interface ChatProcHandle {
   onSpawn(cb: () => void): ChatDisposable
   onStdout(cb: (chunk: string) => void): ChatDisposable
   onStderr(cb: (chunk: string) => void): ChatDisposable
+  /**
+   * stdout was lost for good between two chunks (a routed process whose computer no
+   * longer held the frames; seqs `fromSeq..toSeq`). Fires in order with `onStdout`:
+   * the chunks before and after are halves of different lines. Absent: never (local).
+   */
+  onGap?(cb: (gap: { fromSeq: number; toSeq: number }) => void): ChatDisposable
+  /**
+   * The process's computer acks writes without confirming them (a release older than
+   * confirmed writes): a message lost on the way is not detected. Once per process.
+   * Absent: writes are always confirmed (local).
+   */
+  onWritesUnconfirmed?(cb: (info: { computerId: string }) => void): ChatDisposable
   /** Fires once with the process's terminal status. */
   onExit(cb: (e: { code: number | null; signal: string | null }) => void): ChatDisposable
   /**
@@ -182,14 +194,33 @@ export interface ChatBackend {
  * and hold an unterminated tail until more bytes arrive. A provider's NDJSON
  * line can exceed one chunk, so dropping the tail would corrupt the protocol.
  */
-export function createLineSplitter(onLine: (line: string) => void): (chunk: string) => void {
+/** Feeds stdout chunks; `gap()` says output was lost before the next chunk. */
+export interface LineSplitter {
+  (chunk: string): void
+  /**
+   * Bytes were lost here: the unterminated tail so far and the next chunk's text up
+   * to its first line end are halves of different lines — both are dropped, never
+   * joined into one (corrupt) line.
+   */
+  gap(): void
+}
+
+export function createLineSplitter(onLine: (line: string) => void): LineSplitter {
   // The unterminated tail, as the chunks it arrived in: only each NEW chunk is
   // searched for '\n', so a line of tens of MB (an echoed attachment) costs
   // its length once, not its length per chunk.
   let pending: string[] = []
-  return (chunk: string) => {
+  // After a gap: drop text until the next line end (the lost line's own tail).
+  let torn = false
+  const feed = (chunk: string) => {
     let start = 0
     let index = chunk.indexOf('\n')
+    if (torn) {
+      if (index === -1) return
+      torn = false
+      start = index + 1
+      index = chunk.indexOf('\n', start)
+    }
     while (index !== -1) {
       pending.push(chunk.slice(start, index))
       let line = pending.length === 1 ? pending[0] : pending.join('')
@@ -201,6 +232,12 @@ export function createLineSplitter(onLine: (line: string) => void): (chunk: stri
     }
     if (start < chunk.length) pending.push(start === 0 ? chunk : chunk.slice(start))
   }
+  return Object.assign(feed, {
+    gap: () => {
+      pending = []
+      torn = true
+    }
+  })
 }
 
 /**

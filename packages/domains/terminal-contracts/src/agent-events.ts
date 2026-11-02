@@ -237,6 +237,10 @@ export type NoticeCode =
   | 'history-unavailable'
   /** Claude Code refused a fork; the chat stayed in the original conversation. */
   | 'fork-failed'
+  /** Agent output from a remote computer was lost in transit (it no longer held it). */
+  | 'output-gap'
+  /** The agent's computer runs a release that cannot confirm writes (update it). */
+  | 'computer-outdated'
 
 /**
  * TRANSPORT-INTERNAL (never saved or broadcast): the agent is alive and working

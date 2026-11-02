@@ -68,3 +68,42 @@ export const OFFLINE_MARK = 'offline'
 
 /** A hub with no computer enrolled runs everything itself. */
 export const NO_COMPUTERS_NOTE = 'No computers — runs locally'
+
+/**
+ * The first release whose computers confirm chat writes (dedupe on retry, a refused
+ * write instead of a silent ack, the binary pre-check). An older computer keeps
+ * working, unconfirmed, and cannot upgrade itself (its release predates hub-driven
+ * upgrades): it is updated by hand.
+ */
+export const CHAT_CONFIRMED_WRITES_SINCE = '0.36.3'
+
+/** `major.minor.patch` of a release string (`v` prefix, `-beta.N` suffix allowed). */
+function releaseCore(version: string): [number, number, number] | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version.trim())
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+/**
+ * Which computer runs a release older than confirmed chat writes, and what to do —
+ * null when it confirms them or its version is unknown. A prerelease counts as its
+ * release (`0.36.3-beta.1` confirms).
+ */
+export function outdatedComputerNote(row: {
+  name: string
+  version?: string | null
+}): string | null {
+  const have = row.version ? releaseCore(row.version) : null
+  const need = releaseCore(CHAT_CONFIRMED_WRITES_SINCE)!
+  if (!have) return null
+  for (let i = 0; i < 3; i++) {
+    if (have[i] !== need[i]) {
+      if (have[i] > need[i]) return null
+      return (
+        `${row.name} runs SlayZone ${row.version}: messages to chat agents on it are not confirmed, ` +
+        'so one lost on the way is not noticed. Update the SlayZone CLI on that machine, then run ' +
+        `\`slay computer restart ${row.name}\`.`
+      )
+    }
+  }
+  return null
+}

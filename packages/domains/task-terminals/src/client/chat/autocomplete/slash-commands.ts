@@ -9,6 +9,7 @@
  */
 export {
   availableBuiltins,
+  builtinArgumentHint,
   builtinCommands,
   filterBuiltins,
   rankBuiltins,
@@ -27,6 +28,7 @@ export { resolveEnter, type EnterResolution } from './resolve-enter'
 export { resetChat, type ResetChatOptions } from './chat-actions'
 export type {
   AcceptCtx,
+  BuiltinChatContext,
   BuiltinCommand,
   ChatActions,
   NavigateActions,
