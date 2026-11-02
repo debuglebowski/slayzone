@@ -23,11 +23,17 @@ import {
 import { hubUrlFromAddr, isBareAuthority } from '@slayzone/platform/hub-addr'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import * as SecureStore from 'expo-secure-store'
+import type { InProcessHub } from './in-process-hub'
 
 /** A hub this app is signed in to. */
 export interface HubSession {
   entry: HubEntry
   token: string
+  /**
+   * The hub is served inside the app (the demo hub): its tRPC and REST go to this,
+   * never to the network, and the session is never kept in the keychain.
+   */
+  inProcess?: InProcessHub
 }
 
 /** Where the sessions are kept: text values by key (the keychain in the app). */

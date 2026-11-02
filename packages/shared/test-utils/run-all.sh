@@ -965,6 +965,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
+  packages/shared/transport/src/client/inProcessHub.test.tsx \
   packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
   packages/domains/tasks/src/client/useBoardRefresh.test.tsx \
   packages/domains/tasks/src/client/ProjectTaskLibrary.test.tsx \

@@ -11,6 +11,9 @@
  *   guards and Expo Router moves to the first allowed screen.
  * - Safe area: the sign-in screen pads itself (`Screen`); each tab measures its own,
  *   which includes the tab bar (`TabStack`).
+ * - Demo ("Try demo" on the sign-in screen, `hub-sessions.tsx`): the demo hub is then
+ *   the only session, served inside the app — the same guards, connections and
+ *   screens. Its theme is never kept for the next launch.
  * - Theme: the PRIMARY hub's, the one signed in first. One source keeps the app's look
  *   stable — signing in to another hub, or one hub being slow or unreachable, never
  *   repaints it — and the launch's first frame (the theme read last) is that hub's,
@@ -65,7 +68,10 @@ function Root() {
   const signedIn = sessions.length > 0
   return (
     <HubConnections sessions={sessions}>
-      <HubThemeProvider hubId={sessions[0]?.entry.id ?? null}>
+      <HubThemeProvider
+        hubId={sessions[0]?.entry.id ?? null}
+        keep={sessions[0]?.inProcess === undefined}
+      >
         <Screens>
           <Stack.Protected guard={signedIn}>
             <Stack.Screen name="(tabs)" />

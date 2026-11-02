@@ -1,6 +1,6 @@
 import type { AppRouter } from '@slayzone/api'
 import { trpcFor, type TrpcView } from '@slayzone/transport/client'
-import type { inferRouterOutputs } from '@trpc/server'
+import type { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
 
 /**
  * The mobile app's view of the shared client runtime: the whole app router (an app sits
@@ -18,3 +18,4 @@ export const useTRPCClient: View['useTRPCClient'] = view.useTRPCClient
 export type HubTrpcClient = ReturnType<View['useTRPCClient']>
 
 export type RouterOutputs = inferRouterOutputs<AppRouter>
+export type RouterInputs = inferRouterInputs<AppRouter>

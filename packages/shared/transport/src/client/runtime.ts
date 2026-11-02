@@ -7,9 +7,10 @@ import {
   type TRPCLink
 } from '@trpc/client'
 import type { AnyTRPCRouter } from '@trpc/server'
+import { behaviorSubject } from '@trpc/server/observable'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { compactBytesLink } from './compactBytesLink'
-import { connectDeadlineLink } from './connectDeadlineLink'
+import { type ConnectionStateSource, connectDeadlineLink } from './connectDeadlineLink'
 import { hubReadsCompactBytes } from './hubCapabilities'
 import { createConnectPacer } from './connectPacing'
 
@@ -171,6 +172,16 @@ export function getTrpcClient(): RuntimeClient {
 // whole thing is byte-identical until a second hub is added.
 // ---------------------------------------------------------------------------
 
+/**
+ * What the federation reads of a hub's socket: its state stream and closing it. A
+ * hub's socket is a real `RuntimeWsClient`, except an in-process hub's, which has
+ * none (`getOrCreateInProcessHubClient`).
+ */
+export type HubSocket = {
+  connectionState: ConnectionStateSource
+  close: () => unknown
+}
+
 export type RuntimeHubWsClient = {
   id: string
   url: string
@@ -178,10 +189,12 @@ export type RuntimeHubWsClient = {
    *  connect, so a later token is only reachable by rebuilding — see below. */
   token?: string
   client: RuntimeClient
-  wsClient: RuntimeWsClient
+  wsClient: HubSocket
 }
 
 const hubClients = new Map<string, RuntimeHubWsClient>()
+/** The link each in-process hub's client was built over (a new link rebuilds it). */
+const inProcessLinks = new Map<string, RuntimeLink>()
 
 /**
  * Idempotently get/create the WS client for a hub id. The default hub routes
@@ -211,8 +224,10 @@ export function getOrCreateHubClient(opts: {
   const cached = hubClients.get(opts.id)
   // The default hub is the boot singleton and carries no token — never rebuild
   // it, or every module-scope getTrpcClient() caller would keep a dead socket.
-  if (cached && (opts.isDefault || cached.token === opts.token)) return cached
+  if (cached && !inProcessLinks.has(opts.id) && (opts.isDefault || cached.token === opts.token))
+    return cached
   if (cached) cached.wsClient.close()
+  inProcessLinks.delete(opts.id)
   const created = opts.isDefault
     ? initTrpcClient(opts.url, { links: opts.links })
     : createTrpcWsClient({ url: opts.url, links: opts.links, token: opts.token })
@@ -224,6 +239,47 @@ export function getOrCreateHubClient(opts: {
     wsClient: created.wsClient
   }
   hubClients.set(opts.id, entry)
+  return entry
+}
+
+/**
+ * A socket that is always open: an in-process hub is reachable for as long as it
+ * exists. Closing it does nothing (there is no connection to end).
+ */
+function alwaysOpenSocket(): HubSocket {
+  return {
+    connectionState: behaviorSubject<ReturnType<ConnectionStateSource['get']>>({
+      type: 'state',
+      state: 'pending',
+      error: null
+    }),
+    close: () => undefined
+  }
+}
+
+/**
+ * Idempotently get/create the client of a hub served IN THIS PROCESS: every operation
+ * is resolved by `link` (a terminating link, e.g. `inProcessLink(backend)`), no
+ * socket opens, and its connection reads open from the start. The mobile app's demo
+ * hub is one. The same `link` returns the cached client; another one (a new instance
+ * of the hub) replaces it. `closeHubClient` forgets it like any hub.
+ */
+export function getOrCreateInProcessHubClient(opts: {
+  id: string
+  url: string
+  link: RuntimeLink
+}): RuntimeHubWsClient {
+  const cached = hubClients.get(opts.id)
+  if (cached && inProcessLinks.get(opts.id) === opts.link) return cached
+  if (cached) cached.wsClient.close()
+  const entry: RuntimeHubWsClient = {
+    id: opts.id,
+    url: opts.url,
+    client: createTRPCClient<AnyTRPCRouter>({ links: [opts.link] }),
+    wsClient: alwaysOpenSocket()
+  }
+  hubClients.set(opts.id, entry)
+  inProcessLinks.set(opts.id, opts.link)
   return entry
 }
 
@@ -243,6 +299,7 @@ export function closeHubClient(id: string): boolean {
   const entry = hubClients.get(id)
   if (!entry || entry.wsClient === wsClientSingleton) return false
   hubClients.delete(id)
+  inProcessLinks.delete(id)
   void entry.wsClient.close()
   return true
 }
@@ -257,4 +314,5 @@ export function listHubClients(): RuntimeHubWsClient[] {
 /** Test-only: drop all registered hub clients (does not touch the singleton). */
 export function _resetHubClients(): void {
   hubClients.clear()
+  inProcessLinks.clear()
 }

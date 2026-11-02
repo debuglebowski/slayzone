@@ -1,7 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { QueryClient } from '@tanstack/react-query'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
-import { closeHubClient, getOrCreateHubClient, type RuntimeHubWsClient } from './runtime'
+import {
+  closeHubClient,
+  getOrCreateHubClient,
+  getOrCreateInProcessHubClient,
+  type RuntimeHubWsClient,
+  type RuntimeLink
+} from './runtime'
 import { makeQueryClient } from './provider'
 import { useHubRegistryStore } from './hubRegistryStore'
 
@@ -49,6 +55,13 @@ export type FederationProviderProps = {
   /** Per-hub bearer tokens (hubId → token) for authed remote hubs. Sent as tRPC
    *  connectionParams. Omitted / empty for the local hub → no token frame. */
   tokens?: Record<string, string>
+  /**
+   * Hubs served in this process (hubId → terminating link, e.g. `inProcessLink`):
+   * such a hub's operations never leave the process, it opens no socket and reads as
+   * connected (`getOrCreateInProcessHubClient`). Its `url` and token are not used.
+   * The mobile app's demo hub. Omitted everywhere else.
+   */
+  inProcessLinks?: Readonly<Record<string, RuntimeLink>>
   children: ReactNode
 }
 
@@ -57,6 +70,7 @@ export function FederationProvider({
   defaultHubId,
   decorateUrl,
   tokens,
+  inProcessLinks,
   children
 }: FederationProviderProps): ReactNode {
   // QueryClients are created once per hub id and cached across renders — a new
@@ -68,12 +82,15 @@ export function FederationProvider({
       const entry = hubs.find((h) => h.id === hubId)
       if (!entry || !entry.url) return null
       const url = decorateUrl ? decorateUrl(entry.url) : entry.url
-      const ws = getOrCreateHubClient({
-        id: entry.id,
-        url,
-        isDefault: entry.id === defaultHubId,
-        token: entry.id === defaultHubId ? undefined : tokens?.[entry.id]
-      })
+      const link = inProcessLinks?.[entry.id]
+      const ws = link
+        ? getOrCreateInProcessHubClient({ id: entry.id, url: entry.url, link })
+        : getOrCreateHubClient({
+            id: entry.id,
+            url,
+            isDefault: entry.id === defaultHubId,
+            token: entry.id === defaultHubId ? undefined : tokens?.[entry.id]
+          })
       let queryClient = queryClients.current.get(entry.id)
       if (!queryClient) {
         queryClient = makeQueryClient()
@@ -82,8 +99,9 @@ export function FederationProvider({
       return { entry, ws, queryClient }
     }
     return { hubs, defaultHubId, resolve }
-    // decorateUrl is a stable host closure; hubs/defaultHubId/tokens drive re-resolution.
-  }, [hubs, defaultHubId, decorateUrl, tokens])
+    // decorateUrl is a stable host closure; hubs/defaultHubId/tokens/inProcessLinks
+    // drive re-resolution.
+  }, [hubs, defaultHubId, decorateUrl, tokens, inProcessLinks])
 
   // A hub that left `hubs` (signed out) takes its socket and its cache with it: the
   // socket would keep reconnecting with a bearer the user gave up, and a later sign-in

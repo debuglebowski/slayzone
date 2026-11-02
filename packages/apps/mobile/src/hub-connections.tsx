@@ -6,6 +6,10 @@
  * and reports what it has into `useHubFeeds()`; screens read the merged view from
  * there (`hub-board.ts`).
  *
+ * A hub served inside the app (`HubSession.inProcess`: the demo hub) joins the same
+ * federation through its in-process link: no socket, always connected, every screen
+ * unchanged.
+ *
  * Nothing below this provider sits inside an ambient `HubScope`: a screen about one
  * hub's row wraps itself in that hub's scope, so `useTRPC()` anywhere else throws
  * instead of quietly talking to some hub.
@@ -15,6 +19,7 @@ import {
   FederationProvider,
   type HubConnection,
   HubScope,
+  type RuntimeLink,
   useFederation,
   useHubConnection,
   useSubscription
@@ -78,8 +83,19 @@ export function HubConnections({
     () => Object.fromEntries(sessions.map((s) => [s.entry.id, s.token])),
     [sessions]
   )
+  // Hubs served inside the app (the demo hub): their tRPC never leaves the process.
+  const inProcessLinks = useMemo(() => {
+    const links: Record<string, RuntimeLink> = {}
+    for (const s of sessions) if (s.inProcess) links[s.entry.id] = s.inProcess.link
+    return links
+  }, [sessions])
   return (
-    <FederationProvider hubs={hubs} defaultHubId={NO_LOCAL_HUB} tokens={tokens}>
+    <FederationProvider
+      hubs={hubs}
+      defaultHubId={NO_LOCAL_HUB}
+      tokens={tokens}
+      inProcessLinks={inProcessLinks}
+    >
       <Feeds hubs={hubs}>{children}</Feeds>
     </FederationProvider>
   )

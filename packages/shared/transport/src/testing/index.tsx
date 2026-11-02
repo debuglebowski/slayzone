@@ -1,27 +1,22 @@
 import type { ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { createTRPCClient, type TRPCClient, type TRPCLink } from '@trpc/client'
+import { createTRPCClient, type TRPCClient } from '@trpc/client'
 import type { AnyTRPCRouter } from '@trpc/server'
-import { observable } from '@trpc/server/observable'
+import {
+  type InProcessBackend,
+  type InProcessProcedure,
+  type InProcessSubscription,
+  inProcessLink
+} from '../client/inProcessLink'
 import { TRPCProvider, type RuntimeClient } from '../client/runtime'
 import { makeQueryClient } from '../client/provider'
 
 /** Resolves a query or mutation; a throw/rejection surfaces as the tRPC error. */
-// biome-ignore lint/suspicious/noExplicitAny: inputs are whatever the hook under test sends
-export type TestProcedure = (input: any) => unknown
+export type TestProcedure = InProcessProcedure
 /** Starts a subscription; call `emit` per event, return the teardown. */
-export type TestSubscription = (
-  // biome-ignore lint/suspicious/noExplicitAny: see TestProcedure
-  input: any,
-  emit: (data: unknown) => void
-) => (() => void) | void
-
-export interface TrpcTestBackend {
-  /** Queries + mutations, keyed by dotted path (`'fileEditor.readFile'`). */
-  procedures?: Record<string, TestProcedure>
-  /** Subscriptions, keyed by dotted path (`'fileEditor.watch'`). */
-  subscriptions?: Record<string, TestSubscription>
-}
+export type TestSubscription = InProcessSubscription
+/** Queries + mutations and subscriptions by dotted path (`inProcessLink`'s backend). */
+export type TrpcTestBackend = InProcessBackend
 
 /**
  * `TRouter` types `trpcClient` only (the wire is path-based). Defaults to the
@@ -37,46 +32,15 @@ export interface TrpcTest<TRouter extends AnyTRPCRouter = AnyTRPCRouter> {
 
 /**
  * In-memory tRPC backend for client hook/component tests: the REAL client,
- * TRPCProvider and app QueryClient defaults, with a terminating link that
- * resolves each operation against `backend` instead of a hub socket. An
- * operation with no handler fails loudly (`unexpected op <path>`), so a hook
- * that grows a new call can't silently pass.
+ * TRPCProvider and app QueryClient defaults, with a terminating link
+ * (`inProcessLink`) that resolves each operation against `backend` instead of a
+ * hub socket. An operation with no handler fails loudly (`unexpected op <path>`),
+ * so a hook that grows a new call can't silently pass.
  */
 export function createTrpcTest<TRouter extends AnyTRPCRouter = AnyTRPCRouter>(
   backend: TrpcTestBackend
 ): TrpcTest<TRouter> {
-  const link: TRPCLink<AnyTRPCRouter> =
-    () =>
-    ({ op }) =>
-      observable((observer) => {
-        if (op.type === 'subscription') {
-          const start = backend.subscriptions?.[op.path]
-          if (!start) {
-            observer.error(new Error(`unexpected op ${op.path}`) as never)
-            return () => undefined
-          }
-          observer.next({ result: { type: 'started' } })
-          const teardown = start(op.input, (data) =>
-            observer.next({ result: { type: 'data', data } })
-          )
-          return () => teardown?.()
-        }
-        const resolve = backend.procedures?.[op.path]
-        if (!resolve) {
-          observer.error(new Error(`unexpected op ${op.path}`) as never)
-          return () => undefined
-        }
-        Promise.resolve()
-          .then(() => resolve(op.input))
-          .then(
-            (data) => {
-              observer.next({ result: { type: 'data', data } })
-              observer.complete()
-            },
-            (err: unknown) => observer.error(err as never)
-          )
-        return () => undefined
-      })
+  const link = inProcessLink(backend)
 
   const runtimeClient: RuntimeClient = createTRPCClient<AnyTRPCRouter>({ links: [link] })
   // Same object, re-typed for the caller's router (path-based, see view.ts).

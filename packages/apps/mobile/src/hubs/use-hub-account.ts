@@ -8,6 +8,7 @@ import { createFetchHubTransport, fetchSessionEmail } from '@slayzone/hub-auth/c
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { useQuery } from '@tanstack/react-query'
 import type { HubSession } from '../hub-session'
+import { hubTransportOver } from '../in-process-hub'
 
 /** React Native's `fetch` — no cookies, so no browser CSRF path (as at sign-in). */
 const transport = createFetchHubTransport(fetch)
@@ -18,7 +19,11 @@ export function useHubAccount(session: HubSession): string | null {
     // The bearer is the key: signing in again (maybe as someone else) reads it anew.
     queryKey: ['hub-account', session.token],
     queryFn: () =>
-      fetchSessionEmail(transport, hubUrlFromAddr(session.entry.label, 'http'), session.token),
+      fetchSessionEmail(
+        session.inProcess ? hubTransportOver(session.inProcess.http) : transport,
+        hubUrlFromAddr(session.entry.label, 'http'),
+        session.token
+      ),
     staleTime: Number.POSITIVE_INFINITY
   })
   return data ?? null

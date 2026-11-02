@@ -101,23 +101,29 @@ export function HubThemeReader({
  */
 export function HubThemeProvider({
   hubId,
+  keep = true,
   children
 }: {
   hubId: string | null
+  /**
+   * Keep what the hub says for the next launch (`theme-cache.ts`). Off for the demo hub:
+   * it is gone at the next launch, and must never paint the app's first frame.
+   */
+  keep?: boolean
   children: ReactNode
 }) {
   // Synchronous file read, once per hub: the first frame already paints the kept theme.
-  const cached = useMemo(() => (hubId ? hubThemeCache.load(hubId) : null), [hubId])
+  const cached = useMemo(() => (hubId && keep ? hubThemeCache.load(hubId) : null), [hubId, keep])
   const [live, setLive] = useState<{ hubId: string; settings: HubThemeSettings } | null>(null)
 
   const onSettings = useCallback(
     (settings: HubThemeSettings) => {
       if (!hubId) return
       // Keep what the hub said for the next launch's first paint.
-      hubThemeCache.save(hubId, settings)
+      if (keep) hubThemeCache.save(hubId, settings)
       setLive({ hubId, settings })
     },
-    [hubId]
+    [hubId, keep]
   )
 
   // Settings read from a previous primary hub never paint this one.

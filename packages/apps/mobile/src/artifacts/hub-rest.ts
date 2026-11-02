@@ -10,6 +10,7 @@
  */
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import type { HubSession } from '../hub-session'
+import { fetchOver, type InProcessHttp } from '../in-process-hub'
 
 /** One hub, as the REST calls need it. */
 export interface HubTarget {
@@ -20,15 +21,19 @@ export interface HubTarget {
   /** `host[:port]`, as signed in to. */
   address: string
   token: string
+  /** The hub's REST API served inside the app (the demo hub); absent = over the network. */
+  http?: InProcessHttp
 }
 
 export function hubTarget(session: HubSession): HubTarget {
-  return {
+  const target: HubTarget = {
     hubId: session.entry.id,
     label: session.entry.label,
     address: session.entry.label,
     token: session.token
   }
+  if (session.inProcess) target.http = session.inProcess.http
+  return target
 }
 
 export type QueryValue = string | number | boolean | null | undefined
@@ -117,7 +122,9 @@ export async function hubJson<T>(
   path: string,
   options: { query?: Record<string, QueryValue>; fetch?: HubFetch; signal?: AbortSignal } = {}
 ): Promise<T> {
-  const doFetch = options.fetch ?? (globalThis.fetch as unknown as HubFetch)
+  const doFetch =
+    options.fetch ??
+    (target.http ? fetchOver(target.http) : (globalThis.fetch as unknown as HubFetch))
   const url = hubApiUrl(target, path, options.query)
   let res: Awaited<ReturnType<HubFetch>>
   try {

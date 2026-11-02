@@ -9,6 +9,7 @@ import {
   getHubClient,
   listHubClients,
   initTrpcClient,
+  type HubSocket,
   type RuntimeWsClient
 } from './runtime'
 import {
@@ -44,7 +45,8 @@ export type TypedHubWsClient<TRouter extends AnyTRPCRouter> = {
   /** The token this socket was OPENED with (see `getOrCreateHubClient`). */
   token?: string
   client: TRPCClient<TRouter>
-  wsClient: RuntimeWsClient
+  /** Its socket's state stream and close (an in-process hub has no real socket). */
+  wsClient: HubSocket
 }
 
 type MaybeId = string | null | undefined

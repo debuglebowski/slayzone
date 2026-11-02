@@ -45,16 +45,22 @@ const PROBE_DELAY_MS = 400
  * with Microsoft" appears only where the hub serves it, and the email + password form
  * hides only where the hub says password sign-in is off. Until the hub answers (or when
  * it cannot be reached) the form is as it always was.
+ *
+ * `onTryDemo` (the first sign-in only): "Try demo" opens the app on sample data, no hub
+ * or account needed (`demo/`).
  */
 export function SignInScreen({
   title,
   onSignedIn,
   onCancel,
+  onTryDemo,
   devAutoSubmit = false
 }: {
   title: string
   onSignedIn: (session: HubSession) => void
   onCancel?: () => void
+  /** Offer the demo (the first sign-in): open the app on sample data. */
+  onTryDemo?: () => void
   /** Dev bundles only: submit the `EXPO_PUBLIC_SPIKE_*` prefill once (first sign-in). */
   devAutoSubmit?: boolean
 }) {
@@ -195,6 +201,21 @@ export function SignInScreen({
           </Pressable>
         ) : null}
       </View>
+      {onTryDemo ? (
+        <View style={styles.demo}>
+          <Text style={styles.demoText}>No hub yet? Look around first.</Text>
+          <Pressable
+            testID="try-demo"
+            style={[styles.demoButton, busy && styles.buttonDisabled]}
+            onPress={onTryDemo}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityHint="Opens the app with sample projects. Nothing is sent anywhere."
+          >
+            <Text style={styles.demoButtonText}>Try demo</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
   )
 }
@@ -239,5 +260,16 @@ const makeStyles = (t: ChromeColors) =>
     or: { color: t.mutedForeground, textAlign: 'center', marginTop: 16, fontSize: 13 },
     busy: { marginTop: 16 },
     cancel: { marginTop: 12, paddingVertical: 8, alignItems: 'center' },
-    cancelText: { color: t.mutedForeground, fontSize: 15 }
+    cancelText: { color: t.mutedForeground, fontSize: 15 },
+    demo: { alignSelf: 'center', width: '100%', maxWidth: 420, marginTop: 20, gap: 10 },
+    demoText: { color: t.mutedForeground, fontSize: 14, textAlign: 'center' },
+    demoButton: {
+      paddingVertical: 12,
+      borderRadius: 8,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.secondary
+    },
+    demoButtonText: { color: t.secondaryForeground, fontSize: 16, fontWeight: '600' }
   })

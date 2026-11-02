@@ -16,6 +16,8 @@ const MAX_CONTENT_WIDTH = 720
  *   each with its connection, who the app is signed in as there, its computers (live),
  *   and Sign out (which removes it: its tasks and agents leave every list, its bearer
  *   and the theme kept from it are forgotten). Add a hub opens the sign-in screen.
+ *   The demo hub (`HubSession.inProcess`) shows as the demo, with Exit demo instead of
+ *   Sign out (both go through `onSignOut`, which closes the demo for its hub).
  * - Appearance: the theme is the first hub's (desktop's Appearance settings there).
  * - About: the app's version.
  *
@@ -53,13 +55,18 @@ export function SettingsScreen({
         {feeds.map((item, index) => {
           const status = statusOf(item)
           const session = sessions.find((s) => s.entry.id === item.hub.id)
+          const demo = session?.inProcess !== undefined
           return (
             <View key={item.hub.id} testID={`hub-${item.hub.id}`} style={styles.card}>
               <View style={styles.row}>
                 <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>{item.hub.label}</Text>
+                  <Text style={styles.rowTitle}>{demo ? 'SlayZone demo' : item.hub.label}</Text>
                   <Text style={styles.rowMeta}>
-                    {index === 0 ? `${status} · theme from this hub` : status}
+                    {demo
+                      ? 'Sample data inside the app — nothing is sent anywhere'
+                      : index === 0
+                        ? `${status} · theme from this hub`
+                        : status}
                   </Text>
                 </View>
                 <Pressable
@@ -67,7 +74,7 @@ export function SettingsScreen({
                   hitSlop={8}
                   accessibilityRole="button"
                 >
-                  <Text style={styles.destructive}>Sign out</Text>
+                  <Text style={styles.destructive}>{demo ? 'Exit demo' : 'Sign out'}</Text>
                 </Pressable>
               </View>
               {session ? <HubDetails session={session} /> : null}

@@ -13,6 +13,13 @@ export {
   type TypedHubWsClient
 } from './view'
 export { TrpcProvider, makeQueryClient, type TrpcProviderProps } from './provider'
+export type { HubSocket, RuntimeLink } from './runtime'
+export {
+  inProcessLink,
+  type InProcessBackend,
+  type InProcessProcedure,
+  type InProcessSubscription
+} from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
   FederationProvider,
