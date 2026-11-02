@@ -4,6 +4,7 @@
  * the wire answer behind each row. Against the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
+import { openActivityTool } from '../fixtures/chat-activity'
 import { echoTurn, ev, expect, reply, step, test, type Step } from '../fixtures/chat'
 
 const BUILD = { command: 'npm run build', description: 'Build the project' }
@@ -79,7 +80,10 @@ test.describe('Chat permission cards', () => {
       behavior: 'allow',
       reply: { response: { updatedPermissions: [BASH_RULE], updatedInput: BUILD } }
     })
-    await expect(t.panel.getByText('Allowed · don’t ask again for: npm run build')).toBeVisible()
+    await openActivityTool(t.panel, 'tool-bash')
+    await expect(t.panel.locator('[data-approval="rule"]')).toHaveText(
+      'don’t ask again for: npm run build'
+    )
   })
 
   test('Bash: "No" stops the turn; the same process answers the next message', async ({ chat }) => {
@@ -170,6 +174,7 @@ test.describe('Chat permission cards', () => {
     expect((decision.reply as { response: Record<string, unknown> }).response).not.toHaveProperty(
       'interrupt'
     )
+    await openActivityTool(t.panel, 'tool-bash')
     await expect(t.panel.getByText('Rejected · use pnpm')).toBeVisible()
   })
 

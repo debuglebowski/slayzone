@@ -102,38 +102,37 @@ export function PlanStatus({ prompt }: { prompt: ChatPrompt | null }) {
   return prompt.decision ? <StatusText>Rejected</StatusText> : null
 }
 
+/** Tools whose card shows its own prompt status (no approval state on the shell). */
+export const OWN_PROMPT_STATUS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
 /**
- * One line under a tool card whose call needed approval: waiting, or what was
- * decided (the picked row, the typed feedback), or expired.
+ * The approval state of a tool call that needed one, shown on its card. A plain
+ * "Yes" is no state: the call ran, its status says the rest.
  */
-export function PromptStatusLine({ toolUseId }: { toolUseId: string }) {
-  const prompt = usePromptFor(toolUseId)
+export type ToolApproval =
+  | { state: 'pending' }
+  | { state: 'expired' }
+  | { state: 'rejected'; feedback: string | null }
+  | { state: 'rule'; rule: string }
+
+export function useToolApproval(invocation: ToolInvocation): ToolApproval | null {
+  const prompt = usePromptFor(invocation.id)
   const { autoModeAvailable, cwd } = useChatView()
   const provider = useChatProvider()
-  if (!prompt) return null
-  let text: string | null = null
-  if (prompt.status === 'pending') text = 'Waiting for your approval below ↓'
-  else if (prompt.status === 'expired' || prompt.status === 'cancelled') text = EXPIRED_TEXT
-  else if (prompt.decision?.behavior === 'allow') {
-    const row =
-      prompt.optionId && prompt.optionId !== 'yes'
-        ? buildPermissionView(prompt.request, {
-            autoModeAvailable: autoModeAvailable ?? false,
-            cwd: cwd ?? '',
-            agent: provider.agent
-          }).options.find((o) => o.id === prompt.optionId)
-        : undefined
-    text = row ? `Allowed · ${row.label.replace(/^Yes, and /, '')}` : 'Allowed'
-  } else if (prompt.decision) {
-    const feedback = feedbackOf(prompt)
-    text = feedback !== null ? `Rejected · ${feedback}` : 'Rejected'
+  if (!prompt || OWN_PROMPT_STATUS.has(invocation.name)) return null
+  if (prompt.status === 'pending') return { state: 'pending' }
+  if (prompt.status === 'expired' || prompt.status === 'cancelled') return { state: 'expired' }
+  if (prompt.decision?.behavior === 'allow') {
+    if (!prompt.optionId || prompt.optionId === 'yes') return null
+    const row = buildPermissionView(prompt.request, {
+      autoModeAvailable: autoModeAvailable ?? false,
+      cwd: cwd ?? '',
+      agent: provider.agent
+    }).options.find((o) => o.id === prompt.optionId)
+    return row ? { state: 'rule', rule: row.label.replace(/^Yes, and /, '') } : null
   }
-  if (!text) return null
-  return (
-    <div className="px-0 -mt-1 pb-1">
-      <StatusText>{text}</StatusText>
-    </div>
-  )
+  if (prompt.decision) return { state: 'rejected', feedback: feedbackOf(prompt) }
+  return null
 }
 
 function StatusText({ children }: { children: ReactNode }) {

@@ -238,22 +238,31 @@ describe('a tool waiting for approval', () => {
     )
   }
 
-  it('says so under its card, then what was decided', () => {
+  const approval = () => document.querySelector('[data-approval]')
+  const card = () => document.querySelector('[data-tool-use-id="toolu_bash"]')
+
+  it('shows the approval as a state on its card, no line under it', () => {
     renderBash([promptFor(bash, 'pending')])
-    expect(screen.getByText('Waiting for your approval below ↓')).toBeTruthy()
+    expect(approval()?.getAttribute('data-approval')).toBe('pending')
+    expect(card()?.contains(approval())).toBe(true)
+    expect(screen.queryByText('Waiting for your approval below ↓')).toBeNull()
     cleanup()
+    // A plain "Yes" adds nothing: the call ran.
     renderBash([promptFor(bash, 'resolved', { behavior: 'allow' }, 'yes')])
-    expect(screen.getByText('Allowed')).toBeTruthy()
+    expect(approval()).toBeNull()
+    expect(screen.queryByText('Allowed')).toBeNull()
     cleanup()
     renderBash([promptFor(bash, 'resolved', feedbackDenial('use pnpm'), 'no-feedback')])
-    expect(screen.getByText('Rejected · use pnpm')).toBeTruthy()
+    expect(approval()?.getAttribute('data-approval')).toBe('rejected')
+    expect(card()?.contains(screen.getByText('Rejected · use pnpm'))).toBe(true)
     cleanup()
     renderBash([promptFor(bash, 'expired')])
-    expect(screen.getByText('Expired')).toBeTruthy()
+    expect(approval()?.getAttribute('data-approval')).toBe('expired')
+    expect(screen.queryByText('Expired')).toBeNull()
   })
 
   it('nothing for Codex', () => {
     renderBash([promptFor(bash, 'pending')], { promptCards: false })
-    expect(screen.queryByText('Waiting for your approval below ↓')).toBeNull()
+    expect(document.querySelector('[data-approval]')).toBeNull()
   })
 })

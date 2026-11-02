@@ -47,13 +47,7 @@ import {
   type ToolProps
 } from './tool-cards/card-shell'
 import { questionsOf } from './prompts/QuestionPrompt'
-import {
-  answersOf,
-  PlanStatus,
-  PromptStatusLine,
-  QuestionStatus,
-  usePromptFor
-} from './prompts/PromptStatus'
+import { answersOf, PlanStatus, QuestionStatus, usePromptFor } from './prompts/PromptStatus'
 import { HighlightedText } from './HighlightedText'
 import { CompactionRow } from './CompactionRow'
 import { CommandOutputBlock } from './CommandOutputBlock'
@@ -905,9 +899,6 @@ export const toolRenderers: Record<string, React.FC<ToolProps>> = {
   'codex/webSearch': WebSearchCard
 }
 
-/** Tools whose card shows its own prompt status. */
-const OWN_PROMPT_STATUS = new Set(['AskUserQuestion', 'ExitPlanMode'])
-
 /**
  * Cards that draw a partial input as it streams (fields may be missing or cut).
  * Others show their header until the call is final (prompt cards must never
@@ -945,15 +936,7 @@ export function renderTool(invocation: ToolInvocation, timestamp?: number): Reac
   const R =
     toolRenderers[invocation.name] ??
     (parseMcpToolName(invocation.name) ? McpToolCard : ToolCallGeneric)
-  if (OWN_PROMPT_STATUS.has(invocation.name)) {
-    return <R invocation={invocation} timestamp={timestamp} />
-  }
-  return (
-    <>
-      <R invocation={invocation} timestamp={timestamp} />
-      <PromptStatusLine toolUseId={invocation.id} />
-    </>
-  )
+  return <R invocation={invocation} timestamp={timestamp} />
 }
 
 /**

@@ -1,5 +1,16 @@
 import { createContext, useContext, useEffect, useMemo } from 'react'
-import { ChevronDown, ChevronRight, CircleCheck, CircleX, Loader2, ShieldAlert } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  CircleCheck,
+  CircleX,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
+  ShieldX,
+  TimerOff
+} from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { ToolInvocation } from '@slayzone/terminal/client'
 import { useChatProvider, useChatView } from '../ChatViewContext'
@@ -8,6 +19,7 @@ import { useRowUiState } from '../row-ui-state'
 import { HOOK_TONE, hookLabel } from '../hook-labels'
 import { HighlightedText } from '../HighlightedText'
 import { useToolFocusRequest } from './tool-focus'
+import { useToolApproval, type ToolApproval } from '../prompts/PromptStatus'
 
 // Shared chat card primitives (moved verbatim from renderers.tsx), so tool cards
 // in their own files can use them without importing renderers.tsx.
@@ -104,6 +116,47 @@ function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy
   )
 }
 
+/**
+ * The header icon of a call whose approval is still the story (waiting,
+ * withdrawn, rejected); null when the call's own status says it all.
+ */
+function ApprovalIcon({ approval }: { approval: ToolApproval | null }) {
+  const provider = useChatProvider()
+  if (!approval || approval.state === 'rule') return null
+  const { Icon, label, tone } = {
+    pending: {
+      Icon: ShieldQuestion,
+      label: 'Waiting for your approval below',
+      tone: 'text-warning'
+    },
+    expired: {
+      Icon: TimerOff,
+      label: `Approval expired — ${provider.agent} stopped waiting`,
+      tone: 'text-muted-foreground'
+    },
+    rejected: { Icon: ShieldX, label: 'You rejected this call', tone: 'text-warning' }
+  }[approval.state]
+  return (
+    <span data-approval={approval.state} aria-label={label} title={label} className="shrink-0">
+      <Icon className={cn('size-3', tone)} />
+    </span>
+  )
+}
+
+/** A persistent rule the approval added ("don't ask again for: …"). */
+function ApprovalRuleChip({ rule }: { rule: string }) {
+  return (
+    <span
+      data-approval="rule"
+      title={`Allowed · ${rule}`}
+      className="flex min-w-0 shrink items-center gap-1 rounded-sm border border-border/60 px-1 text-[10px] text-muted-foreground"
+    >
+      <ShieldCheck className="size-2.5 shrink-0 text-success" />
+      <span className="truncate">{rule}</span>
+    </span>
+  )
+}
+
 export const ToolAutoOpenContext = createContext<boolean | undefined>(undefined)
 export const ToolInActivityContext = createContext(false)
 
@@ -127,6 +180,7 @@ function ToolShell({
   const autoOpen = useContext(ToolAutoOpenContext)
   const inActivity = useContext(ToolInActivityContext)
   const status = invocation.status
+  const approval = useToolApproval(invocation)
   // Kept while scrolled away; "Collapse all" closes it (the default holds on mount).
   const [open, setOpen] = useRowUiState(
     'card',
@@ -160,6 +214,7 @@ function ToolShell({
   const canOpen = Boolean(body)
   return (
     <div
+      data-tool-use-id={invocation.id}
       className={cn(
         autoOpen === undefined && !inActivity ? `${CHAT_CARD_INDENT} pr-0` : 'pl-0 pr-0',
         'py-1 group flex items-start gap-2'
@@ -176,7 +231,11 @@ function ToolShell({
             !canOpen && 'cursor-default'
           )}
         >
-          <StatusIcon status={status} />
+          {approval && approval.state !== 'rule' ? (
+            <ApprovalIcon approval={approval} />
+          ) : (
+            <StatusIcon status={status} />
+          )}
           <span className="shrink-0 text-muted-foreground">{icon}</span>
           <span className="font-medium shrink-0">{title}</span>
           {summary !== undefined && summary !== '' && (
@@ -184,6 +243,7 @@ function ToolShell({
               {summary}
             </span>
           )}
+          {approval?.state === 'rule' && <ApprovalRuleChip rule={approval.rule} />}
           {canOpen && (
             <span className="shrink-0 text-muted-foreground">
               {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -191,6 +251,11 @@ function ToolShell({
           )}
         </button>
         {invocation.blockedBy && <BlockedByHook block={invocation.blockedBy} />}
+        {approval?.state === 'rejected' && approval.feedback !== null && (
+          <div className="border-t border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground whitespace-pre-wrap">
+            {`Rejected · ${approval.feedback}`}
+          </div>
+        )}
         {open && canOpen && (
           <div className="border-t border-border/40 bg-background/40">{body}</div>
         )}

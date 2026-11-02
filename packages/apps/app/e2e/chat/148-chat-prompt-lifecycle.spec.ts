@@ -6,6 +6,7 @@
  * task's "needs you" flag following the prompt. Against the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
+import { openActivityTool } from '../fixtures/chat-activity'
 import { ev, expect, reply, step, test, transcriptPath, type Step } from '../fixtures/chat'
 
 const BUILD = { command: 'npm run build', description: 'Build the project' }
@@ -60,7 +61,9 @@ test.describe('Chat prompt lifecycle', () => {
     await expect(t.panel.getByText('Build done.')).toBeVisible()
     await t.reload()
     await expect(t.panel.getByText('Build done.')).toBeVisible()
-    await expect(t.panel.getByText('Allowed', { exact: true })).toBeVisible()
+    const card = await openActivityTool(t.panel, 'tool-bash')
+    // A plain "Yes" leaves no approval state on the card: the call ran.
+    await expect(card.locator('[data-approval]')).toHaveCount(0)
     await expect(t.panel.locator('[data-prompt-dock]')).toHaveCount(0)
     expect((await t.run(0)).decisions()).toHaveLength(1)
   })
@@ -82,7 +85,8 @@ test.describe('Chat prompt lifecycle', () => {
       .poll(async () => (await t.events()).some((e) => e.event.kind === 'permission-cancelled'))
       .toBe(true)
     await expect(t.panel.locator('[data-prompt-dock]')).toHaveCount(0)
-    await expect(t.panel.getByText('Expired', { exact: true })).toBeVisible()
+    await openActivityTool(t.panel, 'tool-bash')
+    await expect(t.panel.locator('[data-approval="expired"]')).toBeVisible()
     expect(run.decisions()).toEqual([])
     expect(t.epoch.runs()).toHaveLength(1)
   })
@@ -98,7 +102,8 @@ test.describe('Chat prompt lifecycle', () => {
     await expect(t.panel.getByText('Bash command')).toBeVisible()
     await t.stopButton.click()
     await expect(t.panel.locator('[data-prompt-dock]')).toHaveCount(0)
-    await expect(t.panel.getByText('Expired', { exact: true })).toBeVisible()
+    await openActivityTool(t.panel, 'tool-bash')
+    await expect(t.panel.locator('[data-approval="expired"]')).toBeVisible()
     const run = await t.run(0, (r) => r.cancels().length === 1)
     expect(run.decisions()).toEqual([])
 
