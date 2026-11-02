@@ -38,7 +38,7 @@ import {
 import { toolActivityByRow, type TurnToolActivity } from './tool-activity'
 import { ActivityTurn } from './ActivityTurn'
 import { AssistantAnswer } from './AssistantAnswer'
-import { CHAT_SCROLLER_BLEED_CLASS, chatColumnClass } from './chat-layout'
+import { CHAT_SCROLLER_BLEED_CLASS, chatColumnClass, turnBlockClass } from './chat-layout'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { ToolAutoOpenContext } from './tool-cards/card-shell'
@@ -174,6 +174,7 @@ export function ChatTimeline({
         : new Map<TimelineItem, TurnToolActivity>(),
     [hiddenTools, items, folded]
   )
+  const compactSpacing = appearance.chatCompactSpacing
   const renderRow = useCallback(
     (item: TimelineItem, index: number) => {
       const turn = activityTurns?.get(item)
@@ -192,7 +193,7 @@ export function ChatTimeline({
         return (
           <>
             {!turn.hostIsActivity && renderTimelineItem(item, index)}
-            <div className="relative">
+            <div className={turnBlockClass(compactSpacing)} data-testid="chat-turn-progress">
               {showWorking && <TypingIndicator label={loadingLabel} />}
               <ActivityTurn turn={turn} appearance={activityAppearance} rowOf={rowOf} />
             </div>
@@ -232,7 +233,8 @@ export function ChatTimeline({
       activities,
       inFlight,
       showToolSummary,
-      showLatestTool
+      showLatestTool,
+      compactSpacing
     ]
   )
   const hasActiveTurn = activityTurns && [...activityTurns.values()].some((turn) => turn.active)

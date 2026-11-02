@@ -12,7 +12,7 @@ import { ToolFocusContext } from './tool-cards/tool-focus'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
 import { formatSeconds } from './tool-cards/command-live'
-import { AnswerFooterPanel } from './answer-footer-panel'
+import { TurnFooter, TurnFooterPanel } from './turn-footer'
 
 function ActivityNarrative({
   item,
@@ -43,7 +43,16 @@ function ActivityNarrative({
           aria-expanded={expanded}
           aria-controls={id}
           onClick={() => setExpanded(!expanded)}
-          className="flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-muted/40"
+          className={cn(
+            'flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2 text-left',
+            // Stays in view while its expanded text scrolls past: right under the
+            // running turn's sticky footer row (TurnFooter). Opaque; redrawn
+            // behind the content: the turn block's hover/focus tint
+            // (turnBlockClass), the card's tint, its own hover tint.
+            'sticky top-(--turn-footer-row-height) z-[4] bg-background from-muted/50 to-muted/50 group-hover/turn:bg-linear-to-b group-focus-within/turn:bg-linear-to-b',
+            'before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-md before:bg-card/40',
+            'after:pointer-events-none after:absolute after:inset-0 after:-z-10 after:rounded-md hover:after:bg-muted/40'
+          )}
         >
           <Icon className="size-3 shrink-0 text-muted-foreground" />
           <span
@@ -190,11 +199,8 @@ export function ActivityTurn({
       ? filtered[filtered.length - 1]
       : undefined
   if ((!showSummary || !turn.items.length) && !latest && !turn.files.length) return null
-  return (
-    <div
-      className={embedded ? 'contents' : 'flex flex-wrap items-start gap-x-2 px-0'}
-      data-testid="chat-activity"
-    >
+  const content = (
+    <>
       {showSummary && turn.items.length > 0 && (
         <>
           <button
@@ -219,7 +225,7 @@ export function ActivityTurn({
               )}
             />
           </button>
-          <AnswerFooterPanel>
+          <TurnFooterPanel>
             <div id={id} hidden={!expanded} className="order-1 min-w-0 basis-full">
               {expanded &&
                 items.map((item, index) => (
@@ -237,7 +243,7 @@ export function ActivityTurn({
                   />
                 ))}
             </div>
-          </AnswerFooterPanel>
+          </TurnFooterPanel>
         </>
       )}
       {turn.files.map((item) =>
@@ -248,12 +254,28 @@ export function ActivityTurn({
         )
       )}
       {latest && (
-        <AnswerFooterPanel>
+        <TurnFooterPanel>
           <div className="order-2 min-w-0 basis-full">
             <ActivityEntry item={latest} row={rowOf?.(latest)} preview />
           </div>
-        </AnswerFooterPanel>
+        </TurnFooterPanel>
       )}
+    </>
+  )
+  // In an answer, the answer's footer row (AssistantAnswer) is the sticky one.
+  if (embedded) {
+    return (
+      <div className="contents" data-testid="chat-activity">
+        {content}
+      </div>
+    )
+  }
+  // A running turn (or one without a final answer): this block is its footer.
+  return (
+    <div data-testid="chat-activity">
+      <TurnFooter className="items-start gap-x-2" testId="chat-activity-footer">
+        {content}
+      </TurnFooter>
     </div>
   )
 }

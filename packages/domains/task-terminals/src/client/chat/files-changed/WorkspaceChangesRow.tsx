@@ -12,7 +12,7 @@ import { useChatView } from '../ChatViewContext'
 import { FilesChangedRow, useShowFileChange } from './FilesChangedRow'
 import { relativeToCwd } from './relative-path'
 import { turnChangeSources, type RecordedChanges } from './turn-changes'
-import { AnswerFooterPanel } from '../answer-footer-panel'
+import { TurnFooterPanel } from '../turn-footer'
 
 type Row = Extract<TimelineItem, { kind: 'workspace-changes' }>
 
@@ -173,11 +173,11 @@ export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; emb
         <ChevronRight className={cn('size-3 shrink-0', open && 'rotate-90')} />
       </button>
       {open && (
-        <AnswerFooterPanel>
+        <TurnFooterPanel>
           <div id={id} className="order-3 min-w-0 basis-full">
             <WorkspaceChangesContent item={item} recorded={recorded} />
           </div>
-        </AnswerFooterPanel>
+        </TurnFooterPanel>
       )}
     </div>
   )

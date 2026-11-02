@@ -9,7 +9,7 @@ import { ToolFocusContext } from '../tool-cards/tool-focus'
 import { useRevealTimelineItem } from '../timeline-reveal'
 import { stableAnchorKey } from '../useChatDisplay'
 import { relativeToCwd } from './relative-path'
-import { AnswerFooterPanel } from '../answer-footer-panel'
+import { TurnFooterPanel } from '../turn-footer'
 
 type FilesChangedItem = Extract<TimelineItem, { kind: 'files-changed' }>
 
@@ -186,7 +186,7 @@ export function FilesChangedRow({
           </button>
         </div>
         {open && (
-          <AnswerFooterPanel>
+          <TurnFooterPanel>
             <ul
               className={cn(
                 'border-t border-border/40 bg-background/40 py-1',
@@ -226,7 +226,7 @@ export function FilesChangedRow({
                 </li>
               )}
             </ul>
-          </AnswerFooterPanel>
+          </TurnFooterPanel>
         )}
       </div>
     </div>
