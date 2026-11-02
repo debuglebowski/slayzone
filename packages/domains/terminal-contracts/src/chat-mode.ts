@@ -39,18 +39,22 @@ export function rawPermissionModeToChatMode(raw: string | null | undefined): Cha
  *
  * `bypass` uses `--permission-mode bypassPermissions`: the older
  * `--allow-dangerously-skip-permissions` only ALLOWS bypass and starts the CLI
- * in `default`.
+ * in `default`. Every other mode carries that allow flag too, so switching INTO
+ * bypass later is a live `set_permission_mode` (the CLI refuses it with
+ * `bypass_not_launched` otherwise) — no restart cutting the running turn.
  */
+const ALLOW_BYPASS_FLAG = '--allow-dangerously-skip-permissions'
+
 export function chatModeToFlags(mode: string): string[] {
   switch (mode) {
     case 'plan':
-      return ['--permission-mode', 'plan']
+      return ['--permission-mode', 'plan', ALLOW_BYPASS_FLAG]
     case 'ask':
-      return ['--permission-mode', 'default']
+      return ['--permission-mode', 'default', ALLOW_BYPASS_FLAG]
     case 'auto-accept':
-      return ['--permission-mode', 'acceptEdits']
+      return ['--permission-mode', 'acceptEdits', ALLOW_BYPASS_FLAG]
     case 'auto':
-      return ['--permission-mode', 'auto']
+      return ['--permission-mode', 'auto', ALLOW_BYPASS_FLAG]
     case 'bypass':
       return ['--permission-mode', 'bypassPermissions']
     default:
@@ -60,9 +64,9 @@ export function chatModeToFlags(mode: string): string[] {
 
 /**
  * Map our ChatMode to the raw CLI permission_mode string used by the SDK's
- * `control_request {subtype:'set_permission_mode', mode}`. Returns null for
- * `bypass`: switching INTO bypass mid-session needs a process spawned with a
- * bypass flag, so it requires a restart instead.
+ * `control_request {subtype:'set_permission_mode', mode}`. `bypass` applies
+ * live only to a process spawned allowing it ({@link chatModeToFlags}); one
+ * spawned before that refuses, and the caller falls back to a restart.
  */
 export function chatModeToCliPermissionMode(mode: string): string | null {
   switch (mode) {
@@ -74,8 +78,10 @@ export function chatModeToCliPermissionMode(mode: string): string | null {
       return 'acceptEdits'
     case 'auto':
       return 'auto'
+    case 'bypass':
+      return 'bypassPermissions'
     default:
-      // `bypass` (Claude flag-only) and any non-Claude mode → no live
+      // Any non-Claude mode → no live
       // `set_permission_mode` equivalent; caller falls back accordingly.
       return null
   }

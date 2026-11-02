@@ -671,7 +671,8 @@ test("a task's own flags are extras: the chat mode, model and effort still decid
   )
   expect(flagValue(seeded, '--permission-mode')).toBe('acceptEdits')
   expect(flagValue(seeded, '--model')).toBe('sonnet')
-  expect(seeded).not.toContain('--allow-dangerously-skip-permissions')
+  // Once: the pills allow bypass (live switch), the task's own copy is dropped.
+  expect(seeded.filter((a) => a === '--allow-dangerously-skip-permissions')).toHaveLength(1)
 
   const override = await coldStartArgs(
     { chatMode: 'ask', chatModel: 'sonnet', chatEffort: 'high' },
@@ -683,7 +684,7 @@ test("a task's own flags are extras: the chat mode, model and effort still decid
   expect(flagValue(override, '--add-dir')).toBe('../shared')
   expect(override.filter((a) => a === '--permission-mode')).toHaveLength(1)
   expect(override.filter((a) => a === '--model')).toHaveLength(1)
-  expect(override).not.toContain('--allow-dangerously-skip-permissions')
+  expect(override.filter((a) => a === '--allow-dangerously-skip-permissions')).toHaveLength(1)
 })
 
 test('chat bypass really bypasses (not just allows it)', async () => {

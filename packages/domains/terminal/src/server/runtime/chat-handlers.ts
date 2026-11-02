@@ -157,9 +157,9 @@ export type ChatStartReason = 'user' | 'restore'
  * Permission/operating mode for chat sessions. Live mode flips ride a
  * `control_request {subtype:'set_permission_mode', mode}` over stdin so the
  * subprocess (and warm conversation state) survives — see `chat:setMode`.
- * `bypass` still needs a kill+respawn because it's enabled via a separate
- * `--allow-dangerously-skip-permissions` flag with no in-flight equivalent;
- * the handler falls back to that path when control_request can't apply.
+ * Claude spawns allow bypass (`chatModeToFlags`), so `bypass` flips live too;
+ * a process the CLI refuses it for (spawned before that) falls back to a
+ * kill+respawn, as does any control_request that can't apply.
  *
  * Inbound `tool_result` blocks (e.g. AskUserQuestion answer) ride the same
  * stdin channel — `chat:sendToolResult`.
@@ -1404,7 +1404,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
       // Fast path: live `set_permission_mode` control_request. Preserves the
       // warm subprocess + conversation state. For claude-chat this maps to a
-      // CLI permission_mode value (bypass → null → fallback). For codex-chat
+      // CLI permission_mode value (bypass included). For codex-chat
       // the runtime mode itself rides the control request — the driver applies
       // it to the next `turn/start`, no respawn.
       const cliMode = o.mode === 'codex-chat' ? safe : chatModeToCliPermissionMode(safe)
@@ -1428,9 +1428,9 @@ export function createChatOps(opts: ChatHandlerOpts) {
         }
       }
 
-      // Fallback: kill + respawn with new flags. Required for `bypass` (uses
-      // --allow-dangerously-skip-permissions, no live equivalent) and as a
-      // safety net when the control channel rejects/times out. Transactional:
+      // Fallback: kill + respawn with new flags, when the control channel
+      // rejects/times out (e.g. `bypass_not_launched`: a Claude process spawned
+      // without allowing bypass). Transactional:
       // spawn first, persist DB after spawn succeeds. chatModeOverride bypasses
       // DB read so the new child uses `safe` flags even though provider_config
       // still has the old value.

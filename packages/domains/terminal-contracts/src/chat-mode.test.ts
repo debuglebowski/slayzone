@@ -8,15 +8,24 @@ import {
 } from './chat-mode'
 import { chatModesForMode, isValidChatModeForMode } from './chat-mode-catalog'
 
-// Spawn flags verified against Claude Code 2.1.312 (initialize →
+// Spawn flags verified against Claude Code 2.1.316 (initialize →
 // current_permission_mode): `--allow-dangerously-skip-permissions` alone starts
-// in `default`; `--permission-mode bypassPermissions` alone really bypasses.
+// in `default` and every `--permission-mode` still applies with it;
+// `--permission-mode bypassPermissions` alone really bypasses.
 test('every Claude chat mode spawns in the CLI mode it names', () => {
-  expect(chatModeToFlags('ask')).toEqual(['--permission-mode', 'default'])
-  expect(chatModeToFlags('plan')).toEqual(['--permission-mode', 'plan'])
-  expect(chatModeToFlags('auto-accept')).toEqual(['--permission-mode', 'acceptEdits'])
-  expect(chatModeToFlags('auto')).toEqual(['--permission-mode', 'auto'])
+  const allow = '--allow-dangerously-skip-permissions'
+  expect(chatModeToFlags('ask')).toEqual(['--permission-mode', 'default', allow])
+  expect(chatModeToFlags('plan')).toEqual(['--permission-mode', 'plan', allow])
+  expect(chatModeToFlags('auto-accept')).toEqual(['--permission-mode', 'acceptEdits', allow])
+  expect(chatModeToFlags('auto')).toEqual(['--permission-mode', 'auto', allow])
   expect(chatModeToFlags('bypass')).toEqual(['--permission-mode', 'bypassPermissions'])
+})
+
+// 2.1.316: `set_permission_mode bypassPermissions` succeeds on a process
+// launched with `--allow-dangerously-skip-permissions`, else `bypass_not_launched`.
+test('every Claude chat mode, bypass included, switches live (no restart, no lost turn)', () => {
+  expect(chatModeToCliPermissionMode('bypass')).toBe('bypassPermissions')
+  expect(chatModeToCliPermissionMode('auto-accept')).toBe('acceptEdits')
 })
 
 test('"Ask before edits" is the CLI default mode, both ways (2.1.312 also accepts `manual`)', () => {

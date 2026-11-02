@@ -886,6 +886,22 @@ function withUserRow(
   }
 }
 
+/**
+ * User messages of the turn now open (rows since the last `result`) still on
+ * their way: sent, not answered, failed or withdrawn.
+ */
+function awaitingMessages(state: ChatTimelineState): UserTextItem[] {
+  const out: UserTextItem[] = []
+  for (let i = state.turnStart; i < state.timeline.length; i++) {
+    const it = rowAt(state.timeline, i)
+    if (it.kind !== 'user-text' || it.parentToolUseId) continue
+    if (it.delivery === 'answered' || it.delivery === 'failed' || it.delivery === 'cancelled')
+      continue
+    out.push(it)
+  }
+  return out
+}
+
 /** `rows` (ascending) with `at` in it. */
 function withRowIn(rows: readonly number[], at: number): readonly number[] {
   if (rows.includes(at)) return rows
@@ -1370,7 +1386,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           tools: event.tools,
           timestamp: ts
         }
-        return {
+        const fresh: ChatTimelineState = {
           ...initialState(),
           timeline: [item],
           // Every row before is gone: rows asked for earlier would land wrong.
@@ -1382,6 +1398,16 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           cliCommands: nextCliCommands(null, event),
           cliCommandDetails: state.cliCommandDetails
         }
+        // A provider that announces its session only once a message reached it
+        // (Claude): that message opened THIS conversation, it is not the old one's.
+        return awaitingMessages(state).reduce(
+          (next, message) => ({
+            ...next,
+            ...withUserRow(next, message),
+            userMessagesSent: next.userMessagesSent + 1
+          }),
+          fresh
+        )
       }
       if (state.sessionStarted) {
         return {

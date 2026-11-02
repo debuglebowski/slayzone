@@ -2965,3 +2965,40 @@ describe('agent-started turn', () => {
     expect(deriveLoadingLabel(s)).toBeNull()
   })
 })
+
+describe('a new conversation starting with a message already sent to it', () => {
+  // A new task's default provider (Codex) announces its session at spawn; the
+  // tab is switched to Claude, which announces its own only once the first
+  // message reached it. That message belongs to the new conversation.
+  test('keeps the message, in flight, and drops only the old session', () => {
+    let s = initialState()
+    s = reducer(s, { type: 'event', event: ev.turnInit('codex-thread') })
+    s = reducer(s, { type: 'event', event: { kind: 'session-spawn', spawnId: 'claude' } })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', id: 'u1', text: 'first' } })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'user-message-delivery', id: 'u1', state: 'delivered' }
+    })
+    s = reducer(s, { type: 'event', event: ev.turnInit('claude-session') })
+    expect(rowsOf(s).map((r) => r.kind)).toEqual(['session-start', 'user-text'])
+    expect(rowsOf(s)[0]).toMatchObject({ sessionId: 'claude-session' })
+    expect(rowsOf(s)[1]).toMatchObject({ id: 'u1', text: 'first', delivery: 'delivered' })
+    expect(isInFlight(s)).toBe(true)
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    expect(isInFlight(s)).toBe(false)
+  })
+
+  test('still clears the previous conversation, answered messages included', () => {
+    let s = initialState()
+    s = reducer(s, { type: 'event', event: ev.turnInit('old') })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', id: 'u0', text: 'old q' } })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', id: 'u1', text: 'new q' } })
+    s = reducer(s, { type: 'event', event: ev.turnInit('new') })
+    expect(rowsOf(s).map((r) => (r.kind === 'user-text' ? r.text : r.kind))).toEqual([
+      'session-start',
+      'new q'
+    ])
+    expect(isInFlight(s)).toBe(true)
+  })
+})
