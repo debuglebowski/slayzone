@@ -31,6 +31,8 @@ export function ArtifactSearchScreen({
   onOpen,
   title = 'Search artifacts',
   placeholder = 'Search titles and contents',
+  initialQuery = '',
+  largeTitle = false,
   before
 }: {
   sessions: readonly HubSession[]
@@ -38,12 +40,22 @@ export function ArtifactSearchScreen({
   onOpen: (result: HubArtifactSearchResult) => void
   title?: string
   placeholder?: string
+  /** What to search for at first (a link's `?q=`). */
+  initialQuery?: string
+  /** A tab's root: the title large (no back). */
+  largeTitle?: boolean
   /** Other results for the same query, shown above the artifacts' (the Search tab's tasks). */
   before?: (q: string) => ReactNode
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(initialQuery)
+  // A later link with another query searches for it (render-time sync).
+  const [linkedQuery, setLinkedQuery] = useState(initialQuery)
+  if (initialQuery !== linkedQuery) {
+    setLinkedQuery(initialQuery)
+    setQ(initialQuery)
+  }
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [regex, setRegex] = useState(false)
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set())
@@ -67,7 +79,13 @@ export function ArtifactSearchScreen({
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title={title} />
+      {largeTitle ? (
+        <Text style={styles.largeTitle} accessibilityRole="header">
+          {title}
+        </Text>
+      ) : (
+        <ScreenHeader title={title} />
+      )}
       <View style={styles.bar}>
         <TextInput
           testID="artifact-search-input"
@@ -225,6 +243,14 @@ function ResultGroup({
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
+    largeTitle: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: t.foreground,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 4
+    },
     screen: { flex: 1, backgroundColor: t.background },
     bar: {
       flexDirection: 'row',

@@ -37,6 +37,9 @@ jest.mock('@slayzone/transport/client', () => ({
     mockHubs.HubScope(props)
 }))
 
+// A task's agent (a terminal web view) has suites of its own.
+jest.mock('../agents/AgentPanel', () => ({ AgentPanel: () => null }))
+
 const home: HubSession = { entry: homeHub, token: 't' }
 const homeFeed = feedOf(
   homeHub,
@@ -68,11 +71,9 @@ beforeEach(() => {
 const ROUTES = 'src/app'
 
 describe('projects routing', () => {
-  it('lists the projects; a phone opens a tapped one on its own screen', async () => {
+  it('/projects (the old projects list) opens the board, whose switcher lists them', async () => {
     await renderRouter(ROUTES, { initialUrl: '/projects' })
-    await userEvent.setup().press(await screen.findByText('Website'))
-    expect(screen).toHavePathname('/projects/home.example/p')
-    expect(await screen.findByTestId('project-detail-p')).toBeOnTheScreen()
+    expect(screen).toHavePathname('/')
   })
 
   it('a deep link to a project opens it (phone: its own screen)', async () => {
@@ -81,11 +82,10 @@ describe('projects routing', () => {
     expect(detail.getByText('Write spec')).toBeOnTheScreen()
   })
 
-  it('a deep link to a project on an iPad shows it beside the list', async () => {
+  it('a deep link to a project on an iPad opens it too', async () => {
     tablet()
     await renderRouter(ROUTES, { initialUrl: '/projects/home.example/q' })
     expect(await screen.findByTestId('project-detail-q')).toBeOnTheScreen()
-    expect(screen.getByText('Website')).toBeOnTheScreen()
   })
 
   it('opens a task of the project on its task screen', async () => {
@@ -94,14 +94,14 @@ describe('projects routing', () => {
     expect(screen).toHavePathname('/task/home.example/t0')
   })
 
-  it('a link to a project opens it in the Tasks tab; its tasks push there too', async () => {
+  it('a link to a project opens it in the Board tab; its tasks push there too', async () => {
     await renderRouter(ROUTES, {
       initialUrl: redirectSystemPath({ path: 'slayzone://projects/home.example/p', initial: true })
     })
     const detail = within(await screen.findByTestId('project-detail-p'))
-    expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'projects', '[hub]', '[id]'])
+    expect(screen).toHaveSegments(['(tabs)', '(board)', 'projects', '[hub]', '[id]'])
     await userEvent.setup().press(detail.getByText('Write spec'))
-    expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
+    expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
   })
 
   it('a project link to a hub the app is not signed in to says so', async () => {

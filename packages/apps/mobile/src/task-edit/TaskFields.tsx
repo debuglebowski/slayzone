@@ -1,60 +1,32 @@
 /**
- * A task's title and fields, editable: the title in place (saved when editing ends; an
- * empty title is not), status (the project's columns), priority, due date (quick dates
- * or a typed day). Project and hub show, read-only.
+ * Changing a task's fields — status (the project's columns), priority, due date (quick
+ * dates or a typed day) — from wherever the task page shows them (its header's status
+ * icon and priority/due, the Details list): `useFieldSheets` hands back `open(field)`
+ * and the sheets to render once. And the title, edited in place (`TitleInput`: saved
+ * when editing ends; an empty title is not).
  */
 import { todayISO } from '@slayzone/tasks/board'
-import { useState } from 'react'
-import { StyleSheet, TextInput, View } from 'react-native'
+import { type ReactNode, useState } from 'react'
+import { StyleSheet, TextInput } from 'react-native'
 import type { TaskRow } from '../hub-board'
 import { ChoiceSheet } from '../computers/ChoiceSheet'
 import { type ChromeColors, useTheme } from '../theme'
-import {
-  dueChoices,
-  dueLabel,
-  parseDueDate,
-  PRIORITY_CHOICES,
-  priorityLabel,
-  statusChoices,
-  statusLabel
-} from './fields'
-import { FieldButton, PromptSheet } from './ui'
+import { dueChoices, parseDueDate, PRIORITY_CHOICES, statusChoices } from './fields'
+import { PromptSheet } from './ui'
 import type { TaskWrites } from './use-task-writes'
 
 const PICK_DATE = 'pick'
 
-type Open = 'status' | 'priority' | 'due' | 'date' | null
+export type TaskField = 'status' | 'priority' | 'due'
+type Open = TaskField | 'date' | null
 
-export function TaskFields({
-  row,
-  writes,
-  showHub
-}: {
-  row: TaskRow
+export function useFieldSheets(
+  row: TaskRow,
   writes: TaskWrites
-  showHub: boolean
-}) {
-  const theme = useTheme()
-  const styles = makeStyles(theme)
+): { open: (field: TaskField) => void; sheets: ReactNode } {
   const { task, update } = writes
   const [open, setOpen] = useState<Open>(null)
   const today = todayISO()
-
-  // The title as typed; follows the task's when that changes (render-time sync).
-  const [title, setTitle] = useState(task.title)
-  const [titleOf, setTitleOf] = useState({ id: task.id, title: task.title })
-  if (titleOf.id !== task.id || titleOf.title !== task.title) {
-    setTitleOf({ id: task.id, title: task.title })
-    setTitle(task.title)
-  }
-  const saveTitle = () => {
-    const next = title.trim()
-    if (!next || next === task.title) {
-      setTitle(task.title)
-      return
-    }
-    void update({ title: next }, { title: next })
-  }
 
   const setStatus = (status: string) => {
     if (status !== task.status) void update({ status }, { status })
@@ -68,42 +40,8 @@ export function TaskFields({
   }
 
   const dues = dueChoices(today)
-  return (
-    <View style={styles.fields}>
-      <TextInput
-        value={title}
-        onChangeText={setTitle}
-        onEndEditing={saveTitle}
-        style={styles.title}
-        multiline
-        submitBehavior="blurAndSubmit"
-        returnKeyType="done"
-        accessibilityLabel="Title"
-        placeholder="Title"
-        placeholderTextColor={theme.mutedForeground}
-      />
-      <View style={styles.chips}>
-        <FieldButton label={row.project?.name ?? 'Unknown project'} />
-        <FieldButton
-          testID="task-status"
-          label={statusLabel(task.status, row.project)}
-          accessibilityLabel="Status"
-          onPress={() => setOpen('status')}
-        />
-        <FieldButton
-          testID="task-priority"
-          label={priorityLabel(task.priority)}
-          accessibilityLabel="Priority"
-          onPress={() => setOpen('priority')}
-        />
-        <FieldButton
-          testID="task-due"
-          label={dueLabel(task.due_date ?? null, today)}
-          accessibilityLabel="Due date"
-          onPress={() => setOpen('due')}
-        />
-        {showHub ? <FieldButton label={row.hubLabel} /> : null}
-      </View>
+  const sheets = (
+    <>
       <ChoiceSheet
         visible={open === 'status'}
         title="Status"
@@ -144,13 +82,48 @@ export function TaskFields({
           onClose={() => setOpen(null)}
         />
       ) : null}
-    </View>
+    </>
+  )
+  return { open: setOpen, sheets }
+}
+
+export function TitleInput({ writes }: { writes: TaskWrites }) {
+  const theme = useTheme()
+  const styles = makeStyles(theme)
+  const { task, update } = writes
+  // The title as typed; follows the task's when that changes (render-time sync).
+  const [title, setTitle] = useState(task.title)
+  const [titleOf, setTitleOf] = useState({ id: task.id, title: task.title })
+  if (titleOf.id !== task.id || titleOf.title !== task.title) {
+    setTitleOf({ id: task.id, title: task.title })
+    setTitle(task.title)
+  }
+  const saveTitle = () => {
+    const next = title.trim()
+    if (!next || next === task.title) {
+      setTitle(task.title)
+      return
+    }
+    void update({ title: next }, { title: next })
+  }
+  return (
+    <TextInput
+      value={title}
+      onChangeText={setTitle}
+      onEndEditing={saveTitle}
+      style={styles.title}
+      multiline
+      scrollEnabled={false}
+      submitBehavior="blurAndSubmit"
+      returnKeyType="done"
+      accessibilityLabel="Title"
+      placeholder="Title"
+      placeholderTextColor={theme.mutedForeground}
+    />
   )
 }
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
-    fields: { gap: 12 },
-    title: { fontSize: 22, fontWeight: '600', color: t.foreground, padding: 0 },
-    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }
+    title: { flex: 1, fontSize: 20, fontWeight: '700', color: t.foreground, padding: 0 }
   })

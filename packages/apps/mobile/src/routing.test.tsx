@@ -30,42 +30,29 @@ jest.mock('./hub-connections', () => ({
   HubConnections: ({ children }: { children: ReactNode }) => children,
   useHubFeeds: () => ({ feeds: mockFeeds.list, retry: () => undefined, clientFor: () => null })
 }))
-// The agent screen talks to its hub (tRPC); here only which one a route opens matters.
-jest.mock('./agents/AgentScreen', () => ({
-  AgentScreen: (props: { feed: HubFeed; taskId: string; tabId?: string }) => {
-    const { Text } = jest.requireActual('react-native')
-    return (
-      <Text>{`agent screen ${props.feed.hub.label} ${props.taskId} ${props.tabId ?? 'main'}`}</Text>
-    )
-  }
-}))
-// The task screen's computer card and artifacts link read their hub (own suites test them).
-jest.mock('./computers/TaskComputer', () => ({
-  TaskComputer: ({ row }: { row: { task: { id: string } } }) => {
-    const { Text } = jest.requireActual('react-native')
-    return <Text>{`computer of ${row.task.id}`}</Text>
-  }
-}))
-jest.mock('./artifacts/TaskArtifactsLink', () => ({
-  TaskArtifactsLink: (p: { hubAddress: string; taskId: string }) => {
-    const { Text } = jest.requireActual('react-native')
-    return <Text>{`artifacts of ${p.hubAddress} ${p.taskId}`}</Text>
-  }
-}))
-// The task editor writes to its hub (its own suites test it): here its title, notes and
-// the cards it is handed.
-jest.mock('./task-edit/TaskEditor', () => ({
-  TaskEditor: (p: import('./task-edit/TaskEditor').TaskEditorProps) => {
-    const { Text } = jest.requireActual('react-native')
+// The task page writes to its hub (`task/TaskPage.test.tsx` tests it): here which task,
+// which part and which agent tab a route opens, and whether it is the wide layout.
+jest.mock('./task/TaskPage', () => ({
+  ...jest.requireActual('./task/TaskPage'),
+  TaskPage: (p: import('./task/TaskPage').TaskPageProps) => {
+    const { Pressable, Text } = jest.requireActual('react-native')
     return (
       <>
-        <Text>{p.row.task.title}</Text>
-        <Text>{p.row.task.description}</Text>
-        {p.children}
+        <Text>{`task page ${p.row.hubLabel} ${p.row.task.id} ${p.segment} ${p.agentTabId ?? 'main'}${p.wide ? ' wide' : ''}`}</Text>
+        {p.onBack ? (
+          <Pressable onPress={p.onBack}>
+            <Text>stand-in back</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={() => p.onSegment('details')}>
+          <Text>stand-in details</Text>
+        </Pressable>
       </>
     )
   }
 }))
+// A project's settings talk to its hub (`projects/routing.test.tsx` covers them).
+jest.mock('./projects/ProjectScreen', () => ({ ProjectScreen: () => null }))
 // Creating writes to a hub (its own suite tests it): here what the route hands it.
 jest.mock('./task-edit/NewTaskScreen', () => ({
   NewTaskScreen: (p: import('./task-edit/NewTaskScreen').NewTaskScreenProps) => {
@@ -102,6 +89,7 @@ jest.mock('@slayzone/transport/client', () => ({
 jest.mock('./hubs/HubDetails', () => ({ HubDetails: () => null }))
 // The board's moves write to its hub (tRPC; `board/*.test.tsx` test them).
 jest.mock('./board/use-board-moves', () => ({ useBoardMoves: () => async () => undefined }))
+jest.mock('./board/use-archive-all', () => ({ useArchiveAll: () => async () => undefined }))
 
 const { hubEntryOf } = jest.requireActual('./hub-session') as typeof import('./hub-session')
 const home: HubSession = { entry: hubEntryOf('home.example'), token: 't' }
@@ -173,8 +161,7 @@ const homeUnreachable: HubFeed = {
 }
 
 /** Queries inside one tab's stack (every tab stays mounted). */
-const tab = (name: 'agents' | 'tasks' | 'search' | 'hubs') =>
-  within(screen.getByTestId(`tab-${name}`))
+const tab = (name: 'board' | 'search' | 'settings') => within(screen.getByTestId(`tab-${name}`))
 
 /** A link from outside the app, as Expo Router receives it (`app/+native-intent.tsx`). */
 const link = (url: string) => redirectSystemPath({ path: url, initial: true })
@@ -196,6 +183,7 @@ describe('routing', () => {
     '/agents',
     '/tasks',
     '/hubs',
+    '/settings',
     '/add-hub',
     '/agent/home.example/t0',
     '/projects',
@@ -210,59 +198,48 @@ describe('routing', () => {
   })
 
   describe('tabs', () => {
-    it('the app opens on the Agents tab', async () => {
-      signedIn(homeWithAgent)
+    it("the app opens on the Board tab: the project's board", async () => {
+      signedIn()
       await renderRouter(ROUTES, { initialUrl: '/' })
-      expect(await screen.findByText('Running')).toBeOnTheScreen()
-      expect(screen).toHaveSegments(['(tabs)', '(agents)'])
+      expect(await screen.findByText('Write spec')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(board)'])
+      expect(tab('board').getByTestId('project-switcher')).toHaveTextContent('HHome▾')
     })
 
-    it('the old /agents link opens the Agents tab', async () => {
-      signedIn(homeWithAgent)
-      await renderRouter(ROUTES, { initialUrl: '/agents' })
-      expect(await screen.findByText('Running')).toBeOnTheScreen()
+    it.each(['/agents', '/tasks', '/projects'])('the old %s link opens the board', async (url) => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: url })
+      expect(await screen.findByText('Write spec')).toBeOnTheScreen()
       expect(screen).toHavePathname('/')
     })
 
-    it("Tasks: every hub's tasks", async () => {
-      signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/tasks' })
-      expect(await screen.findByText('Write spec')).toBeOnTheScreen()
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'tasks'])
-    })
-
-    it('Search: artifact search', async () => {
+    it('Search: tasks and artifacts', async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: '/artifacts' })
       expect(await screen.findByText('artifact search')).toBeOnTheScreen()
       expect(screen).toHaveSegments(['(tabs)', '(search)', 'artifacts'])
     })
 
-    it('Hubs: the signed-in hubs', async () => {
+    it('Settings: the signed-in hubs, theme, about', async () => {
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/hubs' })
-      expect(await screen.findByText('Add a hub')).toBeOnTheScreen()
-      expect(screen).toHaveSegments(['(tabs)', '(hubs)', 'hubs'])
+      await renderRouter(ROUTES, { initialUrl: '/settings' })
+      expect(await screen.findByText('＋ Add a hub')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(settings)', 'settings'])
     })
 
-    it('a tab root has no back button', async () => {
-      signedIn(homeWithAgent)
-      await renderRouter(ROUTES, { initialUrl: '/' })
-      await screen.findByText('Running')
-      expect(screen.queryByText('‹ Home')).toBeNull()
+    it('the old /hubs link opens Settings', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/hubs' })
+      expect(await screen.findByText('＋ Add a hub')).toBeOnTheScreen()
+      expect(screen).toHavePathname('/settings')
     })
   })
 
-  describe('the connection banner', () => {
-    it.each([
-      ['agents', '/'],
-      ['tasks', '/tasks']
-    ] as const)('shows in the %s tab', async (name, url) => {
-      signedIn(homeUnreachable)
-      await renderRouter(ROUTES, { initialUrl: url })
-      await screen.findAllByTestId(`hub-banner-${home.entry.id}`)
-      expect(tab(name).getByTestId(`hub-banner-${home.entry.id}`)).toBeOnTheScreen()
-    })
+  it('the connection banner shows on the board', async () => {
+    signedIn(homeUnreachable)
+    await renderRouter(ROUTES, { initialUrl: '/' })
+    await screen.findAllByTestId(`hub-banner-${home.entry.id}`)
+    expect(tab('board').getByTestId(`hub-banner-${home.entry.id}`)).toBeOnTheScreen()
   })
 
   // Each layout names the screen its stack starts at with `anchor`;
@@ -271,154 +248,139 @@ describe('routing', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
     signedIn()
     await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
-    await screen.findByText('Spec notes')
+    await screen.findByText('task page home.example t0 agent main')
     const deprecated = warn.mock.calls.filter((args) => String(args[0]).includes('deprecated'))
     warn.mockRestore()
     expect(deprecated).toEqual([])
   })
 
-  describe('pushes stay in their tab', () => {
-    it('Agents: an agent opens in the Agents tab', async () => {
-      signedIn(homeWithAgent)
-      await renderRouter(ROUTES, { initialUrl: '/' })
-      await screen.findByText('Running')
-      await userEvent.setup().press(tab('agents').getByText('Write spec'))
-      expect(screen).toHavePathname('/agent/home.example/t0')
-      expect(screen).toHaveSegments(['(tabs)', '(agents)', 'agent', '[hub]', '[id]'])
-      expect(tab('agents').getByText('agent screen home.example t0 main')).toBeOnTheScreen()
-    })
-
-    it('Tasks: a task opens in the Tasks tab (phone)', async () => {
+  describe('the board', () => {
+    it('a tapped card opens its task in the Board tab, Agent first (phone); back returns', async () => {
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/tasks' })
+      await renderRouter(ROUTES, { initialUrl: '/' })
       await userEvent.setup().press(await screen.findByText('Write spec'))
       expect(screen).toHavePathname('/task/home.example/t0')
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
+      expect(tab('board').getByText('task page home.example t0 agent main')).toBeOnTheScreen()
+      await userEvent.setup().press(tab('board').getByText('stand-in back'))
+      expect(screen).toHavePathname('/')
     })
 
-    it('Tasks: Projects opens in the Tasks tab', async () => {
+    it('the part of the task shown lives in the route', async () => {
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/tasks' })
-      await userEvent.setup().press(await screen.findByText('Projects'))
-      expect(screen).toHavePathname('/projects')
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'projects'])
+      await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
+      await userEvent.setup().press(await screen.findByText('stand-in details'))
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0?segment=details')
+      expect(screen.getByText('task page home.example t0 details main')).toBeOnTheScreen()
     })
 
-    it('Tasks: new-task opens in the Tasks tab with its params; created, the task replaces it', async () => {
+    it('the floating ＋ opens new-task in the Board tab for the shown project and column; created, the task replaces it', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/' })
+      await userEvent.setup().press(await screen.findByTestId('new-task'))
+      expect(await screen.findByText('new task home.example p todo -')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'new-task'])
+      await userEvent.setup().press(screen.getByText('stand-in create'))
+      expect(screen).toHavePathname('/task/home.example/new1')
+    })
+
+    it('new-task takes a status and parent; Cancel leaves', async () => {
       signedIn()
       await renderRouter(ROUTES, {
         initialUrl: '/new-task?hub=home.example&project=p&status=todo&parent=t0'
       })
       expect(await screen.findByText('new task home.example p todo t0')).toBeOnTheScreen()
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'new-task'])
-      await userEvent.setup().press(screen.getByText('stand-in create'))
-      expect(screen).toHavePathname('/task/home.example/new1')
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
-    })
-
-    it('Tasks: new-task without status or parent; Cancel leaves it', async () => {
-      signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/new-task?hub=home.example&project=p' })
-      expect(await screen.findByText('new task home.example p - -')).toBeOnTheScreen()
       await userEvent.setup().press(screen.getByText('stand-in cancel'))
-      expect(screen).toHavePathname('/tasks')
+      expect(screen).toHavePathname('/')
     })
 
-    it('Tasks: a task’s agent opens in the Tasks tab', async () => {
+    it("the project switcher's ⋯ opens the project's settings in the Board tab", async () => {
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/tasks' })
-      const user = userEvent.setup()
-      await user.press(await screen.findByText('Write spec'))
-      await user.press(tab('tasks').getByText('Agent ›'))
-      expect(screen).toHavePathname('/agent/home.example/t0')
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'agent', '[hub]', '[id]'])
-      expect(tab('tasks').getByText('agent screen home.example t0 main')).toBeOnTheScreen()
+      await renderRouter(ROUTES, { initialUrl: '/?sheet=projects' })
+      await userEvent.setup().press(await screen.findByTestId('project-settings-p'))
+      expect(screen).toHavePathname('/projects/home.example/p')
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'projects', '[hub]', '[id]'])
     })
 
-    it('Hubs: Add a hub opens in the Hubs tab; back returns to the list', async () => {
+    it("a link's ?sheet=attention opens the 🔔 sheet; a row opens the task's Agent", async () => {
+      signedIn(homeWithAgent)
+      await renderRouter(ROUTES, { initialUrl: '/?sheet=attention' })
+      await userEvent.setup().press(await screen.findByTestId('attention-row-t0'))
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0?segment=agent')
+    })
+
+    it('Settings: Add a hub opens in the Settings tab; back returns', async () => {
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/hubs' })
-      await userEvent.setup().press(await screen.findByText('Add a hub'))
+      await renderRouter(ROUTES, { initialUrl: '/settings' })
+      await userEvent.setup().press(await screen.findByText('＋ Add a hub'))
       expect(screen).toHavePathname('/add-hub')
-      expect(screen).toHaveSegments(['(tabs)', '(hubs)', 'add-hub'])
+      expect(screen).toHaveSegments(['(tabs)', '(settings)', 'add-hub'])
       expect(screen.getByText('Sign in to another hub')).toBeOnTheScreen()
       await userEvent.setup().press(screen.getByText('Cancel'))
-      expect(screen).toHavePathname('/hubs')
+      expect(screen).toHavePathname('/settings')
     })
   })
 
   describe('deep links', () => {
-    it('a task opens in the Tasks tab, above the list (phone)', async () => {
+    it('a task opens in the Board tab, above the board (phone)', async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
-      expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
-      expect(screen).toHavePathname('/task/home.example/t0')
-      expect(screen).toHaveSegments(['(tabs)', '(tasks)', 'task', '[hub]', '[id]'])
-      // With the computer it runs on and its artifacts.
-      expect(tab('tasks').getByText('computer of t0')).toBeOnTheScreen()
-      expect(tab('tasks').getByText('artifacts of home.example t0')).toBeOnTheScreen()
-      await userEvent.setup().press(tab('tasks').getByText('‹ Back'))
-      expect(screen).toHavePathname('/tasks')
+      expect(await screen.findByText('task page home.example t0 agent main')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
+      await userEvent.setup().press(tab('board').getByText('stand-in back'))
+      expect(screen).toHavePathname('/')
     })
 
-    it('a task on an iPad shows it beside the list', async () => {
-      tablet()
-      signedIn()
-      await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
-      expect(await screen.findByText('Spec notes')).toBeOnTheScreen()
-      // The row in the list, and the title of the detail beside it.
-      expect(tab('tasks').getAllByText('Write spec')).toHaveLength(2)
-    })
-
-    it("a task's agents open in the Agents tab, on its hub", async () => {
-      signedIn()
-      await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/home.example/t0') })
-      expect(await screen.findByText('agent screen home.example t0 main')).toBeOnTheScreen()
-      expect(screen).toHaveSegments(['(tabs)', '(agents)', 'agent', '[hub]', '[id]'])
-    })
-
-    it('opens the agent tab an agent link names (?tab=)', async () => {
+    it("an older agent link opens the task's Agent, with the agent tab it names", async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/home.example/t0?tab=side') })
-      expect(await screen.findByText('agent screen home.example t0 side')).toBeOnTheScreen()
+      expect(await screen.findByText('task page home.example t0 agent side')).toBeOnTheScreen()
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
     })
 
-    it('a path without its tab still opens the screen', async () => {
+    it('on an iPad, a task link opens the task as a tab on the board', async () => {
+      tablet()
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
-      expect(await screen.findAllByText('Spec notes')).not.toHaveLength(0)
-      expect(screen).toHavePathname('/task/home.example/t0')
+      await renderRouter(ROUTES, {
+        initialUrl: link('slayzone://task/home.example/t0?segment=artifacts')
+      })
+      expect(
+        await screen.findByText('task page home.example t0 artifacts main wide')
+      ).toBeOnTheScreen()
+      expect(screen).toHavePathname('/')
+      expect(tab('board').getByTestId('open-tab-task-t0')).toBeOnTheScreen()
     })
 
-    it('an agent link to a hub the app is not signed in to says so', async () => {
+    it('a task link to a hub the app is not signed in to says so', async () => {
       signedIn()
-      await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/other.example/t0') })
+      await renderRouter(ROUTES, { initialUrl: link('slayzone://task/other.example/t0') })
       expect(await screen.findByText('Not signed in to other.example')).toBeOnTheScreen()
     })
   })
 
-  it('on an iPad, a tapped task shows beside the list', async () => {
+  it('on an iPad, a tapped card opens its task as a tab beside the board', async () => {
     tablet()
     signedIn()
-    await renderRouter(ROUTES, { initialUrl: '/tasks' })
-    await screen.findAllByText('Write spec')
-    await userEvent.setup().press(tab('tasks').getAllByText('Write spec')[0])
-    expect(screen).toHavePathnameWithParams('/tasks?hub=home.example&task=t0')
+    await renderRouter(ROUTES, { initialUrl: '/' })
+    await userEvent.setup().press(await tab('board').findByText('Write spec'))
+    expect(await screen.findByText('task page home.example t0 details main wide')).toBeOnTheScreen()
+    await userEvent.setup().press(tab('board').getByTestId('open-tab-board'))
+    expect(tab('board').queryByText(/task page/)).toBeNull()
   })
 
   // A session whose hub is gone must never trap the user (fix of 2026-10-29): before
-  // its board fails (no banner yet), the Hubs tab still signs out of it.
-  it('while a hub is still loading, the Hubs tab signs out of it', async () => {
+  // its board fails (no banner yet), Settings still signs out of it.
+  it('while a hub is still loading, Settings signs out of it', async () => {
     signedIn({ ...homeFeed, board: { ...homeFeed.board, data: undefined, pending: true } })
-    await renderRouter(ROUTES, { initialUrl: '/hubs' })
-    await userEvent.setup().press(await tab('hubs').findByText('Sign out'))
+    await renderRouter(ROUTES, { initialUrl: '/settings' })
+    await userEvent.setup().press(await tab('settings').findByText('Sign out'))
     await act(async () => undefined)
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
   })
 
-  it('signing out of the last hub (Hubs tab) returns to sign-in', async () => {
+  it('signing out of the last hub (Settings) returns to sign-in', async () => {
     signedIn()
-    await renderRouter(ROUTES, { initialUrl: '/hubs' })
+    await renderRouter(ROUTES, { initialUrl: '/settings' })
     await userEvent.setup().press(await screen.findByText('Sign out'))
     await act(async () => undefined)
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()

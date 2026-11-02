@@ -1,25 +1,24 @@
 /**
  * Which tab a link from outside the app opens in (`app/+native-intent.tsx`).
  *
- * The detail screens live in several tabs (`app/(tabs)/(tasks,agents,search)/`): inside
+ * The detail screens live in several tabs (`app/(tabs)/(board,search)/`): inside
  * the app a push opens the copy in the tab it starts from, but a link has no tab to
  * start from, and Expo Router would pick the first copy whatever the screen. So a link
  * names its tab itself, as group segments (`/(tabs)/(tasks)/task/<hub>/<id>`; the
  * address bar, `usePathname`, never shows them):
  *
- *   task, projects   the Tasks tab, above the tasks list
- *   agent            the Agents tab, above the agents list
- *   artifacts/<hub>  the Search tab, above the search
+ *   task, agent, projects, artifacts/<hub>   the Board tab, above the board (a task,
+ *                                           its agent and its artifacts live there)
  *
- * Anything else stays as it is: a tab's own root (`/tasks`, `/artifacts`, `/hubs`,
- * `/add-hub`), a screen outside the tabs (`/sign-in`, `/auth/callback`), a link that
- * already names its tab.
+ * Anything else stays as it is: a tab's own root (`/`, `/artifacts`, `/settings`,
+ * `/add-hub`, older ones that redirect), a screen outside the tabs (`/sign-in`,
+ * `/auth/callback`), a link that already names its tab.
  */
 
 const TAB_OF_FIRST_SEGMENT: Readonly<Record<string, string>> = {
-  task: 'tasks',
-  projects: 'tasks',
-  agent: 'agents'
+  task: 'board',
+  projects: 'board',
+  agent: 'board'
 }
 
 /** `slayzone://task/<hub>/<id>` or `/task/<hub>/<id>` → the path that opens it in its tab. */
@@ -33,6 +32,6 @@ export function tabPathOfLink(link: string): string {
   const segments = path.split('/')
   const tab =
     TAB_OF_FIRST_SEGMENT[segments[0]] ??
-    (segments[0] === 'artifacts' && segments.length > 1 ? 'search' : undefined)
+    (segments[0] === 'artifacts' && segments.length > 1 ? 'board' : undefined)
   return tab ? `/(tabs)/(${tab})/${path}${query}` : link
 }

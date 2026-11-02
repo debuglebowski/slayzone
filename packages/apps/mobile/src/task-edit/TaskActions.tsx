@@ -4,21 +4,23 @@
  * it soft-deleted; `task.restore` brings it back, as desktop's Undo does). The hub
  * refuses to delete a task linked to an integration (`linked_to_provider`).
  */
-import { Alert, Pressable, Text, View } from 'react-native'
-import { useTheme } from '../theme'
+import { Alert } from 'react-native'
 import { useTRPCClient } from '../trpc'
-import { makeStyles } from './ui'
 import type { TaskWrites } from './use-task-writes'
 
-export function TaskActions({
-  writes,
-  onDeleted
-}: {
-  writes: TaskWrites
+export interface TaskActions {
+  archived: boolean
+  /** Asks, then archives (or unarchives an archived task). */
+  toggleArchive: () => void
+  /** Asks, then deletes; `onDeleted` once the hub has. */
+  remove: () => void
+}
+
+export function useTaskActions(
+  writes: TaskWrites,
   /** The task was deleted (a screen of its own leaves). */
   onDeleted?: () => void
-}) {
-  const styles = makeStyles(useTheme())
+): TaskActions {
   const client = useTRPCClient()
   const { task } = writes
   const archived = !!task.archived_at
@@ -65,17 +67,5 @@ export function TaskActions({
       }
     ])
 
-  return (
-    <View style={styles.section}>
-      {archived ? <Text style={styles.muted}>Archived</Text> : null}
-      <View style={{ flexDirection: 'row', gap: 24 }}>
-        <Pressable accessibilityRole="button" onPress={toggleArchive} hitSlop={8}>
-          <Text style={styles.link}>{archived ? 'Unarchive' : 'Archive'}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={remove} hitSlop={8}>
-          <Text style={styles.destructive}>Delete</Text>
-        </Pressable>
-      </View>
-    </View>
-  )
+  return { archived, toggleArchive, remove }
 }

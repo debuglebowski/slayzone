@@ -1,5 +1,5 @@
 import { boardOf, taskOf } from '../hubs/testing'
-import { applyMovePlan, planDrop, planStatusChange } from './moves'
+import { applyMovePlan, dragAllowed, planDrop, planStatusChange, reorderAllowed } from './moves'
 
 /**
  * Project `p`, board order = the hub's (`order` ASC): the array order below. `todo` holds
@@ -133,6 +133,125 @@ describe('planDrop', () => {
         beforeTaskId: null
       })
     ).toBeNull()
+  })
+})
+
+describe('planDrop under Display options (desktop KanbanBoard / KanbanListView / moveTask)', () => {
+  /** Board order = array order. Priorities: a 1, b 3, c 3, d 1, e 2; f (other project) 3. */
+  const ranked = () =>
+    boardOf({
+      tasks: [
+        taskOf('a', { status: 'todo', order: 0, priority: 1 }),
+        taskOf('b', { status: 'todo', order: 1, priority: 3 }),
+        taskOf('f', { status: 'todo', order: 1, priority: 3, project_id: 'other' }),
+        taskOf('c', { status: 'todo', order: 2, priority: 3 }),
+        taskOf('d', { status: 'in_progress', order: 0, priority: 1 }),
+        taskOf('e', { status: 'in_progress', order: 1, priority: 2 })
+      ]
+    })
+  const drop = (
+    taskId: string,
+    fromColumn: string,
+    toColumn: string,
+    beforeTaskId: string | null
+  ) => ({
+    taskId,
+    fromColumn,
+    toColumn,
+    beforeTaskId
+  })
+
+  it('due-date groups: no drag at all (desktop disables it)', () => {
+    expect(dragAllowed('due_date')).toBe(false)
+    expect(dragAllowed('status')).toBe(true)
+    expect(dragAllowed('priority')).toBe(true)
+    expect(
+      planDrop(ranked(), 'p', drop('a', 'overdue', 'today', null), [], {
+        groupBy: 'due_date',
+        sortBy: 'manual'
+      })
+    ).toBeNull()
+  })
+
+  it('reorders in a column only with manual or priority sort', () => {
+    expect(reorderAllowed('manual')).toBe(true)
+    expect(reorderAllowed('priority')).toBe(true)
+    expect(reorderAllowed('title')).toBe(false)
+    for (const sortBy of ['title', 'due_date', 'created'] as const) {
+      expect(
+        planDrop(ranked(), 'p', drop('c', 'todo', 'todo', 'b'), undefined, {
+          groupBy: 'status',
+          sortBy
+        })
+      ).toBeNull()
+    }
+  })
+
+  it('priority sort: reorders only onto a task of the same priority', () => {
+    const grouping = { groupBy: 'status', sortBy: 'priority' } as const
+    expect(planDrop(ranked(), 'p', drop('c', 'todo', 'todo', 'b'), undefined, grouping)).toEqual({
+      taskId: 'c',
+      update: null,
+      reorder: ['a', 'c', 'b'],
+      clearBlockers: false
+    })
+    expect(planDrop(ranked(), 'p', drop('c', 'todo', 'todo', 'a'), undefined, grouping)).toBeNull()
+    expect(planDrop(ranked(), 'p', drop('a', 'todo', 'todo', null), undefined, grouping)).toBeNull()
+  })
+
+  it('any sort: a move to another status column still changes the status', () => {
+    const plan = planDrop(ranked(), 'p', drop('b', 'todo', 'in_progress', 'e'), undefined, {
+      groupBy: 'status',
+      sortBy: 'title'
+    })
+    expect(plan?.update).toEqual({ id: 'b', status: 'in_progress' })
+    expect(plan?.reorder).toEqual(['d', 'b', 'e'])
+  })
+
+  it('priority groups: a move to another group sets the priority; the order is that priority', () => {
+    const grouping = { groupBy: 'priority', sortBy: 'manual' } as const
+    expect(planDrop(ranked(), 'p', drop('b', 'p3', 'p1', 'd'), ['a', 'd'], grouping)).toEqual({
+      taskId: 'b',
+      update: { id: 'b', priority: 1 },
+      reorder: ['a', 'b', 'd'],
+      clearBlockers: false
+    })
+    // Within a priority group: reorder the project's tasks of that priority.
+    expect(planDrop(ranked(), 'p', drop('c', 'p3', 'p3', 'b'), ['b', 'c'], grouping)).toEqual({
+      taskId: 'c',
+      update: null,
+      reorder: ['c', 'b'],
+      clearBlockers: false
+    })
+  })
+
+  it('No groups reorders the whole project; Activity reorders within its group, no move between', () => {
+    expect(
+      planDrop(ranked(), 'p', drop('e', 'all', 'all', 'a'), undefined, {
+        groupBy: 'none',
+        sortBy: 'manual'
+      })?.reorder
+    ).toEqual(['e', 'a', 'b', 'c', 'd'])
+    const activity = {
+      groupBy: 'active',
+      sortBy: 'manual',
+      activeTaskIds: new Set(['b', 'd'])
+    } as const
+    expect(
+      planDrop(ranked(), 'p', drop('d', 'active', 'active', 'b'), undefined, activity)?.reorder
+    ).toEqual(['d', 'b'])
+    expect(
+      planDrop(ranked(), 'p', drop('a', 'inactive', 'active', null), undefined, activity)
+    ).toBeNull()
+  })
+
+  it('applies a priority change to the board', () => {
+    const data = ranked()
+    const plan = planDrop(data, 'p', drop('b', 'p3', 'p1', null), ['a', 'd'], {
+      groupBy: 'priority',
+      sortBy: 'manual'
+    })
+    expect(applyMovePlan(data, plan!).tasks.find((t) => t.id === 'b')?.priority).toBe(1)
   })
 })
 

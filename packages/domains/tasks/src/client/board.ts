@@ -17,6 +17,7 @@ export {
   groupTasksBy,
   PRIORITY_LABELS,
   sortTasks,
+  splitActiveInactiveColumns,
   todayISO,
   type Column,
   type GroupKey,

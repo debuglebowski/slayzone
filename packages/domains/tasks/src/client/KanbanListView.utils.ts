@@ -1,7 +1,6 @@
 import type { Task } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import { isTerminalStatus } from '@slayzone/projects-contracts'
-import type { Column } from './kanban'
 
 export function formatSnoozeTimeLeft(until: string): string {
   const ms = new Date(until).getTime() - Date.now()
@@ -29,21 +28,5 @@ export function computeSubTaskCounts(
   return counts
 }
 
-export function splitActiveInactiveColumns(
-  baseTasks: Task[],
-  activeTaskIds: Set<string>,
-  showEmptyColumns: boolean
-): Column[] {
-  const active: Task[] = []
-  const rest: Task[] = []
-  for (const t of baseTasks) {
-    if (activeTaskIds.has(t.id)) active.push(t)
-    else rest.push(t)
-  }
-  const cols: Column[] = []
-  if (active.length > 0 || showEmptyColumns)
-    cols.push({ id: 'active', title: 'Active', tasks: active })
-  if (rest.length > 0 || showEmptyColumns)
-    cols.push({ id: 'inactive', title: 'Inactive', tasks: rest })
-  return cols
-}
+// Lives with the board's DOM-free grouping logic (`./kanban`, `@slayzone/tasks/board`).
+export { splitActiveInactiveColumns } from './kanban'

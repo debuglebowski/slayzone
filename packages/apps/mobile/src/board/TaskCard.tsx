@@ -1,9 +1,7 @@
 import type { ColumnConfig } from '@slayzone/tasks/board'
-import { PRIORITY_LABELS } from '@slayzone/tasks/board'
-import { type Ref, useRef, useState } from 'react'
+import type { Ref } from 'react'
 import {
   type AccessibilityActionEvent,
-  type GestureResponderEvent,
   type HostInstance,
   Pressable,
   StyleSheet,
@@ -12,16 +10,13 @@ import {
 } from 'react-native'
 import type { BoardTask } from '../hub-board'
 import { type ChromeColors, useTheme } from '../theme'
-
-/** How far a card must travel sideways to change its status. */
-export const SWIPE_THRESHOLD = 80
-/** Sideways movement that starts a swipe (and wins over a vertical scroll). */
-const SWIPE_START = 12
+import { AgentDot, PriorityIcon, StatusIcon, SubtaskRing, TagPills } from '../ui-kit/TaskGlyphs'
+import type { CardModel, StatusLook } from './card-model'
 
 export interface CardMoves {
-  /** Swipe left / the "Move to <next>" action. */
+  /** The "Move to <next>" action. */
   next: ColumnConfig | null
-  /** Swipe right / the "Move to <previous>" action. */
+  /** The "Move to <previous>" action. */
   prev: ColumnConfig | null
   onStatus: (status: string) => void
   /** Move one place up/down in its column; absent = not reorderable here. */
@@ -29,15 +24,17 @@ export interface CardMoves {
 }
 
 /**
- * A task on the board (kanban card, list or tree row). Tap opens it. Swipe left moves
- * it to the next status of its project, swipe right to the previous one (what it will
- * become shows underneath while swiping). Long-press starts a drag (`onLongPress`, with
- * where the finger is). The same moves are accessibility actions (VoiceOver: Move to …,
+ * A task on the board — desktop's `KanbanCard` (kanban) or `KanbanListRow` (list):
+ * priority icon, title (3 lines), agent dot; under it the subtask ring, the first tag
+ * as a pill and the rest as dots, Blocked, the due date (red when overdue, and the card
+ * gets a red border). Tap opens the task; long-press starts a drag (`onLongPress`, with
+ * where the finger is). Moves are accessibility actions too (VoiceOver: Move to …,
  * Move up/down).
  */
 export function TaskCard({
   task,
-  depth = 0,
+  model,
+  status,
   meta,
   moves,
   dragging = false,
@@ -48,14 +45,15 @@ export function TaskCard({
   onLongPress
 }: {
   task: BoardTask
-  /** Tree view: the subtask level (indents the row). */
-  depth?: number
-  /** The line under the title (e.g. the hub, with several). */
+  model: CardModel
+  /** List rows show the status icon first (desktop's list row). */
+  status?: StatusLook
+  /** A line under the title (e.g. the hub, with several). */
   meta?: string | null
   moves: CardMoves
   /** This card is the one being dragged (dimmed in place). */
   dragging?: boolean
-  /** Shown beside the board (iPad). */
+  /** Open beside the board (iPad). */
   selected?: boolean
   /** Where the board measures the card for drops. */
   measureRef?: Ref<HostInstance>
@@ -65,11 +63,6 @@ export function TaskCard({
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
-  const start = useRef({ x: 0, y: 0 })
-  const [dx, setDx] = useState(0)
-
-  const target = dx < 0 ? moves.next : dx > 0 ? moves.prev : null
-  const armed = Math.abs(dx) >= SWIPE_THRESHOLD && target !== null
 
   const actions = [
     ...(moves.next ? [{ name: 'next', label: `Move to ${moves.next.label}` }] : []),
@@ -89,118 +82,129 @@ export function TaskCard({
     else if (name === 'down') moves.onStep?.(1)
   }
 
-  const sideways = (e: GestureResponderEvent) => {
-    const x = e.nativeEvent.pageX - start.current.x
-    const y = e.nativeEvent.pageY - start.current.y
-    return { x, y }
-  }
-
-  const priority = task.priority <= 2 ? PRIORITY_LABELS[task.priority] : null
-  const due = task.due_date ? `Due ${task.due_date}` : null
-  const line = [priority, due, meta].filter(Boolean).join(' · ')
+  const bottom =
+    model.subtasks || model.tags.length > 0 || model.blocked || task.due_date ? (
+      <View style={styles.bottom}>
+        {model.subtasks ? <SubtaskRing {...model.subtasks} /> : null}
+        <TagPills tags={model.tags} />
+        {model.blocked ? (
+          <View style={styles.blocked}>
+            <Text style={styles.blockedText}>Blocked</Text>
+          </View>
+        ) : null}
+        {task.due_date ? (
+          <View style={[styles.due, model.overdue && styles.dueOver]} testID="card-due">
+            <Text style={[styles.dueText, model.overdue && styles.dueTextOver]}>
+              {task.due_date}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    ) : null
 
   return (
-    <View
-      style={[styles.wrap, variant === 'card' ? styles.wrapCard : styles.wrapRow]}
-      onTouchStart={(e) => {
-        start.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }
-      }}
-      onMoveShouldSetResponder={(e) => {
-        const { x, y } = sideways(e)
-        if (Math.abs(x) < SWIPE_START || Math.abs(x) < 2 * Math.abs(y)) return false
-        return (x < 0 ? moves.next : moves.prev) !== null
-      }}
-      onResponderTerminationRequest={() => false}
-      onResponderMove={(e) => setDx(sideways(e).x)}
-      onResponderRelease={() => {
-        if (armed && target) moves.onStatus(target.id)
-        setDx(0)
-      }}
-      onResponderTerminate={() => setDx(0)}
-      testID={`task-card-${task.id}`}
+    <Pressable
+      ref={measureRef}
+      testID={`task-${task.id}`}
+      onPress={onPress}
+      onLongPress={
+        onLongPress
+          ? (e) => onLongPress({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })
+          : undefined
+      }
+      delayLongPress={300}
+      accessibilityRole="button"
+      accessibilityLabel={task.title}
+      accessibilityActions={actions}
+      onAccessibilityAction={onAction}
+      accessibilityState={{ selected }}
+      style={({ pressed }) => [
+        variant === 'card' ? styles.card : styles.row,
+        model.overdue && variant === 'card' && styles.overdue,
+        selected && styles.selected,
+        pressed && styles.pressed,
+        dragging && styles.dragging
+      ]}
     >
-      {dx !== 0 ? (
-        <View
-          style={[
-            styles.under,
-            dx < 0 ? styles.underNext : styles.underPrev,
-            armed && styles.armed
-          ]}
-        >
-          <Text style={[styles.underText, armed && styles.armedText]}>
-            {target ? (dx < 0 ? `${target.label} ›` : `‹ ${target.label}`) : ''}
-          </Text>
-        </View>
-      ) : null}
-      <Pressable
-        ref={measureRef}
-        testID={`task-${task.id}`}
-        onPress={onPress}
-        onLongPress={
-          onLongPress
-            ? (e) => onLongPress({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })
-            : undefined
-        }
-        delayLongPress={350}
-        accessibilityRole="button"
-        accessibilityLabel={task.title}
-        accessibilityActions={actions}
-        onAccessibilityAction={onAction}
-        style={[
-          variant === 'card' ? styles.card : styles.row,
-          { transform: [{ translateX: dx }], paddingLeft: 12 + depth * 18 },
-          selected && styles.selected,
-          dragging && styles.dragging
-        ]}
-        accessibilityState={{ selected }}
-      >
-        <Text style={styles.title} numberOfLines={3}>
-          {task.title}
-        </Text>
-        {line ? (
-          <Text style={styles.meta} numberOfLines={1}>
-            {line}
-          </Text>
+      <View style={styles.top}>
+        {status ? (
+          <View style={styles.glyph}>
+            <StatusIcon category={status.category} tone={status.tone} />
+          </View>
         ) : null}
-      </Pressable>
-    </View>
+        <View style={styles.glyph}>
+          <PriorityIcon priority={task.priority} />
+        </View>
+        <View style={styles.titleBox}>
+          <Text style={styles.title} numberOfLines={variant === 'card' ? 3 : 2}>
+            {task.title}
+          </Text>
+          {meta ? (
+            <Text style={styles.meta} numberOfLines={1}>
+              {meta}
+            </Text>
+          ) : null}
+        </View>
+        {model.dot ? (
+          <View style={styles.dot}>
+            <AgentDot kind={model.dot} />
+          </View>
+        ) : null}
+      </View>
+      {bottom}
+    </Pressable>
   )
 }
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
-    wrap: { position: 'relative' },
-    wrapCard: { marginHorizontal: 8, marginBottom: 8 },
-    wrapRow: {},
     card: {
-      backgroundColor: t.card,
+      backgroundColor: t.surface3,
       borderRadius: 10,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.border,
-      paddingVertical: 10,
-      paddingRight: 12
+      paddingHorizontal: 11,
+      paddingVertical: 12
     },
     row: {
-      backgroundColor: t.background,
-      paddingVertical: 12,
-      paddingRight: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 11,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: t.border
     },
+    overdue: { borderColor: t.destructive, borderWidth: 1 },
+    selected: { borderColor: t.primary, borderWidth: 1.5 },
+    pressed: { opacity: 0.7 },
     dragging: { opacity: 0.35 },
-    selected: { backgroundColor: t.accent },
-    title: { fontSize: 15, color: t.foreground },
-    meta: { fontSize: 12, color: t.mutedForeground, marginTop: 3 },
-    under: {
-      ...StyleSheet.absoluteFill,
-      borderRadius: 10,
-      justifyContent: 'center',
-      paddingHorizontal: 16,
-      backgroundColor: t.muted
+    top: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+    glyph: { paddingTop: 2 },
+    titleBox: { flex: 1 },
+    title: { fontSize: 14, fontWeight: '500', lineHeight: 19, color: t.foreground },
+    meta: { fontSize: 12, color: t.mutedForeground, marginTop: 2 },
+    dot: { paddingTop: 5 },
+    bottom: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 10
     },
-    underNext: { alignItems: 'flex-end' },
-    underPrev: { alignItems: 'flex-start' },
-    armed: { backgroundColor: t.primary },
-    underText: { fontSize: 14, fontWeight: '600', color: t.mutedForeground },
-    armedText: { color: t.primaryForeground }
+    blocked: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: t.warning,
+      paddingHorizontal: 7,
+      paddingVertical: 1
+    },
+    blockedText: { fontSize: 11, fontWeight: '600', color: t.warningForeground },
+    due: {
+      borderRadius: 999,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.border,
+      paddingHorizontal: 7,
+      paddingVertical: 1
+    },
+    dueOver: { borderColor: t.destructive },
+    dueText: { fontSize: 11, color: t.mutedForeground },
+    dueTextOver: { color: t.destructive, fontWeight: '600' }
   })

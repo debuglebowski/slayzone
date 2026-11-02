@@ -3,7 +3,7 @@ import { Screen } from './Screen'
 import { useTheme } from './theme'
 
 /** The app's tabs, by the name of their route group (`app/(tabs)/(<tab>)/`). */
-export type TabName = 'agents' | 'tasks' | 'search' | 'hubs'
+export type TabName = 'board' | 'search' | 'settings'
 
 /**
  * One tab's screen stack (`app/(tabs)/(<tab>)/_layout.tsx`): what the tab opens pushes

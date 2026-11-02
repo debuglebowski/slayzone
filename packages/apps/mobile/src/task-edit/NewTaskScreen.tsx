@@ -54,6 +54,10 @@ export interface NewTaskScreenProps {
   projectId: string
   /** The status to start with; one the project doesn't have is ignored. */
   status?: string
+  /** The priority to start with (1 Urgent … 5 Someday; a board's priority group). */
+  priority?: number
+  /** The due date to start with (YYYY-MM-DD; a board's due-date group). */
+  dueDate?: string
   /** Creates a subtask of this task (same hub and project). */
   parentId?: string
   onCreated: (hubAddress: string, taskId: string) => void
@@ -92,6 +96,7 @@ export function NewTaskScreen(props: NewTaskScreenProps) {
     const opened = feedOfAddress(feeds, props.hubAddress)
     if (!opened) return null
     const columns = projectIn(opened, props.projectId)?.columns_config
+    const priority = [1, 2, 3, 4, 5].find((p) => p === props.priority)
     const status =
       props.status && isKnownStatus(props.status, columns)
         ? props.status
@@ -103,11 +108,11 @@ export function NewTaskScreen(props: NewTaskScreenProps) {
         parentId: props.parentId ?? null,
         title: '',
         status,
-        priority: DEFAULT_PRIORITY,
-        dueDate: null,
+        priority: priority ?? DEFAULT_PRIORITY,
+        dueDate: props.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(props.dueDate) ? props.dueDate : null,
         templateId: NO_TEMPLATE
       },
-      explicit: { status: status === props.status, priority: false }
+      explicit: { status: status === props.status, priority: priority !== undefined }
     }
   })
   const feed = form ? feeds.find((f) => f.hub.id === form.hubId) : undefined

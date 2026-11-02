@@ -1,10 +1,10 @@
 /**
  * What the board remembers on this device: the project shown (hub + project id: an id
- * alone is ambiguous across hubs), the view, and each project's filters. One JSON file;
+ * alone is ambiguous across hubs), the view, and each project's filters and Display options. One JSON file;
  * unreadable or foreign content = nothing kept. The file itself is `board-prefs-file.ts`.
  */
 import type { ProjectRef } from '../projects/hub-projects'
-import { type BoardFilter, DEFAULT_BOARD_FILTER } from './board-model'
+import { type BoardFilter, DEFAULT_BOARD_FILTER, LIST_GROUPS, SORTS } from './board-model'
 
 export type BoardView = 'kanban' | 'list' | 'tree'
 export const BOARD_VIEWS: readonly BoardView[] = ['kanban', 'list', 'tree']
@@ -80,6 +80,13 @@ function filterOf(f: Record<string, unknown>): BoardFilter {
       : d.dueDateRange,
     tagIds: Array.isArray(f.tagIds) ? f.tagIds.filter((t) => typeof t === 'string') : d.tagIds,
     showDone: typeof f.showDone === 'boolean' ? f.showDone : d.showDone,
-    showBlocked: typeof f.showBlocked === 'boolean' ? f.showBlocked : d.showBlocked
+    showBlocked: typeof f.showBlocked === 'boolean' ? f.showBlocked : d.showBlocked,
+    showEmpty: typeof f.showEmpty === 'boolean' ? f.showEmpty : d.showEmpty,
+    groupBy: LIST_GROUPS.includes(f.groupBy as never)
+      ? (f.groupBy as BoardFilter['groupBy'])
+      : d.groupBy,
+    sortBy: SORTS.includes(f.sortBy as never) ? (f.sortBy as BoardFilter['sortBy']) : d.sortBy,
+    showArchived: typeof f.showArchived === 'boolean' ? f.showArchived : d.showArchived,
+    showSubTasks: typeof f.showSubTasks === 'boolean' ? f.showSubTasks : d.showSubTasks
   }
 }

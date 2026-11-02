@@ -16,7 +16,7 @@ import { useHubFeeds } from '../hub-connections'
 import type { HubSession } from '../hub-session'
 import { useHubSessions } from '../hub-sessions'
 import { findSession, HOME } from '../routes'
-import { SPLIT_MIN_WIDTH } from '../TaskBrowser'
+import { WIDE_MIN_WIDTH } from '../layout'
 import { type ChromeColors, useTheme } from '../theme'
 import { useTRPCClient } from '../trpc'
 import { ArtifactSearchScreen } from './ArtifactSearchScreen'
@@ -91,7 +91,7 @@ function InHubScope({
   const hubClient = useTRPCClient()
   const styles = makeStyles(useTheme())
   const [linkError, setLinkError] = useState<string | null>(null)
-  const split = width >= SPLIT_MIN_WIDTH
+  const split = width >= WIDE_MIN_WIDTH
   const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
 
   // An artifact link names an artifact, not its task: ask its hub which task holds it.

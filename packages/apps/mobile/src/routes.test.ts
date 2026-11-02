@@ -1,5 +1,5 @@
 import { hubEntryOf } from './hub-session'
-import { agentHref, findSession, taskHref } from './routes'
+import { findSession, taskHref } from './routes'
 
 describe('routes', () => {
   it('names a task by its hub address and id (deep link slayzone://task/<hub>/<id>)', () => {
@@ -8,10 +8,12 @@ describe('routes', () => {
     expect(taskHref('[::1]:8788', 'a/b')).toBe('/task/%5B%3A%3A1%5D%3A8788/a%2Fb')
   })
 
-  it("names a task's agents the same way; a tab other than the main one as a parameter", () => {
-    expect(agentHref('hub.example.com', 't1')).toBe('/agent/hub.example.com/t1')
-    expect(agentHref('127.0.0.1:8788', 't1', 'tab 2')).toBe(
-      '/agent/127.0.0.1%3A8788/t1?tab=tab%202'
+  it('names the part of the task shown, and an agent tab other than the main one, as parameters', () => {
+    expect(taskHref('hub.example.com', 't1', { segment: 'agent' })).toBe(
+      '/task/hub.example.com/t1?segment=agent'
+    )
+    expect(taskHref('127.0.0.1:8788', 't1', { segment: 'agent', tab: 'tab 2' })).toBe(
+      '/task/127.0.0.1%3A8788/t1?segment=agent&tab=tab%202'
     )
   })
 

@@ -6,7 +6,7 @@
  *   frame is already in the user's theme). No navigator yet, so nothing navigates.
  * - Then one `HubConnections` for every signed-in hub (all hubs merged in one list)
  *   and the screens, behind `Stack.Protected` guards: signed out, only `/sign-in`;
- *   signed in, the tabs (`(tabs)/_layout.tsx`: Agents · Tasks · Search · Hubs, every
+ *   signed in, the tabs (`(tabs)/_layout.tsx`: Board · Search · Settings, every
  *   other screen pushed inside one of them). A sign-in or the last sign-out flips the
  *   guards and Expo Router moves to the first allowed screen.
  * - Safe area: the sign-in screen pads itself (`Screen`); each tab measures its own,

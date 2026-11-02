@@ -2,7 +2,7 @@ import type { TerminalState } from '@slayzone/terminal-contracts'
 import { EMPTY_TERMINAL_STATE, type TerminalStateData } from '@slayzone/terminal/terminal-state'
 import type { BoardData, BoardTask, HubFeed } from '../hub-board'
 import { hubEntryOf } from '../hub-session'
-import { groupAgentRows, mergeHubAgents, tabIdOfSession, taskAgentSessions } from './hub-agents'
+import { mergeHubAgents, tabIdOfSession, taskAgentSessions } from './hub-agents'
 
 const home = hubEntryOf('home.example')
 const work = hubEntryOf('work.example')
@@ -105,20 +105,6 @@ describe('mergeHubAgents', () => {
     expect(
       mergeHubAgents([feed(home, board(task('a', 'A')), sessions({ 'gone:gone': 'running' }))])
     ).toEqual([])
-  })
-
-  it('groups rows under their titles, empty groups left out', () => {
-    const rows = mergeHubAgents([
-      feed(
-        home,
-        board(task('a', 'A', true), task('b', 'B')),
-        sessions({ 'a:a': 'idle', 'b:b': 'running' })
-      )
-    ])
-    expect(groupAgentRows(rows).map((g) => [g.title, g.rows.length])).toEqual([
-      ['Waiting for you', 1],
-      ['Running', 1]
-    ])
   })
 })
 

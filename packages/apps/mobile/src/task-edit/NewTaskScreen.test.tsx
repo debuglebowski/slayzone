@@ -60,7 +60,9 @@ function hubs(templates: { work?: TaskTemplate[]; home?: TaskTemplate[] } = {}) 
   return { work, home }
 }
 
-async function open(params: { status?: string; parentId?: string } = {}) {
+async function open(
+  params: { status?: string; parentId?: string; priority?: number; dueDate?: string } = {}
+) {
   const onCreated = jest.fn()
   const onCancel = jest.fn()
   await render(
@@ -69,6 +71,8 @@ async function open(params: { status?: string; parentId?: string } = {}) {
       projectId="wp"
       status={params.status}
       parentId={params.parentId}
+      priority={params.priority}
+      dueDate={params.dueDate}
       onCreated={onCreated}
       onCancel={onCancel}
     />
@@ -168,6 +172,24 @@ describe('NewTaskScreen', () => {
         priority: 1,
         templateId: 'Feature'
       })
+    )
+  })
+
+  it('starts with the priority and due date it was opened with (a group’s “+”); they win over the template’s', async () => {
+    const { work } = hubs({
+      work: [template('Feature', { is_default: true, default_status: 'next', default_priority: 4 })]
+    })
+    await open({ priority: 1, dueDate: '2027-01-02' })
+    await waitFor(() =>
+      expect(screen.getByTestId('new-task-template')).toHaveTextContent('Feature')
+    )
+    expect(screen.getByTestId('new-task-priority')).toHaveTextContent('Urgent')
+    await user().type(screen.getByTestId('new-task-title'), 'x')
+    await user().press(screen.getByText('Create'))
+    await waitFor(() =>
+      expect(creates(work)[0]?.input).toEqual(
+        expect.objectContaining({ priority: 1, dueDate: '2027-01-02', status: 'next' })
+      )
     )
   })
 

@@ -12,7 +12,7 @@ import type { TerminalState } from '@slayzone/terminal-contracts'
 import { EMPTY_TERMINAL_STATE, type TerminalStateData } from '@slayzone/terminal/terminal-state'
 import type { BoardProject, BoardTask, HubFeed } from '../hub-board'
 import { rowKey } from '../hub-board'
-import { AGENT_GROUP_ORDER, AGENT_GROUP_TITLES, type AgentGroup, agentGroup } from './agent-status'
+import { AGENT_GROUP_ORDER, type AgentGroup, agentGroup } from './agent-status'
 
 /** One hub's agent sessions. */
 export interface HubAgentSessions {
@@ -149,21 +149,4 @@ export function mergeHubAgents(feeds: readonly HubFeed[]): AgentRow[] {
   const rank = (g: AgentGroup): number => AGENT_GROUP_ORDER.indexOf(g)
   rows.sort((a, b) => rank(a.group) - rank(b.group) || a.order - b.order)
   return rows.map(({ order: _order, ...row }) => row)
-}
-
-export interface AgentGroupRows {
-  group: AgentGroup
-  title: string
-  rows: AgentRow[]
-}
-
-/** Rows (already in group order) under their group titles; empty groups left out. */
-export function groupAgentRows(rows: readonly AgentRow[]): AgentGroupRows[] {
-  const groups: AgentGroupRows[] = []
-  for (const row of rows) {
-    const last = groups.at(-1)
-    if (last && last.group === row.group) last.rows.push(row)
-    else groups.push({ group: row.group, title: AGENT_GROUP_TITLES[row.group], rows: [row] })
-  }
-  return groups
 }

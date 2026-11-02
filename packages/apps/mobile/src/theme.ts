@@ -83,3 +83,60 @@ export function KeptThemeProvider({
 }) {
   return createElement(HubThemeContext.Provider, { value: settings }, children)
 }
+
+/**
+ * Desktop's fixed task palette — the colours its board paints whatever the theme
+ * (Tailwind's palette there): a status column's tone (`ColumnConfig.color` →
+ * desktop `task-status.ts` COLOR_MAP icon class), priority icons (`priority-icon.tsx`),
+ * agent dots (`terminal-state.ts`), and the letter on a project avatar. Kept here: this
+ * is the only module that names colours.
+ */
+const STATUS_TONES: Readonly<Record<string, string>> = {
+  gray: '#6b7280',
+  slate: '#64748b',
+  blue: '#3b82f6',
+  yellow: '#eab308',
+  purple: '#a855f7',
+  green: '#22c55e',
+  red: '#ef4444',
+  orange: '#f97316'
+}
+
+/** A status column's tone (`gray`, `blue` …) as a colour; unknown = gray, as desktop. */
+export function statusToneColor(tone: string): string {
+  return STATUS_TONES[tone] ?? STATUS_TONES.gray
+}
+
+/** Priority icon colours: 1 Urgent (the lightning), 2 High, 3 Medium, 4 Low. */
+export const PRIORITY_COLORS: Readonly<Record<number, string>> = {
+  1: '#ef4444',
+  2: '#f97316',
+  3: '#eab308',
+  4: '#3b82f6'
+}
+
+/** Agent dots (desktop's 400 shades): needs you, running, subagents, idle, error, paused. */
+export const AGENT_DOT_COLORS = {
+  attention: '#fbbf24',
+  running: '#4ade80',
+  background: '#4ade8080',
+  idle: '#38bdf8',
+  error: '#f87171',
+  hibernated: '#a78bfa'
+} as const
+
+/** The amber of a "waiting for you" count badge, and the text on it. */
+export const ATTENTION_BADGE = { background: '#f59e0b', text: '#000000' } as const
+
+/** The letter on a project's coloured avatar (desktop: white). */
+export const AVATAR_TEXT = '#ffffff'
+
+/** A new project's colour choices (desktop's `CreateProjectDialog`); it stores the value. */
+export const PROJECT_COLORS: readonly string[] = [
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#ef4444',
+  '#8b5cf6',
+  '#ec4899'
+]

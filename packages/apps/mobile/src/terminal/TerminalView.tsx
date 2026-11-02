@@ -25,6 +25,7 @@ import { type BarKey, KEY_BAR, type KeyModes, keyBytes } from './key-bar'
 import TerminalDom, { type TerminalDomHandle } from './TerminalDom'
 import { TerminalController } from './terminal-controller'
 import type { FeedStatus } from './terminal-feed'
+import { useNativeMounted } from './use-native-mounted'
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -45,6 +46,9 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
   const [sendError, setSendError] = useState<string | null>(null)
 
   const terminal = useRef<TerminalDomHandle>(null)
+  // The web view mounts one render later (`useNativeMounted`: expo's mount-time call
+  // into it must not run before its native view exists).
+  const webMounted = useNativeMounted()
   const controller = useMemo(
     () => new TerminalController(sessionId, client, setStatus),
     [client, sessionId]
@@ -111,14 +115,16 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
   return (
     <View style={styles.root}>
       <View style={[styles.terminal, { backgroundColor: colors.background }]}>
-        <TerminalDom
-          ref={terminal}
-          colors={colors}
-          onReady={() => controller.terminalReady()}
-          onModes={async (applicationCursorKeys) => setModes({ applicationCursorKeys })}
-          onInteract={async () => touch()}
-          dom={{ style: styles.web, scrollEnabled: false, bounces: false }}
-        />
+        {webMounted ? (
+          <TerminalDom
+            ref={terminal}
+            colors={colors}
+            onReady={() => controller.terminalReady()}
+            onModes={async (applicationCursorKeys) => setModes({ applicationCursorKeys })}
+            onInteract={async () => touch()}
+            dom={{ style: styles.web, scrollEnabled: false, bounces: false }}
+          />
+        ) : null}
         {status.phase === 'error' ? (
           <Text style={styles.problem} numberOfLines={2}>
             {status.error}

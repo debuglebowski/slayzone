@@ -47,6 +47,8 @@ export interface ArtifactsScreenProps {
   onSelect: (artifactId: string) => void
   onSelectVersion: (artifactId: string, version: number | null) => void
   onBack: () => void
+  /** Inside the task page (its Artifacts tab): no screen header, an Upload row instead. */
+  embedded?: boolean
 }
 
 const UPLOAD_SOURCES: Array<{ label: string; source: UploadSource }> = [
@@ -62,7 +64,8 @@ export function ArtifactsScreen({
   selected,
   onSelect,
   onSelectVersion,
-  onBack
+  onBack,
+  embedded = false
 }: ArtifactsScreenProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -113,13 +116,19 @@ export function ArtifactsScreen({
 
   const listPane = (
     <View style={layout === 'split' ? styles.listPane : styles.fill}>
-      <ScreenHeader
-        title="Artifacts"
-        subtitle={subtitle || null}
-        onBack={onBack}
-        backLabel="Task"
-        actions={<HeaderButton label="Upload" onPress={chooseUpload} />}
-      />
+      {embedded ? (
+        <View style={styles.embeddedBar}>
+          <HeaderButton label="＋ Upload" onPress={chooseUpload} />
+        </View>
+      ) : (
+        <ScreenHeader
+          title="Artifacts"
+          subtitle={subtitle || null}
+          onBack={onBack}
+          backLabel="Task"
+          actions={<HeaderButton label="Upload" onPress={chooseUpload} />}
+        />
+      )}
       {uploads.pickError ? <Text style={styles.error}>{uploads.pickError}</Text> : null}
       {uploads.items.map((item) => (
         <UploadRow
@@ -305,6 +314,12 @@ export const ARTIFACTS_LIST_WIDTH = 340
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
+    embeddedBar: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      paddingHorizontal: 14,
+      paddingVertical: 6
+    },
     screen: { flex: 1, backgroundColor: t.background },
     fill: { flex: 1 },
     split: { flexDirection: 'row' },

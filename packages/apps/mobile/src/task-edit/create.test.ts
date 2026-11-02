@@ -55,4 +55,10 @@ describe('newTaskHref', () => {
       '/new-task?hub=h&project=p&status=in_progress&parent=t'
     )
   })
+
+  it('names a priority and due date when given (a priority or due-date group)', () => {
+    expect(newTaskHref({ hub: 'h', project: 'p', priority: 1, due: '2027-01-02' })).toBe(
+      '/new-task?hub=h&project=p&priority=1&due=2027-01-02'
+    )
+  })
 })

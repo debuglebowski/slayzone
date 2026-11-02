@@ -107,7 +107,7 @@ describe('artifact routes', () => {
     ).toBeOnTheScreen()
   })
 
-  it("a link to a task's artifacts opens them in the Search tab", async () => {
+  it("a link to a task's artifacts opens them in the Board tab (where the task lives)", async () => {
     await renderRouter('src/app', {
       initialUrl: redirectSystemPath({
         path: 'slayzone://artifacts/home.example/t1',
@@ -115,7 +115,7 @@ describe('artifact routes', () => {
       })
     })
     expect(await screen.findByText('list t1 list null', undefined, MOUNT)).toBeOnTheScreen()
-    expect(screen).toHaveSegments(['(tabs)', '(search)', 'artifacts', '[hub]', '[task]'])
+    expect(screen).toHaveSegments(['(tabs)', '(board)', 'artifacts', '[hub]', '[task]'])
   })
 
   it('a hub the app is not signed in to says so', async () => {

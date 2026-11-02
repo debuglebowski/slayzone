@@ -6,36 +6,42 @@
  * (these render inside its scope).
  */
 import { useSubscription } from '@slayzone/transport/client'
-import { getDefaultStatus } from '@slayzone/workflow'
+import { getDefaultStatus, getDoneStatus, isCompletedStatus } from '@slayzone/workflow'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import type { BoardData, TaskRow } from '../hub-board'
-import { taskHref } from '../routes'
+import type { BoardData, BoardTask, TaskRow } from '../hub-board'
 import { useTheme } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
-import { statusLabel } from './fields'
 import { blockerCandidates, isBlocked, projectTags, subtasksOf, toggleTag } from './organise'
 import { makeStyles, PromptSheet, Section, Sheet } from './ui'
 import type { TaskWrites } from './use-task-writes'
 
+/**
+ * The task's subtasks as a checklist (desktop's Sub-tasks card): the box ticks one done
+ * (its project's first completed status) or opens it again (the default status); the
+ * title opens it. "＋ Add sub-task": same project, the project's default status.
+ */
 export function SubtasksSection({
   row,
   board,
-  writes
+  writes,
+  onOpenTask
 }: {
   row: TaskRow
   board: BoardData
   writes: TaskWrites
+  /** A subtask's title was tapped. */
+  onOpenTask: (taskId: string) => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
-  const router = useRouter()
   const client = useTRPCClient()
   const [adding, setAdding] = useState(false)
   const [title, setTitle] = useState('')
+  const columns = row.project?.columns_config
   const subtasks = subtasksOf(board, row.task.id)
+  const done = subtasks.filter((s) => isCompletedStatus(s.status, columns)).length
 
   const add = () => {
     const next = title.trim()
@@ -46,28 +52,47 @@ export function SubtasksSection({
         projectId: row.task.project_id,
         parentId: row.task.id,
         title: next,
-        status: getDefaultStatus(row.project?.columns_config)
+        status: getDefaultStatus(columns)
       })
     )
   }
+  const toggle = (sub: BoardTask) => {
+    const status = isCompletedStatus(sub.status, columns)
+      ? getDefaultStatus(columns)
+      : getDoneStatus(columns)
+    void writes.run(() => client.task.update.mutate({ id: sub.id, status }))
+  }
 
   return (
-    <Section title="Subtasks" action={{ label: 'Add subtask', onPress: () => setAdding(true) }}>
-      {subtasks.map((sub) => (
-        <Pressable
-          key={sub.id}
-          testID={`subtask-${sub.id}`}
-          accessibilityRole="button"
-          onPress={() => router.push(taskHref(row.hubLabel, sub.id))}
-          style={styles.row}
-        >
-          <Text style={styles.rowText} numberOfLines={2}>
-            {sub.title}
-          </Text>
-          <Text style={styles.muted}>{statusLabel(sub.status, row.project)}</Text>
-        </Pressable>
-      ))}
-      {subtasks.length === 0 && !adding ? <Text style={styles.muted}>No subtasks</Text> : null}
+    <Section title={subtasks.length > 0 ? `Sub-tasks · ${done}/${subtasks.length}` : 'Sub-tasks'}>
+      {subtasks.map((sub) => {
+        const checked = isCompletedStatus(sub.status, columns)
+        return (
+          <View key={sub.id} style={styles.check}>
+            <Pressable
+              testID={`subtask-check-${sub.id}`}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked }}
+              accessibilityLabel={sub.title}
+              hitSlop={8}
+              onPress={() => toggle(sub)}
+              style={[styles.box, checked && styles.boxChecked]}
+            >
+              {checked ? <Text style={styles.boxMark}>✓</Text> : null}
+            </Pressable>
+            <Pressable
+              testID={`subtask-${sub.id}`}
+              accessibilityRole="button"
+              onPress={() => onOpenTask(sub.id)}
+              style={styles.checkText}
+            >
+              <Text style={[styles.rowText, checked && styles.struck]} numberOfLines={2}>
+                {sub.title}
+              </Text>
+            </Pressable>
+          </View>
+        )
+      })}
       {adding ? (
         <TextInput
           testID="new-subtask-title"
@@ -78,11 +103,20 @@ export function SubtasksSection({
           submitBehavior="submit"
           returnKeyType="done"
           autoFocus
-          placeholder="Subtask title"
+          placeholder="Sub-task title"
           placeholderTextColor={theme.mutedForeground}
           style={styles.input}
         />
-      ) : null}
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          testID="add-subtask"
+          onPress={() => setAdding(true)}
+          hitSlop={6}
+        >
+          <Text style={styles.muted}>＋ Add sub-task</Text>
+        </Pressable>
+      )}
     </Section>
   )
 }

@@ -8,7 +8,7 @@
 import { HubScope } from '@slayzone/transport/client'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
-import { Text } from 'react-native'
+import { Pressable, Text } from 'react-native'
 import { artifactHref } from '../artifacts/routes'
 import { Markdown } from '../chat/Markdown'
 import type { TaskRow } from '../hub-board'
@@ -38,11 +38,18 @@ function Description({ row }: { row: TaskRow }) {
   }
   return (
     <Section title="Description" action={{ label: 'Edit', onPress: () => setEditing(true) }}>
-      {text.trim() ? (
-        <Markdown text={text} onLink={onLink} />
-      ) : (
-        <Text style={styles.muted}>No description</Text>
-      )}
+      <Pressable
+        onPress={() => setEditing(true)}
+        accessibilityRole="button"
+        accessibilityHint="Edits the description"
+        testID="description-body"
+      >
+        {text.trim() ? (
+          <Markdown text={text} onLink={onLink} />
+        ) : (
+          <Text style={styles.muted}>No description — tap to add one</Text>
+        )}
+      </Pressable>
       {editing ? <DescriptionEditor row={row} onClose={() => setEditing(false)} /> : null}
     </Section>
   )

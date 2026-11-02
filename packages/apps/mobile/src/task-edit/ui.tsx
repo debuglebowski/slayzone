@@ -163,12 +163,13 @@ export const makeStyles = (t: ChromeColors) =>
     section: { gap: 8 },
     sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     heading: {
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: '600',
+      letterSpacing: 0.6,
       color: t.mutedForeground,
       textTransform: 'uppercase'
     },
-    link: { fontSize: 15, color: t.foreground, fontWeight: '500' },
+    link: { fontSize: 14, color: t.primary, fontWeight: '600' },
     field: {
       paddingHorizontal: 10,
       paddingVertical: 6,
@@ -219,5 +220,39 @@ export const makeStyles = (t: ChromeColors) =>
     rowText: { flex: 1, fontSize: 15, color: t.foreground },
     muted: { fontSize: 13, color: t.mutedForeground },
     error: { fontSize: 13, color: t.destructive },
+    check: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+    checkText: { flex: 1 },
+    box: {
+      width: 18,
+      height: 18,
+      borderRadius: 5,
+      borderWidth: 1.5,
+      borderColor: t.mutedForeground,
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    boxChecked: { backgroundColor: t.success, borderColor: t.success },
+    boxMark: { fontSize: 12, fontWeight: '800', color: t.successContrast },
+    struck: { color: t.mutedForeground, textDecorationLine: 'line-through' },
+    card: {
+      backgroundColor: t.surface1,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.border,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 10
+    },
+    detailRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 9,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.border
+    },
+    detailLabel: { fontSize: 14, color: t.mutedForeground },
+    detailValue: { flexShrink: 1, fontSize: 14, color: t.foreground, textAlign: 'right' },
     destructive: { fontSize: 15, color: t.destructive, fontWeight: '500' }
   })

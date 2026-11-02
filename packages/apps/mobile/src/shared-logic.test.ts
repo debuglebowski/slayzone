@@ -20,7 +20,8 @@ import {
   groupTasksBy,
   PRIORITY_LABELS,
   patchBoardRows,
-  sortTasks
+  sortTasks,
+  splitActiveInactiveColumns
 } from '@slayzone/tasks/board'
 import { selectPendingPrompts } from '@slayzone/terminal/chat-prompts'
 import { initialState, reducer } from '@slayzone/terminal/reducer'
@@ -80,6 +81,10 @@ describe('@slayzone/tasks/board', () => {
     const byPriority = groupTasksBy(tasks, 'priority')
     expect(byPriority.find((c) => c.id === 'p1')?.tasks.map((t) => t.id)).toEqual(['urgent'])
     expect(columnToCreateTaskDraft(byPriority[0], 'priority')).toEqual({ priority: 1 })
+    expect(splitActiveInactiveColumns(tasks, new Set(['urgent']), false).map((c) => c.id)).toEqual([
+      'active',
+      'inactive'
+    ])
 
     const sub = task('sub', { parent_id: 'urgent' })
     expect(applyFilters([...tasks, sub], defaultFilterState, new Map()).map((t) => t.id)).toEqual([

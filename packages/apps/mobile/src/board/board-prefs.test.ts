@@ -29,11 +29,13 @@ describe('board prefs', () => {
       DEFAULT_BOARD_PREFS
     )
     expect(
-      createBoardPrefs(memory('{"view":"list","filters":{"k":{"showDone":false}}}')).load()
+      createBoardPrefs(
+        memory('{"view":"list","filters":{"k":{"showDone":false,"showEmpty":false}}}')
+      ).load()
     ).toEqual({
       ...DEFAULT_BOARD_PREFS,
       view: 'list',
-      filters: { k: { ...DEFAULT_BOARD_FILTER, showDone: false } }
+      filters: { k: { ...DEFAULT_BOARD_FILTER, showDone: false, showEmpty: false } }
     })
   })
 
@@ -48,5 +50,23 @@ describe('board prefs', () => {
     })
     expect(prefs.load()).toEqual(DEFAULT_BOARD_PREFS)
     expect(() => prefs.save(DEFAULT_BOARD_PREFS)).not.toThrow()
+  })
+
+  it('keeps group by, sort, show archived and show sub-tasks; drops unknown values', () => {
+    const kept = {
+      ...DEFAULT_BOARD_FILTER,
+      groupBy: 'due_date' as const,
+      sortBy: 'created' as const,
+      showArchived: true,
+      showSubTasks: true
+    }
+    const storage = memory()
+    createBoardPrefs(storage).save({ ...DEFAULT_BOARD_PREFS, filters: { k: kept } })
+    expect(createBoardPrefs(storage).load().filters.k).toEqual(kept)
+    expect(
+      createBoardPrefs(
+        memory('{"filters":{"k":{"groupBy":"color","sortBy":1,"showArchived":"yes"}}}')
+      ).load().filters.k
+    ).toEqual(DEFAULT_BOARD_FILTER)
   })
 })

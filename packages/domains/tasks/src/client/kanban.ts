@@ -245,6 +245,26 @@ export function groupTasksBy(
   }
 }
 
+/** The list's "Activity" grouping: tasks with an alive agent session first, then the rest. */
+export function splitActiveInactiveColumns(
+  baseTasks: Task[],
+  activeTaskIds: ReadonlySet<string>,
+  showEmptyColumns: boolean
+): Column[] {
+  const active: Task[] = []
+  const rest: Task[] = []
+  for (const t of baseTasks) {
+    if (activeTaskIds.has(t.id)) active.push(t)
+    else rest.push(t)
+  }
+  const cols: Column[] = []
+  if (active.length > 0 || showEmptyColumns)
+    cols.push({ id: 'active', title: 'Active', tasks: active })
+  if (rest.length > 0 || showEmptyColumns)
+    cols.push({ id: 'inactive', title: 'Inactive', tasks: rest })
+  return cols
+}
+
 function matchesDueDateRange(dueDate: string | null, range: DueDateRange): boolean {
   if (range === 'all') return true
 

@@ -11,7 +11,11 @@ import { SearchRoute } from './SearchRoute'
 
 const mockRouter = { push: jest.fn() }
 const mockState: { feeds: HubFeed[]; sessions: HubSession[] } = { feeds: [], sessions: [] }
-jest.mock('expo-router', () => ({ useRouter: () => mockRouter }))
+const mockParams: { q?: string } = {}
+jest.mock('expo-router', () => ({
+  useRouter: () => mockRouter,
+  useLocalSearchParams: () => mockParams
+}))
 jest.mock('../hub-connections', () => ({
   useHubFeeds: () => ({ feeds: mockState.feeds, retry: () => undefined, clientFor: () => null })
 }))
