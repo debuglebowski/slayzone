@@ -21,6 +21,7 @@ const respawnSub = {
   })
 }
 const trpcClient = {
+  chat: { restart: { mutate: vi.fn(async () => undefined) } },
   pty: {
     exists: { query: vi.fn(async () => false) },
     kill: { mutate: vi.fn(async () => undefined) }
@@ -76,6 +77,8 @@ function setup(initial: Task) {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
   const onTaskUpdated = vi.fn()
+  const resetTaskState = vi.fn()
+  const setTerminalKey = vi.fn()
   let detect: (id: string) => void = () => {}
   const subscribeSessionDetected = (_sid: string, cb: (id: string) => void) => {
     detect = cb
@@ -88,15 +91,63 @@ function setup(initial: Task) {
         onTaskUpdated,
         shortcutActive: false,
         getMainSessionId,
-        resetTaskState: vi.fn(),
+        resetTaskState,
         subscribeSessionDetected,
-        setTerminalKey: vi.fn(),
+        setTerminalKey,
         agentCwd: '/tmp/repo'
       }),
     { initialProps: { t: initial }, wrapper }
   )
-  return { ...hook, onTaskUpdated, detect: (id: string) => act(() => detect(id)) }
+  return {
+    ...hook,
+    onTaskUpdated,
+    resetTaskState,
+    setTerminalKey,
+    detect: (id: string) => act(() => detect(id))
+  }
 }
+
+describe('useTaskTerminalSession — restart routing', () => {
+  it.each(['codex-chat', 'claude-chat'] as const)(
+    'restarts %s without touching the PTY or conversation',
+    async (mode) => {
+      const initial = {
+        ...task(),
+        terminal_mode: mode,
+        provider_config: { [mode]: { flags: '--verbose' } },
+        currentConversationByMode: { [mode]: 'existing-session' }
+      } as Task
+      const { result, resetTaskState, setTerminalKey, onTaskUpdated } = setup(initial)
+
+      await act(async () => result.current.handleRestartTerminal())
+
+      expect(trpcClient.chat.restart.mutate).toHaveBeenCalledExactlyOnceWith({
+        tabId: initial.id,
+        taskId: initial.id,
+        mode,
+        cwd: '/tmp/repo',
+        providerFlagsOverride: '--verbose'
+      })
+      expect(trpcClient.pty.kill.mutate).not.toHaveBeenCalled()
+      expect(resetTaskState).not.toHaveBeenCalled()
+      expect(setTerminalKey).not.toHaveBeenCalled()
+      expect(trpcClient.task.resetConversation.mutate).not.toHaveBeenCalled()
+      expect(onTaskUpdated).not.toHaveBeenCalled()
+    }
+  )
+
+  it('still kills and remounts a terminal agent', async () => {
+    const { result, resetTaskState, setTerminalKey } = setup(task('existing-session'))
+
+    await act(async () => result.current.handleRestartTerminal())
+
+    expect(trpcClient.pty.kill.mutate).toHaveBeenCalledExactlyOnceWith({ sessionId: 't1:main' })
+    expect(resetTaskState).toHaveBeenCalledWith('t1:main')
+    expect(setTerminalKey).toHaveBeenCalledOnce()
+    expect(trpcClient.chat.restart.mutate).not.toHaveBeenCalled()
+    expect(trpcClient.task.resetConversation.mutate).not.toHaveBeenCalled()
+  })
+})
 
 describe('useTaskTerminalSession — detected conversation id persist', () => {
   it('a failing write is not retried by re-renders; a new task object retries once', async () => {

@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
+import { getProviderFlags } from '@slayzone/task-contracts/types'
 
 import {
   chatModeForTerminal,
@@ -195,9 +196,20 @@ export function useTaskTerminalSession({
     updateTask
   ])
 
-  // Restart terminal (kill PTY, remount, keep session for --resume)
+  // Shortcut and task menu restart the main agent through its transport.
+  // Chat restart preserves its conversation/history without a PTY or remount.
   const handleRestartTerminal = useCallback(async () => {
     if (!task) return
+    if (isChatSupported(task.terminal_mode)) {
+      await trpcClient.chat.restart.mutate({
+        tabId: task.id,
+        taskId: task.id,
+        mode: task.terminal_mode,
+        cwd: agentCwd,
+        providerFlagsOverride: getProviderFlags(task.provider_config, task.terminal_mode)
+      })
+      return
+    }
     const mainSessionId = getMainSessionId(task.id)
     resetTaskState(mainSessionId)
     // Claim the next TerminalStarter mount before killing: the kill's exit
@@ -209,7 +221,7 @@ export function useTaskTerminalSession({
     await new Promise((r) => setTimeout(r, 100))
     markSkipCache(mainSessionId)
     setTerminalKey((k) => k + 1)
-  }, [task, resetTaskState, getMainSessionId, trpcClient, setTerminalKey])
+  }, [task, agentCwd, resetTaskState, getMainSessionId, trpcClient, setTerminalKey])
 
   // Power-off agent (kill PTY only — no remount; user clicks Retry to resume)
   const handleStopAgent = useCallback(async () => {
