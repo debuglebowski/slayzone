@@ -146,6 +146,13 @@ export function createChatTransfers(store: ChatStorage) {
     },
     finish(id: string) {
       const p = load(id)
+      const owner = store.conversation(p.manifest.header.identity.id)
+      if (
+        owner?.state === 'active' &&
+        owner.migrationId === p.manifest.header.migrationId &&
+        owner.migrationHash === p.manifest.hash
+      )
+        return { id: owner.identity.id, hash: owner.migrationHash, epoch: owner.identity.epoch }
       if (p.offset !== p.manifest.bytes || statSync(path(id, '.data')).size !== p.manifest.bytes)
         throw new Error('Incomplete transfer')
       store.stageTransfer(p.manifest, readTransferLines(path(id, '.data')))
@@ -153,6 +160,27 @@ export function createChatTransfers(store: ChatStorage) {
         id: p.manifest.header.identity.id,
         hash: p.manifest.hash,
         epoch: p.manifest.header.identity.epoch + 1
+      }
+    },
+    collectActivated() {
+      for (const name of readdirSync(dir)) {
+        if (!/^[a-f0-9]{64}\.json$/.test(name)) continue
+        const id = name.slice(0, -5)
+        let p: Progress
+        try {
+          p = load(id)
+          if (!p?.manifest?.header?.identity?.id || !p.manifest.hash) continue
+        } catch {
+          continue
+        } // A damaged staging file cannot block readable live history.
+        const owner = store.conversation(p.manifest.header.identity.id)
+        if (
+          owner?.state === 'active' &&
+          owner.migrationId === p.manifest.header.migrationId &&
+          owner.migrationHash === p.manifest.hash &&
+          existsSync(path(id, '.data'))
+        )
+          unlinkSync(path(id, '.data'))
       }
     },
     removeTask(taskId: string) {

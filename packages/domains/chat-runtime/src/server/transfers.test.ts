@@ -62,3 +62,26 @@ test('corrupt transfer never creates a usable conversation', () => {
   expect(() => t.finish(start.id)).toThrow(/integrity|hash|JSON/i)
   expect(s.conversation('c')).toBeNull()
 })
+
+test('activated transfers discard duplicate content while finish retries keep their proof', async () => {
+  const { existsSync } = await import('node:fs')
+  const { s, t } = open(),
+    p = payload(),
+    start = t.begin(p.manifest)
+  t.chunk(start.id, 0, p.bytes)
+  const proof = t.finish(start.id)
+  t.collectActivated()
+  const path = join(s.dir, 'transfers', start.id + '.data')
+  expect(existsSync(path)).toBe(true)
+  s.activate('c', 'move', 2, p.manifest.hash)
+  t.collectActivated()
+  expect(existsSync(path)).toBe(false)
+  expect(t.finish(start.id)).toEqual(proof)
+})
+
+test('damaged staging metadata cannot block cleanup of other live conversations', async () => {
+  const { writeFileSync } = await import('node:fs')
+  const { s, t } = open()
+  writeFileSync(join(s.dir, 'transfers', 'c'.repeat(64) + '.json'), '{}')
+  expect(() => t.collectActivated()).not.toThrow()
+})

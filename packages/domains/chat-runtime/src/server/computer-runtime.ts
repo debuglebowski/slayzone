@@ -1,3 +1,5 @@
+import { createChatRetention } from './retention'
+import { parseChatInvocation } from '../shared'
 import { createLocalArtifacts } from './artifacts'
 import { createChatBackups } from './backups'
 import { createLocalPrompts } from './prompts'
@@ -21,6 +23,7 @@ export function createComputerChatRuntime(opts: {
   stateDir: string
   hubScope: string
   computerId: string
+  hasExternalTaskWork?(taskId: string): boolean
   sessionReader?: ClaudeSessionReader
   transport?: Partial<TransportDeps>
   onMetadata?: (update: ChatMetadataUpdate) => void
@@ -29,6 +32,7 @@ export function createComputerChatRuntime(opts: {
   const prompts = createLocalPrompts(storage)
   const local = createLocalChatData(storage, opts.onMetadata)
   const transfers = createChatTransfers(storage)
+  transfers.collectActivated()
   const attachments = createLocalAttachments(storage, local)
   const artifacts = createLocalArtifacts(storage, local, attachments)
   const backups = createChatBackups(storage)
@@ -54,7 +58,17 @@ export function createComputerChatRuntime(opts: {
     },
     conversations
   )
-  const queueRuntime = createChatQueueRuntime(transport)
+  let retention: ReturnType<typeof createChatRetention> | undefined
+  const queueRuntime = createChatQueueRuntime({
+    ...transport,
+    getSessionTerminalState: (tabId) =>
+      retention?.isPruning(storage.forTab(tabId)?.identity.id ?? '')
+        ? null
+        : transport.getSessionTerminalState(tabId),
+    isReadyForQueuedMessage: (tabId) =>
+      !retention?.isPruning(storage.forTab(tabId)?.identity.id ?? '') &&
+      transport.isReadyForQueuedMessage(tabId)
+  })
   const ops = createChatOps({
     dataOps: local.data,
     sessionReader: opts.sessionReader,
@@ -71,8 +85,42 @@ export function createComputerChatRuntime(opts: {
   )
   let closed = false
   const invoke = createChatInvoker({ storage, local, ops, queueOps })
+  retention = createChatRetention({
+    storage,
+    local,
+    busy: (owner) => {
+      const info = transport.getSessionInfo(owner.identity.tabId)
+      return (
+        Boolean(opts.hasExternalTaskWork?.(owner.identity.taskId)) ||
+        Boolean(info?.pid && !info.ended) ||
+        transport.isTurnOpen(owner.identity.tabId) ||
+        transport
+          .listChatSessions()
+          .some((s) => s.taskId === owner.identity.taskId && !['dead', 'error'].includes(s.state))
+      )
+    },
+    quiesce: async (id) => {
+      const info = transport.getSessionInfo(id)
+      await transport.removeSession(id)
+      if (info)
+        return async () => {
+          await ops.hydrate({ taskId: info.taskId, tabId: id, mode: info.mode, cwd: info.cwd })
+        }
+    },
+    collectGarbage: () => {
+      attachments.collectGarbage()
+      artifacts.collectGarbage()
+    },
+    changed: (id) => {
+      queueRuntime.notifyChatQueueChanged(id)
+      transport.chatEvents.emit('threads-changed', id)
+    }
+  })
+  const retentionService = retention
   return {
-    invoke,
+    invoke: async (input: unknown) =>
+      retentionService.access(parseChatInvocation(input).route.id, () => invoke(input)),
+    retention: retentionService,
     captureHook: prompts.capture,
     prompts: prompts.list,
     storage,
@@ -130,6 +178,7 @@ export function createComputerChatRuntime(opts: {
     async close() {
       if (closed) return
       closed = true
+      await retentionService.close()
       await backups.close()
       await queueRuntime.close()
       await transport.shutdownAll()

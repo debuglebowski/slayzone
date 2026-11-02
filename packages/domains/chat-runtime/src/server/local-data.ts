@@ -72,7 +72,7 @@ export interface ChatMetadataSnapshot {
 /** Content stays local. Only explicitly constructed metadata is forwarded to the hub. */
 export function createLocalChatData(
   store: ChatStorage,
-  notify: (update: ChatMetadataUpdate) => void = () => {}
+  notify: (update: ChatMetadataUpdate) => void = () => undefined
 ) {
   function owner(tabId: string) {
     const o = store.forTab(tabId)
@@ -481,7 +481,7 @@ export function createLocalChatData(
       data.persistChatEventSync!(tabId, seq, event, at ?? Date.now()),
     loadChatEvents: async (tabId) => store.read(owner(tabId).id, -1),
     loadChatEventsRange: async (tabId, after, before) => store.read(owner(tabId).id, after, before),
-    getNextSeqForTab: async (tabId) => (store.read(owner(tabId).id, -1).at(-1)?.seq ?? -1) + 1,
+    getNextSeqForTab: async (tabId) => store.nextSeq(owner(tabId).id),
     clearChatEventsForTab: async (tabId) => {
       const i = owner(tabId)
       store.clearHistory(i.id, i.epoch)

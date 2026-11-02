@@ -89,6 +89,8 @@ export type ChatTerminalState = 'not-spawned' | 'starting' | 'running' | 'idle' 
 
 /** Where a tab's saved events live. Default: nowhere (tests, standalone). */
 export interface ChatEventStore {
+  /** Durable sequence floor, including events already removed by retention. */
+  nextSeq?(tabId: string): Promise<number>
   load(tabId: string): Promise<BufferedEvent[]>
   /** Insert-only: `'clash'` when a row already exists at that seq. `at`: when it was saved (ms). */
   insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
@@ -1639,7 +1641,11 @@ export function createChatTransport(
     await closing.get(opts.tabId)
     const history = opts.initialBuffer ?? (await deps.eventStore.load(opts.tabId))
     const nextSeq =
-      opts.initialNextSeq ?? (history.length > 0 ? history[history.length - 1].seq + 1 : 0)
+      opts.initialNextSeq ??
+      Math.max(
+        history.length > 0 ? history[history.length - 1].seq + 1 : 0,
+        (await deps.eventStore.nextSeq?.(opts.tabId)) ?? 0
+      )
 
     // Skeleton sessionId placeholder. When the resume id is set in providerCfg we
     // honor it (so `--resume <id>` fires on first spawn); otherwise a fresh id.

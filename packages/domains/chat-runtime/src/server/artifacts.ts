@@ -211,6 +211,7 @@ export function createLocalArtifacts(
       throw new Error('Artifact ownership is unavailable or deleted')
     const taskId = owner.identity.taskId,
       tabId = owner.identity.tabId,
+      // biome-ignore lint/suspicious/noExplicitAny: Each heterogeneous tuple is validated by its method schema before dispatch.
       args = artifactMethodSchemas[req.method].parse(req.args) as any[],
       first = args[0]
     const read = reads.has(req.method)
@@ -254,6 +255,10 @@ export function createLocalArtifacts(
           method: req.method,
           args
         })
+        if (receipt.resultExpired)
+          throw new Error(
+            'Artifact operation result expired under chat retention; operation was not repeated'
+          )
         if (receipt.state !== 'delivered')
           throw new Error('Artifact operation outcome is unconfirmed')
         return receipt.result
@@ -329,7 +334,7 @@ export function createLocalArtifacts(
           throw new Error('A chat backup is copying files; retry pruning when it finishes')
         const method = store[req.method as keyof typeof store]
         if (typeof method !== 'function') throw new Error('Unknown computer artifact method')
-        result = await (method as (...args: any[]) => unknown).call(store, db, ...args)
+        result = await (method as (...args: unknown[]) => unknown).call(store, db, ...args)
       }
       if (!read) {
         // The full artifact can be reconstructed after a hub rollback; relay locators contain no names or bytes.

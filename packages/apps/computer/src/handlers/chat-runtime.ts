@@ -39,6 +39,10 @@ import type { ProjectPathStore } from '../project-paths'
 import type { SpawnAdmission } from '../spawn-admission'
 
 const requestSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('retention.configure'),
+    days: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+  }),
   z.object({ kind: z.literal('conversation.delete'), identity: chatIdentitySchema }),
   z.object({
     kind: z.literal('hook.capture'),
@@ -189,6 +193,7 @@ export function createChatRuntimeHandlers(opts: {
   computerId: () => string | null
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
+  hasTaskWork?(taskId: string): boolean
 }) {
   let closed = false,
     resetting = false
@@ -271,6 +276,7 @@ export function createChatRuntimeHandlers(opts: {
       stateDir: opts.stateDir,
       hubScope: opts.hubScope,
       computerId,
+      hasExternalTaskWork: opts.hasTaskWork,
       sessionReader: async (input) =>
         session[HubToComputerMethods.claudeSessionRead](input) as Promise<{
           found: boolean
@@ -369,6 +375,9 @@ export function createChatRuntimeHandlers(opts: {
         return r.backups.restore(req.backupId, req.archiveId)
       case 'backup.settings':
         return r.backups.settings()
+      case 'retention.configure':
+        r.retention.configure(req.days)
+        return { days: r.retention.days }
       case 'backup.configure':
         r.backups.configure(req.settings)
         return null
@@ -452,6 +461,7 @@ export function createChatRuntimeHandlers(opts: {
         if (owner?.state === 'prepared' && r.attachments.missing(req.id).length)
           throw new Error('Migration attachments are incomplete')
         r.storage.activate(req.id, req.migrationId, req.epoch, req.hash)
+        r.transfers.collectActivated()
         return { ok: true }
       }
       case 'attachment.has': {

@@ -31,6 +31,29 @@ on Windows the same folders under the user profile).
 - Each upgrade that migrates writes `backups/*.migration.sqlite` (main DB only; the
   last 3 are kept). It covers the main DB only, not the rest of the table above.
 
+## Computer-owned chat
+
+Chat history, drafts, queued messages, prompt history, workspace diffs and sealed
+attachments live on the owning computer, scoped to its authenticated hub. Its
+storage directory contains `computer-runtime/<hub-scope-hash>/chat.sqlite` and
+referenced blobs. A hub-only backup does not include this computer data.
+Use each computer's chat backup controls to snapshot its database and referenced
+files together. Restores open separate, read-only archives: readable history is
+guaranteed after verification; provider session resumability is not.
+
+`SLAYZONE_HUB_SESSION_RETENTION_DAYS` also configures computer chat retention for
+that hub. Unset or `0` keeps content until explicit deletion. A positive whole
+number enables a sweep shortly after connection/startup and then daily. Each
+computer persists its last configured policy for offline operation. Expiry removes
+old saved chat content, invalidates derived pages and collects unreferenced sealed
+attachments. Live agents, in-flight operations, Trash and unfinished migrations
+defer pruning. Original task files remain; backups follow their separate retention
+policy. Existing hub backups remain under their original retention rules.
+
+Operation IDs survive expiry to prevent delayed retries from resending messages.
+Expired cached results return an explicit error. Receipts created before timestamps
+were tracked receive a full retention window from upgrade, since their age is unknown.
+
 ## Upgrading from v0.35.0
 
 v0.35.0 kept its data in the Electron app-data folder (macOS:

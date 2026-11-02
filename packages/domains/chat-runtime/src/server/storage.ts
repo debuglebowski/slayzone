@@ -58,7 +58,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   db.pragma('busy_timeout = 5000')
   db.pragma('secure_delete = ON')
   const schema = db.pragma('user_version', { simple: true }) as number
-  if (schema > 2) {
+  if (schema > 3) {
     db.close()
     throw new Error('Chat storage was created by a newer version')
   }
@@ -89,8 +89,21 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       CREATE TABLE IF NOT EXISTS migration_checkpoints (
         migration_id TEXT PRIMARY KEY, identity TEXT NOT NULL, value TEXT NOT NULL
       );
-      PRAGMA user_version = 2;
+      CREATE TABLE IF NOT EXISTS retention_policy(id INTEGER PRIMARY KEY CHECK(id=1),days INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS events_retention ON events(conversation_id,saved_at,seq);
+      CREATE INDEX IF NOT EXISTS records_retention ON records(conversation_id,saved_at);
     `)
+    if (schema < 3) {
+      db.exec(
+        'ALTER TABLE receipts ADD COLUMN saved_at INTEGER NOT NULL DEFAULT 0; ALTER TABLE receipts ADD COLUMN result_expired INTEGER NOT NULL DEFAULT 0;'
+      )
+      // v2 receipts had no clock; first-seen time avoids expiring recent retry outcomes on upgrade.
+      db.prepare('UPDATE receipts SET saved_at=?').run(Date.now())
+      db.exec(
+        "DELETE FROM migration_checkpoints WHERE EXISTS(SELECT 1 FROM conversations c WHERE c.id=json_extract(migration_checkpoints.identity,'$.id') AND c.state='active' AND c.migration_id=migration_checkpoints.migration_id)"
+      )
+    }
+    db.pragma('user_version = 3')
   })()
   const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
@@ -135,17 +148,37 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         .all(id) as Array<{ kind: ChatRecord['kind']; id: string; value: string; saved_at: number }>
     ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
   }
+  type ReceiptRow = {
+    id: string
+    hash: string
+    state: CommandReceipt['state']
+    result: string
+    at: number
+    resultExpired: number
+  }
+  const receiptColumns = 'id,hash,state,result,saved_at AS at,result_expired AS resultExpired'
+  function decodeReceipt(r: ReceiptRow): CommandReceipt {
+    return { ...r, result: JSON.parse(r.result), resultExpired: !!r.resultExpired }
+  }
   function receipts(id: string): CommandReceipt[] {
     return (
       db
-        .prepare('SELECT id,hash,state,result FROM receipts WHERE conversation_id=? ORDER BY id')
-        .all(id) as Array<{
-        id: string
-        hash: string
-        state: CommandReceipt['state']
-        result: string
-      }>
-    ).map((r) => ({ ...r, result: JSON.parse(r.result) }))
+        .prepare(`SELECT ${receiptColumns} FROM receipts WHERE conversation_id=? ORDER BY id`)
+        .all(id) as ReceiptRow[]
+    ).map(decodeReceipt)
+  }
+  function nextSeq(id: string): number {
+    const last = (
+      db
+        .prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM events WHERE conversation_id=?')
+        .get(id) as { seq: number }
+    ).seq
+    const floor = db
+      .prepare(
+        "SELECT value FROM records WHERE conversation_id=? AND kind='settings' AND id='event-sequence-floor'"
+      )
+      .get(id) as { value: string } | undefined
+    return Math.max(last, floor ? Number(JSON.parse(floor.value)) : 0)
   }
   function verify(snapshot: ChatMigrationSnapshot): void {
     const { hash, ...body } = snapshot
@@ -273,6 +306,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     ): 'inserted' | 'clash' {
       return db.transaction(() => {
         requireOwner(id, epoch)
+        if (seq < (api.getRecord<number>(id, 'settings', 'event-sequence-floor') ?? 0))
+          return 'clash'
         const result = db
           .prepare('INSERT INTO events VALUES(?,?,?,?) ON CONFLICT(conversation_id,seq) DO NOTHING')
           .run(id, seq, at, JSON.stringify(event))
@@ -284,6 +319,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         requireOwner(id, epoch)
         db.prepare('DELETE FROM events WHERE conversation_id=?').run(id)
         db.prepare(
+          "DELETE FROM records WHERE conversation_id=? AND kind='settings' AND id='event-sequence-floor'"
+        ).run(id)
+        db.prepare(
           "DELETE FROM records WHERE conversation_id=? AND kind IN ('timeline','workspace')"
         ).run(id)
       })()
@@ -291,17 +329,14 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     append(id: string, epoch: number, event: AgentEvent, at = Date.now()): StoredChatEvent {
       return db.transaction(() => {
         requireOwner(id, epoch)
-        const seq = (
-          db
-            .prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM events WHERE conversation_id=?')
-            .get(id) as { seq: number }
-        ).seq
+        const seq = nextSeq(id)
         db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(id, seq, at, JSON.stringify(event))
         return { seq, at, event }
       })()
     },
     read,
     records,
+    nextSeq,
     putRecord(id: string, epoch: number, record: ChatRecord): void {
       db.transaction(() => {
         requireOwner(id, epoch)
@@ -336,11 +371,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           if (previous.hash !== hash) throw new Error('Operation id reused with different input')
           return 'duplicate'
         }
-        db.prepare("INSERT INTO receipts VALUES(?,?,?,'accepted','null')").run(
-          id,
-          operationId,
-          hash
-        )
+        db.prepare(
+          "INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at) VALUES(?,?,?,'accepted','null',?)"
+        ).run(id, operationId, hash, Date.now())
         return 'accepted'
       })()
     },
@@ -356,7 +389,10 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       })()
     },
     receipt(id: string, operationId: string): CommandReceipt | null {
-      return receipts(id).find((r) => r.id === operationId) ?? null
+      const found = db
+        .prepare(`SELECT ${receiptColumns} FROM receipts WHERE conversation_id=? AND id=?`)
+        .get(id, operationId) as ReceiptRow | undefined
+      return found ? decodeReceipt(found) : null
     },
     freeze(id: string, epoch: number, migrationId: string): void {
       db.transaction(() => {
@@ -491,12 +527,16 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
               !['accepted', 'delivered'].includes(r.state)
             )
               throw new Error('Transfer receipt integrity mismatch')
-            db.prepare('INSERT INTO receipts VALUES(?,?,?,?,?)').run(
+            db.prepare(
+              'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired) VALUES(?,?,?,?,?,?,?)'
+            ).run(
               i.id,
               r.id,
               r.hash,
               r.state,
-              JSON.stringify(r.result ?? null)
+              JSON.stringify(r.result ?? null),
+              r.at ?? Date.now(),
+              r.resultExpired ? 1 : 0
             )
             receipts++
           } else throw new Error('Transfer record kind integrity mismatch')
@@ -552,12 +592,16 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             r.at
           )
         for (const r of snapshot.receipts)
-          db.prepare('INSERT INTO receipts VALUES(?,?,?,?,?)').run(
+          db.prepare(
+            'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired) VALUES(?,?,?,?,?,?,?)'
+          ).run(
             i.id,
             r.id,
             r.hash,
             r.state,
-            JSON.stringify(r.result)
+            JSON.stringify(r.result),
+            r.at ?? Date.now(),
+            r.resultExpired ? 1 : 0
           )
       })()
     },
@@ -575,6 +619,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         if (r.state !== 'prepared' && r.state !== 'active')
           throw new Error('Migration activation state mismatch')
         db.prepare("UPDATE conversations SET state='active' WHERE id=?").run(id)
+        db.prepare('DELETE FROM migration_checkpoints WHERE migration_id=?').run(migrationId)
       })()
     },
     migrationCheckpoint(

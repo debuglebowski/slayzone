@@ -148,3 +148,11 @@ test('catalog operations execute on the computer and reject unlisted methods and
     })
   ).rejects.toThrow()
 })
+
+test('retention policy accepts whole days, supports disabling and refuses malformed input', async () => {
+  const { h } = setup()
+  expect(await h.request({ kind: 'retention.configure', days: 14 })).toEqual({ days: 14 })
+  expect(await h.request({ kind: 'retention.configure', days: 0 })).toEqual({ days: 0 })
+  for (const days of [-1, 1.2, '14'])
+    await expect(h.request({ kind: 'retention.configure', days })).rejects.toThrow()
+})

@@ -43,6 +43,7 @@ test('first chat read migrates legacy history then all writes stay on its comput
       )
       .run()
     let live = false
+    const requests: unknown[] = []
     const services = createComputerChatServices({
       db: h.slayDb,
       legacyData: {
@@ -50,14 +51,19 @@ test('first chat read migrates legacy history then all writes stay on its comput
         buildMcpEnv: async () => ({})
       },
       attachments: { read: async () => new Uint8Array() },
-      request: (_pc, request) => pc.request(JSON.parse(JSON.stringify(request))),
+      request: (_pc, request) => {
+        requests.push(request)
+        return pc.request(JSON.parse(JSON.stringify(request)))
+      },
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
+      retentionDays: 2,
       hasLiveTask: async () => live
     })
     expect(await services.relay.ops.getTabState('tab')).toMatchObject({
       draft: { text: 'legacy-private', rev: 3 }
     })
+    expect(requests).toContainEqual({ kind: 'retention.configure', days: 2 })
     expect(h.db.prepare('SELECT count(*) AS n FROM chat_tab_state').get()).toEqual({ n: 0 })
     await services.relay.ops.saveTabDraft('tab', { text: 'new-private', attachments: [] })
     expect(await services.relay.ops.getTabState('tab')).toMatchObject({

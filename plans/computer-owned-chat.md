@@ -155,3 +155,36 @@ Remaining: retention, availability UI, archive/artifact edge cases, lifecycle co
 barrier audit, full desktop/mobile E2E and performance validation.
 
 Unresolved questions: none.
+
+## Computer retention checkpoint
+
+Computer SQLite schema v3 persists the hub's existing
+`SLAYZONE_HUB_SESSION_RETENTION_DAYS` policy. Default `0` keeps content. Enabled
+sweeps run after startup/configuration and daily, with bounded batches and event-loop
+yields. Managed chat agents and native PTYs, foreground calls, Trash and unfinished
+migrations defer expiry. Policy changes and permanent deletion stop later batches.
+
+Expiry clears old events, prompts, queues, diffs, cached diagnostics and derived
+pages; blanks old drafts with increasing revisions; preserves thread structure with
+generic titles. Referenced attachments and original task files remain. Sealed orphan
+copies follow GC leases. Retry identity/hash survives after cached result text
+expires, so delayed requests fail explicitly instead of resending. Unknown receipt
+ages receive a full window from upgrade. Manual backups and read-only archives keep
+their independent retention rules.
+
+Durable sequence floors survive complete event expiry. Open readers flush old
+projections before pruning and rebuild afterward. Activated migration payload files
+and duplicate metadata checkpoints are removed while activation proofs and finish
+retry behavior remain. Tests cover rollback on disk failure and shutdown during a
+failed sweep. Operator behavior documented in `docs/backup-and-restore.md`.
+
+Remaining before merge: availability UI, archive/artifact edge cases, lifecycle
+command barrier audit, full desktop/mobile E2E and performance validation. Main has
+advanced four commits; refresh rebase after saving this checkpoint.
+
+Unresolved questions: none.
+
+Retention validation: 245 targeted tests pass (including 50 native PTY tests), four
+affected package typechecks and hub/computer builds pass. Changed-file Biome lint
+passes. Worktree dependency lifecycle scripts initialized with Electron rebuilding
+skipped; node-pty helper execute bit restored.

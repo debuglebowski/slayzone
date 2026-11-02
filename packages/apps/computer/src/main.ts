@@ -205,7 +205,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     hubScope: deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? '',
     computerId: deps.getComputerId ?? (() => null),
     getProjectPaths: deps.getProjectPaths ?? (() => null),
-    admission: deps.admission
+    admission: deps.admission,
+    hasTaskWork: pty.hasTaskWork
   })
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {

@@ -33,6 +33,8 @@ export interface CommandReceipt {
   hash: string
   state: 'accepted' | 'delivered'
   result: unknown
+  at?: number
+  resultExpired?: boolean
 }
 export interface ChatMigrationSnapshot {
   version: 1

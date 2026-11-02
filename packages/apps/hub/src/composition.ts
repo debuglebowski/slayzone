@@ -4,6 +4,7 @@ import { setChatSessionSource } from '@slayzone/terminal/server'
 import { setAgentPromptReader } from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
+import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
 import { createComputerChatMaintenance } from './computer-chat-maintenance'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
@@ -539,7 +540,9 @@ export function composeServer(opts: {
   // host's handler only sees its own (empty) session maps post-cutover.
   setOnTaskReachedTerminalHandler((taskId) => {
     runtimeOnTaskReachedTerminal(taskId)
-    void computerChat.stopTask(taskId).catch(() => {})
+    void computerChat.stopTask(taskId).catch(() => {
+      /* Disconnected computers reconcile on reconnect. */
+    })
   })
   // The warm pool runs here (initWarmProcessManager below), so this is the one host
   // where a task created to be opened at once can take a warm agent's id.
@@ -790,8 +793,11 @@ export function composeServer(opts: {
   if (legacyChatDiagnostics)
     bootBestEffort('chat-privacy-boundary', legacyChatDiagnostics.initialize)
   const chatCompaction = createChatCompaction(db)
+  const chatRetentionPolicy = readHubSessionRetentionDays()
+  if (!chatRetentionPolicy.ok) throw new Error(chatRetentionPolicy.message)
   const computerChat = createComputerChatServices({
     db,
+    retentionDays: chatRetentionPolicy.days,
     diagnostics: legacyChatDiagnostics,
     legacyData: createDbChatDataOps(db, taskSessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
@@ -853,11 +859,15 @@ export function composeServer(opts: {
   const chatNotificationChains = new Map<string, Promise<void>>()
   let maintainComputerChat = (computerId: string) => computerChat.lifecycle.sync(computerId)
   let syncComputerChatLifecycle = (computerId: string) => computerChat.lifecycle.sync(computerId)
-  let drainComputerChatMaintenance = async () => {}
+  let drainComputerChatMaintenance = async () => {
+    /* Gateway not initialized yet. */
+  }
   const syncChatLifecycle = (): void => {
     if (resettingForTest) return
     for (const computer of execGateway?.listUsableComputers() ?? [])
-      void syncComputerChatLifecycle(computer.computerId).catch(() => {})
+      void syncComputerChatLifecycle(computer.computerId).catch(() => {
+        /* Delivery remains pending for the next tick. */
+      })
   }
   notifyEvents.on('tasks-changed', syncChatLifecycle)
   // Covers startup purges, offline deletions and legacy tasks never opened in this boot.
@@ -866,7 +876,9 @@ export function composeServer(opts: {
   const chatMigrationTimer = setInterval(() => {
     if (resettingForTest) return
     for (const computer of execGateway?.listUsableComputers() ?? [])
-      void maintainComputerChat(computer.computerId).catch(() => {})
+      void maintainComputerChat(computer.computerId).catch(() => {
+        /* Retry disconnected or busy computers on the next tick. */
+      })
   }, 60_000)
   chatMigrationTimer.unref()
 

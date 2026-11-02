@@ -110,6 +110,8 @@ export function createChatInvoker(runtime: Runtime) {
       const running = inFlight.get(flightKey)
       if (running) return running
       const previous = runtime.storage.receipt(identity.id, operationId)!
+      if (previous.resultExpired)
+        throw new Error('Operation result expired under chat retention; operation was not repeated')
       if (previous.state === 'delivered') return previous.result
       throw new Error(
         'Operation acceptance is durable but completion is unconfirmed; reconcile state before an explicit retry'

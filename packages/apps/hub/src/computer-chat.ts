@@ -42,6 +42,7 @@ export function createComputerChatServices(opts: {
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   admitComputer?(computerId: string): Promise<void>
+  retentionDays?: number
   hasLiveTask(taskId: string): Promise<boolean>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
   onTasksChanged?(taskId: string): void
@@ -60,6 +61,12 @@ export function createComputerChatServices(opts: {
       .reconcile(computerId)
       .then(() => relay.drainMetadata(computerId, true))
       .then(() => lifecycle.sync(computerId))
+      .then(async () => {
+        await opts.request(computerId, {
+          kind: 'retention.configure',
+          days: opts.retentionDays ?? 0
+        })
+      })
       .catch((error) => {
         recovered.delete(computerId)
         throw error

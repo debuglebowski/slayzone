@@ -696,8 +696,6 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getSessionInfo,
     getSessionTerminalState,
     isTurnOpen,
-    killAll,
-    shutdownAll,
     configureTransport,
     chatEvents
   } = transport
@@ -715,7 +713,6 @@ export function createChatOps(opts: ChatHandlerOpts) {
   const releaseConversation = opts.conversations?.releaseConversation ?? defaultConversationRelease
   const notifyChatQueueChanged = opts.notifyQueueChanged ?? defaultNotifyChatQueueChanged
   const previousCliDetailsListener = cliDetailsListeners.get(transport)
-  let cliDetailsListener: (tabId: string, event: AgentEvent) => void
 
   // Data seam: all tasks/chat_events/autocomplete access goes through this.
   // The local-DB impl (same SQL as before the hub/computer split) is built by
@@ -749,7 +746,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
   // stored per project + mode for `getModels`; only a change is written.
   const storedCliModels = new Map<string, string>()
   if (previousCliDetailsListener) chatEvents.off('event', previousCliDetailsListener)
-  cliDetailsListener = (tabId, event) => {
+  const cliDetailsListener = (tabId: string, event: AgentEvent) => {
     if (event.kind === 'cli-models') {
       const info = getSessionInfo(tabId)
       if (!info) return
@@ -793,6 +790,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // The tabs' saved history: the transport loads it (after any previous
     // instance of the tab finished writing) and writes it insert-only, in order.
     eventStore: {
+      nextSeq: data.getNextSeqForTab?.bind(data),
       load: (tabId) => data.loadChatEvents(tabId),
       insertSync: data.persistChatEventSync?.bind(data),
       insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
