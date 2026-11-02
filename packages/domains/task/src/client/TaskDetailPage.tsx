@@ -1032,7 +1032,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     setTerminalKey
   })
 
-  // Inject task title into terminal (no execute)
+  // Inject task title into the main agent's input (no execute)
   const handleInjectTitle = useCallback(async () => {
     if (!task || !terminalApiRef.current) return
     await terminalApiRef.current.sendInput(task.title)
@@ -1061,7 +1061,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     [task, trpcClient]
   )
 
-  // Inject task description into terminal (no execute)
+  // Inject task description into the main agent's input (no execute)
   const handleInjectDescription = useCallback(async () => {
     if (!terminalApiRef.current || !descriptionValue) return
     const plainText = stripMarkdown(descriptionValue)
@@ -1075,11 +1075,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   useEffect(() => {
     // Hidden tabs register nothing: every open tab used to run this on every keystroke.
     if (!shortcutActive) return
+    // An agent pane owns focus: a terminal (xterm) or a chat panel.
     const isTerminalFocused = (): boolean => {
       const active = document.activeElement as HTMLElement | null
       if (!active) return false
       if (active.classList.contains('xterm-helper-textarea')) return true
-      return !!active.closest('.xterm')
+      return !!active.closest('.xterm, [data-chat-panel]')
     }
 
     const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {

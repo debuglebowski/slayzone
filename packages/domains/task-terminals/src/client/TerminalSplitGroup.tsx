@@ -187,6 +187,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
               isTemporary={pane.isTemporary}
               {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
               {...(pane.onShowSessions ? { onShowSessions: pane.onShowSessions } : {})}
+              {...(pane.onReady ? { onReady: pane.onReady } : {})}
             />
           </Suspense>
         )

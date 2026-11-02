@@ -81,6 +81,8 @@ export interface OpenChatTaskCoreOpts<M extends ChatMode> {
   repoName: string
   project: { name: string; color: string }
   title: string
+  /** Task description (markdown), e.g. for the inject-description shortcut. */
+  description?: string
   /** Seeds `provider_config[mode].chatConversationId` → the first spawn resumes it. */
   conversationId?: string
   /** Seeds `chat_events` rows (seq = index), as a previous session would have left them. */
@@ -116,6 +118,7 @@ export async function openChatTaskCore<M extends ChatMode>(
   const task = await s.createTask({
     projectId: project.id,
     title: o.title,
+    ...(o.description ? { description: o.description } : {}),
     status: 'todo',
     terminalMode: mode
   })

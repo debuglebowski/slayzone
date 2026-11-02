@@ -121,6 +121,17 @@ export interface ChatPanelProps {
   onHandoff?: () => void
   /** Open the task's sessions sidebar (the palette's "Sessions…"). */
   onShowSessions?: () => void
+  /**
+   * The main tab's input API — same contract a terminal pane hands up, so the
+   * task's Cmd+I / Cmd+Shift+I (title / description), screenshot paths and
+   * focus requests reach a chat agent too. Text lands in the draft, never sent.
+   */
+  onReady?: (api: {
+    sendInput: (text: string) => Promise<void>
+    write: (data: string) => Promise<boolean>
+    focus: () => void
+    clearBuffer: () => Promise<void>
+  }) => void
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -141,7 +152,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       isMain,
       isTemporary,
       onHandoff,
-      onShowSessions
+      onShowSessions,
+      onReady
     } = props
     const {
       state,
@@ -292,6 +304,39 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     useImperativeHandle(ref, () => ({
       focus: () => composer.textareaRef.current?.focus()
     }))
+
+    // Text from outside the composer (inject title / description, a screenshot
+    // path) replaces the selection — caret after it, focused — like typing it.
+    const insertIntoDraft = useStableCallback((text: string): void => {
+      const el = composer.textareaRef.current
+      const value = el?.value ?? composer.draft
+      const start = el?.selectionStart ?? value.length
+      const end = el?.selectionEnd ?? value.length
+      const caret = start + text.length
+      composer.setDraft(value.slice(0, start) + text + value.slice(end))
+      requestAnimationFrame(() => {
+        const node = composer.textareaRef.current
+        if (!node) return
+        node.focus()
+        node.setSelectionRange(caret, caret)
+        composer.setCursorPos(caret)
+      })
+    })
+    const announceReady = useStableCallback((): void => {
+      onReady?.({
+        sendInput: async (text) => insertIntoDraft(text),
+        write: async (data) => {
+          insertIntoDraft(data)
+          return true
+        },
+        focus: () => composer.textareaRef.current?.focus(),
+        // A chat has no scrollback buffer to clear.
+        clearBuffer: async () => {}
+      })
+    })
+    useEffect(() => {
+      announceReady()
+    }, [announceReady])
 
     const display = useChatDisplay({
       timeline,

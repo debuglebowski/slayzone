@@ -41,6 +41,8 @@ export interface ChatTask extends ChatTaskCore<'claude-chat'> {
 
 export interface OpenChatTaskOpts {
   title: string
+  /** Task description (markdown), e.g. for the inject-description shortcut. */
+  description?: string
   scenario: Scenario
   /** Seeds `provider_config['claude-chat'].chatConversationId` → the first spawn resumes it. */
   conversationId?: string
@@ -158,6 +160,7 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
           repoName: `chat-${projectSeq}-${Date.now()}`,
           project: { name: `Chat ${projectSeq}`, color: '#22d3ee' },
           title: opts.title,
+          description: opts.description,
           conversationId: opts.conversationId,
           seedEvents: opts.seedEvents,
           repoFiles: opts.repoFiles,

@@ -6,6 +6,8 @@
  *   while a turn runs Esc stops it and never rewinds.
  * - Cmd+K (the app's palette) has the chat's own page: Compact runs /compact
  *   without touching the draft; Model… switches the model.
+ * - Cmd+I / Cmd+Shift+I insert the task title / description into the composer
+ *   at the caret (terminal-mode parity), without sending.
  * Against the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'
@@ -103,5 +105,27 @@ test.describe('Chat keyboard', () => {
     await row('Sonnet').click()
     const switched = await t.run(0, (r) => r.controlRequests('set_model').length > 0)
     expect(switched.controlRequests()).toContainEqual({ subtype: 'set_model', model: 'sonnet' })
+  })
+
+  test('Cmd+I / Cmd+Shift+I insert title / description into the composer', async ({ chat }) => {
+    const t = await chat.openTask({
+      title: 'Inject me',
+      description: 'Fix **the** bug',
+      scenario: { processes: [{ defaultTurn: echoTurn() }] }
+    })
+    await t.composer.fill('a  b')
+    // Caret between the two spaces: inserted there, not appended.
+    await t.composer.evaluate((el: HTMLTextAreaElement) => {
+      el.focus()
+      el.setSelectionRange(2, 2)
+    })
+    await pressShortcut(t.page, 'terminal-inject-desc')
+    await expect(t.composer).toHaveValue('a Fix the bug b')
+    await pressShortcut(t.page, 'terminal-inject-title')
+    await expect(t.composer).toHaveValue('a Fix the bugInject me b')
+    await expect(t.composer).toBeFocused()
+    // Inserted, never sent.
+    const run = await t.run(0)
+    expect(run.userMessages()).toHaveLength(0)
   })
 })
