@@ -38,6 +38,7 @@ import {
   registerComputer,
   retireStaleLocalComputers,
   touchComputerLastSeen,
+  setComputerVersion,
   reconcileMachineForComputer,
   verifyJoinToken
 } from '@slayzone/computers/server'
@@ -263,6 +264,9 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     if (computer.auth_key_id !== null && computer.auth_key_id !== principal.keyId) return null
 
     await touchComputerLastSeen(db, computer.id, now())
+    if (context?.version && context.version !== computer.version) {
+      await setComputerVersion(db, computer.id, context.version)
+    }
     // Grouping only — never allowed to fail a reconnect.
     if (context?.hostId) {
       try {
@@ -279,7 +283,7 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
       computerId: computer.id,
       name: computer.name,
       platform: computer.platform,
-      version: computer.version,
+      version: context?.version ?? computer.version,
       capabilities: parseCapabilityTags(computer.capabilities_json)
     }
   }

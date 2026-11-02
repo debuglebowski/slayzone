@@ -119,6 +119,18 @@ test('verifyApiKey resolves the descriptor for the minted key', async () => {
   )
 })
 
+test('upgraded hello refreshes release without changing enrollment or key', async () => {
+  const token = await mintToken(db, 'upgrade-version')
+  const enrolled = await adapters.verifyEnrollment({ ...ENROLL_BASE, joinToken: token })
+  const before = await getComputer(db, enrolled.computerId)
+  const descriptor = await adapters.verifyApiKey(enrolled.apiKey, { version: '0.37.0' })
+  expect(descriptor!.version).toBe('0.37.0')
+  const after = await getComputer(db, enrolled.computerId)
+  expect(after!.version).toBe('0.37.0')
+  expect(after!.auth_key_id).toBe(before!.auth_key_id)
+  expect(after!.created_at).toBe(before!.created_at)
+})
+
 test('verifyApiKey returns null for an unknown key', async () => {
   expect(await adapters.verifyApiKey('not-a-real-key'), 'unknown key ⇒ null').toBeNull()
   expect(

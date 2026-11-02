@@ -341,6 +341,7 @@ export class HubDialer {
         try {
           const raw = await conn.rpc.request(ComputerToHubMethods.hello, {
             apiKey: stored.apiKey,
+            version: this.opts.identity.version,
             epoch: this.epoch,
             protocolVersion: COMPUTER_PROTOCOL_VERSION,
             // Reconnect is the ONLY moment the hub can learn that this computer

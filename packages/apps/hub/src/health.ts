@@ -3,6 +3,8 @@ import { isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import type { HubSwitches } from '@slayzone/platform/hub-switches'
 import { getServerBuildInfo } from './build-info.js'
 
+declare const __SLAYZONE_HUB_VERSION__: string | undefined
+
 export type HealthState = {
   ready: boolean
   port: number
@@ -141,6 +143,7 @@ export function handleHealth(
   const build = getServerBuildInfo()
   const payload: Record<string, unknown> = {
     ok: true,
+    version: typeof __SLAYZONE_HUB_VERSION__ === 'string' ? __SLAYZONE_HUB_VERSION__ : '0.0.0',
     port: state.port,
     uptimeMs: Date.now() - state.startedAt,
     commit: build.commit,

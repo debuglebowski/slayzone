@@ -123,7 +123,7 @@ export interface HubComputerGatewayOptions {
    *  learn it. Absent from an older peer, which stays ungrouped. */
   verifyApiKey: (
     apiKey: string,
-    context?: { hostId?: string }
+    context?: { hostId?: string; version?: string }
   ) => Promise<{
     computerId: string
     name?: string
@@ -677,7 +677,10 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
     let identity: Awaited<ReturnType<HubComputerGatewayOptions['verifyApiKey']>>
     try {
-      identity = await options.verifyApiKey(parsed.data.apiKey, { hostId: parsed.data.hostId })
+      identity = await options.verifyApiKey(parsed.data.apiKey, {
+        hostId: parsed.data.hostId,
+        version: parsed.data.version
+      })
     } catch (err) {
       conn.rpc.respondError(
         id,
@@ -741,7 +744,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       computerId: identity.computerId,
       name: identity.name,
       platform: identity.platform,
-      version: identity.version,
+      version: parsed.data.version ?? identity.version,
       capabilities: identity.capabilities,
       authMode: 'hello',
       // From the hello FRAME, not from persistence: the epoch is a property of

@@ -61,8 +61,10 @@ import { createComputerConfigHandlers, reloadLocalRoots } from './handlers/compu
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 
-/** Version advertised at enrollment; wave-1 skeleton is pre-release. */
-export const COMPUTER_VERSION = '0.0.0'
+/** Running package release, advertised on enrollment and reconnect. */
+declare const __SLAYZONE_COMPUTER_VERSION__: string | undefined
+export const COMPUTER_VERSION =
+  typeof __SLAYZONE_COMPUTER_VERSION__ === 'string' ? __SLAYZONE_COMPUTER_VERSION__ : '0.0.0'
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog

@@ -197,6 +197,8 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
+  /** Running release after an upgrade; older computers omit it. */
+  version: z.string().min(1).max(100).optional(),
   apiKey: z.string().min(1),
   epoch: epochField,
   hostId: hostIdField,

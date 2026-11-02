@@ -6,6 +6,7 @@ export {
   getComputer,
   listComputers,
   touchComputerLastSeen,
+  setComputerVersion,
   revokeComputer,
   unrevokeComputer,
   deleteComputer,

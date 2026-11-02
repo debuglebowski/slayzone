@@ -67,6 +67,7 @@ function buildOptions(commit, builtAt) {
     // Textual substitution consumed by src/build-info.ts. Declared `string |
     // undefined` there so running the un-bundled TS source resolves to sentinels.
     define: {
+      __SLAYZONE_HUB_VERSION__: JSON.stringify(version),
       __SLAYZONE_SERVER_COMMIT__: JSON.stringify(commit),
       __SLAYZONE_SERVER_BUILT_AT__: JSON.stringify(builtAt)
     },

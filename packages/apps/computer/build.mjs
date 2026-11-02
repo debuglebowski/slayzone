@@ -53,6 +53,7 @@ const options = {
   format: 'cjs',
   target: 'node20',
   sourcemap: true,
+  define: { __SLAYZONE_COMPUTER_VERSION__: JSON.stringify(pkg.version) },
   plugins: [
     rawImportPlugin,
     // Fails the build if an external would not resolve where the computer runs.

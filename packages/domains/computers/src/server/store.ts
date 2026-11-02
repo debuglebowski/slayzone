@@ -263,6 +263,15 @@ export async function listComputers(
   )
 }
 
+/** Refresh the running release on authenticated reconnect without re-enrollment. */
+export async function setComputerVersion(
+  db: SlayzoneDb,
+  id: string,
+  version: string
+): Promise<void> {
+  await db.run('UPDATE computers SET version = ? WHERE id = ?', [version, id])
+}
+
 /** Heartbeat marker. Monotonic — never moves `last_seen_at` backwards. */
 export async function touchComputerLastSeen(
   db: SlayzoneDb,
