@@ -21,6 +21,7 @@ import {
   type AgentEvent,
   type ChatModelInfo,
   type CommandTaskOutput,
+  type CommandTaskStatus,
   type OutgoingUserMessage,
   type PermissionRequestEvent,
   type UserContentBlock,
@@ -42,6 +43,7 @@ import {
   CODEX_PLAN_INSTRUCTIONS
 } from './codex-collaboration-instructions'
 import type {
+  CodexBackgroundTerminalsResponse,
   CodexApprovalDecision,
   CodexApprovalPolicy,
   CodexCollaborationMode,
@@ -264,6 +266,7 @@ interface CommandOutput {
   output: string
   totalBytes: number
   ended: boolean
+  backgroundProcessId?: string
 }
 
 /**
@@ -454,6 +457,8 @@ class CodexChatSession implements ChatSessionDriver {
   private threadModel: string | null = null
   /** Output of the turn's commands, by item id (live output, polled). */
   private readonly commands = new Map<string, CommandOutput>()
+  private backgroundPoll: ReturnType<typeof setTimeout> | null = null
+  private backgroundPollingUnsupported = false
   /** Patch diagnostics arrive as deltas, not in the completed fileChange item. */
   private readonly patchOutput = new Map<string, string>()
   /** Last context-usage emitted (only a change is emitted again). */
@@ -578,6 +583,7 @@ class CodexChatSession implements ChatSessionDriver {
       ...(this.cliVersion ? { cliVersion: this.cliVersion } : {})
     })
     void this.loadModels(ctx)
+    this.scheduleBackgroundPoll()
     // Flush any messages the user sent before the handshake completed.
     const pending = this.queued.splice(0)
     for (const turn of pending) this.startTurn(turn.text, turn.messageId, turn.input)
@@ -1175,6 +1181,8 @@ class CodexChatSession implements ChatSessionDriver {
 
   dispose(): void {
     this.disposed = true
+    if (this.backgroundPoll) clearTimeout(this.backgroundPoll)
+    this.backgroundPoll = null
     this.settlePendingInterrupt(undefined)
     for (const wake of this.turnEndWaiters.splice(0)) wake()
     this.client?.dispose()
@@ -1344,6 +1352,11 @@ class CodexChatSession implements ChatSessionDriver {
       return
     }
     if (item.type === 'commandExecution') {
+      const out = this.commands.get(item.id)
+      if (out && typeof item.aggregatedOutput === 'string') {
+        out.output = item.aggregatedOutput.slice(-COMMAND_OUTPUT_TAIL)
+        out.totalBytes = Buffer.byteLength(item.aggregatedOutput)
+      }
       const failed =
         item.status === 'failed' ||
         item.status === 'declined' ||
@@ -1358,7 +1371,7 @@ class CodexChatSession implements ChatSessionDriver {
   private endCommand(
     ctx: ChatDriverContext,
     id: string,
-    status: 'completed' | 'failed' | 'killed'
+    status: Exclude<CommandTaskStatus, 'running'>
   ): void {
     const out = this.commands.get(id)
     if (!out || out.ended) return
@@ -1368,9 +1381,19 @@ class CodexChatSession implements ChatSessionDriver {
       taskId: id,
       toolUseId: id,
       status,
-      backgrounded: false,
+      backgrounded: !!out.backgroundProcessId,
       endedAt: Date.now()
     })
+    if (out.backgroundProcessId) {
+      this.emit(ctx, {
+        kind: 'command-task-output',
+        taskId: id,
+        toolUseId: id,
+        output: out.output,
+        totalBytes: out.totalBytes,
+        truncated: out.totalBytes > Buffer.byteLength(out.output)
+      })
+    }
   }
 
   commandTaskOutput(taskId: string): Promise<CommandTaskOutput> {
@@ -1382,6 +1405,92 @@ class CodexChatSession implements ChatSessionDriver {
       totalBytes: out.totalBytes,
       truncated: out.totalBytes > Buffer.byteLength(out.output)
     })
+  }
+
+  /** The native registry is authoritative: never infer jobs from shell syntax. */
+  private scheduleBackgroundPoll(): void {
+    if (this.disposed || this.backgroundPollingUnsupported) return
+    this.backgroundPoll = setTimeout(() => {
+      this.backgroundPoll = null
+      void this.pollBackgroundTerminals()
+    }, 1_000)
+    this.backgroundPoll.unref?.()
+  }
+
+  private async pollBackgroundTerminals(): Promise<void> {
+    const client = this.client
+    const ctx = this.ctx
+    if (!client || !ctx || !this.threadId || this.disposed) return
+    try {
+      const jobs: CodexBackgroundTerminalsResponse['data'] = []
+      let cursor: string | null = null
+      const cursors = new Set<string>()
+      do {
+        const page: CodexBackgroundTerminalsResponse = await client.request(
+          'thread/backgroundTerminals/list',
+          { threadId: this.threadId, ...(cursor ? { cursor } : {}) },
+          5_000
+        )
+        if (this.disposed) return
+        jobs.push(...page.data)
+        cursor = page.nextCursor
+        if (cursor && cursors.has(cursor)) throw new Error('Repeated background terminal cursor')
+        if (cursor) cursors.add(cursor)
+      } while (cursor)
+      const live = new Set(jobs.map((job) => job.itemId))
+      for (const job of jobs) {
+        let out = this.commands.get(job.itemId)
+        if (!out) {
+          this.emit(ctx, {
+            kind: 'tool-call',
+            id: job.itemId,
+            name: 'codex/commandExecution',
+            input: { command: job.command, cwd: job.cwd }
+          })
+          out = { output: '', totalBytes: 0, ended: false }
+          this.commands.set(job.itemId, out)
+        }
+        const changed = out.ended || out.backgroundProcessId !== job.processId
+        out.ended = false
+        out.backgroundProcessId = job.processId
+        if (changed)
+          this.emit(ctx, {
+            kind: 'command-task',
+            taskId: job.itemId,
+            toolUseId: job.itemId,
+            status: 'running',
+            backgrounded: true
+          })
+      }
+      for (const [id, out] of this.commands) {
+        if (out.backgroundProcessId && !out.ended && !live.has(id)) {
+          this.endCommand(ctx, id, 'completed')
+        }
+      }
+    } catch (err) {
+      // Old CLIs lack this experimental API; transient failures must not end jobs.
+      if (
+        err instanceof CodexRpcError &&
+        (err.code === -32601 || /unknown (?:method|variant)|method not found/i.test(err.message))
+      ) {
+        this.backgroundPollingUnsupported = true
+      }
+    } finally {
+      this.scheduleBackgroundPoll()
+    }
+  }
+
+  async stopCommandTask(taskId: string): Promise<void> {
+    const out = this.commands.get(taskId)
+    if (!this.client || !this.ctx || this.disposed || !out?.backgroundProcessId || out.ended) {
+      throw new Error(`background command ${taskId} is not running`)
+    }
+    const reply = await this.client.request<{ terminated: boolean }>(
+      'thread/backgroundTerminals/terminate',
+      { threadId: this.threadId, processId: out.backgroundProcessId },
+      5_000
+    )
+    if (!this.disposed && reply.terminated) this.endCommand(this.ctx, taskId, 'killed')
   }
 
   /** Codex tool-ish items → `tool-call`. Returns null for non-tool items. */
@@ -1563,7 +1672,9 @@ class CodexChatSession implements ChatSessionDriver {
     durationMs: number
   ): void {
     // 0.159.2 sends no item/completed for a command a Stop cut off.
-    for (const [id, out] of this.commands) if (!out.ended) this.endCommand(ctx, id, 'killed')
+    for (const [id, out] of this.commands) {
+      if (!out.ended && !out.backgroundProcessId) this.endCommand(ctx, id, 'killed')
+    }
     this.currentTurnId = null
     if (this.turnStartsInFlight === 0) {
       this.settlePendingInterrupt(undefined)

@@ -241,3 +241,9 @@ export type CodexReviewDecision =
         network_policy_amendment: { host: string; action: 'allow' | 'deny' }
       }
     }
+
+/** Experimental native background-terminal registry (codex-cli 0.159.2). */
+export interface CodexBackgroundTerminalsResponse {
+  data: Array<{ itemId: string; processId: string; command: string; cwd: string }>
+  nextCursor: string | null
+}

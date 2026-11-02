@@ -26,6 +26,15 @@ Child events, drafts, queue entries, and processes use the ordinary chat runtime
 Returned conclusions bind queue entries to their source conversation (migration
 181); draining rechecks this scope after popping and preserves a mismatched entry.
 
+### Codex background terminals
+
+The chat driver polls Codex's native `thread/backgroundTerminals/list` registry
+while its app-server process lives. Jobs feed the shared command-task timeline
+and background-jobs banner; Stop targets the native process ID. Turn completion
+preserves registered jobs. Missing jobs end after a successful complete listing;
+transient errors preserve state, unsupported CLIs disable polling, disposal stops it.
+Detached shell daemons outside Codex's registry are not tracked.
+
 ### Data Flow
 
 Chat attachments stay as sealed artifact references through admission, queueing,

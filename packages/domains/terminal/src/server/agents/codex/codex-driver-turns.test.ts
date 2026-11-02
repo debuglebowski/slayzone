@@ -10,6 +10,7 @@ import type { ChatDriverContext, ChatSessionDriver } from '../types'
 import { buildCodexContent } from './codex-content'
 import { setChatAttachmentReader } from '../chat-attachment-reader'
 import { codexChatBackend } from './codex-chat-session'
+import { initialState, reducer } from '../../../shared/chat-timeline'
 
 type Json = Record<string, unknown>
 type Driver = ChatSessionDriver &
@@ -439,6 +440,150 @@ describe('live settings', () => {
       )
     ).resolves.toBeDefined()
     expect((await turn(h)).effort).toBe('ultra')
+  })
+})
+
+describe('Codex background terminals', () => {
+  afterEach(() => vi.useRealTimers())
+
+  async function polling() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = await harness()
+    await vi.advanceTimersByTimeAsync(1_000)
+    const request = h.sent.find((s) => s.method === 'thread/backgroundTerminals/list')
+    expect(request).toBeDefined()
+    return { h, request: request! }
+  }
+
+  const job = { itemId: 'watch', processId: '42', command: 'watch-azure', cwd: '/work' }
+
+  it('discovers jobs on resume, keeps them across turns, and streams their output', async () => {
+    const { h, request } = await polling()
+    const events = await h.feed({ id: request.id, result: { data: [job], nextCursor: null } })
+    expect(ofKind(events, 'tool-call')[0]).toMatchObject({
+      id: 'watch',
+      input: { command: 'watch-azure' }
+    })
+    expect(ofKind(events, 'command-task')[0]).toMatchObject({
+      taskId: 'watch',
+      toolUseId: 'watch',
+      backgrounded: true,
+      status: 'running'
+    })
+    const timeline = h.emitted.reduce(
+      (state, event) => reducer(state, { type: 'event', event }),
+      initialState()
+    )
+    expect(timeline.bgShells.get('watch')).toMatchObject({
+      shellId: 'watch',
+      command: 'watch-azure',
+      status: 'running'
+    })
+    const ended = await h.feed({
+      method: 'turn/completed',
+      params: { turn: { id: 't', status: 'completed' } }
+    })
+    expect(ofKind(ended, 'command-task')).toEqual([])
+    await h.feed({
+      method: 'item/commandExecution/outputDelta',
+      params: { itemId: 'watch', delta: 'changed' }
+    })
+    expect(await h.driver.commandTaskOutput('watch')).toMatchObject({
+      state: 'running',
+      output: 'changed'
+    })
+    h.driver.dispose()
+  })
+
+  it('only reconciles after all pages; stopping uses the native process id', async () => {
+    const { h, request } = await polling()
+    await h.feed({ id: request.id, result: { data: [job], nextCursor: 'next' } })
+    const page = h.sent.at(-1)!
+    expect(page.params).toMatchObject({ threadId: 'th', cursor: 'next' })
+    await h.feed({ id: page.id, result: { data: [], nextCursor: null } })
+    const stop = h.driver.stopCommandTask!('watch')
+    const terminate = h.sent.at(-1)!
+    expect(terminate).toMatchObject({
+      method: 'thread/backgroundTerminals/terminate',
+      params: { threadId: 'th', processId: '42' }
+    })
+    const events = await h.feed({ id: terminate.id, result: { terminated: true } })
+    await stop
+    expect(ofKind(events, 'command-task')[0]).toMatchObject({
+      status: 'killed',
+      backgrounded: true
+    })
+    h.driver.dispose()
+  })
+
+  it('marks disappeared jobs ended; a failed list preserves running jobs', async () => {
+    const { h, request } = await polling()
+    await h.feed({ id: request.id, result: { data: [job], nextCursor: null } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    await h.feed({
+      id: h.sent.at(-1)!.id,
+      error: { code: -32000, message: 'temporarily unavailable' }
+    })
+    expect(await h.driver.commandTaskOutput('watch')).toMatchObject({ state: 'running' })
+    await vi.advanceTimersByTimeAsync(1_000)
+    const events = await h.feed({ id: h.sent.at(-1)!.id, result: { data: [], nextCursor: null } })
+    expect(ofKind(events, 'command-task')[0]).toMatchObject({
+      status: 'completed',
+      backgrounded: true
+    })
+    h.driver.dispose()
+  })
+
+  it('discovers a command after its foreground tool returned, and saves final output', async () => {
+    const { h, request } = await polling()
+    await h.feed({
+      method: 'item/started',
+      params: {
+        item: { type: 'commandExecution', id: 'watch', command: 'watch-azure', cwd: '/work' }
+      }
+    })
+    await h.feed({
+      method: 'item/completed',
+      params: { item: { type: 'commandExecution', id: 'watch', status: 'completed', exitCode: 0 } }
+    })
+    const events = await h.feed({ id: request.id, result: { data: [job], nextCursor: null } })
+    expect(ofKind(events, 'tool-call')).toEqual([])
+    expect(ofKind(events, 'command-task')[0]).toMatchObject({
+      backgrounded: true,
+      status: 'running'
+    })
+    const ended = await h.feed({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'commandExecution',
+          id: 'watch',
+          status: 'failed',
+          exitCode: 1,
+          aggregatedOutput: 'access denied'
+        }
+      }
+    })
+    expect(ofKind(ended, 'command-task')[0]).toMatchObject({ backgrounded: true, status: 'failed' })
+    expect(ofKind(ended, 'command-task-output')[0]).toMatchObject({
+      output: 'access denied',
+      totalBytes: 13
+    })
+    h.driver.dispose()
+  })
+
+  it('older CLIs disable polling; disposal cancels scheduled requests', async () => {
+    const { h, request } = await polling()
+    await h.feed({ id: request.id, error: { code: -32601, message: 'Method not found' } })
+    const count = h.sent.length
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(h.sent).toHaveLength(count)
+    h.driver.dispose()
+    const fresh = await harness()
+    fresh.driver.dispose()
+    const before = fresh.sent.length
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(fresh.sent).toHaveLength(before)
   })
 })
 
