@@ -11,6 +11,7 @@
  * @module computer/config
  */
 
+import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -19,6 +20,7 @@ import {
   DEFAULT_LOCAL_COMPUTER_NAME,
   ignoredComputerConfigKeys,
   loadComputerConfigFile,
+  readComputerConfigSnapshot,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr, isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
@@ -460,19 +462,43 @@ export function effectiveHubUrls(config: ComputerConfig): string[] {
   return [...new Set(all)]
 }
 
-/** Cached boot config supplies interactive defaults; current device policy and env win. */
+/** Only explicitly unsaved prompts survive a supervisor replacement. Ordinary
+ * file keys, including deletions, always resolve from current device policy. */
+export interface ComputerBootSeed {
+  connection?: Pick<ComputerConfigFile, 'hubUrl' | 'hubUrls' | 'joinToken'>
+  launchOverrides?: Pick<ComputerConfigFile, 'computerName' | 'allowedRoots'>
+  fileFingerprint?: string
+  currentFileSeen?: boolean
+}
 export function loadBootComputerConfig(
-  seed: Partial<ComputerConfig>,
+  seed: Partial<ComputerConfig> & ComputerBootSeed,
   env: NodeJS.ProcessEnv = process.env,
-  file: ComputerConfigFile = loadComputerConfigFile()
+  file?: ComputerConfigFile,
+  fingerprint?: string
 ): ComputerConfig {
-  return loadComputerConfig(env, {
-    ...(seed.hubUrl !== undefined ? { hubUrl: seed.hubUrl } : {}),
-    ...(seed.name !== undefined ? { computerName: seed.name } : {}),
-    ...(seed.joinToken !== undefined ? { joinToken: seed.joinToken } : {}),
-    ...(seed.hubUrls !== undefined ? { hubUrls: seed.hubUrls } : {}),
-    ...(seed.allowedRoots !== undefined ? { allowedRoots: seed.allowedRoots } : {}),
-    ...(seed.autoUpgrade !== undefined ? { autoUpgrade: seed.autoUpgrade } : {}),
-    ...file
-  })
+  const current =
+    file === undefined
+      ? readComputerConfigSnapshot(undefined, { allowLegacy: !seed.currentFileSeen })
+      : {
+          config: file,
+          fingerprint:
+            fingerprint ?? createHash('sha256').update(JSON.stringify(file)).digest('hex')
+        }
+  const overrides = seed.fileFingerprint === current.fingerprint ? seed.launchOverrides : undefined
+  const connection = seed.fileFingerprint === current.fingerprint ? seed.connection : undefined
+  return loadComputerConfig(env, { ...current.config, ...connection, ...overrides })
+}
+
+/** Static host-owned policy; folder roots already reload live from the device file. */
+export function hostConfigurationKey(config: ComputerConfig): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        hubs: effectiveHubUrls(config),
+        name: config.name,
+        capabilities: config.capabilities,
+        binOverrideDir: config.binOverrideDir ?? null
+      })
+    )
+    .digest('hex')
 }

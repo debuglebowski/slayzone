@@ -10,21 +10,30 @@ const dir = path.join(root, 'computer-runtime'), pointer = path.join(dir, role =
 let child, stopping = false, healthy = false, timer, probation, killTimer;
 function read() { return JSON.parse(fs.readFileSync(pointer, 'utf8')); }
 function launch() {
-  const state = read(); healthy = false; probation = undefined;
+  if (stopping) return;
+  const state = read(); let timedOut = false; healthy = false; probation = undefined;
   child = cp.fork(state.current.entry, [role === 'host' ? '--session-host' : '--supervisor'], {env: {...process.env, SLAYZONE_NONINTERACTIVE:'1'}, stdio:['inherit','inherit','inherit','ipc']});
-  timer = setTimeout(() => { child.kill('SIGTERM'); killTimer = setTimeout(() => child.kill('SIGKILL'), 10000); }, 90000);
+  timer = setTimeout(() => {
+    timedOut = true;
+    process.stderr.write('[computer-launcher] ' + role + ' ' + state.current.version + ' startup timed out; restarting\n');
+    // A supervisor SIGTERM means explicit shutdown, including its persistent host.
+    // Crash only the supervisor; its connectors stop on IPC loss and work survives.
+    if (role === 'supervisor') child.kill('SIGKILL');
+    else { child.kill('SIGTERM'); killTimer = setTimeout(() => child.kill('SIGKILL'), 10000); }
+  }, 90000);
   child.on('message', m => { if (m && m.type === 'supervisor-ready') {clearTimeout(timer); if (!probation) probation = setTimeout(() => {healthy = true;}, 60000);} });
   child.on('error', () => {});
   child.on('exit', (code) => {
     clearTimeout(timer); clearTimeout(probation); clearTimeout(killTimer);
     if (stopping) {process.exitCode = code || 0; return;}
-    if (code === 75) {launch(); return;}
-    if (!healthy && code !== 0 && state.previous) {
+    if (code === 75 && !timedOut) {launch(); return;}
+    const failed = timedOut || code !== 0;
+    if (!healthy && failed && state.previous) {
       fs.writeFileSync(path.join(dir, role + '-quarantine.json'), JSON.stringify({version: state.current.version, until: Date.now() + 900000}), {mode:0o600});
       const temp = pointer + '.tmp';
       fs.writeFileSync(temp, JSON.stringify({current:state.previous}) + '\n', {mode:0o600}); fs.renameSync(temp,pointer);
     }
-    if (code === 0) return;
+    if (!failed) return;
     setTimeout(launch, 2000);
   });
 }

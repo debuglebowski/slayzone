@@ -12,7 +12,7 @@ import {
 } from '@slayzone/computer-runtime'
 import { HubDialer, type HubDialerOptions } from '@slayzone/computer-transport/client'
 import { COMPUTER_VERSION, startComputer } from './main'
-import { effectiveHubUrls, type ComputerConfig } from './config'
+import { effectiveHubUrls, hostConfigurationKey, type ComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
 
 export function runtimeDir(root: string): string {
@@ -55,6 +55,8 @@ export interface HostHealth {
   pid: number
   version: string
   idle: boolean
+  configKey?: string
+  hubUrls?: string[]
 }
 export interface ConnectorGrant {
   generation: number
@@ -239,7 +241,9 @@ export async function startSessionHost(
     epoch,
     pid: process.pid,
     version: COMPUTER_VERSION,
-    idle: handle.isIdle()
+    idle: handle.isIdle(),
+    configKey: hostConfigurationKey(config),
+    hubUrls: effectiveHubUrls(config)
   })
   // Health inspection must not leave the legacy dispatch gate drained.
   const inspect = (): HostHealth => {
@@ -257,8 +261,10 @@ export async function startSessionHost(
         const params = (raw ?? {}) as Record<string, unknown>
         if (method === 'auth' && !auth) {
           if (params.role === 'supervisor' && sameSecret(params.token, secret)) {
+            const recovering = controls.size === 0
             auth = params as unknown as Auth
             controls.add(peer)
+            if (recovering) await handle.activate()
           } else if (
             params.role === 'connector' &&
             typeof params.hubUrl === 'string' &&
@@ -283,6 +289,10 @@ export async function startSessionHost(
         if (!auth) throw new Error('local authentication required')
         if (auth.role === 'supervisor') {
           if (method === 'health') return inspect()
+          if (method === 'cancel-maintenance') {
+            await handle.activate()
+            return { ok: true }
+          }
           if (method === 'prepare-maintenance') {
             if (!handle.drainForUpgrade()) throw new Error('session host has active work')
             return { ok: true }

@@ -53,8 +53,8 @@
  * @module platform/slayzone-config
  */
 
-import { randomBytes } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes, createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { getSlayzoneHomeDir } from './dirs'
 
@@ -397,6 +397,67 @@ export function readKeptHubAuthSecret(path: string = getHubStateFilePath()): {
 
 export function saveHubStateFile(state: HubState, path: string = getHubStateFilePath()): void {
   writeJsonAtomic(path, state)
+}
+
+/** Adoption is monotonic and separate from replaceable boot seeds. A deleted
+ * current file must never revive a legacy file's retired device policy. */
+export function markCurrentComputerConfigFileSeen(
+  path: string = getComputerConfigFilePath()
+): void {
+  const runtime = join(dirname(path), 'computer-runtime')
+  mkdirSync(runtime, { recursive: true, mode: 0o700 })
+  try {
+    writeFileSync(join(runtime, 'current-config-seen'), '', { flag: 'wx', mode: 0o600 })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+  }
+}
+
+/** Strict boot read: config and provenance come from the same bytes. Records
+ * valid current-file adoption; legacy-only installs retain their fallback. */
+export function readComputerConfigSnapshot(
+  path: string = getComputerConfigFilePath(),
+  options: { allowLegacy?: boolean } = {}
+): {
+  config: ComputerConfig
+  fingerprint: string
+  source: 'current' | 'legacy' | 'absent'
+  currentFileSeen: boolean
+} {
+  const currentFileSeen =
+    options.allowLegacy === false ||
+    existsSync(join(dirname(path), 'computer-runtime', 'current-config-seen'))
+  for (const source of [path, ...(!currentFileSeen ? [legacyConfigFilePathFor(path)] : [])]) {
+    let text: string
+    try {
+      text = readFileSync(source, 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw new Error(`cannot read computer configuration ${source}`, { cause: err })
+    }
+    let raw: unknown
+    try {
+      raw = JSON.parse(text)
+    } catch (err) {
+      throw new Error(`invalid computer configuration JSON in ${source}`, { cause: err })
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+      throw new Error(`computer configuration ${source} must be an object`)
+    const current = source === path
+    if (current) markCurrentComputerConfigFileSeen(path)
+    return {
+      config: coerceComputerConfig(raw as Record<string, unknown>),
+      fingerprint: createHash('sha256').update(source).update('\0').update(text).digest('hex'),
+      source: current ? 'current' : 'legacy',
+      currentFileSeen: current || currentFileSeen
+    }
+  }
+  return {
+    config: {},
+    fingerprint: currentFileSeen ? 'current-absent' : 'absent',
+    source: 'absent',
+    currentFileSeen
+  }
 }
 
 /**

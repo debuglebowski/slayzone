@@ -1,7 +1,7 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync, unlinkSync } from 'node:fs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
 import {
   assertPathAllowed,
@@ -504,7 +504,12 @@ it('reloads current local policy over cached supervisor config', async () => {
       allowedRoots: ['/old']
     },
     {},
-    { autoUpgrade: false, allowedRoots: ['/new'], computerName: 'edited' }
+    {
+      hubUrl: 'ws://localhost:123/computers',
+      autoUpgrade: false,
+      allowedRoots: ['/new'],
+      computerName: 'edited'
+    }
   )
   expect(config.autoUpgrade).toBe(false)
   expect(config.allowedRoots).toEqual(['/new'])
@@ -512,8 +517,116 @@ it('reloads current local policy over cached supervisor config', async () => {
   expect(
     loadBootComputerConfig(
       { autoUpgrade: false, hubUrl: config.hubUrl },
-      { SLAYZONE_COMPUTER_AUTO_UPGRADE: '1' },
+      { SLAYZONE_COMPUTER_AUTO_UPGRADE: '1', SLAYZONE_HUB_ADDRESS: 'localhost:123' },
       {}
     ).autoUpgrade
   ).toBe(true)
+})
+
+it('removed device policy keys reset to defaults instead of cached values', async () => {
+  const { loadBootComputerConfig } = await import('./config')
+  const hubUrl = 'ws://localhost:123/computers'
+  const config = loadBootComputerConfig(
+    {
+      hubUrl,
+      allowedRoots: ['/old-wide-root'],
+      autoUpgrade: false,
+      hubUrls: ['ws://localhost:456/computers']
+    },
+    {},
+    { hubUrl }
+  )
+  expect(config.allowedRoots).toEqual([])
+  expect(config.autoUpgrade).toBe(true)
+  expect(config.hubUrls).toBeUndefined()
+})
+
+it('retains only explicit unsaved prompts while their authoritative file is unchanged', async () => {
+  const { readComputerConfigSnapshot } = await import('@slayzone/platform/slayzone-config')
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { loadBootComputerConfig } = await import('./config')
+  const root = mkdtempSync(join(tmpdir(), 'boot-provenance-')),
+    path = join(root, 'computer.config.json')
+  try {
+    const env = { SLAYZONE_HUB_ADDRESS: 'localhost:123' }
+    const initial = readComputerConfigSnapshot(path)
+    const seed = {
+      fileFingerprint: initial.fingerprint,
+      launchOverrides: { allowedRoots: ['/explicit-unsaved'] }
+    }
+    expect(
+      loadBootComputerConfig(seed, env, initial.config, initial.fingerprint).allowedRoots
+    ).toEqual(['/explicit-unsaved'])
+    writeFileSync(path, JSON.stringify({ allowedRoots: ['/narrowed'] }))
+    const narrowed = readComputerConfigSnapshot(path)
+    expect(
+      loadBootComputerConfig(seed, env, narrowed.config, narrowed.fingerprint).allowedRoots
+    ).toEqual(['/narrowed'])
+    writeFileSync(path, '{}')
+    const removed = readComputerConfigSnapshot(path)
+    expect(
+      loadBootComputerConfig(seed, env, removed.config, removed.fingerprint).allowedRoots
+    ).toEqual([])
+    writeFileSync(path, 'invalid json')
+    expect(() => readComputerConfigSnapshot(path)).toThrow('invalid computer configuration')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('preserves legacy-only boot policy, but never revives it after current config adoption', async () => {
+  const { readComputerConfigSnapshot } = await import('@slayzone/platform/slayzone-config')
+  const { loadBootComputerConfig } = await import('./config')
+  const path = join(dir, 'computer.config.json')
+  const hubUrl = 'ws://localhost:123/computers'
+  writeFileSync(
+    join(dir, 'config.json'),
+    JSON.stringify({
+      hubUrl,
+      allowedRoots: ['/old-wide'],
+      autoUpgrade: false,
+      hubUrls: ['ws://localhost:456/computers']
+    })
+  )
+  vi.stubEnv('SLAYZONE_ROOT', dir)
+  try {
+    const legacy = readComputerConfigSnapshot(path)
+    expect(loadBootComputerConfig({}, {}).allowedRoots).toEqual(['/old-wide'])
+    writeFileSync(path, JSON.stringify({ hubUrl, allowedRoots: ['/narrow'] }))
+    const adopted = readComputerConfigSnapshot(path)
+    unlinkSync(path)
+    expect(readComputerConfigSnapshot(path).config).toEqual({})
+    const restarted = loadBootComputerConfig({}, { SLAYZONE_HUB_ADDRESS: 'localhost:123' })
+    expect(restarted.allowedRoots).toEqual([])
+    expect(restarted.autoUpgrade).toBe(true)
+    expect(restarted.hubUrls).toBeUndefined()
+    expect(legacy.source).toBe('legacy')
+    expect(adopted.source).toBe('current')
+  } finally {
+    vi.unstubAllEnvs()
+  }
+})
+
+it('does not revive an unsaved launch override after current config adoption and deletion', async () => {
+  const { readComputerConfigSnapshot } = await import('@slayzone/platform/slayzone-config')
+  const { loadBootComputerConfig } = await import('./config')
+  const path = join(dir, 'computer.config.json')
+  const initial = readComputerConfigSnapshot(path)
+  const seed = {
+    fileFingerprint: initial.fingerprint,
+    launchOverrides: { allowedRoots: ['/unsaved-wide'] }
+  }
+  vi.stubEnv('SLAYZONE_ROOT', dir)
+  try {
+    writeFileSync(path, JSON.stringify({ allowedRoots: ['/narrow'] }))
+    readComputerConfigSnapshot(path)
+    unlinkSync(path)
+    expect(
+      loadBootComputerConfig(seed, { SLAYZONE_HUB_ADDRESS: 'localhost:123' }).allowedRoots
+    ).toEqual([])
+  } finally {
+    vi.unstubAllEnvs()
+  }
 })

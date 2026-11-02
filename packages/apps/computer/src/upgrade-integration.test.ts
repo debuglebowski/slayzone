@@ -518,3 +518,107 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
     { timeout: 3000 }
   )
 }, 60_000)
+
+it('changed hub configuration waits for active work then reloads with auto-upgrades disabled', async () => {
+  const { spawn } = await import('node:child_process')
+  const { hostControl } = await import('./session-host')
+  const root = mkdtempSync(join(tmpdir(), 'computer-config-maintenance-'))
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  symlinkSync(
+    dirname(dirname(require.resolve('node-pty/package.json'))),
+    join(root, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  )
+  const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
+    .replace('var INTERVAL_MS = 3e4;', 'var INTERVAL_MS = 100;')
+    .replace(
+      '#!/usr/bin/env node',
+      `#!/usr/bin/env node\nif(process.argv.includes('--supervisor')) require('node:fs').writeFileSync(require('node:path').join(process.env.SLAYZONE_ROOT,'supervisor-pid'),String(process.pid));`
+    )
+  const entry = join(root, 'computer.cjs')
+  writeFileSync(entry, source)
+  const first = await startLoopbackHub({ floodLimits: false }),
+    second = await startLoopbackHub({ floodLimits: false })
+  cleanups.push(() => first.close())
+  cleanups.push(() => second.close())
+  const configPath = join(root, 'computer.config.json')
+  writeFileSync(
+    configPath,
+    JSON.stringify({ hubUrl: first.url, allowedRoots: [root], autoUpgrade: false })
+  )
+  let output = ''
+  const child = spawn(process.execPath, [entry], {
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith('SLAYZONE_'))
+      ),
+      HOME: root,
+      USERPROFILE: root,
+      SLAYZONE_ROOT: root,
+      SLAYZONE_NONINTERACTIVE: '1',
+      SLAYZONE_HUB_JOIN_TOKEN: 'jt-valid'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  child.stdout.on('data', (chunk) => (output += chunk))
+  child.stderr.on('data', (chunk) => (output += chunk))
+  cleanups.push(async () => {
+    if (child.exitCode === null) {
+      const exit = once(child, 'exit')
+      child.kill('SIGTERM')
+      const timer = setTimeout(() => child.kill('SIGKILL'), 10000)
+      await exit
+      clearTimeout(timer)
+    }
+    const peer = await hostControl(root).catch(() => undefined)
+    if (peer) {
+      await peer.rpc.request('stop', { force: true }).catch(() => undefined)
+      peer.close()
+    }
+  })
+  await eventually(() => expect(first.gateway.listComputers(), output).toHaveLength(1), {
+    timeout: 15000
+  })
+  const id = first.gateway.listComputers()[0].computerId
+  await first.gateway.request(id, 'pty.spawn', {
+    sessionId: 'active',
+    command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+    cwd: root
+  })
+  const list = await first.gateway.request<{ sessions: Array<{ pid: number }> }>(id, 'pty.list'),
+    shellPid = list.sessions[0].pid
+  const before = await hostControl(root),
+    health = await before.rpc.request<{ epoch: string; pid: number }>('health')
+  before.close()
+  writeFileSync(
+    configPath,
+    JSON.stringify({ hubUrl: second.url, allowedRoots: [root], autoUpgrade: false })
+  )
+  process.kill(Number(readFileSync(join(root, 'supervisor-pid'), 'utf8')), 'SIGKILL')
+  const statusPath = join(
+    root,
+    'computer-runtime',
+    'hubs',
+    new URL(second.url).host.replace(/[^a-zA-Z0-9.-]/g, '_'),
+    'upgrade-status.json'
+  )
+  await eventually(
+    () =>
+      expect(JSON.parse(readFileSync(statusPath, 'utf8')).phase, output).toBe(
+        'maintenance-required'
+      ),
+    { timeout: 15000 }
+  )
+  const same = await hostControl(root)
+  expect(await same.rpc.request('health')).toMatchObject(health)
+  same.close()
+  expect(() => process.kill(shellPid, 0)).not.toThrow()
+  process.kill(shellPid, 'SIGKILL')
+  await eventually(() => expect(second.gateway.listComputers(), output).toHaveLength(1), {
+    timeout: 15000
+  })
+  const reloaded = await hostControl(root)
+  expect((await reloaded.rpc.request<{ epoch: string }>('health')).epoch).not.toBe(health.epoch)
+  reloaded.close()
+  expect(JSON.parse(readFileSync(configPath, 'utf8')).autoUpgrade).toBe(false)
+}, 60000)

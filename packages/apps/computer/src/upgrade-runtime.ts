@@ -13,7 +13,7 @@ import {
   unlinkSync
 } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
-import { loadComputerConfigFile } from '@slayzone/platform/slayzone-config'
+import { readComputerConfigSnapshot } from '@slayzone/platform/slayzone-config'
 import { promisify } from 'node:util'
 import {
   createUpgradeController,
@@ -26,7 +26,12 @@ import { hostControl, hostEndpoint, runtimeDir, atomicRuntimeJson } from './sess
 import type { LocalPeer } from '@slayzone/computer-runtime'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
 import type { ConnectorGrant } from './session-host'
-import { effectiveHubUrls, type ComputerConfig } from './config'
+import {
+  effectiveHubUrls,
+  hostConfigurationKey,
+  type ComputerConfig,
+  type ComputerBootSeed
+} from './config'
 
 const exec = promisify(execFile)
 const RELEASE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -324,8 +329,21 @@ export async function ensureSessionHost(
   config: ComputerConfig,
   original: UpgradeRelease,
   root: string,
-  notify?: (method: string, params: unknown) => void
+  notify?: (method: string, params: unknown) => void,
+  bootSeed?: ComputerBootSeed
 ): Promise<LocalPeer> {
+  const runtime = runtimeDir(root)
+  mkdirSync(runtime, { recursive: true, mode: 0o700 })
+  // Production passes provenance from the same read used to resolve policy.
+  // Direct library callers supply explicit config rather than cached file defaults.
+  const seed = bootSeed ?? {
+    fileFingerprint: readComputerConfigSnapshot(join(root, 'computer.config.json')).fingerprint,
+    launchOverrides: { computerName: config.name, allowedRoots: config.allowedRoots }
+  }
+  atomicRuntimeJson(join(runtime, 'host-config.json'), {
+    ...seed,
+    connection: { hubUrl: config.hubUrl, hubUrls: config.hubUrls, joinToken: config.joinToken }
+  })
   try {
     const live = await hostControl(root, notify)
     return live
@@ -333,8 +351,6 @@ export async function ensureSessionHost(
     if ((err as Error).message.includes('active work')) throw err
     /* Start only after ruling out a live owner. */
   }
-  const runtime = runtimeDir(root)
-  mkdirSync(runtime, { recursive: true, mode: 0o700 })
   try {
     const prior = JSON.parse(readFileSync(join(runtime, 'host.json'), 'utf8')) as { pid: number }
     try {
@@ -353,7 +369,6 @@ export async function ensureSessionHost(
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
-  atomicRuntimeJson(join(runtime, 'host-config.json'), config)
   try {
     const service = JSON.parse(readFileSync(join(runtime, 'host-service.json'), 'utf8')) as {
       backend: string
@@ -393,7 +408,10 @@ export async function ensureSessionHost(
       SLAYZONE_ROOT: root,
       SLAYZONE_NONINTERACTIVE: '1',
       SLAYZONE_SUPERVISED: '0',
-      SLAYZONE_HUB_ADDRESS: new URL(config.hubUrl).host,
+      SLAYZONE_HUB_ADDRESS:
+        new URL(config.hubUrl).pathname === '/computers' && !new URL(config.hubUrl).search
+          ? new URL(config.hubUrl).host
+          : undefined,
       SLAYZONE_HUB_JOIN_TOKEN: config.joinToken
     },
     detached: true,
@@ -452,21 +470,30 @@ async function initializeUpgradeSupervisor(
   original: UpgradeRelease,
   root: string,
   log: Log,
-  options: { probationMs?: number; intervalMs?: number } = {}
+  options: { probationMs?: number; intervalMs?: number; bootSeed?: ComputerBootSeed } = {}
 ): Promise<{ stop(shutdownHost?: boolean): Promise<void> }> {
   const runtime = runtimeDir(root)
   mkdirSync(runtime, { recursive: true, mode: 0o700 })
-  const control = await ensureSessionHost(config, original, root, (method) => {
-    if (method === 'host.shutdown') void stop(true)
-  })
+  const control = await ensureSessionHost(
+    config,
+    original,
+    root,
+    (method) => {
+      if (method === 'host.shutdown') void stop(true)
+    },
+    options.bootSeed
+  )
   const abort = new AbortController()
   const controllers: ReturnType<typeof createUpgradeController>[] = []
   let stopping = false
   const committed = new Map<string, UpgradeRelease>()
   let maintenanceRunning = false
   let expectedHostStop = false
-  let incompatibleHostTarget: UpgradeRelease | undefined
+  const incompatibleHostTargets = new Map<string, UpgradeRelease>()
+  const desiredHostConfig = hostConfigurationKey(config)
   const hostInfo = await control.rpc.request<import('./session-host').HostHealth>('health')
+  let hostConfigurationChanged =
+    hostInfo.configKey !== undefined && hostInfo.configKey !== desiredHostConfig
   const sharedInstalls = new Map<string, Promise<string>>()
   const install = (version: string): Promise<string> => {
     let pending = sharedInstalls.get(version)
@@ -559,12 +586,19 @@ async function initializeUpgradeSupervisor(
           return worker
         })
         .catch((err) => {
-          failure = err
-          throw err
+          if (String(err).includes('unknown hub')) hostConfigurationChanged = true
+          failure =
+            hostConfigurationChanged && String(err).includes('unknown hub')
+              ? new HostMaintenanceRequired(
+                  'Session host configuration changed; waiting for running work to finish'
+                )
+              : err
+          throw failure
         })
       void starting.catch(() => undefined)
       return {
-        exited: () => !!failure || worker?.exited?.() === true,
+        exited: () =>
+          (failure && !(failure instanceof HostMaintenanceRequired)) || worker?.exited?.() === true,
         connected: async () => (await starting).connected(),
         drain: async () => {
           await starting
@@ -584,10 +618,15 @@ async function initializeUpgradeSupervisor(
     const controller = createUpgradeController(
       { ...initial, worker: launch(initial.entry) },
       {
-        discover: () =>
-          config.autoUpgrade === false
-            ? Promise.resolve(initial.version)
-            : discoverHubRelease([hubUrl], abort.signal),
+        discover: async () => {
+          const target =
+            config.autoUpgrade === false
+              ? initial.version
+              : await discoverHubRelease([hubUrl], abort.signal)
+          if (incompatibleHostTargets.get(hubUrl)?.version !== target)
+            incompatibleHostTargets.delete(hubUrl)
+          return target
+        },
         install,
         validate: async (release) => {
           const probe = await exec(process.execPath, [release.entry, '--runtime-contract'], {
@@ -602,13 +641,12 @@ async function initializeUpgradeSupervisor(
           )
             throw new Error('invalid connector runtime contract')
           if (hostInfo.contract < contract.min || hostInfo.contract > contract.max) {
-            incompatibleHostTarget = release
+            incompatibleHostTargets.set(hubUrl, release)
             throw new HostMaintenanceRequired(
               'Connector requires session host maintenance; waiting for running work to finish'
             )
           }
-          if (incompatibleHostTarget?.version === release.version)
-            incompatibleHostTarget = undefined
+          incompatibleHostTargets.delete(hubUrl)
         },
         launch,
         probationMs: options.probationMs,
@@ -622,9 +660,14 @@ async function initializeUpgradeSupervisor(
         status: (phase, detail) => {
           const status = {
             phase,
-            ...(hostInfo.version !== displayedVersion
-              ? { maintenanceReason: 'Session host update waits for running work to finish' }
-              : {}),
+            ...(hostConfigurationChanged
+              ? {
+                  maintenanceReason:
+                    'Session host configuration changed; waiting for running work to finish'
+                }
+              : hostInfo.version !== displayedVersion
+                ? { maintenanceReason: 'Session host update waits for running work to finish' }
+                : {}),
             currentVersion: displayedVersion,
             hostVersion: hostInfo.version,
             ...detail,
@@ -644,19 +687,52 @@ async function initializeUpgradeSupervisor(
     controllers.push(controller)
   }
   const maintain = async (): Promise<void> => {
-    if (
-      stopping ||
-      maintenanceRunning ||
-      config.autoUpgrade === false ||
-      !process.argv.includes('--supervisor')
-    )
-      return
+    if (stopping || maintenanceRunning || !process.argv.includes('--supervisor')) return
     maintenanceRunning = true
+    let drained = false
     try {
-      const primary = incompatibleHostTarget ?? committed.get(config.hubUrl)
+      const deferred = incompatibleHostTargets.entries().next().value as
+        | [string, UpgradeRelease]
+        | undefined
+      const primary = deferred?.[1] ?? committed.get(effectiveHubUrls(config)[0])
       if (!primary) return
       const liveHost = await control.rpc.request<import('./session-host').HostHealth>('health')
-      if (incompatibleHostTarget && !liveHost.idle) return
+      if (
+        liveHost.configKey !== undefined
+          ? liveHost.configKey !== desiredHostConfig
+          : hostConfigurationChanged
+      ) {
+        if (!liveHost.idle) return
+        await control.rpc.request('prepare-maintenance')
+        drained = true
+        atomicJson(join(runtime, 'host-release.json'), {
+          current:
+            liveHost.configKey === undefined
+              ? original
+              : { entry: liveHost.entry, version: liveHost.version }
+        })
+        await Promise.all(controllers.map((c) => c.stop()))
+        expectedHostStop = true
+        try {
+          await control.rpc.request('stop', { force: false })
+        } catch (err) {
+          expectedHostStop = false
+          throw err
+        }
+        await stop(false)
+        process.exit(75)
+      }
+      if (config.autoUpgrade === false) return
+      const stillWanted = async (): Promise<boolean> => {
+        if (!deferred) return true
+        if (incompatibleHostTargets.get(deferred[0]) !== deferred[1]) return false
+        const target = await discoverHubRelease([deferred[0]], abort.signal)
+        if (target === deferred[1].version)
+          return incompatibleHostTargets.get(deferred[0]) === deferred[1]
+        incompatibleHostTargets.delete(deferred[0])
+        return false
+      }
+      if (!(await stillWanted()) || (deferred && !liveHost.idle)) return
       const supervisorChange = primary.version !== original.version
       const hostChange = primary.version !== liveHost.version
       if (!supervisorChange && (!hostChange || !liveHost.idle)) return
@@ -667,27 +743,49 @@ async function initializeUpgradeSupervisor(
       } catch {
         /* No quarantined runtime. */
       }
-      const replaceHost = !supervisorChange || !!incompatibleHostTarget
-      if (replaceHost) await control.rpc.request('prepare-maintenance')
+      const replaceHost = !supervisorChange || !!deferred
+      if (replaceHost) {
+        await control.rpc.request('prepare-maintenance')
+        drained = true
+        if (!(await stillWanted())) return
+      }
       atomicJson(join(runtime, 'supervisor.json'), { current: primary, previous: original })
       atomicJson(join(runtime, 'host-release.json'), {
         current: primary,
         previous: { entry: liveHost.entry, version: liveHost.version }
       })
       if (replaceHost) {
-        expectedHostStop = true
         await Promise.all(controllers.map((c) => c.stop()))
-        await control.rpc.request('stop', { force: false })
+        expectedHostStop = true
+        try {
+          await control.rpc.request('stop', { force: false })
+        } catch (err) {
+          expectedHostStop = false
+          throw err
+        }
       }
       await stop(false)
       process.exit(75)
     } finally {
+      if (drained && !expectedHostStop && !stopping)
+        await control.rpc
+          .request('cancel-maintenance')
+          .catch((err) =>
+            log('cannot resume session host after canceled maintenance', { error: String(err) })
+          )
       maintenanceRunning = false
     }
   }
+  const maintenanceFailed = (err: unknown): void => {
+    log('runtime maintenance failed', { error: String(err) })
+    if (control.socket.destroyed && !stopping)
+      void stop(false).then(() => {
+        if (process.argv.includes('--supervisor')) process.exit(1)
+      })
+  }
   const interval = setInterval(() => {
     for (const c of controllers) void c.check()
-    void maintain().catch((err) => log('runtime maintenance failed', { error: String(err) }))
+    void maintain().catch(maintenanceFailed)
   }, options.intervalMs ?? INTERVAL_MS)
   for (const c of controllers) void c.check()
   control.socket.once('close', () => {
@@ -712,6 +810,7 @@ async function initializeUpgradeSupervisor(
   }
   process.on('SIGINT', onStop)
   process.on('SIGTERM', onStop)
+  void maintain().catch(maintenanceFailed)
   process.send?.({ type: 'supervisor-ready' }, () => undefined)
   return { stop }
 }
