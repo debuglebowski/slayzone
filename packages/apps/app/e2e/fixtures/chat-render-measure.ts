@@ -63,10 +63,17 @@ function timeUntilShown(page: Page, act: 'open' | 'top' | 'bottom', text: string
           ).some((row) => row.textContent?.includes(text) && row.getBoundingClientRect().height > 0)
         const t0 = performance.now()
         if (act === 'open') w.__slayzone_openTask?.(taskId)
-        else if (act === 'top') scroller()?.scrollTo({ top: 0 })
         else {
           const el = scroller()
-          el?.scrollTo({ top: el.scrollHeight })
+          // Signal scroll intent before moving so the follow lock releases.
+          el?.dispatchEvent(
+            new WheelEvent('wheel', { deltaY: act === 'top' ? -1 : 1, bubbles: true })
+          )
+          const content = el?.querySelector<HTMLElement>('[data-chat-scroll-content]')
+          const padding = content
+            ? Number.parseFloat(getComputedStyle(content).paddingBottom) || 0
+            : 0
+          el?.scrollTo({ top: act === 'top' ? 0 : el.scrollHeight - padding - el.clientHeight })
         }
         const tick = () => {
           if (shown()) return resolve(performance.now() - t0)
@@ -88,6 +95,7 @@ function sweep(page: Page) {
           (p) => p.offsetParent !== null
         )
         const el = panel!.querySelector<HTMLElement>('[data-testid="chat-timeline-scroller"]')!
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
         const frames: number[] = []
         let mountedMax = 0
         let last = performance.now()
@@ -125,7 +133,7 @@ export interface RenderNumbers {
   frameP95Ms: number
   frameMaxMs: number
   mountedMax: number
-  /** Renderer JS heap in use after opening + the scroll (MB). */
+  /** Retained renderer JS heap after opening + scrolling + garbage collection (MB). */
   heapMb: number
 }
 
@@ -147,6 +155,13 @@ export async function measureLongSession(
   const topMs = await timeUntilShown(page, 'top', text.first, taskId)
   const bottomMs = await timeUntilShown(page, 'bottom', text.last, taskId)
   const { frames, mountedMax } = await sweep(page)
+  // Measure retained history, independent of when V8 chooses to collect temporary RPC data.
+  const cdp = await page.context().newCDPSession(page)
+  try {
+    await cdp.send('HeapProfiler.collectGarbage')
+  } finally {
+    await cdp.detach()
+  }
   const heap = await page.evaluate(
     () =>
       (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory

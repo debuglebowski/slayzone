@@ -44,7 +44,9 @@ let sentinelHome = ''
  */
 async function listenSentinel(server: Server): Promise<number> {
   for (;;) {
-    const port = 2_000 + Math.floor(Math.random() * 60_000)
+    // Stay above every isolated worker's block (20000–32599). Otherwise another
+    // worker's legitimate fallback scan can look like a leak from this child.
+    const port = 40_000 + Math.floor(Math.random() * 10_000)
     const start = port - 1
     const clear = (b: { start: number; end: number }): boolean =>
       start + 99 < b.start || start > b.end

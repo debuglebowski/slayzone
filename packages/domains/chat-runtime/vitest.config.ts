@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
-import { stripCallerSlayzoneEnv } from '../../shared/test-utils/caller-env.ts'
+import { isolateFromCaller } from '../../shared/test-utils/caller-env.ts'
 
-stripCallerSlayzoneEnv()
+isolateFromCaller()
 
 export default defineConfig({
   test: {
