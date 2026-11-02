@@ -22,7 +22,9 @@ import {
   userMessageAttachments,
   chatModeForTerminal,
   isSyntheticChatPrompt,
-  chatCapabilitiesForMode
+  chatCapabilitiesForMode,
+  defaultChatModeSettingKey,
+  resolveDefaultChatMode
 } from '@slayzone/terminal-contracts'
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import type { ChatStorage } from './storage'
@@ -34,6 +36,7 @@ export interface ChatBootstrap {
   revision: number
   providerConfig: ProviderConfigEntry
   defaultFlags: string | null
+  settings?: Record<string, string | null>
   env: Record<string, string>
   terminalProviderConfig?: ProviderConfigEntry
   honoredConversations?: string[]
@@ -191,6 +194,23 @@ export function createLocalChatData(
     })
     const previous = store.getRecord<ChatBootstrap>(value.identity.id, 'settings', 'bootstrap')
     if (!previous || value.revision > previous.revision) {
+      if (value.settings) {
+        const settingsId = {
+          id: '__slz_settings__',
+          taskId: '__slz_settings__',
+          tabId: '__slz_settings__',
+          mode: 'claude-chat',
+          epoch: 1
+        }
+        store.createConversation(settingsId)
+        for (const [id, setting] of Object.entries(value.settings))
+          store.putRecord(settingsId.id, 1, {
+            kind: 'settings',
+            id,
+            value: setting,
+            at: Date.now()
+          })
+      }
       set(value.identity.tabId, 'settings', 'bootstrap', value)
       if (!existing || value.revision > (previous?.revision ?? -1)) {
         // Session ids are computer-authoritative once an agent has confirmed them.
@@ -375,6 +395,10 @@ export function createLocalChatData(
     writeChatCollaboration: (t, m, v) => patch(t, m, 'chatCollaboration', v),
     writeChatFastMode: (t, m, v) => patch(t, m, 'chatFastMode', v),
     clearChatConversationId: (t, m) => patch(t, m, 'chatConversationId', null),
+    readSetting: async (key) =>
+      store.getRecord<string | null>('__slz_settings__', 'settings', key) || null,
+    getDefaultChatMode: async (mode) =>
+      resolveDefaultChatMode(mode, await data.readSetting(defaultChatModeSettingKey(mode))),
     getModeDefaultFlags: async (mode) => {
       const tab = store
         .findRecords('settings')

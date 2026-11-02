@@ -7,7 +7,7 @@ import { createChatLifecycle } from './hub-lifecycle'
 
 test('reconnect barrier delivers lifecycle before commands and never acknowledges a failed deletion', async () => {
   const db = new Database(':memory:')
-  migrations.find((m) => m.version === 184)!.up(db)
+  migrations.find((m) => m.version === 187)!.up(db)
   try {
     const adapter = createSlayzoneDbAdapter(db),
       ownership = createChatOwnershipStore(adapter)

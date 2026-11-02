@@ -122,6 +122,7 @@ import {
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {
+  SIDE_QUESTION_TIMEOUT_MS,
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode,
   warmPoolEnabled
@@ -798,7 +799,17 @@ export function composeServer(opts: {
           'kind' in request &&
           ['backup.create', 'backup.restore'].includes(String(request.kind))
           ? 120_000
-          : undefined
+          : typeof request === 'object' &&
+              request !== null &&
+              'kind' in request &&
+              request.kind === 'invoke' &&
+              'value' in request &&
+              typeof request.value === 'object' &&
+              request.value !== null &&
+              'method' in request.value &&
+              request.value.method === 'askSideQuestion'
+            ? SIDE_QUESTION_TIMEOUT_MS + 5_000
+            : undefined
       )
     },
     admitComputer: async (computerId) => {

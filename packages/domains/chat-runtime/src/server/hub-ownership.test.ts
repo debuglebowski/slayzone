@@ -10,7 +10,7 @@ afterEach(() => {
 function fixture() {
   const db = new Database(':memory:')
   dbs.push(db)
-  migrations.find((m) => m.version === 184)!.up(db)
+  migrations.find((m) => m.version === 187)!.up(db)
   return { db, store: createChatOwnershipStore(createSlayzoneDbAdapter(db)) }
 }
 const route = {

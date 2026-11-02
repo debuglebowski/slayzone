@@ -12,7 +12,7 @@ afterEach(() => {
 async function fixture() {
   const db = new Database(':memory:')
   dbs.push(db)
-  migrations.find((m) => m.version === 184)!.up(db)
+  migrations.find((m) => m.version === 187)!.up(db)
   const ownership = createChatOwnershipStore(createSlayzoneDbAdapter(db))
   const route = await ownership.register({
     id: 'c',

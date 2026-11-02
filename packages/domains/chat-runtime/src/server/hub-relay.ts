@@ -27,6 +27,12 @@ import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './
 import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 
+const trimUnsetArgs = (args: unknown[]) => {
+  let end = args.length
+  while (end && args[end - 1] === undefined) end--
+  return args.slice(0, end)
+}
+
 type TabRow = { id: string; task_id: string; mode: string }
 const taskMethods = new Set([
   'inspectPermissions',
@@ -565,6 +571,7 @@ export function createHubChatRelay(opts: {
     args: unknown[],
     operationId?: string
   ): Promise<unknown> {
+    args = trimUnsetArgs(args)
     if (target === 'ops' && method === 'supports') return supportsChatMode(String(args[0]))
     if (target === 'ops' && catalogMethods.has(method))
       return catalogCall(method as ChatCatalogOperation, {}, args)
@@ -602,7 +609,7 @@ export function createHubChatRelay(opts: {
     return opts.request(computerId, {
       kind: 'catalog',
       method,
-      args,
+      args: trimUnsetArgs(args),
       operationId: randomUUID(),
       ...(owner ? { route: { id: owner.id, epoch: owner.epoch } } : {})
     })

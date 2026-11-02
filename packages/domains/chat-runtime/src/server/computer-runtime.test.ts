@@ -277,3 +277,51 @@ test('deleted native sessions remain excluded after newer and stale bootstraps',
   })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
 })
+
+test('computer bootstrap preserves user default settings added on main', async () => {
+  const { r } = runtime()
+  r.bootstrap({
+    ...bootstrap,
+    settings: {
+      'chat_default_mode:claude-chat': 'plan',
+      'chat_default_model:claude-chat': 'sonnet'
+    }
+  })
+  expect(await r.local.data.getDefaultChatMode('claude-chat')).toBe('plan')
+  expect(await r.local.data.readSetting('chat_default_model:claude-chat')).toBe('sonnet')
+})
+
+test('side questions and live-setting guards use the injected transport', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  const { createChatOps } = await import('@slayzone/terminal/runtime')
+  const questions: unknown[] = [],
+    cancelled: unknown[] = []
+  const ops = createChatOps({
+    dataOps: r.local.data,
+    transport: {
+      ...r.transport,
+      askSideQuestion: async (...args) => {
+        questions.push(args)
+        return { text: 'local answer' }
+      },
+      cancelSideQuestion: (...args) => {
+        cancelled.push(args)
+      },
+      isTurnOpen: () => true,
+      getSessionTerminalState: () => 'running',
+      sendControlRequest: async () => {
+        throw new Error('control refused')
+      }
+    }
+  })
+  expect(
+    await ops.askSideQuestion({ ...createOpts, requestId: 'q', question: 'why?', history: [] })
+  ).toEqual({ text: 'local answer' })
+  ops.cancelSideQuestion({ tabId: 'tab-a', requestId: 'q' })
+  expect(questions).toEqual([['tab-a', { requestId: 'q', question: 'why?', history: [] }]])
+  expect(cancelled).toEqual([['tab-a', 'q']])
+  await expect(ops.setModel({ ...createOpts, chatModel: 'sonnet' })).rejects.toThrow(
+    /during this turn/
+  )
+})

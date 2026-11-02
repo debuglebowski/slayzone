@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SIDE_QUESTION_MAX_CHARS } from '@slayzone/terminal-contracts'
 
 const id = z.string().min(1).max(500),
   text = z.string().max(1_000_000)
@@ -81,6 +82,21 @@ const tab = z.tuple([id]),
   taskMode = z.tuple([id, z.string()]),
   createTuple = z.tuple([create])
 export const chatOperationSchemas = {
+  askSideQuestion: z.tuple([
+    create.extend({
+      requestId: id,
+      question: z.string().trim().min(1).max(SIDE_QUESTION_MAX_CHARS),
+      history: z
+        .array(
+          z.object({
+            question: z.string().max(SIDE_QUESTION_MAX_CHARS),
+            answer: z.string().max(200_000)
+          })
+        )
+        .max(50)
+    })
+  ]),
+  cancelSideQuestion: z.tuple([z.object({ tabId: id, requestId: id })]),
   supports: z.tuple([z.string()]),
   testSetWatchdogTimings: z.tuple([
     z
@@ -126,7 +142,7 @@ export const chatOperationSchemas = {
   remove: tab,
   getReplay: z.tuple([id, z.number().int()]),
   getBufferSince: z.tuple([id, z.number().int()]),
-  getInfo: tab,
+  getInfo: z.tuple([id, z.string().optional()]),
   openTimeline: z.tuple([id, z.string()]),
   timelinePages: z.tuple([
     id,
@@ -270,6 +286,7 @@ export const chatBootstrapSchema = z.object({
     chatFastMode: z.boolean().optional()
   }),
   defaultFlags: z.string().nullable(),
+  settings: z.record(z.string(), z.string().nullable()).optional(),
   terminalProviderConfig: z.record(z.string(), z.unknown()).optional(),
   honoredConversations: z.array(z.string()).optional(),
   deletedConversations: z

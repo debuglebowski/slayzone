@@ -203,6 +203,9 @@ export function createChatRuntimeHandlers(opts: {
     const procs = createProcHandlers(
       {
         ...opts.ctx,
+        get hookDirectory() {
+          return opts.ctx.hookDirectory
+        },
         get cliRelay() {
           return opts.ctx.cliRelay
         },

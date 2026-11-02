@@ -2,6 +2,9 @@ import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
+  defaultChatModeSettingKey,
+  defaultChatModelSettingKey,
+  defaultChatEffortSettingKey,
   agentHookPrompt,
   isPromptCaptureMode,
   type ResolvedAgentHook,
@@ -105,6 +108,17 @@ export function createComputerChatServices(opts: {
       projectId: task.project_id,
       cwd: task.worktree_path ?? projectRoot ?? '',
       providerConfig: await opts.legacyData.readProviderConfig(owner.taskId, owner.mode),
+      settings: Object.fromEntries(
+        await Promise.all(
+          ['claude-chat', 'codex-chat']
+            .flatMap((mode) => [
+              defaultChatModeSettingKey(mode),
+              defaultChatModelSettingKey(mode),
+              defaultChatEffortSettingKey(mode)
+            ])
+            .map(async (key) => [key, await opts.legacyData.readSetting(key)])
+        )
+      ),
       terminalProviderConfig: await opts.legacyData.readProviderConfig(owner.taskId, terminalMode),
       defaultFlags: await opts.legacyData.getModeDefaultFlags(owner.mode),
       env: await opts.legacyData.buildMcpEnv(owner.taskId, owner.mode, computerId),

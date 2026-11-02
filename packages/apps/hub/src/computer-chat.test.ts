@@ -50,7 +50,7 @@ test('first chat read migrates legacy history then all writes stay on its comput
         buildMcpEnv: async () => ({})
       },
       attachments: { read: async () => new Uint8Array() },
-      request: (_pc, request) => pc.request(request),
+      request: (_pc, request) => pc.request(JSON.parse(JSON.stringify(request))),
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
       hasLiveTask: async () => live
@@ -63,6 +63,7 @@ test('first chat read migrates legacy history then all writes stay on its comput
     expect(await services.relay.ops.getTabState('tab')).toMatchObject({
       draft: { text: 'new-private', rev: 4 }
     })
+    expect(await services.relay.ops.getInfo('tab', undefined)).toBeNull()
     const owner = await services.ownership.forTab('tab')
     expect(owner).toMatchObject({
       computerId: 'pc',

@@ -44,3 +44,37 @@ test('computer invocation accepts shared message and queue shapes', () => {
     })
   ).toMatchObject({ method: 'hold' })
 })
+
+test('new main operations cross the computer boundary with their full input', () => {
+  expect(
+    parseChatInvocation({ route, target: 'ops', method: 'getInfo', args: ['tab', 'codex-chat'] })
+  ).toMatchObject({ args: ['tab', 'codex-chat'] })
+  expect(
+    parseChatInvocation({
+      route,
+      target: 'ops',
+      method: 'askSideQuestion',
+      operationId: 'btw-1',
+      args: [
+        {
+          tabId: 'tab',
+          taskId: 'task',
+          mode: 'claude-chat',
+          cwd: '/tmp',
+          requestId: 'q',
+          question: 'why?',
+          history: []
+        }
+      ]
+    })
+  ).toMatchObject({ method: 'askSideQuestion' })
+  expect(
+    parseChatInvocation({
+      route,
+      target: 'ops',
+      method: 'cancelSideQuestion',
+      operationId: 'cancel-1',
+      args: [{ tabId: 'tab', requestId: 'q' }]
+    })
+  ).toMatchObject({ method: 'cancelSideQuestion' })
+})

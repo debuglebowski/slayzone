@@ -119,3 +119,16 @@ and integrate main. Latest broad run had 230/231 passing; missing-file export
 regression fixed and focused rerun passed (10 tests). Upload/composer/clipboard
 suites passed (34 tests). Computer bundle builds; affected typechecks passed
 before latest cleanup edits and need rerun after rebase.
+
+
+## Main rebase
+
+Rebased onto local main `0a5cccb6e` (2026-11-02). Preserve main's computer
+upgrade generation/lifecycle, /btw side questions, late-turn stop fixes and user
+model/mode defaults. Chat ownership migration is v187; main owns v184–186.
+
+
+Rebase checks: 143 targeted storage/protocol/service/transport/handler tests pass;
+hub/computer bundles build. Restore /btw calls through each injected transport,
+forward user defaults in bootstrap metadata, keep optional args intact across JSON,
+and propagate upgrade hook-directory changes into computer-local chat processes.

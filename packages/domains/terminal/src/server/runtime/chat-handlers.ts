@@ -635,18 +635,6 @@ async function loadConversationHistory(
   }
 }
 
-/**
- * A setting the live process refused (`set_model` etc.) normally falls back to
- * a kill+respawn — but with a turn open (running, parked on a prompt, or a
- * message on its way) that would cut the turn. Refuse the change instead; the
- * old value stays, the turn keeps going.
- */
-function refuseRespawnMidTurn(tabId: string, setting: string, cause: unknown): void {
-  if (!isTurnOpen(tabId)) return
-  const reason = cause instanceof Error ? cause.message : String(cause)
-  throw new Error(`Can't change ${setting} during this turn (${reason}). Try again when it ends.`)
-}
-
 /** Refuse an operation the mode's provider can't do (`ChatCapabilities`). */
 function assertCapability(
   mode: string,
@@ -698,6 +686,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
     rewindTab,
     forkTab,
     threadForkSource,
+    askSideQuestion,
+    cancelSideQuestion,
     confirmedConversation,
     releaseChatConversation,
     switchTabConversation,
@@ -705,11 +695,23 @@ export function createChatOps(opts: ChatHandlerOpts) {
     readEventsSince,
     getSessionInfo,
     getSessionTerminalState,
+    isTurnOpen,
     killAll,
     shutdownAll,
     configureTransport,
     chatEvents
   } = transport
+  /**
+   * A setting the live process refused (`set_model` etc.) normally falls back to
+   * a kill+respawn — but with a turn open (running, parked on a prompt, or a
+   * message on its way) that would cut the turn. Refuse the change instead; the
+   * old value stays, the turn keeps going.
+   */
+  function refuseRespawnMidTurn(tabId: string, setting: string, cause: unknown): void {
+    if (!isTurnOpen(tabId)) return
+    const reason = cause instanceof Error ? cause.message : String(cause)
+    throw new Error(`Can't change ${setting} during this turn (${reason}). Try again when it ends.`)
+  }
   const releaseConversation = opts.conversations?.releaseConversation ?? defaultConversationRelease
   const notifyChatQueueChanged = opts.notifyQueueChanged ?? defaultNotifyChatQueueChanged
   const previousCliDetailsListener = cliDetailsListeners.get(transport)
