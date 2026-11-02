@@ -40,6 +40,7 @@ function makeScrollRef(): CallbackRef<HTMLElement> {
 const detachedFollow = () => ({
   scrollRef: makeScrollRef(),
   isStuck: () => true,
+  followBottom: () => {},
   unstick: () => {},
   restoreAnchor: () => false
 })

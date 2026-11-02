@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// Pins useFollowBottom's stick-to-bottom contract: scroll events only ever re-stick,
-// explicit user input (wheel up / touch / ArrowUp·PageUp·Home) is the only release,
+// Pins useFollowBottom's stick-to-bottom contract: a scroll event re-sticks only on a move
+// toward the end; releases are user input (wheel up / touch / ArrowUp·PageUp·Home), a
+// scrollbar drag up, or scrolling into the trailing padding,
 // and content growth follows the bottom while stuck — unless the user is selecting
 // text inside the content.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -155,6 +156,56 @@ describe('chat bottom scroll padding', () => {
     expect(dims.scrollTop).toBe(600)
   })
 
+  it('stops following once the user scrolls into the padding', () => {
+    const { result, el, dims } = paddedSetup()
+    fireEvent.wheel(el, { deltaY: 200 })
+    scrollTo(el, dims, 600)
+    grow(dims, 1100)
+    expect(dims.scrollTop).toBe(600)
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(600)
+    expect(result.current.isAtBottom).toBe(false)
+  })
+
+  it('follows again when the user scrolls from the padding back to the message end', () => {
+    const { el, dims } = paddedSetup()
+    fireEvent.wheel(el, { deltaY: 200 })
+    scrollTo(el, dims, 600)
+    fireEvent.wheel(el, { deltaY: -180 })
+    scrollTo(el, dims, 420)
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(900)
+  })
+
+  it('keeps following when the content shrinks under a followed view', () => {
+    const { dims } = paddedSetup()
+    dims.scrollHeight = 900
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(900)
+  })
+
+  it('lets go when the browser scrolled into the padding before any event (passive wheel)', () => {
+    const { result, el, dims } = paddedSetup()
+    // Chromium scrolls first, then sends the passive wheel; a commit in between
+    // reads the lock (the virtual timeline re-aligns after each commit).
+    dims.scrollTop = 600
+    expect(result.current.isStuck()).toBe(false)
+    fireEvent.wheel(el, { deltaY: 200 })
+    grow(dims, 1100)
+    expect(dims.scrollTop).toBe(600)
+  })
+
+  it('keeps following when content shrinks after the lock placed the view itself', () => {
+    const { result, dims } = paddedSetup()
+    dims.scrollHeight = 1500
+    act(() => result.current.followBottom())
+    expect(dims.scrollTop).toBe(900)
+    // Shrinks by more than the threshold: the view is past the new end, but it
+    // was not moved.
+    dims.scrollHeight = 1300
+    expect(result.current.isStuck()).toBe(true)
+  })
+
   it('keeps short conversations at the top', () => {
     const { result, dims } = paddedSetup()
     dims.scrollHeight = 500
@@ -252,6 +303,48 @@ describe('useFollowBottom stick', () => {
     expect(dims.scrollTop).toBe(bottom(dims))
   })
 
+  it('stays released after a small wheel up that ends near the bottom', () => {
+    const { el, dims } = setup()
+    fireEvent.wheel(el, { deltaY: -10 })
+    scrollTo(el, dims, 590)
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(590)
+  })
+
+  it('releases when the user drags the scrollbar up', () => {
+    const { el, dims } = setup()
+    fireEvent.pointerDown(el)
+    scrollTo(el, dims, 500)
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(500)
+  })
+
+  it('lets go when a drag moved the view up before its scroll event', () => {
+    const { result, el, dims } = setup()
+    fireEvent.pointerDown(el)
+    dims.scrollTop = 500
+    expect(result.current.isStuck()).toBe(false)
+  })
+
+  it('re-sticks when the user drags the scrollbar back to the bottom', () => {
+    const { el, dims } = setup()
+    fireEvent.pointerDown(el)
+    scrollTo(el, dims, 300)
+    scrollTo(el, dims, bottom(dims))
+    fireEvent.pointerUp(window)
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(bottom(dims))
+  })
+
+  it('does not release on an upward scroll event after the pointer is up', () => {
+    const { el, dims } = setup()
+    fireEvent.pointerDown(el)
+    fireEvent.pointerUp(window)
+    scrollTo(el, dims, 500)
+    grow(dims, 1500)
+    expect(dims.scrollTop).toBe(bottom(dims))
+  })
+
   it('does not release while the content fits the box', () => {
     const { el, dims } = setup({ scrollHeight: 300, clientHeight: 400, scrollTop: 0 })
     fireEvent.wheel(el, { deltaY: -40 })
@@ -261,8 +354,8 @@ describe('useFollowBottom stick', () => {
 
   it('re-sticks when the user scrolls back to the bottom', () => {
     const { el, dims } = setup()
-    dims.scrollTop = 0
     fireEvent.wheel(el, { deltaY: -40 })
+    scrollTo(el, dims, 0)
     scrollTo(el, dims, bottom(dims))
     grow(dims, 1500)
     expect(dims.scrollTop).toBe(bottom(dims))

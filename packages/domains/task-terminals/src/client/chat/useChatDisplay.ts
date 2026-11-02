@@ -14,6 +14,7 @@ import type { RevealTimelineItem } from './timeline-reveal'
 import { useChatSearch } from './useChatSearch'
 import { isRenderable } from './renderers'
 import { useVirtualTimeline } from './useVirtualTimeline'
+import type { TimelineFollow } from './virtual-timeline'
 import type { FollowBottomApi } from './useFollowBottom'
 import { getFollowBottomOffset } from './useFollowBottom'
 import { activityView } from './activity-view'
@@ -31,7 +32,7 @@ export interface UseChatDisplayOpts {
   showThinking?: boolean
   searchThinking?: boolean
   /** The timeline's follow-bottom lock (`useFollowBottom`). */
-  follow: Pick<FollowBottomApi, 'scrollRef' | 'isStuck' | 'unstick' | 'restoreAnchor'>
+  follow: TimelineFollow & Pick<FollowBottomApi, 'restoreAnchor'>
   /** Paged history (`useChatSession`): page summaries, and loading pages. */
   paging?: ChatPaging | null
   loadPages?: (pages: readonly number[]) => void
@@ -399,7 +400,7 @@ export function useChatDisplay({
   const onGapVisible = useStableCallback((gap: HistoryGap, row: number): void => {
     // At the end, following it, a placeholder is never really in view (the
     // tail is over a page of rows). Away from the end it loads, followed or not
-    // (a scrollbar drag moves the view without letting go of the end).
+    // (a scroll event can lag behind the end while it is still followed).
     if (!paging || !loadPages) return
     const el = follow.scrollRef.current
     if (follow.isStuck() && el && getFollowBottomOffset(el) - el.scrollTop <= 2) return

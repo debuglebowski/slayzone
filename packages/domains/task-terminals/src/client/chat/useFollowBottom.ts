@@ -35,8 +35,18 @@ export interface FollowBottomApi {
   captureAnchor: () => ChatScrollAnchor | null
   /** Put an anchor back. False when its row is not rendered (yet). */
   restoreAnchor: (anchor: ChatScrollAnchor) => boolean
-  /** Whether growth keeps the view at the bottom (the lock, not the indicator). */
+  /**
+   * Whether growth keeps the view at the bottom (the lock, not the indicator).
+   * Reading it first lets go if the user moved the view since the lock last
+   * placed it (see `releaseIfMovedByUser`).
+   */
   isStuck: () => boolean
+  /**
+   * Put the view at the bottom as the lock's own move (callers that follow
+   * growth themselves: the virtual timeline after each commit). Only while
+   * `isStuck()`. A plain `scrollTop` write would read as the user's move.
+   */
+  followBottom: () => void
   /**
    * Stop following the bottom: the view is being moved somewhere on purpose
    * (a reveal). Held until the user scrolls by hand: landing at the bottom by
@@ -52,6 +62,7 @@ interface FollowBottomController {
   captureAnchor: () => ChatScrollAnchor | null
   restoreAnchor: (anchor: ChatScrollAnchor) => boolean
   isStuck: () => boolean
+  followBottom: () => void
   unstick: () => void
   setAutoScroll: (enabled: boolean) => void
   dispose: () => void
@@ -78,27 +89,70 @@ function createFollowBottomController(
   /** `unstick()` was called: reaching the bottom re-engages only after user input. */
   const heldRef = { current: false }
   const resizeObserverRef: { current: ResizeObserver | null } = { current: null }
+  /**
+   * Where the view was at the last scroll event or the lock's own move. A view
+   * found elsewhere was moved since: the browser scrolls BEFORE it sends the
+   * wheel or scroll event (passive wheel, scrollbar drag).
+   */
+  const lastTopRef = { current: 0 }
+  /** A press on the scroller (its scrollbar) is held: a move up is a drag. */
+  const pointerHeldRef = { current: false }
+
+  /**
+   * Let go when the view is where following never puts it — the user moved
+   * it: down past the message end into the trailing padding (growth would pull
+   * it back up), or up while a press is held (a scrollbar drag sends no
+   * wheel). Checked on every follow decision, not just scroll events: a commit
+   * between the browser's scroll and its event re-aligns the view (the virtual
+   * timeline follows after each commit) and would erase the move. A move up
+   * alone does not let go: a fast streaming burst can leave scrollTop lagging
+   * a grown scrollHeight, and a shrink only ever clamps it down.
+   */
+  const releaseIfMovedByUser = (el: HTMLElement): void => {
+    if (!stuckRef.current) return
+    const top = el.scrollTop
+    const last = lastTopRef.current
+    const pastEnd = top > last + 1 && getFollowBottomOffset(el) - top < -THRESHOLD_PX
+    const dragged = pointerHeldRef.current && top < last - 1
+    if (pastEnd || dragged) stuckRef.current = false
+  }
+
+  const isStuck = (): boolean => {
+    const el = scrollRef.current
+    if (el) releaseIfMovedByUser(el)
+    return autoScrollRef.current && stuckRef.current
+  }
 
   const scrollRef = (() => {
     const measureAtBottom = (el: HTMLElement) => {
       const dist = getFollowBottomOffset(el) - el.scrollTop
       return dist <= THRESHOLD_PX
     }
-    // Scroll events update the UI indicator and re-engage the stick when the
-    // user scrolls back to bottom. They do NOT release the stick: a fast
-    // streaming burst can produce a scroll event whose scrollTop lags the
-    // freshly-grown scrollHeight, which would otherwise read "not at bottom"
-    // and unstick the lock mid-stream. Release happens only on user input.
+    // Scroll events update the UI indicator, let go on a move by the user, and
+    // re-engage on a move TOWARD the end that lands within THRESHOLD_PX of it
+    // — so a small scroll up that stays near the end does not re-stick on its
+    // own event.
     const handleScroll = () => {
       const el = scrollRef.current
       if (!el) return
-      const atBottom = measureAtBottom(el)
-      setIsAtBottom(atBottom)
-      if (atBottom && !stuckRef.current && !heldRef.current) stuckRef.current = true
+      releaseIfMovedByUser(el)
+      const top = el.scrollTop
+      const target = getFollowBottomOffset(el)
+      const dist = target - top
+      const prevDist = target - lastTopRef.current
+      lastTopRef.current = top
+      setIsAtBottom(dist <= THRESHOLD_PX)
+      if (stuckRef.current || heldRef.current) return
+      if (Math.abs(dist) <= THRESHOLD_PX && Math.abs(dist) < Math.abs(prevDist)) {
+        stuckRef.current = true
+      }
     }
     // Any scrolling by hand ends a hold: from then on the bottom re-engages.
+    // The scroll it causes may already have happened (passive listeners).
     const userScrolls = () => {
       heldRef.current = false
+      const el = scrollRef.current
+      if (el) releaseIfMovedByUser(el)
     }
     const releaseStick = () => {
       const el = scrollRef.current
@@ -120,7 +174,17 @@ function createFollowBottomController(
       if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') releaseStick()
     }
     // A press on the scrollbar (or the content) is the user's hand too.
-    const handlePointerDown = () => userScrolls()
+    const handlePointerUp = () => {
+      pointerHeldRef.current = false
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+    }
+    const handlePointerDown = () => {
+      userScrolls()
+      pointerHeldRef.current = true
+      window.addEventListener('pointerup', handlePointerUp)
+      window.addEventListener('pointercancel', handlePointerUp)
+    }
     const ref = ((el: HTMLElement | null) => {
       const prev = ref.current
       if (prev === el) return
@@ -131,9 +195,11 @@ function createFollowBottomController(
         prev.removeEventListener('touchmove', handleTouchMove)
         prev.removeEventListener('keydown', handleKeyDown)
         prev.removeEventListener('pointerdown', handlePointerDown)
+        handlePointerUp()
       }
       ref.current = el
       if (el) {
+        lastTopRef.current = el.scrollTop
         resizeObserverRef.current?.observe(el)
         el.addEventListener('scroll', handleScroll, { passive: true })
         el.addEventListener('wheel', handleWheel, { passive: true })
@@ -146,10 +212,20 @@ function createFollowBottomController(
     return ref
   })()
 
+  /** The lock's own move to the bottom: recorded, so it never reads as the user's. */
   const scrollNow = () => {
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = getFollowBottomOffset(el)
+    lastTopRef.current = el.scrollTop
+  }
+
+  const followBottom = (): void => {
+    const el = scrollRef.current
+    if (!el || !isStuck()) return
+    const target = getFollowBottomOffset(el)
+    if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target
+    lastTopRef.current = el.scrollTop
   }
 
   const scrollToBottom = () => {
@@ -185,14 +261,21 @@ function createFollowBottomController(
         // Following must survive that resize too; reading history stays put.
         const viewportChanged = entries.some((entry) => entry.target === scrollRef.current)
         if (!grew && !viewportChanged) return
-        if (!autoScrollRef.current || !stuckRef.current) return
+        if (!isStuck()) {
+          // Not following: the end moved away (no scroll event says so).
+          const scroller = scrollRef.current
+          if (scroller) {
+            setIsAtBottom(getFollowBottomOffset(scroller) - scroller.scrollTop <= THRESHOLD_PX)
+          }
+          return
+        }
         if (isUserSelectingInside(el)) return
         scrollNow()
       })
       ro.observe(el)
       if (scrollRef.current) ro.observe(scrollRef.current)
       resizeObserverRef.current = ro
-      if (autoScrollRef.current && stuckRef.current) scrollNow()
+      if (isStuck()) scrollNow()
     }) as CallbackRef<HTMLElement>
     ref.current = null
     return ref
@@ -206,7 +289,7 @@ function createFollowBottomController(
   const captureAnchor = (): ChatScrollAnchor | null => {
     const el = scrollRef.current
     if (!el || el.clientHeight === 0) return null
-    if (autoScrollRef.current && stuckRef.current) return { atBottom: true }
+    if (isStuck()) return { atBottom: true }
     const top = el.getBoundingClientRect().top
     for (const row of el.querySelectorAll<HTMLElement>('[data-anchor-key]')) {
       const box = row.getBoundingClientRect()
@@ -243,8 +326,6 @@ function createFollowBottomController(
     return true
   }
 
-  const isStuck = (): boolean => autoScrollRef.current && stuckRef.current
-
   const unstick = (): void => {
     stuckRef.current = false
     heldRef.current = true
@@ -257,6 +338,7 @@ function createFollowBottomController(
     captureAnchor,
     restoreAnchor,
     isStuck,
+    followBottom,
     unstick,
     setAutoScroll: (enabled) => {
       autoScrollRef.current = enabled
@@ -293,6 +375,7 @@ export function useFollowBottom(autoScroll = true): FollowBottomApi {
     captureAnchor: controller.captureAnchor,
     restoreAnchor: controller.restoreAnchor,
     isStuck: controller.isStuck,
+    followBottom: controller.followBottom,
     unstick: controller.unstick
   }
 }

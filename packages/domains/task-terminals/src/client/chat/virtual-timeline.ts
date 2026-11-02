@@ -111,6 +111,12 @@ export function estimateRowSize(item: TimelineItem | undefined): number {
   }
 }
 
+/** What the virtual timeline needs of the follow-bottom lock (`useFollowBottom`). */
+export type TimelineFollow = Pick<
+  FollowBottomApi,
+  'scrollRef' | 'isStuck' | 'unstick' | 'followBottom'
+>
+
 /**
  * The chat timeline's virtualizer (`@tanstack/virtual-core`), wrapped for React
  * the way `useFollowBottom` wraps its scroll lock: a plain object created once,
@@ -123,9 +129,7 @@ export function estimateRowSize(item: TimelineItem | undefined): number {
  * with `display:none` are undone here: its rows would measure 0 tall (the sizes
  * are kept instead) and its scroller can lose its offset (put back on show).
  */
-export function createVirtualTimelineController(
-  follow: Pick<FollowBottomApi, 'scrollRef' | 'isStuck' | 'unstick'>
-): VirtualTimelineController {
+export function createVirtualTimelineController(follow: TimelineFollow): VirtualTimelineController {
   let items: readonly TimelineItem[] = []
   let itemKey: (item: TimelineItem, index: number) => Key = (_item, index) => index
   let version = 0
@@ -154,8 +158,8 @@ export function createVirtualTimelineController(
   const restoreAfterShow = (): void => {
     const el = getScrollElement()
     if (!el) return
-    const offset = follow.isStuck() ? getFollowBottomOffset(el) : offsetWhenHidden
-    if (Math.abs(el.scrollTop - offset) > 1) el.scrollTop = offset
+    if (follow.isStuck()) follow.followBottom()
+    else if (Math.abs(el.scrollTop - offsetWhenHidden) > 1) el.scrollTop = offsetWhenHidden
     virtualizer.scrollOffset = el.scrollTop
   }
 
@@ -251,8 +255,7 @@ export function createVirtualTimelineController(
     // for its next observer delivery. Reveals and text selection keep their place.
     const el = getScrollElement()
     if (el && el.clientHeight > 0 && follow.isStuck() && !isUserSelectingInside(el)) {
-      const target = getFollowBottomOffset(el)
-      if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target
+      follow.followBottom()
     }
   }
 
@@ -287,7 +290,7 @@ export function createVirtualTimelineController(
     scrollRef.current = el
     // Opening while following (the default): start at the bottom. The rows'
     // container already has its height; the content's own growth comes later.
-    if (el && follow.isStuck()) el.scrollTop = getFollowBottomOffset(el)
+    if (el && follow.isStuck()) follow.followBottom()
     // Rendering before this read the offset as 0 (no scroller yet): binding
     // would scroll there. Start from where the scroller is.
     if (el) virtualizer.scrollOffset = el.scrollTop
