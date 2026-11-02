@@ -40,7 +40,7 @@ test.skipIf(process.platform === 'win32')(
     const root = fakeRepo({ pendingBuilds: ['.', 'node-pty@1.1.0'], helperMode: 0o644 })
     try {
       expect(() => assertInstallHealthy(root), 'both problems named, each with its fix').toThrow(
-        /Fix: cd .* && pnpm rebuild --pending[\s\S]*spawn-helper is not executable.*Fix: chmod \+x/
+        /Fix: cd .* && pnpm rebuild --pending && node scripts\/postinstall\.js[\s\S]*spawn-helper is not executable.*Fix: chmod \+x/
       )
     } finally {
       fs.rmSync(root, { recursive: true, force: true })

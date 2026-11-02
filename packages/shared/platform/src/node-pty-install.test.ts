@@ -107,7 +107,7 @@ test('skipped builds are reported with the command that runs them', () => {
   expect(problems, 'one problem').toHaveLength(1)
   expect(problems[0]!.detail, 'names the skipped builds').toContain('., posix@4.2.0')
   expect(problems[0]!.fix, 'runs them where the manifest lives').toBe(
-    "cd '/r' && pnpm rebuild --pending"
+    "cd '/r' && pnpm rebuild --pending && node scripts/postinstall.js"
   )
 })
 
@@ -169,7 +169,7 @@ test.skipIf(process.platform === 'win32')(
     const nodePtyDir = fakeInstall({ pendingBuilds: ['.', 'node-pty@1.1.0'], helperMode: 0o644 })
     const problems = nodePtyInstallProblems(nodePtyDir)
     expect(problems.map((p) => p.fix)).toEqual([
-      `cd '${tmp}' && pnpm rebuild --pending`,
+      `cd '${tmp}' && pnpm rebuild --pending && node scripts/postinstall.js`,
       `chmod +x '${path.join(nodePtyDir, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')}'`
     ])
   }

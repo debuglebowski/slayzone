@@ -95,7 +95,9 @@ export function installProblems(state: NodePtyInstallState): NodePtyInstallProbl
     problems.push({
       check: 'Install scripts ran',
       detail: `pnpm skipped the install scripts of: ${state.pendingBuilds.join(', ')}.`,
-      fix: `cd ${shellQuote(state.repoRoot)} && pnpm rebuild --pending`
+      // pnpm 12's rebuild --pending alone left spawn-helper at 644 (2026-11-02):
+      // postinstall.js does the Electron rebuild + execute-bit restore.
+      fix: `cd ${shellQuote(state.repoRoot)} && pnpm rebuild --pending && node scripts/postinstall.js`
     })
   }
   const broken = state.helpers.filter((h) => !h.executable).map((h) => h.path)
