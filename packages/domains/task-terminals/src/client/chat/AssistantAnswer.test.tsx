@@ -86,7 +86,8 @@ describe('assistant answer presentation', () => {
             result,
             userMessageId: 'question',
             active: false,
-            hostIsActivity: false
+            hostIsActivity: false,
+            subAgents: []
           }}
         />
       </ChatViewContext.Provider>
@@ -152,6 +153,7 @@ describe('assistant answer presentation', () => {
             result,
             active: false,
             hostIsActivity: false,
+            subAgents: [],
             userMessageId: 'question'
           }}
         />

@@ -13,7 +13,7 @@ import {
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { LiveBlockStoreContext, streamKeyOf } from '@slayzone/terminal/client'
 import { AssistantMessageBody, InterruptedBlock } from './renderers'
-import { ActivityTurn } from './ActivityTurn'
+import { ActivityTurn, TurnSubAgents } from './ActivityTurn'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { MessageDetails } from './MessageDetails'
 import { TurnFooter } from './turn-footer'
@@ -176,6 +176,7 @@ export function AssistantAnswer({
               <AssistantMessageBody item={item} />
             )}
           </div>
+          {turn && <TurnSubAgents subAgents={turn.subAgents} rowOf={rowOf} />}
           {turn && (
             <TurnFooter
               className={cn(

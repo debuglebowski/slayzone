@@ -113,18 +113,28 @@ describe('activity view: sub-agents', () => {
   const agent = (toolUseId: string, phase: 'in-flight' | 'completed' | 'failed') =>
     ({ kind: 'sub-agent', toolUseId, phase, backgrounded: true, timestamp: 0 }) as TimelineItem
 
-  it('a running sub-agent shows on its own; an ended one folds into the Activities', () => {
+  it("the turn's sub-agents, running or ended, are their own list — never Activities", () => {
     const running = agent('a1', 'in-flight')
     const done = agent('a2', 'completed')
     const view = activityView([user, running, done, reply, result], false)
-    expect(view.rows).toEqual([user, running, reply])
-    expect(view.turns.get(reply)).toMatchObject({ final: reply, items: [done] })
+    expect(view.rows).toEqual([user, reply])
+    expect(view.turns.get(reply)).toMatchObject({
+      final: reply,
+      items: [],
+      subAgents: [running, done]
+    })
     expect(view.hosts.get(done)).toBe(reply)
   })
 
-  it('an ended sub-agent is never the reply', () => {
+  it('a sub-agent is never the reply', () => {
     const done = agent('a1', 'failed')
     const view = activityView([user, reply, done, result], false)
-    expect(view.turns.get(reply)).toMatchObject({ final: reply, items: [done] })
+    expect(view.turns.get(reply)).toMatchObject({ final: reply, items: [], subAgents: [done] })
+  })
+
+  it('a turn with only sub-agents still has a turn for them', () => {
+    const running = agent('a1', 'in-flight')
+    const view = activityView([user, running], true)
+    expect([...view.turns.values()][0]).toMatchObject({ subAgents: [running], active: true })
   })
 })

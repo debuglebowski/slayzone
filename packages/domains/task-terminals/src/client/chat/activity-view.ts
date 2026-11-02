@@ -1,12 +1,12 @@
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { unifiedChangeRows } from './files-changed/turn-changes'
 
-export type ActivityItem = Extract<
-  TimelineItem,
-  { kind: 'text' | 'thinking' | 'tool' | 'stderr' | 'sub-agent' }
->
+export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
+export type SubAgentItem = Extract<TimelineItem, { kind: 'sub-agent' }>
 export interface ActivityTurn {
   items: ActivityItem[]
+  /** The turn's sub-agents: their own rows beside the Activities, never inside them. */
+  subAgents: SubAgentItem[]
   files: Array<Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }>>
   final: Extract<TimelineItem, { kind: 'text' }> | null
   result?: Extract<TimelineItem, { kind: 'result' }>
@@ -54,15 +54,12 @@ export function activityView(
         item.kind === 'text' ||
         item.kind === 'thinking' ||
         item.kind === 'stderr' ||
-        // A sub-agent shows on its own while it runs; once it ended, it is
-        // part of the turn's activity like a tool call.
-        (item.kind === 'sub-agent' && item.phase !== 'in-flight') ||
         (item.kind === 'tool' &&
           item.invocation.name !== 'ExitPlanMode' &&
           item.invocation.name !== 'AskUserQuestion')
     )
     // Process diagnostics can arrive after the reply; they don't make it progress text.
-    const last = activity.findLast((item) => item.kind !== 'stderr' && item.kind !== 'sub-agent')
+    const last = activity.findLast((item) => item.kind !== 'stderr')
     const result = segment.find((item) => item.kind === 'result')
     const user = segment.find((item) => item.kind === 'user-text')
     // Session-file imports have answered user messages, but no live result events.
@@ -83,19 +80,26 @@ export function activityView(
       (item): item is Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }> =>
         item.kind === 'files-changed' || item.kind === 'workspace-changes'
     )
-    const hidden = new Set<TimelineItem>([...entries, ...files])
+    const subAgents = segment.filter((item): item is SubAgentItem => item.kind === 'sub-agent')
+    const hidden = new Set<TimelineItem>([...entries, ...files, ...subAgents])
     if (final && result) hidden.add(result)
     const kept = segment.filter((item) => !hidden.has(item))
     // Preserve a row as an anchor for assistant-initiated turns with no final reply.
-    const host = final ?? kept[kept.length - 1] ?? entries[0] ?? files[0]
+    const host = final ?? kept[kept.length - 1] ?? entries[0] ?? subAgents[0] ?? files[0]
     if (
       host &&
-      (entries.length || files.length || active || final || host.kind === 'interrupted')
+      (entries.length ||
+        subAgents.length ||
+        files.length ||
+        active ||
+        final ||
+        host.kind === 'interrupted')
     ) {
       const hostIsActivity = hidden.has(host)
       if (hostIsActivity) kept.push(host)
       turns.set(host, {
         items: entries,
+        subAgents,
         files,
         final,
         result,
@@ -105,6 +109,7 @@ export function activityView(
       })
       for (const item of entries) hosts.set(item, host)
       for (const item of files) hosts.set(item, host)
+      for (const item of subAgents) hosts.set(item, host)
       if (final && result) hosts.set(result, host)
     }
     output.push(...kept)
