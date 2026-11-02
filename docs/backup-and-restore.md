@@ -38,7 +38,9 @@ attachments live on the owning computer, scoped to its authenticated hub. Its
 storage directory contains `computer-runtime/<hub-scope-hash>/chat.sqlite` and
 referenced blobs. A hub-only backup does not include this computer data.
 Use each computer's chat backup controls to snapshot its database and referenced
-files together. Restores open separate, read-only archives: readable history is
+files together, including original task files and their saved versions. Restored
+archives let you download each version or include it in the history export.
+Restores open separate, read-only archives: readable history is
 guaranteed after verification; provider session resumability is not.
 
 `SLAYZONE_HUB_SESSION_RETENTION_DAYS` also configures computer chat retention for

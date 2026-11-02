@@ -18,6 +18,7 @@ import {
 } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { createReadStream, promises as fsAsync } from 'node:fs'
+import { z } from 'zod'
 import type {
   ComputerChatBackup,
   ComputerChatArchive,
@@ -38,6 +39,23 @@ interface Manifest {
   backup: ComputerChatBackup
   files: FileEntry[]
 }
+const backupSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(['manual', 'auto']),
+  createdAt: z.number().finite().nonnegative(),
+  sizeBytes: z.number().int().nonnegative(),
+  events: z.number().int().nonnegative(),
+  conversations: z.number().int().nonnegative(),
+  readOnlyRestore: z.literal(true),
+  providerResumable: z.literal(false)
+})
+const archiveSchema = z.object({
+  id: z.string().uuid(),
+  backupId: z.string().uuid(),
+  createdAt: z.number().finite().nonnegative(),
+  readOnly: z.literal(true),
+  providerResumable: z.literal(false)
+})
 const hashFile = (path: string) => {
   const hash = createHash('sha256'),
     fd = openSync(path, 'r'),
@@ -112,12 +130,23 @@ export function createChatBackups(store: ChatStorage) {
   }
   function manifest(root: string, id: string): Manifest {
     const path = folder(root, id),
-      value = JSON.parse(readFileSync(fileWithin(path, 'manifest.json'), 'utf8')) as Manifest
+      value = z
+        .object({
+          version: z.literal(1),
+          scope: z.literal(scope),
+          backup: backupSchema,
+          files: z.array(
+            z.object({
+              path: z.string().min(1),
+              hash: z.string().regex(/^[a-f0-9]{64}$/),
+              size: z.number().int().nonnegative()
+            })
+          )
+        })
+        .parse(JSON.parse(readFileSync(fileWithin(path, 'manifest.json'), 'utf8')))
     if (
-      value.version !== 1 ||
-      value.scope !== scope ||
-      !UUID.test(value.backup.id) ||
-      !Array.isArray(value.files)
+      (root === dir && value.backup.id !== id) ||
+      new Set(value.files.map((f) => f.path)).size !== value.files.length
     )
       throw new Error('Backup scope or format mismatch')
     return value
@@ -125,9 +154,16 @@ export function createChatBackups(store: ChatStorage) {
   function descriptor(root: string, id: string) {
     return manifest(root, id).backup
   }
-  async function verify(root: string, id: string) {
-    const m = manifest(root, id),
-      path = folder(root, id)
+  function archiveDescriptor(id: string): ComputerChatArchive {
+    const path = folder(archiveDir, id),
+      value = archiveSchema.parse(
+        JSON.parse(readFileSync(fileWithin(path, 'archive.json'), 'utf8'))
+      )
+    if (value.id !== id || value.backupId !== manifest(archiveDir, id).backup.id)
+      throw new Error('Archive descriptor mismatch')
+    return value
+  }
+  async function verifyContent(m: Manifest, path: string) {
     if (!m.files.some((f) => f.path === 'chat.sqlite'))
       throw new Error('Backup database is missing')
     for (const file of m.files) {
@@ -153,7 +189,12 @@ export function createChatBackups(store: ChatStorage) {
     }
     return m
   }
+  async function verify(root: string, id: string) {
+    return verifyContent(manifest(root, id), folder(root, id))
+  }
   const pending = new Map<string, Promise<ComputerChatBackup>>()
+  const restoring = new Map<string, { backupId: string; work: Promise<ComputerChatArchive> }>()
+  const restorePins = new Map<string, number>()
   let closed = false,
     timer: ReturnType<typeof setTimeout> | null = null
   const settingsPath = join(dir, 'settings.json')
@@ -184,7 +225,7 @@ export function createChatBackups(store: ChatStorage) {
           return {
             id,
             kind: 'manual' as const,
-            createdAt: statSync(folder(dir, id)).mtimeMs,
+            createdAt: lstatSync(join(dir, id)).mtimeMs,
             sizeBytes: 0,
             events: 0,
             conversations: 0,
@@ -320,9 +361,12 @@ export function createChatBackups(store: ChatStorage) {
             for (const item of list()
               .filter((b) => b.kind === 'auto')
               .slice(policy.maxAutoBackups))
-              rmSync(folder(dir, item.id), { recursive: true, force: true })
+              if (!restorePins.has(item.id))
+                rmSync(folder(dir, item.id), { recursive: true, force: true })
         })
-        .catch(() => {})
+        .catch(() => {
+          // Keep the previous verified backups; the next scheduled run retries.
+        })
         .finally(schedule)
     }, delay)
     timer.unref()
@@ -335,6 +379,7 @@ export function createChatBackups(store: ChatStorage) {
     list,
     delete(id: string) {
       if (pending.has(id)) throw new Error('Backup is in progress')
+      if (restorePins.has(id)) throw new Error('Backup restore is in progress')
       rmSync(folder(dir, id), { recursive: true, force: true })
     },
     settings: () => ({ ...policy }),
@@ -354,58 +399,83 @@ export function createChatBackups(store: ChatStorage) {
       schedule()
     },
     async restore(backupId: string, id: string = randomUUID()): Promise<ComputerChatArchive> {
-      const m = await verify(dir, backupId),
-        source = folder(dir, backupId),
+      if (closed) throw new Error('Backup service is closed')
+      const source = folder(dir, backupId),
         target = folder(archiveDir, id)
-      if (existsSync(target)) {
-        const existing = JSON.parse(
-          readFileSync(fileWithin(target, 'archive.json'), 'utf8')
-        ) as ComputerChatArchive
-        if (existing.backupId !== backupId) throw new Error('Archive id conflict')
-        return existing
+      const running = restoring.get(id)
+      if (running) {
+        if (running.backupId !== backupId) throw new Error('Archive id conflict')
+        return running.work
       }
-      const temp = join(archiveDir, `.pending-${id}`)
-      rmSync(temp, { recursive: true, force: true })
-      mkdirSync(temp, { mode: 0o700 })
-      try {
-        for (const file of [...m.files, { path: 'manifest.json' }]) {
-          const dest = join(temp, file.path)
-          mkdirSync(resolve(dest, '..'), { recursive: true, mode: 0o700 })
-          await copyDurable(fileWithin(source, file.path), dest)
+      restorePins.set(backupId, (restorePins.get(backupId) ?? 0) + 1)
+      const work = (async () => {
+        if (existsSync(target)) {
+          const existing = archiveDescriptor(id)
+          if (existing.backupId !== backupId) throw new Error('Archive id conflict')
+          return existing
         }
-        const archive: ComputerChatArchive = {
-          id,
-          backupId,
-          createdAt: Date.now(),
-          readOnly: true,
-          providerResumable: false
-        }
-        durableJson(join(temp, 'archive.json'), archive)
-        await syncDir(temp)
-        renameSync(temp, target)
-        await syncDir(archiveDir)
-        return archive
-      } catch (error) {
+        const m = await verify(dir, backupId),
+          temp = join(archiveDir, `.pending-${id}`)
         rmSync(temp, { recursive: true, force: true })
-        throw error
-      }
+        mkdirSync(temp, { mode: 0o700 })
+        try {
+          for (const file of m.files) {
+            const dest = join(temp, file.path)
+            mkdirSync(resolve(dest, '..'), { recursive: true, mode: 0o700 })
+            await copyDurable(fileWithin(source, file.path), dest)
+          }
+          // Verify the actual copy before publishing; the source may have changed during copying.
+          await verifyContent(m, temp)
+          durableJson(join(temp, 'manifest.json'), m)
+          const archive: ComputerChatArchive = {
+            id,
+            backupId,
+            createdAt: Date.now(),
+            readOnly: true,
+            providerResumable: false
+          }
+          durableJson(join(temp, 'archive.json'), archive)
+          await syncDir(temp)
+          renameSync(temp, target)
+          await syncDir(archiveDir)
+          return archive
+        } catch (error) {
+          rmSync(temp, { recursive: true, force: true })
+          throw error
+        }
+      })().finally(() => {
+        restoring.delete(id)
+        const pins = restorePins.get(backupId)! - 1
+        if (pins) restorePins.set(backupId, pins)
+        else restorePins.delete(backupId)
+      })
+      restoring.set(id, { backupId, work })
+      return work
     },
     listArchives() {
       return readdirSync(archiveDir)
         .filter((id) => UUID.test(id))
-        .map(
-          (id) =>
-            JSON.parse(
-              readFileSync(fileWithin(folder(archiveDir, id), 'archive.json'), 'utf8')
-            ) as ComputerChatArchive
-        )
-        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((id): ComputerChatArchive => {
+          try {
+            return archiveDescriptor(id)
+          } catch {
+            return {
+              id,
+              backupId: id,
+              createdAt: 0,
+              readOnly: true,
+              providerResumable: false,
+              error: 'Archive descriptor is invalid'
+            }
+          }
+        })
+        .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
     },
     conversations(id: string) {
       return withArchive(id, (db) =>
         db
           .prepare(
-            "SELECT id,task_id AS taskId,tab_id AS tabId,mode,(SELECT count(*) FROM events e WHERE e.conversation_id=c.id) AS events FROM conversations c WHERE state<>'deleted' AND task_id NOT LIKE '\\_\\_%' ESCAPE '\\' ORDER BY task_id,tab_id"
+            "SELECT id,task_id AS taskId,tab_id AS tabId,mode,CASE WHEN tab_id LIKE 'artifact-store:%' THEN 'Task files' END AS title,(SELECT count(*) FROM events e WHERE e.conversation_id=c.id) AS events FROM conversations c WHERE state<>'deleted' AND task_id NOT LIKE '\\_\\_%' ESCAPE '\\' ORDER BY task_id,tab_id"
           )
           .all()
       ) as Array<{ id: string; taskId: string; tabId: string; mode: string; events: number }>
@@ -442,11 +512,28 @@ export function createChatBackups(store: ChatStorage) {
         let bytes = 0,
           hasMore = false,
           nextCursor = afterCursor
+        const hasArtifacts = !!db
+          .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_owners'")
+          .get()
+        const artifactRows = hasArtifacts
+          ? ` UNION ALL
+          SELECT v.rowid*2+1 AS cursor,'artifact-version' AS kind,v.id,
+            json_object('artifactId',a.id,'name',a.title,'contentHash',v.content_hash,'size',v.size,
+              'versionNum',v.version_num,'versionName',v.name,'createdAt',v.created_at) AS value
+          FROM artifact_versions v JOIN task_artifacts a ON a.id=v.artifact_id
+          JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
+          WHERE o.conversation_id=?`
+          : ''
         for (const row of db
-          .prepare(
-            "SELECT rowid AS cursor,kind,id,value FROM records WHERE conversation_id=? AND rowid>? AND (kind IN ('draft','prompt','workspace','thread') OR (kind='settings' AND id LIKE 'diagnostic:%')) ORDER BY rowid LIMIT 101"
-          )
-          .iterate(conversationId, afterCursor) as Iterable<{
+          .prepare(`SELECT * FROM (
+            SELECT rowid*2 AS cursor,kind,id,value FROM records WHERE conversation_id=? AND
+              (kind IN ('draft','prompt','workspace','thread') OR (kind='settings' AND id LIKE 'diagnostic:%'))
+            ${artifactRows}) WHERE cursor>? ORDER BY cursor LIMIT 101`)
+          .iterate(
+            conversationId,
+            ...(hasArtifacts ? [conversationId] : []),
+            afterCursor
+          ) as Iterable<{
           cursor: number
           kind: string
           id: string
@@ -486,15 +573,36 @@ export function createChatBackups(store: ChatStorage) {
         return readFileSync(file)
       })
     },
+    file(id: string, conversationId: string, artifactId: string, contentHash: string) {
+      if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Invalid archive file hash')
+      return withArchive(id, (db) => {
+        const row = db
+          .prepare(`SELECT a.title AS name,v.size FROM task_artifacts a
+          JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
+          JOIN artifact_versions v ON v.artifact_id=a.id
+          WHERE o.conversation_id=? AND a.id=? AND v.content_hash=?`)
+          .get(conversationId, artifactId, contentHash) as
+          | { name: string; size: number }
+          | undefined
+        if (!row) throw new Error('File does not belong to this archive conversation')
+        const path = fileWithin(
+          folder(archiveDir, id),
+          `blobs/${contentHash.slice(0, 2)}/${contentHash.slice(2)}`
+        )
+        if (statSync(path).size !== row.size || hashFile(path) !== contentHash)
+          throw new Error('Archive file integrity failure')
+        return { name: row.name, data: readFileSync(path) }
+      })
+    },
     async close() {
       closed = true
       if (timer) clearTimeout(timer)
-      await Promise.allSettled([...pending.values()])
+      await Promise.allSettled([...pending.values(), ...[...restoring.values()].map((r) => r.work)])
     }
   }
   function withArchive<T>(id: string, read: (db: Database.Database) => T): T {
     const path = folder(archiveDir, id)
-    manifest(archiveDir, id)
+    archiveDescriptor(id)
     const db = new Database(fileWithin(path, 'chat.sqlite'), {
       readonly: true,
       fileMustExist: true

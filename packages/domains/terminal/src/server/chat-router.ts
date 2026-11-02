@@ -173,6 +173,22 @@ export const chatRouter = router({
       .mutation(({ input }) => computer().configureBackups(input.computerId, input.settings))
   }),
   archives: router({
+    file: publicProcedure
+      .input(
+        archiveConversation.extend({
+          artifactId: z.string().min(1).max(200),
+          contentHash: z.string().regex(/^[a-f0-9]{64}$/)
+        })
+      )
+      .query(({ input }) =>
+        computer().archiveFile(
+          input.computerId,
+          input.archiveId,
+          input.conversationId,
+          input.artifactId,
+          input.contentHash
+        )
+      ),
     list: publicProcedure
       .input(backupTarget)
       .query(({ input }) => computer().listArchives(input.computerId)),

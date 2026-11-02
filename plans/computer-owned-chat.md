@@ -214,3 +214,22 @@ pass. Remaining: archive/artifact edges, lifecycle command barriers, draft scope
 audit, full E2E/privacy/performance checks, and safe main integration.
 
 Unresolved questions: none.
+
+## Backup completion checkpoint
+
+Restore retries with the same archive ID share one operation; conflicting backup
+IDs fail. Restores pin source backups before verification. Manual deletion and
+automatic retention respect those pins; shutdown awaits all active restores. The
+actual copied database/blobs are verified before durable archive publication.
+Malformed descriptors remain visible as errors without hiding other archives.
+
+Archives page original task-file versions alongside saved chat records. Version
+downloads and JSON exports read only the archive and enforce conversation ownership;
+files remain readable after deleting the live task.
+
+Validation: 1,313 runtime/protocol/relay/router/authorization tests pass, including
+eight backup tests. Four affected typechecks, both bundles and changed-file lint
+pass. Remaining: artifact edges, lifecycle command barriers, draft isolation audit,
+full desktop/mobile E2E/privacy/performance checks, main integration.
+
+Unresolved questions: none.

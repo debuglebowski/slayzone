@@ -17,6 +17,7 @@ export interface ComputerChatArchive {
   createdAt: number
   readOnly: true
   providerResumable: false
+  error?: string
 }
 export interface ComputerChatBackupPolicy {
   autoEnabled: boolean
@@ -40,6 +41,16 @@ export interface ArchivedChatRecordPage {
   records: Array<{ cursor: number; kind: string; id: string; value: unknown }>
   hasMore: boolean
   nextCursor: number
+}
+/** Original task file version in a read-only computer archive. */
+export interface ArchivedArtifactVersion {
+  artifactId: string
+  name: string
+  contentHash: string
+  size: number
+  versionNum: number
+  versionName: string | null
+  createdAt: string
 }
 export interface ChatComputerOps {
   listBackups(computerId: string): Promise<ComputerChatBackup[]>
@@ -72,6 +83,13 @@ export interface ChatComputerOps {
     conversationId: string,
     ref: ChatAttachment
   ): Promise<{ data: string }>
+  archiveFile(
+    computerId: string,
+    archiveId: string,
+    conversationId: string,
+    artifactId: string,
+    contentHash: string
+  ): Promise<{ name: string; data: string }>
 }
 
 export interface ChatAvailability {

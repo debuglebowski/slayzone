@@ -62,6 +62,7 @@ export type {
   ArchivedChatConversation,
   ArchivedChatPage,
   ArchivedChatRecordPage,
+  ArchivedArtifactVersion,
   ChatComputerOps,
   ChatAvailability
 } from './computer-chat'

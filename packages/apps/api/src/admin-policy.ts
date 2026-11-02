@@ -450,6 +450,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.archives.read': 'user',
   'chat.archives.records': 'user',
   'chat.archives.attachment': 'user',
+  'chat.archives.file': 'user',
   'chat.availability': 'user',
   'chat.supports': 'user',
   'chat.switchConversation': 'user',

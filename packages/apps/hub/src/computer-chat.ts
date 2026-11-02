@@ -354,7 +354,15 @@ export function createComputerChatServices(opts: {
         archiveId,
         conversationId,
         ref
-      }) as ReturnType<ChatComputerOps['archiveAttachment']>
+      }) as ReturnType<ChatComputerOps['archiveAttachment']>,
+    archiveFile: (pc, archiveId, conversationId, artifactId, contentHash) =>
+      computerRequest(pc, {
+        kind: 'archive.file',
+        archiveId,
+        conversationId,
+        artifactId,
+        contentHash
+      }) as ReturnType<ChatComputerOps['archiveFile']>
   }
   return {
     computers,

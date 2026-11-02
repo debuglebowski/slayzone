@@ -28,6 +28,7 @@ import {
 } from '@slayzone/ui'
 import {
   userMessageAttachments,
+  type ArchivedArtifactVersion,
   type ChatAttachment,
   type AgentEvent
 } from '@slayzone/terminal-contracts'
@@ -254,8 +255,8 @@ function ComputerBackupList({ computerId, usable }: { computerId: string; usable
             </SelectTrigger>
             <SelectContent>
               {archives.data.map((a) => (
-                <SelectItem key={a.id} value={a.id}>
-                  {new Date(a.createdAt).toLocaleString()}
+                <SelectItem key={a.id} value={a.id} disabled={!!a.error}>
+                  {a.error ?? new Date(a.createdAt).toLocaleString()}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -360,15 +361,26 @@ function ArchiveConversation(target: {
       }
     } catch (e) {
       setError(errorMessage(e))
-    } finally {
-      setBusy(false)
     }
+    setBusy(false)
   }
   const saveAttachment = async (ref: ChatAttachment) => {
     try {
       const { data } = await api.chat.archives.attachment.query({ ...target, ref })
       const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
       download(new Blob([bytes], { type: ref.mediaType }), ref.name)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
+  const saveFile = async (version: ArchivedArtifactVersion) => {
+    try {
+      const file = await api.chat.archives.file.query({
+        ...target,
+        artifactId: version.artifactId,
+        contentHash: version.contentHash
+      })
+      download(new Blob([Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0))]), file.name)
     } catch (e) {
       toast.error(errorMessage(e))
     }
@@ -406,6 +418,19 @@ function ArchiveConversation(target: {
       const attachments = []
       for (const ref of refs.values())
         attachments.push({ ref, ...(await api.chat.archives.attachment.query({ ...target, ref })) })
+      const files = []
+      for (const record of allRecords) {
+        if (record.kind !== 'artifact-version') continue
+        const version = record.value as ArchivedArtifactVersion
+        files.push({
+          version,
+          ...(await api.chat.archives.file.query({
+            ...target,
+            artifactId: version.artifactId,
+            contentHash: version.contentHash
+          }))
+        })
+      }
       download(
         new Blob(
           [
@@ -418,7 +443,8 @@ function ArchiveConversation(target: {
                 ...target,
                 events: allEvents,
                 records: allRecords,
-                attachments
+                attachments,
+                files
               },
               null,
               2
@@ -430,9 +456,8 @@ function ArchiveConversation(target: {
       )
     } catch (e) {
       setError(errorMessage(e))
-    } finally {
-      setBusy(false)
     }
+    setBusy(false)
   }
   return (
     <div className="space-y-3">
@@ -464,14 +489,22 @@ function ArchiveConversation(target: {
             ))}
         </div>
       ))}
-      {records.map((record) => (
-        <details key={record.cursor}>
-          <summary className="text-sm">Saved {record.kind}</summary>
-          <pre className="whitespace-pre-wrap break-all text-xs">
-            {JSON.stringify(record.value, null, 2)}
-          </pre>
-        </details>
-      ))}
+      {records.map((record) =>
+        record.kind === 'artifact-version' ? (
+          <ArchivedFileVersion
+            key={record.cursor}
+            version={record.value as ArchivedArtifactVersion}
+            onDownload={saveFile}
+          />
+        ) : (
+          <details key={record.cursor}>
+            <summary className="text-sm">Saved {record.kind}</summary>
+            <pre className="whitespace-pre-wrap break-all text-xs">
+              {JSON.stringify(record.value, null, 2)}
+            </pre>
+          </details>
+        )
+      )}
       {error && (
         <p role="alert" className="text-destructive text-sm">
           {error}
@@ -482,6 +515,29 @@ function ArchiveConversation(target: {
           {busy ? 'Loading…' : events.length || records.length ? 'Load more' : 'Load saved history'}
         </Button>
       )}
+    </div>
+  )
+}
+
+function ArchivedFileVersion({
+  version,
+  onDownload
+}: {
+  version: ArchivedArtifactVersion
+  onDownload: (version: ArchivedArtifactVersion) => Promise<void>
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded border p-2 text-sm">
+      <div>
+        <p>{version.name}</p>
+        <p className="text-xs text-muted-foreground">
+          Version {version.versionNum}
+          {version.versionName ? ` · ${version.versionName}` : ''} · {version.size} bytes
+        </p>
+      </div>
+      <Button size="sm" variant="outline" onClick={() => void onDownload(version)}>
+        Download
+      </Button>
     </div>
   )
 }

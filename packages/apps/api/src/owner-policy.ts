@@ -688,6 +688,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.archives.read': checked(computer('computerId')),
   'chat.archives.records': checked(computer('computerId')),
   'chat.archives.attachment': checked(computer('computerId')),
+  'chat.archives.file': checked(computer('computerId')),
   'chat.availability': checked(tab('tabId')),
   'chat.supports': none('a terminal mode id'),
   'chat.workspaceChanges.get': checked(tab('tabId')),

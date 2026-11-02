@@ -80,6 +80,13 @@ const requestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('archive.list') }),
   z.object({ kind: z.literal('archive.conversations'), archiveId: z.string().uuid() }),
   z.object({
+    kind: z.literal('archive.file'),
+    archiveId: z.string().uuid(),
+    conversationId: z.string(),
+    artifactId: z.string().min(1).max(200),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }),
+  z.object({
     kind: z.literal('archive.read'),
     archiveId: z.string().uuid(),
     conversationId: z.string(),
@@ -385,6 +392,15 @@ export function createChatRuntimeHandlers(opts: {
         return r.backups.listArchives()
       case 'archive.conversations':
         return r.backups.conversations(req.archiveId)
+      case 'archive.file': {
+        const file = r.backups.file(
+          req.archiveId,
+          req.conversationId,
+          req.artifactId,
+          req.contentHash
+        )
+        return { name: file.name, data: file.data.toString('base64') }
+      }
       case 'archive.read':
         return r.backups.read(req.archiveId, req.conversationId, req.afterSeq)
       case 'archive.records':
