@@ -229,6 +229,10 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
     // offset would put the view back where the reveal had it.
     const at = getScrollElement()?.scrollTop ?? virtualizer.scrollOffset ?? 0
     virtualizer.scrollOffset = at
+    // A completed reveal is not an upward gesture. Keep compensating for
+    // earlier rows that remeasure after an anchor restore; retaining the
+    // reveal's backward direction suppresses those corrections.
+    virtualizer.scrollDirection = null
     virtualizer.scrollToOffset(at)
   }
 

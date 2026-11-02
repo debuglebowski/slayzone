@@ -188,6 +188,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
     await expect(t.panel.getByText(FIRST_PROMPT)).toBeVisible({ timeout: 10_000 })
     await expect(probe).toHaveCount(0) // unmounted
     await t.page.keyboard.press('Meta+ArrowDown')
+    await expect(t.panel.getByText(LAST_REPLY)).toBeVisible({ timeout: 10_000 })
     await expandActivities(t.panel)
     await expect(probe).toBeVisible({ timeout: 10_000 })
     await expect(output).toHaveCount(0) // still collapsed
@@ -202,6 +203,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
     await t.page.getByRole('menuitem', { name: 'Collapse all expanded blocks' }).click()
     await t.composer.focus()
     await t.page.keyboard.press('Meta+ArrowDown')
+    await expect(t.panel.getByText(LAST_REPLY)).toBeVisible({ timeout: 10_000 })
     await expandActivities(t.panel)
     await expect(probe).toBeVisible({ timeout: 10_000 })
     await expect(output).toHaveCount(0)

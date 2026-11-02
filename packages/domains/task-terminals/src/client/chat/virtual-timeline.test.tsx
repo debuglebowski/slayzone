@@ -245,6 +245,25 @@ describe('virtual timeline', () => {
     expect(Math.round(row().getBoundingClientRect().top)).toBe(-37)
   })
 
+  it('keeps a restored anchor when an earlier row remeasures after an upward reveal', async () => {
+    layout.restore()
+    let extra = 0
+    layout = installTimelineLayout({
+      viewport: 600,
+      rowHeight: (row) => 50 + (row.dataset.index === '999' ? extra : 0)
+    })
+    const { container } = render(<Harness items={rows(5_000)} />)
+    await settle(layout)
+    act(() => api!.virtual.revealKey('k:m1000'))
+    await settle(layout)
+    const row = () => container.querySelector<HTMLElement>('[data-item-key="k:m1000"]')!
+    layout.scroller()!.scrollTop += row().getBoundingClientRect().top + 27
+    act(() => api!.virtual.cancelReveal())
+    extra = 32
+    await settle(layout)
+    expect(Math.round(row().getBoundingClientRect().top)).toBe(-27)
+  })
+
   it('reports the row at the top of the view', async () => {
     render(<Harness items={rows(1_000)} />)
     await settle(layout)

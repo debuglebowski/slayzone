@@ -329,8 +329,14 @@ test.describe('Terminal clear buffer', () => {
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(mainWindow, sessionId)
 
-    await runCommand(mainWindow, sessionId, `echo ${markerA}`)
-    await waitForBufferContains(mainWindow, sessionId, markerA)
+    // Build the marker in the shell: its literal must never occur in input
+    // echo, which arrives before command output (and can still look idle).
+    await runCommand(
+      mainWindow,
+      sessionId,
+      `printf 'CLEAR_A_%s\\n' '${markerA.slice('CLEAR_A_'.length)}'`
+    )
+    await waitForBufferContains(mainWindow, sessionId, `${markerA}\r\n`)
     // Wait for shell to be idle (prompt displayed = all PTY output flushed)
     await waitForPtyState(mainWindow, sessionId, 'idle')
 

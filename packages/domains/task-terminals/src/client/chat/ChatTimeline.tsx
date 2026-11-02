@@ -322,7 +322,7 @@ export function ChatTimeline({
             {!isAtBottom && (
               <button
                 onClick={() => void scrollToBottom()}
-                className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-background border border-border shadow-md text-xs hover:bg-muted transition-colors"
+                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-background border border-border shadow-md text-xs hover:bg-muted transition-colors"
               >
                 <ArrowDown className="size-3" />
                 Jump to latest

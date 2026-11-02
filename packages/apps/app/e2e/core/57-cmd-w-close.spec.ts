@@ -122,13 +122,20 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     const fileButton = page
       .locator(`[data-panel-id="editor"]:visible button.w-full:has-text("${fileName}")`)
       .first()
-    if (await fileButton.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    if (
+      await fileButton.waitFor({ state: 'visible', timeout: 8_000 }).then(
+        () => true,
+        () => false
+      )
+    ) {
       await fileButton.click()
       return
     }
 
     await pressShortcut(page, 'search')
-    const quickOpen = page.getByPlaceholder('Open file by name...').last()
+    const quickOpen = page
+      .getByPlaceholder('Search files, folders, commands, projects, and tasks...')
+      .last()
     await expect(quickOpen).toBeVisible({ timeout: 5_000 })
     await quickOpen.fill(fileName)
     const quickOpenMatch = page.locator('[cmdk-item]').filter({ hasText: fileName }).first()

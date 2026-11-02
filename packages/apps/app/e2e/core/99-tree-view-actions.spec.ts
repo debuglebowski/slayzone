@@ -48,11 +48,7 @@ function taskRow(page: Page, taskId: string) {
 
 async function rightClickRow(page: Page, taskId: string) {
   const row = taskRow(page, taskId)
-  await row.scrollIntoViewIfNeeded().catch(() => {})
-  const box = await row.boundingBox()
-  if (!box) throw new Error(`row bbox missing for ${taskId}`)
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' })
+  await row.click({ button: 'right' })
 }
 
 function menuItem(page: Page, name: RegExp | string) {
