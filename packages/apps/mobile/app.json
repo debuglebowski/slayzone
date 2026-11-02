@@ -4,17 +4,22 @@
     "slug": "slayzone-mobile",
     "scheme": "slayzone",
     "orientation": "default",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "platforms": ["ios"],
     "updates": { "enabled": false },
     "ios": {
-      "bundleIdentifier": "com.slayzone.mobile",
+      "bundleIdentifier": "zone.slay.app",
+      "buildNumber": "2",
       "supportsTablet": true,
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": true
         }
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "plugins": [
