@@ -30,6 +30,9 @@ import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import type { ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
 
+export const sessionRecordKey = (mode: string, conversationId: string | null): string =>
+  `session:${JSON.stringify([mode, conversationId])}`
+
 export interface ChatBootstrap {
   identity: ConversationIdentity
   projectId: string | null
@@ -418,7 +421,7 @@ export function createLocalChatData(
       store.transaction(() => {
         const tabId = taskTab(input.taskId, input.mode)
         const value = { ...input, createdAt: input.createdAt ?? Date.now() }
-        set(tabId, 'settings', `session:${input.conversationId ?? 'reset'}`, value)
+        set(tabId, 'settings', sessionRecordKey(input.mode, input.conversationId), value)
         if (input.conversationId)
           set(tabId, 'settings', `session-proof:${input.mode}:${input.conversationId}`, true)
         patchSync(
@@ -433,7 +436,9 @@ export function createLocalChatData(
     isHonoredConversation: async (t, m, id) => {
       if (deleted(t, m, id)) return false
       const tabId = taskTab(t, m),
-        session = get<{ mode?: string }>(tabId, 'settings', `session:${id}`)
+        session =
+          get<{ mode?: string }>(tabId, 'settings', sessionRecordKey(m, id)) ??
+          get<{ mode?: string }>(tabId, 'settings', `session:${id}`)
       return (
         Boolean(get(tabId, 'settings', `session-proof:${m}:${id}`)) ||
         Boolean(session && (session.mode ?? owner(tabId).mode) === m) ||

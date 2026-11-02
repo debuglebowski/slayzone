@@ -354,7 +354,9 @@ export function createHubChatRelay(opts: {
         createdAt?: number
       }
       if (
-        !['claude-chat', 'codex-chat', 'claude-code', 'codex'].includes(input.mode) ||
+        typeof input.mode !== 'string' ||
+        !input.mode ||
+        input.mode.length > 200 ||
         (input.legacyJsonField &&
           !['conversationId', 'chatConversationId'].includes(input.legacyJsonField))
       )

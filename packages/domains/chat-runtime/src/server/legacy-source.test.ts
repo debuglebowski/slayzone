@@ -50,6 +50,11 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
       .run('session-2', 'task', 'claude-chat', 'native', 'user-selected', 2)
     h.db
       .prepare(
+        'INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?)'
+      )
+      .run('terminal-session', 'task', 'claude-code', 'native', 'user-selected', 2)
+    h.db
+      .prepare(
         "INSERT INTO session_resets(id,task_id,mode,created_at) VALUES('reset','task','claude-chat',3)"
       )
       .run()
@@ -113,8 +118,13 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
       createdAt: 12340
     })
     expect(dest.read('c', 9)[0].at).toBe(Date.parse('2026-01-01T12:00:00Z'))
-    expect(dest.getRecord('c', 'settings', 'session:native')).toMatchObject({
-      conversationId: 'native'
+    expect(dest.getRecord('c', 'settings', 'session:["claude-chat","native"]')).toMatchObject({
+      conversationId: 'native',
+      mode: 'claude-chat'
+    })
+    expect(dest.getRecord('c', 'settings', 'session:["claude-code","native"]')).toMatchObject({
+      conversationId: 'native',
+      mode: 'claude-code'
     })
     expect(dest.getRecord('c', 'settings', 'session:reset:claude-chat')).toMatchObject({
       mode: 'claude-chat',

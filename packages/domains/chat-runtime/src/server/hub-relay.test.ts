@@ -7,6 +7,76 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createHubChatRelay } from './hub-relay'
 
+test('metadata recovery preserves custom, removed and other native provider modes', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb),
+      record = vi.fn(async (_value: unknown) => {})
+    await ownership.register({
+      id: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      recordConversation: record,
+      request: async () => null,
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      bootstrap: async () => {
+        throw new Error('Recovery must not bootstrap')
+      },
+      migrate: async () => {
+        throw new Error('Recovery must not migrate')
+      }
+    })
+    const update = {
+      conversationId: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      epoch: 1,
+      kind: 'conversation' as const,
+      sequence: 1,
+      operationId: 'custom-mode',
+      value: {
+        mode: 'my-custom-provider',
+        conversationId: 'native',
+        origin: 'user-selected',
+        createdAt: 123
+      }
+    }
+    let sequence = 0
+    for (const mode of ['my-custom-provider', 'removed-provider', 'gemini', 'claude-chat']) {
+      await relay.reconcileMetadata('pc', {
+        ...update,
+        sequence: ++sequence,
+        operationId: mode,
+        value: { ...update.value, mode }
+      })
+      expect(record).toHaveBeenLastCalledWith(
+        expect.objectContaining({ mode, createdAt: 123, mirrorProviderConfig: true })
+      )
+    }
+    await expect(
+      relay.reconcileMetadata('pc', {
+        ...update,
+        sequence: ++sequence,
+        value: { ...update.value, mode: 123 }
+      })
+    ).rejects.toThrow(/metadata/i)
+    expect(record).toHaveBeenCalledTimes(4)
+  } finally {
+    h.cleanup()
+  }
+})
+
 test('state relay validates identity and waits for attention consumers with computer user-input metadata', async () => {
   const h = await createTestHarness()
   try {

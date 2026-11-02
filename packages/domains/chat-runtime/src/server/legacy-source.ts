@@ -13,7 +13,7 @@ import type {
   ChatTransferManifest,
   StoredChatEvent
 } from '../shared'
-import type { ChatBootstrap } from './local-data'
+import { sessionRecordKey, type ChatBootstrap } from './local-data'
 import type { HubChatOwnership } from './hub-ownership'
 import type { ChatMigrationSource } from './migration'
 import { TRANSFER_CHUNK_BYTES } from './transfers'
@@ -110,7 +110,7 @@ export function createLegacyChatSource(opts: {
     ))
       yield record(
         'settings',
-        `session:${r.conversation_id}`,
+        sessionRecordKey(r.mode, r.conversation_id),
         {
           taskId: owner.taskId,
           mode: r.mode,
