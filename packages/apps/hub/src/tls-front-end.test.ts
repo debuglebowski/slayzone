@@ -69,6 +69,9 @@ const COMPUTER_DIR = join(PACKAGES, 'apps', 'computer')
 const CLI_DIR = join(PACKAGES, 'apps', 'cli')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const COMPUTER_BIN = join(COMPUTER_DIR, 'dist', 'bin.cjs')
+// Logged by the dialer on every connection (`{ computerId, mode }`), from the upgrade
+// supervisor's connector worker and the legacy in-process runtime alike.
+const CONNECTED = 'computer dialer connected'
 const CLI_BIN = join(CLI_DIR, 'dist', 'slay.js')
 const ELECTRON_BIN = require('electron') as unknown as string
 // The CLI is plain node (no native deps) — what a user runs. NOT process.execPath:
@@ -156,12 +159,18 @@ function spawnElectronChild(bin: string, env: Record<string, string>): Proc {
   }
 }
 
-async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: string): Promise<T> {
+/** `label` may be a function, so a timeout reports state (e.g. logs) at failure time. */
+async function poll<T>(
+  fn: () => Promise<T | null>,
+  timeoutMs: number,
+  label: string | (() => string)
+): Promise<T> {
   const start = Date.now()
   for (;;) {
     const v = await fn().catch(() => null)
     if (v != null) return v
-    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${label}`)
+    if (Date.now() - start > timeoutMs)
+      throw new Error(`timed out waiting for ${typeof label === 'function' ? label() : label}`)
     await new Promise((r) => setTimeout(r, 200))
   }
 }
@@ -516,12 +525,11 @@ describe('a computer through the front end', () => {
   let computerId = ''
   test('the computer enrolls over wss:// through the front end, with no pin', async () => {
     // The hub marks the row connected when it ANSWERS the enroll; the computer saves
-    // computer.state.json and logs "connected to hub" only once that answer lands.
+    // computer.state.json and logs the dialer's connected line only once that answer lands.
     // Wait on both sides, or the next test reads a state file not yet written.
     const row = await poll(
       async () => {
-        const enroll = (l: string) =>
-          l.includes('connected to hub') && l.includes('"mode":"enroll"')
+        const enroll = (l: string) => l.includes(CONNECTED) && l.includes('"mode":"enroll"')
         if (!computer!.logs.some(enroll)) return null
         const r = (await trpc.computers.list.query()).find(
           (x) => x.name === 'tls-front-end-computer'
@@ -529,7 +537,7 @@ describe('a computer through the front end', () => {
         return r?.connected ? r : null
       },
       30_000,
-      `computer enrolled and connected (computer logs:\n${computer!.logs.join('\n')})`
+      () => `computer enrolled and connected (computer logs:\n${computer!.logs.join('\n')})`
     )
     computerId = row.id
     expect(
@@ -549,13 +557,13 @@ describe('a computer through the front end', () => {
     const fresh = trpcOverFrontEnd(ownerToken)
     const row = await poll(
       async () => {
-        const hello = (l: string) => l.includes('connected to hub') && l.includes('"mode":"hello"')
+        const hello = (l: string) => l.includes(CONNECTED) && l.includes('"mode":"hello"')
         if (!computer!.logs.some(hello)) return null
         const r = (await fresh.computers.list.query()).find((x) => x.id === computerId)
         return r?.connected ? r : null
       },
       30_000,
-      `computer reconnected (computer logs:\n${computer!.logs.join('\n')})`
+      () => `computer reconnected (computer logs:\n${computer!.logs.join('\n')})`
     )
     expect(row.id, 'same computer id').toBe(computerId)
     const rows = (await fresh.computers.list.query()).filter(
@@ -564,7 +572,7 @@ describe('a computer through the front end', () => {
     expect(rows, `still one row, got ${rows.length}`).toHaveLength(1)
     expect(readFileSync(credsPath, 'utf8'), 'stored credentials untouched').toBe(credsBefore)
     expect(
-      computer!.logs.filter((l) => l.includes('connected to hub') && l.includes('"mode":"enroll"')),
+      computer!.logs.filter((l) => l.includes(CONNECTED) && l.includes('"mode":"enroll"')),
       `reconnected with hello, never re-enrolled:\n${computer!.logs.join('\n')}`
     ).toHaveLength(1)
   })
@@ -615,7 +623,7 @@ describe('a computer through the front end', () => {
         return r?.connected ? r : null
       },
       30_000,
-      `legacy computer connected (logs:\n${legacy!.logs.join('\n')})`
+      () => `legacy computer connected (logs:\n${legacy!.logs.join('\n')})`
     )
     expect(
       legacy!.logs.some((l) => l.includes('ignoring the certificate pin in the join token')),

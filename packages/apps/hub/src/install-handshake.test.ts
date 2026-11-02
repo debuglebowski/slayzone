@@ -383,7 +383,8 @@ describe('the computer, enrolled with that token', () => {
 
   test('the computer logged a successful hub connection', async () => {
     const connected = await poll(
-      async () => (computer!.logs.some((l) => l.includes('connected to hub')) ? true : null),
+      async () =>
+        computer!.logs.some((l) => l.includes('computer dialer connected')) ? true : null,
       5_000,
       'computer connected log'
     )
