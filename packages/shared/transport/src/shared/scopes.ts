@@ -524,6 +524,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.archives.read': 'never',
   'chat.archives.records': 'never',
   'chat.archives.attachment': 'never',
+  'chat.availability': 'agent',
   'chat.supports': 'agent',
   'chat.switchConversation': 'never',
   'chat.takeOver': 'never',

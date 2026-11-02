@@ -192,3 +192,25 @@ skipped; node-pty helper execute bit restored.
 
 Post-rebase: 1,464 targeted tests pass, including owner/admin policy coverage.
 Rebased verification: all four affected typechecks, both bundles and changed-file lint pass.
+
+## Availability and reconnect checkpoint
+
+Desktop/mobile show the history-owning computer, offline state, preparation,
+migration deferral, pause and deletion. Read-only availability checks never migrate
+data or create ownership. Polling pauses for hidden desktop tabs. Reconnect and
+explicit Retry reload history without retrying sends. Canonical accepted messages
+win over local copies; failed/optimistic messages keep text, attachments and delivery
+errors. History failures stay visible. Timeline checkpoint version is 7.
+
+Desktop draft recovery saves restored local journals to the computer, preserves
+empty clears and sealed attachment versions, and retries failed saves on reconnect.
+Initial empty composers cannot overwrite saved drafts. Mobile reconnect preserves
+composer text.
+
+Validation: 1,530 tests passed in the broad availability run; the added history-error
+test had a fixture failure, corrected and rerun separately (32 tests). Mobile's 28
+session tests, five affected typechecks, hub/computer builds and changed-file lint
+pass. Remaining: archive/artifact edges, lifecycle command barriers, draft scope
+audit, full E2E/privacy/performance checks, and safe main integration.
+
+Unresolved questions: none.

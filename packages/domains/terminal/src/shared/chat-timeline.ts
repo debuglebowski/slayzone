@@ -744,6 +744,7 @@ export type Action =
     }
   /** Open from a snapshot (paged history: `decodeTimelineState`): this state, as is. */
   | { type: 'restore'; state: ChatTimelineState }
+  | { type: 'restore-local-messages'; messages: readonly UserTextItem[] }
   | { type: 'user-sent'; text: string; id?: string; content?: UserContentBlock[] }
   | { type: 'user-send-failed'; id?: string; error?: string }
   /** Send a failed message again (same id). */
@@ -1095,6 +1096,25 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
         agentTurnOpen: false,
         compacting: false
       }
+    }
+    case 'restore-local-messages': {
+      let next = state
+      for (const item of action.messages) {
+        if (
+          !item.id ||
+          next.userIndex.has(item.id) ||
+          item.parentToolUseId ||
+          item.delivery === 'cancelled'
+        )
+          continue
+        if (!item.optimistic && item.delivery !== 'failed') continue
+        next = {
+          ...next,
+          ...withUserRow(next, { ...item }),
+          userMessagesSent: next.userMessagesSent + (item.delivery === 'failed' ? 0 : 1)
+        }
+      }
+      return next
     }
     case 'user-sent': {
       // Optimistic dispatch from the renderer (useChatSession.sendMessage). The

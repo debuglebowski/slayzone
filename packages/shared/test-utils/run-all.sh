@@ -653,6 +653,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
@@ -1010,6 +1011,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/useBrowserImportUrls.test.tsx \
   packages/domains/task-browser/src/client/DeviceWebview.test.tsx \
   packages/domains/terminal/src/client/useChatSession.test.tsx \
+  packages/domains/terminal/src/client/useChatAvailability.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/worktrees/src/server/gh-pr-for-checkout.test.ts \
   packages/domains/worktrees/src/server/git-push.test.ts \
@@ -1097,6 +1099,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/prompts/codex-approvals.test.tsx \
   packages/shared/ui/src/agent-pills.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatStorageNotice.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.final-plan.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.renderable.test.tsx \

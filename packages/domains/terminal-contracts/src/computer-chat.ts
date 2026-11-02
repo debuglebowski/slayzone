@@ -73,3 +73,44 @@ export interface ChatComputerOps {
     ref: ChatAttachment
   ): Promise<{ data: string }>
 }
+
+export interface ChatAvailability {
+  state: 'ready' | 'offline' | 'preparing' | 'migrating' | 'unassigned' | 'paused' | 'deleted'
+  computer: { id: string; name: string } | null
+  waitingForAgents?: boolean
+}
+export function chatAvailabilityMessage(
+  status: ChatAvailability
+): { title: string; detail: string } | null {
+  const name = status.computer?.name ?? 'its computer'
+  switch (status.state) {
+    case 'ready':
+      return null
+    case 'offline':
+      return {
+        title: `${name} is offline`,
+        detail: 'Chat is stored there. Connect that computer to load history and send messages.'
+      }
+    case 'preparing':
+      return {
+        title: `Opening chat on ${name}`,
+        detail: 'Preparing its storage. This usually takes a moment.'
+      }
+    case 'migrating':
+      return status.waitingForAgents
+        ? {
+            title: 'Chat migration waiting',
+            detail: `Stop this task’s agents to move its history to ${name}.`
+          }
+        : {
+            title: `Moving chat to ${name}`,
+            detail: 'History becomes available when the verified transfer completes.'
+          }
+    case 'unassigned':
+      return { title: 'Choose a computer', detail: 'Assign a computer to this task to use chat.' }
+    case 'paused':
+      return { title: 'Chat paused', detail: 'Restore or unarchive this task to continue.' }
+    case 'deleted':
+      return { title: 'Chat deleted', detail: 'This conversation is no longer available.' }
+  }
+}

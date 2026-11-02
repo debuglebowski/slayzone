@@ -15,6 +15,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import {
   createChatRecovery,
+  createChatAvailability,
   createChatLifecycle,
   createChatOwnershipStore,
   createChatMigration,
@@ -39,6 +40,8 @@ export function createComputerChatServices(opts: {
   attachments: ChatAttachmentReader
   request: ChatComputerRequest
   resolveComputer(taskId: string): Promise<string | null>
+  resolveAvailabilityComputer?(taskId: string): Promise<string | null>
+  connected?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   admitComputer?(computerId: string): Promise<void>
@@ -355,6 +358,14 @@ export function createComputerChatServices(opts: {
   }
   return {
     computers,
+    availability: createChatAvailability({
+      db: opts.db,
+      ownership,
+      resolveComputer: opts.resolveAvailabilityComputer ?? opts.resolveComputer,
+      connected: opts.connected ?? (() => false),
+      hasLiveTask: opts.hasLiveTask,
+      gate: opts.gate
+    }),
     async migrateIdleComputer(computerId: string) {
       await recoverComputer(computerId)
       const tasks = new Set(

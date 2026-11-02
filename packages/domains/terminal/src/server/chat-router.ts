@@ -137,6 +137,11 @@ const backupId = backupTarget.extend({ id: z.string().uuid() })
 const archiveTarget = backupTarget.extend({ archiveId: z.string().uuid() })
 const archiveConversation = archiveTarget.extend({ conversationId: z.string().min(1) })
 export const chatRouter = router({
+  availability: publicProcedure.input(z.object({ tabId: z.string().min(1) })).query(({ input }) => {
+    const read = getChatDeps().availability
+    if (!read) throw new Error('Chat availability is unavailable')
+    return read(input.tabId)
+  }),
   backups: router({
     list: publicProcedure
       .input(backupTarget)

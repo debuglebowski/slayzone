@@ -63,6 +63,7 @@ export function fakeHub(opts: {
         }
       ],
     'worktrees.detectChildRepos': () => [],
+    'chat.availability': () => ({ state: 'ready', computer: { id: 'c1', name: 'Laptop' } }),
     'chat.hydrate': () => null,
     'chat.getReplay': () => emptyReplay,
     'chat.send': (input) => ({ id: input.message?.id ?? 'x', state: 'queued' }),

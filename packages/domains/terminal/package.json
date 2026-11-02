@@ -14,6 +14,7 @@
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
+    "./client/chat-availability": "./src/client/useChatAvailability.ts",
     "./client/Terminal": "./src/client/Terminal.tsx",
     "./client/LazyTerminal": "./src/client/LazyTerminal.tsx",
     "./client/terminal-mru": "./src/client/terminal-mru.ts",

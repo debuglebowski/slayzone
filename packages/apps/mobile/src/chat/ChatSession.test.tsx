@@ -24,6 +24,44 @@ async function hubSends(hub: FakeHub, events: AgentEvent[], from = 0) {
   })
 }
 
+describe('ChatSession: computer availability', () => {
+  it('names an offline computer and reloads on Retry without resending or losing draft text', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    let offline = true
+    hub.on('chat.availability', () => ({
+      state: offline ? 'offline' : 'ready',
+      computer: { id: 'c1', name: 'Office Mac' }
+    }))
+    hub.on('chat.hydrate', () => {
+      if (offline) throw new Error('Computer offline')
+      return null
+    })
+    await open(hub)
+    expect(await screen.findByText(/Office Mac is offline/)).toBeOnTheScreen()
+    await fireEvent.changeText(screen.getByTestId('chat-input'), 'keep this draft')
+    offline = false
+    await userEvent.setup().press(screen.getByText('Retry'))
+    await waitFor(() => expect(hub.callsTo('chat.hydrate')).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByText(/Office Mac is offline/)).toBeNull())
+    expect(screen.getByTestId('chat-input').props.value).toBe('keep this draft')
+    expect(hub.callsTo('chat.send')).toEqual([])
+  })
+
+  it('explains when a running agent defers migration', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.availability', () => ({
+      state: 'migrating',
+      waitingForAgents: true,
+      computer: { id: 'c1', name: 'Office Mac' }
+    }))
+    await open(hub)
+    expect(
+      await screen.findByText(/Stop this task’s agents to move its history to Office Mac/)
+    ).toBeOnTheScreen()
+    expect(hub.callsTo('chat.send')).toEqual([])
+  })
+})
+
 describe('ChatSession: the folder it runs in', () => {
   it("binds a repo-bound task to the child repo desktop would pick, scanned on the task's computer", async () => {
     const hub = fakeHub({

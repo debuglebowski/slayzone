@@ -7,6 +7,7 @@ import type { ChatDraft, ChatTabState } from '@slayzone/terminal-contracts'
 const server = vi.hoisted(() => ({
   state: null as ChatTabState | null,
   saves: [] as Array<{ tabId: string; draft: ChatDraft }>,
+  fail: false,
   rev: 0
 }))
 
@@ -30,6 +31,7 @@ vi.mock('../../trpc', () => ({
         saveDraft: {
           mutate: async ({ tabId, draft }: { tabId: string; draft: ChatDraft }) => {
             server.saves.push({ tabId, draft })
+            if (server.fail) throw new Error('Computer offline')
             server.rev += 1
             return { rev: server.rev }
           }
@@ -66,6 +68,7 @@ beforeEach(() => {
   server.state = null
   server.saves = []
   server.rev = 0
+  server.fail = false
   localStorage.clear()
 })
 afterEach(() => {
@@ -176,6 +179,76 @@ describe('useChatDraftPersistence', () => {
       expect(h.result.current.saved).toEqual({ text: 'from the other window', attachments: [] })
     )
     expect(localStorage.getItem(draftJournalKey('tab-1'))).toBeNull()
+  })
+
+  it('saves a restored journal to the computer without saving the initial empty composer', async () => {
+    server.state = { draft: { text: 'old', attachments: [], rev: 2 }, scroll: null }
+    server.rev = 2
+    const recovered = { text: 'unsaved edit', attachments: [] }
+    localStorage.setItem(
+      draftJournalKey('tab-1'),
+      JSON.stringify({ ...recovered, baseRev: 2, savedAt: Date.now() })
+    )
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.saved).toEqual(recovered))
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    h.rerender({ draft: recovered })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([{ tabId: 'tab-1', draft: recovered }])
+    expect(localStorage.getItem(draftJournalKey('tab-1'))).toBeNull()
+  })
+
+  it('persists an empty journal that cleared a previously saved draft', async () => {
+    server.state = { draft: { text: 'old', attachments: [], rev: 2 }, scroll: null }
+    server.rev = 2
+    localStorage.setItem(
+      draftJournalKey('tab-1'),
+      JSON.stringify({ ...empty, baseRev: 2, savedAt: Date.now() })
+    )
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.saved).toEqual(empty))
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([{ tabId: 'tab-1', draft: empty }])
+  })
+
+  it('retries a failed draft save after reconnect without requiring another edit', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    server.fail = true
+    const draft = { text: 'written offline', attachments: [] }
+    h.rerender({ draft })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toHaveLength(1)
+    expect(localStorage.getItem(draftJournalKey('tab-1'))).not.toBeNull()
+    server.fail = false
+    act(() => h.result.current.retry())
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([
+      { tabId: 'tab-1', draft },
+      { tabId: 'tab-1', draft }
+    ])
+    expect(localStorage.getItem(draftJournalKey('tab-1'))).toBeNull()
+  })
+
+  it('persists a new sealed version of an attachment with the same artifact id', async () => {
+    const attachment = {
+      artifactId: 'file',
+      kind: 'text' as const,
+      mediaType: 'text/plain' as const,
+      name: 'note.txt',
+      size: 5,
+      contentHash: 'a'.repeat(64)
+    }
+    server.state = { draft: { text: '', attachments: [attachment], rev: 1 }, scroll: null }
+    server.rev = 1
+    const h = setup({ draft: { text: '', attachments: [attachment] } })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    const draft = { text: '', attachments: [{ ...attachment, contentHash: 'b'.repeat(64) }] }
+    h.rerender({ draft })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([{ tabId: 'tab-1', draft }])
   })
 
   it('paused (browsing prompt history): nothing is saved', async () => {

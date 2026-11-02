@@ -9,6 +9,8 @@ import {
   useState
 } from 'react'
 import { CornerDownLeft } from 'lucide-react'
+import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
+import { ChatStorageNotice } from './ChatStorageNotice'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
 import { useSideQuestions } from './side-questions/useSideQuestions'
@@ -160,6 +162,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       timeline,
       inFlight,
       hydrating,
+      loadError,
+      reload,
       paging,
       loadPages,
       unloadPages,
@@ -289,6 +293,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       // then drains that message next (`chat.interrupt` → stopTurn, no restore).
       ...(chatCapabilitiesForMode(mode).liveInterrupt ? { interruptTurn: interrupt } : {}),
       ...(chatCapabilitiesForMode(mode).sideQuestions ? { onSideQuestion: sideQuestions.ask } : {})
+    })
+
+    const storage = useChatAvailability({
+      tabId,
+      active: isActive,
+      onReady: useStableCallback(() => {
+        reload()
+        composer.retryDraftSave()
+      })
     })
 
     const attachmentsApi = useChatAttachments({
@@ -837,6 +850,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         </div>
                       )}
 
+                      <ChatStorageNotice
+                        status={storage.status}
+                        error={loadError ?? storage.error}
+                        onRetry={storage.retry}
+                      />
                       <ChatTimeline
                         overrideNotice={overrideNotice}
                         search={search}

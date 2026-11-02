@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ChatAttachment, ChatDraft, ChatTabState } from '@slayzone/terminal-contracts'
 import { useTRPC, useTRPCClient } from '../../trpc'
@@ -77,7 +77,17 @@ function sameDraft(a: ChatDraft, b: ChatDraft): boolean {
   return (
     a.text === b.text &&
     a.attachments.length === b.attachments.length &&
-    a.attachments.every((x, i) => x.artifactId === b.attachments[i].artifactId)
+    a.attachments.every((x, i) => {
+      const y = b.attachments[i]
+      return (
+        x.artifactId === y.artifactId &&
+        x.contentHash === y.contentHash &&
+        x.name === y.name &&
+        x.kind === y.kind &&
+        x.mediaType === y.mediaType &&
+        x.size === y.size
+      )
+    })
   )
 }
 
@@ -85,6 +95,7 @@ const EMPTY: ChatDraft = { text: '', attachments: [] }
 
 interface Resolved {
   draft: ChatDraft | null
+  persisted: ChatDraft
   rev: number
   /** A journal was there but the server moved on: drop it. */
   stale: boolean
@@ -92,15 +103,23 @@ interface Resolved {
 
 function resolveSaved(tabId: string, server: ChatTabState | null): Resolved {
   const rev = server?.draft.rev ?? 0
+  const persisted = server
+    ? { text: server.draft.text, attachments: server.draft.attachments }
+    : EMPTY
   const journal = readJournal(tabId)
   if (journal && journal.baseRev === rev) {
-    return { draft: { text: journal.text, attachments: journal.attachments }, rev, stale: false }
+    return {
+      draft: { text: journal.text, attachments: journal.attachments },
+      persisted,
+      rev,
+      stale: false
+    }
   }
   const fromServer = server
     ? { text: server.draft.text, attachments: server.draft.attachments }
     : null
   const draft = fromServer && (fromServer.text || fromServer.attachments.length) ? fromServer : null
-  return { draft, rev, stale: journal !== null }
+  return { draft, persisted, rev, stale: journal !== null }
 }
 
 export interface ChatDraftPersistence {
@@ -108,6 +127,8 @@ export interface ChatDraftPersistence {
   loaded: boolean
   /** The draft to restore on mount (journal or server), or null. */
   saved: ChatDraft | null
+  /** Retry saving the current draft after its computer reconnects. Never sends a message. */
+  retry: () => void
 }
 
 export function useChatDraftPersistence({
@@ -129,12 +150,18 @@ export function useChatDraftPersistence({
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const queryOptions = trpc.chat.tabState.get.queryOptions({ tabId }, { enabled })
-  const { data, isSuccess } = useQuery(queryOptions)
+  const { data, isSuccess, refetch } = useQuery(queryOptions)
   const loaded = enabled && isSuccess
 
   // Journal vs server, decided ONCE per mount (later cache updates — our own
   // saves — must not re-decide it). Adjusted during render: no extra frame.
   const [resolved, setResolved] = useState<Resolved | null>(null)
+  const [retryEpoch, setRetryEpoch] = useState(0)
+  const retry = useCallback(() => {
+    if (!enabled) return
+    if (!resolved) void refetch()
+    setRetryEpoch((epoch) => epoch + 1)
+  }, [enabled, resolved, refetch])
   if (!resolved && loaded) {
     setResolved(resolveSaved(tabId, (data as ChatTabState | null | undefined) ?? null))
   }
@@ -151,6 +178,7 @@ export function useChatDraftPersistence({
   // is saved — an untouched (empty) composer must never overwrite a saved draft.
   const baselineRef = useRef<ChatDraft>(EMPTY)
   const dirtyRef = useRef(false)
+  const awaitingRestoreRef = useRef(false)
   const handledRef = useRef<Resolved | null>(null)
 
   useEffect(() => {
@@ -158,13 +186,17 @@ export function useChatDraftPersistence({
     handledRef.current = resolved
     sweepOldJournals(Date.now())
     revRef.current = resolved.rev
-    // What the composer restores is what the server (or the journal) holds.
-    persistedRef.current = resolved.draft ?? EMPTY
+    // A journal is not an acknowledgement from the computer. Save it once restored.
+    persistedRef.current = resolved.persisted
     if (resolved.stale) writeJournal(tabId, null)
     const atLoad = { text, attachments }
     baselineRef.current = atLoad
+    awaitingRestoreRef.current =
+      sameDraft(atLoad, EMPTY) && resolved.draft !== null && !sameDraft(atLoad, resolved.draft)
     // Typed before the saved draft arrived (the composer then keeps it): save it.
-    dirtyRef.current = !sameDraft(atLoad, EMPTY) && !sameDraft(atLoad, persistedRef.current)
+    dirtyRef.current =
+      !sameDraft(atLoad, persistedRef.current) &&
+      (!sameDraft(atLoad, EMPTY) || (resolved.draft !== null && sameDraft(atLoad, resolved.draft)))
   }, [resolved, tabId, text, attachments])
 
   useEffect(() => {
@@ -187,7 +219,7 @@ export function useChatDraftPersistence({
           )
         },
         (err: unknown) => {
-          // The journal keeps the text; the next change (or load) saves it.
+          // The journal keeps the text; reconnect or the next edit retries the save.
           console.error('[chat] saving the draft failed:', err)
         }
       )
@@ -197,6 +229,11 @@ export function useChatDraftPersistence({
   useEffect(() => {
     if (!enabled || !resolved || paused) return
     const draft = { text, attachments }
+    if (awaitingRestoreRef.current) {
+      if (sameDraft(draft, baselineRef.current)) return
+      awaitingRestoreRef.current = false
+      dirtyRef.current = true
+    }
     if (!dirtyRef.current) {
       if (sameDraft(draft, baselineRef.current)) return
       dirtyRef.current = true
@@ -209,7 +246,7 @@ export function useChatDraftPersistence({
       timerRef.current = null
       if (pendingRef.current) saveRef.current(pendingRef.current)
     }, SAVE_DELAY_MS)
-  }, [enabled, resolved, paused, text, attachments, tabId])
+  }, [enabled, resolved, paused, text, attachments, tabId, retryEpoch])
 
   // Leaving (remount, tab closed, page unload): save what is waiting now.
   useEffect(() => {
@@ -228,5 +265,5 @@ export function useChatDraftPersistence({
   // `loaded` waits for `resolved`, not the query: in the render pass that sets
   // `resolved` (re-run at once), a caller that restores during render would
   // otherwise see "loaded, nothing saved" and settle on an empty draft.
-  return { loaded: !enabled || resolved !== null, saved: resolved?.draft ?? null }
+  return { loaded: !enabled || resolved !== null, saved: resolved?.draft ?? null, retry }
 }

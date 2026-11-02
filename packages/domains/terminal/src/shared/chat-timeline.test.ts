@@ -3454,3 +3454,67 @@ describe('interrupted marker', () => {
     expect(interrupted(s)).toHaveLength(2)
   })
 })
+
+describe('local messages survive reconnect replay', () => {
+  test('restores only missing failed messages, preserving files, timestamp and failure', () => {
+    const attachment = {
+      artifactId: 'file',
+      name: 'notes.txt',
+      kind: 'text' as const,
+      mediaType: 'text/plain' as const,
+      size: 5
+    }
+    let before = reducer(initialState(), {
+      type: 'user-sent',
+      id: 'local',
+      text: 'unsent',
+      content: [{ type: 'attachment', attachment }]
+    })
+    before = reducer(before, { type: 'user-send-failed', id: 'local', error: 'offline' })
+    const messages = before.timeline.filter(
+      (r): r is Extract<TimelineItem, { kind: 'user-text' }> => r?.kind === 'user-text'
+    )
+    const restored = reducer(initialState(), { type: 'restore-local-messages', messages })
+    expect(restored.timeline[0]).toEqual(messages[0])
+    expect(isTurnOpen(restored)).toBe(false)
+    expect(restored.userIndex.get('local')).toEqual([0])
+  })
+  test('canonical replay wins over an older failed local copy', () => {
+    let local = reducer(initialState(), { type: 'user-sent', id: 'same', text: 'message' })
+    local = reducer(local, { type: 'user-send-failed', id: 'same', error: 'lost ack' })
+    const messages = local.timeline.filter(
+      (r): r is Extract<TimelineItem, { kind: 'user-text' }> => r?.kind === 'user-text'
+    )
+    const saved = reducer(initialState(), {
+      type: 'event',
+      event: { kind: 'user-message', id: 'same', text: 'message' }
+    })
+    const restored = reducer(saved, { type: 'restore-local-messages', messages })
+    expect(restored).toBe(saved)
+    expect(restored.timeline).toHaveLength(1)
+    expect(restored.timeline[0]).not.toMatchObject({ optimistic: true })
+  })
+  test('restoring a failed bubble does not interrupt a canonical turn in progress', () => {
+    const saved = reducer(initialState(), {
+      type: 'event',
+      event: { kind: 'user-message', id: 'remote', text: 'running' }
+    })
+    const restored = reducer(saved, {
+      type: 'restore-local-messages',
+      messages: [
+        {
+          kind: 'user-text',
+          id: 'failed',
+          text: 'offline',
+          timestamp: 123,
+          delivery: 'failed',
+          deliveryError: 'offline',
+          optimistic: false
+        }
+      ]
+    })
+    expect(restored.userMessagesSent).toBe(saved.userMessagesSent)
+    expect(restored.resultCount).toBe(saved.resultCount)
+    expect(isTurnOpen(restored)).toBe(true)
+  })
+})

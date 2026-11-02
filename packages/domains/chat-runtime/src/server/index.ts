@@ -20,3 +20,5 @@ export { createChatLifecycle } from './hub-lifecycle'
 export { createChatRecovery } from './hub-recovery'
 
 export { computerArtifactRequestSchema } from './artifacts'
+
+export { createChatAvailability } from './hub-availability'

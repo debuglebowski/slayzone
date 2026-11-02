@@ -1,4 +1,4 @@
-import type { ChatComputerOps } from '@slayzone/terminal-contracts'
+import type { ChatComputerOps, ChatAvailability } from '@slayzone/terminal-contracts'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { createChatOps } from './runtime/chat-handlers'
 import type { createChatQueueOps, ChatQueueEventMap } from './runtime/chat-queue-handlers'
@@ -36,6 +36,7 @@ export type ChatDeps = {
   queueOps: AsyncCapable<ReturnType<typeof createChatQueueOps>>
   catalog?: ChatCatalog
   computers?: ChatComputerOps
+  availability?(tabId: string): Promise<ChatAvailability>
   events: TypedEmitter<ChatEventMap>
   queueEvents: TypedEmitter<ChatQueueEventMap>
 }

@@ -10,7 +10,12 @@
  * session can leak into another.
  */
 import { useHubId } from '@slayzone/transport/client'
-import { chatCapabilitiesForMode, type PermissionDecision } from '@slayzone/terminal-contracts'
+import {
+  chatCapabilitiesForMode,
+  chatAvailabilityMessage,
+  type PermissionDecision
+} from '@slayzone/terminal-contracts'
+import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
 import { hasPendingPrompt } from '@slayzone/terminal/chat-prompts'
 import { LiveBlockStore, LiveBlockStoreContext } from '@slayzone/terminal/live-blocks'
 import { isAwaitingUserQuestion } from '@slayzone/terminal/reducer'
@@ -119,6 +124,13 @@ function ChatView({ target }: { target: ChatTarget }) {
   const notice = useNotice()
   const { show: notify } = notice
   const session = useChatSession(target)
+  const storage = useChatAvailability({
+    tabId: target.tabId,
+    active: true,
+    onReady: session.reload
+  })
+  const storageMessage = storage.status ? chatAvailabilityMessage(storage.status) : null
+  const storageError = session.loadError ?? storage.error
   const { state } = session
   const settings = useChatSettings(target, state.permissionMode, notify)
   const models = useChatModels({
@@ -264,14 +276,23 @@ function ChatView({ target }: { target: ChatTarget }) {
               notify={notify}
             />
           )}
-          {session.loadError && (
+          {(storageMessage || storageError) && (
             <View style={s.bar}>
-              <Text style={s.barText} numberOfLines={2}>
-                Couldn't load the chat: {session.loadError}
+              <Text style={s.barText} accessibilityLiveRegion="polite">
+                {storageMessage
+                  ? `${storageMessage.title}\n${storageMessage.detail}`
+                  : `Couldn't load the chat: ${storageError}`}
               </Text>
-              <Pressable onPress={session.reload} accessibilityRole="button">
-                <Text style={s.link}>Retry</Text>
-              </Pressable>
+              {storage.status?.state !== 'deleted' && (
+                <Pressable
+                  onPress={() => {
+                    void storage.retry()
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={s.link}>Retry</Text>
+                </Pressable>
+              )}
             </View>
           )}
           {caps.promptCards && (

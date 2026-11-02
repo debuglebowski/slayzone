@@ -225,7 +225,7 @@ import {
   setComputerBindingChangedListener
 } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
-import { createComputerPlacement } from './computer-placement.js'
+import { createComputerPlacement, BindComputerError } from './computer-placement.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireIdleClose } from './idle-close.js'
@@ -829,6 +829,15 @@ export function composeServer(opts: {
       await placement.forTarget({ computerId })
     },
     resolveComputer: resolveComputerForTask,
+    resolveAvailabilityComputer: async (taskId) => {
+      try {
+        return await resolveComputerForTask(taskId)
+      } catch (error) {
+        if (error instanceof BindComputerError) return null
+        throw error
+      }
+    },
+    connected: (id) => (execGateway?.listUsableComputers() ?? []).some((c) => c.computerId === id),
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
@@ -851,7 +860,11 @@ export function composeServer(opts: {
       request: computerChat.lifecycle.request
     })
   )
-  setChatDeps({ ...computerChat.relay, computers: computerChat.computers })
+  setChatDeps({
+    ...computerChat.relay,
+    computers: computerChat.computers,
+    availability: computerChat.availability
+  })
   setChatSessionSource(computerChat.relay.sessions)
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))

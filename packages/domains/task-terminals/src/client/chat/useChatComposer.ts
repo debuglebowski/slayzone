@@ -666,6 +666,7 @@ export function useChatComposer({
 
   return {
     draft,
+    retryDraftSave: persistence.retry,
     setDraft,
     clearDraft,
     setCursorPos,

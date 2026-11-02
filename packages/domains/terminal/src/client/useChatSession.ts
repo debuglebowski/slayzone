@@ -21,7 +21,11 @@ import type {
   StopResult,
   UserContentBlock
 } from '@slayzone/terminal-contracts'
-import { chatCapabilitiesForMode, userMessageText } from '@slayzone/terminal-contracts'
+import {
+  chatCapabilitiesForMode,
+  userMessageText,
+  userMessageAttachments
+} from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from '../shared/chat-prompts'
 import {
   TIMELINE_PROJECTION_VERSION,
@@ -66,6 +70,9 @@ export interface UseChatSessionResult {
   inFlight: boolean
   /** True until the initial buffer replay resolves (on mount / tab reopen). */
   hydrating: boolean
+  loadError: string | null
+  /** Retry loading history without dropping locally unsent messages. */
+  reload: () => void
   /** Paged history (null: the whole history was replayed — every row is here). */
   paging: ChatPaging | null
   /** Load these pages' rows (as of this state's events); already here or loading: skipped. */
@@ -193,11 +200,13 @@ interface HydrateChatCtx {
   /** Adopt a replay's live snapshot (blocks still streaming) at its live counter. */
   applySnapshot: (events: AgentEvent[], afterSeq: number, liveSeq: number) => void
   /** Open from the hub's projection snapshot (paged history). */
-  openPaged: (opened: OpenedPaged) => void
+  openPaged: (opened: OpenedPaged) => ReadonlySet<string>
   /** Opening from the full replay (no page table). */
   openFull: () => void
   dispatch: Dispatch<ChatTimelineAction>
   onHydrated: () => void
+  restoreLocal: (confirmed: ReadonlySet<string>) => void
+  onError: (message: string | null) => void
 }
 
 /**
@@ -229,7 +238,9 @@ async function hydrateAndReplay({
   openPaged,
   openFull,
   dispatch,
-  onHydrated
+  onHydrated,
+  restoreLocal,
+  onError
 }: HydrateChatCtx): Promise<void> {
   try {
     await trpcClient.chat.hydrate.mutate(target)
@@ -256,9 +267,15 @@ async function hydrateAndReplay({
     }
     if (gen !== genRef.current) return
     if (opened.kind === 'paged') {
-      openPaged(opened as OpenedPaged)
+      const confirmed = new Set(openPaged(opened as OpenedPaged))
+      for (const entry of opened.events) {
+        const event = entry.event as AgentEvent
+        if (event.kind === 'user-message' && event.id) confirmed.add(event.id)
+      }
       applySaved(opened.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
       applySnapshot(opened.live.events as AgentEvent[], opened.live.afterSeq, opened.live.liveSeq)
+      restoreLocal(confirmed)
+      onError(null)
       return
     }
     // Saved history + what is streaming right now, in one snapshot.
@@ -275,8 +292,15 @@ async function hydrateAndReplay({
     applySaved(replay.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
     // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
     applySnapshot(replay.live.events as AgentEvent[], replay.live.afterSeq, replay.live.liveSeq)
-  } catch {
-    /* ignore replay failures */
+    const confirmed = new Set<string>()
+    for (const entry of replay.events) {
+      const event = entry.event as AgentEvent
+      if (event.kind === 'user-message' && event.id) confirmed.add(event.id)
+    }
+    restoreLocal(confirmed)
+    onError(null)
+  } catch (error) {
+    if (gen === genRef.current) onError(error instanceof Error ? error.message : String(error))
   } finally {
     if (gen === genRef.current) {
       // Drain live events queued during hydration. Dedup via lastSeqRef
@@ -340,6 +364,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       agentStartedTurns: chatCapabilitiesForMode(opts.mode).agentStartedTurns
     })
   }, [opts.mode])
+  const stateRef = useRef(state)
+  useLayoutEffect(() => {
+    stateRef.current = state
+  }, [state])
+  const [loadError, setLoadError] = useState<string | null>(null)
   const lastSeqRef = useRef<number>(-1)
   // Newest live event applied (live events carry their own counter; see applyLive).
   const lastLiveRef = useRef<number>(0)
@@ -444,16 +473,48 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // Renderer actions (a message sent) while a load runs: a paged open replaces
   // the state, so they are applied again on top of it.
   const localActionsRef = useRef<ChatTimelineAction[]>([])
+  const keepLocalRef = useRef<Array<Extract<TimelineItem, { kind: 'user-text' }>>>([])
+  const loadedTargetRef = useRef<string | null>(null)
+  const restoreLocal = useCallback((confirmed: ReadonlySet<string>) => {
+    dispatch({ type: 'restore-local-messages', messages: keepLocalRef.current })
+    for (const action of localActionsRef.current) {
+      if (
+        (action.type === 'user-sent' || action.type === 'user-send-failed') &&
+        action.id &&
+        confirmed.has(action.id)
+      )
+        continue
+      if (action.type === 'user-sent' && action.id) {
+        const attachments = userMessageAttachments(action.content ?? [])
+        dispatch({
+          type: 'restore-local-messages',
+          messages: [
+            {
+              kind: 'user-text',
+              id: action.id,
+              text: action.text,
+              timestamp: Date.now(),
+              optimistic: true,
+              delivery: 'queued',
+              ...(attachments.length ? { attachments } : {})
+            }
+          ]
+        })
+      } else dispatch(action)
+    }
+    localActionsRef.current = []
+    keepLocalRef.current = []
+  }, [])
+
   // Stable: refs + dispatch only.
   const dispatchLocal = useCallback((action: ChatTimelineAction): void => {
     if (!hydratedRef.current) localActionsRef.current.push(action)
     dispatch(action)
   }, [])
   // Stable: refs + dispatch + setters only.
-  const openPaged = useCallback((opened: OpenedPaged): void => {
-    dispatch({ type: 'restore', state: decodeTimelineState(opened.snapshot.state) })
-    for (const action of localActionsRef.current) dispatch(action)
-    localActionsRef.current = []
+  const openPaged = useCallback((opened: OpenedPaged): ReadonlySet<string> => {
+    const decoded = decodeTimelineState(opened.snapshot.state)
+    dispatch({ type: 'restore', state: decoded })
     lastSeqRef.current = opened.snapshot.seq
     loadingPagesRef.current.clear()
     setPaging({
@@ -461,6 +522,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       sealed: opened.snapshot.summaries.length,
       summaries: opened.snapshot.summaries as TimelinePageSummary[]
     })
+    return new Set([...decoded.userIndex.entries()].map(([id]) => id))
   }, [])
   const openFull = useCallback((): void => {
     loadingPagesRef.current.clear()
@@ -649,6 +711,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }
   const [seenInputs, setSeenInputs] = useState(loadInputs)
   const [loadedInputs, setLoadedInputs] = useState<typeof loadInputs | null>(null)
+  const reload = useCallback(() => {
+    setLoadedInputs(null)
+    setReopenToken((n) => n + 1)
+  }, [])
+
   const inputsChanged = (a: typeof loadInputs, b: typeof loadInputs): boolean =>
     a.tabId !== b.tabId ||
     a.taskId !== b.taskId ||
@@ -666,7 +733,18 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     const gen = ++genRef.current
     hydratedRef.current = false
     liveQueueRef.current = []
-    localActionsRef.current = []
+    const targetKey = JSON.stringify([opts.tabId, opts.taskId, opts.mode])
+    const sameTarget = loadedTargetRef.current === null || loadedTargetRef.current === targetKey
+    keepLocalRef.current = sameTarget
+      ? stateRef.current.timeline.filter(
+          (it): it is Extract<TimelineItem, { kind: 'user-text' }> =>
+            it?.kind === 'user-text' &&
+            !!it.id &&
+            (it.optimistic === true || it.delivery === 'failed')
+        )
+      : []
+    loadedTargetRef.current = targetKey
+    if (loadedOnceRef.current || !sameTarget) localActionsRef.current = []
     discardPendingLive()
     lastSeqRef.current = -1
     lastLiveRef.current = 0
@@ -700,6 +778,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       openPaged,
       openFull,
       dispatch,
+      restoreLocal,
+      onError: setLoadError,
       onHydrated: () => setLoadedInputs(inputs)
     })
 
@@ -721,6 +801,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     applySnapshot,
     openPaged,
     openFull,
+    restoreLocal,
     trpcClient,
     reopenToken
   ])
@@ -892,6 +973,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),
     hydrating,
+    loadError,
+    reload,
     paging,
     loadPages,
     unloadPages,

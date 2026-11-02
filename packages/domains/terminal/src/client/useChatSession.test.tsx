@@ -24,13 +24,16 @@ const saved = (events: Buffered): Replay => ({
 interface Deferred<T> {
   promise: Promise<T>
   resolve: (v: T) => void
+  reject: (error: unknown) => void
 }
 const deferred = <T,>(): Deferred<T> => {
   let resolve!: (v: T) => void
-  const promise = new Promise<T>((r) => {
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((r, j) => {
     resolve = r
+    reject = j
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 // One pending hydrate + buffer fetch per load, resolved by the test in its own order.
@@ -834,5 +837,77 @@ describe('paged history (opened from the hub projection)', () => {
     await openPaged(0)
     const last = r.current.timeline.at(-1)
     expect(last?.kind === 'user-text' && last.text).toBe('typed while it opened')
+  })
+})
+
+describe('manual/reconnect reload', () => {
+  it('exposes a history error and clears it after a successful reconnect', async () => {
+    const { result } = setup()
+    await act(async () => {
+      bufferLoad = 0
+      loads[0].buffer.reject(new Error('Computer offline'))
+      loads[0].hydrate.resolve()
+    })
+    expect(result.current.loadError).toBe('Computer offline')
+    expect(result.current.hydrating).toBe(false)
+    await act(() => result.current.reload())
+    await finishLoad(1, [])
+    expect(result.current.loadError).toBeNull()
+    expect(result.current.hydrating).toBe(false)
+    expect(sent).toEqual([])
+  })
+  it('keeps failed messages with attachments and messages composed during a full reload', async () => {
+    const { result } = setup()
+    await finishLoad(0, [])
+    const attachment = {
+      artifactId: 'file',
+      name: 'notes.txt',
+      kind: 'text' as const,
+      mediaType: 'text/plain' as const,
+      size: 5
+    }
+    sendFails = new Error('computer offline')
+    await act(async () => {
+      await result.current
+        .sendMessage([
+          { type: 'attachment', attachment },
+          { type: 'text', text: 'keep me' }
+        ])
+        .catch(() => undefined)
+    })
+    const id = sent[0].message.id
+    await act(() => result.current.reload())
+    expect(result.current.hydrating).toBe(true)
+    sendFails = null
+    await act(() => result.current.sendMessage('typed during reconnect'))
+    await finishLoad(1, [])
+    expect(result.current.timeline.filter((i) => i?.kind === 'user-text')).toMatchObject([
+      { id, text: 'keep me', attachments: [attachment], delivery: 'failed' },
+      { text: 'typed during reconnect', optimistic: true }
+    ])
+    await act(() => result.current.retryMessage(id))
+    expect(sent.at(-1)?.message.content).toEqual([
+      { type: 'attachment', attachment },
+      { type: 'text', text: 'keep me' }
+    ])
+    expect(sent.at(-1)?.operationId).not.toBe(sent[0].operationId)
+  })
+  it('uses a canonical message instead of restoring its older failed copy', async () => {
+    const { result } = setup()
+    await finishLoad(0, [])
+    sendFails = new Error('lost acknowledgement')
+    await act(async () => {
+      await result.current.sendMessage('accepted remotely').catch(() => undefined)
+    })
+    const id = sent[0].message.id
+    await act(() => result.current.reload())
+    await finishLoad(1, [
+      { seq: 0, event: { kind: 'user-message', id, text: 'accepted remotely' } },
+      { seq: 1, event: { kind: 'user-message-delivery', id, state: 'delivered' } }
+    ])
+    const rows = result.current.timeline.filter((i) => i?.kind === 'user-text')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id, delivery: 'delivered' })
+    expect(rows[0]).not.toMatchObject({ optimistic: true })
   })
 })

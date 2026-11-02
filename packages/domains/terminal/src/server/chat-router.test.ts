@@ -39,7 +39,16 @@ const queueOps = {
   }
 } as unknown as ChatDeps['queueOps']
 
-setChatDeps({ ops, queueOps, events, queueEvents } as unknown as ChatDeps)
+setChatDeps({
+  ops,
+  queueOps,
+  events,
+  queueEvents,
+  availability: async (tabId: string) => ({
+    state: 'offline',
+    computer: { id: tabId, name: 'Laptop' }
+  })
+} as unknown as ChatDeps)
 
 // The router reads ops via the getChatDeps() singleton, not ctx — stub is enough.
 const ctx = { db: {} as never, dataRoot: '' }
@@ -168,5 +177,13 @@ describe('chat router — command tasks (plan 3.9)', () => {
       ['stop', 't1', 'k1'],
       ['background', 't1', 'toolu_1']
     ])
+  })
+})
+
+test('availability reads injected metadata without invoking chat operations', async () => {
+  const caller = chatRouter.createCaller(ctx)
+  expect(await caller.availability({ tabId: 'tab' })).toEqual({
+    state: 'offline',
+    computer: { id: 'tab', name: 'Laptop' }
   })
 })
