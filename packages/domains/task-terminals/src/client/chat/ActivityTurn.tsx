@@ -30,6 +30,9 @@ function ActivityNarrative({
   const now = useNow(1000, { enabled: thinking && streaming })
   if (!text && item.stream !== 'open') return null
   const Icon = thinking ? Brain : MessageSquare
+  // Tool cards lead with a status icon, then the tool icon. An empty status
+  // slot puts this icon under the tool icons and the text under their titles.
+  const statusSlot = <span aria-hidden className="w-3 shrink-0" />
   if (preview) {
     return (
       <div
@@ -54,6 +57,7 @@ function ActivityNarrative({
             'after:pointer-events-none after:absolute after:inset-0 after:-z-10 after:rounded-md hover:after:bg-muted/40'
           )}
         >
+          {statusSlot}
           <Icon className="size-3 shrink-0 text-muted-foreground" />
           <span
             className={cn('min-w-0 flex-1 truncate', thinking && 'italic text-muted-foreground')}
@@ -79,7 +83,7 @@ function ActivityNarrative({
           id={id}
           hidden={!expanded}
           className={cn(
-            'px-3 pb-2 pl-8 leading-relaxed',
+            'px-3 pb-2 pl-13 leading-relaxed',
             thinking && 'whitespace-pre-wrap italic text-muted-foreground'
           )}
         >
@@ -98,6 +102,7 @@ function ActivityNarrative({
       className="my-1 flex max-w-[620px] items-start gap-2 rounded-md border border-border/50 bg-card/40 px-3 py-2 text-xs leading-relaxed"
       aria-label={thinking ? 'Thinking' : 'Message'}
     >
+      {statusSlot}
       <span className="flex h-lh shrink-0 items-center text-muted-foreground">
         <Icon className="size-3" />
       </span>
