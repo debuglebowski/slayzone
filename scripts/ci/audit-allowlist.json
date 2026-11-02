@@ -18,44 +18,17 @@
     {
       "packages": ["undici"],
       "reason": "Via @electron/get, the electron package's install-time downloader; never in the app or hub.",
-      "reviewed": "2026-10-24",
+      "reviewed": "2026-11-02",
       "expires": "2027-01-24",
-      "advisories": ["GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472", "GHSA-xjj6-f33q-929c"]
-    },
-    {
-      "packages": ["@modelcontextprotocol/sdk"],
-      "reason": "APPLIES, accepted for now: one request to /mcp can exhaust hub memory. Only authenticated callers reach /mcp (and only local processes on the desktop hub, which binds 127.0.0.1). The fix (1.32.0) was published 2026-10-02, so the 30-day minimumReleaseAge holds it back until 2026-11-01; Renovate opens the bump then.",
-      "reviewed": "2026-10-22",
-      "expires": "2026-11-02",
-      "advisories": ["GHSA-46jr-4wx8-v453"]
-    },
-    {
-      "packages": ["@modelcontextprotocol/sdk", "ajv"],
-      "reason": "MCP SDK client-side (OAuth client, redirects), experimental-tasks and SDK bearer-auth advisories: we run only an McpServer over streamable HTTP behind our own bearer gate. ajv: the $data option is not used.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
       "advisories": [
-        "GHSA-22jm-h49p-29qw",
-        "GHSA-2g4f-4pwh-qvx6",
-        "GHSA-6prh-2h8m-c8cw",
-        "GHSA-6qxp-vccf-f47h",
-        "GHSA-rvq5-wwqv-78pq"
-      ]
-    },
-    {
-      "packages": ["electron"],
-      "reason": "Fixed only in Electron >= 42; the 41 line gets no further patches. Clears with the Electron major upgrade.",
-      "reviewed": "2026-10-22",
-      "expires": "2026-12-22",
-      "advisories": [
-        "GHSA-2p8c-gr87-2676",
-        "GHSA-3qxv-5xgr-q7w9",
-        "GHSA-98mx-cjp9-gchm",
-        "GHSA-997q-gvvc-jwmx",
-        "GHSA-fw47-9c62-h3vw",
-        "GHSA-h3v5-h239-pg29",
-        "GHSA-jr5w-w6x2-84p9",
-        "GHSA-x562-297c-g43g"
+        "GHSA-2m5v-pch6-74hx",
+        "GHSA-4qv8-2p9j-2685",
+        "GHSA-4w7w-5xrc-9h26",
+        "GHSA-55wc-3pg8-jfw6",
+        "GHSA-9fm3-97px-rjf6",
+        "GHSA-f72v-6w45-q472",
+        "GHSA-qrxm-fqhp-jwvm",
+        "GHSA-xjj6-f33q-929c"
       ]
     },
     {
@@ -70,13 +43,7 @@
       "reason": "NEEDS REVIEW: dompurify 3.4.15 via mermaid and 3.4.16 via @slayzone/editor. These ids were previously covered by the posthog-js entry, whose rationale (posthog's pinned 3.3.1 copy) does not apply to these paths; moved here unchanged when posthog-js 1.434 dropped dompurify.",
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-6688-9rhm-gjv2",
-        "GHSA-c6gr-qvv4-5v3f",
-        "GHSA-cg2g-xh64-v4q7",
-        "GHSA-mrv2-3pqr-j5jr",
-        "GHSA-p98j-92pf-mc4p"
-      ]
+      "advisories": ["GHSA-c6gr-qvv4-5v3f", "GHSA-cg2g-xh64-v4q7", "GHSA-mrv2-3pqr-j5jr"]
     },
     {
       "packages": ["hono", "@hono/node-server", "express-rate-limit", "ip-address", "fast-uri"],
@@ -145,12 +112,13 @@
     },
     {
       "packages": ["proxy-addr", "path-to-regexp", "qs", "body-parser"],
-      "reason": "Express internals: `trust proxy` is never set (re-check if it ever is); no route uses sequential optional groups or multiple wildcards; Express 5's default query parser is not qs; no urlencoded parser; body limits are valid.",
-      "reviewed": "2026-10-22",
+      "reason": "Express internals: `trust proxy` is never set (re-check if it ever is); no route uses sequential optional groups or multiple wildcards; Express 5's default query parser is not qs; no urlencoded parser; body limits are valid. qs: express and body-parser only call qs.parse; the advisory is in qs.stringify with arrayFormat \"comma\".",
+      "reviewed": "2026-11-02",
       "expires": "2027-01-22",
       "advisories": [
         "GHSA-27v5-c462-wpq7",
         "GHSA-4mjr-xmp4-gh2g",
+        "GHSA-6pq8-jhm2-2vcw",
         "GHSA-j3q9-mxjg-w52f",
         "GHSA-jqcg-44mw-7w3h",
         "GHSA-q8mj-m7cp-5q26",
@@ -177,54 +145,32 @@
         "GHSA-68fv-2mgg-jv7q",
         "GHSA-698v-4r3x-3vcv",
         "GHSA-9jrq-w75r-8gcw",
-        "GHSA-qxg6-89mg-rqv8",
         "GHSA-r825-w8mm-5pxw",
         "GHSA-rq7h-c2jc-7f22",
-        "GHSA-vfpm-58rq-9qcg",
-        "GHSA-xp26-3454-mjgp"
+        "GHSA-vfpm-58rq-9qcg"
       ]
-    },
-    {
-      "packages": ["postcss-selector-parser"],
-      "reason": "Via @tailwindcss/typography: runs at build time on our own CSS.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-rj75-hqrm-r3gf"]
     },
     {
       "packages": ["lodash-es", "js-cookie", "decode-uri-component", "colord", "katex"],
       "reason": "Via @lobehub/icons / @lobehub/ui: we deep-import 6 icon components, which do not load these.",
-      "reviewed": "2026-10-22",
+      "reviewed": "2026-11-02",
       "expires": "2027-01-22",
       "advisories": [
         "GHSA-238p-pmpm-9mq7",
         "GHSA-2wm5-q62r-hmrv",
         "GHSA-f23m-r3pf-42rh",
         "GHSA-qjx8-664m-686j",
+        "GHSA-qr28-fpjm-wq7f",
         "GHSA-r5fr-rjxr-66jc",
         "GHSA-vcc3-ghjq-m6fr"
       ]
     },
     {
       "packages": ["minimatch", "brace-expansion", "lodash"],
-      "reason": "Via archiver in the CLI zip export: no glob patterns are passed.",
-      "reviewed": "2026-10-22",
+      "reason": "Via archiver in the CLI zip export: no glob patterns are passed. minimatch also comes in via eslint (lint-time, our own config globs) and Expo build tooling (mobile, our own project files).",
+      "reviewed": "2026-11-02",
       "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-23c5-xmqv-rm74",
-        "GHSA-3jxr-9vmj-r5cp",
-        "GHSA-3ppc-4f35-3m26",
-        "GHSA-6j4f-fj2g-mc7p",
-        "GHSA-7r86-cg39-jmmj",
-        "GHSA-f23m-r3pf-42rh",
-        "GHSA-f886-m6hf-6m8v",
-        "GHSA-mh99-v99m-4gvg",
-        "GHSA-q2hr-2g5m-vwhr",
-        "GHSA-qhr7-859c-m2p7",
-        "GHSA-r5fr-rjxr-66jc",
-        "GHSA-rgw5-rvv9-x895",
-        "GHSA-xxjr-mmjv-4gpg"
-      ]
+      "advisories": ["GHSA-g3hv-75wg-m249"]
     },
     {
       "packages": ["posix"],
@@ -246,6 +192,28 @@
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
       "advisories": ["GHSA-j452-xhg8-qg39"]
+    },
+    {
+      "packages": ["node-forge", "glob", "deepmerge"],
+      "reason": "Via Expo build tooling in the mobile app (@expo/cli dev server and code signing, @expo/config): runs on the developer machine at build and dev-server time on our own project files, never shipped in the app bundle. node-forge 1.4.1 (published 2026-10-27) and glob 14.0.2 (2026-10-27, a major bump from 13) are held back by the 30-day minimumReleaseAge; deepmerge has no fix. Re-check on the next Expo SDK bump.",
+      "reviewed": "2026-11-02",
+      "expires": "2027-02-02",
+      "advisories": [
+        "GHSA-3g3m-2fjr-6pw4",
+        "GHSA-4487-j8r4-4g2f",
+        "GHSA-4642-5mcj-2rqw",
+        "GHSA-525v-9gp9-w22h",
+        "GHSA-5cwg-6vw7-rj6p",
+        "GHSA-5x38-2vff-x55p",
+        "GHSA-6wvx-3r32-xmcg",
+        "GHSA-7wch-p9px-956x",
+        "GHSA-86w9-cpqp-85rv",
+        "GHSA-8hrf-8g6f-7xwp",
+        "GHSA-gcqx-w48m-w2h4",
+        "GHSA-h6cr-wjv9-3cpp",
+        "GHSA-hqq3-7jhf-c5jx",
+        "GHSA-jc66-7q78-782g"
+      ]
     }
   ]
 }

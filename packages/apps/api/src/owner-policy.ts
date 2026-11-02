@@ -460,7 +460,11 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'aiConfig.discoverComputerMcpConfigs': none(HUB_HOST),
   'aiConfig.writeComputerMcpServer': none(HUB_HOST),
   'aiConfig.removeComputerMcpServer': none(HUB_HOST),
-  'aiConfig.checkSlayConfigured': checked(path('projectPath'), project('projectId'), task('taskId')),
+  'aiConfig.checkSlayConfigured': checked(
+    path('projectPath'),
+    project('projectId'),
+    task('taskId')
+  ),
   'aiConfig.setupSlay': checked(path('projectPath'), project('projectId'), task('taskId')),
   'aiConfig.marketplace.listRegistries': none(LIBRARY),
   'aiConfig.marketplace.ensureFresh': none(LIBRARY),
@@ -678,6 +682,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.testSetWatchdogTimings': none(TEST),
   'chat.hydrate': chatOpts,
   'chat.start': chatOpts,
+  'chat.restart': chatOpts,
   'chat.send': checked(tab('tabId')),
   'chat.sendToolResult': checked(tab('tabId')),
   'chat.respondPermission': checked(tab('tabId')),
@@ -686,6 +691,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.rewindPreview': chatOpts,
   'chat.rewind': chatOpts,
   'chat.fork': chatOpts,
+  'chat.threads.list': chatOpts,
+  'chat.threads.create': chatOpts,
   'chat.sideQuestion.ask': chatOpts,
   'chat.sideQuestion.cancel': checked(tab('tabId')),
   'chat.switchConversation': chatOpts,
@@ -714,6 +721,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.setEffort': chatOpts,
   'chat.getCollaboration': checked(task('taskId')),
   'chat.setCollaboration': chatOpts,
+  'chat.decidePlan': chatOpts,
   'chat.getFastMode': checked(task('taskId')),
   'chat.setFastMode': chatOpts,
   'chat.listSkills': checked(path('cwd')),
@@ -739,6 +747,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.onEvent': streamed(on('tabId', 'tab')),
   'chat.onExit': streamed(on('tabId', 'tab')),
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
+  // A bare signal (no payload to filter): the tab named in the input is checked instead.
+  'chat.threads.onChanged': checked(tab('tabId')),
   'chat.onQueueDrained': streamed(on('tabId', 'tab')),
 
   // ── computers (T-19): binding work needs the task/project AND the computer to be

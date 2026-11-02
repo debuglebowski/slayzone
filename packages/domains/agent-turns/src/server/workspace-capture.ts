@@ -22,10 +22,11 @@ const unavailable = (reason: string): WorkspaceCaptureResult => ({
 })
 
 /** A workspace-scoped operation must not inherit Git environment redirects from its host. */
-export function workspaceGitEnv(overlay: Record<string, string> = {}): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(childProcessEnv()))
-    if (value !== undefined) env[key] = value
+// Typed `NodeJS.ProcessEnv` (what spawn options take), not `Record<string, string>`:
+// a program whose types make some env key required (Expo's `NODE_ENV`) rejects the latter.
+export function workspaceGitEnv(overlay: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env = childProcessEnv()
+  for (const [key, value] of Object.entries(env)) if (value === undefined) delete env[key]
   for (const key of [
     'GIT_DIR',
     'GIT_WORK_TREE',

@@ -21,7 +21,7 @@ export interface ExecResult {
 export function execCapture(
   command: string,
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}
+  opts: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {}
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {

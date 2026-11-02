@@ -33,7 +33,7 @@ export function ContextMeter({ summary }: { summary: UsageSummary | null }) {
     }
   }
   if (sessionCostUsd !== null) {
-    shown ??= formatCost(sessionCostUsd)
+    if (shown === null) shown = formatCost(sessionCostUsd)
     details.push(`Session cost: $${sessionCostUsd.toFixed(4)}`)
   }
   if (shown === null) return null

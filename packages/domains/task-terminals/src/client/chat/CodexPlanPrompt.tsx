@@ -15,23 +15,24 @@ export function CodexPlanPrompt({ review, target, onResolved }: Props) {
   const [busy, setBusy] = useState(false)
   const messageId = useRef<string | null>(null)
 
-  const choose = async (decision: 'implement' | 'keep-planning'): Promise<void> => {
-    if (busy) return
+  // Promise chain, not try/finally: the React Compiler skips functions with a `finally` clause.
+  const choose = (decision: 'implement' | 'keep-planning'): Promise<void> => {
+    if (busy) return Promise.resolve()
     setBusy(true)
-    try {
-      if (decision === 'implement') messageId.current ??= review.messageId ?? crypto.randomUUID()
-      const result = await client.chat.decidePlan.mutate({
+    if (decision === 'implement' && messageId.current === null)
+      messageId.current = review.messageId ?? crypto.randomUUID()
+    return client.chat.decidePlan
+      .mutate({
         ...target,
         planId: review.planId,
         decision,
         ...(decision === 'implement' && messageId.current ? { messageId: messageId.current } : {})
       })
-      onResolved(result.chatCollaboration)
-    } catch (err) {
-      toast(`Plan review failed: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setBusy(false)
-    }
+      .then((result) => onResolved(result.chatCollaboration))
+      .catch((err: unknown) => {
+        toast(`Plan review failed: ${err instanceof Error ? err.message : String(err)}`)
+      })
+      .finally(() => setBusy(false))
   }
 
   return (

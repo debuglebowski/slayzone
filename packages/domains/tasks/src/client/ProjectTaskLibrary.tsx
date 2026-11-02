@@ -56,16 +56,16 @@ export function ProjectTaskLibrary({
     return () => sub.unsubscribe()
   }, [client, open, view, refetchTrash])
 
-  const run = async (id: string, action: () => Promise<void>) => {
+  // Promise chain, not try/finally: the React Compiler skips functions with a `finally` clause.
+  const run = (id: string, action: () => Promise<void>): Promise<void> => {
     setPending(id)
     setError(null)
-    try {
-      await action()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setPending(null)
-    }
+    return Promise.resolve()
+      .then(action)
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => setPending(null))
   }
 
   return (

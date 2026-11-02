@@ -27,21 +27,24 @@ export function SlayNudgeBanner({
   const [setupState, setSetupState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
 
-  const runSetup = async () => {
+  // Promise chain, not try/catch: the React Compiler skips value blocks inside try/catch.
+  const runSetup = () => {
     setSetupState('running')
     setError(null)
-    try {
-      const result = await setupSlayMutation.mutateAsync({ taskId, projectPath, projectId })
-      if (result.ok) {
-        setSetupState('done')
-      } else {
+    return setupSlayMutation
+      .mutateAsync({ taskId, projectPath, projectId })
+      .then((result) => {
+        if (result.ok) {
+          setSetupState('done')
+        } else {
+          setSetupState('error')
+          setError(result.error ?? 'Unknown error')
+        }
+      })
+      .catch((err: unknown) => {
         setSetupState('error')
-        setError(result.error ?? 'Unknown error')
-      }
-    } catch (err) {
-      setSetupState('error')
-      setError(err instanceof Error ? err.message : String(err))
-    }
+        setError(err instanceof Error ? err.message : String(err))
+      })
   }
 
   const handleDialogChange = (open: boolean) => {

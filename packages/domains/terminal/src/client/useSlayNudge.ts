@@ -1,6 +1,32 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTRPCClient } from './trpc'
 
+type TrpcClient = ReturnType<typeof useTRPCClient>
+
+/**
+ * Whether the slay setup banner should show; `null` = dismissed or cancelled (leave
+ * the banner state alone). Outside the hook: the React Compiler skips a function
+ * with value blocks inside try/catch.
+ */
+async function shouldShowSlayNudge(
+  trpcClient: TrpcClient,
+  ids: { taskId: string; projectId: string; projectPath: string },
+  isCancelled: () => boolean
+): Promise<boolean | null> {
+  try {
+    const dismissed = await trpcClient.settings.get.query({
+      key: `slay_nudge_dismissed:${ids.projectId}`
+    })
+    if (isCancelled() || dismissed === '1') return null
+    const configured = await trpcClient.aiConfig.checkSlayConfigured.query(ids)
+    return !configured
+  } catch {
+    // An unreachable computer cannot tell us setup is missing. Never prompt
+    // based on hub files or a previous task's result.
+    return false
+  }
+}
+
 interface UseSlayNudgeOptions {
   computerId?: string | null
   taskId: string | null
@@ -19,26 +45,15 @@ export function useSlayNudge({ computerId, taskId, projectId, projectPath }: Use
 
   useEffect(() => {
     let cancelled = false
-    const check = async () => {
-      if (!taskId || !projectId || !projectPath) return
-      try {
-        const dismissed = await trpcClient.settings.get.query({
-          key: `slay_nudge_dismissed:${projectId}`
-        })
-        if (cancelled || dismissed === '1') return
-        const configured = await trpcClient.aiConfig.checkSlayConfigured.query({
-          taskId,
-          projectId,
-          projectPath
-        })
-        if (!cancelled) setBanner({ target, show: !configured })
-      } catch {
-        // An unreachable computer cannot tell us setup is missing. Never prompt
-        // based on hub files or a previous task's result.
-        if (!cancelled) setBanner({ target, show: false })
-      }
+    if (taskId && projectId && projectPath) {
+      void shouldShowSlayNudge(
+        trpcClient,
+        { taskId, projectId, projectPath },
+        () => cancelled
+      ).then((show) => {
+        if (!cancelled && show !== null) setBanner({ target, show })
+      })
     }
-    void check()
     return () => {
       cancelled = true
     }
