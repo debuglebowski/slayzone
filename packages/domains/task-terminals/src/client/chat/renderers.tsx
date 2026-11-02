@@ -962,6 +962,8 @@ export function renderTool(invocation: ToolInvocation, timestamp?: number): Reac
  */
 export function isRenderable(item: TimelineItem): boolean {
   if (item.kind === 'session-start') return false
+  // A later marker closes the same turn: one "Turn interrupted" per turn.
+  if (item.kind === 'interrupted' && item.superseded) return false
   if (item.kind === 'codex-plan-decision') return false
   if (item.kind === 'rate-limit' && item.status === 'allowed') return false
   // Launcher tool is rendered inside SubAgentRow's accordion, not at root.

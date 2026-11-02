@@ -226,11 +226,15 @@ export type TimelineItem =
       toolUseId: string
       /**
        * Semantic state. `'in-flight'` while any `task_*` system event is the
-       * latest signal; flips to `'completed'`/`'failed'` only when the outer
-       * Task tool's `tool-result` arrives (or on interrupt / process-exit
-       * heal). Decouples UI from SDK subtype strings.
+       * latest signal; flips to `'completed'`/`'failed'` when the outer Task
+       * tool's `tool-result` arrives, or a `task_notification` reports an end
+       * (or on interrupt / process-exit heal). A background run's tool-result
+       * only says it launched: its notification (or its process ending) closes
+       * it. Decouples UI from SDK subtype strings.
        */
       phase: 'in-flight' | 'completed' | 'failed'
+      /** Runs in the background: it outlives its turn, not its process. */
+      backgrounded?: true
       description?: string
       status?: string
       summary?: string
@@ -265,6 +269,11 @@ export type TimelineItem =
       parentToolUseId?: string
       /** Why the turn ended without a reply; absent = the user stopped it. */
       reason?: 'already-in-conversation'
+      /**
+       * A later marker closes the same user turn (a Stop the CLI never saw, then
+       * the message ran and was stopped again): this one is not shown.
+       */
+      superseded?: true
     }
   | {
       kind: 'plan'
@@ -1102,7 +1111,11 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       }
       // Process death mid-turn → balance counters + clear stream state so the
       // typing indicator can't be stuck on. Mirrors the agent-event branch.
-      const healed = healOrphanedTurn(endAgentTurn(state, Date.now()), Date.now())
+      const healed = failInFlightSubAgents(
+        healOrphanedTurn(endAgentTurn(state, Date.now()), Date.now()),
+        'stopped',
+        'process'
+      )
       return {
         ...healed,
         sessionEnded: true,
@@ -1261,7 +1274,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         timestamp: ts,
         ...(event.reason ? { reason: event.reason } : {})
       }
-      const failed = failInFlightSubAgents(state, 'interrupted')
+      const failed = supersedeContinuedInterrupt(failInFlightSubAgents(state, 'interrupted'))
       return {
         ...failed,
         timeline: appended(failed.timeline, item),
@@ -1938,7 +1951,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           const isTerminal = target.phase === 'completed' || target.phase === 'failed'
           const next: TimelineItem = {
             ...target,
-            phase: isTerminal ? target.phase : incomingPhase,
+            // A background run's end is its notification; a foreground run's
+            // is its tool-result (`case 'tool-result'`).
+            phase: isTerminal
+              ? target.phase
+              : target.backgrounded
+                ? (endedPhase(event.status) ?? incomingPhase)
+                : incomingPhase,
             description: event.description ?? target.description,
             status: event.status ?? target.status,
             summary: event.summary ?? target.summary,
@@ -2143,7 +2162,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // Process exited. If we were mid-turn, heal counters + clear stream state
       // so inFlight drops and the typing indicator clears. Without this, a crash
       // mid-stream leaves "Writing…" stuck forever even after the buffer replay.
-      const healed = endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts))
+      const healed = failInFlightSubAgents(
+        endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts)),
+        'stopped',
+        'process'
+      )
       return {
         ...healed,
         sessionEnded: true,
@@ -2255,9 +2278,14 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // uses `notStarted` to suppress the "Session ended, click to restart"
       // banner on hydrate-only tabs (where `sessionEnded` is false but no
       // process has started yet).
-      // A new process: the previous one's streams and commands are gone with it.
+      // A new process: the previous one's streams, commands and sub-agents are
+      // gone with it.
       return {
-        ...endRunningCommandTasks(settleStreams(state)),
+        ...failInFlightSubAgents(
+          endRunningCommandTasks(settleStreams(state)),
+          'stopped',
+          'process'
+        ),
         currentSpawnId: event.spawnId,
         sessionEnded: false,
         exitCode: null,
@@ -2865,6 +2893,14 @@ function closeSubAgentForToolResult(
   if (idx === undefined) return state
   const row = rowAtIfAny(state.timeline, idx)
   if (row?.kind !== 'sub-agent' || row.phase !== 'in-flight') return state
+  if (isAsyncLaunch(event)) {
+    // Launched in the background: still running. Its notification (or its
+    // process ending) closes it.
+    if (row.backgrounded) return state
+    const t = writable(state.timeline)
+    t[idx] = { ...row, backgrounded: true }
+    return { ...state, timeline: t }
+  }
   const closed: TimelineItem = {
     ...row,
     phase: event.isError ? 'failed' : 'completed',
@@ -2892,16 +2928,66 @@ function normalizeSubAgentPhase(phase: string): 'in-flight' | 'completed' | 'fai
  * press or subprocess crash mid-Task can't leave the row spinning forever
  * (the outer `tool-result` that would normally close it never arrives).
  */
-function failInFlightSubAgents(state: ChatTimelineState, statusLabel: string): ChatTimelineState {
+function failInFlightSubAgents(
+  state: ChatTimelineState,
+  statusLabel: string,
+  /**
+   * `turn` (the turn ended): a background sub-agent outlives it and keeps
+   * running. `process` (the agent process is gone): every one ended with it.
+   */
+  scope: 'turn' | 'process' = 'turn'
+): ChatTimelineState {
   // Only the in-flight ones (`inFlightSubAgents`): never a sweep of every sub-agent.
   if (state.inFlightSubAgents.length === 0) return state
   const nextTimeline = writable(state.timeline)
+  const stillRunning: number[] = []
   for (const idx of state.inFlightSubAgents) {
     const row = rowAt(state.timeline, idx)
     if (row.kind !== 'sub-agent' || row.phase !== 'in-flight') continue
+    if (scope === 'turn' && row.backgrounded) {
+      stillRunning.push(idx)
+      continue
+    }
     nextTimeline[idx] = { ...row, phase: 'failed', status: row.status ?? statusLabel }
   }
-  return { ...state, timeline: nextTimeline, inFlightSubAgents: [] }
+  if (stillRunning.length === state.inFlightSubAgents.length) return state
+  return { ...state, timeline: nextTimeline, inFlightSubAgents: stillRunning }
+}
+
+/** The Agent tool's answer for a background run: it launched (`isAsync`), it did not end. */
+function isAsyncLaunch(event: ToolResultEvent): boolean {
+  const structured = event.structured as { isAsync?: unknown } | null | undefined
+  return !event.isError && structured?.isAsync === true
+}
+
+/** The phase a `task_notification` status ends a sub-agent in; null = still running. */
+function endedPhase(status: string | undefined): 'completed' | 'failed' | null {
+  if (status === 'completed') return 'completed'
+  if (status === 'failed' || status === 'killed' || status === 'stopped') return 'failed'
+  return null
+}
+
+/**
+ * An `interrupted` closing an agent-started turn that directly continues a user
+ * turn already marked interrupted (a Stop the CLI never saw: the message ran
+ * anyway and was stopped again) — one turn, one marker. The earlier marker is
+ * superseded in place, so no row moves.
+ */
+function supersedeContinuedInterrupt(state: ChatTimelineState): ChatTimelineState {
+  if (!state.agentTurnOpen) return state
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    if (!it) return state
+    if (it.parentToolUseId != null) continue
+    if (it.kind === 'interrupted') {
+      if (it.superseded) return state
+      const t = writable(state.timeline)
+      t[i] = { ...it, superseded: true }
+      return { ...state, timeline: t }
+    }
+    if (it.kind === 'user-text' || it.kind === 'result' || it.kind === 'session-start') return state
+  }
+  return state
 }
 
 /**

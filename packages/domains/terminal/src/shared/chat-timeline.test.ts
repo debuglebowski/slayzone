@@ -3080,3 +3080,152 @@ describe('a new conversation starting with a message already sent to it', () => 
     expect(isInFlight(s)).toBe(true)
   })
 })
+
+describe('background sub-agents (Agent run in the background)', () => {
+  const started = (toolUseId: string): AgentEvent => ({
+    kind: 'sub-agent',
+    phase: 'in-flight',
+    toolUseId,
+    description: 'bg',
+    raw: {}
+  })
+  /** The Agent tool's immediate answer for a background run: it launched, it did not finish. */
+  const launched = (toolUseId: string): AgentEvent => ({
+    kind: 'tool-result',
+    toolUseId,
+    isError: false,
+    rawContent: 'Async agent launched successfully.',
+    structured: { isAsync: true, status: 'async_launched', agentId: 'a1' }
+  })
+  const notified = (toolUseId: string, status: string): AgentEvent => ({
+    kind: 'sub-agent',
+    phase: 'in-flight',
+    toolUseId,
+    status,
+    raw: {}
+  })
+  const subAgent = (s: ChatTimelineState, toolUseId: string) => {
+    const row = rowsOf(s).find((i) => i.kind === 'sub-agent' && i.toolUseId === toolUseId)
+    if (!row || row.kind !== 'sub-agent') throw new Error('missing')
+    return row
+  }
+  const running = (): ChatTimelineState => {
+    let s = initialState()
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'user-sent', text: 'go' })
+    s = reducer(s, { type: 'event', event: ev.call('tu_BG', 'Agent') })
+    s = reducer(s, { type: 'event', event: started('tu_BG') })
+    return reducer(s, { type: 'event', event: launched('tu_BG') })
+  }
+
+  test('the launch tool-result keeps the row in flight', () => {
+    const row = subAgent(running(), 'tu_BG')
+    expect(row.phase).toBe('in-flight')
+    expect(row.status).toBeUndefined()
+  })
+
+  test('the end of the turn that launched it keeps the row in flight', () => {
+    const s = reducer(running(), { type: 'event', event: ev.turnResult() })
+    expect(subAgent(s, 'tu_BG').phase).toBe('in-flight')
+  })
+
+  test('its completed notification closes the row', () => {
+    const s = reducer(running(), { type: 'event', event: notified('tu_BG', 'completed') })
+    const row = subAgent(s, 'tu_BG')
+    expect(row.phase).toBe('completed')
+    expect(row.status).toBe('completed')
+  })
+
+  test('a stopped / failed notification fails the row', () => {
+    for (const status of ['stopped', 'killed', 'failed']) {
+      const s = reducer(running(), { type: 'event', event: notified('tu_BG', status) })
+      expect(subAgent(s, 'tu_BG').phase).toBe('failed')
+    }
+  })
+
+  test('a running notification keeps the row in flight', () => {
+    const s = reducer(running(), { type: 'event', event: notified('tu_BG', 'running') })
+    expect(subAgent(s, 'tu_BG').phase).toBe('in-flight')
+  })
+
+  test('a new agent process stops it: the old process took it down', () => {
+    let s = reducer(running(), { type: 'event', event: ev.turnResult() })
+    s = reducer(s, { type: 'event', event: { kind: 'session-spawn', spawnId: 'next' } })
+    const row = subAgent(s, 'tu_BG')
+    expect(row.phase).toBe('failed')
+    expect(row.status).toBe('stopped')
+  })
+
+  test('the agent process exiting stops it', () => {
+    let s = reducer(running(), { type: 'event', event: ev.turnResult() })
+    s = reducer(s, { type: 'event', event: { kind: 'process-exit', code: 0, signal: null } })
+    const row = subAgent(s, 'tu_BG')
+    expect(row.phase).toBe('failed')
+    expect(row.status).toBe('stopped')
+  })
+
+  test('a foreground sub-agent still closes on its tool-result', () => {
+    let s = initialState()
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: started('tu_FG') })
+    s = reducer(s, { type: 'event', event: ev.result('tu_FG') })
+    expect(subAgent(s, 'tu_FG').phase).toBe('completed')
+  })
+})
+
+describe('interrupted marker', () => {
+  /** The markers the chat shows. */
+  const interrupted = (s: ChatTimelineState) =>
+    rowsOf(s).filter((i) => i.kind === 'interrupted' && !i.superseded)
+
+  test('a second interrupt of the same user turn shows one marker, after the work', () => {
+    // Stop pressed before the CLI had the message, which then ran anyway and
+    // was stopped again: one turn, one "Turn interrupted".
+    let s = initialState({ agentStartedTurns: true })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'plan it', id: 'u1' } })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'user-message-delivery', id: 'u1', state: 'delivered' }
+    })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'assistant-thinking', messageId: 'm1', text: '', hasSignature: true }
+    })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    expect(interrupted(s)).toHaveLength(1)
+    // The marker shown is the turn's last boundary: after the work.
+    const rows = rowsOf(s)
+    expect(rows[rows.length - 1]).toMatchObject({ kind: 'interrupted' })
+    expect(rows[rows.length - 1]).not.toHaveProperty('superseded')
+    expect(isTurnOpen(s)).toBe(false)
+  })
+
+  test('a stopped turn the agent answered, then an agent turn stopped: two markers', () => {
+    // The first Stop reached the CLI (its result arrived): the agent's own
+    // later turn is a different turn.
+    let s = initialState({ agentStartedTurns: true })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'a', id: 'u1' } })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    s = reducer(s, { type: 'event', event: ev.turnResult() })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'assistant-thinking', messageId: 'm2', text: '', hasSignature: true }
+    })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    expect(interrupted(s)).toHaveLength(2)
+  })
+
+  test('each user turn keeps its own marker', () => {
+    let s = initialState({ agentStartedTurns: true })
+    s = reducer(s, { type: 'event', event: ev.turnInit() })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'a', id: 'u1' } })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'b', id: 'u2' } })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    expect(interrupted(s)).toHaveLength(2)
+  })
+})

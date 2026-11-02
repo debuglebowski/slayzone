@@ -6,6 +6,7 @@ import {
   agentProblemText,
   formatAge,
   interruptedLabel,
+  isShown,
   resultText,
   subAgentItems,
   timelineRows,
@@ -213,5 +214,12 @@ describe('agentProblemText (desktop `AgentProblemCard`)', () => {
       hint: 'Fix the cause below, then retry.',
       inUse: false
     })
+  })
+})
+
+describe('isShown: interrupted markers', () => {
+  test('a marker a later one superseded (same turn) is hidden', () => {
+    expect(isShown({ kind: 'interrupted', timestamp: 1 })).toBe(true)
+    expect(isShown({ kind: 'interrupted', timestamp: 1, superseded: true })).toBe(false)
   })
 })

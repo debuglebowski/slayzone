@@ -27,6 +27,7 @@ export function isAgentLauncher(name: string | undefined): boolean {
 export function isShown(item: TimelineItem): boolean {
   if (item.parentToolUseId != null) return false
   if (item.kind === 'session-start') return false
+  if (item.kind === 'interrupted' && item.superseded) return false
   if (item.kind === 'rate-limit' && item.status === 'allowed') return false
   if (item.kind === 'tool' && isAgentLauncher(item.invocation.name)) return false
   if (item.kind === 'user-text' && PLAN_MARKERS.has(item.text)) return false
