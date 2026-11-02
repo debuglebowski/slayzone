@@ -1186,7 +1186,10 @@ export function composeServer(opts: {
         getOwnership: () => [],
         getWindowId: () => null,
         claimAndCloseOther: stub('taskWindows.claimAndCloseOther'),
-        claimSession: stub('taskWindows.claimSession'),
+        // Every window gets pty output through its own subscription here: there is
+        // no per-window routing to claim (Electron main's legacy webContents path).
+        // Renderers claim on every mount/focus, so this is normal, not a bug.
+        claimSession: () => ({ ok: true }),
         events: silentEmitter as AppDeps['taskWindows']['events']
       }
     })
