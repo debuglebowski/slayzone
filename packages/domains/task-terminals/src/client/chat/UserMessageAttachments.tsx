@@ -35,7 +35,7 @@ export function UserMessageContent({
       {(messageText || children) && (
         <div
           data-testid="chat-user-message-card"
-          className="max-w-full min-w-0 rounded-lg border border-primary/25 bg-primary/5 shadow-sm px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words"
+          className="max-w-full min-w-0 rounded-lg bg-primary/10 px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words"
         >
           <HighlightedText text={messageText} />
           {children}
