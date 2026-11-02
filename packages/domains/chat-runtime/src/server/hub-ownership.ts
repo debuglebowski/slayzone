@@ -421,6 +421,16 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
         'INSERT INTO chat_provider_bindings VALUES(?,?,?) ON CONFLICT(provider_session_id,mode) DO NOTHING',
         [providerSessionId, providerMode(mode), id]
       )
+      // A deleted owner holds no history, so its binding is dead. Let a live
+      // owner of the same task resume the session (e.g. a closed tab's session
+      // reopened in the task's main tab); otherwise every metadata retry fails.
+      await db.run(
+        `UPDATE chat_provider_bindings SET conversation_id=? WHERE provider_session_id=? AND mode=?
+        AND conversation_id<>? AND EXISTS(SELECT 1 FROM chat_ownership old JOIN chat_ownership new ON new.id=?
+          WHERE old.id=chat_provider_bindings.conversation_id AND old.state='deleted'
+          AND new.state='active' AND new.task_id=old.task_id)`,
+        [id, providerSessionId, providerMode(mode), id, id]
+      )
       const row = await api.forProviderSession(providerSessionId, mode)
       if (row?.id !== id) {
         const target = await required(id)

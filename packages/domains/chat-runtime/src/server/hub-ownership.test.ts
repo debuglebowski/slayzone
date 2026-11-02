@@ -109,3 +109,28 @@ test('same-computer tabs can select a provider session; another computer cannot 
     computerId: 'pc-a'
   })
 })
+
+test('a live tab reclaims a provider session whose previous owner in the same task was deleted', async () => {
+  const { store } = fixture()
+  await store.register({ ...route, id: 'closed', tabId: 'prompt-history:task' })
+  await store.bindProvider('closed', 'native', 'claude-chat')
+  await store.deleteConversation('closed')
+  await store.register(route)
+  await expect(store.bindProvider(route.id, 'native', 'claude-chat')).resolves.toBeUndefined()
+  expect(await store.forProviderSession('native', 'claude-code')).toMatchObject({
+    id: route.id,
+    state: 'active'
+  })
+  await store.register({ ...route, id: 'foreign', taskId: 'other', tabId: 'tab-other' })
+  await expect(store.bindProvider('foreign', 'native', 'claude-chat')).rejects.toThrow(/owner/i)
+})
+
+test('a deleted owner in another task never yields its provider session', async () => {
+  const { store } = fixture()
+  await store.register({ ...route, id: 'closed', taskId: 'other', tabId: 'tab-other' })
+  await store.bindProvider('closed', 'native', 'claude-chat')
+  await store.deleteConversation('closed')
+  await store.register(route)
+  await expect(store.bindProvider(route.id, 'native', 'claude-chat')).rejects.toThrow(/owner/i)
+  expect(await store.forProviderSession('native', 'claude-code')).toMatchObject({ id: 'closed' })
+})
