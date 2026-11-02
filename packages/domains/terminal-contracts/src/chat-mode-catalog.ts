@@ -31,3 +31,16 @@ export function defaultChatModeForMode(mode: string): string {
 export function isValidChatModeForMode(mode: string, v: unknown): v is string {
   return typeof v === 'string' && chatModesForMode(mode).includes(v)
 }
+
+/**
+ * `settings` key holding the user's default chat mode for a terminal mode
+ * (Settings → Providers). Applies to tasks with no stored `chatMode`.
+ */
+export function defaultChatModeSettingKey(mode: string): string {
+  return `chat_default_mode:${mode}`
+}
+
+/** The user's stored default when valid for the mode, else the built-in default. */
+export function resolveDefaultChatMode(mode: string, stored: unknown): string {
+  return isValidChatModeForMode(mode, stored) ? stored : defaultChatModeForMode(mode)
+}

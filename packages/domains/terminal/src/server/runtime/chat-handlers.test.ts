@@ -1118,6 +1118,48 @@ test('boot backfill leaves Claude chat entries to the default mode; Codex unchan
   expect(await ops.getMode('task-bf-claude', 'claude-chat')).toBe('auto-accept')
 })
 
+// Settings → Providers → default permission mode: a task that never picked a
+// mode starts (and reports) in the user's default; one that picked keeps its own.
+test('user default chat mode applies to tasks without a stored mode', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('chat_default_mode:claude-chat', 'bypass')"
+  ).run()
+  seedTask(db, 'task-def-1', null, 'tab-def-1')
+  seedTask(db, 'task-def-2', JSON.stringify({ 'claude-chat': { chatMode: 'plan' } }), 'tab-def-2')
+  const spawnArgsLog: string[][] = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: (_cmd, args) => {
+      spawnArgsLog.push(args)
+      return makeFakeChild()
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  const ops = createChatOps(localChatOpts(db))
+  expect(await ops.getMode('task-def-1', 'claude-chat')).toBe('bypass')
+  expect(await ops.getMode('task-def-2', 'claude-chat')).toBe('plan')
+  await ipc.invoke('chat:start', {
+    tabId: 'tab-def-1',
+    taskId: 'task-def-1',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
+  const args = spawnArgsLog[0]
+  expect(args[args.indexOf('--permission-mode') + 1]).toBe('bypassPermissions')
+})
+
 // ---- chat A: live effort (3.11) ----
 
 async function liveEffortSetup(answer: 'success' | 'error') {

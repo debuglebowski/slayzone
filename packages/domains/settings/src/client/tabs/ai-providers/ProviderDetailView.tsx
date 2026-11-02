@@ -1,5 +1,7 @@
 import { RefreshCw, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  agentModeLabel,
   Button,
   IconButton,
   Label,
@@ -11,7 +13,14 @@ import {
   Switch
 } from '@slayzone/ui'
 import type { TerminalModeInfo, UpdateTerminalModeInput } from '@slayzone/terminal-contracts'
-import { DETECTION_ENGINES, isChatSupported } from '@slayzone/terminal-contracts'
+import {
+  chatModesForMode,
+  defaultChatModeSettingKey,
+  DETECTION_ENGINES,
+  isChatSupported,
+  resolveDefaultChatMode
+} from '@slayzone/terminal-contracts'
+import { useTRPC } from '../../trpc'
 import { PanelBreadcrumb } from '../PanelBreadcrumb'
 import { DebouncedInput } from './DebouncedInput'
 import { UsageConfigSection } from './UsageConfigSection'
@@ -206,6 +215,8 @@ export function ProviderDetailView({
             </div>
           </div>
 
+          {isChatSupported(mode.id) && <DefaultChatModeRow modeId={mode.id} />}
+
           {!mode.isBuiltin && (
             <div className="pt-4 border-t border-border dark:border-border">
               <div className="rounded-xl border bg-surface-2/50 dark:bg-surface-0/30 p-5 space-y-4">
@@ -288,6 +299,52 @@ export function ProviderDetailView({
         </div>
 
         <UsageConfigSection mode={mode} onUpdate={updateMode} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Default permission mode for chat tasks that never picked one (stored in
+ * `settings`, read by the chat handlers at spawn). A mode picked in the chat
+ * itself stays per task.
+ */
+function DefaultChatModeRow({ modeId }: { modeId: string }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const key = defaultChatModeSettingKey(modeId)
+  const query = useQuery(trpc.settings.get.queryOptions({ key }))
+  const setSetting = useMutation(
+    trpc.settings.set.mutationOptions({
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey({ key }) })
+    })
+  )
+  const value = resolveDefaultChatMode(modeId, query.data)
+  return (
+    <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
+      <Label className="text-sm">Default Permission Mode</Label>
+      <div className="space-y-1">
+        <Select
+          value={value}
+          disabled={query.data === undefined}
+          onValueChange={(v) => setSetting.mutate({ key, value: v })}
+        >
+          <SelectTrigger size="sm" className="w-full" aria-label="Default permission mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {chatModesForMode(modeId).map((m) => (
+              <SelectItem key={m} value={m}>
+                {agentModeLabel(m)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">
+          Used by chat tasks that have not picked a mode. Changing the mode in a chat keeps it for
+          that task.
+        </p>
       </div>
     </div>
   )

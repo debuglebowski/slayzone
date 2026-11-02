@@ -1,5 +1,15 @@
-import { ChevronDown, ShieldCheck, ShieldQuestion, Eye, AlertTriangle, Zap } from 'lucide-react'
+import { useState } from 'react'
+import {
+  ChevronDown,
+  ShieldCheck,
+  ShieldQuestion,
+  Eye,
+  AlertTriangle,
+  Zap,
+  Info
+} from 'lucide-react'
 import { cn } from './utils'
+import { AgentModeIllustration } from './agent-mode-illustration'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +30,8 @@ interface ModeMeta {
   label: string
   short: string
   description: string
+  /** Longer explanation shown in the info pane. */
+  details: string
   icon: typeof ShieldCheck
   /** Tailwind classes for chip background + foreground. */
   chip: string
@@ -62,6 +74,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Plan mode',
     short: 'Plan',
     description: 'Read-only — investigation phase. No edits, no shell.',
+    details:
+      'Claude reads files and explores, then writes a plan for you to approve. It does not edit your source until you approve the plan. Good for scoping a change before any code is touched.',
     icon: Eye,
     ...SKY
   },
@@ -69,6 +83,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Ask before edits',
     short: 'Ask',
     description: 'Claude asks before each edit and command; you answer in the chat.',
+    details:
+      'Reads run without asking. Every edit and shell command waits for your approval, shown as a card in the chat. Best for sensitive work where you want to review each action.',
     icon: ShieldQuestion,
     ...INDIGO
   },
@@ -76,6 +92,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Auto-accept edits',
     short: 'Auto-accept',
     description: 'Edits and tool calls auto-approved. Recommended default.',
+    details:
+      'File edits and common file commands (mkdir, touch, rm, mv, cp, sed) inside the project folder run without asking. Other shell commands, and anything outside the folder, still ask in the chat.',
     icon: ShieldCheck,
     ...EMERALD
   },
@@ -83,6 +101,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Auto mode',
     short: 'Auto',
     description: 'Continuous autonomous execution. Requires Max/Team/Enterprise + opt-in.',
+    details:
+      'A separate classifier model reviews each action before it runs and blocks anything that goes beyond your request, such as force pushes, production deploys or downloading and running code. Needs an eligible account and model.',
     icon: Zap,
     chip: 'bg-violet-500/15 text-violet-600 dark:text-violet-300 ring-violet-500/30',
     chipHover: 'hover:bg-violet-500/25',
@@ -92,6 +112,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Bypass permissions',
     short: 'Bypass',
     description: 'All permission checks skipped. Use with caution.',
+    details:
+      'No permission prompts or safety checks: every tool call runs immediately, including writes to protected paths. Deny rules in your settings still apply. Use only in isolated environments such as containers or VMs.',
     icon: AlertTriangle,
     ...AMBER
   },
@@ -100,6 +122,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Approval required',
     short: 'Approval',
     description: 'Read-only sandbox — asks before running commands or edits.',
+    details:
+      'Commands run in a read-only sandbox without network access. Codex asks before running anything not known to be safe, so nothing in your project changes without your approval.',
     icon: Eye,
     ...SKY
   },
@@ -107,6 +131,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Auto-accept edits',
     short: 'Auto-accept',
     description: 'Edits and commands in the workspace auto-approved.',
+    details:
+      'Codex edits files and runs commands inside the project folder without asking. Network access is off. It asks before anything outside the folder or anything that needs the network.',
     icon: ShieldCheck,
     ...EMERALD
   },
@@ -114,6 +140,8 @@ const MODE_META: Record<string, ModeMeta> = {
     label: 'Full access',
     short: 'Full access',
     description: 'All actions auto-approved, no sandbox. Use with caution.',
+    details:
+      'No sandbox and no approvals: Codex can read and write anywhere on disk and use the network. Use only in environments you trust.',
     icon: AlertTriangle,
     ...AMBER
   }
@@ -123,6 +151,7 @@ const FALLBACK_META: ModeMeta = {
   label: 'Mode',
   short: 'Mode',
   description: '',
+  details: '',
   icon: ShieldCheck,
   ...EMERALD
 }
@@ -172,6 +201,10 @@ export interface AgentModePillProps {
    * disabled with an opt-in hint. Ignored when `modes` is supplied explicitly.
    */
   autoCapability?: AutoModeCapability
+  /** The user's default mode; its row is tagged "default". */
+  defaultMode?: AgentMode
+  /** When set, the info pane offers "Set default" for the mode it explains. */
+  onSetDefault?: (mode: AgentMode) => void
 }
 
 export function AgentModePill({
@@ -182,14 +215,20 @@ export function AgentModePill({
   variant = 'pill',
   className,
   modes,
-  autoCapability
+  autoCapability,
+  defaultMode,
+  onSetDefault
 }: AgentModePillProps) {
   const meta = MODE_META[mode] ?? FALLBACK_META
   const Icon = meta.icon
+  // Mode whose info pane is open (the popup grows a second column), or null.
+  const [infoMode, setInfoMode] = useState<AgentMode | null>(null)
+  const infoMeta = infoMode ? (MODE_META[infoMode] ?? FALLBACK_META) : null
+  const infoDisabled = infoMode === 'auto' && autoCapability?.optedIn !== true
   const visibleModes =
     modes ?? CLAUDE_MODE_ORDER.filter((m) => m !== 'auto' || autoCapability?.eligible === true)
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => !open && setInfoMode(null)}>
       <DropdownMenuTrigger
         disabled={disabled}
         className={cn(
@@ -211,46 +250,100 @@ export function AgentModePill({
         <span>{compact ? meta.short : meta.label}</span>
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
-        {visibleModes.map((m) => {
-          const itemMeta = MODE_META[m] ?? FALLBACK_META
-          const ItemIcon = itemMeta.icon
-          const selected = m === mode
-          // `auto` is selectable only when eligible AND opted in. Eligible-but-not-opted-in
-          // surfaces the option disabled with an opt-in hint instead of hiding it.
-          const itemDisabled = m === 'auto' && autoCapability?.optedIn !== true
-          const description =
-            m === 'auto' && autoCapability && !autoCapability.optedIn
-              ? 'Run `claude` once and accept the auto-mode prompt to enable.'
-              : itemMeta.description
-          return (
-            <DropdownMenuItem
-              key={m}
-              disabled={itemDisabled}
-              onSelect={(e) => {
-                if (itemDisabled) {
-                  e.preventDefault()
-                  return
-                }
-                if (m !== mode) onChange(m)
-              }}
-              className={cn(
-                'flex items-start gap-2 py-2',
-                selected && itemMeta.chip,
-                itemDisabled && 'opacity-50'
-              )}
-            >
-              <ItemIcon className={cn('size-4 mt-0.5 shrink-0', itemMeta.text)} />
-              <div className="flex-1 min-w-0">
-                <div className={cn('text-xs font-medium', itemMeta.text)}>{itemMeta.label}</div>
-                <div className="text-[11px] text-muted-foreground leading-snug">{description}</div>
+      <DropdownMenuContent align="end" className="flex w-auto p-0">
+        <div className="w-64 p-1">
+          {visibleModes.map((m) => {
+            const itemMeta = MODE_META[m] ?? FALLBACK_META
+            const ItemIcon = itemMeta.icon
+            const selected = m === mode
+            // `auto` is selectable only when eligible AND opted in. Eligible-but-not-opted-in
+            // surfaces the option disabled with an opt-in hint instead of hiding it.
+            const itemDisabled = m === 'auto' && autoCapability?.optedIn !== true
+            // The row is disabled (no info pane), so the opt-in hint shows inline.
+            const optInHint =
+              m === 'auto' && autoCapability && !autoCapability.optedIn
+                ? 'Run `claude` once and accept the auto-mode prompt to enable.'
+                : null
+            return (
+              <DropdownMenuItem
+                key={m}
+                disabled={itemDisabled}
+                onSelect={(e) => {
+                  if (itemDisabled) {
+                    e.preventDefault()
+                    return
+                  }
+                  if (m !== mode) onChange(m)
+                }}
+                className={cn(
+                  'flex items-center gap-2 py-2',
+                  selected && itemMeta.chip,
+                  itemDisabled && 'opacity-50'
+                )}
+              >
+                <ItemIcon className={cn('size-4 shrink-0', itemMeta.text)} />
+                <div className="flex-1 min-w-0">
+                  <div className={cn('text-xs font-medium', itemMeta.text)}>{itemMeta.label}</div>
+                  {optInHint && (
+                    <div className="text-[11px] text-muted-foreground leading-snug">
+                      {optInHint}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5 self-center">
+                  {m === defaultMode && (
+                    <span className="text-[10px] text-muted-foreground">default</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`About ${itemMeta.label}`}
+                    aria-pressed={infoMode === m}
+                    className={cn(
+                      'rounded p-0.5 text-muted-foreground opacity-50 transition-opacity hover:opacity-100',
+                      infoMode === m && 'opacity-100'
+                    )}
+                    onClick={(e) => {
+                      // Keep the menu item from selecting (and closing) on this click.
+                      e.stopPropagation()
+                      setInfoMode(infoMode === m ? null : m)
+                    }}
+                  >
+                    <Info className="size-3.5" />
+                  </button>
+                </div>
+              </DropdownMenuItem>
+            )
+          })}
+        </div>
+        {infoMode && infoMeta && (
+          <div className="flex w-72 flex-col gap-3 border-l border-border p-3">
+            <div className={cn('flex items-center gap-2 text-xs font-medium', infoMeta.text)}>
+              <infoMeta.icon className="size-4 shrink-0" />
+              {infoMeta.label}
+            </div>
+            <AgentModeIllustration mode={infoMode} className="h-16 w-full" />
+            <p className="text-[11px] leading-relaxed text-muted-foreground">{infoMeta.details}</p>
+            {onSetDefault && (
+              <div className="mt-auto flex items-center justify-end">
+                {infoMode === defaultMode ? (
+                  <span className="text-[10px] text-muted-foreground">Default for new chats</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={infoDisabled}
+                    className={cn(
+                      'rounded px-2 py-1 text-[11px] ring-1 ring-current/30 hover:bg-muted/60 disabled:opacity-50',
+                      infoMeta.text
+                    )}
+                    onClick={() => onSetDefault(infoMode)}
+                  >
+                    Set as default
+                  </button>
+                )}
               </div>
-              {selected && (
-                <span className={cn('text-[10px] self-center', itemMeta.text)}>current</span>
-              )}
-            </DropdownMenuItem>
-          )
-        })}
+            )}
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

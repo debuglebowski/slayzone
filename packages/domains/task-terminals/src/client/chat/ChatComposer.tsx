@@ -92,6 +92,9 @@ export interface ChatComposerProps {
   chatMode: ModeApi['chatMode']
   handleModeChange: ModeApi['handleModeChange']
   autoCapability: ModeApi['autoCapability']
+  /** The provider's default permission mode (`useChatDefaultMode`). */
+  defaultChatMode?: string
+  onSetDefaultChatMode?: (mode: string) => void
   chatModel: ModelApi['chatModel']
   /** The models (and their effort levels) the provider offers (`useChatModels`). */
   models: ChatModelsView
@@ -150,6 +153,8 @@ export function ChatComposer({
   chatMode,
   handleModeChange,
   autoCapability,
+  defaultChatMode,
+  onSetDefaultChatMode,
   chatModel,
   models,
   handleModelChange,
@@ -350,6 +355,8 @@ export function ChatComposer({
                 inFlight={inFlight}
                 onChange={handleModeChange}
                 autoCapability={autoCapability}
+                defaultMode={defaultChatMode}
+                onSetDefault={onSetDefaultChatMode}
               />
               {/* Null until hydrated; '' = the provider's default (Codex before it listed models). */}
               {chatModel !== null && (

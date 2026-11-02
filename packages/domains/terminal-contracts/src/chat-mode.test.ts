@@ -6,7 +6,13 @@ import {
   rawPermissionModeToChatMode,
   stripChatOwnedFlags
 } from './chat-mode'
-import { chatModesForMode, isValidChatModeForMode } from './chat-mode-catalog'
+import {
+  chatModesForMode,
+  defaultChatModeForMode,
+  defaultChatModeSettingKey,
+  isValidChatModeForMode,
+  resolveDefaultChatMode
+} from './chat-mode-catalog'
 
 // Spawn flags verified against Claude Code 2.1.316 (initialize →
 // current_permission_mode): `--allow-dangerously-skip-permissions` alone starts
@@ -65,4 +71,15 @@ test("stripChatOwnedFlags keeps a user's extra flags and drops the ones the chat
     ])
   ).toEqual(['--add-dir', '../shared', '--verbose'])
   expect(stripChatOwnedFlags(['--permission-mode=acceptEdits', '--effort=low'])).toEqual([])
+})
+
+// A user-set default (Settings → Providers) replaces the built-in default for
+// tasks that never picked a mode; an invalid or foreign value falls back.
+test('resolveDefaultChatMode: valid stored default wins, else the built-in one', () => {
+  expect(resolveDefaultChatMode('claude-chat', 'bypass')).toBe('bypass')
+  expect(resolveDefaultChatMode('codex-chat', 'full-access')).toBe('full-access')
+  expect(resolveDefaultChatMode('claude-chat', null)).toBe(defaultChatModeForMode('claude-chat'))
+  expect(resolveDefaultChatMode('claude-chat', 'full-access')).toBe('auto-accept')
+  expect(resolveDefaultChatMode('codex-chat', 'bypass')).toBe('auto-accept-edits')
+  expect(defaultChatModeSettingKey('claude-chat')).toBe('chat_default_mode:claude-chat')
 })

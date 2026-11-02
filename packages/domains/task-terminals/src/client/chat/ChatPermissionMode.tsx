@@ -21,13 +21,18 @@ export function ChatPermissionMode({
   chatMode,
   inFlight,
   onChange,
-  autoCapability
+  autoCapability,
+  defaultMode,
+  onSetDefault
 }: {
   mode: string
   chatMode: AgentMode
   inFlight: boolean
   onChange: ReturnType<typeof useChatMode>['handleModeChange']
   autoCapability: AutoModeCapability
+  /** The provider's default mode (`useChatDefaultMode`); undefined until loaded. */
+  defaultMode?: AgentMode
+  onSetDefault?: (mode: AgentMode) => void
 }) {
   const [requested, setRequested] = useState<AgentMode | null>(null)
   const [applying, setApplying] = useState(false)
@@ -61,6 +66,8 @@ export function ChatPermissionMode({
         compact
         variant="text"
         autoCapability={autoCapability}
+        defaultMode={defaultMode}
+        onSetDefault={onSetDefault}
       />
       <AlertDialog
         open={requested !== null}

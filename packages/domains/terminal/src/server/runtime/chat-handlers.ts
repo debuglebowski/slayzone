@@ -90,7 +90,7 @@ import {
   modelsForMode,
   type ChatModelInfo
 } from '@slayzone/terminal-contracts'
-import { defaultChatModeForMode, isValidChatModeForMode } from '@slayzone/terminal-contracts'
+import { isValidChatModeForMode } from '@slayzone/terminal-contracts'
 import { chatEffortToFlags, isChatEffort, type ChatEffort } from '@slayzone/terminal-contracts'
 import {
   isChatCollaborationMode,
@@ -361,7 +361,7 @@ async function buildHydrateOpts(
   const pillsOwnFlags = chatOwnsSpawnFlags(opts.mode)
   if (pillsOwnFlags) {
     resolvedChatMode = await resolveSafeChatMode(
-      chatModeOverride ?? providerCfg.chatMode ?? defaultChatModeForMode(opts.mode)
+      chatModeOverride ?? providerCfg.chatMode ?? (await data.getDefaultChatMode(opts.mode))
     )
     providerFlags = chatModeToFlags(resolvedChatMode)
   } else if (chatModeOverride) {
@@ -375,7 +375,7 @@ async function buildHydrateOpts(
   } else if (providerCfg.flags) {
     providerFlags = parseShellArgs(providerCfg.flags)
   } else {
-    const stored = providerCfg.chatMode ?? defaultChatModeForMode(opts.mode)
+    const stored = providerCfg.chatMode ?? (await data.getDefaultChatMode(opts.mode))
     resolvedChatMode = await resolveSafeChatMode(stored)
     providerFlags = chatModeToFlags(resolvedChatMode)
   }
@@ -1362,7 +1362,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
     getMode: async (taskId: string, mode: string): Promise<string> => {
       const cfg = await data.readProviderConfig(taskId, mode)
-      const stored = cfg.chatMode ?? defaultChatModeForMode(mode)
+      const stored = cfg.chatMode ?? (await data.getDefaultChatMode(mode))
       // Hide stale `auto` from UI when capability is gone — pill would otherwise
       // show violet, and the next mode change would attempt a forbidden flag.
       return resolveSafeChatMode(stored)

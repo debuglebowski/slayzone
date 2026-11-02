@@ -24,6 +24,7 @@ import {
 import { buildMcpEnv, resolveRemoteMcpEnv } from '../mcp-env'
 import { getRemoteMcpEnvProvider } from './pty-manager'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
+import { defaultChatModeSettingKey, resolveDefaultChatMode } from '@slayzone/terminal-contracts'
 import {
   bumpAutocompleteUsage,
   getAutocompleteUsage,
@@ -99,6 +100,11 @@ export interface ChatDataOps {
   clearChatConversationId(taskId: string, mode: string): Promise<void>
   /** `terminal_modes.default_flags` for a mode (PTY fallback flags). */
   getModeDefaultFlags(mode: string): Promise<string | null>
+  /**
+   * Chat mode for a task with no stored `chatMode`: the user's default
+   * (`settings`, Settings → Providers) when valid, else the built-in default.
+   */
+  getDefaultChatMode(mode: string): Promise<string>
   /** Append to the task_conversations ledger (+ transition-slice dual-writes). */
   recordConversation(input: RecordConversationInput): Promise<void>
   /** Did this task run `conversationId` in `mode` (honored, not deleted)? */
@@ -338,6 +344,13 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
         .prepare('SELECT default_flags FROM terminal_modes WHERE id = ?')
         .get(mode)) as { default_flags: string | null } | undefined
       return row?.default_flags ?? null
+    },
+
+    getDefaultChatMode: async (mode) => {
+      const row = (await db
+        .prepare('SELECT value FROM settings WHERE key = ?')
+        .get(defaultChatModeSettingKey(mode))) as { value: string | null } | undefined
+      return resolveDefaultChatMode(mode, row?.value)
     },
 
     recordConversation: (input) => taskStore.recordConversation(db, input),
