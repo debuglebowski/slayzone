@@ -1,13 +1,14 @@
 /**
  * Tab store unit tests
  */
-import { beforeEach, describe, expect, test } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   useTabStore,
   parseClosedTab,
   computeWarmTabCounts,
   pushWarmTabCounts,
+  loadTabStoreState,
   type ClosedTab,
   type TaskLookupTask
 } from './useTabStore.js'
@@ -371,5 +372,61 @@ describe('pushWarmTabCounts', () => {
     const web = fakeHub(['read', 'tasks', 'agent'])
     await pushWarmTabCounts(new Map(), web.client, () => null)
     expect(web.pushed.length, 'scoped default hub skipped').toBe(0)
+  })
+})
+
+// A boot whose saved-tab read failed (hub still starting, socket dropped) used to
+// mark the store loaded with an EMPTY tab list — so the next tab change saved that
+// list over every saved tab. The saved tabs must survive and come back.
+describe('loadTabStoreState when the saved tabs cannot be read yet', () => {
+  test('never saves over them, and restores them once the read succeeds', async () => {
+    vi.useFakeTimers()
+    const g = globalThis as { window?: unknown }
+    const hadWindow = 'window' in g
+    if (!hadWindow) g.window = {}
+    const saved = JSON.stringify({
+      tabs: [{ type: 'home' }, { type: 'task', taskId: 'kept', title: 'kept' }],
+      activeTabIndex: 0,
+      selectedProjectId: ''
+    })
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Connection closed'))
+      .mockResolvedValue(saved)
+    const writes: string[] = []
+    _setTrpcClientSingleton({
+      settings: {
+        get: { query: get },
+        set: {
+          mutate: async (input: { key: string; value: string }) => {
+            if (input.key === 'viewState') writes.push(input.value)
+          }
+        }
+      },
+      taskTerminals: { listAutoRestoreTasks: { query: async () => [] } }
+    } as never)
+    try {
+      await loadTabStoreState()
+      expect(store.getState().isLoaded).toBe(true)
+      store.getState().openTaskInBackground('opened-meanwhile')
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(writes, 'nothing written before the saved tabs were read').toEqual([])
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      const open = store
+        .getState()
+        .tabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : []))
+        .sort()
+      expect(open).toEqual(['kept', 'opened-meanwhile'])
+      const last = JSON.parse(writes.at(-1) ?? '{}') as { tabs?: Array<{ taskId?: string }> }
+      expect((last.tabs ?? []).flatMap((t) => (t.taskId ? [t.taskId] : [])).sort()).toEqual([
+        'kept',
+        'opened-meanwhile'
+      ])
+    } finally {
+      if (!hadWindow) delete g.window
+      vi.useRealTimers()
+      _setTrpcClientSingleton({ settings: { set: { mutate: async () => {} } } } as never)
+    }
   })
 })

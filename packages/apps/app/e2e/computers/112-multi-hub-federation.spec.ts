@@ -628,6 +628,148 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
+  // 2026-10-31 (dev app): while switching between two temporary-task tabs of a
+  // remote-hub project, the merged task list fell from every task to the remote
+  // hub's ~10 and every local tab closed. Recorded on every tab-store change, so a
+  // collapse that lasts one render still fails.
+  base("switching remote temporary-task tabs never drops the local hub's tasks", async () => {
+    base.setTimeout(240_000)
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-remote-temp-switch-hub-'))
+    let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    type ProbeState = {
+      tabs: Array<{ type: string; taskId?: string }>
+      activeTabIndex: number
+      _taskLookup: { tasks: Array<{ id: string }> }
+      openTaskInBackground: (id: string) => void
+      setActiveTabIndex: (index: number) => void
+      setProjectScopedTabs: (enabled: boolean) => void
+    }
+    type ProbeWindow = {
+      __slayzone_tabStore: {
+        getState: () => ProbeState
+        subscribe: (listener: (state: ProbeState) => void) => () => void
+      }
+      __collapseProbe?: Array<{ at: number; tasks: number; local: number; tabs: number }>
+    }
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const { url, token } = hub
+      hubComputer = await attachDefaultComputer(hub, secondStore)
+      const remoteIds = await withHubClient(url, async (client) => {
+        const project = (await client.projects.create.mutate({
+          name: 'dummy',
+          color: '#22c55e'
+        })) as { id: string }
+        const ids: string[] = []
+        for (const n of [1, 2]) {
+          const task = (await client.task.create.mutate({
+            projectId: project.id,
+            title: `Terminal ${n}`,
+            status: 'in_progress',
+            terminalMode: 'terminal',
+            isTemporary: true
+          })) as { id: string }
+          ids.push(task.id)
+        }
+        return ids
+      })
+      launched = await launchIsolatedElectron({
+        name: 'remote-temp-switch',
+        seedUserData: (dir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(dir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(dir),
+            JSON.stringify({
+              server_mode: 'local',
+              multi_hub: true,
+              default_hub_id: 'local',
+              hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url }]
+            })
+          )
+        }
+      })
+      const page = launched.page
+      await authorizeHubInApp(page, 'remote-b', token)
+      expect(await waitForUsableComputer(page)).toBe(true)
+      const localIds = await page.evaluate(async () => {
+        const client = window.getTrpcVanillaClient()
+        const project = await client.projects.create.mutate({ name: 'Local', color: '#3b82f6' })
+        const ids: string[] = []
+        for (let n = 0; n < 6; n++) {
+          const task = await client.task.create.mutate({
+            projectId: project.id,
+            title: `Local ${n}`,
+            status: 'in_progress',
+            terminalMode: 'terminal'
+          })
+          ids.push(task.id)
+        }
+        return ids
+      })
+      await page.evaluate(() => (window as unknown as FederationWindow).__slayzone_refreshData?.())
+      const all = [...localIds, ...remoteIds]
+      await expect
+        .poll(() =>
+          page.evaluate((ids) => {
+            const lookup = (window as unknown as ProbeWindow).__slayzone_tabStore.getState()
+              ._taskLookup.tasks
+            return ids.every((id) => lookup.some((t) => t.id === id))
+          }, all)
+        )
+        .toBe(true)
+      await page.evaluate(
+        ({ ids, local }) => {
+          const w = window as unknown as ProbeWindow
+          const store = w.__slayzone_tabStore
+          store.getState().setProjectScopedTabs(true)
+          for (const id of ids) store.getState().openTaskInBackground(id)
+          const localSet = new Set(local)
+          w.__collapseProbe = []
+          store.subscribe((s) => {
+            w.__collapseProbe!.push({
+              at: Date.now(),
+              tasks: s._taskLookup.tasks.length,
+              local: s._taskLookup.tasks.filter((t) => localSet.has(t.id)).length,
+              tabs: s.tabs.filter((t) => t.type === 'task').length
+            })
+          })
+        },
+        { ids: all, local: localIds }
+      )
+      const activate = (id: string) =>
+        page.evaluate((taskId) => {
+          const store = (window as unknown as ProbeWindow).__slayzone_tabStore
+          const index = store.getState().tabs.findIndex((t) => t.taskId === taskId)
+          store.getState().setActiveTabIndex(index)
+        }, id)
+      // Both hubs keep emitting while the remote temporary tabs take turns.
+      for (let round = 0; round < 12; round++) {
+        await activate(remoteIds[round % 2])
+        await withHubClient(url, (client) =>
+          client.task.update.mutate({ id: remoteIds[round % 2], title: `Terminal r${round}` })
+        )
+        await page.evaluate(
+          ({ id, round }) =>
+            window.getTrpcVanillaClient().task.update.mutate({ id, title: `Local l${round}` }),
+          { id: localIds[round % localIds.length], round }
+        )
+        await page.waitForTimeout(1_500)
+      }
+      const probe = await page.evaluate(() => (window as unknown as ProbeWindow).__collapseProbe!)
+      expect(probe.length).toBeGreaterThan(0)
+      expect(probe.filter((p) => p.local < localIds.length)).toEqual([])
+      expect(probe.filter((p) => p.tabs < all.length)).toEqual([])
+    } finally {
+      if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
   base('rail unions both hubs; local DB stays isolated; writes route to owner', async () => {
     base.setTimeout(180_000)
 

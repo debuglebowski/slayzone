@@ -682,22 +682,63 @@ export async function loadTabStoreState(): Promise<void> {
   if (typeof window === 'undefined') return
   performance.mark('sz:tabStore:start')
   try {
-    const value = await getTrpcClient().settings.get.query({ key: 'viewState' })
-    if (value) {
-      try {
-        useTabStore.getState()._loadState(JSON.parse(value))
-      } catch {
-        useTabStore.setState({ isLoaded: true })
-      }
-    } else {
-      useTabStore.getState()._loadState({ tabs: [], activeTabIndex: 0, selectedProjectId: '' })
-    }
+    applySavedViewState(await getTrpcClient().settings.get.query({ key: 'viewState' }))
   } catch {
+    // Unreadable is not empty: the app is usable now, but nothing is saved until
+    // the saved tabs have been read — or the first tab change would save this
+    // boot's (empty) list over every saved tab.
+    _persistenceBlocked = true
     useTabStore.setState({ isLoaded: true })
+    void retrySavedViewState()
   } finally {
     performance.mark('sz:tabStore:end')
   }
   await restoreActiveSessionTabs()
+}
+
+function applySavedViewState(value: string | null | undefined): void {
+  if (value) {
+    try {
+      useTabStore.getState()._loadState(JSON.parse(value))
+    } catch {
+      // Corrupt: nothing to keep — this boot's state replaces it.
+      useTabStore.setState({ isLoaded: true })
+    }
+  } else {
+    useTabStore.getState()._loadState({ tabs: [], activeTabIndex: 0, selectedProjectId: '' })
+  }
+}
+
+const SAVED_VIEW_STATE_RETRY_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000]
+
+/**
+ * Read the saved view state until it answers, then put it back with the task
+ * tabs opened meanwhile added on top, and resume saving. Retries for the life of
+ * the renderer: giving up would mean either never saving or overwriting.
+ */
+async function retrySavedViewState(): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    const delay = SAVED_VIEW_STATE_RETRY_MS[Math.min(attempt, SAVED_VIEW_STATE_RETRY_MS.length - 1)]
+    await new Promise((resolve) => setTimeout(resolve, delay))
+    let value: string | null | undefined
+    try {
+      value = await getTrpcClient().settings.get.query({ key: 'viewState' })
+    } catch {
+      continue
+    }
+    const openedMeanwhile = useTabStore
+      .getState()
+      .tabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : []))
+    applySavedViewState(value)
+    _persistenceBlocked = false
+    const open = new Set(
+      useTabStore.getState().tabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : []))
+    )
+    for (const taskId of openedMeanwhile) {
+      if (!open.has(taskId)) useTabStore.getState().openTaskInBackground(taskId)
+    }
+    return
+  }
 }
 
 // A task's outer tab can be closed while its agent keeps running — closing a
@@ -730,6 +771,8 @@ export const tabStoreReady: Promise<void> = Promise.resolve()
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null
 let _inflightWrite: Promise<unknown> = Promise.resolve()
 let _persistenceStopped = false
+/** True while the saved view state has not been read yet (see loadTabStoreState). */
+let _persistenceBlocked = false
 
 /**
  * Stop persisting `viewState` for the rest of this renderer's life: drop the pending
@@ -789,7 +832,7 @@ useTabStore.subscribe(
     closedTabs: state.closedTabs
   }),
   (slice) => {
-    if (!useTabStore.getState().isLoaded || _persistenceStopped) return
+    if (!useTabStore.getState().isLoaded || _persistenceStopped || _persistenceBlocked) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
     _debounceTimer = setTimeout(() => {
       _debounceTimer = null

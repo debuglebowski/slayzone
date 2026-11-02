@@ -16,6 +16,8 @@ const { getTask, resolveHub } = vi.hoisted(() => ({
 vi.mock('../trpc', () => ({
   getClientForHub: resolveHub
 }))
+const { recordTimeline } = vi.hoisted(() => ({ recordTimeline: vi.fn() }))
+vi.mock('@/lib/diagnosticsClient', () => ({ recordDiagnosticsTimeline: recordTimeline }))
 const recoveredTask = vi.fn()
 
 vi.mock('@slayzone/telemetry/client', () => {
@@ -87,6 +89,7 @@ let registered: ReadonlySet<string>
 
 beforeEach(() => {
   getTask.mockReset().mockResolvedValue(null)
+  recordTimeline.mockReset()
   recoveredTask.mockReset()
   resolveHub.mockReset().mockReturnValue({ task: { get: { query: getTask } } })
   registered = new Set([LOCAL, REMOTE])
@@ -267,6 +270,20 @@ describe('useTabLifecycle — closing tabs of tasks that are gone', () => {
     await waitFor(() => expect(openTaskIds()).toEqual(['l1']))
   })
 
+  it('keeps a tab tagged with the wrong hub when another hub still has the task', async () => {
+    useTabStore.setState({ tabs: [{ type: 'home' }, taskTab('l1', REMOTE)] })
+    const local = vi.fn().mockResolvedValue(task('l1'))
+    const remote = vi.fn().mockRejectedValue({ data: { code: 'NOT_FOUND' } })
+    resolveHub.mockImplementation((hubId: string) => ({
+      task: { get: { query: hubId === LOCAL ? local : remote } }
+    }))
+
+    render({ tasks: { [LOCAL]: [], [REMOTE]: [] }, loaded: [LOCAL, REMOTE] })
+    await waitFor(() => expect(recoveredTask).toHaveBeenCalledWith(task('l1')))
+    expect(openTaskIds()).toEqual(['l1'])
+    expect(useTabStore.getState().closedTabs).toEqual([])
+  })
+
   it('closes the tabs of a hub that was removed', () => {
     useTabStore.setState({
       tabs: [{ type: 'home' }, taskTab('l1', LOCAL), taskTab('r1', REMOTE)]
@@ -291,5 +308,65 @@ describe('useTabLifecycle — closing tabs of tasks that are gone', () => {
       useTabStore.getState().tabs.flatMap((t) => (t.type === 'task' ? [[t.taskId, t.hubId]] : []))
     )
     expect(hubs).toEqual({ l1: LOCAL, r1: REMOTE })
+  })
+})
+
+// The 2026-10-31 wipe could not be explained afterwards: diagnostics recorded tab
+// switches, not closes, and only the merged task count. Every automatic close and
+// every sharp drop in one hub's task count is recorded now, with per-hub counts.
+describe('useTabLifecycle — diagnostics', () => {
+  it('records each automatic close with its reason and the hubs asked', async () => {
+    useTabStore.setState({
+      tabs: [{ type: 'home' }, taskTab('l1', LOCAL), taskTab('gone', LOCAL), taskTab('r1', REMOTE)]
+    })
+    registered = new Set([LOCAL])
+
+    render({ tasks: { [LOCAL]: ['l1'] }, loaded: [LOCAL] })
+    await waitFor(() => expect(openTaskIds()).toEqual(['l1']))
+    expect(recordTimeline).toHaveBeenCalledWith('tab_auto_closed', {
+      taskId: 'r1',
+      hubId: REMOTE,
+      reason: 'hub_removed'
+    })
+    expect(recordTimeline).toHaveBeenCalledWith('tab_auto_closed', {
+      taskId: 'gone',
+      hubId: LOCAL,
+      reason: 'confirmed_gone',
+      askedHubs: [LOCAL]
+    })
+  })
+
+  it("records a sharp drop in a loaded hub's task count, with every hub's counts", () => {
+    const many = Array.from({ length: 40 }, (_, i) => `l${i}`)
+    const view = render({ tasks: { [LOCAL]: many, [REMOTE]: ['r1'] }, loaded: [LOCAL, REMOTE] })
+    expect(recordTimeline).not.toHaveBeenCalledWith('task_list_shrank', expect.anything())
+
+    view.rerender({ tasks: { [LOCAL]: [], [REMOTE]: ['r1'] }, loaded: [LOCAL, REMOTE] })
+    expect(recordTimeline).toHaveBeenCalledWith('task_list_shrank', {
+      before: { [LOCAL]: 40, [REMOTE]: 1 },
+      after: { [LOCAL]: 0, [REMOTE]: 1 },
+      loaded: [LOCAL, REMOTE],
+      registered: [LOCAL, REMOTE]
+    })
+  })
+
+  it('records a hub with many tasks dropping out of the answered hubs', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `l${i}`)
+    const view = render({ tasks: { [LOCAL]: many, [REMOTE]: ['r1'] }, loaded: [LOCAL, REMOTE] })
+    view.rerender({ tasks: { [REMOTE]: ['r1'] }, loaded: [REMOTE] })
+    expect(recordTimeline).toHaveBeenCalledWith('task_list_shrank', {
+      before: { [LOCAL]: 40, [REMOTE]: 1 },
+      after: { [REMOTE]: 1 },
+      loaded: [REMOTE],
+      registered: [LOCAL, REMOTE]
+    })
+  })
+
+  it('does not record small changes or a hub that has not answered', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `l${i}`)
+    const view = render({ tasks: { [LOCAL]: many }, loaded: [LOCAL] })
+    view.rerender({ tasks: { [LOCAL]: many.slice(5) }, loaded: [LOCAL] })
+    view.rerender({ tasks: { [LOCAL]: many.slice(5), [REMOTE]: [] }, loaded: [LOCAL] })
+    expect(recordTimeline).not.toHaveBeenCalledWith('task_list_shrank', expect.anything())
   })
 })

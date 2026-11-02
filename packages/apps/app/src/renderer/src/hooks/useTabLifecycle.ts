@@ -6,8 +6,12 @@ import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { useTrack } from '@slayzone/telemetry/client'
 import { getClientForHub } from '../trpc'
 import { useHubOwnershipStore } from '@slayzone/transport/client'
+import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 
 type TaskTab = Extract<Tab, { type: 'task' }>
+
+/** A hub's task count must be at least this before halving it counts as a drop. */
+const TASK_DROP_MIN = 20
 
 /**
  * Whether a missing tab is ready for a deletion check. Only
@@ -22,6 +26,34 @@ function canCheckMissing(
 ): boolean {
   if (tab.hubId === undefined) return [...hubs.registered].every((id) => hubs.loaded.has(id))
   return !hubs.registered.has(tab.hubId) || hubs.loaded.has(tab.hubId)
+}
+
+/**
+ * The live row of a task on the first of `hubIds` that has it, or null when every
+ * one of them says it is gone (deleted, or NOT_FOUND — how authenticated hubs
+ * report a missing or inaccessible id). Rejects when any hub cannot answer:
+ * unreachable is not deleted.
+ */
+async function findLiveTask(
+  taskId: string,
+  hubIds: readonly string[]
+): Promise<{ task: Task; hubId: string } | null> {
+  const rows = await Promise.all(
+    hubIds.map((hubId) =>
+      getClientForHub(hubId)
+        .task.get.query({ id: taskId })
+        .catch((error: unknown) => {
+          if (error && typeof error === 'object' && 'data' in error) {
+            const data = error.data
+            if (data && typeof data === 'object' && 'code' in data && data.code === 'NOT_FOUND')
+              return null
+          }
+          throw error
+        })
+    )
+  )
+  const index = rows.findIndex((row) => row && !row.deleted_at)
+  return index >= 0 ? { task: rows[index] as Task, hubId: hubIds[index] } : null
 }
 
 /** Close only the tab instances checked, preserving a surviving active tab. */
@@ -96,6 +128,31 @@ export function useTabLifecycle({
     }
   }, [tabs, hubIdByTask])
 
+  // Record a sharp drop in a loaded hub's task count (the 2026-10-31 wipe: the
+  // merged list fell to one hub's tasks), with every hub's counts before/after.
+  const hubCountsRef = useRef<Record<string, number> | null>(null)
+  useEffect(() => {
+    const after: Record<string, number> = {}
+    for (const hubId of loadedHubIds) after[hubId] = 0
+    for (const task of tasks) {
+      const hubId = hubIdByTask?.get(task.id) ?? defaultHubId
+      if (hubId in after) after[hubId]++
+    }
+    const before = hubCountsRef.current
+    hubCountsRef.current = after
+    if (!before) return
+    const shrank = Object.entries(before).some(
+      ([hubId, count]) => count >= TASK_DROP_MIN && (after[hubId] ?? 0) < count / 2
+    )
+    if (!shrank) return
+    recordDiagnosticsTimeline('task_list_shrank', {
+      before,
+      after,
+      loaded: [...loadedHubIds],
+      registered: [...registeredHubIds]
+    })
+  }, [tasks, hubIdByTask, defaultHubId, loadedHubIds, registeredHubIds])
+
   // Sync tab titles/status/hub and remove tabs for deleted tasks.
   useEffect(() => {
     if (loadedHubIds.size === 0) return
@@ -139,43 +196,45 @@ export function useTabLifecycle({
     const removedHubTabs = new Set(
       missing.filter((tab) => tab.hubId !== undefined && !registeredHubIds.has(tab.hubId))
     )
+    for (const tab of removedHubTabs) {
+      recordDiagnosticsTimeline('tab_auto_closed', {
+        taskId: tab.taskId,
+        hubId: tab.hubId,
+        reason: 'hub_removed'
+      })
+    }
     closeConfirmedTabs(removedHubTabs)
 
     // Board reads may have started before a create or restore committed. Their
     // absence is not proof of deletion: check the current row on its owning hub
     // before changing (and persisting) the open-tab list. A failed/offline read
     // preserves the tab. Legacy tabs with no hub need every hub to confirm.
+    // The recorded hub is asked first; when it says the task is gone, every other
+    // hub is asked too — a tab tagged with the wrong hub must not close a task that
+    // lives elsewhere. Any hub that cannot answer keeps the tab.
     let cancelled = false
     for (const tab of missing) {
       if (removedHubTabs.has(tab)) continue
-      const hubIds = tab.hubId === undefined ? [...registeredHubIds] : [tab.hubId]
-      void Promise.all(
-        hubIds.map((hubId) =>
-          getClientForHub(hubId)
-            .task.get.query({ id: tab.taskId })
-            .catch((error: unknown) => {
-              // Authenticated hubs report missing/inaccessible IDs as NOT_FOUND.
-              if (error && typeof error === 'object' && 'data' in error) {
-                const data = error.data
-                if (data && typeof data === 'object' && 'code' in data && data.code === 'NOT_FOUND')
-                  return null
-              }
-              throw error
-            })
-        )
-      )
-        .then((rows) => {
+      const owners = tab.hubId === undefined ? [...registeredHubIds] : [tab.hubId]
+      const others = [...registeredHubIds].filter((hubId) => !owners.includes(hubId))
+      void findLiveTask(tab.taskId, owners)
+        .then((found) => found ?? findLiveTask(tab.taskId, others))
+        .then((found) => {
           if (cancelled || !useTabStore.getState().tabs.includes(tab)) return
-          const liveIndex = rows.findIndex((row) => row && !row.deleted_at)
-          const live = rows[liveIndex]
-          if (live) {
-            useHubOwnershipStore.getState().noteTaskHub(live.id, hubIds[liveIndex])
-            onTaskRecovered(live)
+          if (found) {
+            useHubOwnershipStore.getState().noteTaskHub(found.task.id, found.hubId)
+            onTaskRecovered(found.task)
             return
           }
           // A later board/restore may already have brought the row back.
           if (useTabStore.getState()._taskLookup.tasks.some((task) => task.id === tab.taskId))
             return
+          recordDiagnosticsTimeline('tab_auto_closed', {
+            taskId: tab.taskId,
+            hubId: tab.hubId,
+            reason: 'confirmed_gone',
+            askedHubs: [...owners, ...others]
+          })
           closeConfirmedTabs(new Set([tab]))
         })
         .catch(() => {
