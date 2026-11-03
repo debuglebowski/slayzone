@@ -51,10 +51,6 @@ const ALLOWLIST = {
   'packages/domains/automations/src/server/engine.ts':
     'run_command / ai actions; refused at save and at run (T-05)',
   // Refused by assertHubLocalExecEnabled, "connect a computer" (T-06).
-  'packages/domains/worktrees/src/server/exec-async.ts':
-    'the worktrees package chokepoint (hubSpawn/hubSpawnSync); refuses (T-06)',
-  'packages/domains/agent-turns/src/server/git-snapshot.ts':
-    'turn snapshots; every git spawn refuses (T-06)',
   'packages/domains/terminal/src/server/shell-env.ts':
     'login-shell PATH and which probes; refuse (T-06)',
   'packages/shared/platform/src/login-shell-path.ts':

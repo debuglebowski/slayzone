@@ -8,15 +8,9 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects-contracts'
-import {
-  detectWorktrees,
-  createWorktree,
-  runWorktreeSetupScript,
-  copyIgnoredFiles,
-  initSubmodules,
-  hasUncommittedChanges,
-  startMergeNoCommit
-} from './git-worktree'
+// Types only: this module runs on the hub, which runs no git — every git step is
+// injected (the router passes routed ops).
+import type { detectWorktrees, runWorktreeSetupScript, startMergeNoCommit } from './git-worktree'
 import { ensureColors } from './color-registry'
 import { runAiCommand } from './merge-ai'
 import type {
@@ -40,7 +34,7 @@ import type {
  */
 export async function detectWorktreesWithColors(
   repoPath: string,
-  detect: (repoPath: string) => ReturnType<typeof detectWorktrees> = detectWorktrees
+  detect: (repoPath: string) => ReturnType<typeof detectWorktrees>
 ) {
   const detected = await detect(repoPath)
   const nonMainPaths = detected.filter((d) => !d.isMain).map((d) => d.path)
@@ -185,19 +179,11 @@ export interface WorktreeSetupExec {
   ) => ReturnType<typeof runWorktreeSetupScript>
 }
 
-export const localWorktreeSetupExec: WorktreeSetupExec = {
-  createWorktree,
-  copyIgnoredFiles,
-  initSubmodules: (worktreePath) => initSubmodules(worktreePath),
-  runWorktreeSetupScript: (worktreePath, repoPath, sourceBranch) =>
-    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
-}
-
 export async function createWorktreeWithSetupWith(
   policy: WorktreePolicyOps,
   opts: CreateWorktreeOpts,
-  onPhase?: (phase: CreateWorktreePhase) => void,
-  exec: WorktreeSetupExec = localWorktreeSetupExec
+  onPhase: ((phase: CreateWorktreePhase) => void) | undefined,
+  exec: WorktreeSetupExec
 ): Promise<{
   setupResult: Awaited<ReturnType<typeof runWorktreeSetupScript>>
   submoduleResult: WorktreeSubmoduleResult
@@ -235,8 +221,8 @@ export async function createWorktreeWithSetupWith(
 export async function createWorktreeWithSetup(
   db: SlayzoneDb,
   opts: CreateWorktreeOpts,
-  onPhase?: (phase: CreateWorktreePhase) => void,
-  exec?: WorktreeSetupExec
+  onPhase: ((phase: CreateWorktreePhase) => void) | undefined,
+  exec: WorktreeSetupExec
 ): Promise<{
   setupResult: Awaited<ReturnType<typeof runWorktreeSetupScript>>
   submoduleResult: WorktreeSubmoduleResult
@@ -258,7 +244,7 @@ export async function mergeWithAI(
     parentBranch: string
     sourceBranch: string
   },
-  git: MergeWithAIGit = { hasUncommittedChanges, startMergeNoCommit }
+  git: MergeWithAIGit
 ): Promise<MergeWithAIResult> {
   const { projectPath, worktreePath, parentBranch, sourceBranch } = args
   try {

@@ -195,15 +195,16 @@ import {
   setGhExecutor,
   invalidateProjectReposCache,
   resetWorktreeColorsForTest,
-  defaultWorktreeExecAdapters,
+  hubWorktreeExecAdapters,
   defaultWorktreePolicyAdapters,
-  getCurrentBranch,
+  executeGitOp,
   setGitOpTransport,
+  setWorktreeColorDetector,
   deliverGitWatchEvent,
   gitWatchComputerGone,
   gitTargetForPath,
   setAiCommandRunner
-} from '@slayzone/worktrees/server'
+} from '@slayzone/worktrees/hub'
 import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
 // unconditionally at boot (a hub always accepts computers).
@@ -567,7 +568,7 @@ export function composeServer(opts: {
   // not over the prior call — a partial second call would drop these fields).
   const baseTaskAdapters = {
     getDataRoot: () => dataRoot,
-    worktrees: defaultWorktreeExecAdapters,
+    worktrees: hubWorktreeExecAdapters,
     worktreePolicy: defaultWorktreePolicyAdapters,
     removeTaskProcesses,
     killPtysByTaskId,
@@ -616,7 +617,16 @@ export function composeServer(opts: {
   // sidecar's copy null: a stale/phantom conversation id then looped `--resume`
   // ("No conversation found") forever with no self-heal. Same orphaned-listener
   // class as the state-change consumers wired just below.
-  registerConversationHealer(db, notifyTasksChanged, { getCurrentBranch })
+  // The branch a checkout is on comes from its computer; none (or no answer) = unknown.
+  registerConversationHealer(db, notifyTasksChanged, {
+    getCurrentBranch: (repoPath) =>
+      executeGitOp('getCurrentBranch', { path: repoPath }, false, db).catch(() => null)
+  })
+  // Worktree colors are the hub's; the worktrees they color are listed on the
+  // checkout's computer (none: no colors yet — detected again next read).
+  setWorktreeColorDetector((projectPath) =>
+    executeGitOp('listWorktrees', { repoPath: projectPath }, false, db)
+  )
   registerConversationResolver(db)
 
   // Terminal state-change consumers: task auto-move + the needs_attention flag.
@@ -1828,7 +1838,7 @@ export function composeServer(opts: {
         // that does not exist on its own machine.
         resolveComputerId: (taskId) => resolveComputerForTask(taskId),
         gate: placement.gate,
-        local: defaultWorktreeExecAdapters
+        local: hubWorktreeExecAdapters
       })
     })
     // `gh` authenticates as whoever owns the machine it runs on. Run on the hub,

@@ -83,7 +83,7 @@ import {
 import { artifactsRouter, type ArtifactsMounts } from '@slayzone/task-artifacts/server'
 import { taskTerminalsRouter, type TaskTerminalsMounts } from '@slayzone/task-terminals/server'
 import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
-import { worktreesRouter, type WorktreesMounts } from '@slayzone/worktrees/server'
+import { worktreesRouter, type WorktreesMounts } from '@slayzone/worktrees/hub'
 
 export const appRouter = router({
   app: appLevelRouter,

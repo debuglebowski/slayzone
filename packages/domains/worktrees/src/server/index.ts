@@ -73,11 +73,12 @@ export {
   popStash,
   dropStash,
   branchFromStash,
-  getStashDiff
+  getStashDiff,
+  hasGithubRemote,
+  ensureBranchPushed
 } from './git-worktree'
 export {
   checkGhInstalled,
-  hasGithubRemote,
   listOpenPrs,
   getPrByUrl,
   getPrForCheckout,
@@ -89,9 +90,11 @@ export {
   getGhUser,
   editPrComment,
   setGhExecutor,
-  runGhLocally,
   type GhExecutor
 } from './gh-cli'
+export { runGhLocally } from './gh-local'
+export { hubWorktreeExecAdapters } from './hub-task-adapters'
+export { setWorktreeColorDetector, type WorktreeDetector } from './color-registry'
 export { runAiCommand, setAiCommandRunner, type AiCommandRunner } from './merge-ai'
 export {
   listProjectRepos,

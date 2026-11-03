@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { setShellOverride } from '@slayzone/platform'
 import { whichBinary } from '@slayzone/terminal/server'
 import { execAsync } from './exec-async'
-import { runGhLocally } from './gh-cli'
+import { runGhLocally } from './gh-local'
 
 const isWin = process.platform === 'win32'
 /** What macOS hands an app opened from the Dock/Finder (launchd's default). */

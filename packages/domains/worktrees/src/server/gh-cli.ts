@@ -1,4 +1,3 @@
-import { whichBinary } from '@slayzone/terminal/server'
 import type {
   GhPullRequest,
   GhPrComment,
@@ -8,23 +7,11 @@ import type {
   MergePrInput,
   EditPrCommentInput
 } from '../shared/types'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
-import { execAsync } from './exec-async'
-import { ensureBranchPushed } from './git-worktree'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 const GH_PR_JSON_FIELDS =
   'number,title,body,url,state,headRefName,baseRefName,isCrossRepository,isDraft,author,createdAt,reviewDecision,statusCheckRollup'
-
-// Cache resolved gh path
-let ghPath: string | null | undefined
-
-async function resolveGhPath(): Promise<string | null> {
-  if (ghPath !== undefined) return ghPath
-  ghPath = await whichBinary('gh')
-  return ghPath
-}
 
 /**
  * Where `gh` actually runs.
@@ -46,30 +33,12 @@ export interface GhExecutor {
   ): Promise<{ status: number | null; stdout: string; stderr: string }>
 }
 
-/**
- * Run gh on THIS machine: the resolved binary with argv, no shell. Through the
- * user's interactive shell, its startup output (prompt themes, gitstatus) landed on
- * the stdout gh's JSON comes back on. `execAsync` supplies the login-shell PATH.
- *
- * Exported so a routed executor can delegate to it for the zero-computer case,
- * where this host's disk is the only one and its own `gh` is therefore the only
- * meaningful identity. Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`
- * (T-06): that hub has no `gh` identity of its own, so no computer = no `gh`.
- */
 /** This machine has no `gh` on its login-shell PATH. */
 export class GhNotFoundError extends Error {
   constructor() {
     super('gh CLI not found')
     this.name = 'GhNotFoundError'
   }
-}
-
-export const runGhLocally: GhExecutor = async (args, opts) => {
-  assertHubLocalExecEnabled({ op: 'gh' })
-  const gh = await resolveGhPath()
-  if (!gh) throw new GhNotFoundError()
-
-  return execAsync(gh, args, { ...opts, source: 'gh' })
 }
 
 /** No executor wired: `gh` has nowhere to run — the hub never runs it itself. */
@@ -157,10 +126,6 @@ export async function checkGhInstalled(repoPath: string): Promise<boolean> {
   }
 }
 
-// Git work (it runs where the checkout is — see the git op contract); re-exported
-// for this module's existing callers.
-export { hasGithubRemote } from './git-worktree'
-
 export async function listOpenPrs(repoPath: string): Promise<GhPullRequest[]> {
   const result = await spawnGh(
     ['pr', 'list', '--json', GH_PR_JSON_FIELDS, '--state', 'open', '--limit', '50'],
@@ -236,12 +201,12 @@ export async function getPrForCheckout(
 }
 
 /**
- * `ensurePushed`: publish the branch first — the router passes the routed
- * `ensureBranchPushed` op (it runs on the checkout's computer); default: this disk.
+ * `ensurePushed`: publish the branch first — the routed `ensureBranchPushed` op (it
+ * runs on the checkout's computer).
  */
 export async function createPr(
   input: CreatePrInput,
-  ensurePushed: (repoPath: string) => Promise<void> = ensureBranchPushed
+  ensurePushed: (repoPath: string) => Promise<void>
 ): Promise<CreatePrResult> {
   await ensurePushed(input.repoPath)
 

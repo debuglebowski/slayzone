@@ -1,5 +1,15 @@
 import { assignNewWorktreeColors } from '../shared'
-import { detectWorktrees } from './git-worktree'
+import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
+import type { DetectedWorktree } from '../shared/types'
+
+/** Lists a checkout's worktrees — on the hub, the routed `listWorktrees` op. */
+export type WorktreeDetector = (projectPath: string) => Promise<DetectedWorktree[]>
+let detector: WorktreeDetector | null = null
+
+/** Wired by the hub's composition; none = colors stay empty. */
+export function setWorktreeColorDetector(next: WorktreeDetector | null): void {
+  detector = next
+}
 
 const registry = new Map<string, Map<string, string>>()
 
@@ -30,15 +40,19 @@ export function getColor(projectPath: string, worktreePath: string): string | un
  * changes (e.g. user runs `git init` later) are picked up there.
  */
 export async function ensureProjectColors(
-  projectPath: string
+  projectPath: string,
+  detect: WorktreeDetector | null = detector
 ): Promise<ReadonlyMap<string, string>> {
   const existing = registry.get(projectPath)
   if (existing !== undefined) return existing
+  if (!detect) return new Map()
   try {
-    const detected = await detectWorktrees(projectPath)
+    const detected = await detect(projectPath)
     const nonMainPaths = detected.filter((d) => !d.isMain).map((d) => d.path)
     return ensureColors(projectPath, nonMainPaths)
-  } catch {
+  } catch (err) {
+    // No computer yet: not a property of the project — detect again next time.
+    if (isHubSwitchedOffError(err)) return new Map()
     const empty = new Map<string, string>()
     registry.set(projectPath, empty)
     return empty
