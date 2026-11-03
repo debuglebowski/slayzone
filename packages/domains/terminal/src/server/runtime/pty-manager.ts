@@ -2284,7 +2284,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           const newState = activityToTerminalState(detectedActivity)
           if (newState) {
             const preview = detection.preview
-            if (newState === 'running' && session.state !== 'running') {
+            // A reattach snapshot is the owner's settled view, not one chunk.
+            const isSnapshot = 'snapshot' in detection && detection.snapshot === true
+            if (newState === 'running' && session.state !== 'running' && !isSnapshot) {
               // See `recordWorkingDetection` in state-machine.ts for the why.
               const gate = recordWorkingDetection(session.workingDetections, Date.now())
               session.workingDetections = gate.history
@@ -2365,6 +2367,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       ): void => {
         // Dev server URLs (localhost/127.0.0.1/0.0.0.0 with port), first sighting only.
         for (const url of detection.devServerUrls) {
+          // Owner-reported URLs can repeat (a reattach snapshot lists them all).
+          if ('seq' in detection && !session.detector.noteDevServerUrl(url)) continue
           ptyEvents.emit('dev-server-detected', sessionId, url)
           if (win.isDestroyed()) continue
           try {

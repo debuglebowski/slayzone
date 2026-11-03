@@ -1108,7 +1108,9 @@ export function createPtyHandlers(
         // gap detector starts from, so a session that has emitted nothing needs
         // no special case on either side.
         seq: session.buffer.getCurrentSeq(),
-        ...(session.signals ? { detection: true as const } : {})
+        ...(session.signals
+          ? { detection: true as const, detected: session.signals.snapshot() }
+          : {})
       })
     }
     return { sessions: live, exited: tombstones.list() }

@@ -718,6 +718,49 @@ describe('createRoutingPtyBackend', () => {
     })
   })
 
+  it('reconnect replays what the computer detected while the hub was away, as one snapshot signal', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    const detected = {
+      activity: 'idle',
+      title: 'Agent waiting',
+      prompt: { type: 'permission', text: 'Allow? [Y/n]', position: 0 },
+      devServerUrls: ['http://localhost:5173'],
+      conversationId: 'conv-1',
+      error: null
+    }
+    gateway.onMethod('pty.list', () => ({
+      sessions: [{ sessionId: 'sess-1', pid: 1, seq: 4, detection: true, detected }]
+    }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const signals: unknown[] = []
+    handle.onSignal?.((s) => signals.push(s))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() =>
+      expect(signals).toEqual([
+        expect.objectContaining({
+          snapshot: true,
+          activity: 'idle',
+          title: 'Agent waiting',
+          prompt: detected.prompt,
+          devServerUrls: ['http://localhost:5173'],
+          conversationId: 'conv-1'
+        })
+      ])
+    )
+  })
+
   it('reconnect with the same epoch ends the sessions the computer no longer holds', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.list', () => ({ sessions: [] }))

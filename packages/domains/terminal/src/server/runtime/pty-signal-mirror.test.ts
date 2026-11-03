@@ -82,9 +82,14 @@ function routedBackend(detectsOutput: boolean) {
   }
 }
 
-function collect<E extends 'title-change' | 'dev-server-detected'>(event: E): string[] {
+function collect<E extends 'title-change' | 'dev-server-detected'>(
+  event: E,
+  sessionId?: string
+): string[] {
   const seen: string[] = []
-  ptyEvents.on(event, (_id: string, value: string) => seen.push(value))
+  ptyEvents.on(event, (id: string, value: string) => {
+    if (sessionId === undefined || id === sessionId) seen.push(value)
+  })
   return seen
 }
 
@@ -186,4 +191,27 @@ test("the owner's exitError becomes the session's error carried on exit", async 
   b.exit(0)
   await new Promise((r) => setTimeout(r, 200))
   expect(exits).toEqual(['SESSION_NOT_FOUND'])
+})
+
+test('a reconnect snapshot applies the detected state at once, without repeating seen URLs', async () => {
+  const b = routedBackend(true)
+  const urls = collect('dev-server-detected', 'mirror:snapshot')
+  const titles = collect('title-change', 'mirror:snapshot')
+  await open('mirror:snapshot')
+  b.output('$ ')
+  b.signal(signal({ seq: 1, devServerUrls: ['http://localhost:5173'] }))
+  b.signal(
+    signal({
+      seq: 9,
+      snapshot: true,
+      activity: 'working',
+      title: 'while away',
+      devServerUrls: ['http://localhost:5173', 'http://localhost:4000']
+    })
+  )
+  await new Promise((r) => setTimeout(r, 150))
+  // One snapshot is the computer's settled view: no two-detection gate.
+  expect(getState('mirror:snapshot')).toBe('running')
+  expect(titles).toEqual(['while away'])
+  expect(urls).toEqual(['http://localhost:5173', 'http://localhost:4000'])
 })

@@ -85,6 +85,13 @@ export class PtyOutputDetector {
     this.statusOutput = ''
   }
 
+  /** Record a dev-server URL reported from elsewhere; true when first seen. */
+  noteDevServerUrl(url: string): boolean {
+    if (this.seenDevUrls.has(url)) return false
+    this.seenDevUrls.add(url)
+    return true
+  }
+
   get watchingConversationId(): boolean {
     return this.watching
   }

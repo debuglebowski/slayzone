@@ -246,7 +246,16 @@ describe('pty detection parity: hub-side vs computer → signal → mirror', () 
     test(m.mode, async () => {
       const a = await run('a', m)
       const b = await run('b', m)
-      expect(b.seen).toEqual(a.seen)
+      // Per kind, in order. Kinds are compared separately: process-title polling runs
+      // on its own timer, so its place among state transitions is not output-driven.
+      const byKind = (seen: Seen) =>
+        Object.fromEntries(
+          ['state', 'prompt', 'title', 'dev-url', 'conversation'].map((k) => [
+            k,
+            seen.filter(([kind]) => kind === k).map(([, v]) => v)
+          ])
+        )
+      expect(byKind(b.seen)).toEqual(byKind(a.seen))
       expect(b.answers).toEqual(a.answers)
       // Both clocks read the output's own time (coalescing must not move it later).
       expect(

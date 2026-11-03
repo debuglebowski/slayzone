@@ -347,6 +347,28 @@ const ptySignalErrorSchema = z.object({
   recoverable: z.boolean()
 })
 
+const ptySignalPromptSchema = z.object({
+  type: z.enum(['permission', 'question', 'input']),
+  text: z.string(),
+  position: z.number()
+})
+
+/**
+ * What a piped session's output has said so far, as of now: the latest activity,
+ * title, prompt (cleared by later working activity), every dev-server URL, the
+ * conversation id, an error not yet recovered from. In `pty.list`, so a hub that
+ * reattaches after a disconnect learns what it missed while away.
+ */
+export const ptyDetectedSnapshotSchema = z.object({
+  activity: z.enum(['working', 'idle', 'unknown']).nullable(),
+  title: z.string().nullable(),
+  prompt: ptySignalPromptSchema.nullable(),
+  devServerUrls: z.array(z.string().min(1)),
+  conversationId: z.string().min(1).nullable(),
+  error: ptySignalErrorSchema.nullable()
+})
+export type PtyDetectedSnapshot = z.infer<typeof ptyDetectedSnapshotSchema>
+
 export const ptySignalPayloadSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
@@ -370,13 +392,7 @@ export const ptySignalPayloadSchema = z.object({
    */
   exitError: ptySignalErrorSchema.optional(),
   suppressOutput: z.boolean(),
-  prompt: z
-    .object({
-      type: z.enum(['permission', 'question', 'input']),
-      text: z.string(),
-      position: z.number()
-    })
-    .nullable(),
+  prompt: ptySignalPromptSchema.nullable(),
   title: z.string().nullable(),
   devServerUrls: z.array(z.string().min(1)),
   conversationId: z.string().min(1).nullable()
@@ -849,7 +865,9 @@ export const ptyListResultSchema = z.object({
       /** Highest assigned seq; -1 when the session has emitted nothing yet. */
       seq: z.number().int(),
       /** The computer runs output detection for it (absent from older computers). */
-      detection: z.literal(true).optional()
+      detection: z.literal(true).optional(),
+      /** With `detection`: what it has detected so far. */
+      detected: ptyDetectedSnapshotSchema.optional()
     })
   ),
   /** Recently reaped sessions. Absent from older computers, which keep none. */

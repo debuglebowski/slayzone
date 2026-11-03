@@ -186,6 +186,37 @@ describe('pty signals (computer-side detection)', () => {
     }
   })
 
+  test('snapshot: the current detected state, for a hub that was away', () => {
+    const { signals, pipeline } = harness('copilot')
+    expect(pipeline.snapshot()).toEqual({
+      activity: null,
+      title: null,
+      prompt: null,
+      devServerUrls: [],
+      conversationId: null,
+      error: null
+    })
+    signals.onOutput('\x1b]0;first\x07 http://0.0.0.0:5173', 1)
+    signals.onOutput('\x1b]0;second\x07 Proceed? [Y/n]', 2)
+    signals.onOutput('http://127.0.0.1:3000', 3)
+    expect(pipeline.snapshot()).toEqual(
+      expect.objectContaining({
+        title: 'second',
+        prompt: expect.objectContaining({ type: 'permission' }),
+        devServerUrls: ['http://localhost:5173', 'http://127.0.0.1:3000']
+      })
+    )
+  })
+
+  test('snapshot: working activity clears a stale prompt', () => {
+    const { signals, pipeline } = harness('qwen-code')
+    signals.onOutput('Continue? [Y/n]', 1)
+    signals.onOutput('⠋ working', 2)
+    expect(pipeline.snapshot()).toEqual(
+      expect.objectContaining({ activity: 'working', prompt: null })
+    )
+  })
+
   test('not a resume: exit says nothing', () => {
     const { sent, pipeline } = harness('claude-code')
     pipeline.exited(1, 'No conversation found with session ID: x')

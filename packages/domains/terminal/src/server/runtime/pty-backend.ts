@@ -106,6 +106,11 @@ export interface PtyDetectionSpec {
 export interface PtySignal {
   /** Owner's seq of the output chunk it came from. */
   seq: number
+  /**
+   * Not one chunk: the owner's settled view after the hub was away (reattach).
+   * Applied as-is — no two-detection gate — and only new dev URLs are announced.
+   */
+  snapshot?: true
   activity: ActivityState | null
   refreshIdleClock: boolean
   /** The idle-clock output happened this long before the signal (coalesced). */

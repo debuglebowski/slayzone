@@ -87,7 +87,15 @@ describe('output detection on the computer (pty-signal)', () => {
       })
     ])
     expect((pty.handlers['pty.list']({}) as { sessions: unknown[] }).sessions).toEqual([
-      expect.objectContaining({ sessionId: 's', detection: true })
+      expect.objectContaining({
+        sessionId: 's',
+        detection: true,
+        // What it has detected so far, for a hub reattaching after a disconnect.
+        detected: expect.objectContaining({
+          title: 'Codex working',
+          devServerUrls: ['http://localhost:3000']
+        })
+      })
     ])
     pty.disposeAll()
   })

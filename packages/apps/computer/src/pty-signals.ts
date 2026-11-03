@@ -30,7 +30,11 @@ import {
   type PtyOutputDetection,
   type TerminalTheme
 } from '@slayzone/terminal/pty-detection'
-import type { PtyDetectionParams, PtySignalPayload } from '@slayzone/computer-transport/shared'
+import type {
+  PtyDetectedSnapshot,
+  PtyDetectionParams,
+  PtySignalPayload
+} from '@slayzone/computer-transport/shared'
 
 export const IDLE_CLOCK_SIGNAL_MS = 500
 
@@ -65,6 +69,8 @@ export interface PtySessionSignals {
    */
   process(data: string): { clean: string; detection: PtyOutputDetection }
   report(detection: PtyOutputDetection, seq: number): void
+  /** What the output has said so far (`pty.list`, for a hub reattaching). */
+  snapshot(): PtyDetectedSnapshot
   /** `/status` was submitted: look for a conversation id in the next output. */
   watchConversationId(): void
   /** The hub's terminal theme changed (OSC colour query answers). */
@@ -127,6 +133,27 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
   let lastSeq = -1
   let disposed = false
   let reportedError = false
+  const current: PtyDetectedSnapshot = {
+    activity: null,
+    title: null,
+    prompt: null,
+    devServerUrls: [],
+    conversationId: null,
+    error: null
+  }
+  /** Fold one chunk's detection into {@link current}, as the hub's mirror does. */
+  const remember = (d: PtyOutputDetection): void => {
+    if (d.activity) {
+      current.activity = d.activity
+      if (d.activity === 'working') current.prompt = null
+      if (d.activity !== 'unknown') current.error = null
+    }
+    if (d.error) current.error = d.error
+    if (d.prompt) current.prompt = d.prompt
+    if (d.title) current.title = d.title
+    for (const url of d.devServerUrls) current.devServerUrls.push(url)
+    if (d.conversationId) current.conversationId = d.conversationId
+  }
   let diskPoll: ReturnType<typeof setInterval> | undefined
   let diskPollStarted = false
   /**
@@ -154,6 +181,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
           if (!id || found || disposed) return
           found = true
           stop()
+          current.conversationId = id
           send(lastSeq, { ...EMPTY, conversationId: id })
         })
         .catch(() => {
@@ -217,6 +245,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     },
     report(d, seq) {
       lastSeq = seq
+      remember(d)
       if (!diskPollStarted) startDiskPoll()
       if (d.error) reportedError = true
       if (d.conversationId && watchTimer) {
@@ -249,6 +278,9 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     },
     setTheme(next) {
       theme = next
+    },
+    snapshot() {
+      return { ...current, devServerUrls: [...current.devServerUrls] }
     },
     exited(exitCode, output) {
       if (!params.resuming || reportedError || disposed) return

@@ -67,6 +67,7 @@ import type {
   PtyWriteOptions
 } from '@slayzone/terminal/server'
 import {
+  type PtyDetectedSnapshot,
   PTY_SIGNAL_EVENT_NAME,
   ptySignalPayloadSchema,
   ComputerTransportErrorCodes,
@@ -446,6 +447,8 @@ interface ListedSession {
   spawnId?: string
   /** The computer runs output detection for it (`pty.list` only). */
   detection?: boolean
+  /** What it has detected so far (`pty.list` only). */
+  detected?: PtyDetectedSnapshot
 }
 
 /** A session the computer reaped and remembers (a tombstone). */
@@ -478,7 +481,13 @@ function sameAttempt(entry: DetachableEntry, listed: ListedSession): boolean {
 
 /** Build {@link ComputerSessionList} from a parsed `pty.list` / `proc.list` reply. */
 function toSessionList(parsed: {
-  sessions: Array<{ sessionId: string; pid?: number; spawnId?: string; detection?: boolean }>
+  sessions: Array<{
+    sessionId: string
+    pid?: number
+    spawnId?: string
+    detection?: boolean
+    detected?: PtyDetectedSnapshot
+  }>
   exited?: Array<{
     sessionId: string
     pid?: number
@@ -492,7 +501,12 @@ function toSessionList(parsed: {
     live: new Map(
       parsed.sessions.map((s) => [
         s.sessionId,
-        { pid: s.pid, spawnId: s.spawnId, ...(s.detection ? { detection: true } : {}) }
+        {
+          pid: s.pid,
+          spawnId: s.spawnId,
+          ...(s.detection ? { detection: true } : {}),
+          ...(s.detected ? { detected: s.detected } : {})
+        }
       ])
     ),
     exited: new Map((parsed.exited ?? []).map((e) => [e.sessionId, e]))
@@ -1109,6 +1123,18 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       entry.sealed = false
       // A spawn confirmed by listing (its reply was lost) is acknowledged here.
       if (listed.detection) ackDetection(entry)
+      // The computer kept detecting while the hub was away; its signals then went
+      // nowhere. Its settled view brings the mirror up to date in one step.
+      if (entry.detectsOutput && listed.detected) {
+        entry.signalEmitter.emit({
+          ...listed.detected,
+          seq: entry.lastSeq,
+          snapshot: true,
+          refreshIdleClock: false,
+          preview: '',
+          suppressOutput: false
+        })
+      }
       // Clear the backfill latch: the gap that matters now is whatever the
       // session emitted while the hub was away, which is a different gap from
       // any this entry had already given up on.
