@@ -5,6 +5,10 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import { expect, test, vi } from 'vitest'
+import {
+  resolveMissingFromRef,
+  snapshotPath
+} from '../../../shared/test-utils/git-snapshot-resolve'
 import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 import { createMemoryCredentialStore, HubDialer } from '@slayzone/computer-transport/client'
 import {
@@ -68,8 +72,13 @@ function historicalHost(ref = legacyRef, version = '0.36.3') {
               }),
               loader: 'text'
             }))
+            // A module the old release imported may be gone from disk since: resolve it
+            // from the ref, so the build depends only on that ref.
+            build.onResolve({ filter: /^\.\.?\// }, (args) =>
+              resolveMissingFromRef(root, ref, args)
+            )
             build.onLoad({ filter: /\.(ts|tsx|js|mjs|json)$/ }, (args) => {
-              const path = realpathSync(args.path)
+              const path = snapshotPath(args.path, realpathSync)
               if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
               const source = execFileSync('git', ['show', `${ref}:${relative(root, path)}`], {
                 cwd: root,
