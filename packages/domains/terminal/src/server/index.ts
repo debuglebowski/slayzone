@@ -138,6 +138,7 @@ export {
   hasPty,
   hasLivePty,
   getBuffer,
+  getBufferSince,
   writePty,
   submitPty,
   killPty,

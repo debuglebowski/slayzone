@@ -478,6 +478,10 @@ export const HubToComputerMethods = {
   /** The hub's terminal theme changed; best-effort (an older computer has no pipeline). */
   ptySetTheme: 'pty.setTheme',
   ptyGetBufferSince: 'pty.getBufferSince',
+  /** REPLAY into a fresh terminal (prelude after eviction) — a piped session's
+   *  buffer is the only one, so the hub forwards its clients' reads here. */
+  ptyGetReplay: 'pty.getReplay',
+  ptyClearBuffer: 'pty.clearBuffer',
   /** Live (non-warm) sessions the computer still holds — drives reattach. */
   ptyList: 'pty.list',
   /** Move a session still waiting for an agent-start slot to the front (tab revealed). */
@@ -845,6 +849,32 @@ export const ptyGetBufferSinceResultSchema = z.object({
 })
 export type PtyGetBufferSinceResult = z.infer<typeof ptyGetBufferSinceResultSchema>
 
+export const ptyGetReplayParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField,
+  /** Frames with `seq > afterSeq`; -1 = a cold attach (prelude after eviction). */
+  afterSeq: z.number().int()
+})
+export type PtyGetReplayParams = z.infer<typeof ptyGetReplayParamsSchema>
+
+export const ptyGetReplayResultSchema = z.object({
+  chunks: z.array(z.object({ seq: z.number().int().nonnegative(), data: z.string() })),
+  prelude: z.string(),
+  /** Highest seq assigned; -1 when nothing (or not this attempt). */
+  currentSeq: z.number().int()
+})
+export type PtyGetReplayResult = z.infer<typeof ptyGetReplayResultSchema>
+
+export const ptyClearBufferParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField
+})
+export const ptyClearBufferResultSchema = z.object({
+  /** The seq the cleared buffer had reached; -1 when there was nothing to clear. */
+  clearedSeq: z.number().int()
+})
+export type PtyClearBufferResult = z.infer<typeof ptyClearBufferResultSchema>
+
 /**
  * Live (non-warm) sessions the computer still holds. The computer is the AUTHORITY
  * on this — the hub's own registry is only a belief about it, and after a
@@ -934,7 +964,9 @@ export const ptyWarmAdoptResultSchema = z.object({
   data: z.string(),
   seq: z.number().int(),
   /** The computer runs the requested `detection` from here on. */
-  detection: z.literal(true).optional()
+  detection: z.literal(true).optional(),
+  /** With `detection`: what the warm output (the seed) said. */
+  detected: ptyDetectedSnapshotSchema.optional()
 })
 export type PtyWarmAdoptResult = z.infer<typeof ptyWarmAdoptResultSchema>
 

@@ -67,6 +67,8 @@ import type {
   PtyWriteOptions
 } from '@slayzone/terminal/server'
 import {
+  ptyClearBufferResultSchema,
+  ptyGetReplayResultSchema,
   type PtyDetectedSnapshot,
   PTY_SIGNAL_EVENT_NAME,
   ptySignalPayloadSchema,
@@ -931,7 +933,7 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
    * removing the seal fails on the backfill count, not on output order.
    */
   sealed: boolean
-  dataEmitter: BufferingEmitter<string>
+  dataEmitter: BufferingEmitter<{ data: string; seq: number }>
   exitEmitter: BufferingEmitter<PtyExitEvent>
   /**
    * The computer acknowledged the spawn's `detection`: it detects this session's
@@ -945,6 +947,8 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
    */
   detectFromSeq: number
   signalEmitter: BufferingEmitter<PtySignal>
+  /** See `ackDetection`: the computer's buffer is the session's only one. */
+  ownsOutput: boolean
 }
 
 /**
@@ -971,7 +975,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       const data = entry.pending.get(next)!
       entry.pending.delete(next)
       entry.lastSeq = next
-      entry.dataEmitter.emit(data)
+      entry.dataEmitter.emit({ data, seq: next })
     }
     if (entry.disposed || entry.pending.size === 0) return
     if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
@@ -1041,7 +1045,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         })
       }
       entry.lastSeq = seq
-      entry.dataEmitter.emit(entry.pending.get(seq)!)
+      entry.dataEmitter.emit({ data: entry.pending.get(seq)!, seq })
     }
     entry.pending.clear()
   }
@@ -1087,10 +1091,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     if (entry && (!payload.spawnId || !entry.spawnId || payload.spawnId === entry.spawnId))
       finalize(entry, payload.exitCode, payload.signal ?? null, payload.reason)
   })
-  /** The computer detects this session's output from what it has delivered on. */
-  function ackDetection(entry: PtyEntry): void {
+  /**
+   * The computer detects this session's output from what it has delivered on — and
+   * owns it outright (its buffer is the only scrollback) when nothing reached the
+   * hub before (`fresh`: no frame delivered, or delivery still sealed for a seed /
+   * a continued buffer). Otherwise the hub already holds a copy and keeps it.
+   */
+  function ackDetection(entry: PtyEntry, fresh = entry.lastSeq === -1): void {
     if (entry.detectsOutput) return
     entry.detectsOutput = true
+    entry.ownsOutput = fresh
     entry.detectFromSeq = entry.lastSeq
   }
   gateway.events.on('event', (event) => {
@@ -1184,7 +1194,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     if (displaced && !displaced.disposed) {
       finalize(displaced, null, null, 'replaced')
     }
-    const dataEmitter = new BufferingEmitter<string>()
+    const dataEmitter = new BufferingEmitter<{ data: string; seq: number }>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
     const signalEmitter = new BufferingEmitter<PtySignal>()
     const entry: PtyEntry = {
@@ -1199,7 +1209,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       exitEmitter,
       detectsOutput: false,
       detectFromSeq: -1,
-      signalEmitter
+      signalEmitter,
+      ownsOutput: false
     }
     sessions.set(key, entry)
 
@@ -1216,7 +1227,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         return pid
       },
       process: processName,
-      onData: (listener: (data: string) => void): ExecDisposable => dataEmitter.on(listener),
+      onData: (listener: (data: string, seq?: number) => void): ExecDisposable =>
+        dataEmitter.on((chunk) => listener(chunk.data, chunk.seq)),
       onExit: (
         cb: (e: { exitCode: number; signal?: number; reason?: string; detail?: string }) => void
       ): ExecDisposable =>
@@ -1241,6 +1253,24 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       get detectsOutput(): boolean {
         return entry.detectsOutput
       },
+      get ownsOutput(): boolean {
+        return entry.ownsOutput
+      },
+      getReplay: async (afterSeq: number) =>
+        ptyGetReplayResultSchema.parse(
+          await gateway.request(computerId, HubToComputerMethods.ptyGetReplay, {
+            sessionId,
+            ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+            afterSeq
+          })
+        ),
+      clearOutput: async () =>
+        ptyClearBufferResultSchema.parse(
+          await gateway.request(computerId, HubToComputerMethods.ptyClearBuffer, {
+            sessionId,
+            ...(entry.spawnId ? { spawnId: entry.spawnId } : {})
+          })
+        ),
       onSignal: (cb: (signal: PtySignal) => void): ExecDisposable => signalEmitter.on(cb),
       resize: (cols: number, rows: number): void => {
         void send(HubToComputerMethods.ptyResize, {
@@ -1404,9 +1434,23 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // on top of it, in seq order. The seed predates the computer's detection
         // (it starts at adopt), so the hub detects it; detection is acknowledged
         // from the seed's seq on.
-        if (parsed.data) entry.dataEmitter.emit(parsed.data)
+        // The seed is everything up to `parsed.seq`, delivered as one chunk under it.
+        // Acknowledged first: the seed predates the computer's detection (the hub
+        // detects it), but the buffer it came from is the session's only one.
         entry.lastSeq = parsed.seq
-        if (detection && parsed.detection) ackDetection(entry)
+        if (detection && parsed.detection) ackDetection(entry, true)
+        entry.detectFromSeq = parsed.seq
+        if (parsed.data) entry.dataEmitter.emit({ data: parsed.data, seq: parsed.seq })
+        if (entry.detectsOutput && parsed.detected) {
+          entry.signalEmitter.emit({
+            ...parsed.detected,
+            seq: parsed.seq,
+            snapshot: true,
+            refreshIdleClock: false,
+            preview: '',
+            suppressOutput: false
+          })
+        }
         entry.sealed = false
         drain(entry)
         return handle
@@ -1521,15 +1565,18 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
               (res) => {
                 const parsed = ptySpawnResultSchema.safeParse(res)
+                const acked = spec.detection && parsed.success && parsed.data.detection === true
                 if (entry.sealed) {
                   // Continued: frames up to the reply's seq are the scrollback this
                   // session already has. An older computer started fresh (no seq).
                   if (parsed.success && parsed.data.seq !== undefined)
                     entry.lastSeq = Math.max(entry.lastSeq, parsed.data.seq)
+                  // Nothing was delivered yet: the continued buffer is the only one.
+                  if (acked) ackDetection(entry, true)
                   entry.sealed = false
                   drain(entry)
                 }
-                if (spec.detection && parsed.success && parsed.data.detection) ackDetection(entry)
+                if (acked) ackDetection(entry)
                 confirm(
                   parsed.success ? parsed.data.pid : null,
                   requestsDeadline && parsed.success && parsed.data.startupDeadline === true

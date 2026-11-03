@@ -9,7 +9,16 @@
 import { afterEach, expect, test } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { PtySessionWindow } from '../pty-host'
-import { createPty, getState, killPty, setDatabase, writePty } from './pty-manager'
+import {
+  clearBuffer,
+  createPty,
+  getBuffer,
+  getBufferSince,
+  getState,
+  killPty,
+  setDatabase,
+  writePty
+} from './pty-manager'
 import { setPtyBackend, type PtyBackend, type PtySignal, type PtySpawnSpec } from './pty-backend'
 import { ptyEvents } from './pty-events'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
@@ -214,4 +223,49 @@ test('a reconnect snapshot applies the detected state at once, without repeating
   expect(getState('mirror:snapshot')).toBe('running')
   expect(titles).toEqual(['while away'])
   expect(urls).toEqual(['http://localhost:5173', 'http://localhost:4000'])
+})
+
+test('owner owns the output: no hub copy; replay, clear and seqs come from the owner', async () => {
+  const replays: number[] = []
+  let dataCb: ((d: string, seq?: number) => void) | undefined
+  setPtyBackend({
+    spawn: () =>
+      ({
+        pid: 4545,
+        process: 'gemini',
+        detectsOutput: true,
+        ownsOutput: true,
+        onData: (cb: (d: string, seq?: number) => void) => {
+          dataCb = cb
+          return { dispose: () => undefined }
+        },
+        onSignal: () => ({ dispose: () => undefined }),
+        onExit: () => ({ dispose: () => undefined }),
+        write: () => undefined,
+        kill: () => undefined,
+        resize: () => undefined,
+        getReplay: async (afterSeq: number) => {
+          replays.push(afterSeq)
+          return { chunks: [{ seq: 41, data: 'from owner' }], prelude: '\x1b[0m', currentSeq: 41 }
+        },
+        clearOutput: async () => ({ clearedSeq: 41 })
+      }) as never
+  } as PtyBackend)
+  const emitted: Array<[string, number]> = []
+  ptyEvents.on('data', (id: string, data: string, seq: number) => {
+    if (id === 'mirror:owner') emitted.push([data, seq])
+  })
+  await open('mirror:owner')
+  dataCb?.('live chunk', 42)
+  // Emitted under the OWNER's seq, so a client's reattach `afterSeq` is the owner's.
+  expect(emitted).toEqual([['live chunk', 42]])
+  expect(await getBufferSince('mirror:owner', 41)).toEqual({
+    chunks: [{ seq: 41, data: 'from owner' }],
+    prelude: '\x1b[0m',
+    currentSeq: 41
+  })
+  expect(replays).toEqual([41])
+  // No hub copy: the full buffer is the owner's replay too.
+  expect(await getBuffer('mirror:owner')).toBe('\x1b[0mfrom owner')
+  expect(await clearBuffer('mirror:owner')).toEqual({ success: true, clearedSeq: 41 })
 })

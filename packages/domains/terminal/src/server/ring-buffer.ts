@@ -184,6 +184,16 @@ export class RingBuffer {
   }
 
   /**
+   * Transform every stored chunk. ONLY for chunks no reader has seen (a warm pty's
+   * output before adoption): it breaks the immutability every other path relies on.
+   * A chunk that becomes empty keeps its seq.
+   */
+  rewriteUnstreamed(transform: (data: string) => string): void {
+    this.chunks = this.chunks.map((c) => ({ seq: c.seq, data: transform(c.data) }))
+    this.totalSize = this.chunks.reduce((n, c) => n + c.data.length, 0)
+  }
+
+  /**
    * Clear the buffer.
    */
   clear(): void {

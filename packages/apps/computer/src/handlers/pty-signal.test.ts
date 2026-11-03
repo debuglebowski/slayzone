@@ -119,6 +119,56 @@ describe('output detection on the computer (pty-signal)', () => {
     pty.disposeAll()
   })
 
+  it('serves replay (with prelude after eviction) and clears the only buffer', async () => {
+    const { child, pty } = setup(9106)
+    await pty.handlers['pty.spawn']({
+      sessionId: 's',
+      spawnId: 'one',
+      command: 'cat',
+      cwd: process.cwd(),
+      detection: { mode: 'claude-code', resuming: false }
+    })
+    child.say('one')
+    child.say('two')
+    expect(pty.handlers['pty.getReplay']({ sessionId: 's', spawnId: 'one', afterSeq: 0 })).toEqual({
+      chunks: [{ seq: 1, data: 'two' }],
+      prelude: '',
+      currentSeq: 1
+    })
+    expect(pty.handlers['pty.clearBuffer']({ sessionId: 's', spawnId: 'one' })).toEqual({
+      clearedSeq: 1
+    })
+    child.say('three')
+    expect(pty.handlers['pty.getReplay']({ sessionId: 's', afterSeq: -1 })).toEqual({
+      chunks: [{ seq: 2, data: 'three' }],
+      prelude: '',
+      currentSeq: 2
+    })
+    // Another attempt's id: nothing (never someone else's scrollback).
+    expect(pty.handlers['pty.getReplay']({ sessionId: 's', spawnId: 'x', afterSeq: -1 })).toEqual({
+      chunks: [],
+      prelude: '',
+      currentSeq: -1
+    })
+    pty.disposeAll()
+  })
+
+  it('warm adopt: the seed is replay-filtered and what it said comes back as a snapshot', async () => {
+    const { child, pty } = setup(9107)
+    await pty.handlers['pty.warmSpawn']({ warmId: 'w', command: 'cat', cwd: process.cwd() })
+    child.say('\x1b]0;warm title\x07ready on http://localhost:5173')
+    const adopted = pty.handlers['pty.warmAdopt']({
+      warmId: 'w',
+      sessionId: 'real',
+      detection: { mode: 'codex', resuming: false }
+    }) as { data: string; detected?: { title: string | null; devServerUrls: string[] } }
+    expect(adopted.data).toBe('ready on http://localhost:5173')
+    expect(adopted.detected).toEqual(
+      expect.objectContaining({ title: 'warm title', devServerUrls: ['http://localhost:5173'] })
+    )
+    pty.disposeAll()
+  })
+
   it('an older hub (no `detection`) gets no signals and no ack', async () => {
     const { notifies, child, pty } = setup(9102)
     const reply = await pty.handlers['pty.spawn']({

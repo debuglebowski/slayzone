@@ -5,6 +5,7 @@ import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal
 import { wrapShellWithUlimit } from '../shell-env'
 import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
 import type { TerminalTheme } from '../sync-query-response'
+import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 
 /**
  * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
@@ -193,7 +194,8 @@ export interface PtyHandle {
   readonly whenSpawned?: Promise<PtySpawnConfirmation>
   readonly process: string
   readonly fd?: number
-  onData(cb: (data: string) => void): { dispose(): void }
+  /** `seq`: the owner's seq for the chunk, when it {@link ownsOutput}. */
+  onData(cb: (data: string, seq?: number) => void): { dispose(): void }
   onExit(cb: (e: PtyExit) => void): { dispose(): void }
   write(data: string, opts?: PtyWriteOptions): void
   resize(cols: number, rows: number): void
@@ -206,6 +208,16 @@ export interface PtyHandle {
   readonly detectsOutput?: boolean
   /** Detections reported by the owner, for output the caller did not detect itself. */
   onSignal?(cb: (signal: PtySignal) => void): { dispose(): void }
+  /**
+   * The owner's buffer is the session's ONLY scrollback: every chunk came through
+   * its pipeline and carries its seq (`onData`), and replay is read from it
+   * ({@link getReplay}). The caller keeps no copy. False/absent: the caller buffers.
+   */
+  readonly ownsOutput?: boolean
+  /** Replay from the owner's buffer (see `BufferSinceResult`). With {@link ownsOutput}. */
+  getReplay?(afterSeq: number): Promise<BufferSinceResult>
+  /** Clear the owner's buffer. With {@link ownsOutput}. */
+  clearOutput?(): Promise<{ clearedSeq: number }>
 }
 
 export interface PtyBackend {

@@ -289,8 +289,9 @@ export const taskWindowsOps = {
     if (!win || win.isDestroyed()) return { ok: false }
     const ok = redirectSessionWindow(sessionId, win)
     if (!ok) return { ok: false }
-    const result = getBufferSince(sessionId, -1)
-    if (result) {
+    // The scrollback can live on the session's computer: replayed when it answers.
+    void getBufferSince(sessionId, -1).then((result) => {
+      if (!result || win.isDestroyed()) return
       for (const chunk of result.chunks) {
         try {
           win.webContents.send('pty:data', sessionId, chunk.data, chunk.seq)
@@ -298,7 +299,7 @@ export const taskWindowsOps = {
           /* ignore */
         }
       }
-    }
+    })
     return { ok: true }
   }
 }

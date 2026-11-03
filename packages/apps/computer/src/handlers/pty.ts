@@ -46,6 +46,10 @@ import {
   type PtyDetectionParams,
   type PtyTheme,
   ptySetThemeParamsSchema,
+  ptyGetReplayParamsSchema,
+  type PtyGetReplayResult,
+  ptyClearBufferParamsSchema,
+  type PtyClearBufferResult,
   PTY_SIGNAL_EVENT_NAME,
   RpcError,
   ComputerNotificationMethods,
@@ -65,7 +69,7 @@ import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/sta
 import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
-import { RingBuffer } from '@slayzone/terminal/pty-detection'
+import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
 import {
   createSpawnAdmission,
   type AdmissionLane,
@@ -936,7 +940,14 @@ export function createPtyHandlers(
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
     releaseAdmission(session)
-    if (params.detection) attachSignals(session, params.detection)
+    if (params.detection) {
+      attachSignals(session, params.detection)
+      // What the warm output said, so the hub's mirror starts from it — read raw,
+      // THEN replay-filtered in place like everything after it. Safe to rewrite: a
+      // warm session never streamed, so no seq of it has reached anyone.
+      session.signals?.absorb(session.buffer.toString())
+      session.buffer.rewriteUnstreamed(filterBufferData)
+    }
     // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
     // sentinel the hub's gap detector starts from, so an adopt with no output
     // needs no special case.
@@ -951,7 +962,7 @@ export function createPtyHandlers(
       pid: session.proc.pid,
       data,
       seq,
-      ...(session.signals ? { detection: true as const } : {})
+      ...(session.signals ? { detection: true as const, detected: session.signals.snapshot() } : {})
     }
   }
 
@@ -1116,6 +1127,37 @@ export function createPtyHandlers(
     return { sessions: live, exited: tombstones.list() }
   }
 
+  /** The buffer for `sessionId` + attempt `spawnId`: live, else a reaped one still kept. */
+  function bufferFor(sessionId: string, spawnId: string | undefined): RingBuffer | undefined {
+    const live = sessions.get(sessionId)
+    if (live && (spawnId === undefined || live.spawnId === spawnId)) return live.buffer
+    const exited = tombstones.get(sessionId)
+    if (exited && (spawnId === undefined || exited.spawnId === spawnId)) return exited.buffer
+    return undefined
+  }
+
+  /** Replay for a hub client (fresh terminal or reattach): this buffer is the only one. */
+  function getReplay(rawParams: unknown): PtyGetReplayResult {
+    const params = ptyGetReplayParamsSchema.parse(rawParams)
+    const buffer = bufferFor(params.sessionId, params.spawnId)
+    if (!buffer) return { chunks: [], prelude: '', currentSeq: -1 }
+    const { chunks, prelude } = buffer.getReplaySince(params.afterSeq)
+    return {
+      chunks: chunks.map((c) => ({ seq: c.seq, data: c.data })),
+      prelude,
+      currentSeq: buffer.getCurrentSeq()
+    }
+  }
+
+  function clearBuffer(rawParams: unknown): PtyClearBufferResult {
+    const params = ptyClearBufferParamsSchema.parse(rawParams)
+    const buffer = bufferFor(params.sessionId, params.spawnId)
+    if (!buffer) return { clearedSeq: -1 }
+    const clearedSeq = buffer.getCurrentSeq()
+    buffer.clear()
+    return { clearedSeq }
+  }
+
   function getBufferSince(rawParams: unknown): {
     frames: Array<{ seq: number; data: string }>
   } {
@@ -1158,6 +1200,8 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyResize]: resize,
     [HubToComputerMethods.ptyWrite]: write,
     [HubToComputerMethods.ptySetTheme]: setTheme,
+    [HubToComputerMethods.ptyGetReplay]: getReplay,
+    [HubToComputerMethods.ptyClearBuffer]: clearBuffer,
     [HubToComputerMethods.ptyGetBufferSince]: getBufferSince,
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,

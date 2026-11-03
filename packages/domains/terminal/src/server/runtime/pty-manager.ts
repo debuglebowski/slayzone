@@ -379,7 +379,7 @@ const sessions = new Map<string, PtySession>()
 const sessionTaskMap = new Map<string, string>()
 const sessionTabMap = new Map<string, string>()
 const sessionChangeListeners = new Set<() => void>()
-const dataListeners = new Map<string, Set<(data: string) => void>>()
+const dataListeners = new Map<string, Set<(data: string, seq: number) => void>>()
 const stateChangeListeners = new Map<
   string,
   Set<(newState: TerminalState, oldState: TerminalState) => void>
@@ -434,7 +434,11 @@ function guardPtyCallback<T extends unknown[]>(
 }
 
 /** Subscribe to live PTY output. Returns unsubscribe function. */
-export function subscribeToPtyData(sessionId: string, cb: (data: string) => void): () => void {
+/** Live output; `seq` is the session's (the owner's, for an owner-buffered one). */
+export function subscribeToPtyData(
+  sessionId: string,
+  cb: (data: string, seq: number) => void
+): () => void {
   if (!dataListeners.has(sessionId)) dataListeners.set(sessionId, new Set())
   dataListeners.get(sessionId)!.add(cb)
   return () => {
@@ -2421,7 +2425,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       )
       // Forward data to renderer
       target.onData(
-        guardPtyCallback(sessionId, taskId, 'onData', (data0) => {
+        guardPtyCallback(sessionId, taskId, 'onData', (data0: string, ownerSeq?: number) => {
           const win = getWin() // Dynamic lookup for redirectSessionWindow()
           if (firstOutputTs === null) {
             firstOutputTs = Date.now()
@@ -2545,13 +2549,17 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
 
           // Append to buffer for history restoration (filter problematic sequences)
           const cleanData = ownerPipeline ? data : filterBufferData(data)
-          const seq = session.buffer.append(cleanData)
+          // An owner-buffered session keeps NO copy here: the chunk is already in
+          // the owner's buffer under `ownerSeq`, which is what clients see.
+          const ownsOutput =
+            (target as unknown as PtyHandle).ownsOutput === true && ownerSeq !== undefined
+          const seq = ownsOutput ? ownerSeq : session.buffer.append(cleanData)
           // Notify external data subscribers (REST API follow endpoints)
           const listeners = dataListeners.get(sessionId)
           if (listeners) {
             for (const cb of listeners) {
               try {
-                cb(cleanData)
+                cb(cleanData, seq)
               } catch (err) {
                 recordPtyCallbackError(sessionId, taskId, 'data-listener', err)
               }
@@ -2741,8 +2749,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
               usedFallback = true
 
               const infoLine = buildRecoveryMessage(terminalMode, exitCode)
-              session.buffer.append(infoLine)
-              if (!win.isDestroyed()) {
+              // An owner-buffered session got this line in the owner's buffer
+              // (`carryOutput.preamble`); it shows on the next replay.
+              if (!outputOwner(session)) session.buffer.append(infoLine)
+              if (!outputOwner(session) && !win.isDestroyed()) {
                 try {
                   win.webContents.send(
                     'pty:data',
@@ -3324,26 +3334,49 @@ export function markSessionActiveFromHook(sessionId: string): boolean {
   return true
 }
 
-export function getBuffer(sessionId: string): string | null {
-  const session = sessions.get(sessionId)
-  return session?.buffer.toString() ?? null
+/**
+ * The session's current pty when ITS owner holds the only scrollback (a computer
+ * running the output pipeline): buffer reads go there. Null = this side buffers.
+ */
+function outputOwner(session: PtySession): PtyHandle | null {
+  const handle = session.pty as unknown as PtyHandle
+  return handle.ownsOutput === true && handle.getReplay ? handle : null
 }
 
-export function clearBuffer(sessionId: string): {
+/** The full scrollback, ready to replay into a fresh terminal. */
+export async function getBuffer(sessionId: string): Promise<string | null> {
+  const session = sessions.get(sessionId)
+  if (!session) return null
+  const owner = outputOwner(session)
+  if (!owner) return session.buffer.toString()
+  const { chunks, prelude } = await owner.getReplay!(-1)
+  return prelude + chunks.map((c) => c.data).join('')
+}
+
+export async function clearBuffer(sessionId: string): Promise<{
   success: boolean
   clearedSeq: number | null
-} {
+}> {
   const session = sessions.get(sessionId)
   if (!session) return { success: false, clearedSeq: null }
-
+  const owner = outputOwner(session)
+  if (owner?.clearOutput) {
+    const { clearedSeq } = await owner.clearOutput()
+    return { success: true, clearedSeq }
+  }
   const clearedSeq = session.buffer.getCurrentSeq()
   session.buffer.clear()
   return { success: true, clearedSeq }
 }
 
-export function getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult | null {
+export async function getBufferSince(
+  sessionId: string,
+  afterSeq: number
+): Promise<BufferSinceResult | null> {
   const session = sessions.get(sessionId)
   if (!session) return null
+  const owner = outputOwner(session)
+  if (owner) return owner.getReplay!(afterSeq)
   const { chunks, prelude } = session.buffer.getReplaySince(afterSeq)
   return {
     chunks,

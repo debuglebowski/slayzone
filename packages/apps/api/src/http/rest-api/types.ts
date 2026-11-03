@@ -1,7 +1,12 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal-contracts'
+import type {
+  BufferSinceResult,
+  TerminalMode,
+  TerminalState,
+  PtyInfo
+} from '@slayzone/terminal-contracts'
 import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap } from '@slayzone/terminal/server'
 import type { MenuEventMap } from '../../app-deps'
@@ -87,7 +92,10 @@ export interface PtyAccess {
   hasPty: (sessionId: string) => boolean
   /** Registered and its process has not exited. */
   hasLivePty: (sessionId: string) => boolean
-  getBuffer: (sessionId: string) => string | null
+  /** The scrollback; read from the session's computer when it owns it. */
+  getBuffer: (sessionId: string) => Promise<string | null>
+  /** Replay after `afterSeq` (-1 = all), with the seq it reached. */
+  getBufferSince: (sessionId: string, afterSeq: number) => Promise<BufferSinceResult | null>
   writePty: (sessionId: string, data: string) => boolean
   submitPty: (sessionId: string, data: string) => boolean
   killPty: (sessionId: string) => boolean
@@ -95,7 +103,7 @@ export interface PtyAccess {
     taskId: string,
     opts: { force: boolean; timeoutMs: number }
   ) => Promise<'ok' | 'already-alive' | 'no-window' | 'timeout' | 'error'>
-  subscribeToPtyData: (sessionId: string, cb: (chunk: string) => void) => () => void
+  subscribeToPtyData: (sessionId: string, cb: (chunk: string, seq: number) => void) => () => void
   subscribeToStateChange: (sessionId: string, cb: (state: TerminalState) => void) => () => void
   onSessionChange: (cb: () => void) => () => void
   getState: (sessionId: string) => TerminalState | null

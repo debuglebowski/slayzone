@@ -71,6 +71,8 @@ export interface PtySessionSignals {
   report(detection: PtyOutputDetection, seq: number): void
   /** What the output has said so far (`pty.list`, for a hub reattaching). */
   snapshot(): PtyDetectedSnapshot
+  /** Detect output that predates this pipeline (a warm session's) into the snapshot. */
+  absorb(text: string): void
   /** `/status` was submitted: look for a conversation id in the next output. */
   watchConversationId(): void
   /** The hub's terminal theme changed (OSC colour query answers). */
@@ -281,6 +283,12 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     },
     snapshot() {
       return { ...current, devServerUrls: [...current.devServerUrls] }
+    },
+    absorb(text) {
+      if (!diskPollStarted) startDiskPoll()
+      const { detection } = this.process(text)
+      if (detection.error) reportedError = true
+      remember(detection)
     },
     exited(exitCode, output) {
       if (!params.resuming || reportedError || disposed) return

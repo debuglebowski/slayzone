@@ -76,6 +76,9 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   // Appearance only (OSC colour-query answers); no session, nothing started.
   'pty.setTheme': null,
   'pty.getBufferSince': null,
+  'pty.getReplay': null,
+  // Empties a session's scrollback (the terminal's "clear"); starts nothing.
+  'pty.clearBuffer': null,
   'pty.list': null,
   'pty.prioritize': null,
   'pty.backgroundJobs': null,

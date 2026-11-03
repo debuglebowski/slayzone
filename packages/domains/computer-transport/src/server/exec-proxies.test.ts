@@ -718,6 +718,58 @@ describe('createRoutingPtyBackend', () => {
     })
   })
 
+  it('a piped session acked before any output owns its output: seqs pass through, replay forwards', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.getReplay', () => ({
+      chunks: [{ seq: 0, data: 'a' }],
+      prelude: '',
+      currentSeq: 0
+    }))
+    gateway.onMethod('pty.clearBuffer', () => ({ clearedSeq: 0 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    expect(handle.ownsOutput).toBe(true)
+    const got: Array<[string, number | undefined]> = []
+    handle.onData((d, seq) => got.push([d, seq]))
+    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'a' })
+    expect(got).toEqual([['a', 0]])
+    expect(await handle.getReplay?.(-1)).toEqual({
+      chunks: [{ seq: 0, data: 'a' }],
+      prelude: '',
+      currentSeq: 0
+    })
+    expect(requireCall(gateway, 'pty.getReplay').params).toMatchObject({
+      sessionId: 'sess-1',
+      afterSeq: -1
+    })
+    expect(await handle.clearOutput?.()).toEqual({ clearedSeq: 0 })
+  })
+
+  it('without the ack the hub keeps owning output (older computer)', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    expect(handle.ownsOutput).toBe(false)
+  })
+
   it('reconnect replays what the computer detected while the hub was away, as one snapshot signal', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
