@@ -17,7 +17,7 @@ import {
   type AgentLifecycleMounts,
   type ChatMounts,
   type PtyMounts
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
 import {
@@ -40,7 +40,7 @@ import {
   type AppLeaderboardMounts,
   type UsageAnalyticsMounts
 } from '@slayzone/usage-analytics/server'
-import type { AppUsageMounts } from '@slayzone/terminal/server'
+import type { AppUsageMounts } from '@slayzone/terminal/hub'
 import type { AppFeedbackMounts } from '@slayzone/feedback/server'
 import type { AppBrowserMounts, AppWebviewMounts } from '@slayzone/task-browser/server'
 import type { AppFloatingAgentMounts } from '@slayzone/agent-panels/server'

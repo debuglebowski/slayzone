@@ -80,7 +80,7 @@ export { createPtyOps, setPtySpawnLookups, type PtyCreateOpts } from './runtime/
 export {
   getPtyBackend,
   setPtyBackend,
-  localPtyBackend,
+  noComputerPtyBackend,
   type BackgroundJobQuery,
   type ComputerDoctorFacts,
   type PtyBackend,
@@ -314,3 +314,6 @@ export type {
 } from './runtime/chat-workspace-tracker'
 
 export { setChatSessionSource } from './runtime/session-registry'
+
+export { localPtyBackend, spawnLocalPty } from './runtime/pty-backend-local'
+export { NodePtyUnavailableError } from './runtime/pty-backend'

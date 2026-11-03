@@ -25,7 +25,7 @@ import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { parseProject } from '@slayzone/projects/server'
 import { getRuntimeAdapters } from './ops/shared'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
-import { getChatDeps, getPtyDeps } from '@slayzone/terminal/server'
+import { getChatDeps, getPtyDeps } from '@slayzone/terminal/hub'
 import {
   isChatSupported,
   spawnConversationIds,

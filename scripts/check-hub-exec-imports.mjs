@@ -34,10 +34,6 @@ const ALLOWLIST = {
   // Refused by assertHubProcessesEnabled (T-04/T-05).
   'packages/shared/platform/src/process-tree.ts':
     'Windows taskkill in killPidTree; bundled via the @slayzone/platform barrel, never called by the hub (background processes run on computers)',
-  'packages/domains/terminal/src/server/runtime/pty-backend.ts':
-    'node-pty for localPtyBackend; refuses (T-04), required on first spawn only (T-30)',
-  'packages/domains/terminal/src/server/runtime/pty-manager.ts':
-    'spawns go through getPtyBackend(); docker/ssh probe refuses (T-04)',
   'packages/domains/terminal/src/server/runtime/chat-proc-handle.ts':
     'in-process chat agent; refuses (T-04)',
   'packages/domains/terminal/src/server/runtime/chat-transport-manager.ts':
@@ -49,8 +45,6 @@ const ALLOWLIST = {
     'login-shell PATH probe; the hub runs it only through shell-env getEnrichedPathAsync, which refuses (T-06)',
   'packages/domains/terminal/src/server/files-scan.ts':
     '@file autocomplete git ls-files; refuses (T-06)',
-  'packages/domains/terminal/src/server/runtime/pty-store.ts':
-    'terminal-mode which probe; refuses (T-06)',
   'packages/apps/hub/src/shell-native.ts': 'open/xdg-open/explorer; refuse (T-06)',
   'packages/shared/db-migrations/src/migrations.ts':
     'v122 git backfill over existing agent_turns rows; skipped with processes off (T-06)',

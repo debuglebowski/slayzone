@@ -28,7 +28,7 @@ import { NOTIFY_SCRIPT_SOURCE } from './sources'
 // the SHELL→SERVER→BRIDGE wiring, not the DB.
 // The agent tree is the REAL one (pure, no DB): it decides the state each hook
 // transitions to, which is exactly what this round-trip asserts.
-vi.mock('@slayzone/terminal/server', async () => {
+vi.mock('@slayzone/terminal/hub', async () => {
   const agentTree = await vi.importActual<typeof import('@slayzone/terminal/server')>(
     '@slayzone/terminal/server'
   )

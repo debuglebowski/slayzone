@@ -1,6 +1,5 @@
 import type * as pty from 'node-pty'
 import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
-import { execFile } from 'child_process'
 import { randomUUID } from 'node:crypto'
 import { getPtyHostBridge, onPtyHostBus, type PtySessionWindow } from '../pty-host'
 import { homedir, platform, userInfo } from 'os'
@@ -37,10 +36,7 @@ import {
   type PtySpawnAdmission,
   type PtySpawnSpec
 } from './pty-backend'
-import {
-  assertHubProcessesEnabled,
-  isHubSwitchedOffError
-} from '@slayzone/platform/hub-switch-refusal'
+import { isHubSwitchedOffError, refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -68,7 +64,7 @@ import {
   buildExecCommand,
   resolveUserShell,
   getShellStartupArgs
-} from '../shell-env'
+} from '@slayzone/platform'
 import {
   shouldShellFallback,
   buildRecoveryMessage,
@@ -1185,36 +1181,31 @@ function buildTransportSpawn(
   return null
 }
 
+/**
+ * Reaching a docker / ssh execution context from where agents start — the caller's
+ * computer (the hub wires `exec.run`). None wired: "connect a computer".
+ */
+export type ExecutionContextProbe = (
+  file: string,
+  args: string[]
+) => Promise<{ success: boolean; error?: string }>
+const noProbe: ExecutionContextProbe = async () =>
+  refuseNoComputer({ op: 'pty.test_execution_context' })
+let executionContextProbe: ExecutionContextProbe = noProbe
+export function setExecutionContextProbe(next: ExecutionContextProbe | null): void {
+  executionContextProbe = next ?? noProbe
+}
+
 export function testExecutionContext(
   context: ExecutionContext
 ): Promise<{ success: boolean; error?: string }> {
-  // The docker / ssh probe below runs on the hub itself.
-  if (context.type !== 'host') {
-    assertHubProcessesEnabled('hub.process.spawn', {
-      op: 'pty.test_execution_context',
-      detail: { contextType: context.type }
-    })
-  }
-  return new Promise((resolve) => {
-    if (context.type === 'host') {
-      resolve({ success: true })
-      return
-    }
-
-    const cmd = context.type === 'docker' ? 'docker' : 'ssh'
-    const args =
-      context.type === 'docker'
-        ? ['exec', '--', context.container, 'echo', 'ok']
-        : ['-o', 'ConnectTimeout=5', '--', context.target, 'echo', 'ok']
-
-    execFile(cmd, args, { timeout: 10_000 }, (err) => {
-      if (err) {
-        resolve({ success: false, error: (err as Error).message })
-      } else {
-        resolve({ success: true })
-      }
-    })
-  })
+  if (context.type === 'host') return Promise.resolve({ success: true })
+  const cmd = context.type === 'docker' ? 'docker' : 'ssh'
+  const args =
+    context.type === 'docker'
+      ? ['exec', '--', context.container, 'echo', 'ok']
+      : ['-o', 'ConnectTimeout=5', '--', context.target, 'echo', 'ok']
+  return executionContextProbe(cmd, args)
 }
 
 const TITLE_POLL_MS = 500

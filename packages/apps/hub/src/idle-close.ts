@@ -5,7 +5,7 @@ import {
   setIdleCloseConfigGetter,
   startIdleChecker,
   touchTaskMainSession
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 
 const IDLE_CLOSE_KEYS = [
   'terminal_auto_close_idle',

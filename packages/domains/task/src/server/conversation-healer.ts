@@ -8,7 +8,7 @@ import {
   readClaudeTranscriptMeta,
   locateClaudeTranscripts,
   type ConversationHealRequest
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import {
   decideConversationHeal,

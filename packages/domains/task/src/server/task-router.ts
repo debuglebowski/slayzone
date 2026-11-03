@@ -13,7 +13,7 @@ import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
 import { startMainAgent } from './main-agent'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { releaseChatConversation } from '@slayzone/terminal/server'
+import { releaseChatConversation } from '@slayzone/terminal/hub'
 import {
   getTaskBus,
   getTaskOps,

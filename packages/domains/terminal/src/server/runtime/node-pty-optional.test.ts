@@ -46,9 +46,8 @@ loader._resolveFilename = function (this: unknown, request: string, ...rest: unk
 }
 
 setSecurityLogSink(() => undefined)
-const { localPtyBackend, spawnLocalPty, setPtyBackend, NodePtyUnavailableError } = await import(
-  './pty-backend'
-)
+const { setPtyBackend, getPtyBackend, NodePtyUnavailableError } = await import('./pty-backend')
+const { localPtyBackend, spawnLocalPty } = await import('./pty-backend-local')
 const { createPty, setDatabase } = await import('./pty-manager')
 
 const spec = {
@@ -67,16 +66,12 @@ test('importing the pty runtime does not load node-pty', () => {
   expect(nodePtyLoaded(), 'node-pty is in the module cache after import').toBeFalsy()
 })
 
-test('processes off: switch refusal, node-pty never loaded', async () => {
-  process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
-  try {
-    const err = await caught(() => localPtyBackend.spawn(spec))
-    expect(isHubSwitchedOffError(err), `expected the switch refusal, got ${err}`).toBeTruthy()
-    expect(attempts, `node-pty resolved ${attempts}x`).toBe(0)
-    expect(nodePtyLoaded(), `node-pty resolved ${attempts}x`).toBeFalsy()
-  } finally {
-    delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
-  }
+test('no computer (the default backend): "connect a computer", node-pty never loaded', async () => {
+  setPtyBackend(null)
+  const err = await caught(() => getPtyBackend().spawn(spec))
+  expect(isHubSwitchedOffError(err), `expected the no-computer refusal, got ${err}`).toBeTruthy()
+  expect(attempts, `node-pty resolved ${attempts}x`).toBe(0)
+  expect(nodePtyLoaded(), `node-pty resolved ${attempts}x`).toBeFalsy()
 })
 
 test('processes on, node-pty missing: clear refusal at the spawn', async () => {
@@ -102,7 +97,7 @@ test('createPty, node-pty missing: an error result, and no -l retry', async () =
     } as unknown as SlayzoneDb,
     createFakeTaskSessionStore()
   )
-  setPtyBackend(null) // the in-process default, as before the routing backend is installed
+  setPtyBackend(localPtyBackend) // a host that spawns in-process
   const fakeWin = {
     isDestroyed: () => false,
     webContents: { send: () => undefined }

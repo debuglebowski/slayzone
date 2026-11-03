@@ -18,7 +18,7 @@ import {
   clearWindowTabCounts,
   stopIdleChecker,
   teardownAllWarm
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import {
   createAppSignIn,
   createAuthExpressApp,

@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
-import { unadoptedWarmAgent } from '@slayzone/terminal/server'
+import { unadoptedWarmAgent } from '@slayzone/terminal/hub'
 import { createAccessScope, type AccessScope, type OwnedResource } from '../../access'
 import { httpAccessRequest } from '../owner-scope'
 

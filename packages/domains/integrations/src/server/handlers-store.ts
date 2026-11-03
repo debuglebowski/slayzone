@@ -84,7 +84,7 @@ import {
   type ColumnConfig,
   type WorkflowCategory
 } from '@slayzone/workflow'
-import { onTaskReachedTerminal } from '@slayzone/terminal/server'
+import { onTaskReachedTerminal } from '@slayzone/terminal/hub'
 import { attachPlacement, parseProject } from '@slayzone/projects/server'
 import { createImportedTaskOp } from '@slayzone/task/server'
 import { getAdapter, getRegisteredProviders, normalizeGithubIssue } from './adapters'

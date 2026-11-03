@@ -13,7 +13,7 @@ import {
 } from '@slayzone/host-capabilities/server'
 import { appBackupRouter, appExportImportRouter } from '@slayzone/settings/server'
 import { appLeaderboardRouter } from '@slayzone/usage-analytics/server'
-import { appUsageRouter } from '@slayzone/terminal/server'
+import { appUsageRouter } from '@slayzone/terminal/hub'
 import { appFeedbackRouter } from '@slayzone/feedback/server'
 import { appBrowserRouter, appWebviewRouter } from '@slayzone/task-browser/server'
 import { appFloatingAgentRouter } from '@slayzone/agent-panels/server'

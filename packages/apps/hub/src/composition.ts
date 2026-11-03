@@ -1,9 +1,10 @@
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
-import { setChatSessionSource } from '@slayzone/terminal/server'
+import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
+import { createComputerProbes } from './computer-probes'
 import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
@@ -124,9 +125,11 @@ import {
   setAgentLifecycleEvents,
   setPtyDeps,
   setChatDeps,
+  setExecutionContextProbe,
+  setTerminalCommandProbe,
   type AgentLifecycleEventMap,
   type PtySessionWindow
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import {
   SIDE_QUESTION_TIMEOUT_MS,
   AGENT_STARTUP_SETTING,
@@ -1906,8 +1909,19 @@ export function composeServer(opts: {
         })
       )
     })
+    // Terminal settings probes (a mode's binary, a docker / ssh context) run on the
+    // caller's computer as one exec.run; with none, "connect a computer".
+    const computerProbes = createComputerProbes({
+      computerFor: () => placement.forCaller(),
+      run: async (computerId, params) =>
+        execRunResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.execRun, params)
+        )
+    })
+    setTerminalCommandProbe(computerProbes.command)
+    setExecutionContextProbe(computerProbes.executionContext)
     // Automation shell actions (run_command, ai) run on the task's, else the project's,
-    // computer as one exec.run; with none, the engine's hub-local path (and refusal).
+    // computer as one exec.run; with none, the engine refuses ("connect a computer").
     setAutomationCommandRouting({
       computerFor: async ({ taskId, projectId }) => {
         if (taskId) return resolveComputerForTask(taskId)

@@ -17,7 +17,7 @@ vi.mock('@slayzone/agent-turns/server', () => ({
 // registry) — mirror agent-hook.test.ts.
 // The warm pool's view of a task id (a warm agent not adopted yet). Default: none.
 const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | null>(() => null)
-vi.mock('@slayzone/terminal/server', () => ({
+vi.mock('@slayzone/terminal/hub', () => ({
   isHookDrivenMode: () => false,
   unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
 }))

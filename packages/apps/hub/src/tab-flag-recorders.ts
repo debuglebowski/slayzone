@@ -4,7 +4,7 @@ import {
   setPtyAgentStateTabRecorder,
   setChatAgentStateTabRecorder,
   type AgentStateRecorder
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 
 /**
  * Wire `terminal_tabs.agent_state` to the process that actually owns the

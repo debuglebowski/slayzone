@@ -8,12 +8,14 @@
  * start the agent.". So the computer answers for itself (`PtyBackend.doctor`).
  *
  * Without a computer to ask — none resolved for the task, or one that predates
- * `pty.doctor` — the hub checks its own PATH, as Doctor always did.
+ * `pty.doctor` — Doctor says so ("connect a computer"): the hub's own PATH says
+ * nothing about the machine the agent starts on.
  *
  * @module terminal/server/runtime/runtime-doctor
  */
 
 import type { ValidationResult } from '@slayzone/terminal-contracts'
+import { NO_COMPUTER_MESSAGE } from '@slayzone/platform/hub-switch-refusal'
 import type { DoctorBinaryRequirement } from '../adapters/types'
 import type { ComputerDoctorFacts, PtyBackend } from './pty-backend'
 
@@ -25,19 +27,10 @@ export interface DoctorInputs {
   backend: Pick<PtyBackend, 'doctor'>
   /** The shell the hub will ask the computer to spawn. */
   shell: string
-  /** A shell override the hub skips because it does not exist; null when none. */
-  missingShellOverride: string | null
-  /** The hub's own lookups, for when no computer can answer. */
-  hubLocal: {
-    shellExists(shell: string): boolean
-    which(binary: string): Promise<string | null>
-  }
 }
 
 type Facts = Omit<ComputerDoctorFacts, 'problems'> & {
-  /** null: unknown — the hub runs no ptys, so it can't speak for node-pty. */
   problems: ComputerDoctorFacts['problems'] | null
-  where: 'computer' | 'hub'
 }
 
 export async function runDoctor(inputs: DoctorInputs): Promise<ValidationResult[]> {
@@ -49,7 +42,7 @@ export async function runDoctor(inputs: DoctorInputs): Promise<ValidationResult[
         shell: inputs.shell,
         binaries
       })
-      if (answered) facts = { ...answered, where: 'computer' }
+      if (answered) facts = answered
     } catch (err) {
       // Unreachable: say so. Answering from the hub's disk would be a guess
       // about another machine.
@@ -62,13 +55,8 @@ export async function runDoctor(inputs: DoctorInputs): Promise<ValidationResult[
       ]
     }
   }
-  facts ??= {
-    problems: null,
-    shellExists: inputs.hubLocal.shellExists(inputs.shell),
-    binaries: await Promise.all(
-      binaries.map(async (binary) => ({ binary, path: await inputs.hubLocal.which(binary) }))
-    ),
-    where: 'hub'
+  if (!facts) {
+    return [{ check: 'Computer connected', ok: false, detail: NO_COMPUTER_MESSAGE }]
   }
 
   const rows: ValidationResult[] = []
@@ -79,22 +67,12 @@ export async function runDoctor(inputs: DoctorInputs): Promise<ValidationResult[
         : facts.problems.map((p) => ({ check: p.check, ok: false, detail: p.detail, fix: p.fix })))
     )
   }
-  if (inputs.missingShellOverride !== null) {
+  if (!facts.shellExists) {
     rows.push({
       check: 'Shell detected',
       ok: false,
-      detail: `Shell override not found: ${inputs.missingShellOverride}`,
-      fix: 'Clear the shell override or set it to a valid absolute path'
-    })
-  } else if (!facts.shellExists) {
-    rows.push({
-      check: 'Shell detected',
-      ok: false,
-      detail:
-        facts.where === 'computer'
-          ? `${inputs.shell} not found on this computer`
-          : `${inputs.shell} not found`,
-      fix: 'Set SHELL to a valid shell path (for example /bin/zsh)'
+      detail: `${inputs.shell} not found on this computer`,
+      fix: 'Set SHELL (or the shell override) to a valid shell path on it (for example /bin/zsh)'
     })
   }
   for (const requirement of inputs.requirements) {

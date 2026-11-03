@@ -93,6 +93,7 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_harness packages/apps/api/src/path-ids.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
+run_harness packages/apps/hub/src/computer-probes.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.

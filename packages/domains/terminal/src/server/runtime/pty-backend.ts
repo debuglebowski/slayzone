@@ -1,8 +1,4 @@
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
-import type * as pty from 'node-pty'
-import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { wrapShellWithUlimit } from '../shell-env'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
 import type { TerminalTheme } from '../sync-query-response'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
@@ -339,26 +335,6 @@ export interface BackgroundJobQuery {
 }
 
 /**
- * The in-process spawn primitive (identical to the former `spawnWrappedShell`):
- * non-transport spawns are wrapped in `/bin/sh -c 'ulimit -n 65535; exec
- * <shell> <args>'` so child processes inherit a soft fd limit high enough for
- * Bun-compiled CLIs (e.g. droid); transport (docker/ssh) spawns run as-is.
- * Exported so pty-manager's warm-pool `spawnLoginShell` shares the exact same
- * primitive rather than duplicating the wrap logic.
- */
-export function spawnLocalPty(
-  file: string,
-  args: string[],
-  options: pty.IPtyForkOptions,
-  transport: boolean
-): pty.IPty {
-  const { spawn } = loadNodePty()
-  if (transport) return spawn(file, args, options)
-  const wrapped = wrapShellWithUlimit(file, args)
-  return spawn(wrapped.file, wrapped.args, options)
-}
-
-/**
  * A local spawn on a hub whose node-pty is missing or does not load. node-pty is an
  * OPTIONAL dependency of the published `@slayzone/hub` (T-30): `npm install` skips it
  * when it cannot be built (no compiler), and a hub with
@@ -379,51 +355,19 @@ export class NodePtyUnavailableError extends Error {
   }
 }
 
-let nodePty: typeof pty | undefined
-
 /**
- * node-pty, loaded on the first local spawn rather than at import. An import-time load
- * is a top-level `require` in the hub's CJS bundle, which kills the boot of a hub that
- * has no node-pty — including one that would never spawn (processes off). Not cached on
- * failure, so a later spawn retries.
+ * The hub's default backend: none. Terminals and agents start on computers — the
+ * composition root installs the routing backend — so until then, and wherever no
+ * computer resolves, a spawn is the actionable "connect a computer"; nothing ever
+ * starts in the hub's own process. The in-process node-pty backend lives in
+ * ./pty-backend-local for hosts that spawn themselves (tests).
  */
-function loadNodePty(): typeof pty {
-  if (nodePty) return nodePty
-  try {
-    nodePty =
-      typeof require === 'function'
-        ? // CJS bundle (the hub): esbuild keeps this call where it is, external, so it
-          // resolves at first use — from the bundle's node_modules or NODE_PATH (the
-          // desktop's packaged sidecar) exactly like the import it replaces.
-          (require('node-pty') as typeof pty)
-        : // Unbundled ESM source (tests under tsx/vitest): no `require` in scope, and
-          // `import.meta` is off limits — the hub's CJS bundle compiles this file too,
-          // where esbuild warns about it and empties it. Resolve from the entry script
-          // instead: in this repo it sits below the hoisted root node_modules.
-          (createRequire(process.argv[1] ?? join(process.cwd(), 'index.js'))(
-            'node-pty'
-          ) as typeof pty)
-  } catch (err) {
-    throw new NodePtyUnavailableError(err)
-  }
-  return nodePty
-}
-
-/** Default backend: spawn in-process via node-pty. The returned raw IPty is a
- *  structural `PtyHandle`, so callers keep it as-is. Synchronous — the -l /
- *  shell fallbacks in pty-manager rely on a synchronous spawn (and their onExit
- *  recovery re-spawns run inside a synchronous callback).
- *
- *  Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`: this backend is active
- *  until the composition root installs the routing one, and a terminal or agent
- *  must never start in the hub's own process meanwhile. */
-export const localPtyBackend: PtyBackend = {
+export const noComputerPtyBackend: PtyBackend = {
   spawn(spec: PtySpawnSpec): PtyHandle {
-    assertHubProcessesEnabled('hub.process.spawn', {
+    return refuseNoComputer({
       op: 'pty.spawn',
       detail: { sessionId: spec.sessionId, taskId: spec.taskId }
     })
-    return spawnLocalPty(spec.file, spec.args, spec.options, spec.transport)
   }
 }
 
@@ -432,19 +376,15 @@ export const localPtyBackend: PtyBackend = {
 // reconnect quiesce point (no in-flight spawn/exit for a session that could
 // straddle two backends).
 //
-// The default remains `localPtyBackend` so TESTS (and any harness that never
-// wires a composition root) keep spawning in-process. In the real app the
-// composition root installs the routing backend, which requires a computer and has
-// no local fallback — see `NoComputerAvailableError`. `setPtyBackend(null)`
-// therefore means "restore the test/default in-process backend", NOT "fall back
-// to local for a routed session": once the routing backend is installed, nothing
-// resets it, so a null computer is an error rather than a silent hub spawn.
-let ptyBackend: PtyBackend = localPtyBackend
+// The default is no backend ("connect a computer"); the composition root installs
+// the routing one, a test that spawns real ptys installs `localPtyBackend`
+// (./pty-backend-local). `setPtyBackend(null)` restores the refusing default.
+let ptyBackend: PtyBackend = noComputerPtyBackend
 
 export function getPtyBackend(): PtyBackend {
   return ptyBackend
 }
 
 export function setPtyBackend(backend: PtyBackend | null): void {
-  ptyBackend = backend ?? localPtyBackend
+  ptyBackend = backend ?? noComputerPtyBackend
 }
