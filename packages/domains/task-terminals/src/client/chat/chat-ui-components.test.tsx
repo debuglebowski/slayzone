@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { TooltipProvider } from '@slayzone/ui'
 import { isSyntheticChatPrompt } from '@slayzone/terminal-contracts'
-import { ContextMeter } from './ContextMeter'
+import { ContextMeter, ContextMeterCard } from './ContextMeter'
 import { CompactionRow } from './CompactionRow'
 import { CommandOutputBlock, looksLikeMarkdown } from './CommandOutputBlock'
 import { HookOutputRow } from './HookOutputRow'
@@ -74,6 +74,46 @@ describe('ContextMeter', () => {
       />
     )
     expect(screen.getByTestId('chat-context-meter').className).toContain('text-destructive')
+  })
+})
+
+describe('ContextMeterCard', () => {
+  it('explains context window and cost in plain terms', () => {
+    render(
+      <ContextMeterCard
+        summary={{ contextTokens: 382_192, contextWindow: 1_000_000, sessionCostUsd: 21.3178 }}
+      />
+    )
+    const card = screen.getByTestId('chat-context-meter-card')
+    expect(card.textContent).toContain('38% context used')
+    expect(card.textContent).toContain('382k / 1M')
+    expect(card.textContent).toContain('Session cost')
+    expect(card.textContent).toContain('$21.32')
+    expect(screen.getByTestId('chat-context-meter-bar').style.width).toBe('38.2192%')
+    expect(screen.getByTestId('chat-context-meter-bar').className).toContain('bg-success')
+    expect(card.textContent).not.toContain('summarized')
+  })
+
+  it('nearly full → warns about compaction', () => {
+    render(
+      <ContextMeterCard
+        summary={{ contextTokens: 190_000, contextWindow: 200_000, sessionCostUsd: null }}
+      />
+    )
+    const card = screen.getByTestId('chat-context-meter-card')
+    expect(card.textContent).toContain('Almost full')
+    expect(screen.getByTestId('chat-context-meter-bar').className).toContain('bg-destructive')
+    expect(card.textContent).not.toContain('Session cost')
+  })
+
+  it('no window → token count without bar', () => {
+    render(
+      <ContextMeterCard
+        summary={{ contextTokens: 1200, contextWindow: null, sessionCostUsd: null }}
+      />
+    )
+    expect(screen.getByTestId('chat-context-meter-card').textContent).toContain('1.2k tokens')
+    expect(screen.queryByTestId('chat-context-meter-bar')).toBeNull()
   })
 })
 
