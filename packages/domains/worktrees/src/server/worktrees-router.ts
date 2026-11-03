@@ -1,12 +1,13 @@
 import { z } from 'zod'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { observable } from '@trpc/server/observable'
-import { removeWorktree } from './git-worktree'
 import {
   resolveCopyBehavior,
   detectWorktreesWithColors,
   createWorktreeWithSetup,
   mergeWithAI,
-  analyzeConflict
+  analyzeConflict,
+  type WorktreeSetupExec
 } from './composite-ops'
 import { detectChildRepos, listProjectRepos } from './list-project-repos'
 import { getGitWatcher } from './git-watcher'
@@ -76,6 +77,19 @@ function gitMutation<K extends GitOpName>(op: K) {
     .mutation(({ ctx, input }) => executeGitOp(op, input as never, true, ctx.db))
 }
 
+/** `createWorktree`'s steps, each on the checkout's computer (resolved by its path). */
+function routedWorktreeSetup(db: SlayzoneDb): WorktreeSetupExec {
+  return {
+    createWorktree: (repoPath, targetPath, branch, sourceBranch) =>
+      executeGitOp('addWorktree', { repoPath, targetPath, branch, sourceBranch }, true, db),
+    copyIgnoredFiles: (repoPath, worktreePath, mode, paths) =>
+      executeGitOp('copyIgnoredFiles', { repoPath, worktreePath, mode, paths }, true, db),
+    initSubmodules: (worktreePath) => executeGitOp('initSubmodules', { worktreePath }, true, db),
+    runWorktreeSetupScript: (worktreePath, repoPath, sourceBranch) =>
+      executeGitOp('runWorktreeSetupScript', { worktreePath, repoPath, sourceBranch }, true, db)
+  }
+}
+
 export const worktreesRouter = router({
   // Watch / unwatch (refcounted)
   // Routed like the ops: the watch runs where the checkout lives; reports arrive as
@@ -108,10 +122,17 @@ export const worktreesRouter = router({
       const computerId = await resolveComputer(input)
       return detectChildRepos(fs, computerId, input.projectPath)
     }),
-  detectWorktrees: hubLocalProcedure
+  // The git runs on the checkout's computer; the worktree colors are the hub's.
+  detectWorktrees: publicProcedure
     .input(obj({ repoPath: s }))
-    .query(({ input }) => detectWorktreesWithColors(input.repoPath)),
-  createWorktree: hubLocalProcedure.input(u).mutation(({ ctx, input }) => {
+    .query(({ ctx, input }) =>
+      detectWorktreesWithColors(input.repoPath, (repoPath) =>
+        executeGitOp('listWorktrees', { repoPath }, false, ctx.db)
+      )
+    ),
+  // Each step runs on the checkout's computer; the copy/submodule policy and the
+  // phase events stay here.
+  createWorktree: publicProcedure.input(u).mutation(({ ctx, input }) => {
     const opts = input as CreateWorktreeOpts
     const { requestId } = opts
     const onPhase = requestId
@@ -119,7 +140,7 @@ export const worktreesRouter = router({
           worktreesEvents.emit('createWorktree:phase', { requestId, phase })
         }
       : undefined
-    return createWorktreeWithSetup(ctx.db, opts, onPhase)
+    return createWorktreeWithSetup(ctx.db, opts, onPhase, routedWorktreeSetup(ctx.db))
   }),
   /** Phase progress for one createWorktree call, correlated by its requestId. */
   onCreateWorktreePhase: publicProcedure.input(obj({ requestId: s })).subscription(({ input }) =>
@@ -133,9 +154,7 @@ export const worktreesRouter = router({
       }
     })
   ),
-  removeWorktree: hubLocalProcedure
-    .input(obj({ repoPath: s, worktreePath: s, branchHint: s.optional() }))
-    .mutation(({ input }) => removeWorktree(input.repoPath, input.worktreePath, input.branchHint)),
+  removeWorktree: gitMutation('removeWorktree'),
   init: gitMutation('init'),
   getCurrentBranch: gitQuery('getCurrentBranch'),
   listBranches: gitQuery('listBranches'),
@@ -144,9 +163,22 @@ export const worktreesRouter = router({
   hasUncommittedChanges: gitQuery('hasUncommittedChanges'),
   mergeIntoParent: gitMutation('mergeIntoParent'),
   abortMerge: gitMutation('abortMerge'),
-  mergeWithAI: hubLocalProcedure
+  // The merge runs on the checkout's computer; the agent's prompt is built here.
+  mergeWithAI: publicProcedure
     .input(obj({ projectPath: s, worktreePath: s, parentBranch: s, sourceBranch: s }))
-    .mutation(({ input }) => mergeWithAI(input)),
+    .mutation(({ ctx, input }) =>
+      mergeWithAI(input, {
+        hasUncommittedChanges: (path) =>
+          executeGitOp('hasUncommittedChanges', { path }, false, ctx.db),
+        startMergeNoCommit: (projectPath, parentBranch, sourceBranch) =>
+          executeGitOp(
+            'startMergeNoCommit',
+            { projectPath, parentBranch, sourceBranch },
+            true,
+            ctx.db
+          )
+      })
+    ),
   isMergeInProgress: gitQuery('isMergeInProgress'),
   getConflictedFiles: gitQuery('getConflictedFiles'),
   getWorkingDiff: gitQuery('getWorkingDiff'),

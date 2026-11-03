@@ -33,6 +33,8 @@ beforeAll(() => {
   setGitOpTransport({
     request: async (computerId, params) => {
       sent.push({ computerId, params })
+      if (params.op === 'listWorktrees') return []
+      if (params.op === 'startMergeNoCommit') return { clean: true, conflictedFiles: [] }
       return params.op === 'getCurrentBranch' ? 'main' : null
     },
     watchStart: async () => undefined,
@@ -50,7 +52,8 @@ afterEach(() => {
 afterAll(() => setGitOpTransport(null))
 
 // A hub that knows no checkout: no path names a target.
-const noCheckouts = { get: async () => undefined, all: async () => [] }
+const noRows = { get: async () => undefined, all: async () => [] }
+const noCheckouts = { ...noRows, prepare: () => noRows }
 const caller = worktreesRouter.createCaller({ db: noCheckouts as never, dataRoot: '' } as never)
 
 describe('git panel ops routed to the computer', () => {
@@ -119,5 +122,41 @@ describe('PR ops', () => {
     } finally {
       setGhExecutor(null)
     }
+  })
+})
+
+describe('worktree lifecycle and AI merge run on the computer', () => {
+  test('createWorktree: create + submodules + setup script there', async () => {
+    await caller.createWorktree({
+      repoPath: '/w/repo',
+      targetPath: '/w/wt-1',
+      branch: 'feat',
+      projectId: 'p1'
+    })
+    const ops = sent.map((x) => x.params.op)
+    expect(ops[0]).toBe('addWorktree')
+    expect(ops).toContain('runWorktreeSetupScript')
+    expect(ops.every((op) => op !== undefined)).toBe(true)
+  })
+
+  test('removeWorktree there', async () => {
+    await caller.removeWorktree({ repoPath: '/w/repo', worktreePath: '/w/wt-1' })
+    expect(sent.at(-1)?.params).toMatchObject({ op: 'removeWorktree', mutates: true })
+  })
+
+  test("detectWorktrees: git there, colors from the hub's registry", async () => {
+    const out = await caller.detectWorktrees({ repoPath: '/w/repo' })
+    expect(sent.at(-1)?.params.op).toBe('listWorktrees')
+    expect(Array.isArray(out)).toBe(true)
+  })
+
+  test("mergeWithAI: its git steps there, the agent's prompt built here", async () => {
+    await caller.mergeWithAI({
+      projectPath: '/w/repo',
+      worktreePath: '/w/wt-1',
+      parentBranch: 'main',
+      sourceBranch: 'feat'
+    })
+    expect(sent.map((x) => x.params.op)).toEqual(['hasUncommittedChanges', 'startMergeNoCommit'])
   })
 })

@@ -153,12 +153,41 @@ export const gitOpsContract = {
   getStashDiff: op(z.object({ repoPath: s, index: n }), ['repoPath']),
 
   hasGithubRemote: op(repo, ['repoPath']),
-  // Internal: `createPr`'s first step (no procedure of its own).
-  ensureBranchPushed: op(repo, ['repoPath'])
+  removeWorktree: op(z.object({ repoPath: s, worktreePath: s, branchHint: s.optional() }), [
+    'repoPath',
+    'worktreePath'
+  ]),
+
+  // Internal steps of composite procedures (no procedure of their own):
+  // `createPr`'s push,
+  ensureBranchPushed: op(repo, ['repoPath']),
+  // `createWorktree`'s steps (the procedure adds policy + phase events),
+  addWorktree: op(
+    z.object({ repoPath: s, targetPath: s, branch: s.optional(), sourceBranch: s.optional() }),
+    ['repoPath', 'targetPath']
+  ),
+  initSubmodules: op(z.object({ worktreePath: s }), ['worktreePath']),
+  runWorktreeSetupScript: op(
+    z.object({ worktreePath: s, repoPath: s, sourceBranch: s.nullable().optional() }),
+    ['worktreePath', 'repoPath']
+  ),
+  // `detectWorktrees`' git (the procedure adds the hub's worktree colors),
+  listWorktrees: op(repo, ['repoPath']),
+  // `mergeWithAI`'s merge (the procedure builds the agent's prompt).
+  startMergeNoCommit: op(z.object({ projectPath: s, parentBranch: s, sourceBranch: s }), [
+    'projectPath'
+  ])
 } as const
 
 /** Ops that are steps of a composite procedure, not procedures themselves. */
-export const GIT_INTERNAL_OPS: ReadonlySet<string> = new Set(['ensureBranchPushed'])
+export const GIT_INTERNAL_OPS: ReadonlySet<string> = new Set([
+  'ensureBranchPushed',
+  'addWorktree',
+  'initSubmodules',
+  'runWorktreeSetupScript',
+  'listWorktrees',
+  'startMergeNoCommit'
+])
 
 export type GitOpName = keyof typeof gitOpsContract
 export type GitOpInput<K extends GitOpName> = z.infer<(typeof gitOpsContract)[K]['input']>

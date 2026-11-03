@@ -122,7 +122,17 @@ export const gitOpImpls = {
   getStashDiff: (i: GitOpInput<'getStashDiff'>) => git.getStashDiff(i.repoPath, i.index),
 
   hasGithubRemote: (i: GitOpInput<'hasGithubRemote'>) => git.hasGithubRemote(i.repoPath),
-  ensureBranchPushed: (i: GitOpInput<'ensureBranchPushed'>) => git.ensureBranchPushed(i.repoPath)
+  ensureBranchPushed: (i: GitOpInput<'ensureBranchPushed'>) => git.ensureBranchPushed(i.repoPath),
+  removeWorktree: (i: GitOpInput<'removeWorktree'>) =>
+    git.removeWorktree(i.repoPath, i.worktreePath, i.branchHint),
+  addWorktree: (i: GitOpInput<'addWorktree'>) =>
+    git.createWorktree(i.repoPath, i.targetPath, i.branch, i.sourceBranch),
+  initSubmodules: (i: GitOpInput<'initSubmodules'>) => git.initSubmodules(i.worktreePath),
+  runWorktreeSetupScript: (i: GitOpInput<'runWorktreeSetupScript'>) =>
+    git.runWorktreeSetupScript(i.worktreePath, i.repoPath, i.sourceBranch),
+  listWorktrees: (i: GitOpInput<'listWorktrees'>) => git.detectWorktrees(i.repoPath),
+  startMergeNoCommit: (i: GitOpInput<'startMergeNoCommit'>) =>
+    git.startMergeNoCommit(i.projectPath, i.parentBranch, i.sourceBranch)
 } satisfies { [K in GitOpName]: (input: GitOpInput<K>) => Promise<unknown> }
 
 export type GitOpResult<K extends GitOpName> = Awaited<ReturnType<(typeof gitOpImpls)[K]>>

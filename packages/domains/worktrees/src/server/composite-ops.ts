@@ -33,9 +33,16 @@ import type {
 // the walk itself had to move to the computer regardless, since it decides the
 // terminal cwd for a workspace that may live on another machine.
 
-/** Detected worktrees with per-worktree colors assigned (main excluded). */
-export async function detectWorktreesWithColors(repoPath: string) {
-  const detected = await detectWorktrees(repoPath)
+/**
+ * Detected worktrees with per-worktree colors assigned (main excluded). `detect`
+ * runs the git — the router passes the routed op (the checkout's computer); the
+ * colors are the hub's own registry.
+ */
+export async function detectWorktreesWithColors(
+  repoPath: string,
+  detect: (repoPath: string) => ReturnType<typeof detectWorktrees> = detectWorktrees
+) {
+  const detected = await detect(repoPath)
   const nonMainPaths = detected.filter((d) => !d.isMain).map((d) => d.path)
   const colors = ensureColors(repoPath, nonMainPaths)
   return detected.map((d) => (d.isMain ? d : { ...d, color: colors.get(d.path) }))
@@ -153,10 +160,44 @@ export async function resolveSubmoduleInitBehavior(
  * `createWorktree` mutation to `worktreesEvents` (consumed by the
  * `onCreateWorktreePhase` subscription, correlated by requestId).
  */
+/**
+ * The git and file work of creating a worktree — injectable so the router runs each
+ * step on the checkout's computer; default: this disk.
+ */
+export interface WorktreeSetupExec {
+  createWorktree: (
+    repoPath: string,
+    targetPath: string,
+    branch?: string,
+    sourceBranch?: string
+  ) => Promise<void>
+  copyIgnoredFiles: (
+    repoPath: string,
+    targetPath: string,
+    mode: 'all' | 'custom',
+    paths: string[]
+  ) => Promise<unknown>
+  initSubmodules: (worktreePath: string) => Promise<WorktreeSubmoduleResult>
+  runWorktreeSetupScript: (
+    worktreePath: string,
+    repoPath: string,
+    sourceBranch?: string | null
+  ) => ReturnType<typeof runWorktreeSetupScript>
+}
+
+export const localWorktreeSetupExec: WorktreeSetupExec = {
+  createWorktree,
+  copyIgnoredFiles,
+  initSubmodules: (worktreePath) => initSubmodules(worktreePath),
+  runWorktreeSetupScript: (worktreePath, repoPath, sourceBranch) =>
+    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
+}
+
 export async function createWorktreeWithSetupWith(
   policy: WorktreePolicyOps,
   opts: CreateWorktreeOpts,
-  onPhase?: (phase: CreateWorktreePhase) => void
+  onPhase?: (phase: CreateWorktreePhase) => void,
+  exec: WorktreeSetupExec = localWorktreeSetupExec
 ): Promise<{
   setupResult: Awaited<ReturnType<typeof runWorktreeSetupScript>>
   submoduleResult: WorktreeSubmoduleResult
@@ -165,13 +206,13 @@ export async function createWorktreeWithSetupWith(
   const emit = (phase: CreateWorktreePhase): void => onPhase?.(phase)
 
   emit('creating')
-  await createWorktree(repoPath, targetPath, branch, sourceBranch)
+  await exec.createWorktree(repoPath, targetPath, branch, sourceBranch)
 
   emit('copying')
   // Copy ignored files based on settings ('ask' is handled client-side)
   const { behavior, customPaths } = await policy.resolveCopyBehavior(projectId)
   if (behavior === 'all' || behavior === 'custom') {
-    await copyIgnoredFiles(repoPath, targetPath, behavior, customPaths)
+    await exec.copyIgnoredFiles(repoPath, targetPath, behavior, customPaths)
   }
 
   emit('submodules')
@@ -180,11 +221,11 @@ export async function createWorktreeWithSetupWith(
   if (submoduleBehavior === 'skip') {
     submoduleResult = { ran: false, reason: 'skipped' }
   } else {
-    submoduleResult = await initSubmodules(targetPath)
+    submoduleResult = await exec.initSubmodules(targetPath)
   }
 
   emit('setup')
-  const setupResult = await runWorktreeSetupScript(targetPath, repoPath, sourceBranch)
+  const setupResult = await exec.runWorktreeSetupScript(targetPath, repoPath, sourceBranch)
 
   emit('done')
   return { setupResult, submoduleResult }
@@ -194,28 +235,38 @@ export async function createWorktreeWithSetupWith(
 export async function createWorktreeWithSetup(
   db: SlayzoneDb,
   opts: CreateWorktreeOpts,
-  onPhase?: (phase: CreateWorktreePhase) => void
+  onPhase?: (phase: CreateWorktreePhase) => void,
+  exec?: WorktreeSetupExec
 ): Promise<{
   setupResult: Awaited<ReturnType<typeof runWorktreeSetupScript>>
   submoduleResult: WorktreeSubmoduleResult
 }> {
-  return createWorktreeWithSetupWith(createDbWorktreePolicyOps(db), opts, onPhase)
+  return createWorktreeWithSetupWith(createDbWorktreePolicyOps(db), opts, onPhase, exec)
+}
+
+/** `mergeWithAI`'s git — the router passes the routed ops; default: this disk. */
+export interface MergeWithAIGit {
+  hasUncommittedChanges: (worktreePath: string) => Promise<boolean>
+  startMergeNoCommit: typeof startMergeNoCommit
 }
 
 // ── AI-assisted merge: start a no-commit merge, return an agent resolution plan ─
-export async function mergeWithAI(args: {
-  projectPath: string
-  worktreePath: string
-  parentBranch: string
-  sourceBranch: string
-}): Promise<MergeWithAIResult> {
+export async function mergeWithAI(
+  args: {
+    projectPath: string
+    worktreePath: string
+    parentBranch: string
+    sourceBranch: string
+  },
+  git: MergeWithAIGit = { hasUncommittedChanges, startMergeNoCommit }
+): Promise<MergeWithAIResult> {
   const { projectPath, worktreePath, parentBranch, sourceBranch } = args
   try {
     // Check for uncommitted changes in worktree
-    const hasChanges = await hasUncommittedChanges(worktreePath)
+    const hasChanges = await git.hasUncommittedChanges(worktreePath)
 
     // Start merge
-    const result = await startMergeNoCommit(projectPath, parentBranch, sourceBranch)
+    const result = await git.startMergeNoCommit(projectPath, parentBranch, sourceBranch)
 
     // If clean merge and no uncommitted changes, we're done
     if (result.clean && !hasChanges) {
