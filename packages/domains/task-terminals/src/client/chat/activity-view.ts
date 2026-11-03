@@ -144,9 +144,12 @@ export function activityView(
   }
   for (const item of rows) {
     if (consumed.has(item)) continue
-    // CLI process diagnostics can arrive after turn completion. Keep consecutive
-    // diagnostics with that turn, stopping at any new content or history boundary.
-    if (completed && item.kind !== 'stderr') flush(false)
+    // CLI process diagnostics and workspace captures are published after turn
+    // completion. A capture with no user message to attach to (an agent-started
+    // turn's) belongs to the turn that just ended: alone it is an empty turn
+    // block, and the next turn would claim it. Keep them with that turn,
+    // stopping at any new content or history boundary.
+    if (completed && item.kind !== 'stderr' && item.kind !== 'workspace-changes') flush(false)
     if (item.kind === 'history-gap' || item.kind === 'conversation-branch') {
       flush(false, false)
       output.push(item)

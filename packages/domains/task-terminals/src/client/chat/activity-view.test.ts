@@ -223,3 +223,40 @@ describe('activity view: a message sent into the running turn', () => {
     expect(view.turns.get(user)?.continuedBy).toBeUndefined()
   })
 })
+
+describe('activity view: late workspace capture of an agent-started turn', () => {
+  const trigger = {
+    kind: 'turn-trigger',
+    subAgents: [],
+    notifications: [{ uuid: 'n1', taskId: 't1', summary: 'Monitor event: "x"' }],
+    timestamp: 0
+  } as TimelineItem
+  // Agent-started turns have no user message to attach the capture to; it lands after the result.
+  const capture = {
+    kind: 'workspace-changes',
+    id: 'workspace:c1',
+    tabId: 'tab',
+    captureId: 'c1',
+    messageId: 'agent-turn:a1',
+    status: 'unavailable',
+    fileCount: 0,
+    reason: 'Agent started this turn without a workspace baseline.',
+    timestamp: 2
+  } as TimelineItem
+  const nextReply = { ...reply, messageId: 'next', text: 'Next' } as TimelineItem
+
+  it('stays with the turn that just ended: no empty turn block of its own', () => {
+    const view = activityView([trigger, reply, result, capture], false)
+    expect(view.rows).toEqual([reply])
+    expect(view.turns.size).toBe(1)
+    expect(view.turns.get(reply)?.files).toEqual([capture])
+    expect(view.hosts.get(capture)).toBe(reply)
+  })
+
+  it('is never handed to the next agent-started turn', () => {
+    const view = activityView([trigger, reply, result, capture, trigger, nextReply, result], false)
+    expect(view.rows).toEqual([reply, nextReply])
+    expect(view.turns.get(reply)?.files).toEqual([capture])
+    expect(view.turns.get(nextReply)?.files).toEqual([])
+  })
+})
