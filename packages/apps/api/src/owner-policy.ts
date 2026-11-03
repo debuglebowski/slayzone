@@ -1085,6 +1085,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.submit': checked(session('sessionId')),
   'pty.resize': checked(session('sessionId')),
   'pty.kill': checked(session('sessionId')),
+  'pty.killTask': checked(task('taskId')),
   'pty.touch': checked(session('sessionId')),
   'pty.interrupt': checked(session('sessionId')),
   'pty.prioritize': checked(session('sessionId')),

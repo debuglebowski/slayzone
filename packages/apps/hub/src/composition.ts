@@ -109,7 +109,7 @@ import {
   configurePtyHost,
   onTaskReachedTerminal,
   runtimeOnTaskReachedTerminal,
-  setOnTaskReachedTerminalHandler,
+  setTaskAgentsStopper,
   broadcastRespawnRequest,
   initWarmProcessManager,
   createDbWarmPoolDataOps,
@@ -569,14 +569,14 @@ export function composeServer(opts: {
     }
   }
   configureTaskRuntimeAdapters(baseTaskAdapters)
-  // Wire the cross-domain "task reached terminal status" seam to the REAL
-  // teardown (kill PTYs + chat transports). PTYs/chats live in THIS process now,
-  // so both the task-ops adapter (onReachedTerminal, above) and server-pure
-  // callers (integrations sync/pull) must tear them down here — the Electron
-  // host's handler only sees its own (empty) session maps post-cutover.
-  setOnTaskReachedTerminalHandler((taskId) => {
+  // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
+  // + chat transports in THIS process, plus chats owned by a computer. Callers:
+  // status→terminal (task-ops onReachedTerminal above, integrations sync/pull)
+  // and pty.killTask (closing a scratch terminal's tab). The Electron host's
+  // handler only sees its own (empty) session maps post-cutover.
+  setTaskAgentsStopper(async (taskId) => {
     runtimeOnTaskReachedTerminal(taskId)
-    void computerChat.stopTask(taskId).catch(() => {
+    await computerChat.stopTask(taskId).catch(() => {
       /* Disconnected computers reconcile on reconnect. */
     })
   })

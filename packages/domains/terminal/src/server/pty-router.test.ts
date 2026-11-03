@@ -108,3 +108,24 @@ describe('pty router', () => {
     expect(got).toEqual([{ sessionId: 'sess-a', cols: 100, rows: 30 }])
   })
 })
+
+describe('pty.killTask', () => {
+  test("runs the host's full agent teardown for the task and waits for it", async () => {
+    const { setTaskAgentsStopper } = await import('./task-events.js')
+    const stopped: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    setTaskAgentsStopper(async (taskId) => {
+      await gate
+      stopped.push(taskId)
+    })
+    const caller = ptyRouter.createCaller(ctx)
+    const killed = caller.killTask({ taskId: 't1' })
+    expect(stopped).toEqual([])
+    release()
+    await killed
+    expect(stopped).toEqual(['t1'])
+  })
+})

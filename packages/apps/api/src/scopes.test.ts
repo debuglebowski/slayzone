@@ -60,6 +60,7 @@ describe('SCOPE_POLICY — specific classifications', () => {
   const never: Array<[string, string]> = [
     ['pty.create', 'takes anyInput — an unvalidated spawn spec'],
     ['pty.kill', 'ends the host process'],
+    ['pty.killTask', 'ends every host process of a task'],
     ['pty.setShellOverride', 'changes which binary a terminal launches'],
     ['chat.start', 'creates a session with an attacker-chosen mode + cwd'],
     ['chat.reset', 're-creates a session with an attacker-chosen mode + cwd'],

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getPtyDeps } from './pty-router-deps'
+import { stopTaskAgents } from './task-events'
 
 // PTY router (IPC → tRPC migration, slice 3 / P17). Mirrors the `pty:*` /
 // `terminalModes:*` / `session:*` / `chat:list` IPC handlers 1:1 plus the
@@ -84,6 +85,11 @@ export const ptyRouter = router({
   kill: publicProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(({ input }) => ops().ptyKill(input.sessionId)),
+  // Every terminal + chat agent of one task, wherever it runs (closing a scratch
+  // terminal's tab). The task and its conversations stay.
+  killTask: publicProcedure
+    .input(z.object({ taskId: z.string() }))
+    .mutation(({ input }) => stopTaskAgents(input.taskId)),
   touch: publicProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(({ input }) => ops().ptyTouch(input.sessionId)),

@@ -611,6 +611,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'pty.interrupt': 'user',
   'pty.prioritize': 'user',
   'pty.kill': 'user',
+  'pty.killTask': 'user',
   'pty.list': 'user',
   'pty.modesCreate': 'user',
   'pty.modesDelete': 'user',

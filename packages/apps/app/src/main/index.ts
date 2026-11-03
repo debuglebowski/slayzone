@@ -526,7 +526,7 @@ import {
   beginTerminalShutdown,
   ptyEvents
 } from '@slayzone/terminal/electron'
-import { setOnTaskReachedTerminalHandler, setAgentLifecycleEvents } from '@slayzone/terminal/server'
+import { setTaskAgentsStopper, setAgentLifecycleEvents } from '@slayzone/terminal/server'
 import {
   attachFloatingGlobalAgentPanel,
   setupFloatingGlobalAgentPanel,
@@ -2165,7 +2165,7 @@ app
     })
     // Wire the cross-domain terminal seam so server-pure callers (integrations
     // sync) reach the real pty-killing impl.
-    setOnTaskReachedTerminalHandler(onTaskReachedTerminal)
+    setTaskAgentsStopper(onTaskReachedTerminal)
     logBoot('task runtime adapters configured')
 
     // Register domain handlers (inject ipcMain and db)

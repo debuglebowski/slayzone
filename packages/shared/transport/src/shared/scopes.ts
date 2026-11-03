@@ -691,6 +691,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.getState': 'agent',
   'pty.interrupt': 'agent',
   'pty.kill': 'never',
+  'pty.killTask': 'never',
   'pty.list': 'agent',
   'pty.modesCreate': 'never',
   'pty.modesDelete': 'never',

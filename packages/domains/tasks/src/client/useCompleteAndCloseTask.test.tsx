@@ -6,10 +6,10 @@ import type { Task } from '@slayzone/task-contracts'
 
 const mutate = vi.fn()
 const restore = vi.fn()
-const ptyKill = vi.fn()
+const ptyKillTask = vi.fn(async () => undefined)
 const client = {
   task: { update: { mutate }, restore: { mutate: restore } },
-  pty: { kill: { mutate: ptyKill } }
+  pty: { killTask: { mutate: ptyKillTask } }
 }
 const tabState = {
   tabs: [] as Array<{ type: string; taskId?: string }>,
@@ -186,40 +186,54 @@ describe('undo of ⌘⇧D', () => {
   })
 })
 
-describe('useCloseTaskTab with a pending write', () => {
+describe('useCloseTaskTab', () => {
   function closer() {
-    const deleteTask = vi.fn(async () => undefined)
     const { result } = renderHook(() => useCloseTaskTab())
-    return { ...result.current, deleteTask }
+    return result.current
+  }
+  const scratch = () => {
+    tabState._taskLookup = { tasks: [task({ is_temporary: true } as Partial<Task>)] }
   }
 
-  beforeEach(() => {
-    tabState._taskLookup = {
-      tasks: [task({ is_temporary: true } as Partial<Task>)]
-    }
+  it('stops every process of a scratch terminal but keeps the task', async () => {
+    scratch()
+    const { closeTabByTaskId } = closer()
+    await closeTabByTaskId('t1')
+    expect(tabState.closeTab).toHaveBeenCalledWith(1)
+    expect(ptyKillTask).toHaveBeenCalledWith({ taskId: 't1' })
+    expect(restore).not.toHaveBeenCalled()
   })
 
-  it('closes the tab without deleting the scratch terminal or killing its process', async () => {
+  it('leaves a regular task running', async () => {
+    tabState._taskLookup = { tasks: [task()] }
+    const { closeTabByTaskId } = closer()
+    await closeTabByTaskId('t1')
+    expect(tabState.closeTab).toHaveBeenCalledWith(1)
+    expect(ptyKillTask).not.toHaveBeenCalled()
+  })
+
+  it('closes at once but stops a scratch terminal only once the pending write lands', async () => {
+    scratch()
     const write = deferred<unknown>()
-    const { closeTabByTaskId, deleteTask } = closer()
+    const { closeTabByTaskId } = closer()
 
     const closed = closeTabByTaskId('t1', { after: write.promise })
     expect(tabState.closeTab).toHaveBeenCalledWith(1)
-    expect(deleteTask).not.toHaveBeenCalled()
+    expect(ptyKillTask).not.toHaveBeenCalled()
 
     write.resolve(undefined)
     await closed
-    expect(deleteTask).not.toHaveBeenCalled()
-    expect(ptyKill).not.toHaveBeenCalled()
+    expect(ptyKillTask).toHaveBeenCalledWith({ taskId: 't1' })
   })
 
-  it('keeps a temporary task when the write fails', async () => {
+  it('keeps a scratch terminal running when the pending write fails', async () => {
+    scratch()
     const write = deferred<unknown>()
-    const { closeTabByTaskId, deleteTask } = closer()
+    const { closeTabByTaskId } = closer()
 
     const closed = closeTabByTaskId('t1', { after: write.promise })
     write.reject(new Error('hub down'))
     await expect(closed).rejects.toThrow('hub down')
-    expect(deleteTask).not.toHaveBeenCalled()
+    expect(ptyKillTask).not.toHaveBeenCalled()
   })
 })

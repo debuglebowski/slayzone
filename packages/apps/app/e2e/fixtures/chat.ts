@@ -62,6 +62,8 @@ export interface OpenChatTaskOpts {
    * - `on-send`: nothing spawns until the first send (the lazy path).
    */
   spawn?: 'on-open' | 'on-send'
+  /** Create it as a temporary (scratch) task. */
+  isTemporary?: boolean
 }
 
 export interface ChatHarness {
@@ -165,6 +167,7 @@ export const test = base.extend<ChatFixtures, ChatWorkerFixtures>({
           seedEvents: opts.seedEvents,
           repoFiles: opts.repoFiles,
           spawn: opts.spawn,
+          isTemporary: opts.isTemporary,
           waitForFirstRun: () => epoch.waitForRun(0)
         })
         return {
