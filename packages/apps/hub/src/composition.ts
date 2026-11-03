@@ -945,7 +945,8 @@ export function composeServer(opts: {
   })
   let resettingForTest = false
   const chatNotificationChains = new Map<string, Promise<void>>()
-  let maintainComputerChat = (computerId: string) => computerChat.lifecycle.sync(computerId)
+  let maintainComputerChat = (computerId: string, _opts?: { reconnect?: boolean }) =>
+    computerChat.lifecycle.sync(computerId)
   let syncComputerChatLifecycle = (computerId: string) => computerChat.lifecycle.sync(computerId)
   let drainComputerChatMaintenance = async () => {
     /* Gateway not initialized yet. */
@@ -1734,7 +1735,7 @@ export function composeServer(opts: {
     const chatMaintenance = createComputerChatMaintenance({
       asOwner: asComputerOwner,
       projects: (id) => syncComputerProjects(id),
-      recover: (id) => computerChat.recoverComputer(id, true),
+      recover: (id, force) => computerChat.recoverComputer(id, force),
       lifecycle: computerChat.lifecycle.sync,
       sessions: computerChat.relay.refreshSessions,
       migrate: async (id) => {
@@ -1743,13 +1744,13 @@ export function composeServer(opts: {
         await legacyChatDiagnostics?.compact()
       }
     })
-    maintainComputerChat = (id) => chatMaintenance.run(id)
+    maintainComputerChat = (id, runOpts) => chatMaintenance.run(id, runOpts)
     syncComputerChatLifecycle = (id) => asComputerOwner(id, () => computerChat.lifecycle.sync(id))
     drainComputerChatMaintenance = () => chatMaintenance.drain()
     computerGateway.events.on('computer-connected', ({ computer }) => {
       computerChat.invalidateRecovery(computer.computerId)
       if (!resettingForTest)
-        void maintainComputerChat(computer.computerId).catch(() =>
+        void maintainComputerChat(computer.computerId, { reconnect: true }).catch(() =>
           console.error('[chat] computer reconciliation pending')
         )
       void reapOrphanWarms(computer.computerId)
