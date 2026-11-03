@@ -20,6 +20,7 @@ that will use it, or the agent gets a cwd that does not exist.
 | call | seam | notes |
 |---|---|---|
 | pty spawn | `PtyBackend.spawn` | `computerId` from `resolveComputerId(taskId)`, `pty-store.ts:313` |
+| pty output pipeline | `PtySpawnSpec.detection` | terminal query answers, detection (`pty-signal`), replay filter and the ONLY scrollback run on the computer; the hub mirrors signals and reads replay via `pty.getReplay` (offline → `PtyOutputUnavailableError`) |
 | chat agent spawn | `ChatBackend.spawn` | `computerId` from `data.resolveComputerId`, `chat-handlers.ts:332` |
 | `createWorktree` | `WorktreeExecAdapters` | in `createWorktreeForTask` |
 | `removeWorktree` | `WorktreeExecAdapters` | in `cleanupTaskFull` — see the caveat below |

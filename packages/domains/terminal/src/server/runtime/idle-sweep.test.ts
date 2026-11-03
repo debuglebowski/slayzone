@@ -32,7 +32,7 @@ import {
   touchTaskMainSession,
   transitionStateFromHook
 } from './pty-manager'
-import { setPtyBackend, type PtyBackend } from './pty-backend'
+import { setPtyBackend, type PtyBackend, type PtySignal } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 // createPty still takes a target window (legacy redirect seam); the SWEEP must not.
@@ -196,4 +196,84 @@ test('windowless sweep: the silence timer flips a running non-hook agent to idle
   await vi.advanceTimersByTimeAsync(10_000 + 200) // one tick + the 100ms idle debounce
   expect(getState(sid)).toBe('idle')
   killPty(sid)
+})
+
+// The computer owns the output: nothing is relayed here (nobody watches), only
+// signals arrive. Silence-idle and idle-close must still work from those alone.
+test('computer-reported state only: silence flips running → idle, then idle-close hibernates', async () => {
+  let signalCb: ((s: PtySignal) => void) | undefined
+  const exitCbs: Array<(e: { exitCode: number }) => void> = []
+  const sid = 'signalOnly:signalOnly'
+  setPtyBackend({
+    spawn() {
+      throw new Error('adopted only')
+    },
+    async adopt() {
+      return {
+        pid: 4343,
+        process: 'gemini',
+        detectsOutput: true,
+        ownsOutput: true,
+        // No bytes ever: relay is off.
+        onData: () => ({ dispose() {} }),
+        onSignal: (cb: (s: PtySignal) => void) => {
+          signalCb = cb
+          return { dispose() {} }
+        },
+        onExit: (cb: (e: { exitCode: number }) => void) => {
+          exitCbs.push(cb)
+          return { dispose() {} }
+        },
+        write: () => {},
+        resize: () => {},
+        kill: () => {
+          killed.push(sid)
+          for (const cb of exitCbs) cb({ exitCode: 0 })
+        }
+      } as never
+    }
+  } as unknown as PtyBackend)
+  const signal = (over: Partial<PtySignal>): PtySignal => ({
+    seq: 0,
+    activity: null,
+    refreshIdleClock: false,
+    preview: '',
+    error: null,
+    suppressOutput: false,
+    prompt: null,
+    title: null,
+    devServerUrls: [],
+    conversationId: null,
+    ...over
+  })
+  const res = await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'gemini' as never,
+    type: 'gemini',
+    conversationId: 'conv-signalOnly',
+    initialCommand: 'agent {flags}',
+    adoptPty: { warmId: 'warm-signalOnly', computerId: 'computer-1' }
+  })
+  expect(res.success, `createPty failed: ${res.error}`).toBe(true)
+  noteSessionConversationId(sid, 'conv-signalOnly')
+  signalCb?.(signal({ seq: 0, firstOutput: true }))
+  signalCb?.(signal({ seq: 1, activity: 'working', refreshIdleClock: true, preview: 'x' }))
+  signalCb?.(signal({ seq: 2, activity: 'working', refreshIdleClock: true, preview: 'x' }))
+  await until(() => getState(sid) === 'running', `${sid} → running`)
+
+  setIdleCloseConfigGetter(() => ({ enabled: true, idleMs: 15_000 }))
+  const rec = recordEvents()
+  vi.useFakeTimers()
+  startIdleChecker()
+  // Silence (no signal refreshes the clock): running → idle on the sweep.
+  await vi.advanceTimersByTimeAsync(10_000 + 200)
+  expect(getState(sid)).toBe('idle')
+  // Idle long enough, nobody engaged: warned, then hibernated after the grace.
+  await vi.advanceTimersByTimeAsync(20_000)
+  expect(rec.warned).toEqual([sid])
+  await vi.advanceTimersByTimeAsync(10_000)
+  expect(rec.hibernated).toEqual([sid])
+  expect(killed).toContain(sid)
 })
