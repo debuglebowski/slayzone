@@ -21,6 +21,7 @@ import {
   CONVERSATION_ID_WATCH_TIMEOUT_MS,
   DISK_SESSION_POLL_ATTEMPTS,
   DISK_SESSION_POLL_MS,
+  claudeTranscriptExists,
   computeSyncQueryResponse,
   filterBufferData,
   getAdapter,
@@ -68,6 +69,12 @@ export interface PtySessionSignals {
   watchConversationId(): void
   /** The hub's terminal theme changed (OSC colour query answers). */
   setTheme(theme: TerminalTheme): void
+  /**
+   * The process exited. A resume that failed gets its cause reported (before the
+   * exit frame): its transcript is gone from THIS disk, or `output` (the replay
+   * buffer) carries the provider's error — the checks the hub used to run itself.
+   */
+  exited(exitCode: number | null, output: string): void
   dispose(): void
 }
 
@@ -119,6 +126,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
   let watchTimer: ReturnType<typeof setTimeout> | undefined
   let lastSeq = -1
   let disposed = false
+  let reportedError = false
   let diskPoll: ReturnType<typeof setInterval> | undefined
   let diskPollStarted = false
   /**
@@ -163,11 +171,16 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     : undefined
   errorWindow?.unref?.()
 
-  const send = (seq: number, d: PtyOutputDetection | null): void => {
+  const send = (
+    seq: number,
+    d: PtyOutputDetection | null,
+    exitError?: PtyOutputDetection['error']
+  ): void => {
     const spawnId = ids.spawnId()
     emit({
       sessionId: ids.sessionId(),
       ...(spawnId !== undefined ? { spawnId } : {}),
+      ...(exitError ? { exitError } : {}),
       seq,
       activity: d?.activity ?? null,
       refreshIdleClock: d ? d.refreshIdleClock : true,
@@ -203,6 +216,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     report(d, seq) {
       lastSeq = seq
       if (!diskPollStarted) startDiskPoll()
+      if (d.error) reportedError = true
       if (d.conversationId && watchTimer) {
         clearTimeout(watchTimer)
         watchTimer = undefined
@@ -233,6 +247,23 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     },
     setTheme(next) {
       theme = next
+    },
+    exited(exitCode, output) {
+      if (!params.resuming || reportedError || disposed) return
+      // DISK TRUTH first: deterministic, needs no output (a fast exit can beat the
+      // "No conversation found" line). Then the exit-code-agnostic string scan.
+      const transcriptGone =
+        params.mode === 'claude-code' &&
+        exitCode !== 0 &&
+        !!params.resumeConversationId &&
+        !!disk &&
+        !claudeTranscriptExists(disk.cwd, params.resumeConversationId)
+      const cause = transcriptGone
+        ? { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+        : detector.adapter.detectError(output)
+      if (!cause) return
+      reportedError = true
+      send(lastSeq, EMPTY, cause)
     },
     watchConversationId() {
       detector.watchConversationId()

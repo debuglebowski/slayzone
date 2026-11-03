@@ -334,10 +334,18 @@ export const ptyDetectionParamsSchema = z.object({
     .optional(),
   /** Spawned to resume a conversation: opens the stale-resume error window. */
   resuming: z.boolean(),
+  /** The conversation being resumed (stale-resume disk check at exit). */
+  resumeConversationId: z.string().min(1).optional(),
   /** Absent: xterm defaults until `pty.setTheme`. */
   theme: ptyThemeSchema.optional()
 })
 export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
+
+const ptySignalErrorSchema = z.object({
+  code: z.string().min(1),
+  message: z.string(),
+  recoverable: z.boolean()
+})
 
 export const ptySignalPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -348,9 +356,13 @@ export const ptySignalPayloadSchema = z.object({
   /** The chunk counts as output for the silence (idle) clock. */
   refreshIdleClock: z.boolean(),
   preview: z.string().max(200),
-  error: z
-    .object({ code: z.string().min(1), message: z.string(), recoverable: z.boolean() })
-    .nullable(),
+  error: ptySignalErrorSchema.nullable(),
+  /**
+   * Sent just before `pty.exit` of a resume that failed: why (the transcript is gone,
+   * or the output said so). Recorded as the session's error for the exit overlay;
+   * not a state transition. Absent on every other signal.
+   */
+  exitError: ptySignalErrorSchema.optional(),
   suppressOutput: z.boolean(),
   prompt: z
     .object({

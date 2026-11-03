@@ -1779,6 +1779,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       ...(type ? { type } : {}),
       patterns: { working: patternWorking ?? null, error: patternError ?? null },
       resuming,
+      ...(resuming && resolvedExistingId ? { resumeConversationId: resolvedExistingId } : {}),
       theme: currentTerminalTheme
     }
     const buildSpec = (
@@ -2255,6 +2256,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         win: PtySessionWindow,
         rawLength: number
       ): void => {
+        // A failed resume's cause, reported by the owner just before its exit.
+        if ('exitError' in detection && detection.exitError) session.error = detection.exitError
         const detectedActivity = detection.activity
 
         // Idle clock policy lives in `shouldRefreshIdleClock`. TUI adapters
@@ -2667,7 +2670,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           //  (2) STRING SCAN — the exit-code-agnostic fallback (covers providers
           //      whose path we don't read, and mid-run cleanups).
           // Gated on `resuming`: only a resume attempt can hit a stale session.
-          if (resuming && !session.error) {
+          // An owner that runs the pipeline made both checks on ITS disk and output,
+          // and reported the cause (`exitError`) before this exit arrived.
+          if (resuming && !session.error && !(target as unknown as PtyHandle).detectsOutput) {
             const transcriptGone =
               terminalMode === 'claude-code' &&
               exitCode !== 0 &&

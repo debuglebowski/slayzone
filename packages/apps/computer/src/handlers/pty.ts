@@ -523,6 +523,9 @@ export function createPtyHandlers(
     // emit exit — a superseded/disposed pty exiting must stay silent, else it
     // would tear down the replacement and confuse the hub.
     if (sessions.get(session.id) !== session) return
+    // A failed resume's cause rides a signal that lands just before the exit frame.
+    if (!session.replacing && !session.warm)
+      session.signals?.exited(exitCode, session.buffer.toString())
     sessions.delete(session.id)
     session.signals?.dispose()
     session.deadline?.cancel()

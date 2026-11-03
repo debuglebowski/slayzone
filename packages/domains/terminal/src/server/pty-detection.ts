@@ -55,3 +55,4 @@ export {
   type PtyOutputDetectorOptions
 } from './pty-output-detector'
 export { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal-contracts'
+export { claudeTranscriptExists } from './claude-transcripts'

@@ -90,6 +90,8 @@ export interface PtyDetectionSpec {
   type?: string
   patterns?: { working?: string | null; error?: string | null }
   resuming: boolean
+  /** The conversation being resumed: the owner checks its transcript at a failed exit. */
+  resumeConversationId?: string
   /** What OSC colour queries are answered with (`setTerminalTheme`). */
   theme?: TerminalTheme
 }
@@ -102,6 +104,8 @@ export interface PtySignal {
   refreshIdleClock: boolean
   preview: string
   error: ErrorInfo | null
+  /** A failed resume's cause, sent just before the exit (sets the error, no transition). */
+  exitError?: ErrorInfo
   suppressOutput: boolean
   prompt: PromptInfo | null
   title: string | null

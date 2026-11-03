@@ -149,6 +149,49 @@ describe('pty signals (computer-side detection)', () => {
     }
   })
 
+  test('failed resume: a missing transcript on THIS disk is reported before the exit', () => {
+    const home = mkdtempSync(join(tmpdir(), 'pty-signals-exit-'))
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      const sent: PtySignalPayload[] = []
+      const make = () =>
+        createPtySessionSignals({
+          params: { mode: 'claude-code', resuming: true, resumeConversationId: 'gone-id' },
+          ids,
+          emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+          respond: () => undefined,
+          disk: { cwd: '/work/repo', startedAt: Date.now() }
+        })
+      const failed = make()
+      failed.exited(1, '')
+      expect(sent.at(-1)?.exitError?.code).toBe('SESSION_NOT_FOUND')
+      failed.dispose()
+
+      // A clean exit is not a failed resume; the output scan finds nothing either.
+      sent.length = 0
+      const clean = make()
+      clean.exited(0, 'bye')
+      expect(sent).toEqual([])
+      clean.dispose()
+
+      // Exit-code-agnostic string scan over the buffered output.
+      const scanned = make()
+      scanned.exited(0, 'No conversation found with session ID: gone-id')
+      expect(sent.at(-1)?.exitError?.code).toBe('SESSION_NOT_FOUND')
+      scanned.dispose()
+    } finally {
+      process.env.HOME = prevHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('not a resume: exit says nothing', () => {
+    const { sent, pipeline } = harness('claude-code')
+    pipeline.exited(1, 'No conversation found with session ID: x')
+    expect(sent).toEqual([])
+  })
+
   test('conversation id only after /status is submitted, and only within the watch', () => {
     vi.useFakeTimers()
     const id = '0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b'

@@ -47,6 +47,7 @@ function routedBackend(detectsOutput: boolean) {
   const writes: Array<[string, unknown]> = []
   let dataCb: ((d: string) => void) | undefined
   let signalCb: ((s: PtySignal) => void) | undefined
+  let exitCb: ((e: { exitCode: number }) => void) | undefined
   setPtyBackend({
     spawn: (spec: PtySpawnSpec) => {
       specs.push(spec)
@@ -62,7 +63,10 @@ function routedBackend(detectsOutput: boolean) {
           signalCb = cb
           return { dispose: () => undefined }
         },
-        onExit: () => ({ dispose: () => undefined }),
+        onExit: (cb: (e: { exitCode: number }) => void) => {
+          exitCb = cb
+          return { dispose: () => undefined }
+        },
         write: (data: string, opts?: unknown) => writes.push([data, opts]),
         kill: () => undefined,
         resize: () => undefined
@@ -73,7 +77,8 @@ function routedBackend(detectsOutput: boolean) {
     specs,
     writes,
     output: (d: string) => dataCb?.(d),
-    signal: (s: PtySignal) => signalCb?.(s)
+    signal: (s: PtySignal) => signalCb?.(s),
+    exit: (exitCode: number) => exitCb?.({ exitCode })
   }
 }
 
@@ -162,4 +167,23 @@ test('submitting the session-id command (gemini: /stats) tells the owner to watc
   expect(b.writes.at(-1)).toEqual(['/stats\r', { watchConversationId: true }])
   writePty('mirror:status', 'hi\r')
   expect(b.writes.at(-1)).toEqual(['hi\r', undefined])
+})
+
+test("the owner's exitError becomes the session's error carried on exit", async () => {
+  const b = routedBackend(true)
+  const exits: Array<string | null> = []
+  ptyEvents.on('exit', (_id: string, _code: number | null, errorCode: string | null) =>
+    exits.push(errorCode)
+  )
+  await open('mirror:exit-error')
+  b.output('$ ')
+  b.signal(
+    signal({
+      seq: 1,
+      exitError: { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+    })
+  )
+  b.exit(0)
+  await new Promise((r) => setTimeout(r, 200))
+  expect(exits).toEqual(['SESSION_NOT_FOUND'])
 })
