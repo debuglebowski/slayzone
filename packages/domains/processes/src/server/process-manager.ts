@@ -49,7 +49,26 @@ export type ProcessComputerResolver = (proc: {
 let processComputerResolver: ProcessComputerResolver | null = null
 export function setProcessComputerResolver(resolver: ProcessComputerResolver | null): void {
   processComputerResolver = resolver
+  // A hub with processes off loads its rows only now: from here they run on computers.
+  if (resolver && deferredPersistence) {
+    const p = deferredPersistence
+    deferredPersistence = null
+    persistence = p
+    void loadRows(p, { localCare: false })
+  }
 }
+
+/**
+ * Refuse a process op only when it would run on THIS machine: with routing wired,
+ * every process runs on a computer, so a hub with processes switched off can manage
+ * them (doSpawn refuses with 'no computer' when none can run it).
+ */
+function assertCanRunProcesses(...args: Parameters<typeof assertHubProcessesEnabled>): void {
+  if (!processComputerResolver) assertHubProcessesEnabled(...args)
+}
+
+/** Rows of a hub with processes off, held until routing is wired (see above). */
+let deferredPersistence: ProcessPersistence | null = null
 
 /** What a client may set on a process (create, update); the rest is the manager's. */
 const EDITABLE_FIELDS = ['label', 'command', 'cwd', 'autoRestart', 'taskId', 'projectId'] as const
@@ -63,6 +82,11 @@ interface ManagedProcess extends ProcessInfo {
    * records it (the computer owns its lifecycle).
    */
   computerId: string | null
+  /**
+   * The routed run's pid ON ITS COMPUTER — shown to users (panel, CLI), never
+   * signalled, polled or persisted here; `pid` stays null for a routed run.
+   */
+  computerPid: number | null
   titlePollTimer: ReturnType<typeof setInterval> | null
   oscTitleSet: boolean
   /** Bumped by every lifecycle op (start/stop/restart). An async step that
@@ -120,10 +144,18 @@ export async function initProcessManager(database: SlayzoneDb): Promise<void> {
 }
 
 export async function initProcessManagerWith(p: ProcessPersistence): Promise<void> {
-  // `SLAYZONE_HUB_ENABLE_PROCESSES=0`: load no persisted row, so none can be
+  // `SLAYZONE_HUB_ENABLE_PROCESSES=0`: load no persisted row yet, so none can be
   // restarted or have its stale pid swept, and skip the PATH warm-up (it spawns the
-  // user's login shell). Every entry point below refuses anyway.
-  if (!hubProcessesEnabled()) return
+  // user's login shell). Every entry point below refuses — until routing to computers
+  // is wired (`setProcessComputerResolver`), which loads the rows then.
+  if (!hubProcessesEnabled()) {
+    deferredPersistence = processComputerResolver ? null : p
+    if (processComputerResolver) {
+      persistence = p
+      await loadRows(p, { localCare: false })
+    }
+    return
+  }
   persistence = p
   // Warm the enriched-PATH cache off the boot critical path. Spawning the
   // user's shell to read $PATH is ~100ms (login shell + rc files); deferring
@@ -136,6 +168,15 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       /* lazy fallback handles it */
     }
   })
+  await loadRows(p, { localCare: true })
+}
+
+/**
+ * Register persisted rows. `localCare`: this machine may have run them — sweep
+ * leftover pids and probe liveness. A hub with processes off never ran one, and
+ * must not exec to check.
+ */
+async function loadRows(p: ProcessPersistence, opts: { localCare: boolean }): Promise<void> {
   const rows = await p.loadAll()
   for (const row of rows) {
     processes.set(row.id, {
@@ -150,11 +191,12 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       // Carried over from the last spawn, if the app never got to clear it (an
       // uncontrolled exit) — reapStaleIfNeeded() checks and clears it before the
       // next restartProcess()/spawnProcess() actually spawns.
-      pid: row.pid,
+      pid: opts.localCare ? row.pid : null,
       exitCode: null,
       logBuffer: [],
       handle: null,
       computerId: null,
+      computerPid: null,
       startedAt: new Date().toISOString(),
       restartCount: 0,
       spawnedAt: null,
@@ -165,6 +207,7 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       termination: null
     })
   }
+  if (!opts.localCare) return
   // Fire-and-forget, off the boot critical path — an orphan left by a row
   // that's never manually restarted again this session would otherwise stay
   // unreachable even across a full app restart (see reapKnownHistory).
@@ -381,6 +424,7 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
   proc.computerId = computerId
   // A routed pid is the computer's: never stored, polled or signalled here.
   proc.pid = routed ? null : (handle.pid ?? null)
+  proc.computerPid = null
   proc.exitCode = null
   proc.processTitle = null
   proc.oscTitleSet = false
@@ -393,8 +437,32 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
 
   handle.onData((chunk) => handleProcessData(proc, chunk))
 
-  handle.onExit(async ({ code, signal }) => {
+  // A routed spawn answers once its computer runs it (or ends it), so the caller
+  // gets the pid there — or the refusal in the log — instead of a bare id.
+  let settleSpawn: (() => void) | null = null
+  const spawnSettled =
+    routed && handle.onSpawned
+      ? new Promise<void>((resolve) => {
+          const timer = setTimeout(() => settleSpawn?.(), ROUTED_SPAWN_CONFIRM_MS)
+          timer.unref?.()
+          settleSpawn = () => {
+            settleSpawn = null
+            clearTimeout(timer)
+            resolve()
+          }
+          handle.onSpawned?.(({ pid }) => {
+            if (proc.handle === handle) proc.computerPid = pid
+            settleSpawn?.()
+          })
+        })
+      : null
+
+  handle.onExit(async ({ code, signal, detail }) => {
+    settleSpawn?.()
     if (proc.handle !== handle) return // stale exit from restarted process
+    proc.computerPid = null
+    // A computer's refusal or OS error says why; a bare exit code would not.
+    if (detail) pushLog(proc, `[${detail}]`)
     const exitGeneration = proc.generation
     stopTitlePolling(proc)
     // Routed: `proc.pid` is null, so no local group sweep runs; the computer
@@ -452,7 +520,11 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
       setStatus(proc, 'orphaned')
     }
   })
+  if (spawnSettled) await spawnSettled
 }
+
+/** How long a routed spawn waits for its computer's "it runs" before answering anyway. */
+const ROUTED_SPAWN_CONFIRM_MS = 10_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -746,6 +818,7 @@ function newManagedProcess(
     logBuffer: [],
     handle: null,
     computerId: null,
+    computerPid: null,
     startedAt: new Date().toISOString(),
     restartCount: 0,
     spawnedAt: null,
@@ -777,7 +850,7 @@ export async function createProcess(
   cwd: string,
   autoRestart: boolean
 ): Promise<string> {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'create', detail: { taskId, projectId } })
+  assertCanRunProcesses('hub.process.spawn', { op: 'create', detail: { taskId, projectId } })
   const id = randomUUID()
   await persistNew(
     newManagedProcess(id, { taskId, projectId, label, command, cwd, autoRestart }, 'stopped')
@@ -793,7 +866,7 @@ export async function spawnProcess(
   cwd: string,
   autoRestart: boolean
 ): Promise<string> {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'spawn', detail: { taskId, projectId } })
+  assertCanRunProcesses('hub.process.spawn', { op: 'spawn', detail: { taskId, projectId } })
   if (isShuttingDown) throw new Error('Cannot spawn process while app is shutting down.')
   const id = randomUUID()
   const proc = newManagedProcess(
@@ -807,7 +880,14 @@ export async function spawnProcess(
   // future caller ever reuses an id.
   await reapStaleIfNeeded(proc)
   await reapKnownHistory(proc)
-  await doSpawn(proc)
+  try {
+    await doSpawn(proc)
+  } catch (err) {
+    // The row exists either way and says why it is not running. No computer is an
+    // ordinary answer (the panel shows it); anything else still fails this call.
+    failSpawn(proc, err)
+    if (!isNoComputer(err)) throw err
+  }
   return id
 }
 
@@ -822,7 +902,7 @@ export async function updateProcess(
   id: string,
   updates: Partial<Pick<ProcessInfo, EditableField>>
 ): Promise<boolean> {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'update', detail: { processId: id } })
+  assertCanRunProcesses('hub.process.spawn', { op: 'update', detail: { processId: id } })
   const proc = processes.get(id)
   if (!proc) return false
   const next: Pick<ProcessInfo, EditableField> = {
@@ -862,9 +942,14 @@ function detachAndTerminate(proc: ManagedProcess): {
   const generation = ++proc.generation
   stopTitlePolling(proc)
   const handle = proc.handle
-  const pid = handle?.pid ?? proc.pid
+  // A routed handle's pid is its COMPUTER's: that number may name any process on
+  // this machine, so no local group poll, descendant scan or signal may use it —
+  // the computer tree-kills its own run on `handle.kill()`.
+  const routedRun = handle != null && proc.computerId != null
+  const pid = routedRun ? null : (handle?.pid ?? proc.pid)
   proc.handle = null
   proc.pid = null
+  proc.computerPid = null
   proc.spawnedAt = null
   void persistence?.updatePid(proc.id, null)
   const previous = proc.termination
@@ -956,7 +1041,7 @@ async function respawn(proc: ManagedProcess, generation: number): Promise<StartP
       throw err
     }
   }
-  return { ok: true, pid: proc.pid, status: proc.status }
+  return { ok: true, pid: proc.pid ?? proc.computerPid, status: proc.status }
 }
 
 /**
@@ -966,7 +1051,7 @@ async function respawn(proc: ManagedProcess, generation: number): Promise<StartP
  * session) is not "running" in this sense: its leftover tree is reaped first.
  */
 export async function startProcess(id: string): Promise<StartProcessResult> {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'start', detail: { processId: id } })
+  assertCanRunProcesses('hub.process.spawn', { op: 'start', detail: { processId: id } })
   if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
   const proc = processes.get(id)
   if (!proc) return { ok: false, reason: 'not-found' }
@@ -986,7 +1071,7 @@ export async function startProcess(id: string): Promise<StartProcessResult> {
  * is spawned, so the caller can read its pid.
  */
 export async function restartProcessDetailed(id: string): Promise<StartProcessResult> {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'restart', detail: { processId: id } })
+  assertCanRunProcesses('hub.process.spawn', { op: 'restart', detail: { processId: id } })
   if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
   const proc = processes.get(id)
   if (!proc) return { ok: false, reason: 'not-found' }
@@ -1023,13 +1108,23 @@ export function listForTask(taskId: string | null, projectId: string | null): Pr
         (taskId != null && p.taskId === taskId) ||
         (p.taskId === null && p.projectId != null && p.projectId === projectId)
     )
-    .map(({ handle: _, titlePollTimer: _t, oscTitleSet: _o, computerId: _c, ...info }) => info)
+    .map(toInfo)
+}
+
+/** What callers see: a routed run shows its pid on its computer. */
+function toInfo({
+  handle: _,
+  titlePollTimer: _t,
+  oscTitleSet: _o,
+  computerId: _c,
+  computerPid,
+  ...info
+}: ManagedProcess): ProcessInfo {
+  return { ...info, pid: info.pid ?? computerPid }
 }
 
 export function listAllProcesses(): ProcessInfo[] {
-  return Array.from(processes.values()).map(
-    ({ handle: _, titlePollTimer: _t, oscTitleSet: _o, computerId: _c, ...info }) => info
-  )
+  return Array.from(processes.values()).map(toInfo)
 }
 
 // The processes panel replaces its stats wholesale on every event, so each emit

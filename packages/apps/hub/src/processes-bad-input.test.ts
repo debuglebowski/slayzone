@@ -433,9 +433,10 @@ function describeHub(
         expect(row.command, `row updated: ${JSON.stringify(row)}`).toBe('echo bye')
         expect(row.autoRestart, `row updated: ${JSON.stringify(row)}`).toBe(true)
       })
-      // Valid input whose spawn fails after `spawn()` returned: the child reports a
-      // missing cwd as an 'error' event, which nobody listened for.
-      test(`${name}: spawn in a cwd that does not exist → answers, the process errors, hub stays up`, async () => {
+      // Valid input whose spawn cannot run: processes run on computers, and this hub
+      // has none — the process says so (it used to start on the hub, where a missing
+      // cwd surfaced as an unlistened 'error' event).
+      test(`${name}: spawn with no computer → answers, the process errors naming it, hub stays up`, async () => {
         const spawned = String(
           await bounded(
             client.processes.spawn.mutate({ ...valid, label: 'nowhere', cwd: '/no/such/dir-t102' }),
@@ -457,18 +458,32 @@ function describeHub(
           'the process to report error'
         )
         expect(
-          row.logBuffer.some((l) => l.includes('failed to start')),
+          row.logBuffer.some((l) => l.includes('Connect a computer')),
           `the reason is in its log: ${JSON.stringify(row.logBuffer)}`
         ).toBe(true)
       })
     } else {
-      for (const op of ['create', 'spawn'] as const) {
-        test(`${name}: a valid ${op} is refused by the switch, hub stays up`, async () => {
-          const got = await codeOf(client.processes[op].mutate(valid))
-          expect(got, `expected FORBIDDEN, got ${got}`).toBe('FORBIDDEN')
-          await stillUp(hub, client, `a valid ${op}`)
-        })
-      }
+      // Processes off: nothing runs on THIS machine, but processes route to
+      // computers, so the hub manages them — and with none connected says so.
+      test(`${name}: a valid create answers (it will run on a computer), hub stays up`, async () => {
+        const id = String(await bounded(client.processes.create.mutate(valid), 'create'))
+        expect(id.length).toBeGreaterThan(0)
+        await stillUp(hub, client, 'a valid create')
+      })
+      test(`${name}: a valid spawn answers; the process errors with "connect a computer", hub stays up`, async () => {
+        const spawned = String(
+          await bounded(client.processes.spawn.mutate({ ...valid, label: 'no-computer' }), 'spawn')
+        )
+        await stillUp(hub, client, 'a valid spawn')
+        const rows = (await client.processes.listAll.query()) as Array<{
+          id: string
+          status: string
+          logBuffer: string[]
+        }>
+        const row = rows.find((x) => x.id === spawned)
+        expect(row?.status).toBe('error')
+        expect(row?.logBuffer.some((l) => l.includes('Connect a computer'))).toBe(true)
+      })
     }
 
     // The same shape outside processes: `fileEditor.watch` started its watcher in a

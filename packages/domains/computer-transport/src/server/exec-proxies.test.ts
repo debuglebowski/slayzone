@@ -1892,7 +1892,14 @@ describe('createRoutingProcessBackend', () => {
       exit = e
     })
 
-    await vi.waitFor(() => expect(exit).toEqual({ code: null, signal: 'spawn-failed' }))
+    // The computer's reason travels with the exit, so the process log can say why.
+    await vi.waitFor(() =>
+      expect(exit).toEqual({
+        code: null,
+        signal: 'spawn-failed',
+        detail: 'path outside allowed roots'
+      })
+    )
   })
 })
 

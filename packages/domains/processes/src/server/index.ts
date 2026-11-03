@@ -17,13 +17,16 @@ export {
   listAllProcesses,
   killAllProcesses,
   shutdownAllProcesses,
-  setProjectCwdResolver
+  setProjectCwdResolver,
+  setProcessComputerResolver,
+  NoProcessComputerError
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {
   ProcessShutdownOptions,
   ProcessShutdownResult,
   ProjectCwdResolver,
+  ProcessComputerResolver,
   StartProcessRefusal,
   StartProcessResult
 } from './process-manager'

@@ -6,6 +6,7 @@
  * A spawn with no computer becomes an actionable error status, never an unhandled
  * rejection from a timer.
  */
+import { spawn as spawnChild } from 'node:child_process'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
   initProcessManagerWith,
@@ -13,7 +14,8 @@ import {
   listAllProcesses,
   restartProcess,
   setProcessComputerResolver,
-  spawnProcess
+  spawnProcess,
+  stopProcess
 } from './process-manager'
 import {
   setProcessBackend,
@@ -144,4 +146,113 @@ describe('stats + title of routed processes come from their computer', () => {
     expect(stats.some((s) => (s[id] as { rss?: number } | undefined)?.rss === 4096)).toBe(true)
     expect(titles).toContainEqual([id, 'node'])
   }, 10_000)
+})
+
+describe("a routed process's own refusal reaches its log", () => {
+  test('the computer refused it (outside its folders): the reason is in the log, not a bare exit', async () => {
+    const exit: {
+      cb?: (e: { code: number | null; signal: string | null; detail?: string }) => void
+    } = {}
+    setProcessBackend({
+      spawn: (): ProcHandle => ({
+        pid: undefined,
+        onData: () => ({ dispose() {} }),
+        onExit: (cb) => {
+          exit.cb = cb
+          return { dispose() {} }
+        },
+        kill: () => undefined
+      }),
+      getCommandLine: async () => null,
+      killByPid: () => undefined
+    } as ProcessBackend)
+    setProcessComputerResolver(async () => 'computer-1')
+    const id = await spawnProcess('proj-1', 'task-x', 'dev', 'pnpm dev', '/tmp', false)
+    exit.cb?.({
+      code: null,
+      signal: null,
+      detail: '/tmp is outside the folders this computer allows'
+    })
+    await sleep(50)
+    const proc = listAllProcesses().find((p) => p.id === id)
+    expect(proc?.status).toBe('error')
+    expect(proc?.logBuffer.join('\n')).toContain('/tmp is outside the folders this computer allows')
+  })
+})
+
+describe("a routed process's pid is the computer's", () => {
+  /** A handle whose process starts on a computer: its pid arrives with the spawn reply. */
+  function routedBackend(kills: string[]): { confirm(pid: number): void } {
+    const spawned: Array<(e: { pid: number }) => void> = []
+    let pid: number | undefined
+    setProcessBackend({
+      spawn: (): ProcHandle => ({
+        get pid() {
+          return pid
+        },
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        onSpawned: (cb: (e: { pid: number }) => void) => {
+          spawned.push(cb)
+          return { dispose() {} }
+        },
+        kill: (sig?: string) => {
+          kills.push(sig ?? 'SIGTERM')
+        }
+      }),
+      getCommandLine: async () => null,
+      killByPid: () => undefined
+    } as ProcessBackend)
+    return {
+      confirm(p) {
+        pid = p
+        for (const cb of spawned) cb({ pid: p })
+      }
+    }
+  }
+
+  test('spawn answers once the computer runs it, and the process shows its pid there', async () => {
+    const backend = routedBackend([])
+    setProcessComputerResolver(async () => 'computer-1')
+    let done = false
+    const pending = spawnProcess('proj-1', 'task-y', 'dev', 'pnpm dev', '/w', false).then((id) => {
+      done = true
+      return id
+    })
+    await sleep(20)
+    expect(done).toBe(false)
+    backend.confirm(4242)
+    const id = await pending
+    expect(listAllProcesses().find((p) => p.id === id)?.pid).toBe(4242)
+  })
+
+  test('stopping it signals only through the computer — never a local pid', async () => {
+    const kills: string[] = []
+    const backend = routedBackend(kills)
+    setProcessComputerResolver(async () => 'computer-1')
+    const pending = spawnProcess('proj-1', 'task-z', 'dev', 'pnpm dev', '/w', false)
+    // The computer's pid number may name ANY process here: a live local group leader.
+    const bystander = spawnChild('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    backend.confirm(bystander.pid as number)
+    const id = await pending
+    const localKill = process.kill
+    const local: Array<[number, unknown]> = []
+    process.kill = ((pid: number, sig?: unknown) => {
+      local.push([pid, sig])
+      return true
+    }) as typeof process.kill
+    try {
+      await stopProcess(id)
+    } finally {
+      process.kill = localKill
+    }
+    const bystanderAlive = bystander.exitCode === null && bystander.signalCode === null
+    bystander.kill('SIGKILL')
+    expect(bystanderAlive).toBe(true)
+    expect(local).toEqual([])
+    // One request to the computer, which tree-kills there. Polling a LOCAL group
+    // for that pid number (and escalating to SIGKILL) is the bug.
+    expect(kills).toEqual(['SIGTERM'])
+    expect(listAllProcesses().find((p) => p.id === id)?.pid).toBeNull()
+  })
 })

@@ -32,9 +32,20 @@ export interface ProcSpawnSpec {
 export interface ProcHandle {
   readonly pid: number | undefined
   onData(cb: (chunk: string, stream: 'stdout' | 'stderr') => void): { dispose(): void }
-  onExit(cb: (e: { code: number | null; signal: string | null }) => void): { dispose(): void }
+  /**
+   * `detail`: why it ended, in the words of whoever ran it (a computer's refusal or
+   * the OS error it reported) — absent for an ordinary exit.
+   */
+  onExit(cb: (e: { code: number | null; signal: string | null; detail?: string }) => void): {
+    dispose(): void
+  }
   /** Kill the whole process tree (POSIX detached-group / Windows `taskkill /T`). */
   kill(sig?: string): void
+  /**
+   * A process that starts ELSEWHERE (a computer): fires once it really runs there,
+   * with its pid on that machine. Absent on the local backend (pid is known at once).
+   */
+  onSpawned?(cb: (e: { pid: number }) => void): { dispose(): void }
 }
 
 /** Spawns processes for the manager. Swappable so exec can be remoted later. */

@@ -177,6 +177,8 @@ import {
   listAllProcesses,
   subscribeToProcessLogs,
   setProjectCwdResolver,
+  setProcessComputerResolver,
+  setProcessBackend,
   killAllProcesses,
   setProcessesDeps
 } from '@slayzone/processes/server'
@@ -209,6 +211,7 @@ import {
   createRoutingChatBackend,
   createRoutingWorkspaceCaptureBackend,
   createRoutingPtyBackend,
+  createRoutingProcessBackend,
   createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
   type HubComputerGateway
@@ -1757,15 +1760,22 @@ export function composeServer(opts: {
         )
       void reapOrphanWarms(computer.computerId)
     })
-    // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
-    // servers, not agents. `doSpawn` is synchronous and also driven by restart
-    // timers, so it cannot resolve a computer — its spec always carries
-    // `computerId: null`. Routing them therefore is NOT wired: enforcement would
-    // block every `pnpm dev`, and running them on the hub is the intended
-    // behavior, not a fallback.
-    //
-    // The routing backend stays available for when they become async and routable
-    // (a separate change); until then the in-process default stands.
+    // Background processes run on the computer that owns their task / project, like
+    // every other workspace exec (docs/exec-boundary.md). The manager resolves the
+    // computer before EVERY spawn (initial, start, restart, auto-restart) — async —
+    // and the backend routes by that id; with none, the process shows "connect a
+    // computer" instead of starting on the hub.
+    setProcessBackend(
+      createRoutingProcessBackend({
+        gateway: computerGateway,
+        resolveComputerId: (spec) => spec.computerId
+      })
+    )
+    setProcessComputerResolver(async ({ taskId, projectId }) => {
+      if (taskId) return resolveComputerForTask(taskId)
+      if (projectId) return resolveComputerForProject(projectId)
+      return resolveExecComputer(null)
+    })
     // Only normalized, computer-persisted chat events cross this channel.
     computerGateway.events.on('event', ({ computerId, name, payload }) => {
       if (name !== 'chat-runtime' || resettingForTest) return

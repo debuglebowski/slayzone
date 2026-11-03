@@ -2070,8 +2070,14 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       },
       onData: (cb: (chunk: string, stream: 'stdout' | 'stderr') => void): ExecDisposable =>
         dataEmitter.on((v) => cb(v.chunk, v.stream)),
-      onExit: (cb: (e: { code: number | null; signal: string | null }) => void): ExecDisposable =>
-        exitEmitter.on(cb),
+      // `finalize` records the outcome before it emits, so the computer's own reason
+      // (a refusal, the OS error) travels with the exit.
+      onExit: (
+        cb: (e: { code: number | null; signal: string | null; detail?: string }) => void
+      ): ExecDisposable =>
+        exitEmitter.on((e) =>
+          cb(entry.outcome?.detail ? { ...e, detail: entry.outcome.detail } : e)
+        ),
       onSpawned: (cb) => spawned.on(cb),
       onGap: (cb) => entry.gapEmitter.on(cb),
       onWritesUnconfirmed: (cb) => entry.unconfirmedWrites.on(cb),
