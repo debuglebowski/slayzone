@@ -4,7 +4,11 @@ import { useHubId, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
-import { useQueuedSubmissions, type QueuedSubmission } from './queued-submissions'
+import {
+  useQueuedSubmissions,
+  type QueuedSubmission,
+  type StagedSubmission
+} from './queued-submissions'
 import { createQueuedSubmissionJournal } from './composer-state/queued-submission-journal'
 
 /**
@@ -27,8 +31,11 @@ export interface UseChatQueueResult {
   pending: QueuedSubmission[]
   retryPending: (id: string) => Promise<void>
   dismissPending: (id: string) => Promise<void>
-  /** `content` defaults to `send` as one text block. */
-  push: (send: string, original: string, content?: UserContentBlock[]) => Promise<void>
+  /**
+   * `content` defaults to `send` as one text block. Resolves once saved on this
+   * device, with the row's id and its delivery to the hub.
+   */
+  push: (send: string, original: string, content?: UserContentBlock[]) => Promise<StagedSubmission>
   remove: (id: string) => Promise<void>
   clear: () => Promise<void>
   /** Rewrite a queued message; false when it was already sent. */

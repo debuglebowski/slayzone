@@ -13,6 +13,11 @@ export interface QueuedSubmission extends QueuedSubmissionInput {
   state: 'pending' | 'failed'
   error?: string
 }
+/** A staged message: its row id, and its delivery (settles on the hub's answer). */
+export interface StagedSubmission {
+  id: string
+  delivered: Promise<void>
+}
 /** Each entry is independently committed/removed, so another editor's journal cannot be overwritten. */
 export interface QueuedSubmissionStorage {
   list(): Promise<QueuedSubmission[]>
@@ -211,18 +216,28 @@ export function createQueuedSubmissions(opts: {
     },
     /**
      * Save, then deliver in the background; resolves once it is SAVED on this
-     * device (the composer clears and the row shows at once). A delivery that
-     * fails later leaves the entry `failed` with why (Retry). Rejects only when
-     * it could not be saved — nothing was sent.
+     * device (the composer clears and the row shows at once) with its `id` and
+     * `delivered` (settles on the hub's answer). A delivery that fails later
+     * leaves the entry `failed` with why (Retry). Rejects only when it could not
+     * be saved — nothing was sent.
      */
-    async stage(input: QueuedSubmissionInput) {
+    async stage(input: QueuedSubmissionInput): Promise<StagedSubmission> {
       await ready
+      const entry = entryFor(input)
       let staged = false
-      return new Promise<void>((resolve, reject) => {
-        attempt(entryFor(input), () => {
-          staged = true
-          resolve()
-        }).catch((err: unknown) => {
+      // `onStaged` can run synchronously (a double submit joins a running
+      // attempt), before `attempt` returns: resolve from `saved`, never inside it.
+      let markSaved!: () => void
+      const saved = new Promise<void>((resolve) => {
+        markSaved = resolve
+      })
+      const delivered = attempt(entry, () => {
+        staged = true
+        markSaved()
+      })
+      return new Promise<StagedSubmission>((resolve, reject) => {
+        void saved.then(() => resolve({ id: entry.id, delivered }))
+        delivered.catch((err: unknown) => {
           if (!staged) reject(err)
         })
       })

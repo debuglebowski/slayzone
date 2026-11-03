@@ -14,7 +14,13 @@ import type { ChatActions, NavigateActions } from './autocomplete/types'
 const mocks = vi.hoisted(() => {
   const queue = {
     items: [] as QueuedChatMessage[],
-    push: vi.fn<(send: string, original: string, content?: UserContentBlock[]) => Promise<void>>(),
+    push: vi.fn<
+      (
+        send: string,
+        original: string,
+        content?: UserContentBlock[]
+      ) => Promise<{ id: string; delivered: Promise<void> }>
+    >(),
     remove: vi.fn<(id: string) => Promise<void>>(),
     clear: vi.fn<() => Promise<void>>(),
     update:
@@ -173,7 +179,8 @@ beforeEach(() => {
   mocks.persistence.calls = []
   mocks.toast.mockReset()
   mocks.queue.items = []
-  mocks.queue.push.mockReset().mockResolvedValue(undefined)
+  mocks.queue.push.mockReset().mockResolvedValue({ id: 'queued-1', delivered: Promise.resolve() })
+  mocks.queue.steer.mockReset().mockResolvedValue({ ok: true })
   mocks.queue.remove.mockReset().mockResolvedValue(undefined)
   mocks.queue.clear.mockReset().mockResolvedValue(undefined)
   mocks.useChatQueue.mockClear()
@@ -405,8 +412,8 @@ describe('useChatComposer queue', () => {
     let finish!: () => void
     mocks.queue.push.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          finish = resolve
+        new Promise((resolve) => {
+          finish = () => resolve({ id: 'queued-1', delivered: Promise.resolve() })
         })
     )
     setup({ inFlight: true })
@@ -581,6 +588,109 @@ describe('useChatComposer onKeyDown', () => {
     })
     expect(notPrevented).toBe(true)
     expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  const sendNowKey = async (
+    mods: { metaKey?: boolean; ctrlKey?: boolean } = { metaKey: true }
+  ): Promise<boolean> => {
+    let notPrevented = true
+    await act(async () => {
+      notPrevented = fireEvent.keyDown(textarea(), { key: 'Enter', shiftKey: true, ...mods })
+    })
+    return notPrevented
+  }
+
+  it.each([
+    ['Cmd', { metaKey: true }],
+    ['Ctrl', { ctrlKey: true }]
+  ])(
+    '%s+Shift+Enter mid-turn sends straight into the running turn (queued, then steered)',
+    async (_name, mods) => {
+      setup({ inFlight: true, steerAvailable: true })
+      type('look at the tests too')
+      expect(await sendNowKey(mods)).toBe(false)
+      expect(mocks.queue.push).toHaveBeenCalledWith(
+        'look at the tests too',
+        'look at the tests too'
+      )
+      await vi.waitFor(() => expect(mocks.queue.steer).toHaveBeenCalledWith('queued-1'))
+      expect(sendMessage).not.toHaveBeenCalled()
+      expect(composer.draft).toBe('')
+      expect(mocks.toast).not.toHaveBeenCalled()
+    }
+  )
+
+  it('Cmd+Shift+Enter jumps a queue that already waits', async () => {
+    mocks.queue.items = [{ id: 'q1', send: 'first', original: 'first' } as QueuedChatMessage]
+    setup({ inFlight: true, steerAvailable: true })
+    type('urgent')
+    await sendNowKey()
+    await vi.waitFor(() => expect(mocks.queue.steer).toHaveBeenCalledWith('queued-1'))
+  })
+
+  it('Cmd+Shift+Enter with no turn running sends like Enter', async () => {
+    setup({ steerAvailable: false })
+    type('hello')
+    expect(await sendNowKey()).toBe(false)
+    expect(sendMessage).toHaveBeenCalledWith('hello')
+    expect(mocks.queue.steer).not.toHaveBeenCalled()
+  })
+
+  it('Cmd+Shift+Enter steers only once the hub has the message', async () => {
+    let confirm!: () => void
+    const delivered = new Promise<void>((resolve) => {
+      confirm = resolve
+    })
+    mocks.queue.push.mockResolvedValue({ id: 'queued-1', delivered })
+    setup({ inFlight: true, steerAvailable: true })
+    type('later')
+    await sendNowKey()
+    expect(composer.draft).toBe('')
+    expect(mocks.queue.steer).not.toHaveBeenCalled()
+    await act(async () => confirm())
+    await vi.waitFor(() => expect(mocks.queue.steer).toHaveBeenCalledWith('queued-1'))
+  })
+
+  it('Cmd+Shift+Enter: a delivery that fails is not steered (its row shows why)', async () => {
+    const delivered = Promise.reject(new Error('Computer offline'))
+    delivered.catch(() => undefined)
+    mocks.queue.push.mockResolvedValue({ id: 'queued-1', delivered })
+    setup({ inFlight: true, steerAvailable: true })
+    type('later')
+    await sendNowKey()
+    expect(mocks.queue.steer).not.toHaveBeenCalled()
+    expect(mocks.toast).not.toHaveBeenCalled()
+  })
+
+  it('Cmd+Shift+Enter: a refused steer says why; the message stays queued', async () => {
+    mocks.queue.steer.mockResolvedValue({ ok: false, reason: 'no active turn to steer' })
+    setup({ inFlight: true, steerAvailable: true })
+    type('later')
+    await sendNowKey()
+    await vi.waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith('Could not send it now: no active turn to steer')
+    )
+    expect(mocks.queue.remove).not.toHaveBeenCalled()
+  })
+
+  it('Cmd+Shift+Enter while the agent waits for an answer queues it and says why', async () => {
+    setup({ inFlight: true, steerAvailable: false })
+    type('later')
+    await sendNowKey()
+    expect(mocks.queue.push).toHaveBeenCalledWith('later', 'later')
+    expect(mocks.queue.steer).not.toHaveBeenCalled()
+    expect(mocks.toast).toHaveBeenCalledWith(
+      "Queued: the agent is waiting for your answer, so it can't take a message now."
+    )
+  })
+
+  it('Cmd+Shift+Enter where the agent takes no messages mid-turn queues it and says why', async () => {
+    setup({ mode: 'terminal', inFlight: true, steerAvailable: true })
+    type('later')
+    await sendNowKey()
+    expect(mocks.queue.push).toHaveBeenCalledWith('later', 'later')
+    expect(mocks.queue.steer).not.toHaveBeenCalled()
+    expect(mocks.toast).toHaveBeenCalledWith("Queued: this agent can't take a message mid-turn.")
   })
 
   it('a key the autocomplete consumes does not send', async () => {

@@ -154,11 +154,20 @@ test('stage resolves once the message is saved on this device, before the hub co
     )
   )
   const queue = f.open()
-  await queue.stage(input)
+  const staged = await queue.stage(input)
   // Saved and shown as pending; the hub has not answered yet.
   expect([...f.records.values()]).toEqual([expect.objectContaining({ ...input, state: 'pending' })])
   expect(queue.getSnapshot()).toEqual([expect.objectContaining({ state: 'pending' })])
+  // Its id is the row's (a steer names it); `delivered` settles on the hub's answer.
+  expect(staged.id).toBe(queue.getSnapshot()[0].id)
+  let delivered = false
+  void staged.delivered.then(() => {
+    delivered = true
+  })
+  await Promise.resolve()
+  expect(delivered).toBe(false)
   confirm()
+  await expect(staged.delivered).resolves.toBeUndefined()
   await vi.waitFor(() => expect(queue.getSnapshot()).toEqual([]))
   expect(f.records.size).toBe(0)
 })
@@ -170,7 +179,8 @@ test('stage: a delivery that fails after saving leaves a failed entry with why (
     })
   )
   const queue = f.open()
-  await expect(queue.stage(input)).resolves.toBeUndefined()
+  const staged = await queue.stage(input)
+  await expect(staged.delivered).rejects.toThrow('Computer offline')
   await vi.waitFor(() =>
     expect(queue.getSnapshot()).toEqual([
       expect.objectContaining({ state: 'failed', error: 'Computer offline' })
