@@ -562,6 +562,8 @@ export const HubToComputerMethods = {
   procList: 'proc.list',
   /** cpu/memory + current title of background processes (the processes panel). */
   procStats: 'proc.stats',
+  /** One shell command run to completion (automation actions) — see exec.run below. */
+  execRun: 'exec.run',
   // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
@@ -1303,6 +1305,26 @@ export type GitWatchEvent = z.infer<typeof gitWatchEventSchema>
  */
 export const gitTurnOpParamsSchema = z.object({ op: z.string().min(1), input: z.unknown() })
 export type GitTurnOpParams = z.infer<typeof gitTurnOpParamsSchema>
+
+/**
+ * `exec.run`: run `command` through the computer's shell to completion and answer
+ * its output. `cwd` (absolute, jailed) wins; else `projectId`'s folder on that
+ * computer; else its first allowed root. `timeoutMs` ends the whole process tree.
+ */
+export const execRunParamsSchema = z.object({
+  command: z.string().min(1),
+  cwd: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  timeoutMs: z.number().int().positive()
+})
+export type ExecRunParams = z.infer<typeof execRunParamsSchema>
+export const execRunResultSchema = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  status: z.number().int().nullable(),
+  timedOut: z.boolean()
+})
+export type ExecRunResult = z.infer<typeof execRunResultSchema>
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)

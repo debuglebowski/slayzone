@@ -96,6 +96,12 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.doctor': null,
   'pty.warmAdopt': null,
   'pty.warmList': null,
+  // An automation's shell command: the program, never the command line (it can
+  // carry a templated prompt).
+  'exec.run': {
+    event: 'computer.proc.spawn',
+    detail: (p) => ({ projectId: p.projectId, program: programName(p.command), oneShot: true })
+  },
   'proc.spawn': {
     event: 'computer.proc.spawn',
     detail: (p) => ({ ...spawn(p), shell: p.shell === true })
