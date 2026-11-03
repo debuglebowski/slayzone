@@ -15,7 +15,9 @@ import {
   restartProcess,
   setProcessComputerResolver,
   spawnProcess,
-  stopProcess
+  stopProcess,
+  createProcess,
+  processesComputerConnected
 } from './process-manager'
 import {
   setProcessBackend,
@@ -254,5 +256,84 @@ describe("a routed process's pid is the computer's", () => {
     // for that pid number (and escalating to SIGKILL) is the bug.
     expect(kills).toEqual(['SIGTERM'])
     expect(listAllProcesses().find((p) => p.id === id)?.pid).toBeNull()
+  })
+})
+
+describe('a computer connecting', () => {
+  function plainBackend(extra: Partial<ProcessBackend> = {}): ProcSpawnSpec[] {
+    const spawnedSpecs: ProcSpawnSpec[] = []
+    setProcessBackend({
+      spawn: (spec: ProcSpawnSpec): ProcHandle => {
+        spawnedSpecs.push(spec)
+        return {
+          pid: undefined,
+          onData: () => ({ dispose() {} }),
+          onExit: () => ({ dispose() {} }),
+          kill: () => undefined
+        }
+      },
+      getCommandLine: async () => null,
+      killByPid: () => undefined,
+      ...extra
+    } as ProcessBackend)
+    return spawnedSpecs
+  }
+
+  test('an auto-restart process that waited for a computer starts on it', async () => {
+    const spawned = plainBackend()
+    setProcessComputerResolver(async () => null)
+    const id = await createProcess('proj-1', null, 'keep-up', 'pnpm dev', '/w', true)
+    expect(await restartProcess(id)).toBe(false)
+    expect(status(id)?.status).toBe('error')
+    setProcessComputerResolver(async () => 'computer-1')
+    await processesComputerConnected('computer-1')
+    await sleep(20)
+    // (An earlier test's auto-restart process was waiting too, and starts as well.)
+    expect(spawned.map((s) => s.id)).toContain(id)
+    expect(status(id)?.status).toBe('running')
+  })
+
+  test('one without auto-restart stays as the user left it', async () => {
+    const spawned = plainBackend()
+    setProcessComputerResolver(async () => null)
+    const id = await createProcess('proj-1', null, 'once', 'pnpm build', '/w', false)
+    await restartProcess(id)
+    setProcessComputerResolver(async () => 'computer-1')
+    await processesComputerConnected('computer-1')
+    await sleep(20)
+    expect(spawned.map((s) => s.id)).not.toContain(id)
+    expect(status(id)?.status).toBe('error')
+  })
+
+  test('a run it kept from before the hub restarted shows as orphaned; Stop ends it there', async () => {
+    const killed: Array<[string, string]> = []
+    let live: Array<{ sessionId: string; pid?: number }> = []
+    plainBackend({
+      listSessions: async () => live,
+      killSession: async (computerId: string, sessionId: string) => {
+        killed.push([computerId, sessionId])
+        live = live.filter((l) => l.sessionId !== sessionId)
+      }
+    })
+    setProcessComputerResolver(async () => 'computer-1')
+    const id = await createProcess('proj-1', null, 'survivor', 'pnpm dev', '/w', false)
+    live = [{ sessionId: id, pid: 5151 }]
+    await processesComputerConnected('computer-1')
+    expect(status(id)).toMatchObject({ status: 'orphaned', pid: 5151 })
+    await stopProcess(id)
+    expect(killed).toEqual([['computer-1', id]])
+    expect(status(id)).toMatchObject({ status: 'stopped', pid: null })
+  })
+
+  test('an orphaned run the computer no longer holds goes back to stopped', async () => {
+    let live: Array<{ sessionId: string; pid?: number }> = []
+    plainBackend({ listSessions: async () => live, killSession: async () => undefined })
+    setProcessComputerResolver(async () => 'computer-1')
+    const id = await createProcess('proj-1', null, 'gone', 'pnpm dev', '/w', false)
+    live = [{ sessionId: id, pid: 6161 }]
+    await processesComputerConnected('computer-1')
+    live = []
+    await processesComputerConnected('computer-1')
+    expect(status(id)).toMatchObject({ status: 'stopped', pid: null })
   })
 })

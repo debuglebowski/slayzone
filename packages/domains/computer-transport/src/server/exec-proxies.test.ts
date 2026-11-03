@@ -1617,6 +1617,32 @@ describe('createRoutingProcessBackend', () => {
     })
   })
 
+  it('lists the runs a computer holds that this hub does not track, and ends one there', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 555 }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [
+        { sessionId: 'proc-1', pid: 555, seq: 0 },
+        { sessionId: 'left-by-old-hub', pid: 777, seq: 4 }
+      ],
+      exited: []
+    }))
+    gateway.onMethod('proc.kill', () => ({ ok: true }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec())
+    expect(await backend.listSessions?.('computer-1')).toEqual([
+      { sessionId: 'left-by-old-hub', pid: 777 }
+    ])
+    await backend.killSession?.('computer-1', 'left-by-old-hub')
+    expect(requireCall(gateway, 'proc.kill')).toMatchObject({
+      computerId: 'computer-1',
+      params: { sessionId: 'left-by-old-hub' }
+    })
+  })
+
   it('remote: forwards proc.spawn, delivers proc.data in order, kill frame, exit cleanup', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('proc.spawn', () => ({ pid: 555 }))

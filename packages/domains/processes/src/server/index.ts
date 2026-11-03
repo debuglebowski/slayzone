@@ -19,6 +19,7 @@ export {
   shutdownAllProcesses,
   setProjectCwdResolver,
   setProcessComputerResolver,
+  processesComputerConnected,
   NoProcessComputerError
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'

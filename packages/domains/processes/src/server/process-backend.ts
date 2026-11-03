@@ -66,6 +66,14 @@ export interface ProcessBackend {
    * it's just never called without this confirming identity first.
    */
   getCommandLine(pid: number): Promise<string | null>
+  /**
+   * Processes `computerId` runs that this backend does not track — runs a previous
+   * hub left there (it restarted; they kept going). Absent on the local backend
+   * (the boot liveness probe covers local pids).
+   */
+  listSessions?(computerId: string): Promise<Array<{ sessionId: string; pid?: number }>>
+  /** End such an untracked run on its computer (tree-kill there). */
+  killSession?(computerId: string, sessionId: string): Promise<void>
   /** Kill the process tree rooted at `pid` without a live `ProcHandle` — used to
    *  reap a leftover process whose parent (this app) exited without ever
    *  running `kill()` on its handle. Same POSIX detached-group / Windows

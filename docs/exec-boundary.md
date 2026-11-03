@@ -20,7 +20,7 @@ that will use it, or the agent gets a cwd that does not exist.
 | call | seam | notes |
 |---|---|---|
 | pty spawn | `PtyBackend.spawn` | `computerId` from `resolveComputerId(taskId)`, `pty-store.ts:313` |
-| background processes | `ProcessBackend.spawn` | the manager awaits the task's (else project's) computer before every spawn, start, restart and auto-restart (`setProcessComputerResolver`); a project process sends no cwd (the computer resolves its folder); stats, title and group sweep run on the computer (`proc.stats`, `reapGroupOnExit`). None → "connect a computer" status, never the hub |
+| background processes | `ProcessBackend.spawn` | the manager awaits the task's (else project's) computer before every spawn, start, restart and auto-restart (`setProcessComputerResolver`); a project process sends no cwd (the computer resolves its folder); stats, title and group sweep run on the computer (`proc.stats`, `reapGroupOnExit`). None → "connect a computer" status, never the hub; an auto-restart one starts when a computer connects. A run a previous hub left on a computer shows as `orphaned` on connect (`proc.list`), and Stop ends it there |
 | pty output pipeline | `PtySpawnSpec.detection` | terminal query answers, detection (`pty-signal`), replay filter and the ONLY scrollback run on the computer; the hub mirrors signals and reads replay via `pty.getReplay` (offline → `PtyOutputUnavailableError`) |
 | chat agent spawn | `ChatBackend.spawn` | `computerId` from `data.resolveComputerId`, `chat-handlers.ts:332` |
 | `createWorktree` | `WorktreeExecAdapters` | in `createWorktreeForTask` |

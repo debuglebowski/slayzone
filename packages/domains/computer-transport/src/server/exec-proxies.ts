@@ -2268,6 +2268,25 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           })
         )
         return merged
+      },
+      /**
+       * Runs `computerId` holds that no entry here tracks — a previous hub's (it
+       * restarted; the computer kept them). The computer is the authority.
+       */
+      async listSessions(computerId: string) {
+        const listed = procListResultSchema.parse(
+          await gateway.request(computerId, HubToComputerMethods.procList, {})
+        )
+        return listed.sessions
+          .filter((l) => {
+            const entry = sessions.get(sessionKey(computerId, l.sessionId))
+            return !entry || entry.disposed
+          })
+          .map((l) => ({ sessionId: l.sessionId, ...(l.pid !== undefined ? { pid: l.pid } : {}) }))
+      },
+      /** End such a run on its computer (the computer tree-kills it). */
+      async killSession(computerId: string, sessionId: string) {
+        await gateway.request(computerId, HubToComputerMethods.procKill, { sessionId })
       }
     }
   }

@@ -178,6 +178,7 @@ import {
   subscribeToProcessLogs,
   setProjectCwdResolver,
   setProcessComputerResolver,
+  processesComputerConnected,
   setProcessBackend,
   killAllProcesses,
   setProcessesDeps
@@ -1775,6 +1776,14 @@ export function composeServer(opts: {
       if (taskId) return resolveComputerForTask(taskId)
       if (projectId) return resolveComputerForProject(projectId)
       return resolveExecComputer(null)
+    })
+    // Auto-restart processes that found no computer start now; runs a previous hub
+    // left on this computer show as orphaned (Stop/Start reach them there).
+    computerGateway.events.on('computer-connected', ({ computer }) => {
+      if (resettingForTest) return
+      void processesComputerConnected(computer.computerId).catch(() =>
+        console.error('[processes] computer reconciliation failed')
+      )
     })
     // Only normalized, computer-persisted chat events cross this channel.
     computerGateway.events.on('event', ({ computerId, name, payload }) => {

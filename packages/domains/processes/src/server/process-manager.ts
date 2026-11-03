@@ -87,6 +87,8 @@ interface ManagedProcess extends ProcessInfo {
    * signalled, polled or persisted here; `pid` stays null for a routed run.
    */
   computerPid: number | null
+  /** An auto-restart process whose last start found no computer: starts on connect. */
+  awaitingComputer: boolean
   titlePollTimer: ReturnType<typeof setInterval> | null
   oscTitleSet: boolean
   /** Bumped by every lifecycle op (start/stop/restart). An async step that
@@ -197,6 +199,7 @@ async function loadRows(p: ProcessPersistence, opts: { localCare: boolean }): Pr
       handle: null,
       computerId: null,
       computerPid: null,
+      awaitingComputer: false,
       startedAt: new Date().toISOString(),
       restartCount: 0,
       spawnedAt: null,
@@ -347,6 +350,8 @@ async function reapSurvivorsAfterUnplannedExit(
 function failSpawn(proc: ManagedProcess, err: unknown): void {
   proc.handle = null
   proc.spawnedAt = null
+  // Meant to stay up: start it once a computer connects (processesComputerConnected).
+  proc.awaitingComputer = proc.autoRestart && isNoComputer(err)
   pushLog(proc, `[could not start: ${toErrorMessage(err)}]`)
   setStatus(proc, 'error')
 }
@@ -421,6 +426,7 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
   })
 
   proc.handle = handle
+  proc.awaitingComputer = false
   proc.computerId = computerId
   // A routed pid is the computer's: never stored, polled or signalled here.
   proc.pid = routed ? null : (handle.pid ?? null)
@@ -521,6 +527,52 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
     }
   })
   if (spawnSettled) await spawnSettled
+}
+
+/**
+ * A computer (re)connected. Processes route to computers, so two things wait on this:
+ * - an auto-restart process that found no computer starts now;
+ * - a run that computer kept from before the hub restarted (nothing here tracks it,
+ *   yet it may hold a port) shows as `orphaned` with its pid there, so Stop and Start
+ *   reach it — what the boot liveness probe does for local pids. One the computer no
+ *   longer holds goes back to `stopped`.
+ */
+export async function processesComputerConnected(computerId: string): Promise<void> {
+  if (isShuttingDown) return
+  for (const proc of processes.values()) {
+    if (proc.awaitingComputer && !proc.handle) {
+      proc.awaitingComputer = false
+      pushLog(proc, '[a computer connected — starting]')
+      setStatus(proc, 'running')
+      spawnOrFail(proc, proc.generation)
+    }
+  }
+  const backend = getProcessBackend()
+  if (!backend.listSessions) return
+  const live = await backend.listSessions(computerId).catch(() => null)
+  if (!live) return
+  const held = new Map(live.map((l) => [l.sessionId, l.pid]))
+  for (const proc of processes.values()) {
+    if (proc.handle || proc.termination) continue
+    const pid = held.get(proc.id)
+    if (held.has(proc.id) && proc.status !== 'running') {
+      proc.computerId = computerId
+      proc.computerPid = pid ?? null
+      pushLog(
+        proc,
+        '[still running on its computer from before the hub restarted — marked orphaned]'
+      )
+      setStatus(proc, 'orphaned')
+    } else if (
+      !held.has(proc.id) &&
+      proc.status === 'orphaned' &&
+      proc.computerId === computerId &&
+      proc.computerPid != null
+    ) {
+      proc.computerPid = null
+      setStatus(proc, 'stopped')
+    }
+  }
 }
 
 /** How long a routed spawn waits for its computer's "it runs" before answering anyway. */
@@ -819,6 +871,7 @@ function newManagedProcess(
     handle: null,
     computerId: null,
     computerPid: null,
+    awaitingComputer: false,
     startedAt: new Date().toISOString(),
     restartCount: 0,
     spawnedAt: null,
@@ -946,6 +999,11 @@ function detachAndTerminate(proc: ManagedProcess): {
   // this machine, so no local group poll, descendant scan or signal may use it —
   // the computer tree-kills its own run on `handle.kill()`.
   const routedRun = handle != null && proc.computerId != null
+  // A run a previous hub left on its computer (adopted as orphaned): only that
+  // computer can end it.
+  const keptOnComputer =
+    handle == null && proc.computerId != null && proc.computerPid != null ? proc.computerId : null
+  proc.awaitingComputer = false
   const pid = routedRun ? null : (handle?.pid ?? proc.pid)
   proc.handle = null
   proc.pid = null
@@ -963,6 +1021,14 @@ function detachAndTerminate(proc: ManagedProcess): {
     if (handle) {
       handle.kill()
       return true
+    }
+    if (keptOnComputer) {
+      const backend = getProcessBackend()
+      if (!backend.killSession) return false
+      return backend.killSession(keptOnComputer, proc.id).then(
+        () => true,
+        () => false
+      )
     }
     // A sweep still in flight from an earlier stop already owns that run.
     if (previous) return previous
@@ -1118,6 +1184,7 @@ function toInfo({
   oscTitleSet: _o,
   computerId: _c,
   computerPid,
+  awaitingComputer: _a,
   ...info
 }: ManagedProcess): ProcessInfo {
   return { ...info, pid: info.pid ?? computerPid }
