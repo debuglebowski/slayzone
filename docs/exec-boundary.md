@@ -19,11 +19,18 @@ that will use it, or the agent gets a cwd that does not exist.
 
 | call | seam | notes |
 |---|---|---|
-| pty spawn | `PtyBackend.spawn` | `computerId` from `resolveComputerId(taskId)`, `pty-store.ts:313` |
+| pty spawn | `PtyBackend.spawn` | `computerId` from `resolveComputerId(taskId)`; the default backend (none installed, or no computer) refuses — the in-process node-pty backend (`pty-backend-local`) is not in the hub |
 | background processes | `ProcessBackend.spawn` | the manager awaits the task's (else project's) computer before every spawn, start, restart and auto-restart (`setProcessComputerResolver`); a project process sends no cwd (the computer resolves its folder); stats, title and group sweep run on the computer (`proc.stats`, `reapGroupOnExit`). None → "connect a computer" status, never the hub; an auto-restart one starts when a computer connects. A run a previous hub left on a computer shows as `orphaned` on connect (`proc.list`), and Stop ends it there |
 | pty output pipeline | `PtySpawnSpec.detection` | terminal query answers, detection (`pty-signal`), replay filter and the ONLY scrollback run on the computer; the hub mirrors signals and reads replay via `pty.getReplay` (offline → `PtyOutputUnavailableError`) |
-| git panel (65 ops) | `git.op` | one table (`@slayzone/worktrees` git op contract + `git-ops` impls) shared by hub and computer; the hub resolves the computer from an explicit `target`, else the op's path (a task worktree, a project placement), else the caller's default; the computer validates and jails every path. None → hub-local, refused where processes are off |
-| chat agent spawn | `ChatBackend.spawn` | `computerId` from `data.resolveComputerId`, `chat-handlers.ts:332` |
+| git panel (65 ops) | `git.op` | one table (`@slayzone/worktrees` git op contract + `git-ops` impls) shared by hub and computer; the hub resolves the computer from an explicit `target`, else the op's path (a task worktree, a project placement), else the caller's default; the computer validates and jails every path. The git watcher (`git.watchStart/Stop`), PR ops (`gh`) and the AI merge run there too |
+| turn snapshots | `git.turnOp` | by the checkout's path, else the task |
+| chat agents | computer chat runtime (`chat.request`) | the whole chat runtime — spawn, history, `@file` autocomplete, autocomplete usage — runs on the computer; the hub relays (`@slayzone/chat-runtime/hub`). A chat → terminal hand-off stops the chat there (conversation registry) |
+| AI config | `agentConfig.fs` | project files on the project's computer; computer-level files (`~/.claude`, …) on an explicit computer, else the caller's |
+| automation shell actions | `exec.run` | the task's, else the project's computer |
+| terminal settings probes | `exec.run` | a terminal mode's binary (`command -v`) and a docker / ssh execution context, on the caller's computer |
+| usage | `usage.collect` | each connected computer parses its own logs; parse state keyed by `(computer_id, file_path)` |
+| test-panel scan | `testPanel.scan` | on the project's computer |
+| workspace files | file-editor `fs.*` | on the task's / project's computer |
 | `createWorktree` | `WorktreeExecAdapters` | in `createWorktreeForTask` |
 | `removeWorktree` | `WorktreeExecAdapters` | in `cleanupTaskFull` — see the caveat below |
 | `runWorktreeSetupScript` | `WorktreeExecAdapters` | in `createWorktreeForTask` |
@@ -68,33 +75,35 @@ With **zero computers connected**, all of this must still work:
 - tasks can be created (without a worktree), listed, archived, deleted
 - the UI renders, including the task list and its worktree colors
 
-Only these may fail, and they must fail with an actionable error naming the computer
-requirement — not silently on the hub:
+Everything in the workspace table above may fail, and must fail with the actionable
+"connect a computer" error (`NO_COMPUTER_CONNECTED`) — never run on the hub. Views
+that need a computer show that state and refetch when one connects; a local computer
+can always be enrolled, even to a remote hub.
 
-- opening a terminal, spawning a chat agent
-- creating or removing a worktree
-- git probes against a workspace path
+## No hub-local fallbacks
 
-## Hubs with processes switched off (T-06)
+No hub — desktop or remote, processes on or off — runs project work itself: every
+workspace call above routes to a computer or refuses with `NO_COMPUTER_CONNECTED`
+("Connect a computer") and one `hub.local_exec` audit line. Hub storage
+(`hubPathExists`, `removeArtifactDir`) and worktree colors stay hub-owned; colors stay
+empty until a computer answers their probe.
 
-On a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (the shared Normain hub) the hub never
-holds or touches project data. Every hub-local path above that is not hub storage —
-the zero-computer fallbacks (workspace fs, `gh`, the default worktree adapters) and the
-calls that never route yet (the git panel's `worktrees.*`, turn snapshots, file and
-autocomplete scans, shell probes, `slay init`, AI-config file reads and edits, the OS opener) — refuses with
-`NO_COMPUTER_CONNECTED` ("Connect a computer") and one `hub.local_exec` audit line.
-Hub storage (`hubPathExists`, `removeArtifactDir`) and worktree colors stay; colors
-on such a hub stay empty because their detection runs git.
+What `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06) still turns off is what remains on the
+hub's own machine: the OS opener (`shell-native.ts`, a client concern), the v122
+backfill migration, and the uploads that copy a path the client names off the hub's
+disk — `artifacts.upload`, `artifacts.uploadDir`, `projects.uploadIcon`, and
+`artifacts.pasteFiles` from anywhere but the hub's own artifact store (T-107); bytes
+sent by the client (`artifacts.uploadBlob`, `POST /api/tasks/:id/artifacts`) never touch
+a client path.
 
-The uploads that copy a path the client names off the hub's disk — `artifacts.upload`,
-`artifacts.uploadDir`, `projects.uploadIcon`, and `artifacts.pasteFiles` from anywhere
-but the hub's own artifact store — refuse the same way (T-107); bytes sent by the client
-(`artifacts.uploadBlob`, `POST /api/tasks/:id/artifacts`) never touch a client path.
-
-The desktop keeps every path above: its hub runs with the switch at `1`, and it
-depends on the hub-local git panel and on the fallback until its local computer
-enrolls. `pnpm lint:server-boundary` (`scripts/check-hub-exec-imports.mjs`) fails on a
-new process-spawning import in hub-bundled code that is not refused and allowlisted.
+`pnpm lint:server-boundary` (`scripts/check-hub-exec-imports.mjs`) fails on a
+process-spawning import in hub-bundled code that is not allowlisted. Five remain, each
+with its reason: `shell-native.ts`, the v122 migration, `cli-install.ts` (fs probe
+only), and `process-tree.ts` / `login-shell-path.ts` (bundled through the
+`@slayzone/platform` barrel, never called by the hub). The hub imports its domains
+through hub-safe entries — `@slayzone/terminal/hub`, `@slayzone/worktrees/hub`,
+`@slayzone/file-editor/hub`, `@slayzone/chat-runtime/hub` — never their `./server`
+barrels, which keep the local implementations computers use.
 
 ## Still undecided
 
