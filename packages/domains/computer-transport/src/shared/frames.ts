@@ -521,6 +521,8 @@ export const HubToComputerMethods = {
   /** Watch a checkout for the git panel; changes come back as `git-watch` events. */
   gitWatchStart: 'git.watchStart',
   gitWatchStop: 'git.watchStop',
+  /** One agent-turn git op (`@slayzone/agent-turns/turn-git`): snapshot, filter, … */
+  gitTurnOp: 'git.turnOp',
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   slayCheckConfigured: 'slay.checkConfigured',
   slaySetup: 'slay.setup',
@@ -1293,6 +1295,14 @@ export const gitWatchEventSchema = z.object({
   refsChanged: z.boolean().optional()
 })
 export type GitWatchEvent = z.infer<typeof gitWatchEventSchema>
+
+/**
+ * `git.turnOp`: one op of `@slayzone/agent-turns`' turn-git contract, validated on
+ * the computer against it (this package cannot import it), repo jailed there.
+ * Answers `{ result }` like `git.op`.
+ */
+export const gitTurnOpParamsSchema = z.object({ op: z.string().min(1), input: z.unknown() })
+export type GitTurnOpParams = z.infer<typeof gitTurnOpParamsSchema>
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)

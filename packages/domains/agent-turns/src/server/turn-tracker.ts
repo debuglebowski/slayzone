@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { realpathSync } from 'node:fs'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { localProjectRoot } from '@slayzone/computers/server'
+import { localProjectRoot, recordedProjectRoot } from '@slayzone/computers/server'
 import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
-import { snapshotWorktree, deleteTurnRef, diffIsEmptyCached, diffIsEmpty } from './git-snapshot'
+import { computerForTurnTask, runTurnGitOp } from './turn-git-routing'
 import { insertTurn, deleteTurn, getLatestTurnForWorktree, findTurnsToPrune } from './db'
 import { agentTurnsEvents } from './events'
 
@@ -19,24 +18,16 @@ function isCleanPrompt(text: string): boolean {
   return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x1b]/.test(text)
 }
 
-/** Canonical worktree path: realpath when possible, fall back to raw path. */
-function canonical(p: string): string {
-  try {
-    return realpathSync(p)
-  } catch {
-    return p
-  }
-}
-
 /**
- * Lookup task_id + git repo path for a chat tab. Falls back to the project's
- * folder when task.worktree_path is empty — the one on the local computer, since
- * the git snapshot reads THIS machine's disk. Returns null if no usable repo path.
+ * Lookup task_id, the computer its checkout is on, and the canonical repo path
+ * THERE for a chat tab. Falls back to the project's folder on that computer (no
+ * computer: the local computer's) when task.worktree_path is empty. Returns null
+ * if no usable repo path.
  */
 async function resolveTabContext(
   db: SlayzoneDb,
   tabId: string
-): Promise<{ taskId: string; worktreePath: string } | null> {
+): Promise<{ taskId: string; worktreePath: string; computerId: string | null } | null> {
   const tab = (await db.prepare(`SELECT task_id FROM terminal_tabs WHERE id = ?`).get(tabId)) as
     | { task_id: string }
     | undefined
@@ -45,10 +36,19 @@ async function resolveTabContext(
     .prepare(`SELECT worktree_path, project_id FROM tasks WHERE id = ?`)
     .get(tab.task_id)) as { worktree_path: string | null; project_id: string | null } | undefined
   if (!row) return null
-  const repoPath =
-    row.worktree_path || (row.project_id ? await localProjectRoot(db, row.project_id) : null)
+  const computerId = await computerForTurnTask(tab.task_id)
+  // A hub with processes switched off runs no git (T-06), so with no computer the
+  // snapshot has nowhere to run. Skipped quietly — this fires on every agent turn.
+  if (computerId == null && !hubProcessesEnabled()) return null
+  const projectRoot = row.project_id
+    ? computerId != null
+      ? await recordedProjectRoot(db, row.project_id, computerId)
+      : await localProjectRoot(db, row.project_id)
+    : null
+  const repoPath = row.worktree_path || projectRoot
   if (!repoPath) return null
-  return { taskId: tab.task_id, worktreePath: canonical(repoPath) }
+  const worktreePath = await runTurnGitOp(computerId, 'canonical', { repoPath })
+  return { taskId: tab.task_id, worktreePath, computerId }
 }
 
 function broadcastChange(worktreePath: string): void {
@@ -70,27 +70,42 @@ export async function recordTurnBoundary(
   tabId: string,
   promptText: string
 ): Promise<void> {
-  // A hub with processes switched off runs no git (T-06): the snapshot would be
-  // refused anyway. Skipped quietly here — this fires on every agent turn, so a
-  // refusal + audit line per turn would only be noise.
-  if (!hubProcessesEnabled()) return
   const ctx = await resolveTabContext(db, tabId)
   if (!ctx) return
+  // The checkout's git runs on its computer (none: this hub's disk).
+  const git = <K extends Parameters<typeof runTurnGitOp>[1]>(
+    op: K,
+    input: Parameters<typeof runTurnGitOp<K>>[2]
+  ) => runTurnGitOp(ctx.computerId, op, input)
+  const deleteTurnRef = (repoPath: string, turnId: string) =>
+    git('deleteTurnRef', { repoPath, turnId })
   const id = randomUUID()
-  const snap = await snapshotWorktree(ctx.worktreePath, id)
+  const snap = await git('snapshot', { repoPath: ctx.worktreePath, turnId: id })
   if (!snap) return
   const { snapshotSha: sha, headSha } = snap
 
   const prev = await getLatestTurnForWorktree(db, ctx.worktreePath)
   // Dedupe semantically — commit SHA always differs (commit message includes
   // turn id). Compare actual diff content.
-  if (prev && (await diffIsEmptyCached(ctx.worktreePath, prev.snapshot_sha, sha))) {
+  if (
+    prev &&
+    (await git('diffIsEmpty', {
+      repoPath: ctx.worktreePath,
+      from: prev.snapshot_sha,
+      to: sha,
+      cached: true
+    }))
+  ) {
     await deleteTurnRef(ctx.worktreePath, id)
     return
   }
   // Also drop if first turn but identical to HEAD (no actual changes).
   if (!prev) {
-    const parentRes = await diffIsEmpty(ctx.worktreePath, `${sha}^`, sha)
+    const parentRes = await git('diffIsEmpty', {
+      repoPath: ctx.worktreePath,
+      from: `${sha}^`,
+      to: sha
+    })
     if (parentRes) {
       await deleteTurnRef(ctx.worktreePath, id)
       return

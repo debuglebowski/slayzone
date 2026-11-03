@@ -15,6 +15,7 @@ import {
   GIT_WATCH_EVENT,
   HubToComputerMethods,
   gitOpParamsSchema,
+  gitTurnOpParamsSchema,
   gitWatchStartParamsSchema,
   gitWatchStopParamsSchema,
   type GitWatchEvent
@@ -31,6 +32,12 @@ import {
   type GitOpInput,
   type GitOpName
 } from '@slayzone/worktrees/git-ops'
+import {
+  isTurnGitOpName,
+  runTurnGitOpLocally,
+  turnGitContract,
+  type TurnGitOpInput
+} from '@slayzone/agent-turns/turn-git'
 import { assertPathAllowed, JailViolationError } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -109,8 +116,19 @@ export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
     return { ok: true }
   }
 
+  /** Agent-turn git (snapshot, dedupe, the list's filter), same table as the hub's. */
+  async function gitTurnOp(raw: unknown): Promise<{ result: unknown }> {
+    const { op, input } = gitTurnOpParamsSchema.parse(raw)
+    if (!isTurnGitOpName(op)) throw new Error(`unknown turn op '${op}'`)
+    const parsed = turnGitContract[op].parse(input) as TurnGitOpInput<typeof op>
+    allow(parsed.repoPath)
+    const result = await runTurnGitOpLocally(op, parsed)
+    return { result: result ?? null }
+  }
+
   return {
     [HubToComputerMethods.gitOp]: gitOp,
+    [HubToComputerMethods.gitTurnOp]: gitTurnOp,
     [HubToComputerMethods.gitWatchStart]: watchStart,
     [HubToComputerMethods.gitWatchStop]: watchStop
   }

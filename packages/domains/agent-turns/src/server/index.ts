@@ -22,3 +22,6 @@ export {
 } from './agent-prompts-router'
 export { agentPromptsEvents, type AgentPromptsEventMap } from './events'
 export type { AgentPrompt } from '../shared/types'
+
+export { setTurnGitRouting, type TurnGitRouting } from './turn-git-routing'
+export { turnGitContract, isTurnGitOpName, runTurnGitOpLocally } from './turn-git'

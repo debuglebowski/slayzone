@@ -169,6 +169,9 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'git.isGitRepo': null,
   // A watch reads; it changes nothing.
   'git.watchStart': null,
+  // Turn snapshots: the hub's own bookkeeping refs on every agent turn (reads and
+  // `refs/slayzone/turns/*` writes) — not a user's act, so not audited.
+  'git.turnOp': null,
   'git.watchStop': null,
   'git.getCurrentBranch': null,
   // The git panel: its writes (stage, commit, push, checkout, …) are audited, its

@@ -149,7 +149,7 @@ import {
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
 import { initAiConfigOps, getAiConfigOps, setSlayExecutor } from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
-import { createChatPromptRecorder } from '@slayzone/agent-turns/server'
+import { createChatPromptRecorder, setTurnGitRouting } from '@slayzone/agent-turns/server'
 import {
   AutomationEngine,
   setAutomationsEvents,
@@ -1855,6 +1855,17 @@ export function composeServer(opts: {
       gitWatchComputerGone(computerId)
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
+    // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
+    // resolved like the git panel (by path, or by the task for a boundary).
+    setTurnGitRouting({
+      computerForPath: async (path) =>
+        placement.forTarget((await gitTargetForPath(db, path)) ?? {}),
+      computerForTask: (taskId) => placement.forTarget({ taskId }),
+      request: async (computerId, op, input) =>
+        gitOpResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.gitTurnOp, { op, input })
+        ).result
+    })
     setGhExecutor(async (args, opts) => {
       // `gh` runs where the checkout is: the path names a task or project placement,
       // resolved — and, with login, admitted (T-19: `gh` speaks as the machine's
