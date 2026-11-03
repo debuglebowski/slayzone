@@ -14,7 +14,8 @@ import { useTRPC, useTRPCClient } from '../../trpc'
  * local journal (localStorage), removed once the server confirmed that exact
  * draft. Edits before the first remote read retain an unknown revision. A
  * conflicting saved copy stays authoritative until the user explicitly keeps
- * both; neither local content nor another provider's draft is overwritten.
+ * both or dismisses it (keeping only the current draft); neither local content
+ * nor another provider's draft is overwritten.
  */
 
 const SAVE_DELAY_MS = 300
@@ -229,6 +230,8 @@ export interface ChatDraftPersistence {
   conflictAvailable: boolean
   /** Keep both copies after an unresolved/stale journal meets a different saved draft. */
   recoverConflict: (current: ChatDraft) => ChatDraft | null
+  /** Keep only the current draft: discard the other retained copies and resume saving. */
+  dismissConflict: (current: ChatDraft) => boolean
 }
 
 export function useChatDraftPersistence({
@@ -375,6 +378,33 @@ export function useChatDraftPersistence({
       setConflictAvailable(false)
       setRetryEpoch((epoch) => epoch + 1)
       return merged
+    },
+    [resolved, conflictKey, key]
+  )
+  const dismissConflict = useCallback(
+    (current: ChatDraft) => {
+      if (!resolved) return false
+      // The current draft must be durable before the other copies are dropped.
+      if (
+        !writeJournal(key, {
+          ...current,
+          baseRev: resolved.rev,
+          ownership: resolved.ownership,
+          savedAt: Date.now()
+        })
+      )
+        return false
+      try {
+        localStorage.removeItem(conflictKey)
+      } catch {
+        return false
+      }
+      conflictBlocked.current = false
+      dirtyRef.current = true
+      awaitingRestoreRef.current = false
+      setConflictAvailable(false)
+      setRetryEpoch((epoch) => epoch + 1)
+      return true
     },
     [resolved, conflictKey, key]
   )
@@ -593,6 +623,7 @@ export function useChatDraftPersistence({
     legacyAvailable,
     recoverLegacy,
     conflictAvailable,
-    recoverConflict
+    recoverConflict,
+    dismissConflict
   }
 }

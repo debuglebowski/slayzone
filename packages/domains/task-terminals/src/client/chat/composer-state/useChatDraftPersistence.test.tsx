@@ -370,6 +370,35 @@ describe('useChatDraftPersistence', () => {
     expect(h.result.current.conflictAvailable).toBe(false)
   })
 
+  it('dismissing a conflict keeps only the current draft, drops the other copy and resumes saving', async () => {
+    const key = draftJournalKey('tab-1')
+    localStorage.setItem(
+      key,
+      JSON.stringify({ text: 'offline edit', attachments: [], baseRev: null, savedAt: Date.now() })
+    )
+    server.state = { draft: { text: 'other device', attachments: [], rev: 4 }, scroll: null }
+    server.rev = 4
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    const current = { text: 'what I see', attachments: [] }
+    h.rerender({ draft: current })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    let dismissed!: boolean
+    act(() => {
+      dismissed = h.result.current.dismissConflict(current)
+    })
+    expect(dismissed).toBe(true)
+    expect(h.result.current.conflictAvailable).toBe(false)
+    expect(localStorage.getItem(`${key}:conflicts`)).toBeNull()
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves.at(-1)?.draft).toEqual(current)
+    expect(server.state?.draft.text).toBe('what I see')
+    h.rerender({ draft: { text: 'what I see, edited', attachments: [] } })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.state?.draft.text).toBe('what I see, edited')
+  })
+
   it('an unresolved journal restores while offline; later remote recovery preserves newer typing', async () => {
     localStorage.setItem(
       draftJournalKey('tab-1'),
