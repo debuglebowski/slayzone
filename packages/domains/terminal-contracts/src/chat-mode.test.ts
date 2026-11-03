@@ -3,6 +3,7 @@ import {
   chatModeToCliPermissionMode,
   chatModeToFlags,
   chatOwnsSpawnFlags,
+  claudeRefusesBypass,
   rawPermissionModeToChatMode,
   stripChatOwnedFlags
 } from './chat-mode'
@@ -18,13 +19,36 @@ import {
 // current_permission_mode): `--allow-dangerously-skip-permissions` alone starts
 // in `default` and every `--permission-mode` still applies with it;
 // `--permission-mode bypassPermissions` alone really bypasses.
-test('every Claude chat mode spawns in the CLI mode it names', () => {
+test('every Claude chat mode spawns in the CLI mode it names, allowing a live bypass switch', () => {
   const allow = '--allow-dangerously-skip-permissions'
-  expect(chatModeToFlags('ask')).toEqual(['--permission-mode', 'default', allow])
-  expect(chatModeToFlags('plan')).toEqual(['--permission-mode', 'plan', allow])
-  expect(chatModeToFlags('auto-accept')).toEqual(['--permission-mode', 'acceptEdits', allow])
-  expect(chatModeToFlags('auto')).toEqual(['--permission-mode', 'auto', allow])
-  expect(chatModeToFlags('bypass')).toEqual(['--permission-mode', 'bypassPermissions'])
+  const ok = { allowBypass: true }
+  expect(chatModeToFlags('ask', ok)).toEqual(['--permission-mode', 'default', allow])
+  expect(chatModeToFlags('plan', ok)).toEqual(['--permission-mode', 'plan', allow])
+  expect(chatModeToFlags('auto-accept', ok)).toEqual(['--permission-mode', 'acceptEdits', allow])
+  expect(chatModeToFlags('auto', ok)).toEqual(['--permission-mode', 'auto', allow])
+  expect(chatModeToFlags('bypass', ok)).toEqual(['--permission-mode', 'bypassPermissions'])
+})
+
+// 2.1.317 `setup()`: `if (mode === 'bypassPermissions' || allowDangerouslySkipPermissions)`
+// under uid 0 without IS_SANDBOX=1 → "cannot be used with root/sudo" + exit 1.
+// The allow flag on a non-bypass mode killed every chat send on a root computer.
+test('where the CLI refuses bypass, no non-bypass mode carries the allow flag', () => {
+  const no = { allowBypass: false }
+  expect(chatModeToFlags('ask', no)).toEqual(['--permission-mode', 'default'])
+  expect(chatModeToFlags('plan', no)).toEqual(['--permission-mode', 'plan'])
+  expect(chatModeToFlags('auto-accept', no)).toEqual(['--permission-mode', 'acceptEdits'])
+  expect(chatModeToFlags('auto', no)).toEqual(['--permission-mode', 'auto'])
+  // Bypass itself is the user's explicit choice: the CLI's own refusal surfaces.
+  expect(chatModeToFlags('bypass', no)).toEqual(['--permission-mode', 'bypassPermissions'])
+})
+
+test('the CLI refuses bypass for root only, unless it runs in a declared sandbox', () => {
+  expect(claudeRefusesBypass({ uid: 0, env: {} })).toBe(true)
+  expect(claudeRefusesBypass({ uid: 0, env: { IS_SANDBOX: 'true' } })).toBe(true)
+  expect(claudeRefusesBypass({ uid: 0, env: { IS_SANDBOX: '1' } })).toBe(false)
+  expect(claudeRefusesBypass({ uid: 501, env: {} })).toBe(false)
+  // Windows: no uid, no root guard.
+  expect(claudeRefusesBypass({ uid: null, env: {} })).toBe(false)
 })
 
 // 2.1.316: `set_permission_mode bypassPermissions` succeeds on a process

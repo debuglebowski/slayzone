@@ -685,6 +685,31 @@ async function coldStartArgs(
   return spawnArgsLog[0]
 }
 
+/**
+ * Run `fn` as if this process were `uid` with `IS_SANDBOX` as given — the
+ * identity the Claude CLI's root guard reads. Defined, not spied: Windows has
+ * no `process.getuid`.
+ */
+async function asProcessIdentity<T>(
+  uid: number,
+  isSandbox: string | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  const ownGetuid = Object.getOwnPropertyDescriptor(process, 'getuid')
+  const ownSandbox = process.env.IS_SANDBOX
+  Object.defineProperty(process, 'getuid', { value: () => uid, configurable: true })
+  if (isSandbox === undefined) delete process.env.IS_SANDBOX
+  else process.env.IS_SANDBOX = isSandbox
+  try {
+    return await fn()
+  } finally {
+    if (ownGetuid) Object.defineProperty(process, 'getuid', ownGetuid)
+    else delete (process as { getuid?: unknown }).getuid
+    if (ownSandbox === undefined) delete process.env.IS_SANDBOX
+    else process.env.IS_SANDBOX = ownSandbox
+  }
+}
+
 function flagValue(args: string[], flag: string): string | null {
   const i = args.indexOf(flag)
   return i === -1 ? null : (args[i + 1] ?? null)
@@ -694,18 +719,19 @@ function flagValue(args: string[], flag: string): string | null {
 // permissions) into provider_config, and explicit flags used to win over the
 // chat mode — the CLI started in `default` while the pill showed Auto-accept.
 test("a task's own flags are extras: the chat mode, model and effort still decide the spawn", async () => {
-  const seeded = await coldStartArgs(
-    { flags: '--allow-dangerously-skip-permissions', chatModel: 'sonnet' },
-    null
+  const seeded = await asProcessIdentity(501, undefined, () =>
+    coldStartArgs({ flags: '--allow-dangerously-skip-permissions', chatModel: 'sonnet' }, null)
   )
   expect(flagValue(seeded, '--permission-mode')).toBe('acceptEdits')
   expect(flagValue(seeded, '--model')).toBe('sonnet')
   // Once: the pills allow bypass (live switch), the task's own copy is dropped.
   expect(seeded.filter((a) => a === '--allow-dangerously-skip-permissions')).toHaveLength(1)
 
-  const override = await coldStartArgs(
-    { chatMode: 'ask', chatModel: 'sonnet', chatEffort: 'high' },
-    '--allow-dangerously-skip-permissions --add-dir ../shared --permission-mode plan --model opus'
+  const override = await asProcessIdentity(501, undefined, () =>
+    coldStartArgs(
+      { chatMode: 'ask', chatModel: 'sonnet', chatEffort: 'high' },
+      '--allow-dangerously-skip-permissions --add-dir ../shared --permission-mode plan --model opus'
+    )
   )
   expect(flagValue(override, '--permission-mode')).toBe('default')
   expect(flagValue(override, '--model')).toBe('sonnet')
@@ -714,6 +740,31 @@ test("a task's own flags are extras: the chat mode, model and effort still decid
   expect(override.filter((a) => a === '--permission-mode')).toHaveLength(1)
   expect(override.filter((a) => a === '--model')).toHaveLength(1)
   expect(override.filter((a) => a === '--allow-dangerously-skip-permissions')).toHaveLength(1)
+})
+
+// Release blocker (0.36.4 → main): Claude 2.1.317 exits 1 at startup when
+// `--allow-dangerously-skip-permissions` is set under uid 0 without IS_SANDBOX=1,
+// so every chat send on a root VPS/container computer failed in every mode.
+test('a root computer spawns non-bypass chat without the bypass allow flag', async () => {
+  const allow = '--allow-dangerously-skip-permissions'
+  for (const chatMode of ['ask', 'plan', 'auto-accept']) {
+    const root = await asProcessIdentity(0, undefined, () => coldStartArgs({ chatMode }, null))
+    expect(root).not.toContain(allow)
+    expect(root).toContain('--permission-mode')
+  }
+  // A task's own copy of the flag must not sneak it back in.
+  const ownFlag = await asProcessIdentity(0, undefined, () =>
+    coldStartArgs({ chatMode: 'ask', flags: allow }, null)
+  )
+  expect(ownFlag).not.toContain(allow)
+  // A declared sandbox lifts the CLI's root guard: keep the live bypass switch.
+  const sandbox = await asProcessIdentity(0, '1', () => coldStartArgs({ chatMode: 'ask' }, null))
+  expect(sandbox.filter((a) => a === allow)).toHaveLength(1)
+  // Non-root keeps it too.
+  const user = await asProcessIdentity(501, undefined, () =>
+    coldStartArgs({ chatMode: 'ask' }, null)
+  )
+  expect(user.filter((a) => a === allow)).toHaveLength(1)
 })
 
 test('chat bypass really bypasses (not just allows it)', async () => {

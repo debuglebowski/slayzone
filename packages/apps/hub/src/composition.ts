@@ -1684,8 +1684,7 @@ export function composeServer(opts: {
     // forward reference is never read before it is set.
     let syncComputerProjects: (computerId: string) => Promise<void> = async () => undefined
     const chatCommandBarrier = createComputerChatCommandBarrier({
-      recover: computerChat.recoverComputer,
-      lifecycle: computerChat.lifecycle.sync
+      lifecycle: computerChat.lifecycle.syncNative
     })
     const computerGateway = createHubComputerGateway({
       beforeRequest: async (computerId, method) => {

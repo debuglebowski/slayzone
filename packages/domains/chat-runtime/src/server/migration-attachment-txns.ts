@@ -36,10 +36,17 @@ function assertSource(db: Database, scope: MigrationAttachmentScope): void {
 }
 
 export const chatMigrationAttachmentTxns = {
+  /**
+   * Seals and pins each reference for this frozen source. An unfrozen reference
+   * whose artifact version no longer exists in this task (artifact deleted or
+   * moved to another task) yields `null`: the migration carries an unavailable
+   * placeholder instead, so one dangling reference cannot strand the whole
+   * conversation. Frozen references (`expected`) must still resolve exactly.
+   */
   'chat-migration:pin-attachments': (
     db: Database,
     { scope, refs, expected }: MigrationAttachmentPinParams
-  ): ChatAttachment[] =>
+  ): Array<ChatAttachment | null> =>
     db
       .transaction(() => {
         assertSource(db, scope)
@@ -98,6 +105,7 @@ export const chatMigrationAttachmentTxns = {
                 scope.taskId,
                 ...(ref.contentHash || frozen ? [ref.contentHash ?? frozen!.contentHash] : [])
               ) as { content_hash: string; size: number } | undefined)
+          if (!version && !frozen) return null
           if (
             !version ||
             !/^[a-f0-9]{64}$/.test(version.content_hash) ||

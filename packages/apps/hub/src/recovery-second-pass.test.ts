@@ -152,10 +152,7 @@ test('new: interrupted first prompt-only bootstrap must not strand an active loc
     expect(await f.request({ kind: 'inspect', id: stranded!.id })).toBeNull()
     await f.restart()
     const after = f.services()
-    const barrier = createComputerChatCommandBarrier({
-      recover: after.recoverComputer,
-      lifecycle: after.lifecycle.sync
-    })
+    const barrier = createComputerChatCommandBarrier({ lifecycle: after.lifecycle.syncNative })
     // Reservation remains uncommitted until the computer durably acknowledges bootstrap.
     // This is a fresh prompt recall, not a damaged DB or a forged inventory.
     await expect(barrier('pc', 'pty.kill')).resolves.toBeUndefined()
@@ -584,10 +581,7 @@ test('legacy active locator with missing computer store is quarantined without w
     )
     await expect(after.resolvePtyComputer('healthy', { mode: 'claude-code' })).resolves.toBe('pc')
     await expect(after.relay.ops.getTabState('healthy-tab')).resolves.toBeDefined()
-    const barrier = createComputerChatCommandBarrier({
-      recover: after.recoverComputer,
-      lifecycle: after.lifecycle.sync
-    })
+    const barrier = createComputerChatCommandBarrier({ lifecycle: after.lifecycle.syncNative })
     await expect(barrier('pc', 'fs.pathExists')).resolves.toBeUndefined()
     await expect(barrier('pc', 'proc.kill')).resolves.toBeUndefined()
     // A matching restored store clears the quarantine; recovery must not create

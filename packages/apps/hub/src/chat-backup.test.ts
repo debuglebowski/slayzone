@@ -6,6 +6,7 @@ import { expect, test } from 'vitest'
 import { sanitizeHubChatBackup } from './chat-backup'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from '../../../domains/chat-runtime/src/server/hub-ownership'
+import { emulateWindowsFsync } from '../../../shared/test-utils/windows-fsync'
 
 test('new hub snapshots contain metadata and general artifacts, no chat content or freed-page remnants', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'hub-backup-private-'))
@@ -97,6 +98,25 @@ test('mixed hub snapshots retain only pending recovery sources and erase committ
     expect(readFileSync(path).includes(Buffer.from('pending-private-payload'))).toBe(true)
   } finally {
     h.cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Windows flush semantics: the sanitized snapshot is flushed through a writable handle', async () => {
+  // FlushFileBuffers needs a writable handle; a read-only open made every hub backup EPERM on Windows.
+  const dir = mkdtempSync(join(tmpdir(), 'hub-backup-windows-fsync-'))
+  const path = join(dir, 'backup.sqlite')
+  try {
+    const db = new Database(path)
+    db.exec('CREATE TABLE tasks(id TEXT,title TEXT)')
+    db.close()
+    const restore = emulateWindowsFsync()
+    try {
+      await sanitizeHubChatBackup(path)
+    } finally {
+      restore()
+    }
+  } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })

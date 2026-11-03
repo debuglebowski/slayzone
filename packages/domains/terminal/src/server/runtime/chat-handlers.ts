@@ -44,6 +44,7 @@ import {
   rawPermissionModeToChatMode,
   chatModeToFlags as chatModeToFlagsShared,
   chatModeToCliPermissionMode,
+  claudeRefusesBypass,
   type ChatMode as ChatModeShared
 } from '@slayzone/terminal-contracts'
 import {
@@ -132,9 +133,11 @@ export type ChatStartReason = 'user' | 'restore'
  * Permission/operating mode for chat sessions. Live mode flips ride a
  * `control_request {subtype:'set_permission_mode', mode}` over stdin so the
  * subprocess (and warm conversation state) survives — see `chat:setMode`.
- * Claude spawns allow bypass (`chatModeToFlags`), so `bypass` flips live too;
- * a process the CLI refuses it for (spawned before that) falls back to a
- * kill+respawn, as does any control_request that can't apply.
+ * Claude spawns allow bypass (`chatModeToFlags`), so `bypass` flips live too —
+ * except as root outside a declared sandbox, where the CLI would refuse to start
+ * with that allow flag. A process the CLI refuses the switch for
+ * (`bypass_not_launched`) falls back to a kill+respawn, as does any
+ * control_request that can't apply.
  *
  * Inbound `tool_result` blocks (e.g. AskUserQuestion answer) ride the same
  * stdin channel — `chat:sendToolResult`.
@@ -147,7 +150,20 @@ export type ChatMode = ChatModeShared
 
 export const DEFAULT_CHAT_MODE_NEW_TASK: ChatMode = 'auto-accept'
 
-export const chatModeToFlags = chatModeToFlagsShared
+/**
+ * Spawn flags for a chat mode, for an agent THIS process spawns: the chat
+ * runtime builds the flags on the computer that runs the agent (its procs are
+ * in-process there), and the child's base env is this process's sanitized env,
+ * which keeps `IS_SANDBOX`. So this process's uid and env are the ones the
+ * CLI's root guard will read.
+ */
+export function chatModeToFlags(mode: string): string[] {
+  const allowBypass = !claudeRefusesBypass({
+    uid: process.getuid?.() ?? null,
+    env: { IS_SANDBOX: process.env.IS_SANDBOX }
+  })
+  return chatModeToFlagsShared(mode, { allowBypass })
+}
 
 /**
  * Downgrade `auto` to `auto-accept` when the user is no longer eligible / opted

@@ -705,10 +705,12 @@ run_harness packages/apps/hub/src/storage-stability-audit.test.ts
 run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
 run_harness packages/apps/hub/src/recovery-second-pass.test.ts
+run_harness packages/apps/hub/src/computer-chat-isolation.test.ts
 run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
 run_harness packages/apps/hub/src/content-third-pass.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-recovery-fixes.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifact-backup.test.ts
+run_harness packages/domains/chat-runtime/src/server/windows-fsync.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachment-pin-review.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration-attachment-pins.test.ts
 run_harness packages/domains/chat-runtime/src/server/queue-admission.test.ts

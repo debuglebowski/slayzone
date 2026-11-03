@@ -8,6 +8,7 @@ import {
   closeSync,
   fsyncSync
 } from 'node:fs'
+import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { z } from 'zod'
 import { join } from 'node:path'
 import {
@@ -477,14 +478,7 @@ export function createLocalArtifacts(
           const v = await store.getCurrentArtifactVersion(db, { artifactId: a.id })
           if (v) {
             const path = blobs.blobPath(v.content_hash)
-            if (existsSync(path)) {
-              const fd = openSync(path, 'r')
-              try {
-                fsyncSync(fd)
-              } finally {
-                closeSync(fd)
-              }
-            }
+            if (existsSync(path)) fsyncFileSync(path)
           }
           local.metadata(tabId, 'artifact-changed', {
             id: a.id,

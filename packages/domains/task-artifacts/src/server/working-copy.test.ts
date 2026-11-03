@@ -1,4 +1,13 @@
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+  rmSync,
+  existsSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -7,6 +16,7 @@ import { syncBuiltinESMExports } from 'node:module'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createStandaloneArtifacts } from './standalone'
 import { artifactsTxns } from './artifact-store-txns'
+import { emulateWindowsFsync } from '../../../../shared/test-utils/windows-fsync'
 
 const roots: string[] = []
 afterEach(() => {
@@ -202,4 +212,50 @@ test('renaming an original preserves bytes without buffering the entire existing
     raw.close()
   }
   expect(readFileSync(newPath, 'utf8')).toBe('original bytes')
+})
+
+test('Windows flush semantics: create, import from a read-only source, write and rename all publish', async () => {
+  // FlushFileBuffers needs a writable handle; a read-only open made every save EPERM on Windows.
+  const dir = mkdtempSync(join(tmpdir(), 'artifact-windows-fsync-'))
+  roots.push(dir)
+  const raw = new Database(join(dir, 'data.sqlite')),
+    local = createStandaloneArtifacts(raw, dir)
+  const sourceDir = join(dir, 'import'),
+    source = join(sourceDir, 'read-only-upload.txt')
+  mkdirSync(sourceDir)
+  writeFileSync(source, 'uploaded bytes')
+  chmodSync(source, 0o444)
+  const restore = emulateWindowsFsync()
+  try {
+    const created = (await local.store.createArtifact(local.db, {
+      taskId: 'task',
+      title: 'notes.txt',
+      content: 'created bytes'
+    }))!
+    await local.store.updateArtifact(local.db, { id: created.id, content: 'updated bytes' })
+    await local.store.writeArtifactContent(local.db, {
+      artifactId: created.id,
+      bytes: Buffer.from('written bytes')
+    })
+    await local.store.updateArtifact(local.db, { id: created.id, title: 'notes.md' })
+    expect(await local.store.readArtifactContent(local.db, created.id)).toBe('written bytes')
+    const {
+      artifacts: [uploaded]
+    } = await local.store.uploadArtifactDir(local.db, {
+      taskId: 'task',
+      dirPath: sourceDir,
+      parentFolderId: null
+    })
+    // The working copy must stay replaceable: a read-only file cannot be flushed or renamed over on Windows.
+    await local.store.writeArtifactContent(local.db, {
+      artifactId: uploaded.id,
+      bytes: Buffer.from('replaced upload')
+    })
+    expect(await local.store.readArtifactContent(local.db, uploaded.id)).toBe('replaced upload')
+    const uploadedPath = (await local.store.getArtifactPath(local.db, uploaded.id))!
+    expect(statSync(uploadedPath).mode & 0o200).toBe(0o200)
+  } finally {
+    restore()
+    raw.close()
+  }
 })

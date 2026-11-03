@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { openSync, closeSync, fsyncSync } from 'node:fs'
+import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 
 /** Sanitize the unpublished snapshot, never the live database. Old backups stay intact. */
 export async function sanitizeHubChatBackup(path: string): Promise<void> {
@@ -89,10 +89,5 @@ export async function sanitizeHubChatBackup(path: string): Promise<void> {
   } finally {
     db.close()
   }
-  const fd = openSync(path, 'r')
-  try {
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
-  }
+  fsyncFileSync(path)
 }
