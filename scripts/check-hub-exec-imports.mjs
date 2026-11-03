@@ -56,10 +56,6 @@ const ALLOWLIST = {
   'packages/domains/ai-config/src/server/handlers-store.ts':
     'setupSlay runs slay init; refuses (T-06)',
   'packages/apps/hub/src/shell-native.ts': 'open/xdg-open/explorer; refuse (T-06)',
-  'packages/domains/file-editor/src/server/file-ops.ts':
-    'git status, shared with the computer; the hub reaches it only through createLocalWorkspaceFs, which refuses (T-06)',
-  'packages/domains/file-editor/src/server/repo-discovery.ts':
-    'git repo discovery, shared with the computer; the hub reaches it only through createLocalWorkspaceFs, which refuses (T-06)',
   'packages/shared/db-migrations/src/migrations.ts':
     'v122 git backfill over existing agent_turns rows; skipped with processes off (T-06)',
   // Not reachable as exec on a hub.

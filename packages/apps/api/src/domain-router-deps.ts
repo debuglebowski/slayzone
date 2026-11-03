@@ -8,7 +8,7 @@
  * @module api/domain-router-deps
  */
 import { setDiagnosticsRouterDeps } from '@slayzone/diagnostics/server'
-import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/server'
+import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/hub'
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setTagsRouterDeps } from '@slayzone/tags/server'

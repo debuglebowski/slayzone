@@ -10,6 +10,7 @@
     "./shared": "./src/shared/index.ts",
     "./dir-picker": "./src/shared/dir-picker.ts",
     "./server": "./src/server/index.ts",
+    "./hub": "./src/server/hub.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
     "./client/FileEditorView": "./src/client/FileEditorView.tsx",

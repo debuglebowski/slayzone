@@ -58,7 +58,7 @@ import {
   workspaceRouter,
   type FileEditorMounts,
   type WorkspaceMounts
-} from '@slayzone/file-editor/server'
+} from '@slayzone/file-editor/hub'
 import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
 import { integrationsRouter, type IntegrationsMounts } from '@slayzone/integrations/server'

@@ -20,9 +20,9 @@
  * caller's first), then the hub still answers and its process is still running. A
  * valid create still works where processes are on, and is refused where they are off.
  *
- * Same shape outside processes: `fileEditor.watch` with processes off and no computer
- * (its refusal floated: the hub exited), and a file named `...` under a hub-local
- * watch (the watcher's callback threw).
+ * Same shape outside processes: `fileEditor.watch` with no computer (its refusal
+ * floated: the hub exited). A file named `...` under a watch (whose callback threw)
+ * is the watcher's own case — it runs on computers (file-editor watcher tests).
  *
  * Native ABI: better-sqlite3 in the hub needs Electron's node.
  *
@@ -487,9 +487,10 @@ function describeHub(
     }
 
     // The same shape outside processes: `fileEditor.watch` started its watcher in a
-    // floated `.then` (a refusal there was an unhandled rejection: processes off, no
-    // computer), and the hub-local watcher's callback threw on a file named `...`.
-    test(`${name}: fileEditor.watch ${opts.processes ? 'survives a file named "..."' : 'refusal reaches the stream'}, hub stays up`, async () => {
+    // floated `.then` (a refusal there was an unhandled rejection). The hub watches no
+    // project folder itself, so with no computer — on any hub — the refusal must reach
+    // the stream, and the hub must stay up.
+    test(`${name}: fileEditor.watch refusal reaches the stream, hub stays up`, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'slz-t102-watch-'))
       const changed: string[] = []
       let error: unknown = null
@@ -504,21 +505,11 @@ function describeHub(
       )
       try {
         await sleep(500)
-        if (opts.processes) {
-          mkdirSync(join(dir, '...'))
-          await sleep(300)
-          writeFileSync(join(dir, 'after.txt'), 'x')
-          await poll(
-            async () => (changed.includes('after.txt') ? true : null),
-            5_000,
-            `a change after "..." (got ${JSON.stringify(changed)}, error ${String(error)})`
-          )
-        } else {
-          await poll(async () => (error ? true : null), 5_000, 'the refusal on the stream')
-          const code =
-            error instanceof TRPCClientError ? (error.data as { code?: string })?.code : null
-          expect(code, `refused FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
-        }
+        await poll(async () => (error ? true : null), 5_000, 'the refusal on the stream')
+        const code =
+          error instanceof TRPCClientError ? (error.data as { code?: string })?.code : null
+        expect(code, `refused FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
+        expect(changed).toEqual([])
         await stillUp(hub, client, 'fileEditor.watch')
       } finally {
         sub.unsubscribe()

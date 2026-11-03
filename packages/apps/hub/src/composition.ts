@@ -185,11 +185,7 @@ import {
   killAllProcesses,
   setProcessesDeps
 } from '@slayzone/processes/server'
-import {
-  createLocalWorkspaceFs,
-  closeAllFileWatchers,
-  setWorkspaceDeps
-} from '@slayzone/file-editor/server'
+import { noComputerWorkspaceFs, setWorkspaceDeps } from '@slayzone/file-editor/hub'
 import {
   setGhExecutor,
   invalidateProjectReposCache,
@@ -2008,7 +2004,8 @@ export function composeServer(opts: {
     // is the entire point: the picker must browse the filesystem the agent will
     // actually get. Serving these from the hub is what made a task on a remote
     // computer report "No repository path configured" for a path that existed.
-    const localWorkspaceFs = createLocalWorkspaceFs()
+    // No computer: "connect a computer" — the hub never reads a project folder itself.
+    const localWorkspaceFs = noComputerWorkspaceFs
     // The hub's own maintenance on connect (below): the computer is named by the
     // gateway event, not by a caller, and what it is handed is cut to its owner's
     // projects (T-19).
@@ -2178,7 +2175,6 @@ export function composeServer(opts: {
       clearDiagnosticsConfigCache()
       resetWorktreeColorsForTest()
       invalidateProjectReposCache()
-      closeAllFileWatchers()
       resetAgentHookStateForTest()
     } finally {
       resettingForTest = false

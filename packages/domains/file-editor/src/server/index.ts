@@ -70,3 +70,5 @@ export {
   type FileEditorRouterDeps
 } from './file-editor-router-deps'
 export { workspaceRouter, type WorkspaceRouter, type WorkspaceMounts } from './workspace-router'
+
+export { noComputerWorkspaceFs, noComputerWorkspaceFsAdapters } from './workspace-fs-none'
