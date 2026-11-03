@@ -49,6 +49,8 @@ type FastModeApi = ReturnType<typeof useChatFastMode>
 
 export interface ChatComposerProps {
   backgroundJobs?: ReactNode
+  /** Banners above the input (draft recovery); rendered inside the composer column. */
+  notices?: ReactNode
   pendingMessages?: ReactNode
   compact?: boolean
   hasPlanReview?: boolean
@@ -124,6 +126,7 @@ export interface ChatComposerProps {
  */
 export function ChatComposer({
   backgroundJobs,
+  notices,
   pendingMessages,
   compact = false,
   hasPlanReview = false,
@@ -181,6 +184,7 @@ export function ChatComposer({
     <div className={`bg-background pb-1 ${hasPlanReview ? 'pt-0' : 'pt-6'}`}>
       <div data-testid="chat-composer-column" className="mx-auto w-full max-w-[60rem]">
         {backgroundJobs}
+        {notices}
         {pendingMessages}
         <ChatQueueList items={queuedMessages} onRemove={removeQueue} {...queueApi} />
         {(attachments.length > 0 || attaching) && (

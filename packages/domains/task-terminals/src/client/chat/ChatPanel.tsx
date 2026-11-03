@@ -963,41 +963,45 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           </button>
                         </div>
                       )}
-                      {composer.draftConflictAvailable && (
-                        <div
-                          role="status"
-                          className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs"
-                        >
-                          <p className="text-muted-foreground">
-                            Saved and local drafts differ. Keep both before saving.
-                          </p>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
-                            onClick={composer.recoverDraftConflict}
-                          >
-                            Keep both
-                          </button>
-                        </div>
-                      )}
-                      {composer.legacyDraftAvailable && (
-                        <div
-                          role="status"
-                          className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs"
-                        >
-                          <p className="text-muted-foreground">
-                            Older unsaved draft on this device. Recover adds it to this chat.
-                          </p>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
-                            onClick={composer.recoverLegacyDraft}
-                          >
-                            Recover draft
-                          </button>
-                        </div>
-                      )}
                       <ChatComposer
+                        notices={
+                          <>
+                            {composer.draftConflictAvailable && (
+                              <div
+                                role="status"
+                                className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                              >
+                                <p className="text-muted-foreground">
+                                  Saved and local drafts differ. Keep both before saving.
+                                </p>
+                                <button
+                                  type="button"
+                                  className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                  onClick={composer.recoverDraftConflict}
+                                >
+                                  Keep both
+                                </button>
+                              </div>
+                            )}
+                            {composer.legacyDraftAvailable && (
+                              <div
+                                role="status"
+                                className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                              >
+                                <p className="text-muted-foreground">
+                                  Older unsaved draft on this device. Recover adds it to this chat.
+                                </p>
+                                <button
+                                  type="button"
+                                  className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                  onClick={composer.recoverLegacyDraft}
+                                >
+                                  Recover draft
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        }
                         pendingMessages={
                           <PendingQueuedMessages
                             items={composer.pendingQueuedMessages}
