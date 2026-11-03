@@ -9,6 +9,42 @@ import { createStartupWatch, type StartupInputs, type StartupView } from './star
 const HIDDEN: StartupView = { visible: false, progress: null, recheckAt: null, ended: false }
 
 /**
+ * The startup watch as an external store: inputs go in, the view comes out, and the
+ * watch's own rechecks (show-delay, quiet spell) run on its timer, not on renders.
+ */
+function createStartupStore() {
+  const watch = createStartupWatch(Date.now())
+  const listeners = new Set<() => void>()
+  let inputs: StartupInputs | null = null
+  let view = HIDDEN
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const evaluate = (): void => {
+    clearTimeout(timer)
+    timer = undefined
+    if (view.ended || !inputs) return
+    view = watch.update(inputs, Date.now())
+    for (const l of listeners) l()
+    if (view.recheckAt !== null)
+      timer = setTimeout(evaluate, Math.max(0, view.recheckAt - Date.now()))
+  }
+  return {
+    setInputs(next: StartupInputs): void {
+      inputs = next
+      evaluate()
+    },
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    getView: (): StartupView => view,
+    dispose(): void {
+      clearTimeout(timer)
+      timer = undefined
+    }
+  }
+}
+
+/**
  * The sidebar's startup card, fed live: tabs loading (`paneHydrator`), hidden
  * terminals waiting for their turn (`terminal-init-scheduler`), and agents starting
  * on the hub (`pty.onAgentStarts`). Its own component, rendered into the sidebar's
@@ -19,11 +55,10 @@ const HIDDEN: StartupView = { visible: false, progress: null, recheckAt: null, e
  */
 export function StartupProgressStatus() {
   const trpc = useTRPC()
-  const [watch] = useState(() => createStartupWatch(Date.now()))
+  const [store] = useState(createStartupStore)
   const [agents, setAgents] = useState<StartupInputs['agents']>(null)
-  const [view, setView] = useState<StartupView>(HIDDEN)
-  const [recheck, setRecheck] = useState(0)
-  const [over, setOver] = useState(false)
+  const view = useSyncExternalStore(store.subscribe, store.getView)
+  const over = view.ended
   const panes = useSyncExternalStore(paneHydrator.subscribeProgress, paneHydrator.progress)
   const terminalsQueued = useSyncExternalStore(subscribeInitQueued, initQueuedCount)
 
@@ -37,14 +72,9 @@ export function StartupProgressStatus() {
   )
 
   useEffect(() => {
-    if (over) return
-    const next = watch.update({ agents, panes, terminalsQueued }, Date.now())
-    setView(next)
-    if (next.ended) setOver(true)
-    if (next.recheckAt === null) return
-    const timer = setTimeout(() => setRecheck((n) => n + 1), Math.max(0, next.recheckAt - Date.now()))
-    return () => clearTimeout(timer)
-  }, [watch, agents, panes, terminalsQueued, recheck, over])
+    store.setInputs({ agents, panes, terminalsQueued })
+  }, [store, agents, panes, terminalsQueued])
+  useEffect(() => () => store.dispose(), [store])
 
   if (over || !view.visible || !view.progress) return null
   return <StartupProgressCard progress={view.progress} />

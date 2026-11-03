@@ -13,7 +13,9 @@
  *    test first and blames whatever line was executing. `showProjectBoard` used
  *    `toPass({ timeout: 30_000 })` inside a 30_000ms test, and its failures were
  *    reported as "element(s) not found, 4000ms" — the inner assertion, not the
- *    real budget. Unsatisfiable by construction.
+ *    real budget. Unsatisfiable by construction. The test budget is the config's,
+ *    raised by a `test.setTimeout(<ms>)` / `describe.configure({ timeout })` the
+ *    file declares: before its first test = every test's, inside a test = that one's.
  *
  * 3. WALL-CLOCK BUDGET IN THE PARALLEL SUITE — `expect(<ms>).toBeLessThan(n)`
  *    measures the machine, not the product, when six Electron apps share the
@@ -60,9 +62,26 @@ const files = walk(E2E_ROOT)
 for (const file of files) {
   const lines = fs.readFileSync(file, 'utf8').split('\n')
   const inPerf = PERF_DIRS.some((d) => file.startsWith(d))
+  // The budget a retry wrapper on this line runs under (rule 2).
+  let fileBudget = TEST_TIMEOUT_MS
+  let testBudget = TEST_TIMEOUT_MS
+  let inTest = false
 
   lines.forEach((line, i) => {
     const at = `${file}:${i + 1}`
+
+    if (/^\s*test(?:\.(?:only|skip|fixme|fail))?\(\s*['"`]/.test(line)) {
+      inTest = true
+      testBudget = fileBudget
+    }
+    const declared =
+      line.match(/\btest\.setTimeout\(\s*([0-9_]+)\s*\)/) ??
+      line.match(/\bdescribe\.configure\(\s*\{[^}]*\btimeout:\s*([0-9_]+)/)
+    if (declared) {
+      const ms = Number(declared[1].replace(/_/g, ''))
+      if (inTest) testBudget = ms
+      else fileBudget = testBudget = ms
+    }
 
     // (1) A statement-position tRPC call whose enclosing arrow has a BLOCK body:
     // the previous non-empty line ends with `{`, and this line neither returns
@@ -83,9 +102,9 @@ for (const file of files) {
     const budget = line.match(/\.(?:toPass|poll)\s*\(?[^)]*timeout:\s*([0-9_]+)/)
     if (budget) {
       const ms = Number(budget[1].replace(/_/g, ''))
-      if (ms >= TEST_TIMEOUT_MS) {
+      if (ms >= testBudget) {
         violations.push(
-          `${at}\n    retry budget ${ms}ms >= test timeout ${TEST_TIMEOUT_MS}ms — it can never report its own failure\n    ${line.trim()}`
+          `${at}\n    retry budget ${ms}ms >= test timeout ${testBudget}ms — it can never report its own failure\n    ${line.trim()}`
         )
       }
     }

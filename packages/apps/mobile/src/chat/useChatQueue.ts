@@ -14,7 +14,8 @@ import { useTRPC, useTRPCClient } from '../trpc'
 import { useStableCallback } from './useStableCallback'
 import {
   useQueuedSubmissions,
-  type QueuedSubmission
+  type QueuedSubmission,
+  type StagedSubmission
 } from '@slayzone/task-terminals/queued-submissions'
 import { createQueuedSubmissionJournal } from './queued-submission-journal'
 
@@ -27,7 +28,7 @@ export interface ChatQueue {
    * `send` goes to the agent; `original` is what was typed (shown, counted for usage).
    * `content` defaults to `send` as one text block (desktop's rule).
    */
-  push: (send: string, original: string, content?: UserContentBlock[]) => Promise<void>
+  push: (send: string, original: string, content?: UserContentBlock[]) => Promise<StagedSubmission>
   remove: (id: string) => Promise<void>
   clear: () => Promise<void>
   /** "Send now" (`chat.queue.steer`); `ok: false` + why when the agent can't take it. */

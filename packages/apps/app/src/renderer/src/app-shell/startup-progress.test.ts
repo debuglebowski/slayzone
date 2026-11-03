@@ -60,14 +60,17 @@ describe('startup watch', () => {
 
     // Everything up: shown as settled through the quiet spell, then gone for good.
     const t1 = T0 + 5_000
-    const settled = w.update({ agents: [], panes: { hydrated: 4, queued: 0 }, terminalsQueued: 0 }, t1)
+    const settled = w.update(
+      { agents: [], panes: { hydrated: 4, queued: 0 }, terminalsQueued: 0 },
+      t1
+    )
     expect(settled.visible).toBe(true)
     expect(settled.progress?.settled).toBe(true)
     expect(settled.progress?.agentsReady).toBe(4)
     expect(settled.recheckAt).toBe(t1 + STARTUP_QUIET_MS)
-    expect(w.update({ ...idle, panes: { hydrated: 4, queued: 0 } }, t1 + STARTUP_QUIET_MS).visible).toBe(
-      false
-    )
+    expect(
+      w.update({ ...idle, panes: { hydrated: 4, queued: 0 } }, t1 + STARTUP_QUIET_MS).visible
+    ).toBe(false)
   })
 
   it('work arriving during the quiet spell (a terminal still waiting for its turn) keeps startup open', () => {

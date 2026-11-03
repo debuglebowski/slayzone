@@ -49,8 +49,7 @@ export function createStartupWatch(startedAt: number) {
     if (done) return ENDED
     const agents = inputs.agents ?? []
     for (const a of agents) seen.add(a.sessionId)
-    const inFlight =
-      agents.length > 0 || inputs.panes.queued > 0 || inputs.terminalsQueued > 0
+    const inFlight = agents.length > 0 || inputs.panes.queued > 0 || inputs.terminalsQueued > 0
     // Startup cannot be over before the hub has said which agents are starting.
     const known = inputs.agents !== null
 

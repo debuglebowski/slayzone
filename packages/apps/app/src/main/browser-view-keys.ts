@@ -73,7 +73,7 @@ export function classifyBrowserViewKey(
   }
   if (key === ',')
     return { kind: 'menu', event: input.shift ? 'open-project-settings' : 'open-settings' }
-  if (screenshotKeys && matchesElectronInput(input, screenshotKeys))
+  if (screenshotKeys && matchesElectronInput(input, screenshotKeys, platform))
     return { kind: 'menu', event: 'screenshot-trigger' }
   if (input.key === '§') return { kind: 'menu', event: 'go-home' }
   return { kind: 'forward' }

@@ -212,7 +212,9 @@ describe('ChatSession against a recorded hub session', () => {
         expectedMode: 'claude-chat'
       })
       await waitFor(() => expect(textOf('Answer to the queued message.')).toBe(true))
-      expect(screen.queryByTestId('chat-queue')).toBeNull()
+      // The row goes once its staged copy is reconciled with the drained hub queue,
+      // which settles after the answer renders.
+      await waitFor(() => expect(screen.queryByTestId('chat-queue')).toBeNull())
 
       // 5. Stop a running turn: the queue is cleared, the turn aborted.
       await type('Work on something long')

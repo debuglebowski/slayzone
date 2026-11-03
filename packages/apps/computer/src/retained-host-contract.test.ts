@@ -149,9 +149,9 @@ test.each([1, 2])(
             value: { route: { id: 'old-chat', epoch: 1 }, target: 'ops', method, args }
           }
         })
-      await expect(
-        invoke('getTabState', ['tab', { expectedMode: 'claude-chat' }])
-      ).rejects.toThrow(/too_big|<=1|at most|Too big/i)
+      await expect(invoke('getTabState', ['tab', { expectedMode: 'claude-chat' }])).rejects.toThrow(
+        /too_big|<=1|at most|Too big/i
+      )
       await native.rpc.request('dispatch', {
         method: 'chat.request',
         actor,

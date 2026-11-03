@@ -925,6 +925,7 @@ run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/turn-trigger-notification.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/history-summary.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/activity-view.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/turn-changes.test.ts

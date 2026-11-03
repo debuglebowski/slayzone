@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
-import {
-  createTestHarness,
-  createSlayzoneDbAdapter
-} from '../../../shared/test-utils/ipc-harness'
+import { createTestHarness, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
 import { createComputerChatServices } from './computer-chat'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
