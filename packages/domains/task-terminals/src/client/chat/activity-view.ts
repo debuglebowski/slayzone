@@ -3,11 +3,14 @@ import { unifiedChangeRows } from './files-changed/turn-changes'
 
 export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
 export type SubAgentItem = Extract<TimelineItem, { kind: 'sub-agent' }>
+export type TurnTriggerItem = Extract<TimelineItem, { kind: 'turn-trigger' }>
 export interface ActivityTurn {
   items: ActivityItem[]
   /** The turn's sub-agents: their own rows beside the Activities, never inside them. */
   subAgents: SubAgentItem[]
   files: Array<Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }>>
+  /** What opened an agent-started turn (background work ended): the turn's header, no row of its own. */
+  trigger?: TurnTriggerItem
   final: Extract<TimelineItem, { kind: 'text' }> | null
   result?: Extract<TimelineItem, { kind: 'result' }>
   userMessageId?: string
@@ -88,11 +91,14 @@ export function activityView(
         item.kind === 'files-changed' || item.kind === 'workspace-changes'
     )
     const subAgents = segment.filter((item): item is SubAgentItem => item.kind === 'sub-agent')
+    const trigger = segment.find((item): item is TurnTriggerItem => item.kind === 'turn-trigger')
     const hidden = new Set<TimelineItem>([...entries, ...files, ...subAgents, ...empty])
     if (final && result) hidden.add(result)
-    const kept = segment.filter((item) => !hidden.has(item))
+    let kept = segment.filter((item) => !hidden.has(item))
+    // A turn carries its trigger as a header; it never anchors the turn itself.
+    const rest = kept.filter((item) => item !== trigger)
     // Preserve a row as an anchor for assistant-initiated turns with no final reply.
-    const host = final ?? kept[kept.length - 1] ?? entries[0] ?? subAgents[0] ?? files[0]
+    const host = final ?? rest[rest.length - 1] ?? entries[0] ?? subAgents[0] ?? files[0]
     if (
       host &&
       (entries.length ||
@@ -103,6 +109,7 @@ export function activityView(
         host.kind === 'interrupted')
     ) {
       const hostIsActivity = hidden.has(host)
+      kept = rest
       if (hostIsActivity) kept.push(host)
       turns.set(host, {
         items: entries,
@@ -112,8 +119,10 @@ export function activityView(
         result,
         userMessageId: user?.id,
         active,
-        hostIsActivity
+        hostIsActivity,
+        trigger
       })
+      if (trigger) hosts.set(trigger, host)
       for (const item of entries) hosts.set(item, host)
       for (const item of files) hosts.set(item, host)
       for (const item of subAgents) hosts.set(item, host)

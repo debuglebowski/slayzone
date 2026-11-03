@@ -14,6 +14,7 @@ import type { TimelineItem } from '@slayzone/terminal/client'
 import { LiveBlockStoreContext, streamKeyOf } from '@slayzone/terminal/client'
 import { AssistantMessageBody, InterruptedBlock } from './renderers'
 import { ActivityTurn } from './ActivityTurn'
+import { TurnTriggerRow } from './TurnTriggerRow'
 import type { ActivityTurn as ActivityTurnData } from './activity-view'
 import { MessageDetails } from './MessageDetails'
 import { TurnFooter } from './turn-footer'
@@ -167,6 +168,7 @@ export function AssistantAnswer({
           </DropdownMenu>
         )}
       </div>
+      {turn?.trigger && <TurnTriggerRow item={turn.trigger} />}
       <div className="flex items-start gap-3">
         <div className="min-w-0 max-w-full">
           <div ref={bodyRef} className="min-w-0">
