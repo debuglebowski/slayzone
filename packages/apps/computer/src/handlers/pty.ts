@@ -60,7 +60,7 @@ import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/sta
 import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
-import { RingBuffer } from '../ring-buffer'
+import { RingBuffer } from '@slayzone/terminal/pty-detection'
 import {
   createSpawnAdmission,
   type AdmissionLane,

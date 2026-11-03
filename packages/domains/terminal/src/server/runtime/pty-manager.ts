@@ -3323,7 +3323,7 @@ export function clearBuffer(sessionId: string): {
 export function getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult | null {
   const session = sessions.get(sessionId)
   if (!session) return null
-  const { chunks, prelude } = session.buffer.getChunksSince(afterSeq)
+  const { chunks, prelude } = session.buffer.getReplaySince(afterSeq)
   return {
     chunks,
     currentSeq: session.buffer.getCurrentSeq(),

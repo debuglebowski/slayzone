@@ -22,7 +22,7 @@
  */
 
 import type { ExitedSession } from '@slayzone/computer-transport/shared'
-import type { RingBuffer } from './ring-buffer'
+import type { RingBuffer } from '@slayzone/terminal/pty-detection'
 
 /** The hub's `DETACH_GRACE_MS`: past it, no hub is still tracking the session. */
 export const TOMBSTONE_TTL_MS = 10 * 60_000

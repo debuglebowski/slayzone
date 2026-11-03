@@ -71,17 +71,18 @@ function stripOrphanedHead(chunks: readonly BufferChunk[]): BufferChunk[] {
 }
 
 /**
- * Ring buffer for terminal output with fixed maximum size.
- * Drops oldest content when capacity is exceeded.
- * Each chunk has a monotonic sequence number for ordering.
+ * Ring buffer for terminal / process output with fixed maximum size — ONE
+ * implementation for the hub and the computer. Drops oldest content when capacity
+ * is exceeded. Each chunk has a monotonic sequence number for ordering.
  *
- * Stored chunks are IMMUTABLE. `getChunksSince(afterSeq >= 0)` — incremental
- * catch-up on reattach — hands back exactly the bytes that were appended,
- * because that path is applied to an already-correct terminal (and the
- * hub↔computer contract requires a seq's bytes not to vary by delivery path).
- * Eviction resync (prelude + orphaned-head strip) is applied at READ time,
- * for the two wholesale-replay-into-a-fresh-terminal paths only:
- * {@link toString} and `getChunksSince(afterSeq === -1)`.
+ * Two read paths:
+ *  - {@link getChunksSince}: VERBATIM, for gap backfill. A seq's bytes never vary by
+ *    delivery path (live frame vs backfill), so this never rewrites a chunk, and a
+ *    chunk whose bytes were truncated at append (a single chunk over the cap) is
+ *    left out — the reader sees an honest gap and skips forward.
+ *  - {@link getReplaySince} / {@link toString}: REPLAY into a fresh terminal. After
+ *    eviction, a cold replay (`afterSeq === -1`) gets the prelude + orphaned-head
+ *    strip; reattach (`afterSeq >= 0`) stays verbatim.
  */
 export class RingBuffer {
   private chunks: BufferChunk[] = []
@@ -90,6 +91,8 @@ export class RingBuffer {
   private nextSeq = 0
   /** True once any content has been evicted, so a full replay needs the prelude. */
   private evicted = false
+  /** Seq of a chunk stored truncated (only ever the head), or -1. */
+  private truncatedSeq = -1
 
   constructor(maxSize: number) {
     this.maxSize = maxSize
@@ -118,9 +121,19 @@ export class RingBuffer {
       this.chunks[0] = { seq: head.seq, data: head.data.slice(-this.maxSize) }
       this.totalSize = this.chunks[0].data.length
       this.evicted = true
+      this.truncatedSeq = head.seq
     }
 
     return seq
+  }
+
+  /**
+   * VERBATIM chunks with seq > afterSeq (`-1` = from the start), for gap backfill:
+   * exactly the bytes `append` received. A truncated chunk is omitted (see class
+   * doc). Empty when afterSeq >= the latest seq or the tail has been evicted.
+   */
+  getChunksSince(afterSeq: number): BufferChunk[] {
+    return this.chunks.filter((c) => c.seq > afterSeq && c.seq !== this.truncatedSeq)
   }
 
   /**
@@ -141,7 +154,7 @@ export class RingBuffer {
    * FIRST, then the (possibly head-repaired) chunks. `prelude + chunks
    * joined` is byte-identical to `toString()` in this case.
    */
-  getChunksSince(afterSeq: number): { chunks: BufferChunk[]; prelude: string } {
+  getReplaySince(afterSeq: number): { chunks: BufferChunk[]; prelude: string } {
     const chunks = this.chunks.filter((c) => c.seq > afterSeq)
     if (afterSeq !== -1 || !this.evicted) return { chunks, prelude: '' }
     return { chunks: stripOrphanedHead(chunks), prelude: REPLAY_PRELUDE }
@@ -179,6 +192,7 @@ export class RingBuffer {
     // An explicit clear is a caller-driven reset, not data loss: the next replay
     // starts from whatever is appended after it, so no eviction prelude applies.
     this.evicted = false
+    this.truncatedSeq = -1
     // Keep nextSeq incrementing to avoid confusion with old sequences
   }
 

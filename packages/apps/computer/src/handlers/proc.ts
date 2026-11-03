@@ -62,7 +62,7 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
-import { RingBuffer } from '../ring-buffer'
+import { RingBuffer } from '@slayzone/terminal/pty-detection'
 import {
   createSpawnAdmission,
   type AdmissionSlot,

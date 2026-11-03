@@ -588,8 +588,9 @@ run_harness packages/domains/terminal/src/client/option-as-meta.test.ts
 # reply and a Shift/Ctrl/Alt+F3 keystroke are byte-identical, so the reply must
 # never be generated rather than filtered afterwards. Uses @xterm/headless.
 run_harness packages/domains/terminal/src/client/suppress-device-status.test.ts
-# Terminal — hub replay buffer: eviction prelude + chunk immutability.
+# Terminal — pty ring buffer (hub + computer): replay prelude, verbatim backfill.
 run_harness packages/domains/terminal/src/server/ring-buffer.test.ts
+run_harness packages/domains/terminal/src/server/ring-buffer-backfill.test.ts
 # Terminal — lean pty-detection entry the computer bundles: no hub/app tree reachable.
 run_harness packages/domains/terminal/src/server/pty-detection.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
@@ -1219,7 +1220,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/agent-hooks/opencode-plugin-behavior.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies-chat.test.ts \
-  packages/apps/computer/src/ring-buffer.test.ts \
   packages/apps/api/src/scopes.test.ts \
   packages/apps/api/src/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \

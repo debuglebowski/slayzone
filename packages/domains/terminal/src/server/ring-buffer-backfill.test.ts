@@ -1,5 +1,8 @@
 /**
- * Unit tests for the computer-side ring buffer.
+ * The ring buffer's VERBATIM read path, `getChunksSince` — what the computer serves
+ * for gap backfill (`pty.getBufferSince`, `proc.getBufferSince`). Replay into a fresh
+ * terminal (prelude + head repair) is the separate `getReplaySince` / `toString`
+ * path, covered in `ring-buffer.test.ts`.
  *
  * The invariant under test is the one the hub's demux depends on: a chunk's bytes
  * are IMMUTABLE once appended. `handlers/pty.ts` documents live frames and
@@ -70,7 +73,13 @@ describe('RingBuffer', () => {
     buf.append('12345')
     buf.append('67890')
     buf.append('abc')
-    expect(buf.size).toBe(buf.toString().length)
+    // toString() is the REPLAY form (prelude after eviction); size counts stored bytes.
+    expect(buf.size).toBe(
+      buf
+        .getChunksSince(-1)
+        .map((c) => c.data)
+        .join('').length
+    )
     expect(buf.size).toBeLessThanOrEqual(10)
   })
 
