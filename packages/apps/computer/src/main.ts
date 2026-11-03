@@ -50,6 +50,7 @@ import { createSlayHandlers } from './handlers/slay'
 import { createGhHandlers } from './handlers/gh'
 import { createClaudeSessionHandlers } from './handlers/claude-session'
 import { createGitHandlers } from './handlers/git'
+import { createGitOpHandlers } from './handlers/git-op'
 import { createWorkspaceChangesHandlers } from './handlers/workspace-changes'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
@@ -225,6 +226,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
+    ...createGitOpHandlers(ctx),
     ...createWorkspaceChangesHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...fs.handlers,
     ...createComputerConfigHandlers(ctx),

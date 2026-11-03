@@ -513,6 +513,11 @@ export const HubToComputerMethods = {
   gitRemoveWorktree: 'git.removeWorktree',
   gitRunWorktreeSetupScript: 'git.runWorktreeSetupScript',
   gitCopyIgnoredFiles: 'git.copyIgnoredFiles',
+  /**
+   * One git panel op by name (`@slayzone/worktrees` git op contract): the computer
+   * validates `input` against the same contract and jails every path it names.
+   */
+  gitOp: 'git.op',
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   slayCheckConfigured: 'slay.checkConfigured',
   slaySetup: 'slay.setup',
@@ -1242,6 +1247,23 @@ export type ComputerShutdownParams = z.infer<typeof computerShutdownParamsSchema
 // (narrowed to the arguments task ops actually pass); the hub-side routing
 // adapters in `server/exec-proxies` forward each seam method to these frames.
 // ---------------------------------------------------------------------------
+
+/**
+ * `git.op`: run one op of the git panel's shared contract on the computer. `op` and
+ * `input` are validated THERE against `@slayzone/worktrees`' `gitOpsContract` (this
+ * package cannot import it — it would cycle), so here they are opaque. `mutates` is
+ * the hub's own declaration, read only by its audit log (writes are audited, the
+ * panel's constant reads are not); the computer ignores it.
+ */
+export const gitOpParamsSchema = z.object({
+  op: z.string().min(1),
+  input: z.unknown(),
+  mutates: z.boolean().optional()
+})
+export type GitOpParams = z.infer<typeof gitOpParamsSchema>
+/** The op's own result, JSON as is; `null` for an op with no answer. */
+export const gitOpResultSchema = z.object({ result: z.unknown() })
+export type GitOpResult = z.infer<typeof gitOpResultSchema>
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)

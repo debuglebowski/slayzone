@@ -804,6 +804,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../../domains/worktrees
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3

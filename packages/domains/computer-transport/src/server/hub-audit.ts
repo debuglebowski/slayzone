@@ -27,6 +27,15 @@ type Params = Record<string, unknown>
 interface AuditRule {
   event: SecurityEventName
   detail: (p: Params) => Record<string, unknown>
+  /** Audited only when this holds (a method that carries reads and writes). */
+  when?: (p: Params) => boolean
+}
+
+/** The repo a `git.op` acts on: the first path field its input names. */
+function gitOpRepo(input: unknown): unknown {
+  if (input === null || typeof input !== 'object') return null
+  const i = input as Params
+  return i.path ?? i.repoPath ?? i.projectPath ?? i.targetPath ?? null
 }
 
 /**
@@ -159,6 +168,13 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   },
   'git.isGitRepo': null,
   'git.getCurrentBranch': null,
+  // The git panel: its writes (stage, commit, push, checkout, …) are audited, its
+  // constant reads (status, diffs, log) are not.
+  'git.op': {
+    event: 'computer.git',
+    when: (p) => p.mutates === true,
+    detail: (p) => ({ op: p.op, repoPath: gitOpRepo(p.input) })
+  },
   'gh.exec': { event: 'computer.gh', detail: (p) => ({ subcommand: ghSubcommand(p.args) }) },
   // Read-only, like the fs reads.
   'claudeSession.read': null,
@@ -183,5 +199,6 @@ export function auditedHubCall(
   const rule = (HUB_CALL_AUDIT as Record<string, AuditRule | null | undefined>)[method]
   if (!rule) return null
   const p = params !== null && typeof params === 'object' ? (params as Params) : {}
+  if (rule.when && !rule.when(p)) return null
   return { event: rule.event, detail: { method, ...rule.detail(p) } }
 }

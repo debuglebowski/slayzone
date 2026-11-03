@@ -195,7 +195,8 @@ import {
   resetWorktreeColorsForTest,
   defaultWorktreeExecAdapters,
   defaultWorktreePolicyAdapters,
-  getCurrentBranch
+  getCurrentBranch,
+  setGitOpTransport
 } from '@slayzone/worktrees/server'
 import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
@@ -204,6 +205,7 @@ import {
   ghExecResultSchema,
   claudeSessionReadResultSchema,
   claudeSessionLocateResultSchema,
+  gitOpResultSchema,
   HubToComputerMethods,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
@@ -1824,6 +1826,14 @@ export function composeServer(opts: {
     // identities for one repository, and only one of them held credentials for it.
     // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
     // their parsing stay here untouched.
+    // The git panel: each op runs on the computer that holds the checkout (the
+    // router resolves it like the workspace fs, owner-gated with login).
+    setGitOpTransport({
+      request: async (computerId, params) =>
+        gitOpResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.gitOp, params)
+        ).result
+    })
     setGhExecutor(async (args, opts) => {
       // The caller's own computer on a hub with login (T-19): `gh` speaks as the
       // machine's account, which must never be someone else's.

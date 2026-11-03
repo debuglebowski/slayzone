@@ -28,6 +28,11 @@ export function setWorktreesRouterDeps(next: WorktreesRouterDeps): void {
   deps = next
 }
 
+/** The deps, or null when nothing composed the router (a bare `createCaller`). */
+export function getWorktreesRouterDepsOrNull(): WorktreesRouterDeps | null {
+  return deps
+}
+
 export function getWorktreesRouterDeps(): WorktreesRouterDeps {
   if (!deps)
     throw new Error(

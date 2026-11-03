@@ -30,6 +30,7 @@
     "@slayzone/computer-runtime": "workspace:*",
     "@slayzone/chat-runtime": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
