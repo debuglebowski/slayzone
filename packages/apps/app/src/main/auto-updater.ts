@@ -55,29 +55,40 @@ function getAutoUpdater() {
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 
+/**
+ * One background update check. Never throws and never leaves a rejection unhandled:
+ * a failed check (offline, DNS, server error, a build without app-update.yml) is
+ * already surfaced once by the updater's own 'error' event, so here it is only logged.
+ *
+ * The boot check used to be `try { checkForUpdatesAndNotify() } catch {}`, whose try
+ * sees only a synchronous throw — every failed boot check became an unhandled
+ * rejection (`main.unhandled_rejection` on each boot of the 2026-11-03 pilot).
+ */
+function checkInBackground(label: 'boot' | 'periodic' | 'resume'): void {
+  const failed = (err: unknown): void => {
+    console.error(`[updater] ${label} check failed:`, err instanceof Error ? err.message : err)
+  }
+  let check: Promise<unknown>
+  try {
+    check = getAutoUpdater().checkForUpdatesAndNotify()
+  } catch (err) {
+    failed(err)
+    return
+  }
+  check.catch(failed)
+}
+
 export function initAutoUpdater(): void {
   if (!app.isPackaged) return
-  try {
-    getAutoUpdater().checkForUpdatesAndNotify()
-  } catch (err) {
-    console.error('[updater] init failed:', err instanceof Error ? err.message : err)
-  }
+  checkInBackground('boot')
   setInterval(() => {
     console.log('[updater] periodic check')
-    getAutoUpdater()
-      .checkForUpdatesAndNotify()
-      .catch((err) => {
-        console.error('[updater] periodic check failed:', err instanceof Error ? err.message : err)
-      })
+    checkInBackground('periodic')
   }, CHECK_INTERVAL_MS)
 
   powerMonitor.on('resume', () => {
     console.log('[updater] resume check')
-    getAutoUpdater()
-      .checkForUpdatesAndNotify()
-      .catch((err) => {
-        console.error('[updater] resume check failed:', err instanceof Error ? err.message : err)
-      })
+    checkInBackground('resume')
   })
 }
 

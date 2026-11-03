@@ -40,13 +40,18 @@ vi.mock('posthog-js', () => ({ default: posthog }))
 
 const convex = vi.hoisted(() => ({
   constructed: [] as string[],
+  options: [] as unknown[],
   closed: [] as string[],
   sessionMounts: 0
 }))
 vi.mock('convex/react', () => {
   class ConvexReactClient {
-    constructor(readonly url: string) {
+    constructor(
+      readonly url: string,
+      options?: unknown
+    ) {
       convex.constructed.push(url)
+      convex.options.push(options)
     }
     async close(): Promise<void> {
       convex.closed.push(this.url)
@@ -178,6 +183,7 @@ const posthogReached = () =>
 beforeEach(() => {
   for (const fn of Object.values(posthog)) fn.mockClear()
   convex.constructed.length = 0
+  convex.options.length = 0
   convex.closed.length = 0
   convex.sessionMounts = 0
   appMounts = 0
@@ -296,5 +302,18 @@ describe('ConvexAuthBootstrap outside a TelemetryProvider', () => {
     await flush()
     expect(convex.constructed).toEqual([])
     expect(leaderboard()).toBe('false')
+  })
+})
+
+// Convex's default registers a `beforeunload` that vetoes the unload while a request
+// has no reply yet. In Electron there is no dialog: the veto silently cancels the
+// window's close, and with it the app's quit (packaged pilot 2026-11-03: every normal
+// quit hit the 15s watchdog). A background telemetry client never holds a window open.
+describe('the Convex client', () => {
+  it('never vetoes a page unload', async () => {
+    renderApp('anonymous', true)
+    await flush()
+    expect(convex.constructed).toEqual([CONVEX_URL])
+    expect(convex.options).toEqual([expect.objectContaining({ unsavedChangesWarning: false })])
   })
 })

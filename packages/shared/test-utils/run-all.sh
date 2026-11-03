@@ -261,6 +261,8 @@ run_harness packages/domains/diagnostics/src/electron/batching.test.ts
 # Write-queue flush timer never holds a process open; beforeExit flushes what it held.
 run_harness packages/domains/diagnostics/src/server/flush-on-exit.test.ts
 run_harness packages/domains/diagnostics/src/server/chat-privacy.test.ts
+# Uncaught/rejected errors keep their identity (class/code/syscall/errno) for the privacy filter.
+run_harness packages/domains/diagnostics/src/electron/error-payload.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_harness packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
@@ -412,6 +414,10 @@ run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migratio
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
 run_harness packages/apps/app/src/main/lifecycle/quit-reap-child.test.ts
+# No page can veto its unload (a veto silently cancelled the window close and the app quit).
+run_harness packages/apps/app/src/main/lifecycle/unload-veto.test.ts
+# Background update checks never leave a rejection unhandled (pilot: startup unhandled_rejection).
+run_harness packages/apps/app/src/main/auto-updater.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
 # The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).

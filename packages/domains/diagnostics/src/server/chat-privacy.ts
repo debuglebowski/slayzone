@@ -92,6 +92,17 @@ const vocabulary = new Set([
   'PreCompact',
   'Notification'
 ])
+/**
+ * An error's IDENTITY, never its text: the class, Node's error code, the failing
+ * syscall. Each must be a bare identifier — anything with a space, a slash or a quote
+ * (where a path or a chat could hide) is dropped. Without these, a withheld message
+ * left a rejection with no JS frames (an fs error) as an empty `{}`.
+ */
+const errorIdentity: Record<string, RegExp> = {
+  errorClass: /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/,
+  errorCode: /^[A-Z][A-Z0-9_]{1,63}$/,
+  errorSyscall: /^[a-z][a-z0-9_]{0,31}$/
+}
 function metadata(value: unknown, depth = 0): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 4) return {}
   const safe: Record<string, unknown> = {}
@@ -110,7 +121,9 @@ function metadata(value: unknown, depth = 0): Record<string, unknown> {
     if (typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item)))
       safe[key] = item
     else if (typeof item === 'string') {
-      if ((key === 'id' || /Ids?$/.test(key)) && /^[A-Za-z0-9._:/-]{1,200}$/.test(item))
+      if (key in errorIdentity) {
+        if (errorIdentity[key].test(item)) safe[key] = item
+      } else if ((key === 'id' || /Ids?$/.test(key)) && /^[A-Za-z0-9._:/-]{1,200}$/.test(item))
         safe[key] = item
       else if (vocabulary.has(item)) safe[key] = item
       else if (['path', 'route', 'op', 'method'].includes(key) && /^chat\.[A-Za-z.]+$/.test(item))

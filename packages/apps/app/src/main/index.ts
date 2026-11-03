@@ -564,6 +564,7 @@ import {
 } from './lifecycle/sentinel'
 import { drainDiagnosticsForQuit } from './lifecycle/quit-diagnostics'
 import { QUIT_CHILD_REAP_MS, reapChildForQuit } from './lifecycle/quit-reap-child'
+import { overrideUnloadVetoes } from './lifecycle/unload-veto'
 import {
   acquireLockWithSelfHeal,
   lockOutcomeIsAcquired,
@@ -4556,6 +4557,19 @@ const webviewOps = {
 const WEBVIEW_INIT_SCRIPT = WEBVIEW_DESKTOP_HANDOFF_SCRIPT
 
 app.on('web-contents-created', (_, wc) => {
+  // No page can veto its unload: Electron has no dialog for it, so a veto silently
+  // cancels the close — and an app quit with it (see lifecycle/unload-veto.ts).
+  overrideUnloadVetoes(wc, {
+    isQuitting: () => quitRequested,
+    record: ({ contentsType, duringQuit }) =>
+      recordDiagnosticEvent({
+        level: duringQuit ? 'warn' : 'info',
+        source: 'main',
+        event: 'app.unload_veto_overridden',
+        payload: { contentsType, duringQuit }
+      })
+  })
+
   // Handoff blocking helpers — check policy map at invocation time (lazy guard).
   // Works for both legacy <webview> and WCV-managed views because both populate
   // webviewDesktopHandoffPolicy via their respective paths.

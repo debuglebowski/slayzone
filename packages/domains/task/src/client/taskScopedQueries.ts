@@ -1,5 +1,8 @@
 import { useEffect } from 'react'
 import { useQueryClient, type Query, type QueryClient } from '@tanstack/react-query'
+import { useSubscription } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
+import { useTRPC } from './trpc'
 
 /**
  * The per-task queries an open task tab reads, refreshed from ONE place.
@@ -108,6 +111,27 @@ export function useTaskScopedQueriesFreshOnReveal(
     }
     return undefined
   }, [taskId, isVisible, queryClient])
+}
+
+/**
+ * The `tasks-changed` refresh for a renderer WITHOUT the app shell — a task opened in
+ * its own window. The main window's one subscription lives in the board's data hook
+ * (`useTasksData`), which also patches the board and scopes the refresh with the
+ * board's parent links; a task window has neither, so nothing refreshed its per-task
+ * queries and an artifact created outside the app (CLI, REST, an agent) never showed
+ * in that window's open Artifacts panel until Reload.
+ *
+ * Every event refreshes every per-task query in this renderer: a task window holds
+ * one task's few queries, and without the board it cannot tell whether an event's
+ * task is a child of its own (whose sub-task list would change).
+ */
+export function useTaskScopedQueriesFreshOnTasksChanged(): void {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const onChanged = useStableCallback(() => {
+    void refreshTaskScopedQueries(queryClient, null)
+  })
+  useSubscription(trpc.notify.onTasksChanged.subscriptionOptions(undefined, { onData: onChanged }))
 }
 
 /** Test seam. */
