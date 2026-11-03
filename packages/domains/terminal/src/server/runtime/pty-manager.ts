@@ -1786,7 +1786,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       rawFile: string,
       rawArgs: string[],
       deadlineMs: number | undefined,
-      admission?: PtySpawnAdmission
+      admission?: PtySpawnAdmission,
+      carryOutput?: { preamble: string }
     ): PtySpawnSpec => ({
       sessionId,
       taskId,
@@ -1804,7 +1805,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         : {}),
       ...(deadlineMs !== undefined ? { startupTimeoutMs: deadlineMs } : {}),
       ...(admission ? { admission } : {}),
-      detection
+      detection,
+      ...(carryOutput ? { carryOutput } : {})
     })
     // Synchronous spawn — the hub-local path (and every recovery re-spawn). Throws
     // if the active backend returns a Promise: only a remote (computerId != null)
@@ -1828,10 +1830,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       rawFile: string,
       rawArgs: string[],
       deadlineMs: number | undefined,
-      admission?: PtySpawnAdmission
+      admission?: PtySpawnAdmission,
+      carryOutput?: { preamble: string }
     ): Promise<pty.IPty> =>
       (await getPtyBackend().spawn(
-        buildSpec(rawFile, rawArgs, deadlineMs, admission)
+        buildSpec(rawFile, rawArgs, deadlineMs, admission, carryOutput)
       )) as unknown as pty.IPty
     if (opts.adoptPty) {
       // Warm-process adoption: the agent is already running ON THE COMPUTER. Adopting
@@ -2789,7 +2792,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
               // continuation rather than falling through synchronously below. On
               // failure we finalize there — the session must never be left with a
               // dead pty and no exit recorded.
-              void spawnRemote(spawnFile, shellOnlyArgs, recoveryDeadlineMs).then(
+              // The owner keeps ONE scrollback across the process change: the
+              // agent's output, this line, then the recovery shell's.
+              void spawnRemote(spawnFile, shellOnlyArgs, recoveryDeadlineMs, undefined, {
+                preamble: buildRecoveryMessage(terminalMode, exitCode)
+              }).then(
                 (fallbackShellPty) => {
                   // The session can be torn down (tab closed, task killed, app
                   // quitting) while the spawn is in flight — the local path cannot

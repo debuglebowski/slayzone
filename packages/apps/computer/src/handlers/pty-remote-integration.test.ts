@@ -162,6 +162,48 @@ describe('desktop hub to remote computer PTY', () => {
     }
   }, 15_000)
 
+  it('a recovery spawn continues ONE scrollback on the computer, without re-delivering it', async () => {
+    const { backend, computer, spec } = setup()
+    try {
+      const detection = { mode: 'claude-code', resuming: false }
+      const agent = (await backend.spawn({
+        ...spec,
+        computerShellCommand: 'printf "agent-out\\n"; exit 1',
+        detection
+      })) as PtyHandle
+      const exited = new Promise<void>((resolve) => agent.onExit(() => resolve()))
+      await agent.whenSpawned
+      await exited
+
+      const shell = (await backend.spawn({
+        ...spec,
+        computerShellCommand: 'printf "shell-out\\n"; exec cat',
+        detection,
+        carryOutput: { preamble: '[agent exited]\r\n' }
+      })) as PtyHandle
+      const live: string[] = []
+      shell.onData((d) => live.push(d))
+      await shell.whenSpawned
+      await vi.waitFor(() => expect(live.join('')).toContain('shell-out'), { timeout: 8_000 })
+      // The continued scrollback is not delivered again as new output.
+      expect(live.join('')).not.toContain('agent-out')
+      expect(live.join('')).not.toContain('[agent exited]')
+
+      const { frames } = computer.handlers['pty.getBufferSince']({ sessionId, seq: -1 }) as {
+        frames: Array<{ seq: number; data: string }>
+      }
+      const text = frames.map((f) => f.data).join('')
+      expect(text.indexOf('agent-out')).toBeGreaterThanOrEqual(0)
+      expect(text.indexOf('agent-out')).toBeLessThan(text.indexOf('[agent exited]'))
+      expect(text.indexOf('[agent exited]')).toBeLessThan(text.indexOf('shell-out'))
+      const seqs = frames.map((f) => f.seq)
+      expect(seqs).toEqual([...seqs].sort((a, b) => a - b))
+      shell.kill()
+    } finally {
+      computer.disposeAll()
+    }
+  }, 20_000)
+
   it('without `detection` the handle reports none and the hub keeps detecting', async () => {
     const { backend, computer, spec } = setup()
     try {

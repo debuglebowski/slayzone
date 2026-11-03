@@ -606,6 +606,19 @@ export const ptySpawnParamsSchema = z
      * Absent: no detection here (an older hub parses the output itself).
      */
     detection: ptyDetectionParamsSchema.optional(),
+    /**
+     * This spawn CONTINUES the session's output: a recovery shell after the agent
+     * exited. The computer reuses the reaped attempt's buffer (seq continues), appends
+     * `preamble` (the hub's "agent exited" line) and returns the seq it reached, so
+     * the session keeps ONE scrollback across the process change. Absent from an
+     * older hub; an older computer ignores it and starts fresh.
+     */
+    carryOutput: z
+      .object({
+        fromSpawnId: z.string().min(1),
+        preamble: z.string().max(4096)
+      })
+      .optional(),
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
     /** New computers resolve their own login shell; command/args remain for older peers. */
@@ -662,7 +675,9 @@ export const ptySpawnResultSchema = z.object({
   startupDeadline: z.literal(true).optional(),
   /** The computer runs the requested `detection`. Absent from a computer (or a
    *  retained session host) that predates it — the hub then detects itself. */
-  detection: z.literal(true).optional()
+  detection: z.literal(true).optional(),
+  /** With `carryOutput`: the highest seq already in the continued buffer. */
+  seq: z.number().int().optional()
 })
 export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 

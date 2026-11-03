@@ -939,10 +939,16 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
  * out-of-order frames trigger a `pty.getBufferSince` backfill so delivery stays
  * monotonic. Sessions are disposed on `pty.exit` and on computer loss/disconnect.
  */
+/** The computer keeps a reaped pty's scrollback this long for a continuing spawn. */
+const PTY_CARRY_WINDOW_MS = 60_000
+
 export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyBackend {
   const { gateway, resolveComputerId, gate } = options
   const sessions = new Map<string, PtyEntry>()
   const spawnFlights = new Map<string, Promise<void>>()
+  /** The latest spawn attempt per session key, outliving its entry: what a
+   *  continuing spawn (`carryOutput`) continues from. */
+  const lastSpawnIds = new Map<string, string>()
 
   function drain(entry: PtyEntry): void {
     if (entry.sealed) return
@@ -1041,6 +1047,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // synthetic -1 ("refused" / "confirmed without a pid").
     entry.pendingSpawn = undefined
     if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
+    // A continuing spawn follows an exit at once; past the computer's carry window
+    // there is nothing left to continue.
+    const { key, spawnId } = entry
+    if (spawnId !== undefined) {
+      setTimeout(() => {
+        if (lastSpawnIds.get(key) === spawnId) lastSpawnIds.delete(key)
+      }, PTY_CARRY_WINDOW_MS).unref?.()
+    }
     entry.exitEmitter.emit({
       exitCode,
       signal: signal ?? undefined,
@@ -1090,6 +1104,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     resume: (entry, listed) => {
       entry.detached = false
       entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
+      // A continued spawn whose reply was lost: its resume point is unknown, so the
+      // backfill below may repeat some scrollback rather than lose output.
+      entry.sealed = false
       // A spawn confirmed by listing (its reply was lost) is acknowledged here.
       if (listed.detection) ackDetection(entry)
       // Clear the backfill latch: the gap that matters now is whatever the
@@ -1346,6 +1363,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
       const { entry, handle, setPid } = register(computerId, sessionId, processName, true)
       entry.spawnId = warmId
+      lastSpawnIds.set(sessionKey(computerId, sessionId), warmId)
       try {
         const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
           warmId,
@@ -1391,11 +1409,15 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // any input written meanwhile — waits behind it, and a refusal rejects
         // `whenSpawned` without anything reaching the computer.
         const admitted = gate ? gate(computerId, { kind: 'task', id: spec.taskId }) : null
+        // A continuing spawn's buffer already holds the previous process's frames:
+        // sealed until the reply says where its seqs resume, or a backfill from -1
+        // would deliver that scrollback a second time.
+        const continuesFrom = spec.carryOutput ? lastSpawnIds.get(key) : undefined
         const { entry, handle, setPid } = register(
           computerId,
           spec.sessionId,
           spec.file,
-          false,
+          continuesFrom !== undefined,
           admitted
         )
 
@@ -1403,6 +1425,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // `spawnIdField` in frames.ts.
         const spawnId = randomUUID()
         entry.spawnId = spawnId
+        lastSpawnIds.set(key, spawnId)
         // The startup deadline travels with the spawn: the computer sees the output
         // directly, so only it can tell a silent session from one whose output is
         // merely still in flight to a stalled hub.
@@ -1417,6 +1440,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           ...(spec.admission ? { admission: spec.admission } : {}),
           // Detection runs where the output is; acknowledged in the reply.
           ...(spec.detection ? { detection: spec.detection } : {}),
+          ...(continuesFrom !== undefined && spec.carryOutput
+            ? { carryOutput: { fromSpawnId: continuesFrom, preamble: spec.carryOutput.preamble } }
+            : {}),
           command: spec.file,
           args: spec.args,
           ...(!spec.transport
@@ -1469,6 +1495,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
               (res) => {
                 const parsed = ptySpawnResultSchema.safeParse(res)
+                if (entry.sealed) {
+                  // Continued: frames up to the reply's seq are the scrollback this
+                  // session already has. An older computer started fresh (no seq).
+                  if (parsed.success && parsed.data.seq !== undefined)
+                    entry.lastSeq = Math.max(entry.lastSeq, parsed.data.seq)
+                  entry.sealed = false
+                  drain(entry)
+                }
                 if (spec.detection && parsed.success && parsed.data.detection) ackDetection(entry)
                 confirm(
                   parsed.success ? parsed.data.pid : null,

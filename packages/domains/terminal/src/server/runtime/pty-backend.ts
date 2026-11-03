@@ -82,6 +82,12 @@ export interface PtySpawnSpec {
    * `PtyHandle.detectsOutput` false and the caller keeps detecting.
    */
   detection?: PtyDetectionSpec
+  /**
+   * This spawn continues the session's output (the recovery shell after an agent
+   * exit): the owner keeps the previous process's scrollback, adds `preamble`, and
+   * the new output follows it. Ignored by an owner that keeps no output.
+   */
+  carryOutput?: { preamble: string }
 }
 
 /** What output detection needs for one session (mirrors `PtyOutputDetector` options). */

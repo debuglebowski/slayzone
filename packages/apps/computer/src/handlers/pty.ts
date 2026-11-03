@@ -64,7 +64,7 @@ import {
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
-import { ExitTombstones } from '../exit-tombstones'
+import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '@slayzone/terminal/pty-detection'
 import {
   createSpawnAdmission,
@@ -366,6 +366,8 @@ export function createPtyHandlers(
       startupTimeoutMs?: number
       taskId?: string
       detection?: PtyDetectionParams
+      /** A continued buffer (`carryOutput`); absent = a fresh one. */
+      buffer?: RingBuffer
     }
   ): PtySession {
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
@@ -387,7 +389,7 @@ export function createPtyHandlers(
       throw explainSpawnFailure(err)
     }
 
-    const buffer = new RingBuffer(MAX_BUFFER_SIZE)
+    const buffer = opts.buffer ?? new RingBuffer(MAX_BUFFER_SIZE)
     let resolveExit!: () => void
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
@@ -560,8 +562,13 @@ export function createPtyHandlers(
       exitCode,
       signal,
       reason,
-      // The hub never got this exit, so it may be missing output too.
-      ...(delivered ? {} : { buffer: session.buffer })
+      // The hub never got this exit, so it may be missing output too. A piped
+      // session's buffer is the ONLY copy: kept briefly for a continuing spawn.
+      ...(delivered
+        ? session.signals
+          ? { buffer: session.buffer, bufferUntil: Date.now() + CARRY_WINDOW_MS }
+          : {}
+        : { buffer: session.buffer })
     })
   }
 
@@ -590,7 +597,7 @@ export function createPtyHandlers(
     slot.release()
   }
 
-  type SpawnReply = { pid: number; startupDeadline?: true; detection?: true }
+  type SpawnReply = { pid: number; startupDeadline?: true; detection?: true; seq?: number }
 
   function startSession(params: PtySpawnParams): SpawnReply {
     const shell = params.computerShell ? resolveUserShell() : params.command
@@ -600,10 +607,20 @@ export function createPtyHandlers(
           ...(params.computerShellCommand ? ['-c', params.computerShellCommand] : [])
         ]
       : params.args
+    // A continuing spawn keeps the session's scrollback: the reaped attempt's
+    // buffer (seq continues), then the hub's preamble, then the new process.
+    let carried: RingBuffer | undefined
+    if (params.carryOutput) {
+      carried =
+        tombstones.takeBuffer(params.sessionId, params.carryOutput.fromSpawnId) ??
+        new RingBuffer(MAX_BUFFER_SIZE)
+      if (params.carryOutput.preamble) carried.append(params.carryOutput.preamble)
+    }
     const session = spawnSession(params.sessionId, {
       ...params,
       command: shell,
-      args
+      args,
+      ...(carried ? { buffer: carried } : {})
     })
     ctx.log('pty spawned', {
       sessionId: params.sessionId,
@@ -613,7 +630,8 @@ export function createPtyHandlers(
     return {
       pid: session.proc.pid,
       ...(session.deadline ? { startupDeadline: true as const } : {}),
-      ...(session.signals ? { detection: true as const } : {})
+      ...(session.signals ? { detection: true as const } : {}),
+      ...(carried ? { seq: carried.getCurrentSeq() } : {})
     }
   }
 
