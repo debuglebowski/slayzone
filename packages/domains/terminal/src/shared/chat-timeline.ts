@@ -84,6 +84,8 @@ export type TimelineItem =
       deliveryError?: string
       /** Files attached to the message (absent when none). */
       attachments?: ChatAttachment[]
+      /** Taken into the agent's running turn ("Send now"): the turn goes on after it. */
+      joinsTurn?: true
     }
   /** A turn that failed without a reply: the CLI's own error text (auth, API, …). */
   | { kind: 'turn-error'; text: string; timestamp: number; parentToolUseId?: string }
@@ -1325,7 +1327,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           text: event.text,
           timestamp: ts,
           ...(event.id ? { id: event.id, delivery: 'queued' as const } : {}),
-          ...attachmentsOf(event.content)
+          ...attachmentsOf(event.content),
+          joinsTurn: true
         }
         return { ...state, ...withUserRow(state, joined) }
       }

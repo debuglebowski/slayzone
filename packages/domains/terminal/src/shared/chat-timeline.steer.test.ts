@@ -53,3 +53,12 @@ test('without the flag the same message would be read as a crashed turn (control
   const s = run([...turnUpToTool, { kind: 'user-message', id: 's1', text: 'also run lint' }])
   expect(rows(s).map((r) => r.kind)).toContain('interrupted')
 })
+
+test('a joined message row says it joined the turn', () => {
+  const s = run([
+    ...turnUpToTool,
+    { kind: 'user-message', id: 's1', text: 'also run lint', joinsTurn: true }
+  ])
+  expect(rows(s).at(-1)).toMatchObject({ kind: 'user-text', joinsTurn: true })
+  expect(rows(s)[0]).not.toHaveProperty('joinsTurn')
+})

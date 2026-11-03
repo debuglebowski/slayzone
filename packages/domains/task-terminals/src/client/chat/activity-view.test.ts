@@ -189,3 +189,37 @@ describe('activity view: turn trigger', () => {
     expect(view.rows).not.toContain(trigger)
   })
 })
+
+describe('activity view: a message sent into the running turn', () => {
+  const user = { kind: 'user-text', id: 'u1', text: 'run the build', timestamp: 0 } as TimelineItem
+  const tool = {
+    kind: 'tool',
+    invocation: { id: 't1', name: 'Bash', status: 'done', input: {} },
+    timestamp: 1
+  } as TimelineItem
+  const joined = {
+    kind: 'user-text',
+    id: 's1',
+    text: 'also run lint',
+    joinsTurn: true,
+    timestamp: 2
+  } as TimelineItem
+  const after = {
+    kind: 'tool',
+    invocation: { id: 't2', name: 'Bash', status: 'pending', input: {} },
+    timestamp: 3
+  } as TimelineItem
+
+  it('marks the part before it as continued after that message', () => {
+    const view = activityView([user, tool, joined, after], true)
+    expect(view.turns.get(user)).toMatchObject({ continuedBy: joined, active: false })
+    expect(view.turns.get(joined)).toMatchObject({ active: true })
+    expect(view.turns.get(joined)?.continuedBy).toBeUndefined()
+  })
+
+  it('an ordinary next message ends the turn without the mark', () => {
+    const next = { ...joined, joinsTurn: undefined } as TimelineItem
+    const view = activityView([user, tool, next, after], true)
+    expect(view.turns.get(user)?.continuedBy).toBeUndefined()
+  })
+})

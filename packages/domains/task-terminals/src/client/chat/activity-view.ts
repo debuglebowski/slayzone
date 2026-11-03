@@ -14,6 +14,11 @@ export interface ActivityTurn {
   final: Extract<TimelineItem, { kind: 'text' }> | null
   result?: Extract<TimelineItem, { kind: 'result' }>
   userMessageId?: string
+  /**
+   * The message sent into this turn while it ran ("Send now"): the agent read it
+   * here and the turn goes on after it, so this part has no answer of its own.
+   */
+  continuedBy?: Extract<TimelineItem, { kind: 'user-text' }>
   active: boolean
   /** When no other visible row exists, the host itself is an activity item. */
   hostIsActivity: boolean
@@ -50,7 +55,11 @@ export function activityView(
   const hosts = new Map<TimelineItem, TimelineItem>()
   let segment: TimelineItem[] = []
   let completed = false
-  const flush = (active: boolean, historyComplete = true): void => {
+  const flush = (
+    active: boolean,
+    historyComplete = true,
+    continuedBy?: Extract<TimelineItem, { kind: 'user-text' }>
+  ): void => {
     if (!segment.length) return
     // A text / thinking block with no text shows nothing (Claude's hidden
     // thinking is one): no activity, no row. One still streaming counts.
@@ -118,6 +127,7 @@ export function activityView(
         final,
         result,
         userMessageId: user?.id,
+        ...(continuedBy ? { continuedBy } : {}),
         active,
         hostIsActivity,
         trigger
@@ -141,7 +151,7 @@ export function activityView(
       flush(false, false)
       output.push(item)
     } else if (item.kind === 'user-text') {
-      flush(false)
+      flush(false, true, item.joinsTurn ? item : undefined)
       segment.push(item, ...(attached.get(item) ?? []))
     } else {
       segment.push(item)
