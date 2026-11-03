@@ -1,60 +1,15 @@
 import { useState, type RefObject } from 'react'
 import { Button } from '@slayzone/ui'
 import type { ChatPrompt } from '@slayzone/terminal/client'
-import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import type { PromptAnswer } from './PermissionPrompt'
 import { PromptRows } from './PromptRows'
+import {
+  CODEX_CANCEL as CANCEL,
+  CODEX_SKIP as SKIP,
+  codexQuestionsOf,
+  type CodexQuestion
+} from './question-options'
 import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
-
-/** Codex's user-input questions (`item/tool/requestUserInput`). */
-export const CODEX_QUESTIONS = 'item/tool/requestUserInput'
-
-interface CodexQuestion {
-  id: string
-  header: string
-  question: string
-  /** A free-text answer besides the options. */
-  isOther: boolean
-  /** The answer is typed hidden (a token, a password). */
-  isSecret: boolean
-  options: Array<{ label: string; description?: string }>
-}
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
-const str = (v: unknown): string => (typeof v === 'string' ? v : '')
-
-export function codexQuestionsOf(input: unknown): CodexQuestion[] {
-  const raw = isRecord(input) && Array.isArray(input.questions) ? input.questions : []
-  return raw.flatMap((q): CodexQuestion[] => {
-    if (!isRecord(q) || !str(q.id)) return []
-    const options = Array.isArray(q.options)
-      ? q.options.flatMap((o) =>
-          isRecord(o) && str(o.label)
-            ? [
-                {
-                  label: str(o.label),
-                  ...(str(o.description) ? { description: str(o.description) } : {})
-                }
-              ]
-            : []
-        )
-      : []
-    return [
-      {
-        id: str(q.id),
-        header: str(q.header),
-        question: str(q.question),
-        isOther: q.isOther === true,
-        isSecret: q.isSecret === true,
-        options
-      }
-    ]
-  })
-}
-
-const SKIP: PermissionDecision = { behavior: 'deny', message: '' }
-const CANCEL: PermissionDecision = { behavior: 'deny', message: '', interrupt: true }
 
 /**
  * The questions Codex asks through requestUserInput: each with its options (one pick) and,

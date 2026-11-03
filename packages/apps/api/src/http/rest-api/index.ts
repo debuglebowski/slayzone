@@ -60,6 +60,8 @@ import { registerPtySubmitRoute } from './pty/submit'
 import { registerPtyKillRoute } from './pty/kill'
 import { registerPtyRespawnRoute } from './pty/respawn'
 import { registerPtyStartRoute } from './pty/start'
+import { registerChatRoutes } from './chat'
+import { registerAgentRoutes } from './agent'
 import { registerBrowserUrlRoute } from './browser/url'
 import { registerBrowserNavigateRoute } from './browser/navigate'
 import { registerBrowserClickRoute } from './browser/click'
@@ -174,6 +176,11 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerPtyKillRoute(app, deps)
   registerPtyRespawnRoute(app, deps)
   registerPtyStartRoute(app, deps)
+
+  // Chat agents (`slay chat`)
+  registerChatRoutes(app, deps)
+  // A task's main agent, chat or terminal (`slay agent`)
+  registerAgentRoutes(app, deps)
 
   // Terminal tabs
   registerTabsCreateRoute(app, deps)

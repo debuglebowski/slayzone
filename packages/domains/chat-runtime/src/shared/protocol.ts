@@ -174,6 +174,7 @@ export const chatOperationSchemas = {
   getReplay: z.tuple([id, z.number().int()]),
   getBufferSince: z.tuple([id, z.number().int()]),
   getInfo: z.tuple([id, z.string().optional()]),
+  getTurnStatus: tab,
   openTimeline: z.tuple([id, z.string()]),
   timelinePages: z.tuple([
     id,
@@ -264,6 +265,7 @@ export const CHAT_READ_OPERATIONS = new Set<ChatOperation>([
   'getReplay',
   'getBufferSince',
   'getInfo',
+  'getTurnStatus',
   'openTimeline',
   'timelinePages',
   'searchTimeline',

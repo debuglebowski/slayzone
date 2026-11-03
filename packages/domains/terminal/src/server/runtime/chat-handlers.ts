@@ -32,7 +32,13 @@ import { listCommands } from '../commands'
 import { listAgents } from '../agents-registry'
 import { listProjectFiles } from '../files-scan'
 import type { UsageMap } from '../autocomplete-usage-store'
-import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal-contracts'
+import type {
+  SkillInfo,
+  CommandInfo,
+  AgentInfo,
+  FileMatch,
+  ChatTurnStatus
+} from '@slayzone/terminal-contracts'
 import type {
   AgentEvent,
   OutgoingUserMessage,
@@ -674,6 +680,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getSessionInfo,
     getSessionTerminalState,
     isTurnOpen,
+    getTurnStatus,
     configureTransport,
     chatEvents
   } = transport
@@ -1382,6 +1389,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
       const info = getSessionInfo(tabId)
       return info && (mode === undefined || info.mode === mode) ? info : null
     },
+    /** Running, parked on a prompt, or done — see `ChatTurnStatus`. Null: no live tab. */
+    getTurnStatus: (tabId: string): ChatTurnStatus | null => getTurnStatus(tabId),
     getWorkspaceChanges,
     getWorkspaceFileDiff,
 

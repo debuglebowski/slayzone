@@ -21,6 +21,7 @@
     "./agents": "./src/server/agents/index.ts",
     "./reducer": "./src/shared/chat-timeline.ts",
     "./chat-prompts": "./src/shared/chat-prompts.ts",
+    "./chat-transcript": "./src/shared/chat-transcript.ts",
     "./timeline-checkpoint": "./src/shared/chat-timeline-checkpoint.ts",
     "./timeline-projection": "./src/server/runtime/chat-timeline-projection.ts",
     "./terminal-themes": "./src/client/terminal-themes.ts",

@@ -101,6 +101,22 @@ export interface PtyAccess {
   getState: (sessionId: string) => TerminalState | null
 }
 
+/**
+ * Chat runtime access for the `/api/chat/*` and `/api/agent/*` routes — the hub's
+ * chat relay (`getChatDeps()`: ops, queue, events), the shared state bus chat
+ * states flow through, and the task's main-agent resolution. Absent → chat
+ * routes 501.
+ */
+export interface ChatAccess {
+  deps: () => import('@slayzone/terminal/server').ChatDeps
+  /** A session's state changes (`${taskId}:${tabId}`); chat and pty share this bus. */
+  onStateChange: (cb: (sessionId: string, state: TerminalState) => void) => () => void
+  /** What `startMainAgent` resolves for the task (main tab, mode, folder). */
+  launch: (taskId: string) => Promise<import('@slayzone/task/server').MainAgentLaunch>
+  /** Start the task's main agent unless one is live (`task.startMainAgent`). */
+  startMain: (taskId: string) => Promise<import('@slayzone/task/server').StartMainAgentResult>
+}
+
 /** Process-manager access. Mirrors the host's live process registry (module
  *  singleton in the Electron main today). Absent → processes routes 501. */
 export interface ProcessesAccess {
@@ -219,6 +235,7 @@ export interface RestApiDeps {
   menu?: TypedEmitter<MenuEventMap>
   taskBus?: TaskOpsBus
   pty?: PtyAccess
+  chat?: ChatAccess
   terminalStateBridge?: TerminalStateBridge
   processes?: ProcessesAccess
   browser?: BrowserAccess

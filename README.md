@@ -100,6 +100,14 @@ slay tasks open <id>
 
 # Control the embedded browser (inside task terminals)
 slay tasks browser navigate "https://localhost:3000"
+
+# Drive a task's agent (chat or terminal): send, wait, read
+slay agent send --task <id> "Fix the failing tests" --wait
+slay agent read --task <id> --last 5
+
+# Chat-mode agents: answer what they ask
+slay chat prompts --task <id>
+slay chat allow <requestId> --task <id>
 ```
 
 Install via **SlayZone → Settings → About → Install**, or manually:

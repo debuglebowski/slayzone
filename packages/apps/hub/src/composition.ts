@@ -63,7 +63,10 @@ import {
   registerConversationHealer,
   registerConversationResolver,
   taskSessionStore,
-  setTaskDeps
+  setTaskDeps,
+  getTaskOp,
+  resolveMainAgentLaunch,
+  startMainAgent
 } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task-contracts'
 import {
@@ -127,6 +130,7 @@ import {
   setAgentLifecycleEvents,
   setPtyDeps,
   setChatDeps,
+  getChatDeps,
   setChatAttachmentReader,
   createWorkspaceChangesStore,
   type AgentLifecycleEventMap,
@@ -136,7 +140,8 @@ import {
   SIDE_QUESTION_TIMEOUT_MS,
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode,
-  warmPoolEnabled
+  warmPoolEnabled,
+  type TerminalState
 } from '@slayzone/terminal-contracts'
 import {
   createIntegrationOps,
@@ -1572,6 +1577,18 @@ export function composeServer(opts: {
       subscribeToStateChange,
       onSessionChange,
       getState
+    },
+    // `slay chat` / `slay agent`: the chat relay, the state bus chat states share
+    // with ptys, and the task's main-agent resolution (`task.startMainAgent`'s).
+    chat: {
+      deps: getChatDeps,
+      onStateChange: (cb) => {
+        const listener = (sessionId: string, state: TerminalState) => cb(sessionId, state)
+        ptyEvents.on('state-change', listener)
+        return () => ptyEvents.off('state-change', listener)
+      },
+      launch: (taskId) => resolveMainAgentLaunch(db, taskId, (id) => getTaskOp(db, id)),
+      startMain: (taskId) => startMainAgent(db, { taskId }, (id) => getTaskOp(db, id))
     },
     terminalStateBridge,
     processes: {

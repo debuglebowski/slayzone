@@ -78,3 +78,14 @@ test('new main operations cross the computer boundary with their full input', ()
     })
   ).toMatchObject({ method: 'cancelSideQuestion' })
 })
+
+test('getTurnStatus is a tab-keyed read that crosses the computer boundary', async () => {
+  const { CHAT_READ_OPERATIONS } = await import('./protocol')
+  expect(
+    parseChatInvocation({ route, target: 'ops', method: 'getTurnStatus', args: ['tab'] })
+  ).toMatchObject({ method: 'getTurnStatus', args: ['tab'] })
+  expect(() =>
+    parseChatInvocation({ route, target: 'ops', method: 'getTurnStatus', args: [] })
+  ).toThrow()
+  expect(CHAT_READ_OPERATIONS.has('getTurnStatus')).toBe(true)
+})

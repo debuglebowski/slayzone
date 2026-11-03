@@ -10,29 +10,7 @@ import {
 } from './prompt-options'
 import { isPlainKey, isTypingTarget, usePromptKeys, type PromptKeyHandler } from './prompt-keys'
 import type { PromptAnswer } from './PermissionPrompt'
-
-export interface AskOption {
-  label: string
-  description?: string
-  /** Shown beside the options when focused (a mock-up, a snippet). */
-  preview?: string
-}
-export interface AskQuestion {
-  question: string
-  header?: string
-  multiSelect?: boolean
-  options: AskOption[]
-}
-
-export function questionsOf(input: unknown): AskQuestion[] {
-  const qs = (input as { questions?: unknown } | null)?.questions
-  return Array.isArray(qs)
-    ? qs.filter(
-        (q): q is AskQuestion =>
-          q !== null && typeof q === 'object' && typeof (q as AskQuestion).question === 'string'
-      )
-    : []
-}
+import { questionsOf, type AskQuestion } from './question-options'
 
 /** Single-select questions with previews get the TUI's preview pane + notes. */
 function hasPreviews(q: AskQuestion): boolean {

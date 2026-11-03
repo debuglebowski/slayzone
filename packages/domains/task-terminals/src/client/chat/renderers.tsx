@@ -52,7 +52,7 @@ import {
   shortenPath,
   type ToolProps
 } from './tool-cards/card-shell'
-import { questionsOf } from './prompts/QuestionPrompt'
+import { questionsOf } from './prompts/question-options'
 import { answersOf, PlanStatus, QuestionStatus, usePromptFor } from './prompts/PromptStatus'
 import { HighlightedText } from './HighlightedText'
 import { CompactionRow } from './CompactionRow'

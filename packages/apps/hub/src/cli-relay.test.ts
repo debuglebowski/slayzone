@@ -66,6 +66,9 @@ test('relay binds current computer owner internally; forbids administrative and 
   expect(await (await request('/api/tasks')).json()).toEqual({ user: 'alice', computer: 'c' })
   owner = 'bob'
   expect(await (await request('/api/tasks')).json()).toEqual({ user: 'bob', computer: 'c' })
+  // `slay chat` drives chat agents from task terminals through the relay.
+  for (const path of ['/api/chat/t1/status', '/api/chat/t1/wait?until=idle'])
+    expect(await (await request(path)).json(), path).toEqual({ user: 'bob', computer: 'c' })
   for (const path of [
     '/api/auth/get-session',
     '/api/hub/users',
