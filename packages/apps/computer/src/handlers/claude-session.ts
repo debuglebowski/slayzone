@@ -4,8 +4,13 @@
  *
  * The chat shows a conversation it resumes (Sessions picker, "Continue in chat"
  * from the terminal) from the CLI's own record, the session file
- * `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<sessionId>.jsonl`.
- * Only that file can be read: the path is built from a jailed cwd and a uuid.
+ * `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<sessionId>.jsonl` —
+ * or another project dir when the session moved folders (EnterWorktree keeps the
+ * file only under the worktree's). Only a `<uuid>.jsonl` under the CLI's projects
+ * dir can be read; the hint cwd is jailed.
+ *
+ * `claudeSession.locate` answers, for the hub's conversation healer and resume,
+ * whether a session's file exists here and which folder to resume it from.
  *
  * The file is append-only and holds a tree: a rewind does not rewrite it, the
  * next record just points its `parentUuid` at an earlier one. The conversation is
@@ -17,15 +22,16 @@
  * @module computer/handlers/claude-session
  */
 
-import { createReadStream, existsSync, realpathSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import {
+  claudeSessionLocateParamsSchema,
   claudeSessionReadParamsSchema,
   HubToComputerMethods,
+  type ClaudeSessionLocateResult,
   type ClaudeSessionReadResult
 } from '@slayzone/computer-transport/shared'
+import { locateClaudeTranscript } from '@slayzone/terminal/claude-transcripts'
 import { assertPathAllowed } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -38,31 +44,6 @@ interface Link {
   parent: string | null
   /** A user / assistant / compaction record of the main chain: part of the conversation. */
   content: boolean
-}
-
-/** The CLI's project-dir name for a cwd: every non-alphanumeric char becomes `-`. */
-function encodeProjectDir(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
-}
-
-function claudeConfigDir(): string {
-  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-}
-
-/** The session file: under the cwd's real path (what the CLI sees), else as given. */
-function sessionFile(cwd: string, sessionId: string): string | null {
-  const candidates = new Set<string>()
-  try {
-    candidates.add(realpathSync(cwd))
-  } catch {
-    // The cwd is gone; the CLI may still have recorded it as given.
-  }
-  candidates.add(cwd)
-  for (const dir of candidates) {
-    const file = join(claudeConfigDir(), 'projects', encodeProjectDir(dir), `${sessionId}.jsonl`)
-    if (existsSync(file)) return file
-  }
-  return null
 }
 
 async function* records(file: string): AsyncGenerator<Record<string, unknown>> {
@@ -127,13 +108,36 @@ export function createClaudeSessionHandlers(
   ctx: HandlerContext,
   getProjectPaths: () => { get(projectId: string): { path: string } | null } | null
 ): HubMethodTable {
+  const hintFolder = (params: { cwd?: string; projectId?: string }): string | undefined =>
+    params.cwd ?? (params.projectId ? getProjectPaths()?.get(params.projectId)?.path : undefined)
+  const isAllowedDir = (dir: string): boolean => {
+    try {
+      assertPathAllowed(dir, ctx.config.allowedRoots)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function locate(rawParams: unknown): Promise<ClaudeSessionLocateResult> {
+    const params = claudeSessionLocateParamsSchema.parse(rawParams)
+    const resolved = hintFolder(params)
+    // No folder known is fine: ids are unique, so they are still found.
+    const cwd = resolved ? assertPathAllowed(resolved, ctx.config.allowedRoots) : ''
+    const sessions: ClaudeSessionLocateResult['sessions'] = []
+    for (const sessionId of params.sessionIds) {
+      const found = await locateClaudeTranscript(sessionId, cwd, { isAllowedDir })
+      sessions.push({ sessionId, found: found != null, resumeCwd: found?.resumeCwd ?? null })
+    }
+    return { sessions }
+  }
+
   async function read(rawParams: unknown): Promise<ClaudeSessionReadResult> {
     const params = claudeSessionReadParamsSchema.parse(rawParams)
-    const resolved =
-      params.cwd ?? (params.projectId ? getProjectPaths()?.get(params.projectId)?.path : undefined)
+    const resolved = hintFolder(params)
     if (!resolved) throw new Error('claudeSession.read: no cwd for this session')
     const cwd = assertPathAllowed(resolved, ctx.config.allowedRoots)
-    const file = sessionFile(cwd, params.sessionId)
+    const file = (await locateClaudeTranscript(params.sessionId, cwd))?.path
     if (!file) return { found: false, records: [], omitted: 0 }
 
     // Pass 1: the links, and the branch's leaf.
@@ -179,5 +183,8 @@ export function createClaudeSessionHandlers(
     return { found: true, records: picked, omitted: branch.length - picked.length }
   }
 
-  return { [HubToComputerMethods.claudeSessionRead]: read }
+  return {
+    [HubToComputerMethods.claudeSessionRead]: read,
+    [HubToComputerMethods.claudeSessionLocate]: locate
+  }
 }

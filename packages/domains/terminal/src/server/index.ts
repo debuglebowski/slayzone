@@ -35,8 +35,17 @@ export {
   claudeTranscriptRetentionMs,
   readClaudeTranscriptMeta,
   listClaudeTranscriptIds,
+  locateClaudeTranscript,
+  type ClaudeTranscriptLocation,
   type ClaudeTranscriptMeta
 } from './claude-transcripts'
+export {
+  setClaudeTranscriptLocator,
+  locateClaudeTranscripts,
+  type ClaudeTranscriptLocator,
+  type ClaudeTranscriptLocateRequest,
+  type ClaudeTranscriptLocated
+} from './runtime/claude-transcript-locator'
 export { getAutoModeEligibility, type AutoModeEligibility } from './auto-mode-eligibility'
 export { supportsChatMode } from './agents/registry'
 export {

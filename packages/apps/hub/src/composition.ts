@@ -82,6 +82,7 @@ import {
   ptyEvents,
   createChatOps,
   setClaudeSessionReader,
+  setClaudeTranscriptLocator,
   createChatQueueOps,
   chatEvents,
   chatQueueEvents,
@@ -198,6 +199,7 @@ import { createComputerProjectSync } from './computer-project-sync'
 import {
   ghExecResultSchema,
   claudeSessionReadResultSchema,
+  claudeSessionLocateResultSchema,
   HubToComputerMethods,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
@@ -1836,6 +1838,26 @@ export function composeServer(opts: {
         }
       )
       return claudeSessionReadResultSchema.parse(res)
+    })
+
+    // Where a Claude conversation's transcript is, and which folder to resume it
+    // from (a session that used EnterWorktree keeps it under the worktree's
+    // project dir). Asked of the computer the session runs on — its disk, not the
+    // hub's. A failure is "unknown" upstream, never "missing".
+    setClaudeTranscriptLocator(async (req) => {
+      const computerId = resolveExecComputer(req.computerId)
+      if (computerId == null) throw new Error('no computer for this session')
+      if (placement.gate) await placement.gate(computerId, { kind: 'task', id: req.taskId })
+      const res = await computerGateway.request(
+        computerId,
+        HubToComputerMethods.claudeSessionLocate,
+        {
+          ...(req.cwd ? { cwd: req.cwd } : {}),
+          ...(req.projectId ? { projectId: req.projectId } : {}),
+          sessionIds: req.sessionIds
+        }
+      )
+      return claudeSessionLocateResultSchema.parse(res).sessions
     })
 
     setSlayExecutor(

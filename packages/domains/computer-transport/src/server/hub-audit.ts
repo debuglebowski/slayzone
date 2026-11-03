@@ -155,6 +155,7 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'gh.exec': { event: 'computer.gh', detail: (p) => ({ subcommand: ghSubcommand(p.args) }) },
   // Read-only, like the fs reads.
   'claudeSession.read': null,
+  'claudeSession.locate': null,
   'computer.setAllowedRoots': {
     event: 'computer.allowed_roots.set',
     detail: (p) => ({ roots: p.roots })

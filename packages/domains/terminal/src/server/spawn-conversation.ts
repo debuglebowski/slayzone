@@ -50,3 +50,30 @@ export function resolveSpawnConversation(input: SpawnConversationInput): SpawnCo
   const shouldMintFresh = !resuming && !input.conversationId && input.supportsFreshPreMint
   return { resolvedExistingId: resolved, resuming, shouldMintFresh }
 }
+
+/**
+ * The last gate before starting a KNOWN conversation id fresh (the initial
+ * command, `claude --session-id <id>`): if that id's transcript exists anywhere
+ * on the agent's computer, starting fresh would make the CLI write a second,
+ * empty conversation under the same id — and supersede the real one the next
+ * time the session changes folder (2026-11-03, task 5c34ebb9: a 10 MB
+ * conversation lost after EnterWorktree). So: found ⇒ resume, always.
+ *
+ * Unknown (`found: null`, the computer could not answer) depends on who claimed
+ * the id was unused:
+ *  - `healer-never-written`: the healer inferred "never prompted" from a missing
+ *    file. Without a lookup to confirm it, resume — the worst case is the honest
+ *    "session expired" overlay, never a lost conversation.
+ *  - `caller`: an id handed to a fresh spawn (a new task's pre-assigned id).
+ *    Resuming an id that was never used would show a false "expired", so keep
+ *    the fresh start.
+ */
+export function decideFreshReuse(input: {
+  source: 'healer-never-written' | 'caller'
+  /** Transcript found anywhere on the agent's computer; null = unknown. */
+  found: boolean | null
+}): 'fresh' | 'resume' {
+  if (input.found === true) return 'resume'
+  if (input.found === null && input.source === 'healer-never-written') return 'resume'
+  return 'fresh'
+}

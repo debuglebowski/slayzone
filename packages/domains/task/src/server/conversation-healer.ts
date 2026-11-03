@@ -2,11 +2,11 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import {
   setConversationHealer,
   setConversationResolver,
-  claudeTranscriptExists,
   claudeTranscriptPath,
   claudeTranscriptRetentionMs,
   listClaudeTranscriptIds,
   readClaudeTranscriptMeta,
+  locateClaudeTranscripts,
   type ConversationHealRequest
 } from '@slayzone/terminal/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -71,7 +71,8 @@ export function registerConversationHealer(
   deps: ConversationHealerDeps
 ): void {
   const { getCurrentBranch } = deps
-  setConversationHealer(async ({ taskId, mode, cwd, storedId }: ConversationHealRequest) => {
+  setConversationHealer(async (req: ConversationHealRequest) => {
+    const { taskId, mode, cwd, storedId } = req
     // Only claude-code persists transcripts at the path we read.
     if (mode !== 'claude-code') return { id: storedId, healed: false }
     try {
@@ -91,11 +92,28 @@ export function registerConversationHealer(
       const owned = await listResumeCandidates(db, taskId, mode).catch(() => [] as string[])
       const history = [...new Set([...owned, ...legacyHistory])]
       const storedInHistory = history.includes(storedId)
-      const storedExists = claudeTranscriptExists(cwd, storedId)
+
+      // Where each transcript is, on the disk of the computer the agent runs on,
+      // in ANY project dir: a session that used EnterWorktree keeps its file only
+      // under the worktree's. A lookup in `cwd` alone read such a session as
+      // "never written" and started it fresh over its own conversation.
+      const located = await locateClaudeTranscripts({
+        taskId,
+        computerId: req.computerId ?? null,
+        projectId: req.projectId ?? null,
+        cwd,
+        sessionIds: [...new Set([storedId, ...history])]
+      })
+      // Unknown (the computer could not answer): it may well exist. Resume it —
+      // the CLI resumes it, or the honest overlay shows. Never fresh, never a
+      // repoint on a guess.
+      const storedLocated = located?.get(storedId)
+      if (!storedLocated) return { id: storedId, healed: false }
+      const storedExists = storedLocated.found
 
       // Rule 1 (hot path): a transcript ON DISK is the only proof the stored id
-      // is resumable → keep, no disk scan. History membership alone is NOT proof
-      // (a zero-turn/pruned session is in history but has no `.jsonl`), so it no
+      // is resumable → keep. History membership alone is NOT proof (a
+      // zero-turn/pruned session is in history but has no `.jsonl`), so it no
       // longer short-circuits here — it flows into decideConversationHeal, which
       // repoints to a surviving sibling or surfaces the honest overlay.
       if (storedExists) return { id: storedId, healed: false }
@@ -104,7 +122,8 @@ export function registerConversationHealer(
       const isLegacy = !Number.isNaN(createdAtMs) && createdAtMs < FIX_SHIP_TS
 
       // Rule 2: exact history fallback (which recorded ids still exist on disk).
-      const historyExists = history.map((id) => ({ id, exists: claudeTranscriptExists(cwd, id) }))
+      // An id the computer did not answer for counts as absent: never repoint on a guess.
+      const historyExists = history.map((id) => ({ id, exists: located?.get(id)?.found === true }))
 
       // Rule 3: orphan candidates — gathered lazily, legacy-only.
       let candidates: HealTranscriptMeta[] = []

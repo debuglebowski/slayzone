@@ -52,6 +52,7 @@ run_harness packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 run_harness packages/domains/projects/src/server/project-groups-txns.test.ts
 run_harness packages/domains/task/src/server/ops/conversation-id-heal.test.ts
+run_harness packages/domains/task/src/server/conversation-healer.test.ts
 run_harness packages/domains/task/src/server/ops/task-conversations.test.ts
 run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
@@ -633,6 +634,7 @@ run_harness packages/domains/terminal/src/server/pty-exit-strategy.test.ts
 # Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
 run_harness packages/domains/terminal/src/server/spawn-conversation.test.ts
 run_harness packages/domains/terminal/src/server/claude-transcripts.test.ts
+run_harness packages/domains/terminal/src/server/runtime/claude-transcript-locator.test.ts
 run_harness packages/domains/terminal/src/server/adapters/claude-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/antigravity-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/hook-driven-modes.test.ts
@@ -747,6 +749,8 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
+# createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
+run_harness packages/domains/terminal/src/server/runtime/createpty-resume-location.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 

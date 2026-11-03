@@ -4,7 +4,7 @@
  * ledger-resolved by main) must RESUME, never fresh-mint over it.
  */
 import { describe, expect, test } from 'vitest'
-import { resolveSpawnConversation } from './spawn-conversation'
+import { decideFreshReuse, resolveSpawnConversation } from './spawn-conversation'
 
 // 1. THE regression guard: ledger id present, renderer hint absent → RESUME, no mint.
 //    This is exactly the restart-clobber: boot board store hadn't hydrated the
@@ -119,5 +119,30 @@ describe('7. Empty-string hint treated as absent → falls back to ledger', () =
   })
   test('empty-string hint is treated as absent', () => {
     expect(d.resolvedExistingId).toBe('REAL')
+  })
+})
+
+// The last gate before starting a KNOWN id fresh (`--session-id <id>`): an id
+// whose transcript exists anywhere on the agent's computer must be resumed, never
+// started over (2026-11-03: a fresh start over a moved transcript superseded a
+// 10 MB conversation).
+describe('decideFreshReuse: never start fresh over an existing transcript', () => {
+  test('healer said never-written, but the transcript exists → resume', () => {
+    expect(decideFreshReuse({ source: 'healer-never-written', found: true })).toBe('resume')
+  })
+  test('healer said never-written, lookup unknown → resume (honest overlay at worst)', () => {
+    expect(decideFreshReuse({ source: 'healer-never-written', found: null })).toBe('resume')
+  })
+  test('healer said never-written, and it is not anywhere → fresh', () => {
+    expect(decideFreshReuse({ source: 'healer-never-written', found: false })).toBe('fresh')
+  })
+  test('caller-supplied id whose transcript exists → resume', () => {
+    expect(decideFreshReuse({ source: 'caller', found: true })).toBe('resume')
+  })
+  test('caller-supplied id, lookup unknown → fresh (a new task: resuming would show a false "expired")', () => {
+    expect(decideFreshReuse({ source: 'caller', found: null })).toBe('fresh')
+  })
+  test('caller-supplied id, not anywhere → fresh', () => {
+    expect(decideFreshReuse({ source: 'caller', found: false })).toBe('fresh')
   })
 })

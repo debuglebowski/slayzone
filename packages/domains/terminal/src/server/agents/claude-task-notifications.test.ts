@@ -6,10 +6,18 @@
  * Monitor's end).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { encodeClaudeProjectDir } from '../claude-transcripts'
 import { ClaudeTaskNotifications, parseTaskNotification } from './claude-task-notifications'
 
 const MONITOR_EVENT =
@@ -202,5 +210,46 @@ describe('ClaudeTaskNotifications (reads the session file during a turn)', () =>
     tail.turnStarted('/cwd', 'other')
     await tail.poll()
     expect(uuids()).toEqual(['a', 'b'])
+  })
+})
+
+// A session that used EnterWorktree keeps its file only under the worktree's
+// project dir: the default lookup must follow it, not read a file that is gone.
+describe('ClaudeTaskNotifications (default path: a session that moved folders)', () => {
+  const configDir = realpathSync(mkdtempSync(join(tmpdir(), 'ctn-config-')))
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'ctn-work-')))
+  const repo = join(work, 'repo')
+  const worktree = join(repo, '.claude', 'worktrees', 'wt1')
+  const sid = 'c0ffee00-0000-4000-8000-000000000001'
+  let prev: string | undefined
+  beforeEach(() => {
+    prev = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = configDir
+    mkdirSync(worktree, { recursive: true })
+  })
+  afterEach(() => {
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = prev
+  })
+
+  it('finds the file under the worktree project dir and emits its notification', async () => {
+    const dir = join(configDir, 'projects', encodeClaudeProjectDir(worktree))
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, `${sid}.jsonl`)
+    writeFileSync(file, `${JSON.stringify({ type: 'relocated', relocatedCwd: worktree })}\n`)
+    const emitted: AgentEvent[] = []
+    const tail = new ClaudeTaskNotifications({
+      emit: (ev) => emitted.push(ev),
+      startedAt: T0,
+      intervalMs: 0
+    })
+    tail.turnStarted(repo, sid)
+    await tail.poll()
+    appendFileSync(file, `${JSON.stringify(notificationRecord('moved-1', MONITOR_EVENT))}\n`)
+    await tail.poll()
+    tail.dispose()
+    expect(emitted.map((e) => (e.kind === 'background-notification' ? e.uuid : '?'))).toEqual([
+      'moved-1'
+    ])
   })
 })
