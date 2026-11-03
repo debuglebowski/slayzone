@@ -260,7 +260,10 @@ run_harness packages/domains/processes/src/server/process-routed-lifecycle.test.
 # Processes switched off but routed to computers: rows load, starts go to the computer.
 run_harness packages/domains/processes/src/server/process-switch-routed.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
+run_harness packages/domains/ai-config/src/server/ai-config-routing.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
+run_harness packages/domains/file-editor/src/server/watcher.test.ts
+run_harness packages/domains/file-editor/src/server/workspace-fs-none.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
@@ -531,6 +534,11 @@ run_harness packages/apps/api/src/routers/integrations.test.ts
 run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
 run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
+run_harness packages/domains/worktrees/src/server/git-ops.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
+run_harness packages/domains/worktrees/src/server/git-watch-routing.test.ts
+run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.
@@ -538,6 +546,7 @@ run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_harness packages/domains/agent-turns/src/server/agent-turns-router.test.ts
+run_harness packages/domains/agent-turns/src/server/turn-git-routing.test.ts
 run_harness packages/domains/agent-turns/src/server/workspace-capture.test.ts
 run_harness packages/domains/terminal/src/server/chat-router.test.ts
 run_harness packages/domains/terminal/src/server/chat-threads-store.test.ts
@@ -562,6 +571,10 @@ run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
 run_harness packages/domains/automations/src/server/automations-router.test.ts
 run_harness packages/domains/automations/src/server/engine.test.ts
+run_harness packages/domains/automations/src/server/engine-routing.test.ts
+run_harness packages/domains/test-panel/src/server/scan-routing.test.ts
+run_harness packages/domains/usage-analytics/src/server/usage-routing.test.ts
+run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
