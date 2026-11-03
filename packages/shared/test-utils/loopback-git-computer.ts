@@ -11,6 +11,8 @@ import { runTurnGitOpLocally } from '../../domains/agent-turns/src/server/turn-g
 import { setTurnGitRouting } from '../../domains/agent-turns/src/server/turn-git-routing'
 import { deterministicLocalComputerId } from '../../domains/computers/src/server/store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
+import { exec } from 'node:child_process'
+import { setAutomationCommandRouting } from '../../domains/automations/src/server/command-routing'
 import { createGitWatcher, runGitOpLocally } from '../../domains/worktrees/src/server/git-ops'
 import {
   deliverGitWatchEvent,
@@ -61,5 +63,29 @@ export function useLoopbackTurnComputer(): void {
     computerForTask: async () => local,
     request: async (_computerId, op, input) =>
       (await runTurnGitOpLocally(op, input as never)) ?? null
+  })
+}
+
+/**
+ * The same for automation actions: `exec.run` on the test machine (shell, cwd,
+ * timeout), answering as the LOCAL computer so fixtures' project folders resolve.
+ */
+export function useLoopbackCommandComputer(): void {
+  const local = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+  setAutomationCommandRouting({
+    computerFor: async () => local,
+    run: (_computerId, { command, cwd, timeoutMs }) =>
+      new Promise((resolve) => {
+        const child = exec(command, { cwd, timeout: timeoutMs }, (err, stdout, stderr) => {
+          const killed = !!(err as { killed?: boolean } | null)?.killed
+          resolve({
+            stdout,
+            stderr,
+            status: err ? ((err as { code?: number }).code ?? 1) : 0,
+            timedOut: killed
+          })
+        })
+        void child
+      })
   })
 }

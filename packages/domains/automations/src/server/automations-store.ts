@@ -7,8 +7,6 @@ import type {
   UpdateAutomationInput
 } from '../shared'
 import { parseAutomationRow } from '../shared'
-import { assertAutomationActionsAllowed } from './hub-exec-actions'
-import { getAutomationCommandRouting } from './command-routing'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './automations-txns'
 
@@ -49,8 +47,6 @@ export async function createAutomation(
   db: SlayzoneDb,
   data: CreateAutomationInput
 ): Promise<Automation> {
-  // Saved for computers to run when routing is wired; else they would run here.
-  if (!getAutomationCommandRouting()) assertAutomationActionsAllowed(data.actions, { op: 'save' })
   const id = crypto.randomUUID()
   const row = await db.namedTxn('automations:create', {
     id,
@@ -70,8 +66,6 @@ export async function updateAutomation(
   data: UpdateAutomationInput
 ): Promise<Automation> {
   if (data.actions !== undefined) {
-    if (!getAutomationCommandRouting())
-      assertAutomationActionsAllowed(data.actions, { op: 'save', automationId: data.id })
   }
   const fields: string[] = []
   const values: unknown[] = []

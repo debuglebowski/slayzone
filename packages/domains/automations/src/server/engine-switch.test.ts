@@ -1,10 +1,8 @@
 /**
- * `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-05): an automation action that execs on the
- * hub (`run_command`, `ai`) is refused at save and at run — including a rule written
- * straight into the database, which never passed the save check. Proven on the
- * filesystem: the command would create a marker file, and it never appears. Every
- * refusal is one `automation.run_command` audit line. The default path is
- * engine.test.ts.
+ * Automation actions (`run_command`, `ai`) never exec on the hub, on any hub (T-05
+ * superseded: they run on computers). With no computer, a run is refused — including
+ * a rule written straight into the database. Proven on the filesystem: the command
+ * would create a marker file, and it never appears.
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -82,119 +80,76 @@ async function refused(fn: () => Promise<unknown>): Promise<unknown> {
   }
 }
 
-process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
+// Automation actions run on computers (engine-routing.test.ts), never on the hub: so
+// saving one is fine on any hub, and running one with no computer is the actionable
+// "connect a computer" — with nothing exec'd here, whatever the switch says.
+for (const processes of ['0', undefined] as const) {
+  const label = processes === '0' ? 'processes off' : 'processes on'
+  describe(`${label}, no computer`, () => {
+    const setSwitch = () => {
+      if (processes === undefined) delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
+      else process.env.SLAYZONE_HUB_ENABLE_PROCESSES = processes
+    }
 
-describe('processes off: save', () => {
-  for (const [kind, action] of [
-    ['run_command', runCommand(marker('save'))],
-    ['ai', aiAction]
-  ] as const) {
-    test(`create with ${kind}: refused, nothing stored, one audit line`, async () => {
-      const before = lines.length
-      const err = await refused(() =>
-        createAutomation(h.slayDb, {
+    test('save: a run_command and an ai action are stored', async () => {
+      setSwitch()
+      h.db.prepare('DELETE FROM automations').run()
+      for (const [kind, action] of [
+        ['run_command', runCommand(marker('save'))],
+        ['ai', aiAction]
+      ] as const) {
+        await createAutomation(h.slayDb, {
           project_id: projectId,
           name: kind,
           trigger_config: trigger as never,
           actions: [action as never]
         })
-      )
+      }
+      expect((await listAutomationsByProject(h.slayDb, projectId)).length).toBe(2)
+      const id = insertRow([], 'empty')
+      await updateAutomation(h.slayDb, { id, actions: [runCommand(marker('upd')) as never] })
+      expect((await toggleAutomation(h.slayDb, id, false)).enabled).toBe(false)
+      expect(await deleteAutomation(h.slayDb, id)).toBe(true)
+    })
+
+    test('manual run: "connect a computer" to the caller, no run row, no exec', async () => {
+      setSwitch()
+      h.db.prepare('DELETE FROM automations').run()
+      const id = insertRow([runCommand(marker('manual'))])
+      const err = await refused(() => engine.executeManual(id))
       expect(isHubSwitchedOffError(err)).toBe(true)
-      expect((await listAutomationsByProject(h.slayDb, projectId)).length).toBe(0)
-      expect(lines.length).toBe(before + 1)
-      expect(lines[before].event).toBe('automation.run_command')
-      expect(lines[before].outcome).toBe('denied')
-      expect(lines[before].detail.op).toBe('save')
-      expect(lines[before].detail.actionType).toBe(kind)
+      expect((err as Error).message).toMatch(/Connect a computer/)
+      expect(runsOf(id)).toHaveLength(0)
+      expect(existsSync(marker('manual'))).toBe(false)
     })
-  }
 
-  test('update that sets a run_command action: refused, row unchanged', async () => {
-    const id = insertRow([], 'empty')
-    const err = await refused(() =>
-      updateAutomation(h.slayDb, { id, actions: [runCommand(marker('upd')) as never] })
-    )
-    expect(isHubSwitchedOffError(err)).toBe(true)
-    const row = h.db.prepare('SELECT actions FROM automations WHERE id = ?').get(id) as {
-      actions: string
-    }
-    expect(row.actions).toBe('[]')
-    expect(lines[lines.length - 1].detail.automationId).toBe(id)
-  })
-
-  test('update that leaves actions alone, toggle, delete: still work', async () => {
-    const id = insertRow([runCommand(marker('keep'))], 'keep')
-    const renamed = await updateAutomation(h.slayDb, { id, name: 'renamed' })
-    expect(renamed.name).toBe('renamed')
-    expect((await toggleAutomation(h.slayDb, id, false)).enabled).toBe(false)
-    expect(await deleteAutomation(h.slayDb, id)).toBe(true)
-  })
-})
-
-describe('processes off: run (row inserted directly)', () => {
-  test('manual run: refused to the caller, no run row, no exec', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    const id = insertRow([runCommand(marker('manual'))])
-    const before = lines.length
-    const err = await refused(() => engine.executeManual(id))
-    expect(isHubSwitchedOffError(err)).toBe(true)
-    expect(runsOf(id)).toHaveLength(0)
-    expect(existsSync(marker('manual'))).toBe(false)
-    expect(lines.length).toBe(before + 1)
-    expect(lines[before].event).toBe('automation.run_command')
-    expect(lines[before].detail.op).toBe('run')
-    expect(lines[before].detail.automationId).toBe(id)
-  })
-
-  test('event-triggered run: recorded as refused, no exec', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    const id = insertRow([runCommand(marker('event'))])
-    const before = lines.length
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    // The engine runs off the event asynchronously; a fixed 300ms sleep raced it when
-    // this file runs alongside other suites. Wait (deadline-bounded) for the run row
-    // to settle instead.
-    const deadline = Date.now() + 10_000
-    while (Date.now() < deadline && runsOf(id)[0]?.status !== 'error') {
-      await new Promise((r) => setTimeout(r, 25))
-    }
-    const runs = runsOf(id)
-    expect(runs).toHaveLength(1)
-    expect(runs[0].status).toBe('error')
-    expect(String(runs[0].error)).toContain('SLAYZONE_HUB_ENABLE_PROCESSES=0')
-    expect(existsSync(marker('event'))).toBe(false)
-    expect(lines.length).toBe(before + 1)
-    expect(lines[before].event).toBe('automation.run_command')
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
-  })
-
-  test('ai action inserted directly: refused at run too', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    const id = insertRow([aiAction])
-    const err = await refused(() => engine.executeManual(id))
-    expect(isHubSwitchedOffError(err)).toBe(true)
-    expect(lines[lines.length - 1].detail.actionType).toBe('ai')
-  })
-})
-
-describe('processes on (default)', () => {
-  test('the same rule saves and runs', async () => {
-    delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
-    h.db.prepare('DELETE FROM automations').run()
-    const before = lines.length
-    const a = await createAutomation(h.slayDb, {
-      project_id: projectId,
-      name: 'on',
-      trigger_config: trigger as never,
-      actions: [runCommand(marker('default')) as never]
+    test('event-triggered run: recorded as failed with "connect a computer", no exec', async () => {
+      setSwitch()
+      h.db.prepare('DELETE FROM automations').run()
+      const id = insertRow([runCommand(marker('event'))])
+      h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
+      taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline && runsOf(id)[0]?.status !== 'error') {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      const runs = runsOf(id)
+      expect(runs).toHaveLength(1)
+      expect(runs[0].status).toBe('error')
+      expect(String(runs[0].error)).toMatch(/Connect a computer/)
+      expect(existsSync(marker('event'))).toBe(false)
+      h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
     })
-    const run = await engine.executeManual(a.id)
-    expect(run.status).toBe('success')
-    expect(existsSync(marker('default'))).toBe(true)
-    expect(lines.length).toBe(before)
+
+    test('ai action: refused at run too', async () => {
+      setSwitch()
+      h.db.prepare('DELETE FROM automations').run()
+      const id = insertRow([aiAction])
+      const err = await refused(() => engine.executeManual(id))
+      expect(isHubSwitchedOffError(err)).toBe(true)
+    })
   })
-})
+}
 
 afterAll(() => {
   engine.stop()

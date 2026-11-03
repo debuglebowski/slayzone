@@ -42,8 +42,6 @@ const ALLOWLIST = {
     'in-process chat agent; refuses (T-04)',
   'packages/domains/terminal/src/server/runtime/chat-transport-manager.ts':
     'in-process chat agent; refuses (T-04)',
-  'packages/domains/automations/src/server/engine.ts':
-    'run_command / ai actions; refused at save and at run (T-05)',
   // Refused by assertHubLocalExecEnabled, "connect a computer" (T-06).
   'packages/domains/terminal/src/server/shell-env.ts':
     'login-shell PATH and which probes; refuse (T-06)',
@@ -53,8 +51,6 @@ const ALLOWLIST = {
     '@file autocomplete git ls-files; refuses (T-06)',
   'packages/domains/terminal/src/server/runtime/pty-store.ts':
     'terminal-mode which probe; refuses (T-06)',
-  'packages/domains/ai-config/src/server/handlers-store.ts':
-    'setupSlay runs slay init; refuses (T-06)',
   'packages/apps/hub/src/shell-native.ts': 'open/xdg-open/explorer; refuse (T-06)',
   'packages/shared/db-migrations/src/migrations.ts':
     'v122 git backfill over existing agent_turns rows; skipped with processes off (T-06)',

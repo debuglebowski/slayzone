@@ -2,9 +2,13 @@
  * Automation history integration tests
  */
 import { afterAll, describe, expect, test } from 'vitest'
+import { useLoopbackCommandComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine } from './engine.js'
 import { taskEvents } from '@slayzone/task/server'
+
+// Actions run on computers, never the hub: here a loopback test computer runs them.
+useLoopbackCommandComputer()
 
 const h = await createTestHarness()
 

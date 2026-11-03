@@ -14,9 +14,8 @@ import {
   type TemplateContext
 } from '@slayzone/automations/shared'
 import { taskEvents } from '@slayzone/task/server'
-import { exec } from 'child_process'
-import { assertAutomationActionsAllowed } from './hub-exec-actions'
-import { localProjectRoot, recordedProjectRoot } from '@slayzone/computers/server'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
+import { recordedProjectRoot } from '@slayzone/computers/server'
 import { getAutomationCommandRouting } from './command-routing'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './automations-txns'
@@ -416,11 +415,10 @@ export class AutomationEngine {
       this.currentDepth = depth + 1
       for (let i = 0; i < automation.actions.length; i++) {
         const action = automation.actions[i]
-        // Before anything is resolved or exec'd ON THE HUB: a rule saved before the
-        // switch was turned off, or written straight into the database, is refused
-        // here. On a computer nothing runs on the hub.
+        // Actions run on computers only: with none, before anything is resolved —
+        // "connect a computer" (nothing ever execs on the hub).
         if (computerId == null)
-          assertAutomationActionsAllowed([action], { op: 'run', automationId: automation.id })
+          refuseNoComputer({ op: 'automation.run', detail: { automationId: automation.id } })
         const resolved = await this.resolveAction(action, ctx)
         const actionRunId = await this.db.namedTxn('automations:start-action-run', {
           input: {
@@ -563,7 +561,8 @@ export class AutomationEngine {
     projectId: string | null | undefined
   ): Promise<{ outputTail: string | null }> {
     const routing = getAutomationCommandRouting()
-    if (computerId != null && routing) {
+    if (computerId == null || !routing) refuseNoComputer({ op: 'automation.run' })
+    {
       const result = await routing.run(computerId, {
         command: resolved.command,
         ...(resolved.cwd ? { cwd: resolved.cwd } : {}),
@@ -579,26 +578,6 @@ export class AutomationEngine {
       }
       return { outputTail }
     }
-    const result = await this.runCommand(resolved.command, resolved.cwd, resolved.timeoutMs)
-    return { outputTail: trimOutputTail(`${result.stdout}${result.stderr}`) }
-  }
-
-  private runCommand(
-    command: string,
-    cwd: string | undefined,
-    timeoutMs: number
-  ): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-      const child = exec(command, { cwd, timeout: timeoutMs }, (err, stdout, stderr) => {
-        const outputTail = trimOutputTail(`${stdout}${stderr}`)
-        if (err)
-          reject(
-            new AutomationCommandError(`Command failed: ${err.message}\n${stderr}`, outputTail)
-          )
-        else resolve({ stdout, stderr })
-      })
-      setTimeout(() => child.kill(), timeoutMs + 1000)
-    })
   }
 
   // Build the timeline activity event for a completed run. Returns `null` when
@@ -694,11 +673,9 @@ export class AutomationEngine {
       )
       if (project) {
         // `{{project.path}}` and the default cwd are the project's folder on the
-        // computer the actions run on; none = the hub, sharing the local computer's.
+        // computer the actions run on (none: unknown — the run is refused anyway).
         const path =
-          computerId != null
-            ? await recordedProjectRoot(this.db, project.id, computerId)
-            : await localProjectRoot(this.db, project.id)
+          computerId != null ? await recordedProjectRoot(this.db, project.id, computerId) : null
         ctx.project = { id: project.id, name: project.name, path }
       }
     }
@@ -721,15 +698,15 @@ export class AutomationEngine {
     ])
     if (!row) throw new Error('Automation not found')
     const automation = parseAutomationRow(row)
-    // A manual run is a request: refuse it to the caller rather than recording a
-    // failed run — when it would run on the hub (no computer for its project).
+    // A manual run is a request: with no computer for its project, refuse it to the
+    // caller rather than recording a failed run.
     const computerId = await this.computerFor({
       type: 'manual',
       projectId: automation.project_id,
       depth: 0
     } as AutomationEvent)
-    if (computerId == null)
-      assertAutomationActionsAllowed(automation.actions, { op: 'run', automationId: automation.id })
+    if (computerId == null && automation.actions.length > 0)
+      refuseNoComputer({ op: 'automation.run', detail: { automationId: automation.id } })
 
     const event: AutomationEvent = {
       type: 'manual',

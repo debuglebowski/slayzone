@@ -1,10 +1,5 @@
-import { checkSlayConfigured } from './slay-setup'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
-// eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: `slay init` (setupSlay) can block the hub up to 10s; convert to async.
-import { execFileSync } from 'node:child_process'
-import { buildShellInvocation, quoteForShell } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   AiConfigItem,
@@ -2630,27 +2625,6 @@ export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfig
     },
     removeComputerMcpServer: async (input: RemoveComputerMcpServerInput) => {
       await removeMcpServerFromSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey)
-    },
-    checkSlayConfigured: (projectPath: string): boolean => {
-      // Reads the project's instruction files on THIS machine: refused like setupSlay.
-      assertHubLocalExecEnabled({ op: 'slay.check' })
-      return checkSlayConfigured(projectPath, homeDir)
-    },
-    setupSlay: (projectPath: string, projectId?: string): { ok: boolean; error?: string } => {
-      // Runs `slay init` in a project directory on THIS machine: refused on a hub with
-      // processes switched off (T-06), outside the try so it is not just `ok: false`.
-      assertHubLocalExecEnabled({ op: 'slay.init' })
-      try {
-        const cwd = path.resolve(projectPath)
-        const devFlag = process.env.NODE_ENV === 'development' ? ' --dev' : ''
-        const projectFlag = projectId ? ` --project ${quoteForShell(projectId)}` : ''
-        const cmd = `slay${devFlag} init${projectFlag}`
-        const { file, args } = buildShellInvocation(cmd)
-        execFileSync(file, args, { cwd, timeout: 10000 })
-        return { ok: true }
-      } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
-      }
     }
   }
 }

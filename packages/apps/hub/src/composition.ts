@@ -1994,8 +1994,7 @@ export function composeServer(opts: {
       createRoutingSlayExecutor({
         resolveComputer: (target) => placement.forTarget(target),
         gateway: computerGateway,
-        gate: placement.gate ? (computerId) => placement.gate!(computerId, null) : undefined,
-        local: getAiConfigOps()
+        gate: placement.gate ? (computerId) => placement.gate!(computerId, null) : undefined
       })
     )
 
