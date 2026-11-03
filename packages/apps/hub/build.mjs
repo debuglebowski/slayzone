@@ -1,7 +1,8 @@
 import { build } from 'esbuild'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
 import { watchBundleInputs } from '@slayzone/build-guards/watch-inputs'
@@ -75,6 +76,14 @@ function buildOptions(commit, builtAt) {
   }
 }
 
+/** Write to a sibling temp file, then rename over `path` (atomic on one filesystem). */
+function writeAtomic(path, contents, mode = 0o644) {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmp = `${path}.${process.pid}.tmp`
+  writeFileSync(tmp, contents, { mode })
+  renameSync(tmp, path)
+}
+
 /**
  * One full build. Each invocation recomputes commit + builtAt so the value
  * compiled into the bundle (esbuild `define`) and the value written to the
@@ -86,16 +95,24 @@ async function buildOnce() {
   const commit = gitCommit()
   const builtAt = new Date().toISOString()
   const buildId = `${commit}@${builtAt}`
-  const result = await build(buildOptions(commit, builtAt))
+  // Built in memory, then swapped in whole: a process spawning bin.cjs while this
+  // rebuilds (a parallel test, the sidecar supervisor) reads the old file or the
+  // new one, never a half-written one.
+  const result = await build({ ...buildOptions(commit, builtAt), write: false })
+  const bundle = result.outputFiles.find((f) => f.path.endsWith('bin.cjs'))
+  if (!bundle || result.outputFiles.length !== 1)
+    throw new Error(
+      `[build] expected one bin.cjs output, got ${result.outputFiles.map((f) => f.path)}`
+    )
+  // Executable: it is also the published package's `slayzone-hub` bin (shebang).
+  writeAtomic(bundle.path, bundle.contents, 0o755)
 
   // On-disk manifest = the source of truth the supervisor reads to compare
   // against the running sidecar. Includes the bundle's sha256 (content identity,
   // catches dirty/uncommitted rebuilds) which cannot be compiled into the bundle.
-  const bundleSha256 = createHash('sha256')
-    .update(readFileSync(new URL('./dist/bin.cjs', import.meta.url)))
-    .digest('hex')
-  writeFileSync(
-    new URL('./dist/sidecar-build.json', import.meta.url),
+  const bundleSha256 = createHash('sha256').update(bundle.contents).digest('hex')
+  writeAtomic(
+    fileURLToPath(new URL('./dist/sidecar-build.json', import.meta.url)),
     JSON.stringify({ buildId, commit, builtAt, version, bundleSha256 }, null, 2) + '\n'
   )
   process.stdout.write(`[build] sidecar ${buildId} (sha256 ${bundleSha256.slice(0, 12)}…)\n`)
