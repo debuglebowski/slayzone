@@ -100,6 +100,10 @@ export function tasksCommand(): Command {
     .option('--no-parent', 'Detach task (make top-level)')
     .option('--permanent', 'Convert temporary task to a real task')
     .option(
+      '--agent <mode>',
+      "Switch the task's agent (claude-code, codex, claude-chat, …): stops the running one; next start is a new conversation"
+    )
+    .option(
       '--worktree-path <path>',
       'Link a git worktree to this task (auto-derives parent branch + repo from project layout)'
     )

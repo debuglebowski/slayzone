@@ -54,7 +54,6 @@ import {
   BUILTIN_PANEL_IDS,
   getProviderFlags,
   setProviderFlags,
-  clearAllConversationIds,
   priorityOptions
 } from '@slayzone/task-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
@@ -1165,24 +1164,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const mainSessionId = `${task.id}:${task.id}`
       // Reset state FIRST to ignore any in-flight data
       resetTaskState(mainSessionId)
-      // Now kill the PTY (any data it sends will be ignored)
-      await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
+      // The hub stops the main agent and stores the mode with every conversation
+      // id cleared (fresh start) — the same op mobile and `slay tasks update
+      // --agent` call. Data the old agent still sends is ignored.
+      const updated = await trpcClient.task.switchMode.mutate({ taskId: task.id, mode })
       // Small delay to let any remaining PTY data be processed and ignored
       await new Promise((r) => setTimeout(r, 100))
-      // Update mode and clear all conversation IDs (fresh start)
-      const updated = await updateTaskAsync({
-        id: task.id,
-        terminalMode: mode,
-        providerConfig: clearAllConversationIds(task.provider_config)
-      })
-      if (!updated) return
       onTaskUpdated(updated)
       // Remount terminal (mark skip to prevent cleanup from re-caching old content)
       markSkipCache(mainSessionId)
       setTerminalKey((k) => k + 1)
       track('terminal_mode_switched', { from: oldMode, to: mode })
     },
-    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskAsync, track]
+    [task, onTaskUpdated, resetTaskState, trpcClient, track]
   )
 
   const getMainHistory = useCallback(() => {

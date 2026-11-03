@@ -192,12 +192,7 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
       'Switch',
       `Switch to ${modeLabel(mode)}?`,
       'The agent is stopped and starts again with a new conversation.',
-      () =>
-        switchAgentMode(
-          client,
-          { id: taskId, terminal_mode: task.terminal_mode, provider_config: task.provider_config },
-          mode
-        )
+      () => switchAgentMode(client, taskId, mode)
     )
   }
 

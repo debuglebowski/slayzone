@@ -153,7 +153,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks view [id]\` — show task details including status, priority, description, tags, and subtasks.
 
-- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent]\` — update a task.
+- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>]\` — update a task. \`--agent\` switches the task's agent (e.g. \`claude-code\`, \`codex\`, \`claude-chat\`): stops the running one and starts a fresh conversation.
   - \`--append-description\` adds text after a newline separator (mutually exclusive with \`--description\`)
   - \`--no-due\` clears the due date
   - \`--parent <id>\` reparents under another task in the same project; \`--no-parent\` makes it top-level
@@ -234,11 +234,11 @@ Templates define defaults for new tasks: terminal mode, status, priority, provid
 
 - \`slay templates view <id> [--json]\` — view template details including all configured defaults.
 
-- \`slay templates create <name> [--project <name|id>] [--terminal-mode <mode>] [--priority <1-5>] [--status <status>] [--default] [--description <text>]\` — create a template.
+- \`slay templates create <name> [--project <name|id>] [--agent <mode>] [--priority <1-5>] [--status <status>] [--default] [--description <text>]\` — create a template.
   - \`--project\` defaults to \`$SLAYZONE_PROJECT_ID\`
   - \`--default\` makes it the project default, clearing any existing default (transactional)
 
-- \`slay templates update <id> [--name <n>] [--terminal-mode <m>] [--priority <1-5>] [--status <s>] [--default] [--no-default] [--description <text>]\` — update a template.
+- \`slay templates update <id> [--name <n>] [--agent <m>] [--priority <1-5>] [--status <s>] [--default] [--no-default] [--description <text>]\` — update a template.
   - \`--default\` clears all other defaults
   - \`--no-default\` unsets only this template's default flag
 

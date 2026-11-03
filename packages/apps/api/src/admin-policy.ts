@@ -698,6 +698,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'task.setBrowserTabLocked': 'user',
   'task.startMainAgent': 'user',
   'task.switchConversation': 'user',
+  'task.switchMode': 'user',
   'task.testRecordPendingSpawn': 'user',
   'task.unarchive': 'user',
   'task.update': 'user',
