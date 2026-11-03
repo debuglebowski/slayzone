@@ -89,6 +89,13 @@ interface AppSidebarProps {
   taskTags?: Map<string, string[]>
   compactFooter?: ReactNode
   updateState?: UpdateState | null
+  /**
+   * Host-supplied status card at the top of the footer, above its icon row — the
+   * startup progress card (`StartupProgressCard`). A slot, not data: its frequent
+   * updates re-render only the host's small component, never the sidebar or the app
+   * around it.
+   */
+  statusSlot?: ReactNode
 }
 
 type UpdateState =
@@ -198,7 +205,8 @@ export function AppSidebar({
   tags,
   taskTags,
   compactFooter,
-  updateState
+  updateState,
+  statusSlot
 }: AppSidebarProps) {
   const sidebarView = useTabStore((s) => s.sidebarView)
   const setSidebarView = useTabStore((s) => s.setSidebarView)
@@ -308,6 +316,7 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className={cn('py-4 gap-3', !compactFooter && 'border-t border-border/60')}>
+        {statusSlot}
         {compactFooter ? (
           compactFooter
         ) : (

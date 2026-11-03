@@ -191,6 +191,8 @@ run_harness packages/apps/api/src/routers/upload-sources.test.ts
 run_harness packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+# Agent-start tracker behind the sidebar's startup card (queued / booting per agent).
+run_harness packages/domains/terminal/src/server/runtime/agent-starts.test.ts
 # The hub decides an agent's computer and folder before the spawn (task sessions and
 # the project-wide agent panel); an explicit folder wins, none known = none guessed.
 run_harness packages/domains/terminal/src/server/runtime/spawn-target.test.ts
@@ -1284,6 +1286,7 @@ run_vitest_files "vitest (tasks-changed refresh)" \
 # a tab's page is mounted are held for it.
 run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
+  packages/apps/app/src/renderer/src/app-shell/startup-progress.test.ts \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts

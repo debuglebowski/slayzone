@@ -8,6 +8,7 @@ export { SidebarTaskContextMenu } from './SidebarTaskContextMenu'
 export { TabPanes, EXPLODE_DRAG_TYPE, EXPLODE_GRID_PAD } from './TabPanes'
 export { AppTabBar } from './AppTabBar'
 export { ActiveTabSync } from './ActiveTabSync'
+export { StartupProgressStatus } from './StartupProgressStatus'
 // HomeDetail now lives in the shared @slayzone/home package (one Home shell for
 // the Electron app + the Chromium fork — no drift). App.tsx feeds it the same
 // props as before; the fork uses HomeContainer (self-wiring) over the same component.

@@ -3,6 +3,7 @@ import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getPtyDeps } from './pty-router-deps'
 import { stopTaskAgents } from './task-events'
+import { agentStarts, type AgentStartEntry } from './runtime/agent-starts'
 
 // PTY router (IPC → tRPC migration, slice 3 / P17). Mirrors the `pty:*` /
 // `terminalModes:*` / `session:*` / `chat:list` IPC handlers 1:1 plus the
@@ -359,6 +360,17 @@ export const ptyRouter = router({
       const ev = getPtyDeps().events
       ev.on('hibernated', handler)
       return () => ev.off('hibernated', handler)
+    })
+  ),
+  /**
+   * Agents starting right now — `queued` (waiting for a start slot on their
+   * computer) or `booting` (launched, no output yet). The current snapshot on
+   * subscribe, then one per burst of changes. Drives the sidebar's startup card.
+   */
+  onAgentStarts: publicProcedure.subscription(() =>
+    observable<AgentStartEntry[]>((emit) => {
+      emit.next(agentStarts.snapshot())
+      return agentStarts.subscribe((entries) => emit.next(entries))
     })
   ),
   // Per-process CPU/RSS sampler (host poller). Mirrors the legacy `pty:stats` send.

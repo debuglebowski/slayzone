@@ -164,4 +164,33 @@ describe('pane hydrator', () => {
     runIdle([0])
     expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(1)
   })
+  it('reports progress (hydrated / still queued) and notifies on each change', async () => {
+    // The sidebar's startup card shows "Tabs loaded N/M" from this.
+    const { h, runIdle, flush } = harness()
+    const seen: Array<{ hydrated: number; queued: number }> = []
+    const off = h.subscribeProgress(() => seen.push(h.progress()))
+    expect(h.progress()).toEqual({ hydrated: 0, queued: 0 })
+
+    h.hydrateNow('active')
+    const cancelC = h.enqueue('c', { rank: () => 2, ready: new Promise(() => {}) })
+    h.enqueue('a', { rank: () => 0, ready: Promise.resolve() })
+    h.enqueue('b', { rank: () => 1, ready: Promise.resolve() })
+    expect(h.progress()).toEqual({ hydrated: 1, queued: 3 })
+    // Stable snapshot between changes (useSyncExternalStore needs that).
+    expect(h.progress()).toBe(h.progress())
+
+    await flush()
+    runIdle([0])
+    expect(h.progress()).toEqual({ hydrated: 2, queued: 2 })
+    cancelC()
+    expect(h.progress()).toEqual({ hydrated: 2, queued: 1 })
+    runIdle([0])
+    expect(h.progress()).toEqual({ hydrated: 3, queued: 0 })
+    expect(seen.at(-1)).toEqual({ hydrated: 3, queued: 0 })
+    const count = seen.length
+
+    off()
+    h.hydrateNow('later')
+    expect(seen.length).toBe(count)
+  })
 })

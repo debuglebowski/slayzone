@@ -33,6 +33,7 @@ import {
   type PtySpawnSpec
 } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
+import { agentStarts } from './agent-starts'
 
 const fakeWin = {
   isDestroyed: () => false,
@@ -732,6 +733,77 @@ test("remote backend: an AGENT's initial spawn asks for admission (visible tab f
     `visible agent → foreground, got ${String(byId['admFg:admFg'])}`
   ).toBe('foreground')
   for (const c of cases) killPty(c.sid)
+  setPtyBackend(null)
+})
+
+test('agent-start tracker: an agent is queued until its computer launches it, booting until its first output; a shell is never tracked', async () => {
+  // The sidebar's startup card counts these. An agent waits for an admission
+  // slot (spawn not confirmed) → queued; launched → booting; first output → gone.
+  let confirm!: () => void
+  const agent = makeFakeHandle({
+    whenSpawned: new Promise((res) => {
+      confirm = () => res({ pid: 4242, ownsStartupDeadline: true })
+    })
+  })
+  const shell = makeFakeHandle({
+    whenSpawned: Promise.resolve({ pid: 4343, ownsStartupDeadline: true })
+  })
+  setPtyBackend({ spawn: (spec) => (spec.admission ? agent : shell) })
+  const agentSid = 'trackAgent:trackAgent'
+  const shellSid = 'trackShell:trackShell'
+  const phaseOf = (sid: string) =>
+    agentStarts.snapshot().find((e) => e.sessionId === sid)?.phase ?? 'none'
+
+  await createPty({
+    win: fakeWin,
+    sessionId: agentSid,
+    cwd: '/tmp',
+    mode: 'claude-code' as never,
+    type: 'claude-code',
+    computerId: 'computer-1'
+  })
+  await createPty({
+    win: fakeWin,
+    sessionId: shellSid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    computerId: 'computer-1'
+  })
+  expect(phaseOf(agentSid), 'agent before launch').toBe('queued')
+  expect(phaseOf(shellSid), 'plain shell').toBe('none')
+
+  confirm()
+  await new Promise((r) => setTimeout(r, 300))
+  expect(phaseOf(agentSid), 'agent launched, silent').toBe('booting')
+
+  agent.emitData('hello')
+  await new Promise((r) => setTimeout(r, 300))
+  expect(phaseOf(agentSid), 'agent after first output').toBe('none')
+
+  killPty(agentSid)
+  killPty(shellSid)
+  agent.emitExit(-2)
+  shell.emitExit(-2)
+  setPtyBackend(null)
+})
+
+test('agent-start tracker: an agent that exits before printing leaves the tracker', async () => {
+  const agent = makeFakeHandle({ whenSpawned: new Promise<never>(() => {}) as never })
+  setPtyBackend({ spawn: () => agent })
+  const sid = 'trackExit:trackExit'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code' as never,
+    type: 'claude-code',
+    computerId: 'computer-1'
+  })
+  expect(agentStarts.snapshot().some((e) => e.sessionId === sid)).toBe(true)
+  agent.emitExit(1)
+  await new Promise((r) => setTimeout(r, 300))
+  expect(agentStarts.snapshot().some((e) => e.sessionId === sid)).toBe(false)
   setPtyBackend(null)
 })
 

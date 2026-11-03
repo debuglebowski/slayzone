@@ -33,3 +33,18 @@ export interface KeyRecorderProps {
 
 /** Renderless component that records a hotkey while `active`. */
 export type KeyRecorderComponent = (props: KeyRecorderProps) => ReactNode
+
+/**
+ * What the sidebar's startup card shows while a restored workspace comes up: agents
+ * started so far (and how many are still booting or waiting for a start slot), and
+ * tabs loaded. `settled`: nothing left in flight — the card says "Ready" until it goes.
+ */
+export interface StartupProgress {
+  settled: boolean
+  agentsReady: number
+  agentsTotal: number
+  agentsBooting: number
+  agentsQueued: number
+  tabsLoaded: number
+  tabsTotal: number
+}

@@ -66,6 +66,7 @@ import {
 } from '../user-input-tracker'
 import type { AgentStateRecorder } from './pty-manager'
 import { ptyEvents } from './pty-events'
+import { agentStarts } from './agent-starts'
 import {
   chatSpawnError,
   childProcessToHandle,
@@ -893,6 +894,10 @@ export function createChatTransport(
     const old = tab.terminalState
     tab.terminalState = next
     const stateSessionId = stateKey(tab)
+    // The startup card's agent count: a routed start waits on its computer for an
+    // admission slot until `onSpawn` (→ `idle`); an in-process spawn launches at once.
+    if (next === 'starting') agentStarts.mark(stateSessionId, deps.backend ? 'queued' : 'booting')
+    else agentStarts.clear(stateSessionId)
     deps.broadcastStateChange(stateSessionId, next, old)
     deps.onStateChange?.(stateSessionId, next, old)
     // Edge-trigger: any time we land in `idle` (post-result, post-spawn, etc.)
