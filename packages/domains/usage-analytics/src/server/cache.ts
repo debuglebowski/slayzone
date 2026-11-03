@@ -1,14 +1,30 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { UsageRecord, AnalyticsSummary, DateRange } from '../shared/types'
-import { parseClaudeFiles } from './parsers/claude'
-import { parseCodexFiles } from './parsers/codex'
-import { parseOpenCodeFiles } from './parsers/opencode'
-import { parseQwenFiles } from './parsers/qwen'
+import { collectUsage, type ParseResult, type UsageCursors } from './collect'
 
 interface ParseState {
   file_path: string
   last_offset: number
   last_modified_ms: number
+}
+
+/** The hub's own disk, in `usage_parse_state.computer_id`. */
+const HUB_DISK = ''
+
+/**
+ * Where usage logs are parsed: on each connected computer (`usage.collect`), wired
+ * by the hub's composition. Unwired: the hub parses its own disk, as before.
+ */
+export interface UsageCollectRouting {
+  /** The computers to ask this refresh (connected ones). */
+  computers(): readonly string[]
+  collect(computerId: string, cursors: UsageCursors): Promise<ParseResult[]>
+}
+
+let routing: UsageCollectRouting | null = null
+
+export function setUsageCollectRouting(next: UsageCollectRouting | null): void {
+  routing = next
 }
 
 /**
@@ -17,28 +33,28 @@ interface ParseState {
  * walking files), so we can't hand them an async DB lookup. One query + a Map
  * is both contract-correct and cheaper than a per-file round-trip to the worker.
  */
-async function loadOffsets(
-  db: SlayzoneDb
-): Promise<Map<string, { offset: number; modifiedMs: number }>> {
+async function loadCursors(db: SlayzoneDb, computerId: string): Promise<UsageCursors> {
   const rows = (await db.all(
-    'SELECT file_path, last_offset, last_modified_ms FROM usage_parse_state'
+    'SELECT file_path, last_offset, last_modified_ms FROM usage_parse_state WHERE computer_id = ?',
+    [computerId]
   )) as ParseState[]
-  return new Map(
-    rows.map((r) => [r.file_path, { offset: r.last_offset, modifiedMs: r.last_modified_ms }])
-  )
+  const out: UsageCursors = {}
+  for (const r of rows) out[r.file_path] = { offset: r.last_offset, modifiedMs: r.last_modified_ms }
+  return out
 }
 
 async function saveParseState(
   db: SlayzoneDb,
+  computerId: string,
   filePath: string,
   mtimeMs: number,
   endOffset: number
 ): Promise<void> {
   await db
     .prepare(
-      'INSERT OR REPLACE INTO usage_parse_state (file_path, last_modified_ms, last_offset) VALUES (?, ?, ?)'
+      'INSERT OR REPLACE INTO usage_parse_state (computer_id, file_path, last_modified_ms, last_offset) VALUES (?, ?, ?, ?)'
     )
-    .run(filePath, mtimeMs, endOffset)
+    .run(computerId, filePath, mtimeMs, endOffset)
 }
 
 async function upsertRecords(
@@ -85,23 +101,46 @@ async function upsertRecords(
   return inserted
 }
 
-export async function refreshUsageData(db: SlayzoneDb): Promise<void> {
-  const offsets = await loadOffsets(db)
-  const getOffset = (filePath: string): { offset: number; modifiedMs: number } | undefined =>
-    offsets.get(filePath)
+/** One refresh at a time: two overlapping refreshes would parse the same bytes twice. */
+let inFlight: Promise<void> | null = null
 
-  const allResults = await Promise.all([
-    parseClaudeFiles(getOffset),
-    parseCodexFiles(getOffset),
-    parseOpenCodeFiles(getOffset),
-    parseQwenFiles(getOffset)
-  ])
+export function refreshUsageData(db: SlayzoneDb): Promise<void> {
+  inFlight ??= refresh(db).finally(() => {
+    inFlight = null
+  })
+  return inFlight
+}
+
+async function refresh(db: SlayzoneDb): Promise<void> {
+  // Each computer parses its own logs; the hub's disk only without routing (on the
+  // desktop the local computer reads the very same logs).
+  const sources: Array<{
+    computerId: string
+    collect: (c: UsageCursors) => Promise<ParseResult[]>
+  }> = routing
+    ? routing.computers().map((id) => ({
+        computerId: id,
+        collect: (c) => (routing as UsageCollectRouting).collect(id, c)
+      }))
+    : [{ computerId: HUB_DISK, collect: collectUsage }]
 
   let totalInserted = 0
-  for (const results of allResults) {
+  for (const source of sources) {
+    let results: ParseResult[]
+    try {
+      results = await source.collect(await loadCursors(db, source.computerId))
+    } catch {
+      continue // unreachable this refresh: its cursors stand, next refresh resumes
+    }
     for (const result of results) {
       const inserted = await upsertRecords(db, result.records, result.sourceFile)
-      await saveParseState(db, result.sourceFile, result.fileMtimeMs, result.endOffset)
+      await saveParseState(
+        db,
+        source.computerId,
+        result.sourceFile,
+        result.fileMtimeMs,
+        result.endOffset
+      )
       totalInserted += inserted
     }
   }

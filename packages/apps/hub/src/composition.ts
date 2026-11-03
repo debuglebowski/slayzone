@@ -156,6 +156,7 @@ import {
 } from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
 import { createChatPromptRecorder, setTurnGitRouting } from '@slayzone/agent-turns/server'
+import { setUsageCollectRouting, type ParseResult } from '@slayzone/usage-analytics/server'
 import {
   AutomationEngine,
   setAutomationsEvents,
@@ -219,6 +220,7 @@ import {
   gitOpResultSchema,
   execRunResultSchema,
   agentConfigFsResultSchema,
+  usageCollectResultSchema,
   gitWatchEventSchema,
   GIT_WATCH_EVENT,
   HubToComputerMethods,
@@ -1865,6 +1867,17 @@ export function composeServer(opts: {
       gitWatchComputerGone(computerId)
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
+    // Agent usage logs are on the computers: each refresh asks every usable one for
+    // what is new since its own cursors.
+    setUsageCollectRouting({
+      computers: () => computerGateway.listUsableComputers().map((c) => c.computerId),
+      collect: async (computerId, cursors) =>
+        usageCollectResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.usageCollect, {
+            cursors
+          })
+        ).results as unknown as ParseResult[]
+    })
     // AI-config files (instructions, skills, MCP): a project's on the project's
     // computer (by its checkout path), the computer-level ones on an explicit computer
     // or the caller's own — each fs call one agentConfig.fs.

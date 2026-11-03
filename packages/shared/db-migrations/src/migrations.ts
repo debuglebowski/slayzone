@@ -4646,6 +4646,25 @@ export const migrations: Migration[] = [
       );
       CREATE UNIQUE INDEX chat_provider_transition_pending ON chat_provider_transitions(conversation_id) WHERE state='reserved';`)
     }
+  },
+  {
+    version: 192,
+    up(db) {
+      // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
+      // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
+      // Existing cursors were the hub's own parse ('' = this hub's disk).
+      db.exec(`CREATE TABLE usage_parse_state_by_computer (
+        computer_id TEXT NOT NULL DEFAULT '',
+        file_path TEXT NOT NULL,
+        last_offset INTEGER NOT NULL DEFAULT 0,
+        last_modified_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (computer_id, file_path)
+      );
+      INSERT INTO usage_parse_state_by_computer (computer_id, file_path, last_offset, last_modified_ms)
+        SELECT '', file_path, last_offset, last_modified_ms FROM usage_parse_state;
+      DROP TABLE usage_parse_state;
+      ALTER TABLE usage_parse_state_by_computer RENAME TO usage_parse_state;`)
+    }
   }
 ]
 
