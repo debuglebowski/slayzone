@@ -147,7 +147,13 @@ import {
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
-import { initAiConfigOps, getAiConfigOps, setSlayExecutor } from '@slayzone/ai-config/server'
+import {
+  initAiConfigOps,
+  getAiConfigOps,
+  setSlayExecutor,
+  setAiConfigFsRouting,
+  aiConfigComputerGone
+} from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
 import { createChatPromptRecorder, setTurnGitRouting } from '@slayzone/agent-turns/server'
 import {
@@ -211,6 +217,7 @@ import {
   claudeSessionLocateResultSchema,
   gitOpResultSchema,
   execRunResultSchema,
+  agentConfigFsResultSchema,
   gitWatchEventSchema,
   GIT_WATCH_EVENT,
   HubToComputerMethods,
@@ -1857,6 +1864,23 @@ export function composeServer(opts: {
       gitWatchComputerGone(computerId)
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
+    // AI-config files (instructions, skills, MCP): a project's on the project's
+    // computer (by its checkout path), the computer-level ones on an explicit computer
+    // or the caller's own — each fs call one agentConfig.fs.
+    setAiConfigFsRouting({
+      computerForProject: async ({ projectPath, projectId }) => {
+        const byPath = projectPath ? await gitTargetForPath(db, projectPath) : null
+        return placement.forTarget(byPath ?? (projectId ? { projectId } : {}))
+      },
+      computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),
+      request: async (computerId, call) =>
+        agentConfigFsResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.agentConfigFs, call)
+        ).result
+    })
+    computerGateway.events.on('computer-disconnected', ({ computerId }) =>
+      aiConfigComputerGone(computerId)
+    )
     // Automation shell actions (run_command, ai) run on the task's, else the project's,
     // computer as one exec.run; with none, the engine's hub-local path (and refusal).
     setAutomationCommandRouting({

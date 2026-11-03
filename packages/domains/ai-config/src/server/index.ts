@@ -25,3 +25,9 @@ export {
   type AiConfigStat,
   type AiConfigDirEntry
 } from './ai-config-fs'
+export {
+  setAiConfigFsRouting,
+  aiConfigComputerGone,
+  type AiConfigFsRouting,
+  type AiConfigFsCall
+} from './ai-config-fs-routing'
