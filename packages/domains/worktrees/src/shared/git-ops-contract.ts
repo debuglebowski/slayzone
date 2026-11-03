@@ -150,8 +150,15 @@ export const gitOpsContract = {
   popStash: op(z.object({ repoPath: s, index: n }), ['repoPath']),
   dropStash: op(z.object({ repoPath: s, index: n }), ['repoPath']),
   branchFromStash: op(z.object({ repoPath: s, index: n, branchName: s }), ['repoPath']),
-  getStashDiff: op(z.object({ repoPath: s, index: n }), ['repoPath'])
+  getStashDiff: op(z.object({ repoPath: s, index: n }), ['repoPath']),
+
+  hasGithubRemote: op(repo, ['repoPath']),
+  // Internal: `createPr`'s first step (no procedure of its own).
+  ensureBranchPushed: op(repo, ['repoPath'])
 } as const
+
+/** Ops that are steps of a composite procedure, not procedures themselves. */
+export const GIT_INTERNAL_OPS: ReadonlySet<string> = new Set(['ensureBranchPushed'])
 
 export type GitOpName = keyof typeof gitOpsContract
 export type GitOpInput<K extends GitOpName> = z.infer<(typeof gitOpsContract)[K]['input']>

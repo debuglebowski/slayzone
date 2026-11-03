@@ -198,7 +198,8 @@ import {
   getCurrentBranch,
   setGitOpTransport,
   deliverGitWatchEvent,
-  gitWatchComputerGone
+  gitWatchComputerGone,
+  gitTargetForPath
 } from '@slayzone/worktrees/server'
 import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
@@ -1855,9 +1856,12 @@ export function composeServer(opts: {
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
     setGhExecutor(async (args, opts) => {
-      // The caller's own computer on a hub with login (T-19): `gh` speaks as the
-      // machine's account, which must never be someone else's.
-      const computerId = await placement.forCaller()
+      // `gh` runs where the checkout is: the path names a task or project placement,
+      // resolved — and, with login, admitted (T-19: `gh` speaks as the machine's
+      // account, never someone else's) — like any workspace target. A path the hub
+      // does not know falls back to the caller's own computer.
+      const pathTarget = opts.cwd ? await gitTargetForPath(db, opts.cwd) : null
+      const computerId = await placement.forTarget(pathTarget ?? {})
       // No computer = this hub's own disk is the only one, so its own `gh` is the
       // only meaningful identity. Falls through to the local executor — which refuses
       // on a hub with processes switched off (T-06): there, no computer = no `gh`.

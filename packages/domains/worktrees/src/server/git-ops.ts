@@ -119,7 +119,10 @@ export const gitOpImpls = {
   dropStash: (i: GitOpInput<'dropStash'>) => git.dropStash(i.repoPath, i.index),
   branchFromStash: (i: GitOpInput<'branchFromStash'>) =>
     git.branchFromStash(i.repoPath, i.index, i.branchName),
-  getStashDiff: (i: GitOpInput<'getStashDiff'>) => git.getStashDiff(i.repoPath, i.index)
+  getStashDiff: (i: GitOpInput<'getStashDiff'>) => git.getStashDiff(i.repoPath, i.index),
+
+  hasGithubRemote: (i: GitOpInput<'hasGithubRemote'>) => git.hasGithubRemote(i.repoPath),
+  ensureBranchPushed: (i: GitOpInput<'ensureBranchPushed'>) => git.ensureBranchPushed(i.repoPath)
 } satisfies { [K in GitOpName]: (input: GitOpInput<K>) => Promise<unknown> }
 
 export type GitOpResult<K extends GitOpName> = Awaited<ReturnType<(typeof gitOpImpls)[K]>>

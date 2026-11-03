@@ -9,7 +9,8 @@ import type {
   EditPrCommentInput
 } from '../shared/types'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { execAsync, execGit } from './exec-async'
+import { execAsync } from './exec-async'
+import { ensureBranchPushed } from './git-worktree'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 const GH_PR_JSON_FIELDS =
@@ -153,35 +154,9 @@ export async function checkGhInstalled(repoPath: string): Promise<boolean> {
   }
 }
 
-export async function hasGithubRemote(repoPath: string): Promise<boolean> {
-  try {
-    const output = await execGit(['remote', '-v'], { cwd: repoPath })
-    return /github\.com/i.test(output)
-  } catch {
-    return false
-  }
-}
-
-async function ensureBranchPushed(repoPath: string): Promise<void> {
-  try {
-    await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { cwd: repoPath })
-    return // upstream exists
-  } catch {
-    // no upstream — push
-  }
-
-  const branchOutput = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })
-  const branch = branchOutput.trim()
-
-  const push = await execAsync('git', ['push', '-u', 'origin', branch], {
-    cwd: repoPath,
-    timeout: 30000
-  })
-  if (push.status !== 0) {
-    const stderr = push.stderr?.trim() || 'Unknown error'
-    throw new Error(`Failed to push branch: ${stderr}`)
-  }
-}
+// Git work (it runs where the checkout is — see the git op contract); re-exported
+// for this module's existing callers.
+export { hasGithubRemote } from './git-worktree'
 
 export async function listOpenPrs(repoPath: string): Promise<GhPullRequest[]> {
   const result = await spawnGh(
@@ -257,8 +232,15 @@ export async function getPrForCheckout(
   throw new Error(`gh pr view failed: ${stderr || `exit ${result.status ?? 'spawn failure'}`}`)
 }
 
-export async function createPr(input: CreatePrInput): Promise<CreatePrResult> {
-  await ensureBranchPushed(input.repoPath)
+/**
+ * `ensurePushed`: publish the branch first — the router passes the routed
+ * `ensureBranchPushed` op (it runs on the checkout's computer); default: this disk.
+ */
+export async function createPr(
+  input: CreatePrInput,
+  ensurePushed: (repoPath: string) => Promise<void> = ensureBranchPushed
+): Promise<CreatePrResult> {
+  await ensurePushed(input.repoPath)
 
   const args = [
     'pr',

@@ -11,7 +11,8 @@ import { describe, expect, test } from 'vitest'
 import {
   gitOpsContract,
   gitOpAbsolutePaths,
-  gitOpRepoRelativePaths
+  gitOpRepoRelativePaths,
+  GIT_INTERNAL_OPS
 } from '../shared/git-ops-contract'
 import { gitOpImpls } from './git-ops'
 import { worktreesRouter } from './worktrees-router'
@@ -21,9 +22,12 @@ describe('git op contract', () => {
     expect(Object.keys(gitOpImpls).sort()).toEqual(Object.keys(gitOpsContract).sort())
   })
 
-  test('every contract op is a worktrees procedure', () => {
+  test('every contract op is a worktrees procedure (bar the internal steps)', () => {
     const procedures = Object.keys(worktreesRouter._def.procedures)
-    for (const op of Object.keys(gitOpsContract)) expect(procedures, op).toContain(op)
+    for (const op of Object.keys(gitOpsContract)) {
+      if (GIT_INTERNAL_OPS.has(op)) expect(procedures, op).not.toContain(op)
+      else expect(procedures, op).toContain(op)
+    }
   })
 
   test('the path fields it names are string fields of its input', () => {

@@ -2387,3 +2387,35 @@ export async function getStashDiff(repoPath: string, index: number): Promise<str
     return ''
   }
 }
+
+/** Whether the checkout has a github.com remote (false when git cannot tell). */
+export async function hasGithubRemote(repoPath: string): Promise<boolean> {
+  try {
+    const output = await execGit(['remote', '-v'], { cwd: repoPath })
+    return /github\.com/i.test(output)
+  } catch {
+    return false
+  }
+}
+
+/** Publish the checked-out branch to `origin` unless it already has an upstream. */
+export async function ensureBranchPushed(repoPath: string): Promise<void> {
+  try {
+    await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { cwd: repoPath })
+    return // upstream exists
+  } catch {
+    // no upstream — push
+  }
+
+  const branchOutput = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })
+  const branch = branchOutput.trim()
+
+  const push = await execAsync('git', ['push', '-u', 'origin', branch], {
+    cwd: repoPath,
+    timeout: 30000
+  })
+  if (push.status !== 0) {
+    const stderr = push.stderr?.trim() || 'Unknown error'
+    throw new Error(`Failed to push branch: ${stderr}`)
+  }
+}

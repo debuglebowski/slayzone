@@ -12,7 +12,6 @@ import { detectChildRepos, listProjectRepos } from './list-project-repos'
 import { getGitWatcher } from './git-watcher'
 import {
   checkGhInstalled,
-  hasGithubRemote,
   listOpenPrs,
   getPrByUrl,
   getPrForCheckout,
@@ -228,9 +227,7 @@ export const worktreesRouter = router({
   checkGhInstalled: publicProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => checkGhInstalled(input.repoPath)),
-  hasGithubRemote: hubLocalProcedure
-    .input(obj({ repoPath: s }))
-    .query(({ input }) => hasGithubRemote(input.repoPath)),
+  hasGithubRemote: gitQuery('hasGithubRemote'),
   listOpenPrs: publicProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => listOpenPrs(input.repoPath)),
@@ -240,9 +237,15 @@ export const worktreesRouter = router({
   getPrForCheckout: publicProcedure
     .input(obj({ repoPath: s, branch: s }))
     .query(({ input }) => getPrForCheckout(input.repoPath, input.branch)),
-  createPr: hubLocalProcedure
+  // The branch is pushed on the checkout's computer (the routed op), then `gh`
+  // opens the PR through the routed gh executor.
+  createPr: publicProcedure
     .input(z.unknown() as unknown as z.ZodType<CreatePrInput>)
-    .mutation(({ input }) => createPr(input)),
+    .mutation(({ ctx, input }) =>
+      createPr(input, async (repoPath) => {
+        await executeGitOp('ensureBranchPushed', { repoPath }, true, ctx.db)
+      })
+    ),
   getPrComments: publicProcedure
     .input(obj({ repoPath: s, prNumber: z.number() }))
     .query(({ input }) => getPrComments(input.repoPath, input.prNumber)),

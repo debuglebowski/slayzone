@@ -10,6 +10,7 @@ import { TRPCError } from '@trpc/server'
 import { worktreesRouter } from './worktrees-router'
 import { setWorktreesRouterDeps } from './worktrees-router-deps'
 import { setGitOpTransport } from './git-op-routing'
+import { setGhExecutor } from './gh-cli'
 
 const sent: Array<{
   computerId: string
@@ -89,5 +90,34 @@ describe('git panel ops routed to the computer', () => {
     expect(err).toBeInstanceOf(TRPCError)
     expect((err as TRPCError).code).toBe('FORBIDDEN')
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe('PR ops', () => {
+  test('hasGithubRemote asks the computer', async () => {
+    await caller.hasGithubRemote({ repoPath: '/w/repo' })
+    expect(sent.at(-1)?.params).toMatchObject({ op: 'hasGithubRemote', mutates: false })
+  })
+
+  test('createPr pushes the branch ON the computer, then runs gh', async () => {
+    const gh: string[][] = []
+    setGhExecutor(async (args) => {
+      gh.push(args)
+      return { stdout: 'https://github.com/o/r/pull/7\n', stderr: '', status: 0 }
+    })
+    try {
+      const pr = await caller.createPr({
+        repoPath: '/w/repo',
+        title: 't',
+        body: 'b',
+        baseBranch: 'main'
+      })
+      expect(pr).toEqual({ url: 'https://github.com/o/r/pull/7', number: 7 })
+      expect(sent.map((x) => x.params.op)).toEqual(['ensureBranchPushed'])
+      expect(sent[0]?.params.mutates).toBe(true)
+      expect(gh[0]?.slice(0, 2)).toEqual(['pr', 'create'])
+    } finally {
+      setGhExecutor(null)
+    }
   })
 })
