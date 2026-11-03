@@ -748,6 +748,8 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 # exists/write/start must not treat an exited session in its ~100ms drain window
 # as live (a Retry raced it; writes landed in the dead pty).
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
+# The hub mirrors owner-detected pty output (signals) instead of parsing it.
+run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts

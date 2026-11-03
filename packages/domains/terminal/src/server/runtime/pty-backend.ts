@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type * as pty from 'node-pty'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { wrapShellWithUlimit } from '../shell-env'
+import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
 
 /**
  * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
@@ -72,6 +73,43 @@ export interface PtySpawnSpec {
    * startup deadline counts from then. Ignored by the local backend.
    */
   admission?: PtySpawnAdmission
+  /**
+   * Ask the process owner to run output detection itself and report it as
+   * {@link PtySignal}s (`PtyHandle.onSignal`) — the owner sees the output; the hub
+   * then mirrors state instead of parsing a copy. An owner that cannot (local
+   * backend, an older computer or retained session host) leaves
+   * `PtyHandle.detectsOutput` false and the caller keeps detecting.
+   */
+  detection?: PtyDetectionSpec
+}
+
+/** What output detection needs for one session (mirrors `PtyOutputDetector` options). */
+export interface PtyDetectionSpec {
+  mode: string
+  type?: string
+  patterns?: { working?: string | null; error?: string | null }
+  resuming: boolean
+}
+
+/** One chunk's detection, reported by the owner (see `PtyOutputDetection`). */
+export interface PtySignal {
+  /** Owner's seq of the output chunk it came from. */
+  seq: number
+  activity: ActivityState | null
+  refreshIdleClock: boolean
+  preview: string
+  error: ErrorInfo | null
+  suppressOutput: boolean
+  prompt: PromptInfo | null
+  title: string | null
+  devServerUrls: string[]
+  conversationId: string | null
+}
+
+/** Per-write hints for the process owner. */
+export interface PtyWriteOptions {
+  /** This write submits the session-id command (`/status`): watch for an id. */
+  watchConversationId?: true
 }
 
 /** See {@link PtySpawnSpec.admission}. */
@@ -137,9 +175,17 @@ export interface PtyHandle {
   readonly fd?: number
   onData(cb: (data: string) => void): { dispose(): void }
   onExit(cb: (e: PtyExit) => void): { dispose(): void }
-  write(data: string): void
+  write(data: string, opts?: PtyWriteOptions): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
+  /**
+   * The owner runs the spec's `detection` (it acknowledged it): output from here on
+   * is detected THERE and arrives as `onSignal`; the caller must not detect it too.
+   * Absent/false until acknowledged, and always on a backend that cannot.
+   */
+  readonly detectsOutput?: boolean
+  /** Detections reported by the owner, for output the caller did not detect itself. */
+  onSignal?(cb: (signal: PtySignal) => void): { dispose(): void }
 }
 
 export interface PtyBackend {
@@ -160,7 +206,9 @@ export interface PtyBackend {
     warmId: string,
     sessionId: string,
     processName: string,
-    taskId?: string
+    taskId?: string,
+    /** Run output detection on the computer from adoption on (see `PtySpawnSpec`). */
+    detection?: PtyDetectionSpec
   ): Promise<PtyHandle>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing

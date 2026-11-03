@@ -59,11 +59,16 @@ import type {
   ChatWriteFailureCode,
   ChatWriteOptions,
   PtyBackend,
+  PtyDetectionSpec,
   PtyHandle,
+  PtySignal,
   PtySpawnConfirmation,
-  PtySpawnSpec
+  PtySpawnSpec,
+  PtyWriteOptions
 } from '@slayzone/terminal/server'
 import {
+  PTY_SIGNAL_EVENT_NAME,
+  ptySignalPayloadSchema,
   ComputerTransportErrorCodes,
   fsCopyInResultSchema,
   fsDiscoverReposResultSchema,
@@ -439,6 +444,8 @@ interface PendingSpawn {
 interface ListedSession {
   pid?: number
   spawnId?: string
+  /** The computer runs output detection for it (`pty.list` only). */
+  detection?: boolean
 }
 
 /** A session the computer reaped and remembers (a tombstone). */
@@ -471,7 +478,7 @@ function sameAttempt(entry: DetachableEntry, listed: ListedSession): boolean {
 
 /** Build {@link ComputerSessionList} from a parsed `pty.list` / `proc.list` reply. */
 function toSessionList(parsed: {
-  sessions: Array<{ sessionId: string; pid?: number; spawnId?: string }>
+  sessions: Array<{ sessionId: string; pid?: number; spawnId?: string; detection?: boolean }>
   exited?: Array<{
     sessionId: string
     pid?: number
@@ -482,7 +489,12 @@ function toSessionList(parsed: {
   }>
 }): ComputerSessionList {
   return {
-    live: new Map(parsed.sessions.map((s) => [s.sessionId, { pid: s.pid, spawnId: s.spawnId }])),
+    live: new Map(
+      parsed.sessions.map((s) => [
+        s.sessionId,
+        { pid: s.pid, spawnId: s.spawnId, ...(s.detection ? { detection: true } : {}) }
+      ])
+    ),
     exited: new Map((parsed.exited ?? []).map((e) => [e.sessionId, e]))
   }
 }
@@ -907,6 +919,18 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   sealed: boolean
   dataEmitter: BufferingEmitter<string>
   exitEmitter: BufferingEmitter<PtyExitEvent>
+  /**
+   * The computer acknowledged the spawn's `detection`: it detects this session's
+   * output and reports `pty-signal`s. Until then the hub detects whatever it is
+   * delivered itself.
+   */
+  detectsOutput: boolean
+  /**
+   * `lastSeq` at the acknowledgement. Output up to it was delivered while the hub
+   * still detected locally, so signals for those seqs are dropped — never twice.
+   */
+  detectFromSeq: number
+  signalEmitter: BufferingEmitter<PtySignal>
 }
 
 /**
@@ -1035,6 +1059,23 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     if (entry && (!payload.spawnId || !entry.spawnId || payload.spawnId === entry.spawnId))
       finalize(entry, payload.exitCode, payload.signal ?? null, payload.reason)
   })
+  /** The computer detects this session's output from what it has delivered on. */
+  function ackDetection(entry: PtyEntry): void {
+    if (entry.detectsOutput) return
+    entry.detectsOutput = true
+    entry.detectFromSeq = entry.lastSeq
+  }
+  gateway.events.on('event', (event) => {
+    if (event.name !== PTY_SIGNAL_EVENT_NAME) return
+    const parsed = ptySignalPayloadSchema.safeParse(event.payload)
+    if (!parsed.success) return
+    const { sessionId, spawnId, ...signal } = parsed.data
+    const entry = sessions.get(sessionKey(event.computerId, sessionId))
+    if (!entry || entry.disposed || !entry.detectsOutput) return
+    if (spawnId && entry.spawnId && spawnId !== entry.spawnId) return
+    if (signal.seq <= entry.detectFromSeq) return
+    entry.signalEmitter.emit(signal)
+  })
   const detach = joinDetachController<PtyEntry>({
     gateway,
     sessions,
@@ -1049,6 +1090,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     resume: (entry, listed) => {
       entry.detached = false
       entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
+      // A spawn confirmed by listing (its reply was lost) is acknowledged here.
+      if (listed.detection) ackDetection(entry)
       // Clear the backfill latch: the gap that matters now is whatever the
       // session emitted while the hub was away, which is a different gap from
       // any this entry had already given up on.
@@ -1100,6 +1143,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     }
     const dataEmitter = new BufferingEmitter<string>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
+    const signalEmitter = new BufferingEmitter<PtySignal>()
     const entry: PtyEntry = {
       key,
       computerId,
@@ -1109,7 +1153,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       detached: false,
       sealed,
       dataEmitter,
-      exitEmitter
+      exitEmitter,
+      detectsOutput: false,
+      detectFromSeq: -1,
+      signalEmitter
     }
     sessions.set(key, entry)
 
@@ -1138,13 +1185,20 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             ...(event.detail ? { detail: event.detail } : {})
           })
         ),
-      write: (data: string): void => {
+      write: (data: string, opts?: PtyWriteOptions): void => {
         void send(HubToComputerMethods.ptyWrite, {
           sessionId,
           ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
-          data
+          data,
+          ...(opts?.watchConversationId && entry.detectsOutput
+            ? { watchConversationId: true as const }
+            : {})
         }).catch(noop)
       },
+      get detectsOutput(): boolean {
+        return entry.detectsOutput
+      },
+      onSignal: (cb: (signal: PtySignal) => void): ExecDisposable => signalEmitter.on(cb),
       resize: (cols: number, rows: number): void => {
         void send(HubToComputerMethods.ptyResize, {
           sessionId,
@@ -1273,7 +1327,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       warmId: string,
       sessionId: string,
       processName: string,
-      taskId?: string
+      taskId?: string,
+      detection?: PtyDetectionSpec
     ) {
       // Before anything is tracked: a refused adopt leaves no session behind.
       if (gate) await gate(computerId, { kind: 'session', id: sessionId })
@@ -1286,15 +1341,19 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
           warmId,
           sessionId,
-          ...(taskId ? { taskId } : {})
+          ...(taskId ? { taskId } : {}),
+          ...(detection ? { detection } : {})
         })
         const parsed = ptyWarmAdoptResultSchema.parse(res)
         setPid(parsed.pid)
         // Seed BEFORE unsealing: everything the agent emitted while warm is
         // delivered first, then whatever queued up during the round-trip drains
-        // on top of it, in seq order.
+        // on top of it, in seq order. The seed predates the computer's detection
+        // (it starts at adopt), so the hub detects it; detection is acknowledged
+        // from the seed's seq on.
         if (parsed.data) entry.dataEmitter.emit(parsed.data)
         entry.lastSeq = parsed.seq
+        if (detection && parsed.detection) ackDetection(entry)
         entry.sealed = false
         drain(entry)
         return handle
@@ -1347,6 +1406,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           // An agent start waits on the computer for an admission slot; the reply
           // (and the computer's startup deadline) come when it has really started.
           ...(spec.admission ? { admission: spec.admission } : {}),
+          // Detection runs where the output is; acknowledged in the reply.
+          ...(spec.detection ? { detection: spec.detection } : {}),
           command: spec.file,
           args: spec.args,
           ...(!spec.transport
@@ -1399,6 +1460,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
               (res) => {
                 const parsed = ptySpawnResultSchema.safeParse(res)
+                if (spec.detection && parsed.success && parsed.data.detection) ackDetection(entry)
                 confirm(
                   parsed.success ? parsed.data.pid : null,
                   requestsDeadline && parsed.success && parsed.data.startupDeadline === true

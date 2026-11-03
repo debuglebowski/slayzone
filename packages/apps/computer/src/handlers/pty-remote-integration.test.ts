@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '@slayzone/computer-transport/shared'
 import { createRoutingPtyBackend, type RoutingGateway } from '@slayzone/computer-transport/server'
 import type { ComputerGatewayEvents } from '@slayzone/computer-transport/server'
-import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
+import type { PtyHandle, PtySignal, PtySpawnSpec } from '@slayzone/terminal/server'
 import { createPtyHandlers } from './pty'
 import type { ComputerConfig } from '../config'
 import type { ComputerDialer } from './types'
@@ -124,6 +124,55 @@ describe('desktop hub to remote computer PTY', () => {
       await vi.waitFor(() =>
         expect((computer.handlers['pty.list']({}) as { sessions: unknown[] }).sessions).toEqual([])
       )
+    } finally {
+      computer.disposeAll()
+    }
+  }, 15_000)
+
+  it('output detection runs on the computer and reaches the hub handle as signals', async () => {
+    const { backend, computer, spec } = setup()
+    try {
+      const handle = (await backend.spawn({
+        ...spec,
+        computerShellCommand:
+          'printf "\\033]0;Codex busy\\007 serving http://0.0.0.0:5173\\n"; exec cat',
+        detection: { mode: 'codex', resuming: false }
+      })) as PtyHandle
+      const signals: PtySignal[] = []
+      const data: string[] = []
+      handle.onSignal?.((s) => signals.push(s))
+      handle.onData((d) => data.push(d))
+      await handle.whenSpawned
+      expect(handle.detectsOutput).toBe(true)
+      await vi.waitFor(
+        () =>
+          expect(signals).toContainEqual(
+            expect.objectContaining({
+              title: 'Codex busy',
+              devServerUrls: ['http://localhost:5173']
+            })
+          ),
+        { timeout: 8_000 }
+      )
+      // The bytes still reach the hub for display.
+      expect(data.join('')).toContain('serving http://0.0.0.0:5173')
+      handle.kill()
+    } finally {
+      computer.disposeAll()
+    }
+  }, 15_000)
+
+  it('without `detection` the handle reports none and the hub keeps detecting', async () => {
+    const { backend, computer, spec } = setup()
+    try {
+      const handle = (await backend.spawn(spec)) as PtyHandle
+      const signals: PtySignal[] = []
+      handle.onSignal?.((s) => signals.push(s))
+      await handle.whenSpawned
+      expect(handle.detectsOutput).toBe(false)
+      await new Promise((r) => setTimeout(r, 300))
+      expect(signals).toEqual([])
+      handle.kill()
     } finally {
       computer.disposeAll()
     }

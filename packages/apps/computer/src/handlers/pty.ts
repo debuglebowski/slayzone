@@ -437,13 +437,15 @@ export function createPtyHandlers(
       // adopt. Emitting under a `warmId` the hub never registered would be
       // dropped anyway — and would burn a seq the adopt handover then replays.
       if (session.warm) return
+      // What the chunk says goes FIRST: a stale-resume error suppresses this very
+      // chunk on the hub, which must know before the bytes arrive.
+      session.signals?.onOutput(data, seq)
       ctx.dialer.notify(ComputerNotificationMethods.ptyData, {
         sessionId: session.id,
         ...(session.spawnId ? { spawnId: session.spawnId } : {}),
         seq,
         data
       })
-      session.signals?.onOutput(data, seq)
     })
 
     proc.onExit(({ exitCode, signal }) => {

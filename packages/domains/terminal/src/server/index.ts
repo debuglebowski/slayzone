@@ -78,8 +78,11 @@ export {
   type PtyHandle,
   type PtyRuntimeProblem,
   type PtySpawnAdmission,
+  type PtyDetectionSpec,
+  type PtySignal,
   type PtySpawnConfirmation,
-  type PtySpawnSpec
+  type PtySpawnSpec,
+  type PtyWriteOptions
 } from './runtime/pty-backend'
 export {
   createDbPtySessionLedger,

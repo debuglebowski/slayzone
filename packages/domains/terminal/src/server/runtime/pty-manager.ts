@@ -32,6 +32,8 @@ import {
   type BackgroundJobQuery,
   type PtyExit,
   type PtyHandle,
+  type PtyDetectionSpec,
+  type PtySignal,
   type PtySpawnAdmission,
   type PtySpawnSpec
 } from './pty-backend'
@@ -80,7 +82,8 @@ import { isInterruptKey, appendInput } from '../stdin-input'
 import {
   CONVERSATION_ID_WATCH_TIMEOUT_MS,
   PtyOutputDetector,
-  SESSION_ERROR_WINDOW_MS
+  SESSION_ERROR_WINDOW_MS,
+  type PtyOutputDetection
 } from '../pty-output-detector'
 import { resolveSpawnConversation } from '../spawn-conversation'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
@@ -1766,6 +1769,14 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // process runs it (see `PtySpawnSpec.startupTimeoutMs`), and pty-manager runs
     // its own only when that owner does not (`armHubStartupDeadlineUnlessOwned`).
     const startupTimeoutMs = adapter.startupTimeoutMs ?? STARTUP_TIMEOUT_MS
+    // Output detection runs where the output is when the owner can (a computer);
+    // the hub then mirrors its signals instead of parsing a copy.
+    const detection: PtyDetectionSpec = {
+      mode: terminalMode,
+      ...(type ? { type } : {}),
+      patterns: { working: patternWorking ?? null, error: patternError ?? null },
+      resuming
+    }
     const buildSpec = (
       rawFile: string,
       rawArgs: string[],
@@ -1787,7 +1798,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           }
         : {}),
       ...(deadlineMs !== undefined ? { startupTimeoutMs: deadlineMs } : {}),
-      ...(admission ? { admission } : {})
+      ...(admission ? { admission } : {}),
+      detection
     })
     // Synchronous spawn — the hub-local path (and every recovery re-spawn). Throws
     // if the active backend returns a Promise: only a remote (computerId != null)
@@ -1833,7 +1845,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         opts.adoptPty.warmId,
         sessionId,
         spawnFile,
-        taskId || undefined
+        taskId || undefined,
+        detection
       )) as unknown as pty.IPty
     } else if (computerId != null) {
       // Remote session: await the computer spawn. No local -l / interactive-shell
@@ -2229,6 +2242,168 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     }
 
     const attachPtyHandlers = (target: pty.IPty): void => {
+      // The effects of one chunk's detection — local (`PtyOutputDetector`) or
+      // reported by the owner (`PtySignal`). HEAD runs before the chunk is emitted
+      // (a stale-resume error must suppress that very chunk), TAIL after it.
+      const applyDetectionHead = (
+        session: PtySession,
+        detection: PtyOutputDetection | PtySignal,
+        win: PtySessionWindow,
+        rawLength: number
+      ): void => {
+        const detectedActivity = detection.activity
+
+        // Idle clock policy lives in `shouldRefreshIdleClock`. TUI adapters
+        // (default) refresh only on detected activity so cursor blinks /
+        // status redraws don't pin the clock open; output-driven adapters
+        // (`transitionOnInput === false`, e.g. plain shell) refresh on every chunk.
+        if (detection.refreshIdleClock) {
+          session.lastOutputTime = Date.now()
+        }
+
+        if (detectedActivity) {
+          session.activity = detectedActivity
+          // A working agent is, by definition, not blocked awaiting the user.
+          if (detectedActivity === 'working') session.awaitingUser = false
+          // Clear error state on valid activity (recovery from error)
+          if (session.error && detectedActivity !== 'unknown') {
+            session.error = null
+          }
+          // Map activity to TerminalState for backward compatibility
+          const newState = activityToTerminalState(detectedActivity)
+          if (newState) {
+            const preview = detection.preview
+            if (newState === 'running' && session.state !== 'running') {
+              // See `recordWorkingDetection` in state-machine.ts for the why.
+              const gate = recordWorkingDetection(session.workingDetections, Date.now())
+              session.workingDetections = gate.history
+              if (gate.shouldPromote) {
+                session.workingDetections = []
+                session.pendingTransitionTrigger = {
+                  source: 'detect-activity:working',
+                  preview
+                }
+                transitionState(sessionId, newState)
+              }
+            } else {
+              session.pendingTransitionTrigger = {
+                source: `detect-activity:${detectedActivity}`,
+                preview
+              }
+              transitionState(sessionId, newState)
+            }
+          }
+        }
+
+        // Adapter error detection, already through the session-error gate:
+        // SESSION_NOT_FOUND is only honored during the resume startup window; after
+        // it closes a match is a mid-session echo of the literal "No conversation
+        // found with session ID:" string (e.g. an agent discussing this very bug —
+        // which is how task 753 froze itself) and is ignored.
+        const detectedError = detection.error
+        if (detectedError) {
+          session.error = detectedError
+          session.pendingTransitionTrigger = {
+            source: `detect-error:${detectedError.code}`,
+            preview: detectedError.message?.slice(0, 200)
+          }
+          transitionState(sessionId, 'error')
+          recordDiagnosticEvent({
+            level: 'error',
+            source: 'pty',
+            event: 'pty.adapter_error',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            message: detectedError.message,
+            payload: {
+              code: detectedError.code,
+              rawLength
+            }
+          })
+          // The error code is carried to the renderer on `pty:exit` (see
+          // finalizeSessionExit) so the dead overlay can show a friendly,
+          // error-specific message. No separate IPC — on a stale resume the
+          // CLI exits and the overlay rides that exit. From here on, suppress
+          // forwarding this session's output so the raw "No conversation
+          // found …" line never paints before that overlay.
+          if (detection.suppressOutput) session.suppressOutput = true
+        }
+
+        // Check for prompts (drives the needs-attention UI). NOT used as a
+        // hibernation blocker — the fuzzy match (any line ending in '?') gave
+        // sticky false positives. Hibernation uses the hook signal instead.
+        const prompt = detection.prompt
+        if (prompt) ptyEvents.emit('prompt', sessionId, prompt)
+        if (prompt && !win.isDestroyed()) {
+          try {
+            win.webContents.send('pty:prompt', sessionId, prompt)
+          } catch {
+            // Window destroyed, ignore
+          }
+        }
+
+        // OSC title handling: AI modes (claude-code, codex, etc.) set meaningful OSC titles.
+        // Plain terminals ignore OSC (shell prompts emit noisy paths like "user@host:~/dir").
+        // pty.process polling is handled separately by startTitlePolling().
+        if (detection.title) emitTitle(session, detection.title)
+      }
+      const applyDetectionTail = (
+        session: PtySession,
+        detection: PtyOutputDetection | PtySignal,
+        win: PtySessionWindow
+      ): void => {
+        // Dev server URLs (localhost/127.0.0.1/0.0.0.0 with port), first sighting only.
+        for (const url of detection.devServerUrls) {
+          ptyEvents.emit('dev-server-detected', sessionId, url)
+          if (win.isDestroyed()) continue
+          try {
+            win.webContents.send('pty:dev-server-detected', sessionId, url)
+          } catch {
+            // Window destroyed, ignore
+          }
+        }
+
+        // Conversation ID parsed from /status output
+        const detectedConversationId = detection.conversationId
+        if (detectedConversationId) {
+          // Remember it on the session so the hibernation gate knows this
+          // agent can be resumed by id.
+          session.conversationId = detectedConversationId
+          recordDiagnosticEvent({
+            level: 'info',
+            source: 'pty',
+            event: 'pty.conversation_detected',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            payload: {
+              conversationId: detectedConversationId
+            }
+          })
+          ptyEvents.emit('session-detected', sessionId, detectedConversationId)
+          if (!win.isDestroyed()) {
+            try {
+              win.webContents.send('pty:session-detected', sessionId, detectedConversationId)
+            } catch {
+              // Window destroyed, ignore
+            }
+          }
+          if (session.statusWatchTimeout) {
+            clearTimeout(session.statusWatchTimeout)
+            session.statusWatchTimeout = undefined
+          }
+        }
+      }
+      // Owner-detected output (see `PtySpawnSpec.detection`): same effects, for a
+      // chunk this side delivered but did not detect.
+      ;(target as unknown as PtyHandle).onSignal?.(
+        guardPtyCallback(sessionId, taskId, 'onSignal', (signal: PtySignal) => {
+          const session = sessions.get(sessionId)
+          if (!session || session.pty !== target) return
+          const win = getWin()
+          applyDetectionHead(session, signal, win, signal.preview.length)
+          applyDetectionTail(session, signal, win)
+        })
+      )
       // Forward data to renderer
       target.onData(
         guardPtyCallback(sessionId, taskId, 'onData', (data0) => {
@@ -2361,103 +2536,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           // Track current seq for IPC emission
           const currentSeq = seq
 
-          // Everything this chunk says (pure detection; state decisions below).
-          const detection = session.detector.detect(data)
-          const detectedActivity = detection.activity
-
-          // Idle clock policy lives in `shouldRefreshIdleClock`. TUI adapters
-          // (default) refresh only on detected activity so cursor blinks /
-          // status redraws don't pin the clock open; output-driven adapters
-          // (`transitionOnInput === false`, e.g. plain shell) refresh on every chunk.
-          if (detection.refreshIdleClock) {
-            session.lastOutputTime = Date.now()
-          }
-
-          if (detectedActivity) {
-            session.activity = detectedActivity
-            // A working agent is, by definition, not blocked awaiting the user.
-            if (detectedActivity === 'working') session.awaitingUser = false
-            // Clear error state on valid activity (recovery from error)
-            if (session.error && detectedActivity !== 'unknown') {
-              session.error = null
-            }
-            // Map activity to TerminalState for backward compatibility
-            const newState = activityToTerminalState(detectedActivity)
-            if (newState) {
-              const preview = detection.preview
-              if (newState === 'running' && session.state !== 'running') {
-                // See `recordWorkingDetection` in state-machine.ts for the why.
-                const gate = recordWorkingDetection(session.workingDetections, Date.now())
-                session.workingDetections = gate.history
-                if (gate.shouldPromote) {
-                  session.workingDetections = []
-                  session.pendingTransitionTrigger = {
-                    source: 'detect-activity:working',
-                    preview
-                  }
-                  transitionState(sessionId, newState)
-                }
-              } else {
-                session.pendingTransitionTrigger = {
-                  source: `detect-activity:${detectedActivity}`,
-                  preview
-                }
-                transitionState(sessionId, newState)
-              }
-            }
-          }
-
-          // Adapter error detection, already through the session-error gate:
-          // SESSION_NOT_FOUND is only honored during the resume startup window; after
-          // it closes a match is a mid-session echo of the literal "No conversation
-          // found with session ID:" string (e.g. an agent discussing this very bug —
-          // which is how task 753 froze itself) and is ignored.
-          const detectedError = detection.error
-          if (detectedError) {
-            session.error = detectedError
-            session.pendingTransitionTrigger = {
-              source: `detect-error:${detectedError.code}`,
-              preview: detectedError.message?.slice(0, 200)
-            }
-            transitionState(sessionId, 'error')
-            recordDiagnosticEvent({
-              level: 'error',
-              source: 'pty',
-              event: 'pty.adapter_error',
-              sessionId,
-              taskId: taskIdFromSessionId(sessionId),
-              message: detectedError.message,
-              payload: {
-                code: detectedError.code,
-                rawLength: data.length
-              }
-            })
-            // The error code is carried to the renderer on `pty:exit` (see
-            // finalizeSessionExit) so the dead overlay can show a friendly,
-            // error-specific message. No separate IPC — on a stale resume the
-            // CLI exits and the overlay rides that exit. From here on, suppress
-            // forwarding this session's output so the raw "No conversation
-            // found …" line never paints before that overlay.
-            if (detection.suppressOutput) session.suppressOutput = true
-          }
-
-          // Check for prompts (drives the needs-attention UI). NOT used as a
-          // hibernation blocker — the fuzzy match (any line ending in '?') gave
-          // sticky false positives. Hibernation uses the hook signal instead.
-          const prompt = detection.prompt
-          if (prompt) ptyEvents.emit('prompt', sessionId, prompt)
-          if (prompt && !win.isDestroyed()) {
-            try {
-              win.webContents.send('pty:prompt', sessionId, prompt)
-            } catch {
-              // Window destroyed, ignore
-            }
-          }
-
-          // OSC title handling: AI modes (claude-code, codex, etc.) set meaningful OSC titles.
-          // Plain terminals ignore OSC (shell prompts emit noisy paths like "user@host:~/dir").
-          // pty.process polling is handled separately by startTitlePolling().
-          if (detection.title) emitTitle(session, detection.title)
+          // What this chunk says: detected here, unless the process owner detects
+          // it where the output is and reports it as signals (`onSignal` above).
+          const detection = (target as unknown as PtyHandle).detectsOutput
+            ? null
+            : session.detector.detect(data)
+          if (detection) applyDetectionHead(session, detection, win, data.length)
 
           if (!session.suppressOutput) ptyEvents.emit('data', sessionId, cleanData, currentSeq)
           if (!win.isDestroyed() && !session.suppressOutput) {
@@ -2469,46 +2553,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             }
           }
 
-          // Dev server URLs (localhost/127.0.0.1/0.0.0.0 with port), first sighting only.
-          for (const url of detection.devServerUrls) {
-            ptyEvents.emit('dev-server-detected', sessionId, url)
-            if (win.isDestroyed()) continue
-            try {
-              win.webContents.send('pty:dev-server-detected', sessionId, url)
-            } catch {
-              // Window destroyed, ignore
-            }
-          }
-
-          // Conversation ID parsed from /status output
-          const detectedConversationId = detection.conversationId
-          if (detectedConversationId) {
-            // Remember it on the session so the hibernation gate knows this
-            // agent can be resumed by id.
-            session.conversationId = detectedConversationId
-            recordDiagnosticEvent({
-              level: 'info',
-              source: 'pty',
-              event: 'pty.conversation_detected',
-              sessionId,
-              taskId: taskIdFromSessionId(sessionId),
-              payload: {
-                conversationId: detectedConversationId
-              }
-            })
-            ptyEvents.emit('session-detected', sessionId, detectedConversationId)
-            if (!win.isDestroyed()) {
-              try {
-                win.webContents.send('pty:session-detected', sessionId, detectedConversationId)
-              } catch {
-                // Window destroyed, ignore
-              }
-            }
-            if (session.statusWatchTimeout) {
-              clearTimeout(session.statusWatchTimeout)
-              session.statusWatchTimeout = undefined
-            }
-          }
+          if (detection) applyDetectionTail(session, detection, win)
 
           const config = getDiagnosticsConfig()
           recordDiagnosticEvent({
@@ -2978,6 +3023,7 @@ export function writePty(sessionId: string, data: string): boolean {
     })
   }
 
+  let watchConversationId = false
   // Buffer input to detect commands. Mouse/focus reports are dropped and the
   // result is capped: the buffer resets only on submit-Enter, so a pane the
   // user hovers over but never submits in used to accumulate reports for the
@@ -3023,6 +3069,8 @@ export function writePty(sessionId: string, data: string): boolean {
     }
     const cmd = session.adapter.sessionIdCommand ?? '/status'
     if (session.inputBuffer.includes(cmd)) {
+      // An owner that detects output watches its own (told with this write).
+      watchConversationId = true
       if (session.statusWatchTimeout) {
         clearTimeout(session.statusWatchTimeout)
         session.statusWatchTimeout = undefined
@@ -3040,7 +3088,10 @@ export function writePty(sessionId: string, data: string): boolean {
     session.inputBuffer = '' // reset on enter
   }
 
-  session.pty.write(data)
+  ;(session.pty as unknown as PtyHandle).write(
+    data,
+    watchConversationId ? { watchConversationId: true } : undefined
+  )
   return true
 }
 
