@@ -74,9 +74,15 @@ export interface UseChatComposerOpts {
   attachmentsUsedBytes?: number
   /**
    * Stop the running turn WITHOUT dropping the queue (so the next queued
-   * message goes next). Provided → queued messages get "Send now".
+   * message goes next). Provided → queued messages get "Stop & send".
    */
   interruptTurn?: () => Promise<void>
+  /**
+   * The agent can take a queued message into its running turn now: a turn runs
+   * and no prompt waits. With the provider's `steerQueued` → queued messages get
+   * "Send now".
+   */
+  steerAvailable?: boolean
   /**
    * `/btw <question>`: a side question — asked at once, mid-turn too, never sent
    * or queued (`ChatCapabilities.sideQuestions`). Absent: `/btw` is plain text.
@@ -124,6 +130,7 @@ export function useChatComposer({
   cliCommands,
   attachmentsUsedBytes = 0,
   interruptTurn,
+  steerAvailable = false,
   onSideQuestion
 }: UseChatComposerOpts) {
   const trpcClient = useTRPCClient()
@@ -185,7 +192,8 @@ export function useChatComposer({
     update: updateQueue,
     move: moveQueue,
     hold: holdQueue,
-    release: releaseQueue
+    release: releaseQueue,
+    steer: steerQueue
   } = useChatQueue(
     tabId,
     useStableCallback((original: string) => {
@@ -273,6 +281,10 @@ export function useChatComposer({
     setAttachments(recovered.attachments)
     setCursorPos(recovered.text.length)
     textareaRef.current?.focus()
+  })
+  const dismissDraftConflict = useStableCallback(() => {
+    if (!persistence.dismissConflict({ text: draft, attachments }))
+      toast.error('Could not save the current draft on this device.')
   })
   // Restore once, as soon as the saved draft is known — adjusted during render,
   // so the first painted frame already shows it.
@@ -707,14 +719,32 @@ export function useChatComposer({
     setDraft((prev) => (prev.trim() ? `${prev}\n\n${text}` : text))
     if (files.length > 0) setAttachments((prev) => [...prev, ...files])
   })
-  // "Send now" = this one first, then stop the turn: the queue drains it next.
+  // "Stop & send" = this one first, then stop the turn: the queue drains it next.
   const sendQueuedNow = useStableCallback(async (id: string): Promise<void> => {
     if (!interruptTurn) return
     await moveQueue(id, 0)
     await interruptTurn()
   })
+  // "Send now": the agent takes it after its current step; it stays
+  // listed ("With agent…") until then. A refusal (the turn just ended…) says why.
+  // A request that fails (an older computer has no such method) says so too.
+  const steerQueued = useStableCallback(async (id: string): Promise<void> => {
+    const reason = await steerQueue(id).then(
+      (result) => (result.ok ? null : result.reason),
+      (err: unknown) => (err instanceof Error ? err.message : String(err))
+    )
+    if (reason !== null) toast(`Could not send it now: ${reason}`)
+  })
   const queueApi = {
     editable: capabilities.editableQueue,
+    withdrawSteered: capabilities.withdrawSteered,
+    // Saved on this device, not confirmed by the hub yet: rows at the end of the list.
+    pending: pendingQueuedMessages,
+    onRetryPending: retryQueuedSubmission,
+    ...(dismissPendingQueue ? { onDismissPending: dismissPendingQueue } : {}),
+    ...(capabilities.steerQueued && steerAvailable
+      ? { onSteer: (id: string) => void steerQueued(id) }
+      : {}),
     onMove: moveQueue,
     onHold: holdQueue,
     onRelease: releaseQueue,
@@ -745,6 +775,7 @@ export function useChatComposer({
     legacyDraftAvailable: persistence.legacyAvailable,
     draftConflictAvailable: persistence.conflictAvailable,
     recoverDraftConflict,
+    dismissDraftConflict,
     recoverLegacyDraft,
     setDraft,
     clearDraft,

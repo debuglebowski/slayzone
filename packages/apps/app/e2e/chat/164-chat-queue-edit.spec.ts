@@ -13,9 +13,14 @@ const scenario = (ms: number) => ({
   processes: [{ turns: [[step.sleep(ms), ...reply('first done')]], defaultTurn: echoTurn() }]
 })
 
+/** Queue `text` and wait for the hub's row (a row shows at once, unconfirmed, without actions). */
 async function queue(t: ChatTask, text: string): Promise<void> {
   await t.send(text)
-  await expect(t.panel.getByTestId('chat-queue-item').filter({ hasText: text })).toBeVisible()
+  await expect(
+    t.panel
+      .locator('[data-testid="chat-queue-item"]:not([data-unconfirmed])')
+      .filter({ hasText: text })
+  ).toBeVisible()
 }
 
 test.describe('Claude chat: editable, reorderable queue', () => {
@@ -74,7 +79,7 @@ test.describe('Claude chat: editable, reorderable queue', () => {
     expect(run.userMessages()).toEqual(['first', 'final words'])
   })
 
-  test('"Send now" stops the running turn and that message goes next; the rest keep their order', async ({
+  test('"Stop & send" stops the running turn and that message goes next; the rest keep their order', async ({
     chat
   }) => {
     const t = await chat.openTask({ title: 'Queue send now', scenario: scenario(30_000) })
@@ -87,12 +92,37 @@ test.describe('Claude chat: editable, reorderable queue', () => {
     await t.panel
       .getByTestId('chat-queue-item')
       .filter({ hasText: 'urgent' })
-      .getByRole('button', { name: 'Send now' })
+      .getByRole('button', { name: 'Stop & send' })
       .click()
     await expect(t.panel.getByText('echo: urgent')).toBeVisible({ timeout: 15_000 })
     const run = await t.run(0, (r) => r.userMessages().length === 3, 20_000)
     expect(run.userMessages()).toEqual(['first', 'urgent', 'later'])
     // A live interrupt: the same process, one interrupt request.
     expect(run.controlRequests('interrupt')).toHaveLength(1)
+  })
+
+  test('"Send now" hands it to the CLI while the turn runs; it leaves the queue once picked up', async ({
+    chat
+  }) => {
+    const t = await chat.openTask({ title: 'Queue steer', scenario: scenario(6_000) })
+    await t.send('first')
+    await expect(t.stopButton).toBeVisible()
+    await t.run(0, (run) => run.userMessages().includes('first'))
+    await queue(t, 'later')
+    await queue(t, 'steered')
+    const steered = t.panel.getByTestId('chat-queue-item').filter({ hasText: 'steered' })
+    await steered.getByRole('button', { name: 'Send now' }).click()
+    // With the agent: marked, still listed, and the CLI has it while the first turn runs.
+    await expect(steered).toContainText('With agent')
+    const midTurn = await t.run(0, (r) => r.userMessages().length === 2)
+    expect(midTurn.userMessages()).toEqual(['first', 'steered'])
+    await expect(t.panel.getByText('first done')).toHaveCount(0)
+    // The CLI takes it (this fake: once the turn ends), then the queue goes on in order.
+    await expect(t.panel.getByText('echo: steered')).toBeVisible({ timeout: 15_000 })
+    await expect(t.panel.getByText('echo: later')).toBeVisible({ timeout: 15_000 })
+    const run = await t.run(0, (r) => r.userMessages().length === 3, 20_000)
+    expect(run.userMessages()).toEqual(['first', 'steered', 'later'])
+    await expect(t.panel.getByTestId('chat-queue-item')).toHaveCount(0)
+    expect(run.controlRequests('interrupt')).toHaveLength(0)
   })
 })

@@ -51,7 +51,6 @@ export interface ChatComposerProps {
   backgroundJobs?: ReactNode
   /** Banners above the input (draft recovery); rendered inside the composer column. */
   notices?: ReactNode
-  pendingMessages?: ReactNode
   compact?: boolean
   hasPlanReview?: boolean
   appearance: AppearanceSettings
@@ -127,7 +126,6 @@ export interface ChatComposerProps {
 export function ChatComposer({
   backgroundJobs,
   notices,
-  pendingMessages,
   compact = false,
   hasPlanReview = false,
   appearance,
@@ -185,7 +183,6 @@ export function ChatComposer({
       <div data-testid="chat-composer-column" className="mx-auto w-full max-w-[60rem]">
         {backgroundJobs}
         {notices}
-        {pendingMessages}
         <ChatQueueList items={queuedMessages} onRemove={removeQueue} {...queueApi} />
         {(attachments.length > 0 || attaching) && (
           <div className="flex flex-wrap gap-1.5 mb-1.5 px-1">

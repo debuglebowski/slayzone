@@ -119,9 +119,14 @@ export function createQueuedSubmissions(opts: {
   void ready.catch(() => {
     /* Submit reports staging failure before any RPC. */
   })
-  function attempt(entry: QueuedSubmission): Promise<void> {
+  /** `onStaged`: called once the entry is saved on this device, before delivery. */
+  function attempt(entry: QueuedSubmission, onStaged?: () => void): Promise<void> {
     const running = flights.get(entry.id)
-    if (running) return running
+    if (running) {
+      // Already saved: its earlier attempt staged it.
+      onStaged?.()
+      return running
+    }
     const pending: QueuedSubmission = { ...entry, state: 'pending', error: undefined }
     let acknowledged = false
     entries.set(entry.id, pending)
@@ -138,6 +143,7 @@ export function createQueuedSubmissions(opts: {
           // Preserve local submission order through asynchronous journal writes.
           // Release once RPC starts; later messages need not wait for its ACK.
           await opts.storage.put(pending)
+          onStaged?.()
           const delivery = opts.deliver(pending)
           release()
           await delivery
@@ -172,6 +178,24 @@ export function createQueuedSubmissions(opts: {
     )
     return work
   }
+  /** The entry for `input`: a double submit joins the one already there. */
+  function entryFor(input: QueuedSubmissionInput): QueuedSubmission {
+    const key = queuedSubmissionInputKey(input)
+    const previous = [...entries.values()].find((entry) => queuedSubmissionInputKey(entry) === key)
+    return (
+      previous ?? {
+        ...input,
+        content: input.content.map((block) =>
+          block.type === 'attachment'
+            ? { ...block, attachment: { ...block.attachment } }
+            : { ...block }
+        ),
+        id: opts.createId(),
+        createdAt: Date.now(),
+        state: 'pending'
+      }
+    )
+  }
   return {
     getSnapshot: () => snapshot,
     subscribe: (listener: () => void) => {
@@ -180,25 +204,28 @@ export function createQueuedSubmissions(opts: {
         listeners.delete(listener)
       }
     },
+    /** Save, then deliver; resolves when the hub confirmed it. */
     async push(input: QueuedSubmissionInput) {
       await ready
-      const key = queuedSubmissionInputKey(input)
-      const previous = [...entries.values()].find(
-        (entry) => queuedSubmissionInputKey(entry) === key
-      )
-      return attempt(
-        previous ?? {
-          ...input,
-          content: input.content.map((block) =>
-            block.type === 'attachment'
-              ? { ...block, attachment: { ...block.attachment } }
-              : { ...block }
-          ),
-          id: opts.createId(),
-          createdAt: Date.now(),
-          state: 'pending'
-        }
-      )
+      return attempt(entryFor(input))
+    },
+    /**
+     * Save, then deliver in the background; resolves once it is SAVED on this
+     * device (the composer clears and the row shows at once). A delivery that
+     * fails later leaves the entry `failed` with why (Retry). Rejects only when
+     * it could not be saved — nothing was sent.
+     */
+    async stage(input: QueuedSubmissionInput) {
+      await ready
+      let staged = false
+      return new Promise<void>((resolve, reject) => {
+        attempt(entryFor(input), () => {
+          staged = true
+          resolve()
+        }).catch((err: unknown) => {
+          if (!staged) reject(err)
+        })
+      })
     },
     async retry(id: string) {
       await ready
@@ -229,5 +256,11 @@ export function useQueuedSubmissions(opts: Parameters<typeof createQueuedSubmiss
       /* Submit reports the journal read failure. */
     })
   }, [manager])
-  return { pending, push: manager.push, retry: manager.retry, dismiss: manager.dismiss }
+  return {
+    pending,
+    push: manager.push,
+    stage: manager.stage,
+    retry: manager.retry,
+    dismiss: manager.dismiss
+  }
 }

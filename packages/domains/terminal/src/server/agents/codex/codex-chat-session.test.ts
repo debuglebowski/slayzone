@@ -901,3 +901,85 @@ test('attachment reads are scoped to the driver context, not another hub reader'
     b.driver.dispose()
   }
 })
+
+// ---- "Send now": turn/steer (codex-cli 0.166.0) ----
+
+describe('steerUserTurn', () => {
+  const steerMsg = { id: 'steer-1', content: [{ type: 'text' as const, text: 'skip the rest' }] }
+
+  async function runningTurn(): Promise<Harness> {
+    const h = makeHarness()
+    await handshake(h, 'thread-s')
+    h.driver.sendUserMessage('go')
+    h.driver.handleLine(JSON.stringify({ id: turnStartId(h), result: { turn: { id: 'turn-s' } } }))
+    await flush()
+    return h
+  }
+
+  test('sends turn/steer into the running turn, with the message id as clientUserMessageId', async () => {
+    const h = await runningTurn()
+    const done = h.driver.steerUserTurn!(steerMsg)
+    const steer = h.sent.find((m) => m.method === 'turn/steer')
+    expect(steer?.params).toEqual({
+      threadId: 'thread-s',
+      expectedTurnId: 'turn-s',
+      clientUserMessageId: 'steer-1',
+      input: [{ type: 'text', text: 'skip the rest', text_elements: [] }]
+    })
+    h.driver.handleLine(JSON.stringify({ id: steer!.id, result: { turnId: 'turn-s' } }))
+    await expect(done).resolves.toBeUndefined()
+  })
+
+  test('its userMessage item is the pickup: reported as the message replay', async () => {
+    const h = await runningTurn()
+    const done = h.driver.steerUserTurn!(steerMsg)
+    const steer = h.sent.find((m) => m.method === 'turn/steer')
+    h.driver.handleLine(JSON.stringify({ id: steer!.id, result: { turnId: 'turn-s' } }))
+    await done
+    h.driver.handleLine(
+      JSON.stringify({
+        method: 'item/started',
+        params: {
+          threadId: 'thread-s',
+          turnId: 'turn-s',
+          item: { type: 'userMessage', id: 'item-9', clientId: 'steer-1', content: [] }
+        }
+      })
+    )
+    expect(h.emitted.filter((e) => e.kind === 'user-replay')).toEqual([
+      { kind: 'user-replay', uuid: 'steer-1' }
+    ])
+  })
+
+  test('a userMessage item of an ordinary turn reports nothing', async () => {
+    const h = await runningTurn()
+    h.driver.handleLine(
+      JSON.stringify({
+        method: 'item/started',
+        params: {
+          threadId: 'thread-s',
+          turnId: 'turn-s',
+          item: { type: 'userMessage', id: 'item-1', clientId: 'u1', content: [] }
+        }
+      })
+    )
+    expect(h.emitted.filter((e) => e.kind === 'user-replay')).toEqual([])
+  })
+
+  test('refused when the turn already ended ("no active turn to steer")', async () => {
+    const h = await runningTurn()
+    const done = h.driver.steerUserTurn!(steerMsg)
+    const steer = h.sent.find((m) => m.method === 'turn/steer')
+    h.driver.handleLine(
+      JSON.stringify({ id: steer!.id, error: { code: -32600, message: 'no active turn to steer' } })
+    )
+    await expect(done).rejects.toThrow(/no active turn/)
+  })
+
+  test('no running turn: rejects without sending', async () => {
+    const h = makeHarness()
+    await handshake(h)
+    await expect(h.driver.steerUserTurn!(steerMsg)).rejects.toThrow()
+    expect(h.sent.some((m) => m.method === 'turn/steer')).toBe(false)
+  })
+})

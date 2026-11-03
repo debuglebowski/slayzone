@@ -308,6 +308,15 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     return this.sendLine(line, { writeId: message.id })
   }
 
+  /**
+   * The same stdin write as a new message: Claude Code holds a message written
+   * mid-turn (`command_lifecycle queued`) and takes it after the running tool
+   * call, in the same turn (`started` + replay; 2.1.317).
+   */
+  steerUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
+    return this.sendUserTurn(message, prepared)
+  }
+
   private serializeTurn(
     id: string,
     content: Parameters<NonNullable<typeof claudeCodeAdapter.serializeUserTurn>>[0]['content']

@@ -468,6 +468,8 @@ class CodexChatSession implements ChatSessionDriver {
   private pendingInterrupt: Deferred<unknown> | null = null
   /** Outbox message id → the turn it started and its text (this process's turns). */
   private readonly turnByMessage = new Map<string, { turnId: string; text: string }>()
+  /** Messages sent with `turn/steer` whose `userMessage` item has not come yet. */
+  private readonly steered = new Set<string>()
   /** A `/compact` the user asked for is running (its compaction is `manual`). */
   private manualCompaction = false
   /** Waiters for the running turn to end (`turn/completed`). */
@@ -919,20 +921,60 @@ class CodexChatSession implements ChatSessionDriver {
     return { id: message.id, line: JSON.stringify(input) }
   }
 
+  /** The `UserInput` a message is sent as; null when its files were not prepared. */
+  private turnInput(
+    message: OutgoingUserMessage,
+    prepared?: PreparedUserTurn
+  ): CodexUserInput[] | null {
+    if (prepared?.id === message.id) return JSON.parse(prepared.line) as CodexUserInput[]
+    if (!message.content.every((b) => b.type === 'text')) return null
+    return message.content.map((b) => ({
+      type: 'text',
+      text: b.type === 'text' ? b.text : '',
+      text_elements: []
+    }))
+  }
+
   sendUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
-    let input: CodexUserInput[]
-    if (prepared?.id === message.id) input = JSON.parse(prepared.line) as CodexUserInput[]
-    else if (message.content.every((b) => b.type === 'text')) {
-      input = message.content.map((b) => ({
-        type: 'text',
-        text: b.type === 'text' ? b.text : '',
-        text_elements: []
-      }))
-    } else return Promise.reject(new Error('attachments were not prepared for this message'))
+    const input = this.turnInput(message, prepared)
+    if (!input) return Promise.reject(new Error('attachments were not prepared for this message'))
     const text = userMessageText(message.content)
     if (!this.handshakeDone) this.queued.push({ text, messageId: message.id, input })
     else this.startTurn(text, message.id, input)
     return Promise.resolve()
+  }
+
+  /**
+   * Add a message to the running turn: `turn/steer` (codex-cli 0.166.0). Codex
+   * takes it after the running item; its `userMessage` item (`clientId` = the
+   * message id) is the pickup, reported as the message's replay. Rejects when no
+   * turn runs — also Codex's own "no active turn to steer" when it just ended.
+   */
+  steerUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
+    const client = this.client
+    const threadId = this.threadId
+    const turnId = this.currentTurnId
+    if (!client || !threadId || !this.handshakeDone || !turnId || this.endedTurns.has(turnId)) {
+      return Promise.reject(new Error('Codex is not working right now.'))
+    }
+    const input = this.turnInput(message, prepared)
+    if (!input) return Promise.reject(new Error('attachments were not prepared for this message'))
+    const text = userMessageText(message.content)
+    this.steered.add(message.id)
+    return client
+      .request<{ turnId?: string }>(
+        'turn/steer',
+        { threadId, expectedTurnId: turnId, clientUserMessageId: message.id, input },
+        TURN_REQUEST_TIMEOUT_MS
+      )
+      .then((res) => {
+        // Rewind / fork find a message's turn by its id: this one is in the running turn.
+        this.turnByMessage.set(message.id, { turnId: res?.turnId ?? turnId, text })
+      })
+      .catch((err: unknown) => {
+        this.steered.delete(message.id)
+        throw err instanceof Error ? err : new Error(String(err))
+      })
   }
 
   /**
@@ -1598,7 +1640,12 @@ class CodexChatSession implements ChatSessionDriver {
     }
     if (item.type === 'userMessage') {
       // Codex echoes the user message as an item; the transport already
-      // emitted its own synthetic `user-message` — skip the echo.
+      // emitted its own synthetic `user-message` — skip the echo. A steered
+      // message's item is its pickup: the transport shows it from here.
+      const clientId = typeof item.clientId === 'string' ? item.clientId : null
+      if (clientId && this.steered.delete(clientId)) {
+        this.emit(ctx, { kind: 'user-replay', uuid: clientId })
+      }
       return
     }
     // agentMessage / reasoning streams open lazily on their first delta (see

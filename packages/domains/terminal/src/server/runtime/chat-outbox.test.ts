@@ -535,3 +535,50 @@ test('text-only messages are not prepared: written in the same tick, as before',
   expect(p.preparedWith).toEqual([undefined])
   expect(h.states('a')).toEqual(['sending'])
 })
+
+// ---- a message the agent took into its running turn (Send now) ----
+
+test('join: a steered message the agent took is delivered at once, never written by the outbox', () => {
+  const p = proc(1)
+  const h = harness(p)
+  h.outbox.join(msg('s1'), 1)
+  expect(h.states('s1')).toEqual(['delivered'])
+  expect(p.sent).toEqual([])
+  expect(h.writing).toEqual([])
+  expect(h.outbox.inFlight()).toBe(1)
+  // Idempotent by id, like accept.
+  h.outbox.join(msg('s1'), 1)
+  expect(h.states('s1')).toEqual(['delivered'])
+})
+
+test('join: a CLI that acks natively answers it by its own lifecycle', () => {
+  const p = proc(1)
+  const h = harness(p)
+  h.outbox.accept(msg('m1'))
+  h.outbox.onLifecycle(1, 'm1', 'started')
+  h.outbox.join(msg('s1'), 1)
+  h.outbox.onLifecycle(1, 's1', 'completed')
+  expect(h.states('s1')).toEqual(['delivered', 'answered'])
+  expect(h.outbox.state('m1')).toBe('delivered')
+})
+
+test('join: without native acks the turn result answers it with the message that opened the turn', async () => {
+  const p = proc(1, { native: false })
+  const h = harness(p)
+  h.outbox.accept(msg('m1'))
+  await Promise.resolve()
+  expect(h.outbox.state('m1')).toBe('delivered')
+  h.outbox.join(msg('s1'), 1)
+  h.outbox.onResult(1)
+  expect(h.outbox.state('m1')).toBe('answered')
+  expect(h.outbox.state('s1')).toBe('answered')
+  expect(h.outbox.inFlight()).toBe(0)
+})
+
+test('join: a process that ends before answering leaves it interrupted, like any delivered message', () => {
+  const p = proc(1)
+  const h = harness(p)
+  h.outbox.join(msg('s1'), 1)
+  h.outbox.onProcessEnded(1, { resend: false })
+  expect(h.outbox.state('s1')).toBe('cancelled')
+})

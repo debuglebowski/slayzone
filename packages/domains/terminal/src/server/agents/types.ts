@@ -247,6 +247,16 @@ export interface ChatSessionDriver {
    */
   sendUserTurn?(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void>
   /**
+   * Add an outbox message to the RUNNING turn (a queued message's "Add to
+   * current turn"), as `prepared` when given. Resolves once the provider took
+   * the request (Claude: the stdin write — the CLI holds it until its next tool
+   * call ends; Codex: `turn/steer` accepted); rejects when it refused (no turn
+   * running) or could not be written. The pickup is reported as `user-replay`
+   * (or Claude's `command-lifecycle started`) for the message id. Absent: the
+   * provider cannot add to a running turn.
+   */
+  steerUserTurn?(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void>
+  /**
    * The provider confirms each message itself (Claude: `command_lifecycle` /
    * replay for the message `uuid`), so a written message is only `sending`
    * until it does. Absent/false: a confirmed write counts as delivered.

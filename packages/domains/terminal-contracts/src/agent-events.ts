@@ -188,6 +188,12 @@ export interface UserMessageEvent {
    * flight, never re-sent, never taken back by Stop.
    */
   history?: true
+  /**
+   * The agent took this message into its RUNNING turn (a queued message added
+   * with "Send now", saved when the agent picked it up): a row inside
+   * that turn, not a new turn — the turn's one result answers it too.
+   */
+  joinsTurn?: true
 }
 
 /**

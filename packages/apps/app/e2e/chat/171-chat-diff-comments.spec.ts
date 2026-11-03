@@ -13,7 +13,7 @@ import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
 
 const BEFORE = 'const a = 1\nconst b = 2\nconst c = 3\n'
 
-/** An Edit, then the turn keeps running until it is interrupted ("Send now"). */
+/** An Edit, then the turn keeps running until it is interrupted ("Stop & send"). */
 const EDIT_THEN_WAIT = [
   step.emit(
     ev.init(),
@@ -109,11 +109,11 @@ test.describe('Chat diff comments', () => {
     await expect(t.composer).toHaveValue(draft)
     await expect(t.stopButton).toBeVisible()
 
-    // A turn runs: it queues, and goes out next ("Send now" stops the turn).
+    // A turn runs: it queues, and goes out next ("Stop & send" stops the turn).
     await t.composer.press('Enter')
     const queued = t.panel.getByTestId('chat-queue-item').filter({ hasText: 'src/app.ts:2' })
     await expect(queued).toBeVisible()
-    await queued.getByRole('button', { name: 'Send now' }).click()
+    await queued.getByRole('button', { name: 'Stop & send' }).click()
     const run = await t.run(0, (r) => r.userMessages().length === 2, 20_000)
     expect(run.userMessages()[1]).toBe(draft)
   })

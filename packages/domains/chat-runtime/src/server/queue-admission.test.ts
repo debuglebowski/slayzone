@@ -179,7 +179,10 @@ test('an abandoned hub lease wakes the drainer after expiry without another requ
     getSessionTerminalState: () => 'idle',
     getSessionInfo: () => null,
     isReadyForQueuedMessage: () => ready,
-    registerChatQueueDrainer: () => {}
+    registerChatQueueDrainer: () => {},
+    registerSteerListener: () => {},
+    steerUserMessage: async () => ({ ok: false, reason: 'not in this fixture' }),
+    withdrawSteer: async () => false
   })
   const ops = runtime.createChatQueueOps(
     {} as SlayzoneDb,

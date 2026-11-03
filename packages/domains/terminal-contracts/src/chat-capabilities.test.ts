@@ -27,6 +27,8 @@ test('Claude Code chat: every capability', () => {
     commandPalette: true,
     compact: true,
     sideQuestions: true,
+    steerQueued: true,
+    withdrawSteered: true,
     agentStartedTurns: true
   })
 })
@@ -52,6 +54,8 @@ test('Codex chat: prompt cards, live Stop + effort, rewind, fork, sessions, comp
     commandPalette: true,
     compact: true,
     sideQuestions: true,
+    steerQueued: true,
+    withdrawSteered: false,
     agentStartedTurns: false
   })
 })
@@ -77,6 +81,8 @@ test('unknown / non-chat modes get nothing', () => {
     commandPalette: false,
     compact: false,
     sideQuestions: false,
+    steerQueued: false,
+    withdrawSteered: false,
     agentStartedTurns: false
   })
 })

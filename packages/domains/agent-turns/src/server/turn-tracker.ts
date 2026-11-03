@@ -134,7 +134,8 @@ export function initChatTurnSubscriber(db: SlayzoneDb): (tabId: string, event: A
   const lastUserPromptByTab = new Map<string, string>()
   return (tabId, event) => {
     if (event.kind === 'user-message') {
-      lastUserPromptByTab.set(tabId, event.text ?? '')
+      // A message added to the running turn: the turn's prompt stays the one that opened it.
+      if (!event.joinsTurn) lastUserPromptByTab.set(tabId, event.text ?? '')
       return
     }
     if (event.kind === 'result') {

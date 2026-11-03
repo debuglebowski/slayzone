@@ -725,6 +725,81 @@ describe('ChatSession: files attached on desktop', () => {
     expect(queue).toHaveTextContent(/spec\.pdf/)
     expect(screen.getByLabelText('Remove queued message: spec.pdf')).toBeOnTheScreen()
   })
+
+  const queuedRow = (over: Record<string, unknown> = {}) => ({
+    id: 'q1',
+    tabId: TAB,
+    send: 'also run lint',
+    original: 'also run lint',
+    position: 0,
+    createdAt: '2026-11-03 10:00:00',
+    ...over
+  })
+  const runningTurn = (hub: FakeHub) =>
+    hubSends(hub, [
+      { kind: 'turn-init', sessionId: 's', model: 'opus', cwd: '/w', tools: [] },
+      { kind: 'user-message', id: 'u1', text: 'build', content: [{ type: 'text', text: 'build' }] }
+    ])
+
+  it('"Send now" on a queued message while a turn runs', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.queue.list', () => [queuedRow()])
+    hub.on('chat.queue.steer', () => ({ ok: true }))
+    await open(hub)
+    await screen.findByTestId('chat-queue')
+    expect(screen.queryByLabelText('Send now: also run lint')).toBeNull()
+    await runningTurn(hub)
+    await fireEvent.press(await screen.findByLabelText('Send now: also run lint'))
+    await waitFor(() => expect(hub.callsTo('chat.queue.steer')).toEqual([{ id: 'q1' }]))
+  })
+
+  it('a refused add says why', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.queue.list', () => [queuedRow()])
+    hub.on('chat.queue.steer', () => ({ ok: false, reason: 'no active turn to steer' }))
+    await open(hub)
+    await screen.findByTestId('chat-queue')
+    await runningTurn(hub)
+    await fireEvent.press(await screen.findByLabelText('Send now: also run lint'))
+    await screen.findByText('Could not send it now: no active turn to steer')
+  })
+
+  it('a message with the agent is marked; Claude can take it back, Codex cannot', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.queue.list', () => [queuedRow({ steering: true })])
+    await open(hub)
+    await screen.findByTestId('chat-queue')
+    await runningTurn(hub)
+    const queue = await screen.findByTestId('chat-queue')
+    expect(queue).toHaveTextContent(/With agent/)
+    expect(screen.queryByLabelText('Send now: also run lint')).toBeNull()
+    expect(screen.queryByLabelText('Remove queued message: also run lint')).toBeNull()
+    await fireEvent.press(screen.getByLabelText('Take back from the agent: also run lint'))
+    await waitFor(() => expect(hub.callsTo('chat.queue.remove')).toEqual([{ id: 'q1' }]))
+  })
+
+  it('a queued message shows in Up next at once, before the hub confirms it', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.queue.push', () => new Promise(() => {}))
+    await open(hub)
+    await screen.findByTestId('chat-input')
+    await runningTurn(hub)
+    await fireEvent.changeText(screen.getByTestId('chat-input'), 'follow-up')
+    await fireEvent.press(screen.getByLabelText('Queue message'))
+    const queue = await screen.findByTestId('chat-queue')
+    expect(queue).toHaveTextContent(/follow-up/)
+    expect(screen.queryByText(/Waiting for queue confirmation/)).toBeNull()
+    expect(screen.getByTestId('chat-input').props.value).toBe('')
+  })
+
+  it('Codex: a message with the agent cannot be taken back', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.queue.list', () => [queuedRow({ steering: true })])
+    await open(hub, 'codex-chat')
+    const queue = await screen.findByTestId('chat-queue')
+    expect(queue).toHaveTextContent(/With agent/)
+    expect(screen.queryByLabelText('Take back from the agent: also run lint')).toBeNull()
+  })
 })
 
 describe("ChatSession: the CLI's own command words", () => {

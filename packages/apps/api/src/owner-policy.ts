@@ -758,6 +758,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.queue.move': checked(ref('chatQueueItem')('id')),
   'chat.queue.hold': checked(ref('chatQueueItem')('id')),
   'chat.queue.release': checked(ref('chatQueueItem')('id')),
+  'chat.queue.steer': checked(ref('chatQueueItem')('id')),
   'chat.queue.clear': checked(tab('tabId')),
   'chat.tabState.get': checked(tab('tabId')),
   'chat.tabState.saveDraft': checked(tab('tabId')),
@@ -1109,6 +1110,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.warmSetProjectTabCounts': checked(project('counts{}')),
   'pty.onData': streamed(on('sessionId', 'session')),
   'pty.onStateChange': streamed(on('sessionId', 'session')),
+  // A full snapshot of starting agents: cut to the caller's sessions. An empty cut is
+  // still sent — it is the snapshot ("none of yours are starting"), not a no-op.
+  'pty.onAgentStarts': streamed((event, { scope }) => rows('sessionId', 'session')(event, scope)),
   'pty.onBackgroundJobs': streamed(on('sessionId', 'session')),
   'pty.onResize': streamed(on('sessionId', 'session')),
   'pty.onTitleChange': streamed(on('sessionId', 'session')),

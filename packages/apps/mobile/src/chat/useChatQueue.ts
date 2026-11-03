@@ -30,6 +30,8 @@ export interface ChatQueue {
   push: (send: string, original: string, content?: UserContentBlock[]) => Promise<void>
   remove: (id: string) => Promise<void>
   clear: () => Promise<void>
+  /** "Send now" (`chat.queue.steer`); `ok: false` + why when the agent can't take it. */
+  steer: (id: string) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 export function useChatQueue(
@@ -60,6 +62,13 @@ export function useChatQueue(
   })
   useSubscription(trpc.chat.onQueueDrained.subscriptionOptions(undefined, { onData: onDrainedMsg }))
 
+  // Stable (the store is rebuilt when `deliver` changes). A refresh that fails
+  // changes nothing: the hub has the message.
+  const refreshList = useStableCallback(() =>
+    Promise.resolve()
+      .then(() => queryClient.invalidateQueries(trpc.chat.queue.list.queryFilter({ tabId })))
+      .catch(() => undefined)
+  )
   const deliver = useCallback(
     async ({ id, send, original, content, expectedMode }: QueuedSubmission) => {
       // The id it gets here is the id it is sent with (the outbox tracks it by it).
@@ -71,11 +80,15 @@ export function useChatQueue(
         content,
         ...(expectedMode ? { expectedMode } : {})
       })
+      // Its local row gives way to the hub's only once the list has it: no gap.
+      await refreshList()
     },
-    [trpcClient, tabId]
+    [trpcClient, tabId, refreshList]
   )
   const submissions = useQueuedSubmissions({ storage, deliver, createId: newMessageId })
-  const { push: pushSubmission } = submissions
+  // Resolves once saved on this device: the row shows (and the draft clears) at
+  // once; a delivery that fails later shows on the row, with Retry.
+  const { stage: pushSubmission } = submissions
   const push = useCallback(
     (send: string, original: string, content?: UserContentBlock[]) =>
       pushSubmission({
@@ -96,6 +109,11 @@ export function useChatQueue(
     await trpcClient.chat.queue.clear.mutate({ tabId })
   }, [trpcClient, tabId])
 
+  const steer = useCallback(
+    (id: string) => trpcClient.chat.queue.steer.mutate({ id }),
+    [trpcClient]
+  )
+
   return {
     items: list.data ?? [],
     pending: submissions.pending,
@@ -103,6 +121,7 @@ export function useChatQueue(
     dismissPending: submissions.dismiss,
     push,
     remove,
-    clear
+    clear,
+    steer
   }
 }

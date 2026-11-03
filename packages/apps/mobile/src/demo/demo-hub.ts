@@ -670,6 +670,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     'chat.queue.list': () => [],
     'chat.queue.push': unavailable,
     'chat.queue.remove': () => false,
+    'chat.queue.steer': unavailable,
     'chat.queue.clear': () => 0,
     'chat.stopCommandTask': () => undefined,
     'chat.commandTaskOutput': () => ({ state: 'gone' }),

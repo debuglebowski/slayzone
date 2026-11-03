@@ -1,6 +1,7 @@
 /**
  * The composer: the `/` menu above the input while a command is being typed, the
- * messages waiting in the queue ("Up next", removable), the files the next message
+ * messages waiting in the queue ("Up next", removable, addable to the running
+ * turn — then "With agent…" until the agent reads it), the files the next message
  * carries (given back by Stop; removable), and the input with Send — and Stop while a
  * turn runs. Keyboard dictation works as in any text field.
  */
@@ -28,6 +29,8 @@ export function Composer({
   composer,
   queued,
   onRemoveQueued,
+  onSteerQueued,
+  withdrawSteered = false,
   inFlight,
   disabled,
   placeholder
@@ -35,12 +38,23 @@ export function Composer({
   composer: ChatComposer
   queued: readonly QueuedChatMessage[]
   onRemoveQueued: (id: string) => void
+  /**
+   * "Send now": the agent takes it after its current step. Absent →
+   * not offered (no turn runs, a prompt waits, or the provider can't).
+   */
+  onSteerQueued?: (id: string) => void
+  /** A message with the agent (`steering`) can be taken back until it is read. */
+  withdrawSteered?: boolean
   inFlight: boolean
   /** Not ready to send yet (loading), or the session ended. */
   disabled: boolean
   placeholder: string
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
+  // Saved on this device, not confirmed by the hub yet: shown at once at the end of
+  // Up next (no actions until confirmed); the hub's row replaces it once listed.
+  const listed = new Set(queued.map((q) => q.id))
+  const unconfirmed = (composer.pendingQueuedMessages ?? []).filter((e) => !listed.has(e.id))
   return (
     <View style={s.wrap}>
       {composer.menu && (
@@ -75,56 +89,7 @@ export function Composer({
           )}
         />
       )}
-      {!!composer.pendingQueuedMessages?.length && (
-        <View style={s.queue} accessibilityLabel="Unconfirmed queued messages">
-          {composer.pendingQueuedMessages.map((entry) => (
-            <View key={entry.id} style={s.queueRow}>
-              <View style={s.queueBody}>
-                <Text style={s.queueText} numberOfLines={2}>
-                  {entry.original || entry.send || 'Attached files'}
-                </Text>
-                {userMessageAttachments(entry.content).length > 0 && (
-                  <Text style={s.queueFiles}>
-                    {userMessageAttachments(entry.content)
-                      .map((file) => file.name)
-                      .join(', ')}
-                  </Text>
-                )}
-                <Text style={s.queueFiles} accessibilityLiveRegion="polite">
-                  {entry.state === 'pending' ? 'Waiting for queue confirmation…' : entry.error}
-                </Text>
-              </View>
-              {entry.state === 'failed' && (
-                <>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Retry queued message: ${entry.original || 'Attached files'}`}
-                    onPress={() => {
-                      void composer.retryQueuedSubmission?.(entry.id).catch(() => {
-                        /* Pending copy retains the error. */
-                      })
-                    }}
-                  >
-                    <Text style={s.queueRemove}>Retry</Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove local copy; accepted messages are not cancelled"
-                    onPress={() => {
-                      void composer.dismissQueuedSubmission?.(entry.id).catch(() => {
-                        /* Keep the local copy if deletion fails. */
-                      })
-                    }}
-                  >
-                    <Text style={s.queueRemove}>Dismiss</Text>
-                  </Pressable>
-                </>
-              )}
-            </View>
-          ))}
-        </View>
-      )}
-      {queued.length > 0 && (
+      {queued.length + unconfirmed.length > 0 && (
         <View style={s.queue} testID="chat-queue">
           <Text style={s.queueTitle}>Up next</Text>
           {queued.map((q) => {
@@ -142,14 +107,91 @@ export function Composer({
                     </Text>
                   ) : null}
                 </View>
-                <Pressable
-                  onPress={() => onRemoveQueued(q.id)}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove queued message: ${label}`}
-                >
-                  <Text style={s.queueRemove}>✕</Text>
-                </Pressable>
+                {q.steering ? (
+                  <>
+                    <Text style={s.queueSteering}>With agent…</Text>
+                    {withdrawSteered && (
+                      <Pressable
+                        onPress={() => onRemoveQueued(q.id)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Take back from the agent: ${label}`}
+                      >
+                        <Text style={s.queueRemove}>✕</Text>
+                      </Pressable>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {onSteerQueued && (
+                      <Pressable
+                        onPress={() => onSteerQueued(q.id)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Send now: ${label}`}
+                      >
+                        <Text style={s.queueAction}>Send now</Text>
+                      </Pressable>
+                    )}
+                    <Pressable
+                      onPress={() => onRemoveQueued(q.id)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove queued message: ${label}`}
+                    >
+                      <Text style={s.queueRemove}>✕</Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            )
+          })}
+          {unconfirmed.map((entry) => {
+            const label = entry.original || entry.send || 'Attached files'
+            const files = userMessageAttachments(entry.content)
+            return (
+              <View key={entry.id} style={s.queueRow}>
+                <View style={s.queueBody}>
+                  <Text style={s.queueText} numberOfLines={2}>
+                    {label}
+                  </Text>
+                  {files.length > 0 ? (
+                    <Text style={s.queueFiles} numberOfLines={1}>
+                      📎 {files.map((f) => f.name).join(', ')}
+                    </Text>
+                  ) : null}
+                  {entry.state === 'failed' && entry.error ? (
+                    <Text style={s.queueFiles} accessibilityLiveRegion="polite">
+                      {entry.error}
+                    </Text>
+                  ) : null}
+                </View>
+                {entry.state === 'failed' && (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Retry queued message: ${label}`}
+                      onPress={() => {
+                        void composer.retryQueuedSubmission?.(entry.id).catch(() => {
+                          /* The local copy keeps the error. */
+                        })
+                      }}
+                    >
+                      <Text style={s.queueRemove}>Retry</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove local copy; accepted messages are not cancelled"
+                      onPress={() => {
+                        void composer.dismissQueuedSubmission?.(entry.id).catch(() => {
+                          /* Keep the local copy if deletion fails. */
+                        })
+                      }}
+                    >
+                      <Text style={s.queueRemove}>Dismiss</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
             )
           })}
@@ -269,6 +311,8 @@ function makeStyles(t: ChromeColors) {
     queueBody: { flex: 1 },
     queueText: { color: t.foreground, fontSize: 13 },
     queueFiles: { color: t.mutedForeground, fontSize: 12, marginTop: 1 },
+    queueSteering: { color: t.mutedForeground, fontSize: 12, fontStyle: 'italic' },
+    queueAction: { color: t.primary, fontSize: 12, fontWeight: '600' },
     files: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 },
     file: {
       flexDirection: 'row',

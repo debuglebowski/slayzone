@@ -8,7 +8,10 @@ import {
   getSessionTerminalState,
   getSessionInfo,
   isReadyForQueuedMessage,
-  registerChatQueueDrainer
+  registerChatQueueDrainer,
+  registerSteerListener,
+  steerUserMessage,
+  withdrawSteer
 } from './chat-transport-manager'
 import {
   createDbChatQueueData,
@@ -22,7 +25,7 @@ import { admitAttachments, type AttachmentLookup } from './chat-attachment-guard
 import { createDbAttachmentLookup } from './chat-data-ops'
 import { getPtyHostBridge } from '../pty-host'
 import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
-import type { ChatTransport } from './chat-transport-manager'
+import type { ChatTransport, SteerResult } from './chat-transport-manager'
 
 /**
  * Chat-queue event emitter — the source for the tRPC `chat.onQueueChanged` /
@@ -60,6 +63,9 @@ type QueueTransport = Pick<
   | 'getSessionInfo'
   | 'isReadyForQueuedMessage'
   | 'registerChatQueueDrainer'
+  | 'registerSteerListener'
+  | 'steerUserMessage'
+  | 'withdrawSteer'
 >
 const legacyQueueTransport: QueueTransport = {
   dispatchUserMessage,
@@ -68,7 +74,10 @@ const legacyQueueTransport: QueueTransport = {
   getSessionTerminalState,
   getSessionInfo,
   isReadyForQueuedMessage,
-  registerChatQueueDrainer
+  registerChatQueueDrainer,
+  registerSteerListener,
+  steerUserMessage,
+  withdrawSteer
 }
 export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTransport) {
   const {
@@ -78,7 +87,10 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
     getSessionTerminalState,
     getSessionInfo,
     isReadyForQueuedMessage,
-    registerChatQueueDrainer
+    registerChatQueueDrainer,
+    registerSteerListener,
+    steerUserMessage,
+    withdrawSteer
   } = transport
 
   const chatQueueEvents = new TypedEmitter<ChatQueueEventMap>()
@@ -129,6 +141,35 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
    * memory: holds end with the hub process, like the editors that made them.
    */
   const holds = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
+
+  /**
+   * Queued messages added to the running turn ("Send now") that the
+   * agent has not picked up, per tab. Their rows stay in the queue — listed as
+   * `steering`, not editable — until the transport reports the pickup (the row
+   * leaves the queue) or gives them back (an ordinary queued row again). While
+   * any waits, the tab's queue does not drain: the steered message goes first.
+   * In memory: a hub restart ends the processes they were written to, so the
+   * rows are ordinary queued messages again.
+   */
+  const steering = new Map<string, Set<string>>()
+
+  function isSteering(tabId: string, id: string): boolean {
+    return steering.get(tabId)?.has(id) ?? false
+  }
+
+  function markSteering(tabId: string, id: string): void {
+    const ids = steering.get(tabId) ?? new Set<string>()
+    steering.set(tabId, ids)
+    ids.add(id)
+  }
+
+  /** True when it was marked. */
+  function unmarkSteering(tabId: string, id: string): boolean {
+    const ids = steering.get(tabId)
+    if (!ids?.delete(id)) return false
+    if (ids.size === 0) steering.delete(tabId)
+    return true
+  }
 
   function heldIds(tabId: string): string[] {
     return [...(holds.get(tabId)?.keys() ?? [])]
@@ -210,6 +251,8 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       return
     }
     if (!isReadyForQueuedMessage(tabId)) return
+    // A message added to the turn goes first: nothing is sent until the agent has it.
+    if (steering.has(tabId)) return
 
     // A head being edited stays put (and everything behind it waits).
     const head = await data.pop(tabId, heldIds(tabId))
@@ -294,6 +337,27 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       void drainChatQueue(db, tabId, data)
     })
 
+    // What became of a steered message (on the tab's chain: never races a pop,
+    // a hold, or a remove that withdraws it).
+    registerSteerListener((tabId, id, outcome) => {
+      void onTabChain(tabId, async () => {
+        if (!unmarkSteering(tabId, id)) return
+        if (outcome === 'picked-up') {
+          // The agent has it (its row is in the timeline now): it leaves the queue.
+          const row = (await data.list(tabId)).find((m) => m.id === id)
+          await data.remove(id)
+          broadcast('chat:queue-changed', tabId)
+          if (row) broadcast('chat:queue-drained', tabId, row.original)
+        } else {
+          broadcast('chat:queue-changed', tabId)
+        }
+        // Not awaited: the drain runs on this chain, after this step.
+        void drainChatQueue(db, tabId, data)
+      }).catch((err) => {
+        console.error('[chat-queue] steer outcome failed:', err)
+      })
+    })
+
     /** Files in a queued message pass the same gate as a direct send (checked + sealed). */
     const admit = (
       tabId: string,
@@ -309,7 +373,59 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       })
 
     return {
-      list: (tabId: string): Promise<QueuedChatMessage[]> => data.list(tabId),
+      list: async (tabId: string): Promise<QueuedChatMessage[]> => {
+        const rows = await data.list(tabId)
+        if (!steering.has(tabId)) return rows
+        return rows.map((m) => (isSteering(tabId, m.id) ? { ...m, steering: true as const } : m))
+      },
+
+      /**
+       * Add a queued message to the running turn ("Send now"): the
+       * agent takes it after its current tool call. It stays listed (`steering`)
+       * until picked up. Refused — the message stays queued as it was — when it
+       * is being edited, already added, meant for another conversation, or the
+       * agent can't take it (no turn running, a prompt waiting, Codex's turn
+       * just ended).
+       */
+      steer: async (id: string): Promise<SteerResult> => {
+        const gone: SteerResult = { ok: false, reason: 'That message was already sent.' }
+        const tabId = await data.getTabIdForItem(id)
+        if (tabId === null) return gone
+        const marked = await onTabChain(
+          tabId,
+          async (): Promise<
+            { ok: true; row: QueuedChatMessage } | { ok: false; reason: string }
+          > => {
+            const row = (await data.list(tabId)).find((m) => m.id === id)
+            if (!row) return gone
+            if (isSteering(tabId, id)) return { ok: false, reason: 'It was already added.' }
+            if (holds.get(tabId)?.has(id)) {
+              return { ok: false, reason: 'That message is being edited.' }
+            }
+            if (
+              row.expectedConversationId !== undefined &&
+              row.expectedConversationId !== getSessionInfo(tabId)?.sessionId
+            ) {
+              return { ok: false, reason: 'That message is for another conversation.' }
+            }
+            markSteering(tabId, id)
+            broadcast('chat:queue-changed', tabId)
+            return { ok: true, row }
+          }
+        )
+        if (!marked.ok) return marked
+        const content: UserContentBlock[] = marked.row.content ?? [
+          { type: 'text', text: marked.row.send }
+        ]
+        const result = await steerUserMessage(tabId, { id, content })
+        if (!result.ok) {
+          await onTabChain(tabId, async () => {
+            if (unmarkSteering(tabId, id)) broadcast('chat:queue-changed', tabId)
+          })
+          void drainChatQueue(db, tabId, data)
+        }
+        return result
+      },
 
       reserve: async (
         tabId: string,
@@ -420,7 +536,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
         next: { send: string; original: string; content: UserContentBlock[] }
       ): Promise<boolean> => {
         const tabId = await data.getTabIdForItem(id)
-        if (tabId === null) return false
+        if (tabId === null || isSteering(tabId, id)) return false
         const content = await admit(tabId, next.content, id)
         const updated = await data.update(id, { ...next, content })
         if (updated) broadcast('chat:queue-changed', tabId)
@@ -430,7 +546,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       /** Move a queued message to `toIndex` in its tab's order. */
       move: async (id: string, toIndex: number): Promise<boolean> => {
         const tabId = await data.getTabIdForItem(id)
-        if (tabId === null) return false
+        if (tabId === null || isSteering(tabId, id)) return false
         const moved = await data.move(id, toIndex)
         if (moved) {
           broadcast('chat:queue-changed', tabId)
@@ -449,6 +565,8 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
         if (tabId === null) return false
         return onTabChain(tabId, async () => {
           if ((await data.getTabIdForItem(id)) === null) return false
+          // With the agent: no longer editable.
+          if (isSteering(tabId, id)) return false
           const tabHolds = holds.get(tabId) ?? new Map<string, ReturnType<typeof setTimeout>>()
           holds.set(tabId, tabHolds)
           const previous = tabHolds.get(id)
@@ -476,6 +594,19 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
 
       remove: async (id: string): Promise<boolean> => {
         const tabId = await data.getTabIdForItem(id)
+        if (tabId !== null && isSteering(tabId, id)) {
+          // Added to the turn: take it back from the agent first (on the chain,
+          // so the queue cannot send it in between). One it kept stays listed.
+          return onTabChain(tabId, async () => {
+            if (isSteering(tabId, id)) {
+              if (!(await withdrawSteer(tabId, id))) return false
+              unmarkSteering(tabId, id)
+            }
+            const removed = await data.remove(id)
+            if (removed) broadcast('chat:queue-changed', tabId)
+            return removed
+          })
+        }
         const removed = await data.remove(id)
         if (tabId !== null) dropHold(tabId, id)
         // Gate on row existence (null check), not string truthiness — exact
@@ -486,6 +617,22 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
 
       clear: async (tabId: string): Promise<number> => {
         dropHolds(tabId)
+        if (steering.has(tabId)) {
+          // Steered messages are taken back first; one the agent kept stays listed.
+          return onTabChain(tabId, async () => {
+            const kept = new Set<string>()
+            for (const id of [...(steering.get(tabId) ?? [])]) {
+              if (await withdrawSteer(tabId, id)) unmarkSteering(tabId, id)
+              else kept.add(id)
+            }
+            let cleared = 0
+            for (const row of await data.list(tabId)) {
+              if (!kept.has(row.id) && (await data.remove(row.id))) cleared++
+            }
+            if (cleared > 0) broadcast('chat:queue-changed', tabId)
+            return cleared
+          })
+        }
         const cleared = await data.clear(tabId)
         if (cleared > 0) broadcast('chat:queue-changed', tabId)
         return cleared
@@ -497,6 +644,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
     for (const timer of admissionTimers.values()) clearTimeout(timer)
     admissionTimers.clear()
     for (const tabId of holds.keys()) dropHolds(tabId)
+    steering.clear()
     await Promise.allSettled(draining.values())
   }
   return {

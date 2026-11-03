@@ -738,6 +738,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
@@ -961,6 +962,7 @@ run_harness packages/domains/terminal/src/shared/workspace-changes.test.ts
 run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts
+run_harness packages/domains/terminal/src/shared/chat-timeline.steer.test.ts
 run_harness packages/domains/terminal/src/shared/persistent-index.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/shared/chat-timeline-streaming.test.ts

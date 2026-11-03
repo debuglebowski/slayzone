@@ -1318,6 +1318,17 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           return { ...state, timeline: next, idlessOptimistic: state.idlessOptimistic - 1 }
         }
       }
+      if (event.joinsTurn) {
+        // Taken into the running turn: its row goes here, the turn goes on.
+        const joined: UserTextItem = {
+          kind: 'user-text',
+          text: event.text,
+          timestamp: ts,
+          ...(event.id ? { id: event.id, delivery: 'queued' as const } : {}),
+          ...attachmentsOf(event.content)
+        }
+        return { ...state, ...withUserRow(state, joined) }
+      }
       // Drift recovery: a fresh (non-optimistic-confirming) user-message means a new
       // turn starts here. If counters say we're still in-flight, the prior turn never
       // produced its terminator (process crashed mid-turn, app force-quit, dropped event).
