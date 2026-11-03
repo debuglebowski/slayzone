@@ -131,6 +131,8 @@ export {
   setGitOpTransport,
   executeGitOp,
   gitTargetForPath,
+  deliverGitWatchEvent,
+  gitWatchComputerGone,
   type GitOpTransport
 } from './git-op-routing'
 export {

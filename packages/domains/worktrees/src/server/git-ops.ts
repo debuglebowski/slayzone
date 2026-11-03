@@ -142,3 +142,4 @@ export {
   type GitOpName
 } from '../shared/git-ops-contract'
 export { configureGitExec, type GitExecEnvironment } from './exec-async'
+export { createGitWatcher, type GitWatcher, type GitDiffChangedPayload } from './git-watcher'

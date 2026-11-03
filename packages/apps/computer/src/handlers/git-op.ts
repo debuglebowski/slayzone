@@ -10,9 +10,19 @@
  * @module computer/handlers/git-op
  */
 import { isAbsolute, relative, resolve } from 'node:path'
-import { HubToComputerMethods, gitOpParamsSchema } from '@slayzone/computer-transport/shared'
+import {
+  ComputerNotificationMethods,
+  GIT_WATCH_EVENT,
+  HubToComputerMethods,
+  gitOpParamsSchema,
+  gitWatchStartParamsSchema,
+  gitWatchStopParamsSchema,
+  type GitWatchEvent
+} from '@slayzone/computer-transport/shared'
 import {
   configureGitExec,
+  createGitWatcher,
+  type GitDiffChangedPayload,
   gitOpAbsolutePaths,
   gitOpRepoRelativePaths,
   gitOpsContract,
@@ -62,5 +72,46 @@ export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
     return { result: result ?? null }
   }
 
-  return { [HubToComputerMethods.gitOp]: gitOp }
+  // The git panel's live refresh: one refcounted watcher per checkout, reports sent
+  // under every hub watch id on that checkout.
+  const watcher = createGitWatcher({ refuse: () => undefined })
+  const watchPaths = new Map<string, string>() // watchId → worktreePath
+  const report = (event: GitWatchEvent): void => {
+    ctx.dialer.notify(ComputerNotificationMethods.event, { name: GIT_WATCH_EVENT, payload: event })
+  }
+  const idsFor = (worktreePath: string): string[] =>
+    [...watchPaths].filter(([, p]) => p === worktreePath).map(([id]) => id)
+  watcher.on('git:diff-changed', ({ worktreePath, refsChanged }: GitDiffChangedPayload) => {
+    for (const watchId of idsFor(worktreePath)) report({ watchId, kind: 'changed', refsChanged })
+  })
+  watcher.on('git:diff-watch-failed', ({ worktreePath }: { worktreePath: string }) => {
+    for (const watchId of idsFor(worktreePath)) {
+      watchPaths.delete(watchId)
+      report({ watchId, kind: 'failed' })
+    }
+  })
+
+  async function watchStart(raw: unknown): Promise<{ ok: true }> {
+    const { watchId, worktreePath } = gitWatchStartParamsSchema.parse(raw)
+    allow(worktreePath)
+    if (watchPaths.has(watchId)) return { ok: true }
+    watchPaths.set(watchId, worktreePath)
+    watcher.subscribe(worktreePath)
+    return { ok: true }
+  }
+
+  async function watchStop(raw: unknown): Promise<{ ok: true }> {
+    const { watchId } = gitWatchStopParamsSchema.parse(raw)
+    const worktreePath = watchPaths.get(watchId)
+    if (worktreePath === undefined) return { ok: true }
+    watchPaths.delete(watchId)
+    watcher.unsubscribe(worktreePath)
+    return { ok: true }
+  }
+
+  return {
+    [HubToComputerMethods.gitOp]: gitOp,
+    [HubToComputerMethods.gitWatchStart]: watchStart,
+    [HubToComputerMethods.gitWatchStop]: watchStop
+  }
 }

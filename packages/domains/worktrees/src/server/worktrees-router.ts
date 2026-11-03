@@ -36,7 +36,7 @@ import type {
 import type { GitDiffChangedPayload } from './git-watcher'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 import { gitOpsContract, type GitOpName } from '../shared/git-ops-contract'
-import { executeGitOp } from './git-op-routing'
+import { executeGitOp, unwatchGitCheckout, watchGitCheckout } from './git-op-routing'
 import { getWorktreesRouterDeps } from './worktrees-router-deps'
 
 const u = z.unknown()
@@ -79,12 +79,14 @@ function gitMutation<K extends GitOpName>(op: K) {
 
 export const worktreesRouter = router({
   // Watch / unwatch (refcounted)
-  watchStart: hubLocalProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
-    getGitWatcher().subscribe(input.worktreePath)
-  }),
-  watchStop: publicProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
-    getGitWatcher().unsubscribe(input.worktreePath)
-  }),
+  // Routed like the ops: the watch runs where the checkout lives; reports arrive as
+  // the same `onDiffChanged` events (see git-op-routing.ts).
+  watchStart: publicProcedure
+    .input(obj({ worktreePath: s }))
+    .mutation(({ ctx, input }) => watchGitCheckout(input.worktreePath, ctx.db)),
+  watchStop: publicProcedure
+    .input(obj({ worktreePath: s }))
+    .mutation(({ input }) => unwatchGitCheckout(input.worktreePath)),
 
   isGitRepo: gitQuery('isGitRepo'),
   // Repo discovery runs on the machine that owns the directory — it decides the

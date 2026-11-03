@@ -196,7 +196,9 @@ import {
   defaultWorktreeExecAdapters,
   defaultWorktreePolicyAdapters,
   getCurrentBranch,
-  setGitOpTransport
+  setGitOpTransport,
+  deliverGitWatchEvent,
+  gitWatchComputerGone
 } from '@slayzone/worktrees/server'
 import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
@@ -206,6 +208,8 @@ import {
   claudeSessionReadResultSchema,
   claudeSessionLocateResultSchema,
   gitOpResultSchema,
+  gitWatchEventSchema,
+  GIT_WATCH_EVENT,
   HubToComputerMethods,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
@@ -1832,8 +1836,24 @@ export function composeServer(opts: {
       request: async (computerId, params) =>
         gitOpResultSchema.parse(
           await computerGateway.request(computerId, HubToComputerMethods.gitOp, params)
-        ).result
+        ).result,
+      watchStart: async (computerId, params) => {
+        if (placement.gate) await placement.gate(computerId, null)
+        await computerGateway.request(computerId, HubToComputerMethods.gitWatchStart, params)
+      },
+      watchStop: async (computerId, params) => {
+        await computerGateway.request(computerId, HubToComputerMethods.gitWatchStop, params)
+      }
     })
+    computerGateway.events.on('event', ({ computerId, name, payload }) => {
+      if (name !== GIT_WATCH_EVENT) return
+      const parsed = gitWatchEventSchema.safeParse(payload)
+      if (parsed.success) deliverGitWatchEvent(computerId, parsed.data)
+    })
+    computerGateway.events.on('computer-disconnected', ({ computerId }) =>
+      gitWatchComputerGone(computerId)
+    )
+    computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
     setGhExecutor(async (args, opts) => {
       // The caller's own computer on a hub with login (T-19): `gh` speaks as the
       // machine's account, which must never be someone else's.

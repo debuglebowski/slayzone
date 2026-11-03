@@ -518,6 +518,9 @@ export const HubToComputerMethods = {
    * validates `input` against the same contract and jails every path it names.
    */
   gitOp: 'git.op',
+  /** Watch a checkout for the git panel; changes come back as `git-watch` events. */
+  gitWatchStart: 'git.watchStart',
+  gitWatchStop: 'git.watchStop',
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   slayCheckConfigured: 'slay.checkConfigured',
   slaySetup: 'slay.setup',
@@ -1264,6 +1267,32 @@ export type GitOpParams = z.infer<typeof gitOpParamsSchema>
 /** The op's own result, JSON as is; `null` for an op with no answer. */
 export const gitOpResultSchema = z.object({ result: z.unknown() })
 export type GitOpResult = z.infer<typeof gitOpResultSchema>
+
+/**
+ * `git.watchStart`: watch the checkout at `worktreePath` (its index, refs and tracked
+ * files) for the git panel. `watchId` is HUB-minted and echoed on every report, so
+ * two hubs' or two panels' watches of one checkout never cross.
+ */
+export const gitWatchStartParamsSchema = z.object({
+  watchId: z.string().min(1),
+  worktreePath: z.string().min(1)
+})
+export type GitWatchStartParams = z.infer<typeof gitWatchStartParamsSchema>
+export const gitWatchStopParamsSchema = z.object({ watchId: z.string().min(1) })
+export type GitWatchStopParams = z.infer<typeof gitWatchStopParamsSchema>
+
+/**
+ * `ComputerEventParams.name` for a git watch report — the generic `event`
+ * notification, no dedicated method. `changed`: a debounced change (`refsChanged`:
+ * a ref moved); `failed`: the watch tore down (the panel falls back to polling).
+ */
+export const GIT_WATCH_EVENT = 'git-watch'
+export const gitWatchEventSchema = z.object({
+  watchId: z.string().min(1),
+  kind: z.enum(['changed', 'failed']),
+  refsChanged: z.boolean().optional()
+})
+export type GitWatchEvent = z.infer<typeof gitWatchEventSchema>
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)

@@ -46,7 +46,10 @@ describe('gitTargetForPath', () => {
   })
 
   test("a project's folder (or inside it) is that computer's", async () => {
-    expect(await gitTargetForPath(db, '/home/a/proj')).toEqual({ computerId: 'c-a', projectId: 'p1' })
+    expect(await gitTargetForPath(db, '/home/a/proj')).toEqual({
+      computerId: 'c-a',
+      projectId: 'p1'
+    })
     expect(await gitTargetForPath(db, '/home/a/proj/packages/x/')).toEqual({
       computerId: 'c-a',
       projectId: 'p1'
@@ -80,7 +83,11 @@ describe('the router routes by path', () => {
       }),
       shellOpenPath: async () => ''
     })
-    setGitOpTransport({ request: async () => null })
+    setGitOpTransport({
+      request: async () => null,
+      watchStart: async () => undefined,
+      watchStop: async () => undefined
+    })
   })
   afterAll(() => setGitOpTransport(null))
 

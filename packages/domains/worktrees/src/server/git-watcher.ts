@@ -151,7 +151,17 @@ function resolveGitDir(worktreePath: string): string | null {
   }
 }
 
-export function createGitWatcher(): GitWatcher {
+export interface GitWatcherOptions {
+  /**
+   * Throws to refuse watching here. Default: the hub's T-06 refusal (a hub with
+   * processes switched off never watches its own disk). A computer passes none —
+   * watching its checkouts is its job.
+   */
+  refuse?: () => void
+}
+
+export function createGitWatcher(options: GitWatcherOptions = {}): GitWatcher {
+  const refuse = options.refuse ?? (() => assertHubLocalExecEnabled({ op: 'git.watch' }))
   const entries = new Map<string, WatchEntry>()
   const emitter = new EventEmitter() as GitWatcher
 
@@ -286,9 +296,9 @@ export function createGitWatcher(): GitWatcher {
   }
 
   emitter.subscribe = (worktreePath: string): void => {
-    // Watches a path on the hub's own disk: refused on a hub with processes
-    // switched off (T-06), like every other hub-local git/file access.
-    assertHubLocalExecEnabled({ op: 'git.watch' })
+    // Watches a path on this machine's disk: on the hub, refused where processes
+    // are switched off (T-06), like every other hub-local git/file access.
+    refuse()
     let entry = entries.get(worktreePath)
     if (entry) {
       entry.refCount++

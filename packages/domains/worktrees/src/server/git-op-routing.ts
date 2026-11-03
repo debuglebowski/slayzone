@@ -14,6 +14,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { gitOpAbsolutePaths, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
 import { runGitOpLocally, type GitOpResult } from './git-ops'
+import { getGitWatcher } from './git-watcher'
 import { getWorktreesRouterDepsOrNull, type WorktreesComputerTarget } from './worktrees-router-deps'
 
 export interface GitOpTransport {
@@ -22,6 +23,10 @@ export interface GitOpTransport {
     computerId: string,
     params: { op: GitOpName; input: unknown; mutates: boolean }
   ): Promise<unknown>
+  /** Start watching a checkout there (`git.watchStart`); reports arrive via
+   *  {@link deliverGitWatchEvent}. */
+  watchStart(computerId: string, params: { watchId: string; worktreePath: string }): Promise<void>
+  watchStop(computerId: string, params: { watchId: string }): Promise<void>
 }
 
 let transport: GitOpTransport | null = null
@@ -29,6 +34,112 @@ let transport: GitOpTransport | null = null
 /** Wired by the hub's composition (its computer gateway); null = none (tests, unwired). */
 export function setGitOpTransport(next: GitOpTransport | null): void {
   transport = next
+  routedWatches.clear()
+}
+
+/** Resolve the computer an op or watch on `path` runs on (null = this hub's disk). */
+async function computerFor(
+  target: WorktreesComputerTarget | undefined,
+  path: string | undefined,
+  db: SlayzoneDb | undefined
+): Promise<string | null> {
+  const deps = getWorktreesRouterDepsOrNull()
+  if (!deps) return null
+  // An explicit target wins; else the path names whose checkout this is.
+  const resolvedTarget = target ?? (db && path ? await gitTargetForPath(db, path) : null) ?? {}
+  return deps.getWorkspace().resolveComputer(resolvedTarget)
+}
+
+/**
+ * The panel's watches, refcounted per checkout path: many panels on one checkout =
+ * one watch. `computerId` null = the hub's own watcher (no computer).
+ */
+interface RoutedWatch {
+  computerId: string | null
+  watchId: string
+  count: number
+}
+const routedWatches = new Map<string, RoutedWatch>()
+let watchSeq = 0
+
+/** `worktrees.watchStart`: watch where the checkout lives. */
+export async function watchGitCheckout(worktreePath: string, db?: SlayzoneDb): Promise<void> {
+  const existing = routedWatches.get(worktreePath)
+  if (existing) {
+    existing.count++
+    return
+  }
+  const computerId = transport ? await computerFor(undefined, worktreePath, db) : null
+  const again = routedWatches.get(worktreePath)
+  if (again) {
+    again.count++
+    return
+  }
+  if (computerId != null && transport) {
+    const watch: RoutedWatch = {
+      computerId,
+      watchId: `gw-${process.pid}-${++watchSeq}`,
+      count: 1
+    }
+    routedWatches.set(worktreePath, watch)
+    try {
+      await transport.watchStart(computerId, { watchId: watch.watchId, worktreePath })
+    } catch (err) {
+      if (routedWatches.get(worktreePath) === watch) routedWatches.delete(worktreePath)
+      throw err
+    }
+    return
+  }
+  getGitWatcher().subscribe(worktreePath)
+  routedWatches.set(worktreePath, { computerId: null, watchId: '', count: 1 })
+}
+
+/** `worktrees.watchStop`: release one subscription; the last one ends the watch. */
+export async function unwatchGitCheckout(worktreePath: string): Promise<void> {
+  const watch = routedWatches.get(worktreePath)
+  if (!watch) {
+    // Started before routing existed (or on the hub's watcher directly).
+    getGitWatcher().unsubscribe(worktreePath)
+    return
+  }
+  if (--watch.count > 0) return
+  routedWatches.delete(worktreePath)
+  if (watch.computerId == null) {
+    getGitWatcher().unsubscribe(worktreePath)
+    return
+  }
+  await transport?.watchStop(watch.computerId, { watchId: watch.watchId }).catch(() => {
+    /* the computer is gone — its watch went with it */
+  })
+}
+
+/** A computer's watch report: emitted as the panel's own watcher event. */
+export function deliverGitWatchEvent(
+  computerId: string,
+  event: { watchId: string; kind: 'changed' | 'failed'; refsChanged?: boolean }
+): void {
+  for (const [worktreePath, watch] of routedWatches) {
+    if (watch.computerId !== computerId || watch.watchId !== event.watchId) continue
+    if (event.kind === 'changed') {
+      getGitWatcher().emit('git:diff-changed', {
+        worktreePath,
+        refsChanged: event.refsChanged === true
+      })
+    } else {
+      routedWatches.delete(worktreePath)
+      getGitWatcher().emit('git:diff-watch-failed', { worktreePath })
+    }
+    return
+  }
+}
+
+/** A computer disconnected: its watches are gone — say so, and forget them. */
+export function gitWatchComputerGone(computerId: string): void {
+  for (const [worktreePath, watch] of [...routedWatches]) {
+    if (watch.computerId !== computerId) continue
+    routedWatches.delete(worktreePath)
+    getGitWatcher().emit('git:diff-watch-failed', { worktreePath })
+  }
 }
 
 function trimSlashes(p: string): string {
@@ -47,8 +158,7 @@ export async function gitTargetForPath(
 ): Promise<WorktreesComputerTarget | null> {
   const p = trimSlashes(path)
   // `inside(col)`: p is col, or lies under col/ (substr compare: no LIKE escaping).
-  const inside = (col: string) =>
-    `(${col} = ? OR substr(?, 1, length(${col}) + 1) = ${col} || '/')`
+  const inside = (col: string) => `(${col} = ? OR substr(?, 1, length(${col}) + 1) = ${col} || '/')`
   const task = await db.get<{ id: string; worktree_path: string }>(
     `SELECT id, worktree_path FROM tasks
       WHERE worktree_path IS NOT NULL AND worktree_path != '' AND ${inside('worktree_path')}
@@ -69,7 +179,8 @@ export async function gitTargetForPath(
   const same = placements.filter((r) => r.root_path === longest.root_path)
   const computers = new Set(same.map((r) => r.computer_id))
   const projects = new Set(same.map((r) => r.project_id))
-  if (computers.size === 1) return { computerId: longest.computer_id, projectId: longest.project_id }
+  if (computers.size === 1)
+    return { computerId: longest.computer_id, projectId: longest.project_id }
   return projects.size === 1 ? { projectId: longest.project_id } : null
 }
 
@@ -79,12 +190,8 @@ export async function executeGitOp<K extends GitOpName>(
   mutates: boolean,
   db?: SlayzoneDb
 ): Promise<GitOpResult<K>> {
-  const deps = getWorktreesRouterDepsOrNull()
-  // An explicit target wins; else the path names whose checkout this is.
   const repoPath = gitOpAbsolutePaths(op, input as GitOpInput<K>)[0]
-  const resolvedTarget =
-    target ?? (db && repoPath ? await gitTargetForPath(db, repoPath) : null) ?? {}
-  const computerId = deps ? await deps.getWorkspace().resolveComputer(resolvedTarget) : null
+  const computerId = await computerFor(target, repoPath, db)
   if (computerId != null && transport) {
     return (await transport.request(computerId, { op, input, mutates })) as GitOpResult<K>
   }

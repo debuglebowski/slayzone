@@ -167,6 +167,9 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
     detail: (p) => ({ repoPath: p.repoPath, worktreePath: p.worktreePath })
   },
   'git.isGitRepo': null,
+  // A watch reads; it changes nothing.
+  'git.watchStart': null,
+  'git.watchStop': null,
   'git.getCurrentBranch': null,
   // The git panel: its writes (stage, commit, push, checkout, …) are audited, its
   // constant reads (status, diffs, log) are not.

@@ -33,7 +33,9 @@ beforeAll(() => {
     request: async (computerId, params) => {
       sent.push({ computerId, params })
       return params.op === 'getCurrentBranch' ? 'main' : null
-    }
+    },
+    watchStart: async () => undefined,
+    watchStop: async () => undefined
   })
 })
 
