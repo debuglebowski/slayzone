@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ptySignalPayloadSchema, type PtySignalPayload } from '@slayzone/computer-transport/shared'
 import { createPtySessionSignals, IDLE_CLOCK_SIGNAL_MS } from './pty-signals'
@@ -74,6 +77,47 @@ describe('pty signals (computer-side detection)', () => {
     vi.advanceTimersByTime(5_000)
     late.signals.onOutput(msg, 1)
     expect(late.sent).toEqual([])
+  })
+
+  test("codex: the conversation id is read from THIS machine's session files after first output", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'pty-signals-home-'))
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const id = '11111111-2222-3333-4444-555555555555'
+      const now = new Date()
+      const dir = join(
+        home,
+        '.codex',
+        'sessions',
+        String(now.getFullYear()),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      )
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, `rollout-x-${id}.jsonl`),
+        `${JSON.stringify({ payload: { cwd: '/work/repo' } })}\n`
+      )
+      const sent: PtySignalPayload[] = []
+      const signals = createPtySessionSignals(
+        { mode: 'codex', resuming: false },
+        ids,
+        (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+        Date.now,
+        { cwd: '/work/repo', startedAt: Date.now() }
+      )
+      signals.onOutput('booting', 4)
+      vi.advanceTimersByTime(3_000)
+      await vi.waitFor(() =>
+        expect(sent).toContainEqual(expect.objectContaining({ seq: 4, conversationId: id }))
+      )
+      signals.dispose()
+    } finally {
+      process.env.HOME = prevHome
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   test('conversation id only after /status is submitted, and only within the watch', () => {

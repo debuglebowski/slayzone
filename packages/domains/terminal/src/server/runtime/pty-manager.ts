@@ -81,6 +81,8 @@ import { filterBufferData } from '../filter-buffer-data'
 import { isInterruptKey, appendInput } from '../stdin-input'
 import {
   CONVERSATION_ID_WATCH_TIMEOUT_MS,
+  DISK_SESSION_POLL_ATTEMPTS,
+  DISK_SESSION_POLL_MS,
   PtyOutputDetector,
   SESSION_ERROR_WINDOW_MS,
   type PtyOutputDetection
@@ -605,7 +607,6 @@ const IDLE_CHECK_INTERVAL_MS = 10 * 1000
 const STARTUP_TIMEOUT_MS = 10 * 1000
 const FAST_EXIT_FALLBACK_WINDOW_MS = 2000
 // Delay after first PTY output before auto-sending session detection command
-const SESSION_ID_AUTO_DETECT_DELAY_MS = 3000
 
 // Exit code used when a PTY is killed programmatically by the app (e.g. task reached
 // terminal status). Distinct from -1 (unknown) so diagnostics and renderer logic
@@ -2445,9 +2446,14 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             // Auto-detect session ID from disk for providers that support it.
             // Polls periodically — the CLI may not write the session file until
             // the first API handshake completes, which can take several seconds.
-            if (adapter.detectSessionFromDisk && !resuming) {
+            // An owner that detects output reads ITS disk and reports the id.
+            if (
+              adapter.detectSessionFromDisk &&
+              !resuming &&
+              !(target as unknown as PtyHandle).detectsOutput
+            ) {
               let attempts = 0
-              const maxAttempts = 10
+              const maxAttempts = DISK_SESSION_POLL_ATTEMPTS
               const timer = setInterval(async () => {
                 attempts++
                 const sess = sessions.get(sessionId)
@@ -2486,7 +2492,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
                 } catch {
                   if (attempts >= maxAttempts) clearInterval(timer)
                 }
-              }, SESSION_ID_AUTO_DETECT_DELAY_MS)
+              }, DISK_SESSION_POLL_MS)
 
               const sess = sessions.get(sessionId)
               if (sess) sess.sessionIdAutoDetectTimer = timer as unknown as NodeJS.Timeout

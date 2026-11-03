@@ -19,6 +19,8 @@
  */
 import {
   CONVERSATION_ID_WATCH_TIMEOUT_MS,
+  DISK_SESSION_POLL_ATTEMPTS,
+  DISK_SESSION_POLL_MS,
   computeSyncQueryResponse,
   getAdapter,
   PtyOutputDetector,
@@ -29,6 +31,18 @@ import {
 import type { PtyDetectionParams, PtySignalPayload } from '@slayzone/computer-transport/shared'
 
 export const IDLE_CLOCK_SIGNAL_MS = 500
+
+const EMPTY: PtyOutputDetection = {
+  activity: null,
+  refreshIdleClock: false,
+  preview: '',
+  error: null,
+  suppressOutput: false,
+  prompt: null,
+  title: null,
+  devServerUrls: [],
+  conversationId: null
+}
 
 /** Any theme: the forwarded text of `computeSyncQueryResponse` does not depend on it. */
 const NO_THEME: TerminalTheme = { foreground: '#ffffff', background: '#000000', cursor: '#ffffff' }
@@ -50,6 +64,12 @@ interface Ids {
   spawnId: () => string | undefined
 }
 
+/** Where and when the process started: what disk conversation-id detection matches on. */
+export interface PtyDiskSessionContext {
+  cwd: string
+  startedAt: number
+}
+
 function says(d: PtyOutputDetection): boolean {
   return (
     d.activity !== null ||
@@ -65,7 +85,8 @@ export function createPtySessionSignals(
   params: PtyDetectionParams,
   ids: Ids,
   emit: PtySignalSink,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  disk?: PtyDiskSessionContext
 ): PtySessionSignals {
   const detector = new PtyOutputDetector({
     adapter: getAdapter({ mode: params.mode, type: params.type, patterns: params.patterns }),
@@ -77,6 +98,43 @@ export function createPtySessionSignals(
   let trailing: { seq: number } | null = null
   let trailingTimer: ReturnType<typeof setTimeout> | undefined
   let watchTimer: ReturnType<typeof setTimeout> | undefined
+  let lastSeq = -1
+  let disposed = false
+  let diskPoll: ReturnType<typeof setInterval> | undefined
+  let diskPollStarted = false
+  /**
+   * Some providers (codex) write the conversation id to THIS machine's disk rather
+   * than printing it. Polled after the first output — the CLI may not write the
+   * file until its first API handshake — as the hub used to, against the cwd the
+   * process really runs in.
+   */
+  const startDiskPoll = (): void => {
+    diskPollStarted = true
+    const detectFromDisk = detector.adapter.detectSessionFromDisk
+    if (!detectFromDisk || detector.resuming || !disk) return
+    let attempts = 0
+    let found = false
+    const stop = (): void => {
+      if (diskPoll) clearInterval(diskPoll)
+      diskPoll = undefined
+    }
+    diskPoll = setInterval(() => {
+      attempts++
+      if (attempts >= DISK_SESSION_POLL_ATTEMPTS) stop()
+      detectFromDisk
+        .call(detector.adapter, disk.startedAt, disk.cwd)
+        .then((id) => {
+          if (!id || found || disposed) return
+          found = true
+          stop()
+          send(lastSeq, { ...EMPTY, conversationId: id })
+        })
+        .catch(() => {
+          // Unreadable session dir: try again next tick.
+        })
+    }, DISK_SESSION_POLL_MS)
+    diskPoll.unref?.()
+  }
   // The stale-resume window opens at the real process start — here.
   let errorWindow: ReturnType<typeof setTimeout> | undefined = params.resuming
     ? setTimeout(() => {
@@ -115,6 +173,8 @@ export function createPtySessionSignals(
 
   return {
     onOutput(data, seq) {
+      lastSeq = seq
+      if (!diskPollStarted) startDiskPoll()
       const { forwarded, pendingPartial } = computeSyncQueryResponse(syncPending + data, NO_THEME)
       syncPending = pendingPartial
       const d = detector.detect(forwarded)
@@ -156,10 +216,13 @@ export function createPtySessionSignals(
       watchTimer.unref?.()
     },
     dispose() {
+      disposed = true
       if (trailingTimer) clearTimeout(trailingTimer)
       if (watchTimer) clearTimeout(watchTimer)
       if (errorWindow) clearTimeout(errorWindow)
+      if (diskPoll) clearInterval(diskPoll)
       trailingTimer = watchTimer = errorWindow = undefined
+      diskPoll = undefined
       trailing = null
     }
   }

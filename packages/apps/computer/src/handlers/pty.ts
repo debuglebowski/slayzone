@@ -93,6 +93,9 @@ interface PtySession {
    * output says goes to the hub as `pty-signal` events. Absent: the hub detects.
    */
   signals?: PtySessionSignals
+  /** Where and when the process started (disk conversation-id detection matches on it). */
+  cwd: string
+  startedAt: number
   /**
    * The key this session is currently filed under, read by its own onData/onExit.
    *
@@ -387,6 +390,8 @@ export function createPtyHandlers(
       proc,
       buffer,
       id,
+      cwd,
+      startedAt: Date.now(),
       ...(opts.taskId ? { taskId: opts.taskId } : {}),
       exited,
       resolveExit,
@@ -473,7 +478,9 @@ export function createPtyHandlers(
           name: PTY_SIGNAL_EVENT_NAME,
           payload
         })
-      }
+      },
+      Date.now,
+      { cwd: session.cwd, startedAt: session.startedAt }
     )
   }
 

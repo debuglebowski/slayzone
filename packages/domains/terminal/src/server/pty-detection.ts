@@ -49,6 +49,8 @@ export {
   stripAnsiForSessionParse,
   SESSION_ERROR_WINDOW_MS,
   CONVERSATION_ID_WATCH_TIMEOUT_MS,
+  DISK_SESSION_POLL_MS,
+  DISK_SESSION_POLL_ATTEMPTS,
   type PtyOutputDetection,
   type PtyOutputDetectorOptions
 } from './pty-output-detector'

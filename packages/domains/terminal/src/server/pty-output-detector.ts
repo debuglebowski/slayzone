@@ -36,6 +36,9 @@ export interface PtyOutputDetectorOptions {
 export const SESSION_ERROR_WINDOW_MS = 5_000
 /** How long after `/status` is submitted its output is searched for a conversation id. */
 export const CONVERSATION_ID_WATCH_TIMEOUT_MS = 5_000
+/** Disk conversation-id detection (`adapter.detectSessionFromDisk`): poll interval and tries. */
+export const DISK_SESSION_POLL_MS = 3_000
+export const DISK_SESSION_POLL_ATTEMPTS = 10
 
 export function stripAnsiForSessionParse(data: string): string {
   return data
@@ -57,7 +60,7 @@ const ANY_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 export class PtyOutputDetector {
   readonly adapter: TerminalAdapter
   readonly mode: string
-  private readonly resuming: boolean
+  readonly resuming: boolean
   /** Inside the resume startup window: SESSION_NOT_FOUND / SESSION_IN_USE count. */
   checkingForSessionError: boolean
   private readonly seenDevUrls = new Set<string>()
