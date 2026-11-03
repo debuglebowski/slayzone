@@ -665,6 +665,14 @@ export const chatRouter = router({
     release: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input }) => queueOps().release(input.id)),
+    /**
+     * Add a queued message to the running turn ("Send now"): the
+     * agent takes it after its current tool call. `ok: false` + why when it
+     * can't (the message stays queued).
+     */
+    steer: publicProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => queueOps().steer(input.id)),
     remove: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input }) => queueOps().remove(input.id)),

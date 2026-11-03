@@ -236,6 +236,33 @@ describe('pty signals (computer-side detection)', () => {
     )
   })
 
+  test("failed resume: the hub's spawn-time lookup (any project dir) decides, not just beside the cwd", () => {
+    const sent: PtySignalPayload[] = []
+    const exitWith = (resumeTranscript: 'found' | 'missing' | 'unknown') => {
+      sent.length = 0
+      const p = createPtySessionSignals({
+        params: {
+          mode: 'claude-code',
+          resuming: true,
+          resumeConversationId: 'id',
+          resumeTranscript
+        },
+        ids,
+        emit: (x) => sent.push(ptySignalPayloadSchema.parse(x)),
+        respond: () => undefined,
+        disk: { cwd: '/nowhere/with/no/transcript', startedAt: Date.now() }
+      })
+      p.exited(1, '')
+      p.dispose()
+      return sent.at(-1)?.exitError?.code ?? null
+    }
+    // Moved into a worktree's project dir: found there, so not stale.
+    expect(exitWith('found')).toBeNull()
+    expect(exitWith('missing')).toBe('SESSION_NOT_FOUND')
+    // Could not tell: the output scan decides (nothing here).
+    expect(exitWith('unknown')).toBeNull()
+  })
+
   test('not a resume: exit says nothing', () => {
     const { sent, pipeline } = harness('claude-code')
     pipeline.exited(1, 'No conversation found with session ID: x')

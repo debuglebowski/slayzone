@@ -97,6 +97,8 @@ interface Entry {
   /** First link-down failure of the current attempt (retry window start). */
   linkDownSince: number | null
   retryTimer: ReturnType<typeof setTimeout> | null
+  /** Taken into a running turn by the agent ({@link ChatOutbox.join}): answered with that turn. */
+  joined?: true
 }
 
 const DEFAULT_RETRY_WINDOW_MS = 30_000
@@ -140,6 +142,29 @@ export class ChatOutbox {
     this.queue.push(msg.id)
     this.pump()
     return 'queued'
+  }
+
+  /**
+   * A message the agent took into its RUNNING turn (a queued message added to
+   * it: Claude picked it up from stdin, Codex from `turn/steer`). The transport
+   * wrote it itself, so it is delivered as of now; the outbox only follows it to
+   * its answer — by the CLI's own lifecycle, else with the turn's result.
+   * Idempotent by id.
+   */
+  join(msg: OutgoingUserMessage, gen: number): void {
+    if (this.entries.has(msg.id)) return
+    const entry: Entry = {
+      message: msg,
+      state: 'queued',
+      gen,
+      written: true,
+      cli: 'started',
+      linkDownSince: null,
+      retryTimer: null,
+      joined: true
+    }
+    this.entries.set(msg.id, entry)
+    this.set(entry, 'delivered')
   }
 
   state(id: string): OutboxState | null {
@@ -276,13 +301,22 @@ export class ChatOutbox {
     this.deliver(entry)
   }
 
-  /** A turn of `gen` finished: answers the oldest delivered message when nothing else will. */
+  /**
+   * A turn of `gen` finished: answers the oldest delivered message (and those
+   * taken into the turn, {@link join}) when nothing else will.
+   */
   onResult(gen: number): void {
     if (this.lifecycleGens.has(gen)) return
     const sending = this.oldestWritten(gen, 'sending')
     if (sending) this.deliver(sending)
     const entry = this.oldestWritten(gen, 'delivered')
     if (entry) this.set(entry, 'answered')
+    // Messages taken into this turn are answered by its result too.
+    for (const joined of this.entries.values()) {
+      if (joined.joined && joined.gen === gen && joined.state === 'delivered') {
+        this.set(joined, 'answered')
+      }
+    }
   }
 
   /**

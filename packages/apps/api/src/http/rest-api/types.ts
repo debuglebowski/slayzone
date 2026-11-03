@@ -121,9 +121,22 @@ export interface ProcessesAccess {
     status: string
     logBuffer: string[]
   }>
-  kill: (processId: string) => boolean | Promise<boolean>
+  /** Delete the row; its run's tree is terminated. */
+  remove: (processId: string) => boolean | Promise<boolean>
+  /** Stop the run (whole tree, awaited), keep the row. */
+  stop: (processId: string) => boolean | Promise<boolean>
+  /** Start a row that is not running, with its stored command/cwd. */
+  start: (processId: string) => Promise<ProcessStartResult>
+  /** Stop (whole tree, awaited) and start again under the same id. */
+  restart: (processId: string) => Promise<ProcessStartResult>
   subscribeToLogs: (processId: string, cb: (line: string) => void) => () => void
 }
+
+/** Outcome of a process start/restart. Structural copy of the process manager's
+ *  `StartProcessResult` (this package does not import the domain's server). */
+export type ProcessStartResult =
+  | { ok: true; pid: number | null; status: string }
+  | { ok: false; reason: 'not-found' | 'already-running' | 'shutting-down' | 'no-computer' }
 
 /** The minimal WebContents surface the browser routes drive. Structural (NOT
  *  Electron's type — this package must stay electron-free); the Electron host's

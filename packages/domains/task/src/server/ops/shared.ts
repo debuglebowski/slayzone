@@ -178,7 +178,7 @@ export interface WorktreePolicyAdapters {
 
 export interface TaskRuntimeAdapters {
   killPtysByTaskId: (taskId: string) => void
-  killTaskProcesses: (taskId: string) => void
+  removeTaskProcesses: (taskId: string) => void
   recordDiagnosticEvent: (event: DiagnosticEventPayload) => void
   /** Broadcast a respawn request to the renderer when a task transitions from a
    *  terminal status back to a non-terminal one. Renderer decides whether to act. */
@@ -276,7 +276,7 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   killPtysByTaskId: () => {
     // Unwired: no PTYs to kill.
   },
-  killTaskProcesses: () => {
+  removeTaskProcesses: () => {
     // Unwired: no processes to kill.
   },
   recordDiagnosticEvent: () => {
@@ -564,7 +564,7 @@ export async function cleanupTaskFull(
   // is the single source of truth for the storage dir (<ROOT>/storage).
   const artifactsBaseDir = artifactTaskDir(artifactsDirOf(runtimeAdapters.getDataRoot()), taskId)
   cleanupTaskImmediate(taskId)
-  runtimeAdapters.killTaskProcesses(taskId)
+  runtimeAdapters.removeTaskProcesses(taskId)
   // Clean up artifact files on disk.
   // HUB storage, not workspace: never routed to a computer (see hubPathExists).
   if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {

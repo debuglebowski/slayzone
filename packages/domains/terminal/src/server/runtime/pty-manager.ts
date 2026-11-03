@@ -88,7 +88,8 @@ import {
   type PtyOutputDetection
 } from '../pty-output-detector'
 import { PtyOutputUnavailableError } from './pty-output-unavailable'
-import { resolveSpawnConversation } from '../spawn-conversation'
+import { decideFreshReuse, resolveSpawnConversation } from '../spawn-conversation'
+import { locateClaudeTranscripts, type ClaudeTranscriptLocated } from './claude-transcript-locator'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
 import {
@@ -709,6 +710,9 @@ export interface ConversationHealRequest {
   mode: TerminalMode
   cwd: string
   storedId: string
+  /** Where the agent runs: transcripts are looked up on THAT computer's disk. */
+  computerId?: string | null
+  projectId?: string | null
 }
 export type ConversationHealer = (
   req: ConversationHealRequest
@@ -1559,7 +1563,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           taskId,
           mode: terminalMode,
           cwd,
-          storedId: resolvedExistingId
+          storedId: resolvedExistingId,
+          computerId,
+          projectId: opts.projectId ?? null
         })
         if (healed?.fresh) {
           neverWrittenId = resolvedExistingId
@@ -1570,6 +1576,58 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       } catch {
         // keep resolvedExistingId as-is
       }
+    }
+    // Where the Claude transcript is — on the agent's computer, in any project dir
+    // (claude-transcript-locator.ts). Two uses: never start a KNOWN id fresh over
+    // an existing transcript (decideFreshReuse), and resume from the folder the
+    // session last worked in (EnterWorktree moves the transcript to the
+    // worktree's project dir). `undefined` = not looked up (other providers,
+    // docker/ssh, a pre-warmed agent); null = the computer could not answer.
+    let resumeLocated: ClaudeTranscriptLocated | null | undefined
+    if (terminalMode === 'claude-code' && !executionContext && !opts.adoptPty?.preWarmedAgent) {
+      const freshId =
+        neverWrittenId ??
+        (!resolvedExistingId && conversationId && supportsFreshPreMint(initialCommand)
+          ? conversationId
+          : null)
+      const target = resolvedExistingId ?? freshId
+      if (target) {
+        const located = await locateClaudeTranscripts({
+          taskId,
+          computerId,
+          projectId: opts.projectId ?? null,
+          cwd,
+          sessionIds: [target]
+        })
+        const hit = located?.get(target) ?? null
+        const source = neverWrittenId ? 'healer-never-written' : 'caller'
+        if (freshId && decideFreshReuse({ source, found: hit?.found ?? null }) === 'resume') {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'conv_id.fresh_refused',
+            sessionId,
+            taskId,
+            message: freshId,
+            payload: { source, found: hit?.found ?? null, computerId }
+          })
+          resolvedExistingId = freshId
+          neverWrittenId = null
+        }
+        if (resolvedExistingId) resumeLocated = hit
+      }
+    }
+    const resumeCwd = resolvedExistingId ? (resumeLocated?.resumeCwd ?? null) : null
+    if (resumeCwd) {
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'conv_id.resume_cwd',
+        sessionId,
+        taskId,
+        message: resumeCwd,
+        payload: { taskCwd: cwd, computerId }
+      })
     }
     const resuming = !!resolvedExistingId
     // Never two processes on one conversation (chat A, plan 3.10): a chat of this
@@ -1730,7 +1788,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // absent, so the computer starts the agent in its own folder for the project or
     // refuses with `project_not_placed`.
     const onComputer = computerId != null
-    let effectiveCwd = transport ? transport.cwd : onComputer ? cwd || '' : cwd || homedir()
+    const spawnCwd = resumeCwd ?? cwd
+    let effectiveCwd = transport
+      ? transport.cwd
+      : onComputer
+        ? spawnCwd || ''
+        : spawnCwd || homedir()
     if (!transport && !onComputer && effectiveCwd) {
       const fallback = homedir()
       if (!existsSync(effectiveCwd)) {
@@ -1838,6 +1901,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       patterns: { working: patternWorking ?? null, error: patternError ?? null },
       resuming,
       ...(resuming && resolvedExistingId ? { resumeConversationId: resolvedExistingId } : {}),
+      // The same answer the hub's own exit check would use (resumeLocated).
+      ...(resuming && resumeLocated !== undefined
+        ? {
+            resumeTranscript:
+              resumeLocated === null ? 'unknown' : resumeLocated.found ? 'found' : 'missing'
+          }
+        : {}),
       theme: currentTerminalTheme
     }
     // The relay state the latest spawn/adopt asked for (see `watchPtyOutput`).
@@ -2768,7 +2838,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
               terminalMode === 'claude-code' &&
               exitCode !== 0 &&
               !!resolvedExistingId &&
-              !claudeTranscriptExists(cwd, resolvedExistingId)
+              // The spawn-time lookup on the agent's computer (any project dir);
+              // unknown (null) defers to the string scan. Not looked up
+              // (docker/ssh): this machine's disk, as before.
+              (resumeLocated !== undefined
+                ? resumeLocated?.found === false
+                : !claudeTranscriptExists(cwd, resolvedExistingId))
             if (transcriptGone) {
               session.error = {
                 code: 'SESSION_NOT_FOUND',

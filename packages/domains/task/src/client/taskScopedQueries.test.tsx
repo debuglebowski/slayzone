@@ -2,11 +2,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query'
+import { createTrpcTest } from '@slayzone/transport/testing'
 import {
   __resetTaskScopedQueriesForTest,
   refreshTaskScopedQueries,
   taskIdOfScopedQuery,
-  useTaskScopedQueriesFreshOnReveal
+  useTaskScopedQueriesFreshOnReveal,
+  useTaskScopedQueriesFreshOnTasksChanged
 } from './taskScopedQueries'
 
 // tRPC v11 query keys: [path segments, { input, type }].
@@ -102,5 +104,50 @@ describe('taskScopedQueries', () => {
     sub.unsub()
     vis.unsub()
     ui.unmount()
+  })
+})
+
+// A renderer without the app shell (a task's own window) gets no board refresh, so
+// nothing refreshed its per-task queries: an artifact the CLI created never showed in
+// that window's open Artifacts panel until Reload (e2e 146).
+describe('useTaskScopedQueriesFreshOnTasksChanged', () => {
+  afterEach(() => __resetTaskScopedQueriesForTest())
+
+  function Listener() {
+    useTaskScopedQueriesFreshOnTasksChanged()
+    return null
+  }
+
+  it("refetches this renderer's per-task queries on every tasks-changed event", async () => {
+    let emit: ((data: unknown) => void) | null = null
+    const trpc = createTrpcTest({
+      subscriptions: {
+        'notify.onTasksChanged': (_input, e) => {
+          emit = e
+          return () => {
+            emit = null
+          }
+        }
+      }
+    })
+    const artifacts = observe(trpc.queryClient, key('artifacts.getByTask', { taskId: 't1' }))
+    const other = observe(trpc.queryClient, key('task.get', { id: 't1' }))
+    render(<Listener />, { wrapper: trpc.wrapper })
+    await settle()
+    expect(emit).not.toBeNull()
+    artifacts.fn.mockClear()
+    other.fn.mockClear()
+
+    // Unknown scope (a CLI/REST write), then one that names an unrelated task: the
+    // window cannot tell a child of its task from any other, so both refresh it.
+    await act(async () => emit?.(undefined))
+    await settle()
+    expect(artifacts.fn).toHaveBeenCalledTimes(1)
+    await act(async () => emit?.({ taskIds: ['someone-else'] }))
+    await settle()
+    expect(artifacts.fn).toHaveBeenCalledTimes(2)
+    expect(other.fn, 'only per-task queries').not.toHaveBeenCalled()
+    artifacts.unsub()
+    other.unsub()
   })
 })

@@ -6,6 +6,7 @@ import type { ChatAttachment, QueuedChatMessage } from '@slayzone/terminal-contr
 const mocks = vi.hoisted(() => ({ toast: vi.fn() }))
 vi.mock('@slayzone/ui', async () => ({
   ...(await vi.importActual<object>('../../../../../shared/ui/src/use-stable-callback')),
+  ...(await vi.importActual<object>('../../../../../shared/ui/src/tooltip')),
   cn: (...c: unknown[]) => c.filter(Boolean).join(' '),
   toast: mocks.toast
 }))
@@ -24,7 +25,16 @@ vi.mock('./attachments/AttachmentChip', () => ({
   AttachmentKindIcon: () => null
 }))
 
+import { TooltipProvider } from '../../../../../shared/ui/src/tooltip'
+
+// jsdom ships no ResizeObserver; Radix tooltip content measures itself with one.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 import { ChatQueueList, HOLD_RENEW_MS, type ChatQueueListProps } from './ChatQueueList'
+import type { QueuedSubmission } from './queued-submissions'
 
 const FILE: ChatAttachment = {
   artifactId: 'a1',
@@ -64,7 +74,11 @@ function setup(over: Partial<ChatQueueListProps> = {}) {
     onSaveGone: vi.fn(),
     ...over
   }
-  return render(<ChatQueueList {...props} />)
+  return render(
+    <TooltipProvider>
+      <ChatQueueList {...props} />
+    </TooltipProvider>
+  )
 }
 
 beforeEach(() => {
@@ -147,15 +161,108 @@ describe('ChatQueueList', () => {
     expect(props.onMove).toHaveBeenCalledWith('q2', 0)
   })
 
-  it('not editable (Codex): no edit, no reorder handle; "send now" only when offered', () => {
+  it('not editable (Codex): no edit, no reorder handle; "Stop & send" only when offered', () => {
     setup({ editable: false })
     expect(screen.queryByRole('button', { name: 'Edit queued message' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Drag to reorder' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop & send' })).toBeNull()
     cleanup()
     const onSendNow = vi.fn()
     setup({ onSendNow })
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send now' })[1])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop & send' })[1])
     expect(onSendNow).toHaveBeenCalledWith('q2')
+  })
+
+  it('"Send now" only when offered (a turn runs, no prompt waits)', () => {
+    setup()
+    expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull()
+    cleanup()
+    const onSteer = vi.fn()
+    setup({ onSteer })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send now' })[1])
+    expect(onSteer).toHaveBeenCalledWith('q2')
+  })
+
+  it('a message with the agent: marked, no edit / reorder / send actions; cancel only if it can be taken back', () => {
+    const items = [q('q1', 'first'), q('q2', 'second', { steering: true })]
+    setup({ items, onSteer: vi.fn(), onSendNow: vi.fn(), withdrawSteered: false })
+    const row = screen.getAllByTestId('chat-queue-item')[1]
+    expect(row.textContent).toContain('With agent')
+    expect(row.querySelector('[aria-label="Edit queued message"]')).toBeNull()
+    expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull()
+    expect(row.querySelector('[aria-label="Stop & send"]')).toBeNull()
+    expect(row.querySelector('[aria-label="Send now"]')).toBeNull()
+    expect(row.querySelector('[aria-label="Cancel queued message"]')).toBeNull()
+    cleanup()
+    setup({ items, withdrawSteered: true })
+    const again = screen.getAllByTestId('chat-queue-item')[1]
+    const cancel = again.querySelector('[aria-label="Take back from the agent"]') as HTMLElement
+    expect(cancel).not.toBeNull()
+    fireEvent.click(cancel)
+    expect(props.onRemove).toHaveBeenCalledWith('q2')
+  })
+
+  it('every row action explains itself in a tooltip', async () => {
+    setup({ onSteer: vi.fn(), onSendNow: vi.fn() })
+    const row = screen.getAllByTestId('chat-queue-item')[0]
+    const tips: Array<[string, string]> = [
+      ['Send now', 'Send now: the agent reads it after its current step'],
+      ['Stop & send', 'Stop the agent and send this next'],
+      ['Edit queued message', 'Edit'],
+      ['Cancel queued message', 'Remove from the queue']
+    ]
+    for (const [name, tip] of tips) {
+      const button = row.querySelector(`[aria-label="${name}"]`) as HTMLElement
+      await act(async () => button.focus())
+      expect((await screen.findByRole('tooltip')).textContent).toContain(tip)
+      await act(async () => button.blur())
+    }
+  })
+
+  describe('messages not yet confirmed by the hub', () => {
+    const pendingEntry = (over: Partial<QueuedSubmission> = {}): QueuedSubmission => ({
+      id: 'p1',
+      send: 'third',
+      original: 'third',
+      content: [{ type: 'text', text: 'third' }],
+      createdAt: 1,
+      state: 'pending',
+      ...over
+    })
+
+    it('show at once as ordinary rows at the end, with no actions and no waiting text', () => {
+      setup({ pending: [pendingEntry()], onSteer: vi.fn(), onSendNow: vi.fn() })
+      const rows = screen.getAllByTestId('chat-queue-item')
+      expect(rows.map((r) => r.textContent)).toEqual([
+        expect.stringContaining('first'),
+        expect.stringContaining('second'),
+        expect.stringContaining('third')
+      ])
+      expect(screen.getByText('Up next · 3')).toBeTruthy()
+      expect(rows[2].querySelectorAll('button')).toHaveLength(0)
+      expect(screen.queryByText(/Waiting for queue confirmation/)).toBeNull()
+    })
+
+    it('one the hub already listed is not shown twice', () => {
+      setup({ pending: [pendingEntry({ id: 'q2' })] })
+      expect(screen.getAllByTestId('chat-queue-item')).toHaveLength(2)
+    })
+
+    it('one that failed says why, with Retry and Dismiss', () => {
+      const onRetryPending = vi.fn(() => Promise.resolve())
+      const onDismissPending = vi.fn(() => Promise.resolve())
+      setup({
+        items: [],
+        pending: [pendingEntry({ state: 'failed', error: 'Computer offline' })],
+        onRetryPending,
+        onDismissPending
+      })
+      const row = screen.getByTestId('chat-queue-item')
+      expect(row.textContent).toContain('Computer offline')
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      expect(onRetryPending).toHaveBeenCalledWith('p1')
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      expect(onDismissPending).toHaveBeenCalledWith('p1')
+    })
   })
 })

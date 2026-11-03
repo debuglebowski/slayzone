@@ -116,8 +116,7 @@ export function HomeView({
   // task-detail archive/delete, the delete-task dialog — gets the same undo
   // affordance the Electron app provides (App.tsx useUndoableTaskActions). The
   // underlying useTasksData instance stays single; only the wrapped action fns
-  // are swapped in. (Temp-task auto-cleanup in closeTab calls rawData.deleteTask
-  // directly to avoid a spurious "undo" toast for scratch terminals.)
+  // are swapped in.
   const { push: pushUndo, undo, redo } = useUndo()
   const {
     contextMenuUpdate,
@@ -226,9 +225,8 @@ export function HomeView({
     ;(window as unknown as Record<string, unknown>).__slayzone_openTask = openTask
   }, [openTask])
 
-  // Close a tab by index. Closing hides its view while preserving the task
-  // and its running terminals
-  // (shared with the Electron app).
+  // Close a tab by index. Keeps the task; a scratch terminal's processes stop
+  // with its tab (shared with the Electron app).
   const { closeTab, closeTabByTaskId } = useCloseTaskTab()
   // ⌘⇧T — reopens the preserved tab (also handles legacy discarded tabs).
   const reopenClosedTab = useReopenClosedTab(rawData.updateTask)

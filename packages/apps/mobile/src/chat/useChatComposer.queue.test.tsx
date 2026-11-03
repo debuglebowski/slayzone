@@ -23,7 +23,13 @@ function props(push: jest.Mock) {
       sendMessage: jest.fn(),
       abortAndPop: jest.fn(async () => ({ popped: false }))
     } as unknown as ChatSessionApi,
-    queue: { items: [], push, clear: jest.fn(async () => {}), remove: jest.fn(async () => {}) },
+    queue: {
+      items: [],
+      push,
+      clear: jest.fn(async () => {}),
+      remove: jest.fn(async () => {}),
+      steer: jest.fn(async () => ({ ok: true as const }))
+    },
     settings: { model: 'opus' } as ChatSettings,
     models: chatModelsView('claude-chat', undefined),
     slash: { items: [], usage: {}, commands: [], bump: jest.fn() } as unknown as SlashCommands,

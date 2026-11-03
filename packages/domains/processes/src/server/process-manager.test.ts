@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   createProcess,
   initProcessManagerWith,
-  killProcess,
+  removeProcess,
   listAllProcesses,
   listForTask,
   restartProcess,
@@ -105,7 +105,7 @@ describe('reapSurvivorsAfterUnplannedExit', () => {
   test("an unplanned exit sweeps the leader pid's process group", () => {
     capturedExit!({ code: 1, signal: null }) // simulate the leader dying on its own
     expect(sweepKillCalls.map((c) => c.pid)).toContain(424242)
-    killProcess(crashId)
+    removeProcess(crashId)
   })
 
   test('doSpawn registers an onExit handler on the second spawn too', async () => {
@@ -119,7 +119,7 @@ describe('reapSurvivorsAfterUnplannedExit', () => {
     // finally exiting *after* stopProcess already nulled proc.handle.
     capturedExit!({ code: 0, signal: null })
     expect(sweepKillCalls).toEqual([])
-    killProcess(stoppedId)
+    removeProcess(stoppedId)
   })
 })
 
@@ -136,7 +136,7 @@ describe('pgrep survivor snapshot logs what it finds', () => {
   let logId = ''
 
   afterAll(() => {
-    if (logId) killProcess(logId)
+    if (logId) removeProcess(logId)
     real?.kill('SIGKILL') // clean up our own test process rather than waiting out its 5s sleep
     setProcessBackend(null)
   })
@@ -204,7 +204,7 @@ describe('leader exit with a survivor that outlives the sweep → orphaned', () 
     listAllProcesses().find((p) => p.id === orphanId)
 
   afterAll(() => {
-    if (orphanId) killProcess(orphanId)
+    if (orphanId) removeProcess(orphanId)
     survivor?.kill('SIGKILL')
     setProcessBackend(null)
   })
@@ -273,11 +273,11 @@ describe('reapStaleIfNeeded catches a dead leader with a live group member', () 
 
   afterAll(async () => {
     // restartProcess also scheduled a real doSpawn ~500ms out (against this
-    // fake backend) — wait for it to land *before* killProcess, so killProcess
+    // fake backend) — wait for it to land *before* removeProcess, so removeProcess
     // clears the title-poll interval that spawn starts rather than tearing
     // this record down first and leaving that interval to leak forever.
     await testSleep(700)
-    killProcess(staleId)
+    removeProcess(staleId)
     staleSurvivor?.kill('SIGKILL')
     setProcessBackend(null)
   })
@@ -333,16 +333,11 @@ describe('reapStaleIfNeeded catches a dead leader with a live group member', () 
   })
 })
 
-// --- reapKnownHistory: a *normal-looking* restart (hadLiveHandle=true,
-//     never surfaces 'orphaned', reapStaleIfNeeded is skipped entirely for
-//     this kind of transition by design) can still silently leak a
-//     descendant if its own kill() never actually reached it — e.g. an
-//     intermediate hop in a multi-process script chain that escaped the
-//     group signal. Before this fix, nothing ever looked back at that
-//     generation once a *later* restart's spawn overwrote proc.pid — it
-//     sat forever, invisible to reapStaleIfNeeded (which only ever
-//     inspects the current pid). A history-backed sweep must catch it on
-//     the NEXT restart, however many generations later. ---
+// --- reapKnownHistory: a restart whose previous run survives EVERY signal
+//     (its handle's kill never lands, and neither does the backend's) must not
+//     forget it: it stays in pid history, and the NEXT restart — however many
+//     generations later — sweeps it from there. Before history existed, nothing
+//     looked back at a generation once a later spawn overwrote proc.pid. ---
 describe('reapKnownHistory', () => {
   let genA: ChildProcess | undefined
   let genAPid: number | undefined
@@ -369,13 +364,14 @@ describe('reapKnownHistory', () => {
   }
   const FAKE_GEN_B_PID = 987654321 // arbitrary — generation B is never actually spawned for real
   const multiGenKillCalls: Array<{ pid: number; sig?: string }> = []
+  let killsLand = false
   let multiGenId = ''
   const genAInHistory = async (): Promise<boolean> =>
     (await historyPersistence.listPidHistory(multiGenId)).some((e) => e.pid === genAPid)
 
   afterAll(async () => {
     await testSleep(700)
-    if (multiGenId) killProcess(multiGenId)
+    if (multiGenId) removeProcess(multiGenId)
     genA?.kill('SIGKILL')
     setProcessBackend(null)
   })
@@ -407,7 +403,7 @@ describe('reapKnownHistory', () => {
       getCommandLine: async () => null,
       killByPid: (pid, sig) => {
         multiGenKillCalls.push({ pid, sig })
-        if (pid === genAPid && sig === 'SIGKILL') genA!.kill('SIGKILL')
+        if (pid === genAPid && sig === 'SIGKILL' && killsLand) genA!.kill('SIGKILL')
       }
     })
 
@@ -415,23 +411,22 @@ describe('reapKnownHistory', () => {
     expect(await genAInHistory()).toBe(true)
   })
 
-  // Restart #1: hadLiveHandle=true (genA looks perfectly healthy) — its own
-  // kill() never actually reaches genA (real process, stays alive).
-  // reapStaleIfNeeded is skipped for this transition; reapKnownHistory
-  // correctly defers on genA too, since it's still the CURRENT pid here.
-  test('a restart never touches the still-current generation via history (that is reapStaleIfNeeded’s job)', async () => {
+  // Restart #1: genA is the live run. Its handle's kill never lands; restart
+  // then finds it through history and sweeps it there too — which doesn't land
+  // either (killsLand=false), so genA outlives SIGKILL.
+  test('restart #1 escalates a run that ignores its handle kill through history', async () => {
     await restartProcess(multiGenId)
-    await testSleep(700) // let the scheduled doSpawn land, assigning generation B
-    expect(multiGenKillCalls.filter((c) => c.pid === genAPid)).toEqual([])
+    expect(multiGenKillCalls).toContainEqual({ pid: genAPid, sig: 'SIGTERM' })
+    expect(multiGenKillCalls).toContainEqual({ pid: genAPid, sig: 'SIGKILL' })
   })
-  test("generation A is still in history — its leak hasn't been discovered yet", async () => {
+  test('a generation that survived SIGKILL stays in history', async () => {
     expect(await genAInHistory()).toBe(true)
   })
 
-  // Restart #2: generation B is now current; generation A is a superseded,
-  // already-forgotten-by-the-single-pid-column leak. Only reapKnownHistory
-  // can find it now.
-  test('reapKnownHistory sweeps a generation left behind by an earlier, clean-looking restart', async () => {
+  // Restart #2: generation B is now current; genA is reachable only via history.
+  test('reapKnownHistory sweeps a surviving generation on a later restart', async () => {
+    multiGenKillCalls.length = 0
+    killsLand = true
     await restartProcess(multiGenId)
     expect(multiGenKillCalls).toContainEqual({ pid: genAPid, sig: 'SIGTERM' })
     expect(multiGenKillCalls).toContainEqual({ pid: genAPid, sig: 'SIGKILL' })
@@ -458,7 +453,7 @@ describe('sweepAllHistoryOnBoot', () => {
 
   afterAll(() => {
     bootOrphan?.kill('SIGKILL')
-    killProcess(bootRowId)
+    removeProcess(bootRowId)
     setProcessBackend(null)
   })
 
@@ -576,7 +571,7 @@ describe('setProjectCwdResolver', () => {
   })
   test('the resolved cwd self-heals the in-memory record', () => {
     expect(listAllProcesses().find((p) => p.id === movedId)?.cwd).toBe('/new/live/path')
-    killProcess(movedId)
+    removeProcess(movedId)
   })
 
   test('a task-scoped process ignores the resolver and keeps its own (worktree) cwd', async () => {
@@ -589,7 +584,7 @@ describe('setProjectCwdResolver', () => {
       false
     )
     expect(spawnedCwds.at(-1)).toBe('/task/own/worktree')
-    killProcess(taskScopedId)
+    removeProcess(taskScopedId)
   })
 
   test('a resolver returning null (e.g. a deleted project) falls back to the stored cwd', async () => {
@@ -602,7 +597,7 @@ describe('setProjectCwdResolver', () => {
       false
     )
     expect(spawnedCwds.at(-1)).toBe('/still/stored/path')
-    killProcess(unresolvedId)
+    removeProcess(unresolvedId)
   })
 
   // restartProcess must also re-resolve — the realistic bug scenario is a
@@ -627,6 +622,6 @@ describe('setProjectCwdResolver', () => {
   })
   test('the restart-time resolution also self-heals the stored record', () => {
     expect(listAllProcesses().find((p) => p.id === restartId)?.cwd).toBe('/new/after/rename')
-    killProcess(restartId)
+    removeProcess(restartId)
   })
 })

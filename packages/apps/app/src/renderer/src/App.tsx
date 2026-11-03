@@ -638,7 +638,7 @@ function App(): React.JSX.Element {
   )
 
   // Tab management (declared early so IPC-listener refs below can close over closeTab).
-  // Closing a tab preserves its task and running terminals.
+  // Closing a tab keeps its task; a scratch terminal's processes stop with it.
   const { closeTab, closeTabByTaskId } = useCloseTaskTab()
   // ⌘⇧T — reopens the preserved tab (also handles legacy discarded tabs).
   const reopenClosedTab = useReopenClosedTab(updateTask)

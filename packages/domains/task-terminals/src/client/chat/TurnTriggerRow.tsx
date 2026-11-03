@@ -1,17 +1,24 @@
-import { useContext } from 'react'
-import { Bot, CornerDownRight, Radio } from 'lucide-react'
+import { Fragment, type ReactNode, useContext } from 'react'
+import { Bot, Check, Timer, X } from 'lucide-react'
 import type { TimelineItem } from '@slayzone/terminal/client'
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import { CHAT_CARD_INDENT } from './tool-cards/card-shell'
 import { ToolFocusContext } from './tool-cards/tool-focus'
 import { flashRow, useRevealTimelineItem } from './timeline-reveal'
+import {
+  describeTurnTriggerNotification,
+  type TurnTriggerNotification
+} from './turn-trigger-notification'
 
 type TurnTriggerItem = Extract<TimelineItem, { kind: 'turn-trigger' }>
 
 /**
- * The agent opened this turn because background work told it something: which
- * sub-agents ended (a name shows its sub-agent row — scrolled to, its
- * Activities opened) and which notifications arrived (a Monitor event, a
- * background command's end — the line it reported, in full on hover).
+ * The agent opened this turn because background work told it something; each
+ * message it received is shown above its answer. A sub-agent that ended: a
+ * one-line card, its name and ✓ / ✕ (the name shows its sub-agent row —
+ * scrolled to, its Activities opened). A line a watch printed: a labelled card
+ * (`Watch` / `Printed`); a background task's end: `Task`. A watch that hit its
+ * time limit: a short "Watch stopped" pill (which watch on hover).
  */
 export function TurnTriggerRow({ item }: { item: TurnTriggerItem }) {
   const reveal = useRevealTimelineItem()
@@ -24,50 +31,107 @@ export function TurnTriggerRow({ item }: { item: TurnTriggerItem }) {
   }
   return (
     <div
-      className={`${CHAT_CARD_INDENT} py-1 text-xs text-muted-foreground`}
+      className={`${CHAT_CARD_INDENT} space-y-1.5 py-1 text-xs text-muted-foreground`}
       data-testid="turn-trigger"
     >
-      {item.subAgents.length > 0 && (
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <CornerDownRight className="size-3 shrink-0" />
-          <span>After</span>
-          {item.subAgents.map((agent, i) => (
-            <span key={agent.toolUseId} className="flex min-w-0 items-center gap-1.5">
-              {i > 0 && <span className="text-muted-foreground/40">·</span>}
-              <button
-                type="button"
-                onClick={() => show(agent.toolUseId)}
-                className="flex min-w-0 items-center gap-1 rounded-sm px-1 hover:bg-muted/50 hover:text-foreground"
-              >
-                <Bot className="size-3 shrink-0" />
-                <span className="truncate">{agent.description ?? 'sub-agent'}</span>
-              </button>
-            </span>
-          ))}
-          <span>finished</span>
-        </div>
-      )}
-      {item.notifications?.map((notification) => (
+      {item.subAgents.map((agent) => (
         <div
-          key={notification.uuid}
-          className="flex min-w-0 items-center gap-1.5"
-          data-testid="turn-trigger-notification"
-          title={
-            notification.event
-              ? `${notification.summary}\n${notification.event}`
-              : notification.summary
-          }
+          key={agent.toolUseId}
+          className="flex w-fit max-w-full items-center gap-2.5 rounded-lg border border-border/50 bg-card px-3 py-1.5"
+          data-testid="turn-trigger-sub-agent"
         >
-          <CornerDownRight className="size-3 shrink-0" />
-          <span className="shrink-0">After</span>
-          <Radio className="size-3 shrink-0" />
-          <span className="min-w-0 shrink truncate">{notification.summary}</span>
-          {notification.event && (
-            <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground/70">
-              {notification.event}
+          <Bot className="size-3 shrink-0" />
+          <button
+            type="button"
+            onClick={() => show(agent.toolUseId)}
+            className="min-w-0 truncate text-left text-foreground hover:underline"
+          >
+            {agent.description ?? 'sub-agent'}
+          </button>
+          {agent.failed ? (
+            <span role="img" aria-label="Failed" className="shrink-0 text-destructive">
+              <X className="size-3.5" />
+            </span>
+          ) : (
+            <span role="img" aria-label="Finished" className="shrink-0 text-success-foreground">
+              <Check className="size-3.5" />
             </span>
           )}
         </div>
+      ))}
+      {item.notifications?.map((notification) => (
+        <NotificationRow key={notification.uuid} notification={notification} />
+      ))}
+    </div>
+  )
+}
+
+function NotificationRow({ notification }: { notification: TurnTriggerNotification }) {
+  const view = describeTurnTriggerNotification(notification)
+  if (view.kind === 'card') {
+    return (
+      <TriggerCard
+        testId="turn-trigger-notification"
+        rows={view.rows.map((row) => ({
+          label: row.label,
+          value: row.value,
+          ...(row.mono ? { className: 'font-mono text-foreground/80' } : {})
+        }))}
+      />
+    )
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className="flex w-fit max-w-full items-center gap-1.5 rounded-full border border-warning/35 bg-warning/10 px-2.5 py-0.5 text-warning-foreground"
+          data-testid="turn-trigger-notification"
+        >
+          <Timer className="size-3 shrink-0" />
+          <span className="truncate">{view.text}</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        showArrow={false}
+        className="max-w-sm space-y-0.5 rounded-lg border border-border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+        data-testid="turn-trigger-notification-tooltip"
+      >
+        <p className="break-words font-medium">{view.tooltip.title}</p>
+        <p className="text-muted-foreground">{view.tooltip.body}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+interface TriggerCardRow {
+  label: string
+  value: ReactNode
+  /** Value styling (default: foreground prose). */
+  className?: string
+}
+
+/** One message the agent received, labelled: `Watch <name>` / `Printed <line>`. */
+function TriggerCard({ rows, testId }: { rows: readonly TriggerCardRow[]; testId: string }) {
+  return (
+    <div
+      className="grid w-fit max-w-full grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-0.5 rounded-lg border border-border/50 bg-card px-3 py-2"
+      data-testid={testId}
+    >
+      {rows.map((row) => (
+        <Fragment key={row.label}>
+          <span>{row.label}</span>
+          <span
+            className={cn(
+              'whitespace-pre-wrap [overflow-wrap:anywhere]',
+              row.className ?? 'text-foreground'
+            )}
+          >
+            {row.value}
+          </span>
+        </Fragment>
       ))}
     </div>
   )

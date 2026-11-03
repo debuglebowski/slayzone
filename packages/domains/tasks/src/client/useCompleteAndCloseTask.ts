@@ -13,15 +13,16 @@ interface CompleteAndCloseDeps {
   projects: Project[]
   /** Upsert one task into board state (useTasksData's updateTask). */
   updateTask: (task: Task | null | undefined) => void
-  /** Close the view, optionally waiting for a pending write. */
+  /** The shell's tab close (useCloseTaskTab); stops a scratch terminal once the pending write lands. */
   closeTabByTaskId: (taskId: string, opts?: CloseTaskTabOptions) => Promise<void>
   openTask: (taskId: string) => void
 }
 
 /**
  * "Complete & Close Tab" (⌘⇧D): mark a task done in its project's completed
- * column and close its tab — undoably. Closing the view preserves the task and
- * its running processes, including scratch terminals. Writes reach its owning hub.
+ * column and close its tab — undoably. The task itself is never deleted (a scratch
+ * terminal's processes stop with its tab, see useCloseTaskTab). Writes reach its
+ * owning hub.
  *
  * Optimistic both ways: the done status and the tab close land in the caller's
  * synchronous turn — one render — so the open tab never shows the done state on
@@ -51,7 +52,7 @@ export function useCompleteAndCloseTask(deps: CompleteAndCloseDeps, undo: UndoAP
           status: doneStatus
         })
         updateTask({ ...task, status: doneStatus })
-        // Await the status write while closing the view immediately.
+        // The tab closes now; a scratch terminal's stop waits for the write.
         const closed = closeTabByTaskId(taskId, { after: write })
         return write.then(
           async (updated) => {

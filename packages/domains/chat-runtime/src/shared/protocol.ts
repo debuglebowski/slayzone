@@ -252,6 +252,8 @@ export const chatQueueOperationSchemas = {
   move: z.tuple([id, z.number().int().nonnegative()]),
   hold: tab,
   release: tab,
+  /** Add a queued message to the running turn (by its id). An older computer refuses the method. */
+  steer: tab,
   remove: tab,
   clear: tab
 } as const

@@ -328,6 +328,23 @@ function ChatView({ target }: { target: ChatTarget }) {
             composer={composer}
             queued={queue.items}
             onRemoveQueued={(id) => void queue.remove(id).catch(() => undefined)}
+            {...(caps.steerQueued && session.inFlight && state.prompts.length === 0
+              ? {
+                  onSteerQueued: (id: string) =>
+                    void queue
+                      .steer(id)
+                      .then(
+                        (result) => (result.ok ? null : result.reason),
+                        (err: unknown) => (err instanceof Error ? err.message : String(err))
+                      )
+                      .then((reason) => {
+                        if (reason !== null) {
+                          notice.show(`Could not send it now: ${reason}`)
+                        }
+                      })
+                }
+              : {})}
+            withdrawSteered={caps.withdrawSteered}
             inFlight={session.inFlight}
             disabled={session.hydrating || ended}
             placeholder={session.inFlight ? 'Queue a message…' : 'Message'}

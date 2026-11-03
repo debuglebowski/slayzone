@@ -105,6 +105,8 @@ export interface PtyDetectionSpec {
   resuming: boolean
   /** The conversation being resumed: the owner checks its transcript at a failed exit. */
   resumeConversationId?: string
+  /** The spawn-time transcript lookup's answer, when one was made (see frames.ts). */
+  resumeTranscript?: 'found' | 'missing' | 'unknown'
   /** What OSC colour queries are answered with (`setTerminalTheme`). */
   theme?: TerminalTheme
 }

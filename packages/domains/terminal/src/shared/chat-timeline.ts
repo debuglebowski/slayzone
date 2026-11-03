@@ -675,6 +675,8 @@ export interface ChatTimelineState {
 export interface TurnTriggerSubAgent {
   toolUseId: string
   description?: string
+  /** It failed, was stopped or killed (absent: it completed). */
+  failed?: true
 }
 
 /** A background notification (what a `turn-trigger` row names). */
@@ -1315,6 +1317,17 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           next[i] = { ...it, text: event.text, timestamp: ts, optimistic: false }
           return { ...state, timeline: next, idlessOptimistic: state.idlessOptimistic - 1 }
         }
+      }
+      if (event.joinsTurn) {
+        // Taken into the running turn: its row goes here, the turn goes on.
+        const joined: UserTextItem = {
+          kind: 'user-text',
+          text: event.text,
+          timestamp: ts,
+          ...(event.id ? { id: event.id, delivery: 'queued' as const } : {}),
+          ...attachmentsOf(event.content)
+        }
+        return { ...state, ...withUserRow(state, joined) }
       }
       // Drift recovery: a fresh (non-optimistic-confirming) user-message means a new
       // turn starts here. If counters say we're still in-flight, the prior turn never
@@ -2066,7 +2079,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
             turnTriggers: endedInBackground
               ? [
                   ...state.turnTriggers,
-                  { toolUseId: id, ...(next.description ? { description: next.description } : {}) }
+                  {
+                    toolUseId: id,
+                    ...(next.description ? { description: next.description } : {}),
+                    ...(next.phase === 'failed' ? { failed: true as const } : {})
+                  }
                 ]
               : state.turnTriggers,
             inFlightSubAgents:

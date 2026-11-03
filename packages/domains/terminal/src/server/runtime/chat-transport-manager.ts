@@ -337,6 +337,12 @@ interface ChatTab {
    * and by the turn's end.
    */
   pendingPrompts: Set<string>
+  /**
+   * Queued messages added to the running turn ("Send now") that the
+   * agent has not picked up yet, by id, with the process they were written to.
+   * Still the queue's: no timeline row, no outbox entry until the pickup.
+   */
+  steers: Map<string, { message: OutgoingUserMessage; gen: number }>
   /** The user stopped the current turn: its aborted `result` is an end, not an error. */
   turnInterrupted: boolean
   /** Any assistant progress (live or saved) since the last user message. */
@@ -469,6 +475,12 @@ interface PoppedMessage {
   id?: string
   content: UserContentBlock[]
 }
+
+/** What became of a steered message ("Send now"). */
+export type SteerOutcome = 'picked-up' | 'returned'
+export type SteerListener = (tabId: string, id: string, outcome: SteerOutcome) => void
+/** `ok`: the agent took the request (pickup comes later); else nothing was sent. */
+export type SteerResult = { ok: true } | { ok: false; reason: string }
 
 export interface StopTurnResult extends StopResult {
   /** `interrupt`: the process stayed. `respawn`: it was replaced (the fallback). */
@@ -871,6 +883,9 @@ export function createChatTransport(
 
   function transitionState(tab: ChatTab, next: ChatTerminalState): void {
     if (tab.terminalState === next) return
+    // A process the host is stopping only ends: nothing it still says (a late
+    // `result`, a prompt) brings the tab back. A respawn clears `tab.proc` first.
+    if (next !== 'dead' && tab.proc?.stopRequested && !tab.proc.ended) return
     // Leaving a watched state for a resting/terminal one — disarm.
     if (next === 'idle' || next === 'error' || next === 'dead') {
       clearWatchdog(tab)
@@ -963,6 +978,138 @@ export function createChatTransport(
     return (
       tab.terminalState === 'idle' && tab.pendingPrompts.size === 0 && tab.outbox.inFlight() === 0
     )
+  }
+
+  // ---- add to the running turn ("steer") ----
+
+  let steerListener: SteerListener | null = null
+
+  /**
+   * Hear what became of each steered message: `picked-up` (the agent took it —
+   * its row is in the timeline, the outbox has it) or `returned` (it never got
+   * there: withdrawn, dropped, the process ended). Single slot, like the drainer.
+   */
+  function registerSteerListener(fn: SteerListener | null): void {
+    steerListener = fn
+  }
+
+  function settleSteer(tab: ChatTab, id: string, outcome: SteerOutcome): void {
+    if (!tab.steers.delete(id)) return
+    steerListener?.(tab.tabId, id, outcome)
+  }
+
+  /** The process a message can be added to now: a running turn, no prompt waiting, not being stopped. */
+  function steerableProcess(tab: ChatTab): ChatProcess | null {
+    if (tab.closed || !chatCapabilitiesForMode(tab.mode).steerQueued) return null
+    if (tab.respawning || permissionChanges.has(tab.tabId)) return null
+    if (tab.terminalState !== 'running' || tab.pendingPrompts.size > 0) return null
+    const proc = liveProcess(tab.tabId)
+    if (!proc || !proc.ready || proc.interruptIssued || !proc.driver.steerUserTurn) return null
+    return proc
+  }
+
+  /** Can a queued message be added to this tab's running turn now? */
+  function canSteer(tabId: string): boolean {
+    const tab = tabs.get(tabId)
+    return tab ? steerableProcess(tab) !== null : false
+  }
+
+  /**
+   * Add a queued message to the running turn. Resolves `ok` once the agent took
+   * the request (Claude: the stdin write; Codex: `turn/steer` accepted) — it is
+   * not picked up yet: that is reported to the steer listener. Refused (nothing
+   * sent, the message stays an ordinary queued one) when no turn runs, a prompt
+   * waits, or the agent turned it down (Codex: the turn had just ended).
+   */
+  async function steerUserMessage(
+    tabId: string,
+    message: OutgoingUserMessage
+  ): Promise<SteerResult> {
+    const tab = tabs.get(tabId)
+    if (!tab || tab.closed) return { ok: false, reason: 'This chat tab is closed.' }
+    const proc = steerableProcess(tab)
+    if (!proc) return { ok: false, reason: `${tab.backend.displayName} is not working right now.` }
+    if (tab.steers.has(message.id) || tab.outbox.state(message.id) !== null) {
+      return { ok: false, reason: 'That message was already sent.' }
+    }
+    tab.steers.set(message.id, { message, gen: proc.gen })
+    try {
+      const prepared =
+        proc.driver.prepareUserTurn && !message.content.every((b) => b.type === 'text')
+          ? await proc.driver.prepareUserTurn(message)
+          : undefined
+      // The process ended (or was replaced) while its files were read.
+      if (!tab.steers.has(message.id)) return { ok: false, reason: 'The agent stopped.' }
+      if (tab.proc !== proc || proc.ended) {
+        tab.steers.delete(message.id)
+        return { ok: false, reason: 'The agent stopped.' }
+      }
+      await proc.driver.steerUserTurn!(message, prepared)
+      return { ok: true }
+    } catch (err) {
+      tab.steers.delete(message.id)
+      // The provider's own wording ("no active turn to steer") stays in the log.
+      diagnostic(tab, 'info', 'chat.steer_refused', 'the agent did not take the message', {
+        error: toErrorMessage(err)
+      })
+      return { ok: false, reason: `${tab.backend.displayName} could not take it right now.` }
+    }
+  }
+
+  /**
+   * Take back a steered message the agent has not picked up (Claude:
+   * `cancel_async_message`). True: withdrawn — reported `returned`. False: it
+   * was picked up, or the provider cannot withdraw it.
+   */
+  async function withdrawSteer(tabId: string, id: string): Promise<boolean> {
+    const tab = tabs.get(tabId)
+    const steer = tab?.steers.get(id)
+    if (!tab || !steer || !chatCapabilitiesForMode(tab.mode).withdrawSteered) return false
+    const proc = liveProcess(tabId)
+    if (!proc || proc.gen !== steer.gen || !proc.driver.applyControl) return false
+    try {
+      const res = await proc.driver.applyControl(
+        { subtype: 'cancel_async_message', message_uuid: id },
+        STOP_FOLLOW_UP_TIMEOUT_MS
+      )
+      if (controlPayload(res)?.cancelled !== true) return false
+    } catch (err) {
+      diagnostic(tab, 'warn', 'chat.withdraw_failed', 'cancel_async_message failed', {
+        error: toErrorMessage(err)
+      })
+      return false
+    }
+    settleSteer(tab, id, 'returned')
+    return true
+  }
+
+  /**
+   * The agent took a steered message: its row goes into the timeline HERE —
+   * where the agent read it, after the tool call it followed — and the outbox
+   * follows it to its answer. A CLI that held it past the turn's end starts a
+   * turn with it (Claude, when no tool call came): running again.
+   */
+  function pickUpSteer(tab: ChatTab, proc: ChatProcess, id: string): void {
+    const steer = tab.steers.get(id)
+    if (!steer || steer.gen !== proc.gen) return
+    const joinsTurn = tab.terminalState === 'running'
+    if (!joinsTurn) markTurnStarted(tab)
+    routeHostEvent(tab, {
+      kind: 'user-message',
+      id,
+      text: userMessageText(steer.message.content),
+      content: steer.message.content,
+      ...(joinsTurn ? { joinsTurn: true as const } : {})
+    })
+    tab.outbox.join(steer.message, proc.gen)
+    settleSteer(tab, id, 'picked-up')
+  }
+
+  /** Every steered message of `gen` goes back to the queue (its process ended / is being stopped). */
+  function returnSteers(tab: ChatTab, gen: number): void {
+    for (const [id, steer] of [...tab.steers]) {
+      if (steer.gen === gen) settleSteer(tab, id, 'returned')
+    }
   }
 
   // ---- event pipeline ----
@@ -1152,11 +1299,18 @@ export function createChatTransport(
     // Transport-internal: they move the outbox / watchdog, never the timeline.
     switch (event.kind) {
       case 'command-lifecycle':
+        if (tab.steers.has(event.commandUuid)) {
+          // `started` (or `completed` of one it had already): picked up; `cancelled`: dropped.
+          if (event.state === 'cancelled') settleSteer(tab, event.commandUuid, 'returned')
+          else if (event.state !== 'queued') pickUpSteer(tab, proc, event.commandUuid)
+        }
         tab.outbox.onLifecycle(proc.gen, event.commandUuid, event.state)
         if (proc.lateTurnOf === event.commandUuid) onLateTurnLifecycle(tab, proc, event.state)
         noteAlive(tab)
         return
       case 'user-replay':
+        // The agent echoes a message as it takes it: a steered one is picked up.
+        if (tab.steers.has(event.uuid)) pickUpSteer(tab, proc, event.uuid)
         tab.outbox.onReplay(proc.gen, event.uuid)
         return
       case 'heartbeat':
@@ -1476,6 +1630,8 @@ export function createChatTransport(
     // Undelivered messages of a REPLACED process (or a failed resume / fork) go to
     // the next one; any other end fails them, visibly.
     const resend = proc.replaced || proc.resumeFailed || proc.forkFailed
+    // Steered messages it never picked up are the queue's again.
+    returnSteers(tab, proc.gen)
     if (!tab.closed) {
       // A failed resume never had a conversation: even what it confirmed is re-sent.
       tab.outbox.onProcessEnded(proc.gen, {
@@ -1702,6 +1858,7 @@ export function createChatTransport(
       watchdogKillStage: 'none',
       watchdogLastProgress: Date.now(),
       pendingPrompts: new Set<string>(),
+      steers: new Map(),
       turnInterrupted: false,
       turnProgress: false,
       liveSeq: 0,
@@ -2637,7 +2794,13 @@ export function createChatTransport(
       if (reach?.sent !== false) proc.discardTurn = true
       if (popped.id && reach?.sent && !reach.started) proc.lateTurnOf = popped.id
     } else tab.turnInterrupted = true
-    // Messages the CLI holds queued would run right after the interrupt.
+    // Messages the CLI holds queued would run right after the interrupt. A
+    // steered one goes back to the queue; one the provider cannot withdraw
+    // (Codex) dies with the turn it was added to — the queue sends it again.
+    for (const [id, steer] of [...tab.steers]) {
+      if (steer.gen !== proc.gen) continue
+      if (!(await withdrawSteer(tabId, id))) settleSteer(tab, id, 'returned')
+    }
     for (const id of tab.outbox.heldByCli(proc.gen)) await withdrawQueued(tab, proc, id)
 
     let ack: unknown
@@ -3270,6 +3433,10 @@ export function createChatTransport(
       if (!proc.ended) proc.kill('SIGKILL')
     }, 2000)
     t.unref?.()
+    // The stop is certain (SIGKILL follows), so the tab reads `dead` now — not
+    // after the CLI's own shutdown (~0.8 s for Claude Code). transitionState
+    // keeps it there until the exit (see its stopping-process guard).
+    transitionState(tab, 'dead')
   }
 
   /**
@@ -3648,6 +3815,10 @@ export function createChatTransport(
     getWorkspaceChanges,
     getWorkspaceFileDiff,
     registerChatQueueDrainer,
+    registerSteerListener,
+    canSteer,
+    steerUserMessage,
+    withdrawSteer,
     getSessionTerminalState,
     isSessionAwaitingUserInput,
     isTurnOpen,
@@ -3717,6 +3888,10 @@ export const {
   getWorkspaceChanges,
   getWorkspaceFileDiff,
   registerChatQueueDrainer,
+  registerSteerListener,
+  canSteer,
+  steerUserMessage,
+  withdrawSteer,
   getSessionTerminalState,
   isSessionAwaitingUserInput,
   isTurnOpen,

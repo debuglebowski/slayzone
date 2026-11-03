@@ -34,7 +34,7 @@ export function ProcessesPanel({
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const { mutateAsync: killProcess } = useMutation(trpc.processes.kill.mutationOptions())
+  const { mutateAsync: removeProcess } = useMutation(trpc.processes.remove.mutationOptions())
   const { mutateAsync: stopProcess } = useMutation(trpc.processes.stop.mutationOptions())
   const { mutateAsync: restartProcess } = useMutation(trpc.processes.restart.mutationOptions())
   const [processes, setProcesses] = useState<ProcessEntry[]>([])
@@ -177,9 +177,9 @@ export function ProcessesPanel({
     )
   }, [])
 
-  const handleKill = useCallback(
+  const handleRemove = useCallback(
     (proc: ProcessEntry) =>
-      killProcess({ processId: proc.id }).then(
+      removeProcess({ processId: proc.id }).then(
         () => {
           setProcesses((prev) => prev.filter((p) => p.id !== proc.id))
           setExpandedLogs((prev) => {
@@ -188,9 +188,9 @@ export function ProcessesPanel({
             return next
           })
         },
-        (err: unknown) => reportActionError('kill', proc, err)
+        (err: unknown) => reportActionError('remove', proc, err)
       ),
-    [killProcess, reportActionError]
+    [removeProcess, reportActionError]
   )
 
   const handleStop = useCallback(
@@ -343,7 +343,7 @@ export function ProcessesPanel({
                     onToggleLog={() => toggleLog(proc.id)}
                     onRestart={() => void handleRestart(proc)}
                     onStop={() => void handleStop(proc)}
-                    onKill={() => void handleKill(proc)}
+                    onRemove={() => void handleRemove(proc)}
                     onEdit={() => openEditDialog(proc)}
                     onInject={() => handleInject(proc)}
                     onOpenUrl={onOpenUrl}
@@ -366,7 +366,7 @@ export function ProcessesPanel({
                     onToggleLog={() => toggleLog(proc.id)}
                     onRestart={() => void handleRestart(proc)}
                     onStop={() => void handleStop(proc)}
-                    onKill={() => void handleKill(proc)}
+                    onRemove={() => void handleRemove(proc)}
                     onEdit={() => openEditDialog(proc)}
                     onInject={() => handleInject(proc)}
                     onOpenUrl={onOpenUrl}

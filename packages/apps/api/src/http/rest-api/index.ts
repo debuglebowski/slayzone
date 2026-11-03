@@ -13,6 +13,7 @@ import { registerProcessesListRoute } from './processes/list'
 import { registerProcessesLogsRoute } from './processes/logs'
 import { registerProcessesDeleteRoute } from './processes/delete'
 import { registerProcessesFollowRoute } from './processes/follow'
+import { registerProcessesLifecycleRoutes } from './processes/lifecycle'
 import { registerOpenTaskRoute } from './tasks/open'
 import { registerCloseTaskRoute } from './tasks/close'
 import { registerArchiveTaskRoute } from './tasks/archive'
@@ -98,6 +99,7 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerProcessesLogsRoute(app, deps)
   registerProcessesDeleteRoute(app, deps)
   registerProcessesFollowRoute(app, deps)
+  registerProcessesLifecycleRoutes(app, deps)
 
   // Tasks
   registerOpenTaskRoute(app, deps)

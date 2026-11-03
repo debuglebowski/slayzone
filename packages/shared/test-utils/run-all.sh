@@ -52,6 +52,7 @@ run_harness packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 run_harness packages/domains/projects/src/server/project-groups-txns.test.ts
 run_harness packages/domains/task/src/server/ops/conversation-id-heal.test.ts
+run_harness packages/domains/task/src/server/conversation-healer.test.ts
 run_harness packages/domains/task/src/server/ops/task-conversations.test.ts
 run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
@@ -252,6 +253,8 @@ run_harness packages/domains/processes/src/server/process-persistence.test.ts
 run_harness packages/domains/processes/src/server/process-backend.test.ts
 # Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
 run_harness packages/domains/processes/src/server/process-switch.test.ts
+# Real trees: a run that outlived the app session reads 'orphaned'; stop/restart take escaped descendants; start/restart contract.
+run_harness packages/domains/processes/src/server/process-lifecycle.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
@@ -260,6 +263,8 @@ run_harness packages/domains/diagnostics/src/electron/batching.test.ts
 # Write-queue flush timer never holds a process open; beforeExit flushes what it held.
 run_harness packages/domains/diagnostics/src/server/flush-on-exit.test.ts
 run_harness packages/domains/diagnostics/src/server/chat-privacy.test.ts
+# Uncaught/rejected errors keep their identity (class/code/syscall/errno) for the privacy filter.
+run_harness packages/domains/diagnostics/src/electron/error-payload.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_harness packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
@@ -411,6 +416,10 @@ run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migratio
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
 run_harness packages/apps/app/src/main/lifecycle/quit-reap-child.test.ts
+# No page can veto its unload (a veto silently cancelled the window close and the app quit).
+run_harness packages/apps/app/src/main/lifecycle/unload-veto.test.ts
+# Background update checks never leave a rejection unhandled (pilot: startup unhandled_rejection).
+run_harness packages/apps/app/src/main/auto-updater.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
 # The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).
@@ -638,6 +647,7 @@ run_harness packages/domains/terminal/src/server/pty-exit-strategy.test.ts
 # Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
 run_harness packages/domains/terminal/src/server/spawn-conversation.test.ts
 run_harness packages/domains/terminal/src/server/claude-transcripts.test.ts
+run_harness packages/domains/terminal/src/server/runtime/claude-transcript-locator.test.ts
 run_harness packages/domains/terminal/src/server/adapters/claude-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/antigravity-adapter.test.ts
 run_harness packages/domains/terminal/src/server/adapters/hook-driven-modes.test.ts
@@ -735,6 +745,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
@@ -754,6 +765,8 @@ run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
+# createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
+run_harness packages/domains/terminal/src/server/runtime/createpty-resume-location.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 
@@ -958,6 +971,7 @@ run_harness packages/domains/terminal/src/shared/workspace-changes.test.ts
 run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts
+run_harness packages/domains/terminal/src/shared/chat-timeline.steer.test.ts
 run_harness packages/domains/terminal/src/shared/persistent-index.test.ts
 # Reducer: token streaming (live state, finalize in place) + command tasks (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/shared/chat-timeline-streaming.test.ts

@@ -16,7 +16,14 @@ import type {
 const transport = vi.hoisted(() => ({
   ready: true,
   conversationId: 'source',
-  dispatched: [] as Array<{ tabId: string; message: OutgoingUserMessage }>
+  dispatched: [] as Array<{ tabId: string; message: OutgoingUserMessage }>,
+  steered: [] as Array<{ tabId: string; message: OutgoingUserMessage }>,
+  steerResult: { ok: true } as { ok: true } | { ok: false; reason: string },
+  withdrawn: [] as string[],
+  withdrawResult: true,
+  steerListener: null as
+    | ((tabId: string, id: string, outcome: 'picked-up' | 'returned') => void)
+    | null
 }))
 vi.mock('./chat-transport-manager', () => ({
   getSessionTerminalState: () => 'idle',
@@ -24,6 +31,19 @@ vi.mock('./chat-transport-manager', () => ({
   isReadyForQueuedMessage: () => transport.ready,
   ensureSpawned: async () => undefined,
   registerChatQueueDrainer: () => undefined,
+  registerSteerListener: (
+    fn: (tabId: string, id: string, outcome: 'picked-up' | 'returned') => void
+  ) => {
+    transport.steerListener = fn
+  },
+  steerUserMessage: async (tabId: string, message: OutgoingUserMessage) => {
+    transport.steered.push({ tabId, message })
+    return transport.steerResult
+  },
+  withdrawSteer: async (_tabId: string, id: string) => {
+    transport.withdrawn.push(id)
+    return transport.withdrawResult
+  },
   getEventBufferSince: () => [],
   dispatchUserMessage: (tabId: string, message: OutgoingUserMessage) => {
     transport.dispatched.push({ tabId, message })
@@ -31,7 +51,7 @@ vi.mock('./chat-transport-manager', () => ({
   }
 }))
 
-import { createChatQueueOps, drainChatQueue, HOLD_MS } from './chat-queue-handlers'
+import { chatQueueEvents, createChatQueueOps, drainChatQueue, HOLD_MS } from './chat-queue-handlers'
 import type { ChatQueueData } from './chat-queue-data'
 import type { AttachmentLookup } from './chat-attachment-guard'
 import type { SlayzoneDb } from '@slayzone/platform'
@@ -113,6 +133,10 @@ beforeEach(() => {
   transport.ready = true
   transport.conversationId = 'source'
   transport.dispatched = []
+  transport.steered = []
+  transport.steerResult = { ok: true }
+  transport.withdrawn = []
+  transport.withdrawResult = true
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -237,4 +261,115 @@ test('a returned thread answer waits for its source conversation after a session
   transport.conversationId = 'source'
   await drainChatQueue(db, 'tab-1', data)
   expect(sentTexts()).toEqual(['thread conclusion'])
+})
+
+describe('queue: add to the running turn (steer)', () => {
+  // Steering state lives in the module's queue runtime: each test gets its own tab.
+  let n = 0
+  let tab = ''
+  /** A turn is running (the queue holds), with `a` and `b` queued. */
+  async function queued() {
+    tab = `steer-tab-${++n}`
+    const data = memoryQueue()
+    const ops = createChatQueueOps(db, data, lookup)
+    transport.ready = false
+    const a = await ops.push(tab, 'a', 'a')
+    const b = await ops.push(tab, 'b', '/b-original')
+    return { data, ops, a, b }
+  }
+
+  test('steer hands the message to the turn; it stays listed, marked, until picked up', async () => {
+    const { ops, b } = await queued()
+    expect(await ops.steer(b.id)).toEqual({ ok: true })
+    expect(transport.steered).toEqual([
+      { tabId: tab, message: { id: b.id, content: [{ type: 'text', text: 'b' }] } }
+    ])
+    const list = await ops.list(tab)
+    expect(list.map((m) => [m.send, m.steering ?? false])).toEqual([
+      ['a', false],
+      ['b', true]
+    ])
+  })
+
+  test('picked up: the row leaves the queue (drained, with its original text)', async () => {
+    const { ops, b } = await queued()
+    const drained: string[] = []
+    const onDrained = (_tab: string, original: string) => drained.push(original)
+    chatQueueEvents.on('queue-drained', onDrained)
+    await ops.steer(b.id)
+    transport.steerListener!(tab, b.id, 'picked-up')
+    await vi.waitFor(async () => expect((await ops.list(tab)).map((m) => m.send)).toEqual(['a']))
+    chatQueueEvents.off('queue-drained', onDrained)
+    expect(drained).toEqual(['/b-original'])
+  })
+
+  test('nothing drains while a steered message waits: it goes first', async () => {
+    const { data, ops, b } = await queued()
+    await ops.steer(b.id)
+    transport.ready = true
+    await drainChatQueue(db, tab, data)
+    expect(transport.dispatched).toEqual([])
+    // Picked up, it is the agent's message in flight: the queue waits for its answer.
+    transport.ready = false
+    transport.steerListener!(tab, b.id, 'picked-up')
+    await vi.waitFor(async () => expect(await ops.list(tab)).toHaveLength(1))
+    transport.ready = true
+    await drainChatQueue(db, tab, data)
+    expect(sentTexts()).toEqual(['a'])
+  })
+
+  test('returned: an ordinary queued message again, in its place', async () => {
+    const { data, ops, b } = await queued()
+    await ops.steer(b.id)
+    transport.steerListener!(tab, b.id, 'returned')
+    await vi.waitFor(async () =>
+      expect((await ops.list(tab)).map((m) => m.steering ?? false)).toEqual([false, false])
+    )
+    transport.ready = true
+    await drainChatQueue(db, tab, data)
+    await drainChatQueue(db, tab, data)
+    expect(sentTexts()).toEqual(['a', 'b'])
+  })
+
+  test('refused by the agent: unmarked, and why', async () => {
+    const { ops, b } = await queued()
+    transport.steerResult = { ok: false, reason: 'no active turn to steer' }
+    expect(await ops.steer(b.id)).toEqual({ ok: false, reason: 'no active turn to steer' })
+    expect((await ops.list(tab)).every((m) => !m.steering)).toBe(true)
+  })
+
+  test('a held (edited) message cannot be steered; a steered one cannot be edited or moved', async () => {
+    const { ops, a, b } = await queued()
+    await ops.hold(a.id)
+    expect(await ops.steer(a.id)).toMatchObject({ ok: false })
+    expect(transport.steered).toEqual([])
+    await ops.steer(b.id)
+    expect(await ops.hold(b.id)).toBe(false)
+    expect(
+      await ops.update(b.id, { send: 'x', original: 'x', content: [{ type: 'text', text: 'x' }] })
+    ).toBe(false)
+    expect(await ops.move(b.id, 0)).toBe(false)
+    expect(await ops.steer(b.id)).toMatchObject({ ok: false })
+  })
+
+  test('removing a steered message withdraws it first; one the agent kept stays', async () => {
+    const { ops, a, b } = await queued()
+    await ops.steer(b.id)
+    transport.withdrawResult = false
+    expect(await ops.remove(b.id)).toBe(false)
+    expect((await ops.list(tab)).map((m) => m.id)).toEqual([a.id, b.id])
+
+    transport.withdrawResult = true
+    expect(await ops.remove(b.id)).toBe(true)
+    expect(transport.withdrawn).toEqual([b.id, b.id])
+    expect((await ops.list(tab)).map((m) => m.id)).toEqual([a.id])
+  })
+
+  test('clear withdraws steered messages too; one the agent kept is left listed', async () => {
+    const { ops, b } = await queued()
+    await ops.steer(b.id)
+    transport.withdrawResult = false
+    expect(await ops.clear(tab)).toBe(1)
+    expect((await ops.list(tab)).map((m) => m.id)).toEqual([b.id])
+  })
 })

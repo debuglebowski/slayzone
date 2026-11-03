@@ -1,4 +1,16 @@
-import { detectPlatform, isPrimaryModifier, type Platform } from '@slayzone/shortcuts'
+import {
+  detectPlatform,
+  isPrimaryModifier,
+  matchesElectronInput,
+  type Platform
+} from '@slayzone/shortcuts'
+
+/** Current Screenshot binding (user override or default) — set by main at boot. */
+let getScreenshotKeys: () => string | null = () => null
+
+export function setBrowserViewScreenshotKeysResolver(resolve: () => string | null): void {
+  getScreenshotKeys = resolve
+}
 
 /** Primary+key combos that always pass through to the webpage (clipboard, undo, scroll). */
 const BROWSER_DEFAULT_PASSTHROUGH = new Set([
@@ -11,7 +23,10 @@ const BROWSER_DEFAULT_PASSTHROUGH = new Set([
   'arrowdown' // scroll to top/bottom
 ])
 
-export type BrowserViewKeyInput = Pick<Electron.Input, 'key' | 'control' | 'meta' | 'shift' | 'alt'>
+export type BrowserViewKeyInput = Pick<
+  Electron.Input,
+  'type' | 'key' | 'control' | 'meta' | 'shift' | 'alt'
+>
 
 export type BrowserViewKeyAction =
   /** No Cmd/Ctrl held — the page gets the key untouched. */
@@ -42,7 +57,8 @@ export type BrowserViewKeyAction =
  */
 export function classifyBrowserViewKey(
   input: BrowserViewKeyInput,
-  platform: Platform = detectPlatform()
+  platform: Platform = detectPlatform(),
+  screenshotKeys: string | null = getScreenshotKeys()
 ): BrowserViewKeyAction {
   if (!(input.control || input.meta)) return { kind: 'ignore' }
 
@@ -57,7 +73,8 @@ export function classifyBrowserViewKey(
   }
   if (key === ',')
     return { kind: 'menu', event: input.shift ? 'open-project-settings' : 'open-settings' }
-  if (key === 's' && input.shift) return { kind: 'menu', event: 'screenshot-trigger' }
+  if (screenshotKeys && matchesElectronInput(input, screenshotKeys))
+    return { kind: 'menu', event: 'screenshot-trigger' }
   if (input.key === '§') return { kind: 'menu', event: 'go-home' }
   return { kind: 'forward' }
 }

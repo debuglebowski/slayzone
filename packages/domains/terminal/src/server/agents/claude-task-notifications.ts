@@ -22,7 +22,7 @@
  */
 import { open } from 'node:fs/promises'
 import type { AgentEvent, BackgroundNotificationEvent } from '@slayzone/terminal-contracts'
-import { claudeTranscriptPath } from '../claude-transcripts'
+import { claudeTranscriptPath, locateClaudeTranscript } from '../claude-transcripts'
 
 /** A turn's cause is in the file well within this; past it, stop looking. */
 const TURN_READ_LIMIT_MS = 15_000
@@ -87,6 +87,8 @@ export function parseTaskNotification(record: unknown): BackgroundNotificationEv
 
 export class ClaudeTaskNotifications {
   private path: string | null = null
+  /** The session the path is for — to find its file if it moved folders. */
+  private target: { cwd: string; sessionId: string } | null = null
   /** Byte offset of the next unread line of `path`. */
   private offset = 0
   /** An incomplete last line, completed by the next read. */
@@ -105,7 +107,12 @@ export class ClaudeTaskNotifications {
   /** A turn's `init`: read what the CLI appends until the turn's first output. */
   turnStarted(cwd: string, sessionId: string): void {
     if (this.disposed || !sessionId) return
-    const path = (this.io.pathOf ?? claudeTranscriptPath)(cwd, sessionId)
+    // Same session as last turn: keep the file found then (it may have been
+    // located under another project dir; a failed open re-locates it).
+    const same = this.target?.cwd === cwd && this.target.sessionId === sessionId
+    const path =
+      same && this.path ? this.path : (this.io.pathOf ?? claudeTranscriptPath)(cwd, sessionId)
+    this.target = { cwd, sessionId }
     if (path !== this.path) {
       this.path = path
       this.offset = -1 // set on the first read: the file's newest part
@@ -160,7 +167,22 @@ export class ClaudeTaskNotifications {
   private async readAppended(): Promise<void> {
     const path = this.path
     if (!path) return
-    const handle = await open(path, 'r')
+    let handle: Awaited<ReturnType<typeof open>>
+    try {
+      handle = await open(path, 'r')
+    } catch (err) {
+      // Not where the cwd says: a session that used EnterWorktree keeps its file
+      // only under the worktree's project dir. Follow it (default lookup only).
+      const target = this.target
+      if (this.io.pathOf || !target) throw err
+      const found = await locateClaudeTranscript(target.sessionId, target.cwd)
+      if (!found || found.path === path || this.path !== path || this.disposed) throw err
+      this.path = found.path
+      this.offset = -1
+      this.partial = ''
+      this.candidates = []
+      return this.readAppended()
+    }
     let chunk: string
     try {
       const { size } = await handle.stat()

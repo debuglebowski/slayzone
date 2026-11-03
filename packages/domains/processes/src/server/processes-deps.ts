@@ -29,11 +29,13 @@ export type ProcessesDeps = {
     >
   ) => boolean | Promise<boolean>
   stop: (processId: string) => boolean | Promise<boolean>
-  kill: (processId: string) => boolean | Promise<boolean>
+  /** Delete the row; its run's tree is terminated. */
+  remove: (processId: string) => boolean | Promise<boolean>
   restart: (processId: string) => boolean | Promise<boolean>
   listForTask: (taskId: string | null, projectId: string | null) => ProcessInfo[]
   listAll: () => ProcessInfo[]
-  killTask: (taskId: string) => void
+  /** `remove` every task-scoped row of `taskId`. */
+  removeForTask: (taskId: string) => void
   events: TypedEmitter<ProcessEventMap>
 }
 

@@ -84,7 +84,7 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     trpc.menu.onCloseTask.subscriptionOptions(undefined, {
       onData: (taskId) => {
         useTabStore.getState().closeTabByTaskId(taskId)
-        void trpcClient.processes.killTask.mutate({ taskId })
+        void trpcClient.processes.removeForTask.mutate({ taskId })
       }
     })
   )

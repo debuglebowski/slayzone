@@ -110,3 +110,43 @@ test('failed reconnect never migrates before recovery; next tick retries', async
   await maintenance.run('pc')
   expect(migrations).toBe(1)
 })
+
+function recordingMaintenance(forces: boolean[], gate?: Promise<void>) {
+  return createComputerChatMaintenance({
+    asOwner: async (_id, work) => work(),
+    projects: async () => {
+      await gate
+    },
+    recover: async (_id, force) => {
+      forces.push(force)
+    },
+    lifecycle: async () => {},
+    sessions: async () => {},
+    migrate: async () => {}
+  })
+}
+
+test('only a reconnect forces recovery; idle ticks reuse the recovered state', async () => {
+  // A forced recovery bumps the recovery generation, and every open chat
+  // reloads its whole history on a new generation — once a minute on idle ticks.
+  const forces: boolean[] = []
+  const maintenance = recordingMaintenance(forces)
+  await maintenance.run('pc', { reconnect: true })
+  await maintenance.run('pc')
+  await maintenance.run('pc')
+  expect(forces).toEqual([true, false, false])
+})
+
+test('a reconnect during a running tick still forces recovery after it', async () => {
+  const forces: boolean[] = []
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const maintenance = recordingMaintenance(forces, gate)
+  const tick = maintenance.run('pc')
+  const reconnect = maintenance.run('pc', { reconnect: true })
+  release()
+  await Promise.all([tick, reconnect])
+  expect(forces).toEqual([false, true])
+})

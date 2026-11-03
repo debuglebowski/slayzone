@@ -77,6 +77,19 @@ export interface ChatCapabilities {
    */
   sideQuestions: boolean
   /**
+   * A queued message can be added to the running turn ("Send now"):
+   * the agent takes it after its current tool call, in the same turn (Claude:
+   * written on stdin, `command_lifecycle started` marks the pickup — 2.1.317;
+   * Codex: `turn/steer`, its `userMessage` item marks it — 0.166.0). Until
+   * then it stays in the queue, shown as with the agent.
+   */
+  steerQueued: boolean
+  /**
+   * A message added to the running turn can be taken back until the agent picks
+   * it up (Claude: `cancel_async_message`). Codex has no way to withdraw it.
+   */
+  withdrawSteered: boolean
+  /**
    * The provider starts turns by itself (Claude Code answers a finished
    * background task or a hook with init, output and a result — no user
    * message): the chat reads as working through such a turn. Codex never
@@ -105,6 +118,8 @@ const NONE: ChatCapabilities = {
   commandPalette: false,
   compact: false,
   sideQuestions: false,
+  steerQueued: false,
+  withdrawSteered: false,
   agentStartedTurns: false
 }
 
@@ -129,6 +144,8 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     commandPalette: true,
     compact: true,
     sideQuestions: true,
+    steerQueued: true,
+    withdrawSteered: true,
     agentStartedTurns: true
   },
   'codex-chat': {
@@ -159,7 +176,9 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     // `/compact` → `thread/compact/start` (the driver).
     compact: true,
     // An ephemeral `thread/fork` + one turn on it, answered and dropped (the driver).
-    sideQuestions: true
+    sideQuestions: true,
+    // `turn/steer` into the running turn; no way to take it back.
+    steerQueued: true
   }
 }
 

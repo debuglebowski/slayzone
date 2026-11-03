@@ -57,6 +57,7 @@ import {
 import type { useChatSearch } from './useChatSearch'
 import type { CallbackRef } from './useFollowBottom'
 import { VirtualTimelineRows } from './VirtualTimelineRows'
+import { TurnTriggerRow } from './TurnTriggerRow'
 import type { VirtualTimelineController } from './virtual-timeline'
 
 const SUGGESTED_PROMPTS = [
@@ -194,6 +195,7 @@ export function ChatTimeline({
           <>
             {!turn.hostIsActivity && renderTimelineItem(item, index)}
             <div className={turnBlockClass(compactSpacing)} data-testid="chat-turn-progress">
+              {turn.trigger && <TurnTriggerRow item={turn.trigger} />}
               {showWorking && <TypingIndicator label={loadingLabel} />}
               <ActivityTurn turn={turn} appearance={activityAppearance} rowOf={rowOf} />
             </div>

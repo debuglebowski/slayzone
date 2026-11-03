@@ -11,7 +11,6 @@ import {
 import { CornerDownLeft } from 'lucide-react'
 import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
-import { PendingQueuedMessages } from './PendingQueuedMessages'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
 import { useSideQuestions } from './side-questions/useSideQuestions'
@@ -290,9 +289,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       handleModelChange,
       cliCommands,
       attachmentsUsedBytes: attachmentBytesOf(historyOfSession),
-      // "Send now" on a queued message: a live interrupt keeps the queue, which
+      // "Stop & send" on a queued message: a live interrupt keeps the queue, which
       // then drains that message next (`chat.interrupt` → stopTurn, no restore).
       ...(chatCapabilitiesForMode(mode).liveInterrupt ? { interruptTurn: interrupt } : {}),
+      // "Send now": a turn runs and no prompt waits for an answer.
+      steerAvailable:
+        inFlight && !(promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)),
       ...(chatCapabilitiesForMode(mode).sideQuestions ? { onSideQuestion: sideQuestions.ask } : {})
     })
 
@@ -963,47 +965,54 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           </button>
                         </div>
                       )}
-                      {composer.draftConflictAvailable && (
-                        <div
-                          role="status"
-                          className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs"
-                        >
-                          <p className="text-muted-foreground">
-                            Saved and local drafts differ. Keep both before saving.
-                          </p>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
-                            onClick={composer.recoverDraftConflict}
-                          >
-                            Keep both
-                          </button>
-                        </div>
-                      )}
-                      {composer.legacyDraftAvailable && (
-                        <div
-                          role="status"
-                          className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs"
-                        >
-                          <p className="text-muted-foreground">
-                            Older unsaved draft on this device. Recover adds it to this chat.
-                          </p>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
-                            onClick={composer.recoverLegacyDraft}
-                          >
-                            Recover draft
-                          </button>
-                        </div>
-                      )}
                       <ChatComposer
-                        pendingMessages={
-                          <PendingQueuedMessages
-                            items={composer.pendingQueuedMessages}
-                            onRetry={composer.retryQueuedSubmission}
-                            onDismiss={composer.dismissQueuedSubmission}
-                          />
+                        notices={
+                          <>
+                            {composer.draftConflictAvailable && (
+                              <div
+                                role="status"
+                                className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                              >
+                                <p className="text-muted-foreground">
+                                  Saved and local drafts differ. Keep both before saving.
+                                </p>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                    onClick={composer.recoverDraftConflict}
+                                  >
+                                    Keep both
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Keep only the current draft"
+                                    className="rounded-full px-3 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    onClick={composer.dismissDraftConflict}
+                                  >
+                                    Dismiss
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            {composer.legacyDraftAvailable && (
+                              <div
+                                role="status"
+                                className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                              >
+                                <p className="text-muted-foreground">
+                                  Older unsaved draft on this device. Recover adds it to this chat.
+                                </p>
+                                <button
+                                  type="button"
+                                  className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                  onClick={composer.recoverLegacyDraft}
+                                >
+                                  Recover draft
+                                </button>
+                              </div>
+                            )}
+                          </>
                         }
                         backgroundJobs={
                           backgroundJobs.length > 0 ? (

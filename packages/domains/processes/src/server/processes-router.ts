@@ -53,9 +53,9 @@ export const processesRouter = router({
   stop: publicProcedure
     .input(z.object({ processId: z.string() }))
     .mutation(({ input }) => getProcessesDeps().stop(input.processId)),
-  kill: publicProcedure
+  remove: publicProcedure
     .input(z.object({ processId: z.string() }))
-    .mutation(({ input }) => getProcessesDeps().kill(input.processId)),
+    .mutation(({ input }) => getProcessesDeps().remove(input.processId)),
   restart: publicProcedure
     .input(z.object({ processId: z.string() }))
     .mutation(({ input }) => getProcessesDeps().restart(input.processId)),
@@ -63,9 +63,9 @@ export const processesRouter = router({
     .input(z.object({ taskId: z.string().nullable(), projectId: z.string().nullable() }))
     .query(({ input }) => getProcessesDeps().listForTask(input.taskId, input.projectId)),
   listAll: publicProcedure.query(() => getProcessesDeps().listAll()),
-  killTask: publicProcedure
+  removeForTask: publicProcedure
     .input(z.object({ taskId: z.string() }))
-    .mutation(({ input }) => getProcessesDeps().killTask(input.taskId)),
+    .mutation(({ input }) => getProcessesDeps().removeForTask(input.taskId)),
 
   // Streaming events
   onLog: publicProcedure.subscription(() =>

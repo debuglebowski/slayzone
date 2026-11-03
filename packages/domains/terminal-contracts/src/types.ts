@@ -554,4 +554,10 @@ export interface QueuedChatMessage {
   createdAt: string
   /** Content blocks; absent on rows queued before they existed (content = `send`). */
   content?: UserContentBlock[]
+  /**
+   * Added to the running turn ("Send now") and not taken by the agent
+   * yet. Runtime state of the hub's queue, never stored: after a restart the
+   * row is an ordinary queued message again.
+   */
+  steering?: true
 }

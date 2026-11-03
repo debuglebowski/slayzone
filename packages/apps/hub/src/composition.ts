@@ -82,6 +82,7 @@ import {
   ptyEvents,
   createChatOps,
   setClaudeSessionReader,
+  setClaudeTranscriptLocator,
   createChatQueueOps,
   chatEvents,
   chatQueueEvents,
@@ -110,7 +111,7 @@ import {
   configurePtyHost,
   onTaskReachedTerminal,
   runtimeOnTaskReachedTerminal,
-  setOnTaskReachedTerminalHandler,
+  setTaskAgentsStopper,
   broadcastRespawnRequest,
   initWarmProcessManager,
   createDbWarmPoolDataOps,
@@ -167,9 +168,11 @@ import {
   spawnProcess,
   updateProcess,
   stopProcess,
-  killProcess,
+  removeProcess,
   restartProcess,
-  killTaskProcesses,
+  restartProcessDetailed,
+  startProcess,
+  removeTaskProcesses,
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
@@ -197,6 +200,7 @@ import { createComputerProjectSync } from './computer-project-sync'
 import {
   ghExecResultSchema,
   claudeSessionReadResultSchema,
+  claudeSessionLocateResultSchema,
   HubToComputerMethods,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
@@ -549,7 +553,7 @@ export function composeServer(opts: {
     getDataRoot: () => dataRoot,
     worktrees: defaultWorktreeExecAdapters,
     worktreePolicy: defaultWorktreePolicyAdapters,
-    killTaskProcesses,
+    removeTaskProcesses,
     killPtysByTaskId,
     recordDiagnosticEvent,
     // PTY lifecycle now lives in THIS process (slice 9), so the task-status
@@ -568,14 +572,14 @@ export function composeServer(opts: {
     }
   }
   configureTaskRuntimeAdapters(baseTaskAdapters)
-  // Wire the cross-domain "task reached terminal status" seam to the REAL
-  // teardown (kill PTYs + chat transports). PTYs/chats live in THIS process now,
-  // so both the task-ops adapter (onReachedTerminal, above) and server-pure
-  // callers (integrations sync/pull) must tear them down here — the Electron
-  // host's handler only sees its own (empty) session maps post-cutover.
-  setOnTaskReachedTerminalHandler((taskId) => {
+  // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
+  // + chat transports in THIS process, plus chats owned by a computer. Callers:
+  // status→terminal (task-ops onReachedTerminal above, integrations sync/pull)
+  // and pty.killTask (closing a scratch terminal's tab). The Electron host's
+  // handler only sees its own (empty) session maps post-cutover.
+  setTaskAgentsStopper(async (taskId) => {
     runtimeOnTaskReachedTerminal(taskId)
-    void computerChat.stopTask(taskId).catch(() => {
+    await computerChat.stopTask(taskId).catch(() => {
       /* Disconnected computers reconcile on reconnect. */
     })
   })
@@ -942,7 +946,8 @@ export function composeServer(opts: {
   })
   let resettingForTest = false
   const chatNotificationChains = new Map<string, Promise<void>>()
-  let maintainComputerChat = (computerId: string) => computerChat.lifecycle.sync(computerId)
+  let maintainComputerChat = (computerId: string, _opts?: { reconnect?: boolean }) =>
+    computerChat.lifecycle.sync(computerId)
   let syncComputerChatLifecycle = (computerId: string) => computerChat.lifecycle.sync(computerId)
   let drainComputerChatMaintenance = async () => {
     /* Gateway not initialized yet. */
@@ -1029,11 +1034,11 @@ export function composeServer(opts: {
     spawn: spawnProcess,
     update: updateProcess,
     stop: stopProcess,
-    kill: killProcess,
+    remove: removeProcess,
     restart: restartProcess,
     listForTask,
     listAll: listAllProcesses,
-    killTask: killTaskProcesses,
+    removeForTask: removeTaskProcesses,
     events: processEvents
   })
 
@@ -1573,7 +1578,10 @@ export function composeServer(opts: {
     terminalStateBridge,
     processes: {
       listAll: listAllProcesses,
-      kill: killProcess,
+      remove: removeProcess,
+      stop: stopProcess,
+      start: startProcess,
+      restart: restartProcessDetailed,
       subscribeToLogs: subscribeToProcessLogs
     }
   }
@@ -1729,7 +1737,7 @@ export function composeServer(opts: {
     const chatMaintenance = createComputerChatMaintenance({
       asOwner: asComputerOwner,
       projects: (id) => syncComputerProjects(id),
-      recover: (id) => computerChat.recoverComputer(id, true),
+      recover: (id, force) => computerChat.recoverComputer(id, force),
       lifecycle: computerChat.lifecycle.sync,
       sessions: computerChat.relay.refreshSessions,
       migrate: async (id) => {
@@ -1738,13 +1746,13 @@ export function composeServer(opts: {
         await legacyChatDiagnostics?.compact()
       }
     })
-    maintainComputerChat = (id) => chatMaintenance.run(id)
+    maintainComputerChat = (id, runOpts) => chatMaintenance.run(id, runOpts)
     syncComputerChatLifecycle = (id) => asComputerOwner(id, () => computerChat.lifecycle.sync(id))
     drainComputerChatMaintenance = () => chatMaintenance.drain()
     computerGateway.events.on('computer-connected', ({ computer }) => {
       computerChat.invalidateRecovery(computer.computerId)
       if (!resettingForTest)
-        void maintainComputerChat(computer.computerId).catch(() =>
+        void maintainComputerChat(computer.computerId, { reconnect: true }).catch(() =>
           console.error('[chat] computer reconciliation pending')
         )
       void reapOrphanWarms(computer.computerId)
@@ -1833,6 +1841,26 @@ export function composeServer(opts: {
         }
       )
       return claudeSessionReadResultSchema.parse(res)
+    })
+
+    // Where a Claude conversation's transcript is, and which folder to resume it
+    // from (a session that used EnterWorktree keeps it under the worktree's
+    // project dir). Asked of the computer the session runs on — its disk, not the
+    // hub's. A failure is "unknown" upstream, never "missing".
+    setClaudeTranscriptLocator(async (req) => {
+      const computerId = resolveExecComputer(req.computerId)
+      if (computerId == null) throw new Error('no computer for this session')
+      if (placement.gate) await placement.gate(computerId, { kind: 'task', id: req.taskId })
+      const res = await computerGateway.request(
+        computerId,
+        HubToComputerMethods.claudeSessionLocate,
+        {
+          ...(req.cwd ? { cwd: req.cwd } : {}),
+          ...(req.projectId ? { projectId: req.projectId } : {}),
+          sessionIds: req.sessionIds
+        }
+      )
+      return claudeSessionLocateResultSchema.parse(res).sessions
     })
 
     setSlayExecutor(

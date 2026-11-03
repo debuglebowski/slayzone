@@ -28,7 +28,8 @@ const mocks = vi.hoisted(() => {
       >(),
     move: vi.fn<(id: string, toIndex: number) => Promise<void>>(),
     hold: vi.fn<(id: string) => Promise<boolean>>(),
-    release: vi.fn<(id: string) => Promise<void>>()
+    release: vi.fn<(id: string) => Promise<void>>(),
+    steer: vi.fn<(id: string) => Promise<{ ok: true } | { ok: false; reason: string }>>()
   }
   return {
     toast: vi.fn(),
@@ -834,5 +835,28 @@ describe('useChatComposer queue edit + send-now seam', () => {
     await act(async () => composer.queueApi.onSendNow?.('q2'))
     expect(mocks.queue.move).toHaveBeenCalledWith('q2', 0)
     expect(interruptTurn).toHaveBeenCalled()
+  })
+
+  it('"Send now" only while the agent can take one (Claude / Codex), refusals toast why', async () => {
+    setup()
+    expect(composer.queueApi.onSteer).toBeUndefined()
+    expect(composer.queueApi.withdrawSteered).toBe(true)
+    cleanup()
+    setup({ mode: 'terminal', steerAvailable: true })
+    expect(composer.queueApi.onSteer).toBeUndefined()
+    cleanup()
+    mocks.queue.steer.mockResolvedValue({ ok: true })
+    setup({ steerAvailable: true })
+    await act(async () => composer.queueApi.onSteer?.('q2'))
+    expect(mocks.queue.steer).toHaveBeenCalledWith('q2')
+    expect(mocks.toast).not.toHaveBeenCalled()
+    mocks.queue.steer.mockResolvedValue({ ok: false, reason: 'no active turn to steer' })
+    await act(async () => composer.queueApi.onSteer?.('q2'))
+    expect(mocks.toast).toHaveBeenCalledWith('Could not send it now: no active turn to steer')
+    mocks.queue.steer.mockRejectedValue(new Error('Chat operation unavailable'))
+    await act(async () => composer.queueApi.onSteer?.('q2'))
+    expect(mocks.toast).toHaveBeenLastCalledWith(
+      'Could not send it now: Chat operation unavailable'
+    )
   })
 })

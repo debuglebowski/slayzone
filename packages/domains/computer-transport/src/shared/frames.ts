@@ -336,6 +336,13 @@ export const ptyDetectionParamsSchema = z.object({
   resuming: z.boolean(),
   /** The conversation being resumed (stale-resume disk check at exit). */
   resumeConversationId: z.string().min(1).optional(),
+  /**
+   * What the hub's spawn-time lookup (in ANY project dir — a session can move into a
+   * worktree's) found for that transcript; the exit check uses it instead of looking
+   * only beside the cwd. `unknown`: it could not tell (defer to the output scan).
+   * Absent: not looked up — check this disk beside the cwd, as before.
+   */
+  resumeTranscript: z.enum(['found', 'missing', 'unknown']).optional(),
   /** Absent: xterm defaults until `pty.setTheme`. */
   theme: ptyThemeSchema.optional()
 })
@@ -562,7 +569,12 @@ export const HubToComputerMethods = {
    * resumed or handed-over conversation's history for the chat timeline). Only
    * that file: the path is built from the cwd and a uuid, nothing else.
    */
-  claudeSessionRead: 'claudeSession.read'
+  claudeSessionRead: 'claudeSession.read',
+  /**
+   * Where Claude Code session files are on the computer, wherever the session's
+   * folder moved to (EnterWorktree), and which folder to resume each one from.
+   */
+  claudeSessionLocate: 'claudeSession.locate'
 } as const
 
 /** Reserved method namespaces for future hub → computer exec commands. */
@@ -1188,6 +1200,33 @@ export const claudeSessionReadResultSchema = z.object({
   omitted: z.number().int().nonnegative()
 })
 export type ClaudeSessionReadResult = z.infer<typeof claudeSessionReadResultSchema>
+
+/**
+ * `claudeSession.locate`: for each session id, is its session file on this
+ * computer (in any project dir — a session that used EnterWorktree keeps its file
+ * under the worktree's), and which folder `claude --resume` should start in. The
+ * hint folder resolves as a spawn's does (`cwd`, else the project's checkout);
+ * neither is fine — ids are still found.
+ */
+export const claudeSessionLocateParamsSchema = z.object({
+  cwd: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  sessionIds: z.array(z.string().min(1)).min(1).max(500)
+})
+export type ClaudeSessionLocateParams = z.infer<typeof claudeSessionLocateParamsSchema>
+
+export const claudeSessionLocateResultSchema = z.object({
+  /** One per requested id, in request order. */
+  sessions: z.array(
+    z.object({
+      sessionId: z.string(),
+      found: z.boolean(),
+      /** A different folder to resume from (inside the jail), or null = the hint folder. */
+      resumeCwd: z.string().nullable()
+    })
+  )
+})
+export type ClaudeSessionLocateResult = z.infer<typeof claudeSessionLocateResultSchema>
 
 export const computerShutdownParamsSchema = z.object({
   reason: z.string().optional(),

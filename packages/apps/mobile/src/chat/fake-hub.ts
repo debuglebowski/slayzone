@@ -98,6 +98,7 @@ export function fakeHub(opts: {
     'chat.queue.list': () => [],
     'chat.queue.push': () => null,
     'chat.queue.remove': () => null,
+    'chat.queue.steer': () => ({ ok: true }),
     'chat.queue.clear': () => null,
     'chat.stopCommandTask': () => true,
     'chat.commandTaskOutput': () => ({ state: 'gone' })

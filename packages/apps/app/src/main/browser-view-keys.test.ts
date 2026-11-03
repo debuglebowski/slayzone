@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { classifyBrowserViewKey } from './browser-view-keys'
 
+const SCREENSHOT = 'mod+shift+y'
+
 const key = (
   k: string,
   mods: { meta?: boolean; control?: boolean; shift?: boolean; alt?: boolean } = {}
 ) => ({
+  type: 'keyDown',
   key: k,
   meta: false,
   control: false,
@@ -42,10 +45,9 @@ describe('classifyBrowserViewKey — macOS (primary = Cmd)', () => {
       kind: 'menu',
       event: 'open-project-settings'
     })
-    expect(classifyBrowserViewKey(key('s', { meta: true, shift: true }), 'mac')).toEqual({
-      kind: 'menu',
-      event: 'screenshot-trigger'
-    })
+    expect(
+      classifyBrowserViewKey(key('y', { meta: true, shift: true }), 'mac', SCREENSHOT)
+    ).toEqual({ kind: 'menu', event: 'screenshot-trigger' })
     expect(classifyBrowserViewKey(key('§', { meta: true }), 'mac')).toEqual({
       kind: 'menu',
       event: 'go-home'
@@ -60,6 +62,23 @@ describe('classifyBrowserViewKey — macOS (primary = Cmd)', () => {
     })
     expect(classifyBrowserViewKey(key('b', { meta: true }), 'mac')).toEqual({ kind: 'forward' })
     expect(classifyBrowserViewKey(key('c', { meta: true, alt: true }), 'mac')).toEqual({
+      kind: 'forward'
+    })
+  })
+})
+
+describe('classifyBrowserViewKey — screenshot binding', () => {
+  it('follows the resolved binding, not a hardcoded key', () => {
+    expect(
+      classifyBrowserViewKey(key('s', { meta: true, shift: true }), 'mac', SCREENSHOT)
+    ).toEqual({ kind: 'forward' })
+    expect(classifyBrowserViewKey(key('k', { meta: true, alt: true }), 'mac', 'mod+alt+k')).toEqual(
+      { kind: 'menu', event: 'screenshot-trigger' }
+    )
+  })
+
+  it('unbound screenshot forwards', () => {
+    expect(classifyBrowserViewKey(key('y', { meta: true, shift: true }), 'mac', null)).toEqual({
       kind: 'forward'
     })
   })

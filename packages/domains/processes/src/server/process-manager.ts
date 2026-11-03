@@ -65,6 +65,15 @@ interface ManagedProcess extends ProcessInfo {
   computerId: string | null
   titlePollTimer: ReturnType<typeof setInterval> | null
   oscTitleSet: boolean
+  /** Bumped by every lifecycle op (start/stop/restart). An async step that
+   *  resumes after an await (a spawn waiting on the cwd resolver, a stop's
+   *  final status write, an auto-restart timer, the boot liveness probe) acts
+   *  only if no newer op has superseded it. */
+  generation: number
+  /** The in-flight termination of the previous run's tree, if a stop/restart
+   *  is still sweeping it. A start awaits it, so the new run never races the
+   *  old one onto the same port. Resolves true when nothing of it is left. */
+  termination: Promise<boolean> | null
 }
 
 const LOG_BUFFER_MAX = 500
@@ -151,13 +160,17 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       spawnedAt: null,
       processTitle: null,
       titlePollTimer: null,
-      oscTitleSet: false
+      oscTitleSet: false,
+      generation: 0,
+      termination: null
     })
   }
   // Fire-and-forget, off the boot critical path — an orphan left by a row
   // that's never manually restarted again this session would otherwise stay
   // unreachable even across a full app restart (see reapKnownHistory).
   void sweepAllHistoryOnBoot()
+  // Same: a row whose previous run is still alive must not read 'stopped'.
+  void probeHydratedLiveness()
 }
 
 function pushLog(proc: ManagedProcess, line: string): void {
@@ -295,9 +308,19 @@ function failSpawn(proc: ManagedProcess, err: unknown): void {
   setStatus(proc, 'error')
 }
 
-/** For timers (restart, auto-restart): a spawn that fails becomes the process's status. */
-function spawnOrFail(proc: ManagedProcess): void {
-  void doSpawn(proc).catch((err: unknown) => failSpawn(proc, err))
+/**
+ * For timers (auto-restart): a spawn that fails becomes the process's status — unless
+ * a stop/restart superseded it meanwhile (that one owns the status now).
+ */
+function spawnOrFail(proc: ManagedProcess, generation: number): void {
+  void doSpawn(proc, generation).catch((err: unknown) => {
+    if (proc.generation === generation) failSpawn(proc, err)
+  })
+}
+
+/** Nothing can run it now (no computer connected / bound): a refusal, not a crash. */
+function isNoComputer(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === 'NO_COMPUTER_CONNECTED'
 }
 
 export class NoProcessComputerError extends Error {
@@ -308,7 +331,7 @@ export class NoProcessComputerError extends Error {
   }
 }
 
-async function doSpawn(proc: ManagedProcess): Promise<void> {
+async function doSpawn(proc: ManagedProcess, generation = proc.generation): Promise<void> {
   if (isShuttingDown) return
   const computerId = processComputerResolver
     ? await processComputerResolver({ taskId: proc.taskId, projectId: proc.projectId })
@@ -338,6 +361,8 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
       })
     }
   }
+  // A stop/restart issued while this spawn awaited the resolver supersedes it.
+  if (proc.generation !== generation || !processes.has(proc.id)) return
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling(routed)
   // Spawn via the pluggable backend: the local one keeps the exact
@@ -370,6 +395,7 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
 
   handle.onExit(async ({ code, signal }) => {
     if (proc.handle !== handle) return // stale exit from restarted process
+    const exitGeneration = proc.generation
     stopTitlePolling(proc)
     // Routed: `proc.pid` is null, so no local group sweep runs; the computer
     // reaps its own process group.
@@ -382,7 +408,7 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
     proc.oscTitleSet = false
     win?.webContents.send('processes:title', proc.id, null)
     processEvents.emit('title', proc.id, null)
-    // Always an *unplanned* exit here — stopProcess/killProcess/restartProcess
+    // Always an *unplanned* exit here — stopProcess/removeProcess/restartProcess
     // null proc.handle before calling handle.kill(), so a manager-initiated
     // exit never reaches this guard. See reapSurvivorsAfterUnplannedExit's
     // doc comment for why a leader exiting alone can still leave orphans.
@@ -394,15 +420,20 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
     // The sweep above can take up to ~2s (poll + SIGKILL escalation). A
     // manager-initiated restart/kill may have already moved this record on
     // in the meantime — don't clobber whatever it did.
-    if (!processes.has(proc.id) || proc.handle !== null) return
+    if (!processes.has(proc.id) || proc.handle !== null || proc.generation !== exitGeneration) {
+      return
+    }
 
     if (proc.autoRestart) {
       proc.restartCount++
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
       setStatus(proc, 'running')
+      // A stop within that second bumps the generation: the respawn is then dropped
+      // instead of resurrecting a process the user just stopped.
+      const generation = proc.generation
       setTimeout(() => {
         if (isShuttingDown) return
-        if (processes.has(proc.id)) spawnOrFail(proc)
+        if (processes.has(proc.id) && proc.generation === generation) spawnOrFail(proc, generation)
       }, 1000)
     } else if (groupEmpty) {
       pushLog(proc, `[exited with code ${code ?? '?'}]`)
@@ -457,36 +488,114 @@ function groupHasLiveMembers(pid: number): boolean {
   }
 }
 
+/** Signal 0: true while `pid` exists (EPERM = exists, owned by someone else). */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+function signalPids(pids: readonly number[], sig: NodeJS.Signals): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, sig)
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 /**
- * Sends `SIGTERM` to the process group led by `pid`, polls for it to
- * actually empty out, escalates once to `SIGKILL` if it doesn't, and reports
- * whether the group ended up empty. Shared by both reap paths in this file
- * so neither can declare victory on a single unverified signal — that was
- * the root of the bug this fixes: a lone `SIGTERM` used to be fired and
- * forgotten, so a descendant that outlived it (or was never reachable
- * because the leader itself was already dead) was silently left running,
- * orphaned to PID 1, while the process record was reported as a clean exit.
+ * Live descendants of `rootPid` (one `ps` snapshot, walked by parent link) that
+ * left its process group — a tool that `setsid()`s or `setpgid()`s its workers.
+ * The group signal never reaches them, and once their parent dies they reparent
+ * to pid 1, where no parent walk finds them again: so this is taken while the
+ * root is still alive, BEFORE the first signal. Group members are excluded —
+ * the group signal and `groupHasLiveMembers` already cover them. POSIX only.
+ *
+ * Only for a root that is this process's own direct child (what the local
+ * backend's `spawn` makes it): any other root — a remote backend's pid, or a pid
+ * reused by an unrelated process — yields nothing, so an unrelated tree is never
+ * signalled by pid.
+ */
+async function escapedDescendants(rootPid: number): Promise<number[]> {
+  if (process.platform === 'win32') return []
+  const out = await new Promise<string>((resolve) => {
+    execFile(
+      'ps',
+      ['-A', '-o', 'pid=,ppid=,pgid='],
+      { timeout: 2000, maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout) => resolve(err ? '' : stdout)
+    )
+  })
+  const children = new Map<number, Array<{ pid: number; pgid: number }>>()
+  let rootIsOurChild = false
+  for (const line of out.split('\n')) {
+    const [pid, ppid, pgid] = line.trim().split(/\s+/).map(Number)
+    if (!pid || !Number.isFinite(ppid) || !Number.isFinite(pgid)) continue
+    if (pid === rootPid) rootIsOurChild = ppid === process.pid
+    const list = children.get(ppid) ?? []
+    list.push({ pid, pgid })
+    children.set(ppid, list)
+  }
+  if (!rootIsOurChild) return []
+  const escaped: number[] = []
+  const queue = [rootPid]
+  const seen = new Set(queue)
+  while (queue.length > 0) {
+    for (const child of children.get(queue.shift()!) ?? []) {
+      if (seen.has(child.pid)) continue
+      seen.add(child.pid)
+      if (child.pgid !== rootPid) escaped.push(child.pid)
+      queue.push(child.pid)
+    }
+  }
+  return escaped
+}
+
+/**
+ * Terminates the whole tree of a run: `signal` reaches the POSIX process group
+ * led by `leaderPid` (every tracked leader is spawned `detached: true`, i.e.
+ * `setsid()` — see `process-backend.ts` — so its pid is the group id), and each
+ * `escaped` descendant is signalled by pid. `SIGTERM`, poll until nothing is
+ * left, escalate once to `SIGKILL`, and report whether nothing is left — never
+ * victory on a single unverified signal: a lone fire-and-forget `SIGTERM` let a
+ * descendant that outlived it (or ignored it) keep running, reparented to pid 1,
+ * while its record read as a clean exit or 'stopped'.
  *
  * On win32 there's no liveness primitive to poll (mirrors `getCommandLine`'s
  * `null` return there) — `killPidTree` already force-kills unconditionally
  * (`taskkill /T /F`), so this just fires it and trusts the same level the
  * rest of this file already does on that platform.
  */
-async function reapGroup(pid: number, backend: ProcessBackend): Promise<boolean> {
-  if (process.platform === 'win32') {
-    backend.killByPid(pid, 'SIGTERM')
-    return true
-  }
-  backend.killByPid(pid, 'SIGTERM')
+async function terminateTree(
+  leaderPid: number,
+  signal: (sig: NodeJS.Signals) => void,
+  escaped: readonly number[] = []
+): Promise<boolean> {
+  signal('SIGTERM')
+  if (process.platform === 'win32') return true
+  signalPids(escaped, 'SIGTERM')
+  const alive = (): boolean => groupHasLiveMembers(leaderPid) || escaped.some(pidAlive)
   const deadline = Date.now() + REAP_POLL_TIMEOUT_MS
-  while (Date.now() < deadline && groupHasLiveMembers(pid)) {
+  while (Date.now() < deadline && alive()) {
     await sleep(REAP_POLL_INTERVAL_MS)
   }
-  if (groupHasLiveMembers(pid)) {
-    backend.killByPid(pid, 'SIGKILL')
+  if (alive()) {
+    signal('SIGKILL')
+    signalPids(escaped, 'SIGKILL')
     await sleep(REAP_POLL_INTERVAL_MS)
   }
-  return !groupHasLiveMembers(pid)
+  return !alive()
+}
+
+/** `terminateTree` for a run with no live handle (its leader already gone, or
+ *  left by a previous app session): the group is signalled through the backend. */
+function reapGroup(pid: number, backend: ProcessBackend): Promise<boolean> {
+  return terminateTree(pid, (sig) => backend.killByPid(pid, sig))
 }
 
 /**
@@ -501,42 +610,53 @@ async function reapGroup(pid: number, backend: ProcessBackend): Promise<boolean>
  * since we last saw it) is deliberately left alone — killing an unverified
  * process is worse than leaving a stale one for a new spawn to collide with.
  *
- * Always returns true: every branch (reaped, confirmed already-dead, or
- * confirmed no longer ours) is safe for the caller to stop tracking.
+ * Every branch (reaped, confirmed already-dead, or confirmed no longer ours)
+ * is safe for the caller to stop tracking. Returns whether nothing of ours is
+ * left alive — false only when a verified leftover survived the full sweep.
  */
 async function reapCandidatePid(
   proc: ManagedProcess,
   candidatePid: number,
   backend: ProcessBackend
 ): Promise<boolean> {
-  const liveCommand = await backend.getCommandLine(candidatePid)
-
-  if (!liveCommand) {
-    // The leader pid itself is gone. A collision between a fresh
-    // `detached: true` group id and an unrelated pre-existing group at that
-    // exact pid, right after our own prior spawn, isn't a realistic risk —
-    // so a still-populated group here is trusted as our own orphaned leftover.
-    if (groupHasLiveMembers(candidatePid)) {
+  const verdict = await classifyCandidatePid(proc, candidatePid, backend)
+  if (verdict === 'dead' || verdict === 'not-ours') {
+    if (verdict === 'not-ours') {
       pushLog(
         proc,
-        `[leader pid ${candidatePid} from a previous run is gone, but a spawned process from its group is still alive — sweeping it]`
+        `[pid ${candidatePid} from a previous run no longer matches this command — leaving it running]`
       )
-      await reapGroup(candidatePid, backend)
     }
     return true
   }
+  pushLog(
+    proc,
+    verdict === 'group-only'
+      ? `[leader pid ${candidatePid} from a previous run is gone, but a spawned process from its group is still alive — sweeping it]`
+      : `[reaping leftover process from a previous run: pid ${candidatePid}]`
+  )
+  return reapGroup(candidatePid, backend)
+}
 
-  if (!commandsLikelyMatch(proc.command, liveCommand)) {
-    pushLog(
-      proc,
-      `[pid ${candidatePid} from a previous run no longer matches this command — leaving it running]`
-    )
-    return true
-  }
-
-  pushLog(proc, `[reaping leftover process from a previous run: pid ${candidatePid}]`)
-  await reapGroup(candidatePid, backend)
-  return true
+/**
+ * What is left of a run whose leader was `candidatePid`, verified before
+ * anything acts on it:
+ * - `'leader'`: the leader itself is alive and still runs this command.
+ * - `'group-only'`: the leader is gone but its process group is still populated
+ *   (a descendant outlived it). A collision between a fresh `detached: true`
+ *   group id and an unrelated pre-existing group at that exact pid, right after
+ *   our own prior spawn, isn't a realistic risk — so it is trusted as ours.
+ * - `'not-ours'`: the pid is alive but runs something else (reused).
+ * - `'dead'`: nothing left.
+ */
+async function classifyCandidatePid(
+  proc: ManagedProcess,
+  candidatePid: number,
+  backend: ProcessBackend
+): Promise<'leader' | 'group-only' | 'not-ours' | 'dead'> {
+  const liveCommand = await backend.getCommandLine(candidatePid)
+  if (!liveCommand) return groupHasLiveMembers(candidatePid) ? 'group-only' : 'dead'
+  return commandsLikelyMatch(proc.command, liveCommand) ? 'leader' : 'not-ours'
 }
 
 /**
@@ -545,12 +665,13 @@ async function reapCandidatePid(
  * so nothing sent it a kill signal and nothing cleared the persisted pid),
  * verify and reap it before the caller spawns a fresh one against the same port.
  */
-async function reapStaleIfNeeded(proc: ManagedProcess): Promise<void> {
+async function reapStaleIfNeeded(proc: ManagedProcess): Promise<boolean> {
   const stalePid = proc.pid
-  if (proc.handle || stalePid == null) return
-  await reapCandidatePid(proc, stalePid, getProcessBackend())
+  if (proc.handle || stalePid == null) return true
+  const clean = await reapCandidatePid(proc, stalePid, getProcessBackend())
   proc.pid = null
   void persistence?.updatePid(proc.id, null)
+  return clean
 }
 
 /**
@@ -559,8 +680,7 @@ async function reapStaleIfNeeded(proc: ManagedProcess): Promise<void> {
  * attempt that was superseded before it was ever reaped, whose pid was
  * clobbered out of the single `processes.pid` column by a later restart and
  * so became permanently unreachable to `reapStaleIfNeeded` alone. Every
- * visited entry is pruned regardless of outcome — `reapCandidatePid`'s only
- * return value means "safe to forget."
+ * visited entry is pruned unless a verified leftover survived the sweep.
  */
 async function reapKnownHistory(proc: ManagedProcess): Promise<void> {
   if (!persistence) return
@@ -568,8 +688,10 @@ async function reapKnownHistory(proc: ManagedProcess): Promise<void> {
   const history = await persistence.listPidHistory(proc.id)
   for (const entry of history) {
     if (entry.pid === proc.pid) continue
-    await reapCandidatePid(proc, entry.pid, backend)
-    void persistence.removePidHistory(proc.id, entry.pid)
+    // A leftover that survived even SIGKILL stays in history, reachable next time.
+    if (await reapCandidatePid(proc, entry.pid, backend)) {
+      void persistence.removePidHistory(proc.id, entry.pid)
+    }
   }
 }
 
@@ -578,6 +700,35 @@ async function reapKnownHistory(proc: ManagedProcess): Promise<void> {
  *  (restarting the whole app alone wasn't enough to recover it before this). */
 async function sweepAllHistoryOnBoot(): Promise<void> {
   await Promise.allSettled(Array.from(processes.values()).map((p) => reapKnownHistory(p)))
+}
+
+/**
+ * A row hydrated with a pid whose run outlived the previous app session (the
+ * hub/sidecar exited without stopping it — every run is `detached`, so it
+ * survives its parent) is still running, not 'stopped'. Before this probe every
+ * hydrated row read 'stopped', so such a run kept serving its port untracked
+ * and invisible for as long as nobody pressed Start. Marked 'orphaned' (pid
+ * kept): Stop / Restart / Start then take the tree down through
+ * `reapStaleIfNeeded`. Read-only — it never signals anything.
+ */
+async function probeHydratedLiveness(): Promise<void> {
+  const backend = getProcessBackend()
+  await Promise.allSettled(
+    Array.from(processes.values()).map(async (proc) => {
+      const pid = proc.pid
+      if (pid == null || proc.handle || proc.status !== 'stopped') return
+      const generation = proc.generation
+      const verdict = await classifyCandidatePid(proc, pid, backend)
+      if (verdict !== 'leader' && verdict !== 'group-only') return
+      // A start/stop since boot owns the row now.
+      if (proc.generation !== generation || proc.handle || proc.pid !== pid) return
+      pushLog(
+        proc,
+        `[still running from a previous session (pid ${pid}) — not attached to this app; stop or restart to take it over]`
+      )
+      setStatus(proc, 'orphaned')
+    })
+  )
 }
 
 /** A process row the manager has not registered yet: created, not running. */
@@ -600,7 +751,9 @@ function newManagedProcess(
     spawnedAt: null,
     processTitle: null,
     titlePollTimer: null,
-    oscTitleSet: false
+    oscTitleSet: false,
+    generation: 0,
+    termination: null
   }
 }
 
@@ -688,74 +841,177 @@ export async function updateProcess(
   return true
 }
 
-export function stopProcess(id: string): boolean {
-  const proc = processes.get(id)
-  if (!proc) return false
+/**
+ * Detach `proc` from its current run and terminate that run's whole tree
+ * (`terminateTree`): the synchronous part — handle and pid nulled, generation
+ * bumped — happens before the first await, so the old handle's `onExit` sees
+ * `proc.handle !== handle` and never treats this as an unplanned exit (no
+ * auto-restart, no second sweep). The returned promise (also parked on
+ * `proc.termination` for a following start to await) resolves to whether
+ * nothing of the run is left, plus the pid that identified it.
+ *
+ * Without a live handle the row may still carry a pid: an 'orphaned' run, or a
+ * run left by a previous app session. That pid is verified first
+ * (`reapCandidatePid`) — a pid since reused by something else is never killed.
+ */
+function detachAndTerminate(proc: ManagedProcess): {
+  generation: number
+  pid: number | null
+  done: Promise<boolean>
+} {
+  const generation = ++proc.generation
   stopTitlePolling(proc)
-  // Set handle to null before kill so the exit handler's `proc.handle !== handle`
-  // guard bails out (prevents auto-restart from firing)
   const handle = proc.handle
-  const orphanedPid = handle ? null : proc.pid // e.g. an 'orphaned' row's dead leader pid
+  const pid = handle?.pid ?? proc.pid
   proc.handle = null
   proc.pid = null
-  void persistence?.updatePid(proc.id, null)
   proc.spawnedAt = null
-  if (handle) handle.kill()
-  // Best-effort only (fire-and-forget, matching handle.kill() above) — no
-  // live handle means no poll/escalate loop to wait on here.
-  else if (orphanedPid != null) getProcessBackend().killByPid(orphanedPid, 'SIGTERM')
-  setStatus(proc, 'stopped')
+  void persistence?.updatePid(proc.id, null)
+  const previous = proc.termination
+  const done = (async (): Promise<boolean> => {
+    if (handle && pid != null) {
+      // Snapshot BEFORE the first signal: a descendant outside the group is only
+      // findable through its parent, which the signal is about to kill.
+      const escaped = await escapedDescendants(pid)
+      return terminateTree(pid, (sig) => handle.kill(sig), escaped)
+    }
+    if (handle) {
+      handle.kill()
+      return true
+    }
+    // A sweep still in flight from an earlier stop already owns that run.
+    if (previous) return previous
+    if (pid == null) return true
+    return reapCandidatePid(proc, pid, getProcessBackend())
+  })()
+  proc.termination = done
+  void done.finally(() => {
+    if (proc.termination === done) proc.termination = null
+  })
+  return { generation, pid, done }
+}
+
+/** Status after a stop's sweep: 'stopped', or 'orphaned' (pid kept, so the next
+ *  stop/start finds the survivor) when part of the tree outlived SIGKILL. */
+function settleStopped(proc: ManagedProcess, pid: number | null, clean: boolean): void {
+  if (clean || pid == null) {
+    setStatus(proc, 'stopped')
+    return
+  }
+  proc.pid = pid
+  void persistence?.updatePid(proc.id, pid)
+  pushLog(proc, `[stop: part of the process tree (pid ${pid}) survived SIGKILL — marked orphaned]`)
+  setStatus(proc, 'orphaned')
+}
+
+/**
+ * Stop the run, keep the row. Resolves once the whole tree is gone (or found to
+ * have survived SIGKILL → 'orphaned'), not when the first signal is sent.
+ */
+export async function stopProcess(id: string): Promise<boolean> {
+  const proc = processes.get(id)
+  if (!proc) return false
+  const { generation, pid, done } = detachAndTerminate(proc)
+  const clean = await done
+  // A start issued meanwhile owns the row now.
+  if (proc.generation === generation && processes.has(id)) settleStopped(proc, pid, clean)
   return true
 }
 
-export function killProcess(id: string): boolean {
+/** Delete the row; its run is terminated in the background (whole tree, with
+ *  escalation). Synchronous so the row is gone before the caller continues. */
+export function removeProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
-  stopTitlePolling(proc)
   proc.autoRestart = false
-  if (proc.handle) {
-    proc.handle.kill()
-  } else if (proc.pid != null) {
-    // e.g. deleting an 'orphaned' row — best-effort sweep of its dead
-    // leader's process group rather than abandoning it untracked.
-    getProcessBackend().killByPid(proc.pid, 'SIGTERM')
-  }
-  proc.handle = null
+  void detachAndTerminate(proc).done
   processes.delete(id)
   void persistence?.remove(id)
   return true
 }
 
-export async function restartProcess(id: string): Promise<boolean> {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'restart', detail: { processId: id } })
-  if (isShuttingDown) return false
-  const proc = processes.get(id)
-  if (!proc) return false
-  stopTitlePolling(proc)
-  // Captured before proc.handle is nulled below: non-null here means this row
-  // was actually spawned and is being tracked live in THIS app instance — a
-  // normal restart, whose exit handler will clear pid/persistence on its own
-  // once handle.kill() (below) takes effect. Null means this row was reloaded
-  // from persistence and never spawned this session — the crash-recovery case,
-  // where proc.pid (if set) is a leftover from an uncontrolled previous exit.
-  const hadLiveHandle = proc.handle != null
-  if (proc.handle) proc.handle.kill()
-  proc.handle = null
-  proc.logBuffer.push('[restarting...]')
-  setStatus(proc, 'running')
-  if (!hadLiveHandle) await reapStaleIfNeeded(proc)
-  // Unconditional (not gated by hadLiveHandle): even a normal live restart
-  // can have older, already-superseded history from earlier this session
-  // that reapStaleIfNeeded — keyed only to the current pid — never sees.
+/** Why a start did not happen. */
+export type StartProcessRefusal = 'not-found' | 'already-running' | 'shutting-down' | 'no-computer'
+export type StartProcessResult =
+  | { ok: true; pid: number | null; status: ProcessStatus }
+  | { ok: false; reason: StartProcessRefusal }
+
+/**
+ * Bring a row's previous run fully down — an in-flight stop's sweep, a leftover
+ * from a previous session (`reapStaleIfNeeded`), superseded generations
+ * (`reapKnownHistory`) — then spawn with the row's stored command/cwd. Shared
+ * by start and restart, after each has detached what it needs to.
+ */
+async function respawn(proc: ManagedProcess, generation: number): Promise<StartProcessResult> {
+  if (proc.termination) await proc.termination
+  await reapStaleIfNeeded(proc)
   await reapKnownHistory(proc)
-  setTimeout(() => spawnOrFail(proc), 500)
-  return true
+  if (proc.generation === generation) {
+    try {
+      await doSpawn(proc, generation)
+    } catch (err) {
+      // Shown on the process either way; no computer is a refusal the caller reports.
+      if (proc.generation === generation) failSpawn(proc, err)
+      if (isNoComputer(err)) return { ok: false, reason: 'no-computer' }
+      throw err
+    }
+  }
+  return { ok: true, pid: proc.pid, status: proc.status }
+}
+
+/**
+ * Start a row that is not running, with its stored command/cwd. A running row
+ * is refused (`already-running`) rather than restarted — restart is explicit.
+ * An 'orphaned' row (a survivor of an earlier run, or a run left by a previous
+ * session) is not "running" in this sense: its leftover tree is reaped first.
+ */
+export async function startProcess(id: string): Promise<StartProcessResult> {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'start', detail: { processId: id } })
+  if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
+  const proc = processes.get(id)
+  if (!proc) return { ok: false, reason: 'not-found' }
+  if (proc.handle || (proc.status === 'running' && !proc.termination)) {
+    return { ok: false, reason: 'already-running' }
+  }
+  const generation = ++proc.generation
+  stopTitlePolling(proc)
+  pushLog(proc, '[starting...]')
+  setStatus(proc, 'running')
+  return respawn(proc, generation)
+}
+
+/**
+ * Stop whatever runs (whole tree, awaited — the new run never collides with the
+ * old one's port) and start again under the same id. Resolves after the new run
+ * is spawned, so the caller can read its pid.
+ */
+export async function restartProcessDetailed(id: string): Promise<StartProcessResult> {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'restart', detail: { processId: id } })
+  if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
+  const proc = processes.get(id)
+  if (!proc) return { ok: false, reason: 'not-found' }
+  // A live run is taken down here; a row without one keeps its pid for
+  // reapStaleIfNeeded (respawn), which verifies it before signalling.
+  let generation: number
+  if (proc.handle) {
+    generation = detachAndTerminate(proc).generation
+  } else {
+    generation = ++proc.generation
+    stopTitlePolling(proc)
+  }
+  pushLog(proc, '[restarting...]')
+  setStatus(proc, 'running')
+  return respawn(proc, generation)
+}
+
+export async function restartProcess(id: string): Promise<boolean> {
+  return (await restartProcessDetailed(id)).ok
 }
 
 /** Kill all processes belonging to a specific task. Project-scoped processes are unaffected. */
-export function killTaskProcesses(taskId: string): void {
+export function removeTaskProcesses(taskId: string): void {
   for (const [id, proc] of processes.entries()) {
-    if (proc.taskId === taskId) killProcess(id)
+    if (proc.taskId === taskId) removeProcess(id)
   }
 }
 

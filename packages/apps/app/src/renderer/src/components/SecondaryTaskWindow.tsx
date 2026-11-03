@@ -9,6 +9,7 @@ const TaskDetailPage = lazy(() =>
   import('@slayzone/task/client/TaskDetailPage').then((m) => ({ default: m.TaskDetailPage }))
 )
 import { fetchTaskDetail, type TaskDetailData } from '@slayzone/task/client/taskDetailCache'
+import { useTaskScopedQueriesFreshOnTasksChanged } from '@slayzone/task/client/taskScopedQueries'
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from '@slayzone/ui'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { UsagePopover } from '@/components/usage/UsagePopover'
@@ -31,6 +32,9 @@ const DEFAULT_PANEL_VIS: PanelVisibility = {
 export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  // This window has no board, so it gets no board-driven refresh: refresh the task's
+  // per-task queries (artifacts, tags, sub-tasks) on external changes here.
+  useTaskScopedQueriesFreshOnTasksChanged()
   const [taskId, setTaskId] = useState(initialTaskId)
   const [data, setData] = useState<TaskDetailData | null>(null)
   const [error, setError] = useState<string | null>(null)

@@ -79,7 +79,12 @@ function convexDeployment(url: string): ConvexDeployment | null {
   if (!deployment) {
     deployment = {
       url,
-      client: new ConvexReactClient(url),
+      // No unload veto. Convex's default `beforeunload` cancels the unload while a
+      // request has no reply; Electron shows no dialog, so the veto silently cancels
+      // the window's close — and with it the app's quit (every normal quit then hit
+      // the 15s watchdog). A background leaderboard/feedback client must never hold
+      // a window open; an unanswered sync is re-sent on the next interval tick.
+      client: new ConvexReactClient(url, { unsavedChangesWarning: false }),
       storageNamespace: url.replace(/\/+$/, '')
     }
     deployments.set(url, deployment)

@@ -142,3 +142,48 @@ test('provider change creates a new intent while retry preserves the old expecte
     expectedMode: 'claude-chat'
   })
 })
+
+test('stage resolves once the message is saved on this device, before the hub confirms it', async () => {
+  let confirm!: () => void
+  const f = fixture(
+    vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          confirm = resolve
+        })
+    )
+  )
+  const queue = f.open()
+  await queue.stage(input)
+  // Saved and shown as pending; the hub has not answered yet.
+  expect([...f.records.values()]).toEqual([expect.objectContaining({ ...input, state: 'pending' })])
+  expect(queue.getSnapshot()).toEqual([expect.objectContaining({ state: 'pending' })])
+  confirm()
+  await vi.waitFor(() => expect(queue.getSnapshot()).toEqual([]))
+  expect(f.records.size).toBe(0)
+})
+
+test('stage: a delivery that fails after saving leaves a failed entry with why (nothing lost)', async () => {
+  const f = fixture(
+    vi.fn(async () => {
+      throw new Error('Computer offline')
+    })
+  )
+  const queue = f.open()
+  await expect(queue.stage(input)).resolves.toBeUndefined()
+  await vi.waitFor(() =>
+    expect(queue.getSnapshot()).toEqual([
+      expect.objectContaining({ state: 'failed', error: 'Computer offline' })
+    ])
+  )
+  expect([...f.records.values()]).toEqual([expect.objectContaining({ state: 'failed' })])
+})
+
+test('stage: a message that could not be saved on this device rejects (the draft stays)', async () => {
+  const f = fixture()
+  f.storage.put = async () => {
+    throw new Error('Disk full')
+  }
+  await expect(f.open().stage(input)).rejects.toThrow('Disk full')
+  expect(f.deliver).not.toHaveBeenCalled()
+})

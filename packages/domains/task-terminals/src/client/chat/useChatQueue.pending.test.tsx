@@ -28,7 +28,8 @@ vi.mock('../trpc', () => {
         onQueueDrained: { subscriptionOptions: () => ({}) },
         queue: {
           list: {
-            queryOptions: () => ({ queryKey: ['queue'], queryFn: async () => [] })
+            queryOptions: () => ({ queryKey: ['queue'], queryFn: async () => [] }),
+            queryFilter: () => ({ queryKey: ['queue'] })
           }
         }
       }
@@ -51,8 +52,10 @@ test('desktop retry after remount reuses durable client ID and does not automati
   await act(async () => {
     await first.result.current.push('queued', 'queued').catch(() => {})
   })
+  // Saved first, delivered in the background: the lost acknowledgement shows on the entry.
+  await waitFor(() => expect(server.calls).toHaveLength(1))
   const id = server.calls[0].id
-  expect(first.result.current.pending).toMatchObject([{ id, state: 'failed' }])
+  await waitFor(() => expect(first.result.current.pending).toMatchObject([{ id, state: 'failed' }]))
   first.unmount()
   const reopened = renderHook(() => useChatQueue('tab'), { wrapper })
   await waitFor(() => expect(reopened.result.current.pending).toHaveLength(1))
@@ -61,6 +64,7 @@ test('desktop retry after remount reuses durable client ID and does not automati
   await act(async () => {
     await reopened.result.current.retryPending(id)
   })
+  await waitFor(() => expect(reopened.result.current.pending).toEqual([]))
   expect(server.calls.map((call) => call.id)).toEqual([id, id])
   expect(reopened.result.current.pending).toEqual([])
   expect(localStorage.length).toBe(0)

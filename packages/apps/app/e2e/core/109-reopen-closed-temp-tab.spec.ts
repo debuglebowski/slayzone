@@ -11,7 +11,8 @@ import {
 } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
 
-// Closing a scratch tab preserves its task and live terminal; ⌘⇧T reattaches it.
+// Closing a scratch tab keeps its task but stops its terminal; ⌘⇧T reopens it and
+// the terminal auto-starts again.
 test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
   type TabStoreWindow = Window & {
     __slayzone_tabStore?: {
@@ -72,7 +73,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     projectId = p.id
   })
 
-  test('preserves the scratch task and running terminal across close and reopen', async ({
+  test('keeps the scratch task, stops its terminal on close, respawns it on reopen', async ({
     mainWindow,
     electronApp
   }) => {
@@ -91,7 +92,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     await closeActiveTab(electronApp)
     await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
-    await expect.poll(() => ptyAlive(mainWindow, task.id), poll).toBe(true)
+    await expect.poll(() => ptyAlive(mainWindow, task.id), poll).toBe(false)
 
     await reopen(mainWindow)
     await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(false)
@@ -114,10 +115,11 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       )
       .toBe(true)
 
-    // Closing it again still preserves the scratch terminal.
+    // Closing it again stops it again, still without deleting the task.
     await closeActiveTab(electronApp)
     await expect.poll(() => isDeleted(mainWindow, task.id), poll).toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
+    await expect.poll(() => ptyAlive(mainWindow, task.id), poll).toBe(false)
   })
 
   test('reopens in close order across temporary and regular tabs', async ({

@@ -26,8 +26,8 @@ import { appRouter, setAppDeps } from '@slayzone/api'
 import {
   createProcess,
   initProcessManager,
-  killProcess,
-  killTaskProcesses,
+  removeProcess,
+  removeTaskProcesses,
   listAllProcesses,
   listForTask,
   processEvents,
@@ -74,11 +74,11 @@ setProcessesDeps({
   spawn: spawnProcess,
   update: updateProcess,
   stop: stopProcess,
-  kill: killProcess,
+  remove: removeProcess,
   restart: restartProcess,
   listForTask,
   listAll: listAllProcesses,
-  killTask: killTaskProcesses,
+  removeForTask: removeTaskProcesses,
   events: processEvents
 })
 const engine = new AutomationEngine(h.slayDb, () => undefined)
@@ -304,7 +304,7 @@ describe('defaults (switches unset): unchanged', () => {
     })
     expect(created.status).toBe(200)
     expect(typeof created.data).toBe('string')
-    killProcess(created.data as string)
+    removeProcess(created.data as string)
 
     const bad = await call('integrations.connectGithub', { token: '   ' })
     expect(bad.status).toBe(500)

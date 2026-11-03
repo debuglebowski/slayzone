@@ -21,6 +21,7 @@ import { registerProcessesListRoute } from './processes/list.js'
 import { registerProcessesLogsRoute } from './processes/logs.js'
 import { registerProcessesFollowRoute } from './processes/follow.js'
 import { registerProcessesDeleteRoute } from './processes/delete.js'
+import { registerProcessesLifecycleRoutes } from './processes/lifecycle.js'
 import { registerAutomationsCrudRoutes } from './automations/crud.js'
 import { registerAutomationsRunRoute } from './automations/run.js'
 
@@ -37,9 +38,21 @@ const processes = {
     processTouches++
     return []
   },
-  kill: () => {
+  remove: () => {
     processTouches++
     return false
+  },
+  stop: () => {
+    processTouches++
+    return false
+  },
+  start: async () => {
+    processTouches++
+    return { ok: false, reason: 'not-found' }
+  },
+  restart: async () => {
+    processTouches++
+    return { ok: false, reason: 'not-found' }
   },
   subscribeToLogs: () => {
     processTouches++
@@ -59,6 +72,7 @@ registerProcessesListRoute(app, deps)
 registerProcessesLogsRoute(app, deps)
 registerProcessesFollowRoute(app, deps)
 registerProcessesDeleteRoute(app, deps)
+registerProcessesLifecycleRoutes(app, deps)
 registerAutomationsCrudRoutes(app, deps)
 registerAutomationsRunRoute(app, deps)
 const rest = await mountRestApp(app)
@@ -89,7 +103,10 @@ describe('processes switched off', () => {
     ['GET', '/api/processes', 'list'],
     ['GET', '/api/processes/p1/logs', 'logs'],
     ['GET', '/api/processes/p1/follow', 'follow'],
-    ['DELETE', '/api/processes/p1', 'kill']
+    ['DELETE', '/api/processes/p1', 'remove'],
+    ['POST', '/api/processes/p1/start', 'start'],
+    ['POST', '/api/processes/p1/stop', 'stop'],
+    ['POST', '/api/processes/p1/restart', 'restart']
   ] as const) {
     test(`${method} ${path}: 403 HUB_PROCESSES_DISABLED, one audit line`, async () => {
       const before = lines.length

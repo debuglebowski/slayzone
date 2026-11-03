@@ -8,9 +8,11 @@ export {
   spawnProcess,
   updateProcess,
   stopProcess,
-  killProcess,
+  removeProcess,
   restartProcess,
-  killTaskProcesses,
+  restartProcessDetailed,
+  startProcess,
+  removeTaskProcesses,
   listForTask,
   listAllProcesses,
   killAllProcesses,
@@ -21,7 +23,9 @@ export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {
   ProcessShutdownOptions,
   ProcessShutdownResult,
-  ProjectCwdResolver
+  ProjectCwdResolver,
+  StartProcessRefusal,
+  StartProcessResult
 } from './process-manager'
 export { createDbProcessPersistence } from './process-persistence'
 export type { ProcessPersistence, PersistedProcess, ProcessRow } from './process-persistence'

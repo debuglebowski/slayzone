@@ -21,5 +21,6 @@ export { PanelOwnerStub } from './PanelOwnerStub'
 export {
   refreshTaskScopedQueries,
   useTaskScopedQueriesFreshOnReveal,
+  useTaskScopedQueriesFreshOnTasksChanged,
   taskIdOfScopedQuery
 } from './taskScopedQueries'

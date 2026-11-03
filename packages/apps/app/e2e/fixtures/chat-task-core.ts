@@ -91,6 +91,8 @@ export interface OpenChatTaskCoreOpts<M extends ChatMode> {
   repoFiles?: Record<string, string>
   /** `on-open` (default): spawned the way the Restart button does. `on-send`: lazily. */
   spawn?: 'on-open' | 'on-send'
+  /** Create it as a temporary (scratch) task. */
+  isTemporary?: boolean
   /** Resolves once the fake's first spawn exists (`epoch.waitForRun(0)`). */
   waitForFirstRun: () => Promise<unknown>
 }
@@ -120,7 +122,8 @@ export async function openChatTaskCore<M extends ChatMode>(
     title: o.title,
     ...(o.description ? { description: o.description } : {}),
     status: 'todo',
-    terminalMode: mode
+    terminalMode: mode,
+    ...(o.isTemporary ? { isTemporary: true } : {})
   })
   const tabId = await page.evaluate(
     async ({ id, m }) => {

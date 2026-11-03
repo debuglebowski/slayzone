@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -168,5 +168,89 @@ describe('claudeSession.read', () => {
     await expect(
       handlers()({ cwd: join(root, 'repo'), sessionId: '../../secret' })
     ).rejects.toThrow()
+  })
+})
+
+// A session that used EnterWorktree keeps its file only under the worktree's
+// project dir (`relocated` record). The computer owns that disk, so it answers
+// where the conversation is and which folder to resume it from.
+describe('claudeSession.locate', () => {
+  function locate(projects: Record<string, string> = {}, allowedRoots?: string[]) {
+    const config: ComputerConfig = {
+      hubUrl: 'ws://localhost:0/computers',
+      name: 'test',
+      allowedRoots: allowedRoots ?? [root],
+      capabilities: []
+    }
+    const table = createClaudeSessionHandlers({ dialer, config, log: () => {} }, () => ({
+      get: (id: string) => (projects[id] ? { path: projects[id] } : null)
+    }))
+    return (params: Record<string, unknown>) =>
+      table[M.claudeSessionLocate](params) as Promise<{
+        sessions: Array<{ sessionId: string; found: boolean; resumeCwd: string | null }>
+      }>
+  }
+  function moveIntoWorktree(cwd: string, worktree: string, id: string): void {
+    const { file } = writeSessionFile({
+      configDir,
+      cwd: worktree,
+      sessionId: id,
+      turns: [{ user: 'enter a worktree', assistant: 'done' }]
+    })
+    appendFileSync(file, `${JSON.stringify({ type: 'relocated', relocatedCwd: worktree })}\n`)
+    void cwd
+  }
+
+  it('a session moved into a worktree: found, resume from the worktree', async () => {
+    const cwd = join(root, 'repo')
+    const worktree = join(cwd, '.claude', 'worktrees', 'wt1')
+    mkdirSync(worktree, { recursive: true })
+    const moved = randomUUID()
+    const here = randomUUID()
+    const missing = randomUUID()
+    moveIntoWorktree(cwd, worktree, moved)
+    writeSessionFile({ configDir, cwd, sessionId: here, turns: [{ user: 'hi', assistant: 'yo' }] })
+    const res = await locate()({ cwd, sessionIds: [moved, here, missing] })
+    expect(res.sessions).toEqual([
+      { sessionId: moved, found: true, resumeCwd: worktree },
+      { sessionId: here, found: true, resumeCwd: null },
+      { sessionId: missing, found: false, resumeCwd: null }
+    ])
+  })
+
+  it('resolves the project checkout when the hub sends no cwd', async () => {
+    const cwd = join(root, 'repo')
+    const worktree = join(cwd, '.claude', 'worktrees', 'wt1')
+    mkdirSync(worktree, { recursive: true })
+    const id = randomUUID()
+    moveIntoWorktree(cwd, worktree, id)
+    const res = await locate({ p1: cwd })({ projectId: 'p1', sessionIds: [id] })
+    expect(res.sessions).toEqual([{ sessionId: id, found: true, resumeCwd: worktree }])
+  })
+
+  it('never offers a resume folder outside the jail', async () => {
+    const cwd = join(root, 'repo')
+    const worktree = join(root, 'outside', 'wt1')
+    mkdirSync(worktree, { recursive: true })
+    mkdirSync(cwd, { recursive: true })
+    const id = randomUUID()
+    moveIntoWorktree(cwd, worktree, id)
+    const res = await locate({}, [cwd])({ cwd, sessionIds: [id] })
+    expect(res.sessions).toEqual([{ sessionId: id, found: true, resumeCwd: null }])
+  })
+
+  it('refuses a cwd outside the jail', async () => {
+    await expect(locate()({ cwd: '/etc', sessionIds: [randomUUID()] })).rejects.toThrow()
+  })
+
+  it('read follows a moved session too', async () => {
+    const cwd = join(root, 'repo')
+    const worktree = join(cwd, '.claude', 'worktrees', 'wt1')
+    mkdirSync(worktree, { recursive: true })
+    const id = randomUUID()
+    moveIntoWorktree(cwd, worktree, id)
+    const res = await handlers()({ cwd, sessionId: id })
+    expect(res.found).toBe(true)
+    expect(contentOf(res.records[0])).toBe('enter a worktree')
   })
 })

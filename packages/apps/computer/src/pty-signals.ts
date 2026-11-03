@@ -304,12 +304,16 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
       if (!params.resuming || reportedError || disposed) return
       // DISK TRUTH first: deterministic, needs no output (a fast exit can beat the
       // "No conversation found" line). Then the exit-code-agnostic string scan.
+      // The hub's spawn-time lookup searched every project dir (a session can move
+      // into a worktree's); 'unknown' defers to the scan. Not looked up: this disk,
+      // beside the cwd.
       const transcriptGone =
         params.mode === 'claude-code' &&
         exitCode !== 0 &&
         !!params.resumeConversationId &&
-        !!disk &&
-        !claudeTranscriptExists(disk.cwd, params.resumeConversationId)
+        (params.resumeTranscript !== undefined
+          ? params.resumeTranscript === 'missing'
+          : !!disk && !claudeTranscriptExists(disk.cwd, params.resumeConversationId))
       const cause = transcriptGone
         ? { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
         : detector.adapter.detectError(output)

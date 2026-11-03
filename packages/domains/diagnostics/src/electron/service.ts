@@ -25,6 +25,7 @@ import {
   CONFIG_KEYS
 } from '../server'
 import { startRetentionScheduler, stopRetentionScheduler } from '../server/retention'
+import { toErrorMessage, toErrorPayload } from './error-payload'
 
 // Electron-coupled glue for diagnostics. The data core (config cache, event
 // write-queue, redaction, export bundle) lives in the electron-free
@@ -56,27 +57,6 @@ const electronRuntime = electron as unknown as Partial<typeof import('electron')
 const app = electronRuntime.app as App | undefined
 const dialog = electronRuntime.dialog
 const BrowserWindow = electronRuntime.BrowserWindow
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return String(error)
-  }
-}
-
-function toErrorPayload(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack ?? null
-    }
-  }
-  return { value: toErrorMessage(error) }
-}
 
 function summarizeArgs(args: unknown[]): unknown {
   return args.map((arg) => {

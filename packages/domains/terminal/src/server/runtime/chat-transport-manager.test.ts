@@ -1710,3 +1710,58 @@ test('watchdog: fatal handshake failure escalates to SIGKILL', async () => {
   await wait(100)
   expect(h.stateChanges.includes('dead')).toBe(true)
 })
+
+test('kill: the tab reads `dead` at once, before the CLI finishes its own shutdown', async () => {
+  await setup()
+  const stateChanges: string[] = []
+  const signals: string[] = []
+  const fake = makeFakeChild()
+  // A real CLI takes ~0.8 s to exit on SIGTERM; this one exits only when told.
+  fake.kill = ((sig?: string) => {
+    signals.push(sig ?? 'SIGTERM')
+    return true
+  }) as ChildProcess['kill']
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: (_s, next) => stateChanges.push(next)
+  })
+  await createChat({
+    tabId: 'tab-kill-now',
+    taskId: 'task-kill-now',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    conversationId: null,
+    providerFlags: []
+  })
+  mgr.sendUserMessage('tab-kill-now', 'hi')
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getSessionTerminalState('tab-kill-now')).toBe('running')
+
+  mgr.killByTaskId('task-kill-now')
+  expect(signals).toEqual(['SIGTERM'])
+  expect(mgr.getSessionTerminalState('tab-kill-now')).toBe('dead')
+  expect(stateChanges.at(-1)).toBe('dead')
+
+  // What the dying process still says does not bring the tab back.
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'late',
+      session_id: 's'
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getSessionTerminalState('tab-kill-now')).toBe('dead')
+
+  // Its real exit settles it, still `dead`, with no extra transition.
+  const before = stateChanges.length
+  ;(fake as unknown as EventEmitter).emit('exit', null, 'SIGTERM')
+  await new Promise((r) => setTimeout(r, 20))
+  expect(mgr.getSessionTerminalState('tab-kill-now')).toBe('dead')
+  expect(stateChanges.slice(before)).toEqual([])
+})

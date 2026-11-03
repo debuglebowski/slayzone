@@ -17,9 +17,10 @@ import { createQueuedSubmissionJournal } from './composer-state/queued-submissio
  * callback is exposed separately so the consumer can bump autocomplete
  * usage counts with the raw `original` token after a drain dispatches.
  *
- * No optimistic update on push/remove/clear: the server broadcasts
+ * The list itself is the hub's (no optimistic edit of it): the server broadcasts
  * `onQueueChanged` post-mutation and the subscription invalidates the list
- * query — the same single-source-of-truth flow the IPC version relied on.
+ * query. A push shows at once anyway: it is saved on this device first and
+ * listed as `pending` (an unconfirmed row) until the hub's list has it.
  */
 export interface UseChatQueueResult {
   items: QueuedChatMessage[]
@@ -41,6 +42,8 @@ export interface UseChatQueueResult {
   /** Hold it while edited (renew while the editor is open); false when already sent. */
   hold: (id: string) => Promise<boolean>
   release: (id: string) => Promise<void>
+  /** "Send now" (`chat.queue.steer`); `ok: false` + why when the agent can't take it. */
+  steer: (id: string) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 export function useChatQueue(
@@ -83,6 +86,13 @@ export function useChatQueue(
   // Fire-and-forget RPC facade via the STABLE vanilla client. (useMutation
   // returns a new object each render; wrapping it in these callbacks made them
   // unstable, and a consumer effect keyed on `clear` looped infinitely.)
+  // Stable (the store is rebuilt when `deliver` changes). A refresh that fails
+  // changes nothing: the hub has the message.
+  const refreshList = useStableCallback(() =>
+    Promise.resolve()
+      .then(() => queryClient.invalidateQueries(trpc.chat.queue.list.queryFilter({ tabId })))
+      .catch(() => undefined)
+  )
   const deliver = useCallback(
     async ({ id, send, original, content, expectedMode }: QueuedSubmission) => {
       // The id it gets here is the id it is sent with: the outbox tracks the
@@ -95,12 +105,15 @@ export function useChatQueue(
         content,
         ...(expectedMode ? { expectedMode } : {})
       })
-      // No optimistic update — onQueueChanged fires post-insert and triggers refetch.
+      // Its local row gives way to the hub's only once the list has it: no gap.
+      await refreshList()
     },
-    [trpcClient, tabId]
+    [trpcClient, tabId, refreshList]
   )
   const submissions = useQueuedSubmissions({ storage, deliver, createId: safeRandomUUID })
-  const { push: pushSubmission } = submissions
+  // Resolves once saved on this device: the row shows (and the draft clears) at
+  // once; a delivery that fails later shows on the row, with Retry.
+  const { stage: pushSubmission } = submissions
   const push = useCallback(
     (send: string, original: string, content?: UserContentBlock[]) =>
       pushSubmission({
@@ -142,6 +155,11 @@ export function useChatQueue(
     [trpcClient]
   )
 
+  const steer = useCallback(
+    (id: string) => trpcClient.chat.queue.steer.mutate({ id }),
+    [trpcClient]
+  )
+
   return {
     items: listQuery.data ?? [],
     pending: submissions.pending,
@@ -153,6 +171,7 @@ export function useChatQueue(
     update,
     move,
     hold,
-    release
+    release,
+    steer
   }
 }

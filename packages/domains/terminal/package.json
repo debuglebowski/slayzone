@@ -28,7 +28,8 @@
     "./terminal-state": "./src/client/terminal-state-reducer.ts",
     "./live-blocks": "./src/client/live-blocks.ts",
     "./runtime": "./src/server/chat-runtime.ts",
-    "./pty-detection": "./src/server/pty-detection.ts"
+    "./pty-detection": "./src/server/pty-detection.ts",
+    "./claude-transcripts": "./src/server/claude-transcripts.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

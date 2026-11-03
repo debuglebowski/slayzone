@@ -161,3 +161,31 @@ describe('activity view: empty blocks', () => {
     expect([...view.turns.values()][0]?.items).toEqual([streaming])
   })
 })
+
+describe('activity view: turn trigger', () => {
+  const trigger = {
+    kind: 'turn-trigger',
+    subAgents: [],
+    notifications: [{ uuid: 'n1', taskId: 't1', summary: 'Monitor event: "x"' }],
+    timestamp: 0
+  } as TimelineItem
+
+  it('belongs to the turn it opened: no row of its own, carried as the turn header', () => {
+    const view = activityView([trigger, reply, result], false)
+    expect(view.rows).toEqual([reply])
+    expect(view.turns.get(reply)?.trigger).toBe(trigger)
+    expect(view.hosts.get(trigger)).toBe(reply)
+  })
+
+  it('heads a still-running turn too', () => {
+    const tool = {
+      kind: 'tool',
+      invocation: { id: 'tu1', name: 'Bash', status: 'pending' },
+      timestamp: 1
+    } as TimelineItem
+    const view = activityView([trigger, tool], true)
+    const [turn] = [...view.turns.values()]
+    expect(turn.trigger).toBe(trigger)
+    expect(view.rows).not.toContain(trigger)
+  })
+})

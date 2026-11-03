@@ -1,5 +1,5 @@
-import { existsSync, createReadStream, readFileSync } from 'fs'
-import { readdir } from 'fs/promises'
+import { existsSync, createReadStream, readFileSync, realpathSync } from 'fs'
+import { open, readdir, stat } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createInterface } from 'readline'
@@ -65,6 +65,158 @@ export function claudeTranscriptRetentionMs(): number | null {
 /** Does the transcript for `conversationId` exist in `cwd`'s project dir? */
 export function claudeTranscriptExists(cwd: string, conversationId: string): boolean {
   return existsSync(claudeTranscriptPath(cwd, conversationId))
+}
+
+/** Where a session's transcript is, and where `claude --resume` should start. */
+export interface ClaudeTranscriptLocation {
+  /** Absolute path of `<id>.jsonl`. */
+  path: string
+  /**
+   * The folder the session last worked in, when it is NOT the folder the caller
+   * asked about: a session that used EnterWorktree keeps its transcript only under
+   * the worktree's project dir. Set only when that folder exists, passes
+   * `isAllowedDir`, and is the folder whose project dir holds the file (so the
+   * CLI started there finds it in its own project dir). Null = resume in the
+   * folder asked about (the file is there, or no recorded folder qualifies; the
+   * CLI then finds a cross-project session by id itself).
+   */
+  resumeCwd: string | null
+}
+
+export interface LocateClaudeTranscriptOptions {
+  /** A computer's path jail. Absent = every folder allowed. */
+  isAllowedDir?: (dir: string) => boolean
+}
+
+/** A Claude session id is a uuid; anything that could leave the projects dir is refused. */
+function isSafeSessionId(id: string): boolean {
+  return id.length > 0 && !/[\\/]|\.\./.test(id)
+}
+
+/** The project dir names a folder maps to: its real path (what the CLI sees) and as given. */
+function projectDirNamesFor(cwd: string): string[] {
+  if (!cwd) return []
+  const names = new Set<string>()
+  try {
+    names.add(encodeClaudeProjectDir(realpathSync(cwd)))
+  } catch {
+    // Folder gone: the CLI may still have recorded it as given.
+  }
+  names.add(encodeClaudeProjectDir(cwd))
+  return [...names]
+}
+
+async function mtimeIfFile(path: string): Promise<number | null> {
+  try {
+    const s = await stat(path)
+    return s.isFile() ? s.mtimeMs : null
+  } catch {
+    return null
+  }
+}
+
+/** Last chunk size read when looking for the session's current folder. */
+const TAIL_CHUNK_BYTES = 64 * 1024
+/** Stop looking further back than this (a folder change writes records at once). */
+const TAIL_MAX_BYTES = 4 * 1024 * 1024
+
+/**
+ * The folder the session last worked in: the newest `relocated.relocatedCwd` or
+ * record `cwd`, read backwards from the end of the file in chunks.
+ */
+async function readLastRecordedCwd(path: string): Promise<string | null> {
+  const fh = await open(path, 'r')
+  try {
+    const { size } = await fh.stat()
+    let end = size
+    let carry = ''
+    while (end > 0 && size - end < TAIL_MAX_BYTES) {
+      const start = Math.max(0, end - TAIL_CHUNK_BYTES)
+      const buf = Buffer.alloc(end - start)
+      await fh.read(buf, 0, buf.length, start)
+      const text = buf.toString('utf8') + carry
+      const lines = text.split('\n')
+      // The first piece may be a partial line: keep it for the next chunk.
+      carry = start > 0 ? (lines.shift() ?? '') : ''
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim()
+        if (!line) continue
+        try {
+          const rec = JSON.parse(line) as { relocatedCwd?: unknown; cwd?: unknown }
+          if (typeof rec.relocatedCwd === 'string' && rec.relocatedCwd) return rec.relocatedCwd
+          if (typeof rec.cwd === 'string' && rec.cwd) return rec.cwd
+        } catch {
+          // A line the CLI is still writing.
+        }
+      }
+      end = start
+    }
+    return null
+  } finally {
+    await fh.close()
+  }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Find the transcript for `sessionId` on this machine, wherever the session's
+ * folder moved to. Looks in `hintCwd`'s project dir first (the common case), then
+ * in every project dir. Only the exact `<id>.jsonl` counts — a
+ * `.jsonl.superseded-*` copy is not a live conversation. Several copies: the
+ * newest wins. Null = no transcript anywhere.
+ *
+ * This is the one answer to "does this conversation exist, and where do I resume
+ * it": the conversation healer, the stale-resume check, and every reader of a
+ * session file use it, on the machine (computer) that owns the disk.
+ */
+export async function locateClaudeTranscript(
+  sessionId: string,
+  hintCwd: string,
+  opts: LocateClaudeTranscriptOptions = {}
+): Promise<ClaudeTranscriptLocation | null> {
+  if (!isSafeSessionId(sessionId)) return null
+  const projectsRoot = join(claudeConfigDir(), 'projects')
+  const fileName = `${sessionId}.jsonl`
+
+  for (const name of projectDirNamesFor(hintCwd)) {
+    const path = join(projectsRoot, name, fileName)
+    if ((await mtimeIfFile(path)) != null) return { path, resumeCwd: null }
+  }
+
+  let entries: string[]
+  try {
+    entries = await readdir(projectsRoot)
+  } catch {
+    return null
+  }
+  let best: { path: string; dirName: string; mtime: number } | null = null
+  for (const dirName of entries) {
+    const path = join(projectsRoot, dirName, fileName)
+    const mtime = await mtimeIfFile(path)
+    if (mtime != null && (!best || mtime > best.mtime)) best = { path, dirName, mtime }
+  }
+  if (!best) return null
+
+  let recorded: string | null = null
+  try {
+    recorded = await readLastRecordedCwd(best.path)
+  } catch {
+    recorded = null
+  }
+  const qualifies =
+    recorded != null &&
+    recorded !== hintCwd &&
+    (opts.isAllowedDir?.(recorded) ?? true) &&
+    (await isDirectory(recorded)) &&
+    projectDirNamesFor(recorded).includes(best.dirName)
+  return { path: best.path, resumeCwd: qualifies ? recorded : null }
 }
 
 export interface ClaudeTranscriptMeta {

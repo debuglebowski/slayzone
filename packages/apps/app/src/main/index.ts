@@ -526,7 +526,7 @@ import {
   beginTerminalShutdown,
   ptyEvents
 } from '@slayzone/terminal/electron'
-import { setOnTaskReachedTerminalHandler, setAgentLifecycleEvents } from '@slayzone/terminal/server'
+import { setTaskAgentsStopper, setAgentLifecycleEvents } from '@slayzone/terminal/server'
 import {
   attachFloatingGlobalAgentPanel,
   setupFloatingGlobalAgentPanel,
@@ -564,6 +564,7 @@ import {
 } from './lifecycle/sentinel'
 import { drainDiagnosticsForQuit } from './lifecycle/quit-diagnostics'
 import { QUIT_CHILD_REAP_MS, reapChildForQuit } from './lifecycle/quit-reap-child'
+import { overrideUnloadVetoes } from './lifecycle/unload-veto'
 import {
   acquireLockWithSelfHeal,
   lockOutcomeIsAcquired,
@@ -580,6 +581,7 @@ import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
 import { attachDocumentLinkBridges, setDocumentShortcutKeysResolver } from './document-link-bridge'
+import { setBrowserViewScreenshotKeysResolver } from './browser-view-keys'
 import { attachAppWindowNavigationGuard } from './app-window-navigation-guard'
 import {
   setProcessManagerWindow,
@@ -587,11 +589,11 @@ import {
   spawnProcess,
   updateProcess,
   stopProcess,
-  killProcess,
+  removeProcess,
   restartProcess,
   listForTask,
   listAllProcesses,
-  killTaskProcesses,
+  removeTaskProcesses,
   killAllProcesses,
   shutdownAllProcesses,
   processEvents,
@@ -613,6 +615,9 @@ import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handof
 setDocumentShortcutKeysResolver(() => [
   resolveShortcutKeys(currentOverrides, 'artifacts-toggle-sidebar')
 ])
+setBrowserViewScreenshotKeysResolver(() =>
+  resolveShortcutKeys(currentOverrides, 'terminal-screenshot')
+)
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280
@@ -2145,7 +2150,7 @@ app
 
     configureTaskRuntimeAdapters({
       killPtysByTaskId,
-      killTaskProcesses,
+      removeTaskProcesses,
       recordDiagnosticEvent,
       requestPtyRespawn: broadcastRespawnRequest,
       onReachedTerminal: onTaskReachedTerminal,
@@ -2161,7 +2166,7 @@ app
     })
     // Wire the cross-domain terminal seam so server-pure callers (integrations
     // sync) reach the real pty-killing impl.
-    setOnTaskReachedTerminalHandler(onTaskReachedTerminal)
+    setTaskAgentsStopper(onTaskReachedTerminal)
     logBoot('task runtime adapters configured')
 
     // Register domain handlers (inject ipcMain and db)
@@ -2591,11 +2596,11 @@ app
               spawn: spawnProcess,
               update: updateProcess,
               stop: stopProcess,
-              kill: killProcess,
+              remove: removeProcess,
               restart: restartProcess,
               listForTask,
               listAll: listAllProcesses,
-              killTask: killTaskProcesses,
+              removeForTask: removeTaskProcesses,
               events: processEvents
             })
             // Cutover: no in-process appRouter server. The desktop app serves ONE
@@ -4261,15 +4266,15 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           updateProcess(processId, updates)
       )
       ipcMain.handle('processes:stop', (_event, processId: string) => stopProcess(processId))
-      ipcMain.handle('processes:kill', (_event, processId: string) => killProcess(processId))
+      ipcMain.handle('processes:remove', (_event, processId: string) => removeProcess(processId))
       ipcMain.handle('processes:restart', (_event, processId: string) => restartProcess(processId))
       ipcMain.handle(
         'processes:listForTask',
         (_event, taskId: string | null, projectId: string | null) => listForTask(taskId, projectId)
       )
       ipcMain.handle('processes:listAll', () => listAllProcesses())
-      ipcMain.handle('processes:killTask', (_event, taskId: string) => {
-        killTaskProcesses(taskId)
+      ipcMain.handle('processes:removeForTask', (_event, taskId: string) => {
+        removeTaskProcesses(taskId)
       })
     }
 
@@ -4552,6 +4557,19 @@ const webviewOps = {
 const WEBVIEW_INIT_SCRIPT = WEBVIEW_DESKTOP_HANDOFF_SCRIPT
 
 app.on('web-contents-created', (_, wc) => {
+  // No page can veto its unload: Electron has no dialog for it, so a veto silently
+  // cancels the close — and an app quit with it (see lifecycle/unload-veto.ts).
+  overrideUnloadVetoes(wc, {
+    isQuitting: () => quitRequested,
+    record: ({ contentsType, duringQuit }) =>
+      recordDiagnosticEvent({
+        level: duringQuit ? 'warn' : 'info',
+        source: 'main',
+        event: 'app.unload_veto_overridden',
+        payload: { contentsType, duringQuit }
+      })
+  })
+
   // Handoff blocking helpers — check policy map at invocation time (lazy guard).
   // Works for both legacy <webview> and WCV-managed views because both populate
   // webviewDesktopHandoffPolicy via their respective paths.

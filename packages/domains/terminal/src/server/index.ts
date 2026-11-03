@@ -35,8 +35,17 @@ export {
   claudeTranscriptRetentionMs,
   readClaudeTranscriptMeta,
   listClaudeTranscriptIds,
+  locateClaudeTranscript,
+  type ClaudeTranscriptLocation,
   type ClaudeTranscriptMeta
 } from './claude-transcripts'
+export {
+  setClaudeTranscriptLocator,
+  locateClaudeTranscripts,
+  type ClaudeTranscriptLocator,
+  type ClaudeTranscriptLocateRequest,
+  type ClaudeTranscriptLocated
+} from './runtime/claude-transcript-locator'
 export { getAutoModeEligibility, type AutoModeEligibility } from './auto-mode-eligibility'
 export { supportsChatMode } from './agents/registry'
 export {
@@ -46,9 +55,9 @@ export {
 } from './user-input-tracker'
 // E2E: in-process runtime reset (replaces restarting the side-car per spec).
 export { resetTerminalRuntimeForTest } from './runtime/test-reset'
-// Cross-domain seam: server-side callers (integrations sync) invoke the no-op
-// default; the Electron host injects the real pty-killing impl at boot.
-export { onTaskReachedTerminal, setOnTaskReachedTerminalHandler } from './task-events'
+// Cross-domain seam: server-side callers (integrations sync, pty.killTask) invoke
+// the no-op default; the host injects the real agent teardown at boot.
+export { onTaskReachedTerminal, setTaskAgentsStopper, stopTaskAgents } from './task-events'
 
 // PTY/chat runtime (slice 6c inversion: electron-free, host-bridged). The
 // Electron entry configures the real window/theme/bus bridge at import time;

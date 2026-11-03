@@ -104,3 +104,48 @@ test('chat/renderer diagnostics retain metadata without persisting content or sc
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// A startup rejection's text is withheld (it may quote a chat), so the event needs the
+// error's IDENTITY to be diagnosable: pilot 2026-11-03 had three `main.unhandled_rejection`
+// rows with payload `{}` — an fs error carries no JS stack frames, and `name` is not kept.
+test('main rejections keep the error identity (class, code, syscall, errno), never its text', () => {
+  const secret = '/Users/someone/PRIVATE-CHAT-DIAGNOSTIC-MARKER/app-update.yml'
+  const safe = chatSafeDiagnostic({
+    level: 'error',
+    source: 'main',
+    event: 'main.unhandled_rejection',
+    message: `ENOENT: no such file or directory, open '${secret}'`,
+    payload: {
+      name: 'Error',
+      message: `ENOENT: no such file or directory, open '${secret}'`,
+      stack: `Error: ENOENT: no such file or directory, open '${secret}'`,
+      errorClass: 'Error',
+      errorCode: 'ENOENT',
+      errorSyscall: 'open',
+      errno: -2
+    }
+  })
+  expect(safe.message).toBeNull()
+  expect(safe.payload).toEqual({
+    errorClass: 'Error',
+    errorCode: 'ENOENT',
+    errorSyscall: 'open',
+    errno: -2
+  })
+  expect(JSON.stringify(safe)).not.toContain('PRIVATE')
+})
+
+test('identity fields that are not identifiers are dropped', () => {
+  const safe = chatSafeDiagnostic({
+    level: 'error',
+    source: 'main',
+    event: 'main.unhandled_rejection',
+    message: null,
+    payload: {
+      errorClass: 'my private prompt',
+      errorCode: 'see /Users/x/secret.txt',
+      errorSyscall: 'open /Users/x'
+    }
+  })
+  expect(safe.payload).toEqual({})
+})
