@@ -13,7 +13,8 @@
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/hooks": "./src/client/hooks.ts",
-    "./slay-setup": "./src/server/slay-setup.ts"
+    "./slay-setup": "./src/server/slay-setup.ts",
+    "./config-fs": "./src/server/ai-config-fs.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

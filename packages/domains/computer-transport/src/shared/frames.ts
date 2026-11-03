@@ -564,6 +564,8 @@ export const HubToComputerMethods = {
   procStats: 'proc.stats',
   /** One shell command run to completion (automation actions) — see exec.run below. */
   execRun: 'exec.run',
+  /** The AI-config ops' filesystem (instructions, skills, MCP) — see below. */
+  agentConfigFs: 'agentConfig.fs',
   // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
@@ -1325,6 +1327,28 @@ export const execRunResultSchema = z.object({
   timedOut: z.boolean()
 })
 export type ExecRunResult = z.infer<typeof execRunResultSchema>
+
+/**
+ * `agentConfig.fs`: one call of `@slayzone/ai-config`'s `AiConfigFs` seam on the
+ * computer — a project's provider files (inside allowedRoots) or its own provider
+ * dirs under its home (`~/.claude`, …). Paths are absolute ON THE COMPUTER (built
+ * from its `homedir` answer and its project folders). Answers `{ result }`.
+ */
+const agentConfigPath = z.string().min(1)
+export const agentConfigFsParamsSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('homedir') }),
+  z.object({ op: z.literal('exists'), path: agentConfigPath }),
+  z.object({ op: z.literal('readFile'), path: agentConfigPath }),
+  z.object({ op: z.literal('writeFile'), path: agentConfigPath, content: z.string() }),
+  z.object({ op: z.literal('mkdir'), path: agentConfigPath }),
+  z.object({ op: z.literal('unlink'), path: agentConfigPath }),
+  z.object({ op: z.literal('rmdir'), path: agentConfigPath }),
+  z.object({ op: z.literal('rename'), path: agentConfigPath, to: agentConfigPath }),
+  z.object({ op: z.literal('stat'), path: agentConfigPath }),
+  z.object({ op: z.literal('readdir'), path: agentConfigPath })
+])
+export type AgentConfigFsParams = z.infer<typeof agentConfigFsParamsSchema>
+export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)
