@@ -715,12 +715,12 @@ run_harness packages/domains/chat-runtime/src/server/hub-ownership.test.ts
 # Migration interruption, provider rebinding, durable submissions and cleanup regressions.
 run_harness packages/apps/hub/src/review-integration-upgrade.test.ts
 run_harness packages/apps/hub/src/review-released-chat-upgrade.test.ts
-run_harness packages/domains/chat-runtime/src/server/review-migration-state.test.ts
-run_harness packages/domains/chat-runtime/src/server/migration-task-authority.test.ts
+run_harness packages/apps/hub/src/review-migration-state.test.ts
+run_harness packages/apps/hub/src/migration-task-authority.test.ts
 run_harness packages/domains/chat-runtime/src/server/review-storage-durability.test.ts
 run_harness packages/domains/chat-runtime/src/server/review-provider-transition-storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/review-superseded-transfer.test.ts
-run_harness packages/domains/chat-runtime/src/server/provider-transition.test.ts
+run_harness packages/apps/hub/src/provider-transition.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-session-authority.test.ts
 run_harness packages/domains/chat-runtime/src/server/queue-message-identities.test.ts
 run_harness packages/domains/chat-runtime/src/server/tab-state-ownership.test.ts

@@ -140,62 +140,60 @@ test.each([1, 2])(
       })
       const oldHealth = await control!.rpc.request<HostHealth>('health')
       expect(oldHealth.idle).toBe(false)
-      if (contract === 2) {
-        const invoke = (method: string, args: unknown[]) =>
-          native!.rpc.request('dispatch', {
-            method: 'chat.request',
-            actor,
-            params: {
-              kind: 'invoke',
-              value: { route: { id: 'old-chat', epoch: 1 }, target: 'ops', method, args }
-            }
-          })
-        await expect(
-          invoke('getTabState', ['tab', { expectedMode: 'claude-chat' }])
-        ).rejects.toThrow(/too_big|<=1|at most|Too big/i)
-        await native.rpc.request('dispatch', {
-          method: 'chat.request',
-          actor,
-          params: {
-            kind: 'bootstrap',
-            value: {
-              identity: {
-                id: 'old-chat',
-                taskId: 'task',
-                tabId: 'tab',
-                mode: 'claude-chat',
-                epoch: 1
-              },
-              projectId: null,
-              cwd: root,
-              revision: 1,
-              providerConfig: {},
-              defaultFlags: null,
-              env: {}
-            }
-          }
-        })
-        const stripped = await native.rpc.request('dispatch', {
+      const invoke = (method: string, args: unknown[]) =>
+        native!.rpc.request('dispatch', {
           method: 'chat.request',
           actor,
           params: {
             kind: 'invoke',
-            value: {
-              route: { id: 'old-chat', epoch: 1 },
-              target: 'queue',
-              method: 'push',
-              args: [
-                'tab',
-                'historical admission',
-                'historical admission',
-                { id: 'old-queue', expectedMode: 'codex-chat' }
-              ],
-              operationId: 'old-admission'
-            }
+            value: { route: { id: 'old-chat', epoch: 1 }, target: 'ops', method, args }
           }
         })
-        expect(stripped).toMatchObject({ id: 'old-queue' })
-      }
+      await expect(
+        invoke('getTabState', ['tab', { expectedMode: 'claude-chat' }])
+      ).rejects.toThrow(/too_big|<=1|at most|Too big/i)
+      await native.rpc.request('dispatch', {
+        method: 'chat.request',
+        actor,
+        params: {
+          kind: 'bootstrap',
+          value: {
+            identity: {
+              id: 'old-chat',
+              taskId: 'task',
+              tabId: 'tab',
+              mode: 'claude-chat',
+              epoch: 1
+            },
+            projectId: null,
+            cwd: root,
+            revision: 1,
+            providerConfig: {},
+            defaultFlags: null,
+            env: {}
+          }
+        }
+      })
+      const stripped = await native.rpc.request('dispatch', {
+        method: 'chat.request',
+        actor,
+        params: {
+          kind: 'invoke',
+          value: {
+            route: { id: 'old-chat', epoch: 1 },
+            target: 'queue',
+            method: 'push',
+            args: [
+              'tab',
+              'historical admission',
+              'historical admission',
+              { id: 'old-queue', expectedMode: 'codex-chat' }
+            ],
+            operationId: 'old-admission'
+          }
+        }
+      })
+      expect(stripped).toMatchObject({ id: 'old-queue' })
       const grant = await control!.rpc.request<ConnectorGrant>('reserve', { hubUrl: hub.url })
       native.close()
       native = undefined
@@ -236,32 +234,18 @@ test.each([1, 2])(
           cwd: root
         })
       ).rejects.toThrow(/update pending/i)
-      if (contract === 2)
-        await expect(
-          hub.gateway.request(retained.computerId, 'chat.request', {
-            kind: 'invoke',
-            value: {
-              route: { id: 'old-chat', epoch: 1 },
-              target: 'queue',
-              method: 'clear',
-              args: ['tab'],
-              operationId: 'maintenance-clear'
-            }
-          })
-        ).resolves.toBe(1)
-      else
-        await expect(
-          hub.gateway.request(retained.computerId, 'chat.request', {
-            kind: 'invoke',
-            value: {
-              route: { id: 'old-chat', epoch: 1 },
-              target: 'queue',
-              method: 'clear',
-              args: ['tab'],
-              operationId: 'maintenance-clear'
-            }
-          })
-        ).rejects.toThrow(/update pending/i)
+      await expect(
+        hub.gateway.request(retained.computerId, 'chat.request', {
+          kind: 'invoke',
+          value: {
+            route: { id: 'old-chat', epoch: 1 },
+            target: 'queue',
+            method: 'clear',
+            args: ['tab'],
+            operationId: 'maintenance-clear'
+          }
+        })
+      ).resolves.toBe(1)
       await hub.gateway.request(retained.computerId, 'proc.kill', { sessionId: 'running-native' })
       await vi.waitFor(async () =>
         expect((await control!.rpc.request<HostHealth>('health')).idle).toBe(true)
