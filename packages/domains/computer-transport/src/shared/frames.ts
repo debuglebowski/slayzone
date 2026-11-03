@@ -355,6 +355,12 @@ export const ptySignalPayloadSchema = z.object({
   activity: z.enum(['working', 'idle', 'unknown']).nullable(),
   /** The chunk counts as output for the silence (idle) clock. */
   refreshIdleClock: z.boolean(),
+  /**
+   * How long BEFORE this signal that output happened — set on a coalesced
+   * idle-clock signal sent after its window, so the hub's clock reads the output's
+   * time, not the signal's. Absent = now.
+   */
+  idleClockAgoMs: z.number().int().nonnegative().optional(),
   preview: z.string().max(200),
   error: ptySignalErrorSchema.nullable(),
   /**

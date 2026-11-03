@@ -121,7 +121,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
   })
   let syncPending = ''
   let lastClockSignalAt = -Infinity
-  let trailing: { seq: number } | null = null
+  let trailing: { seq: number; at: number } | null = null
   let trailingTimer: ReturnType<typeof setTimeout> | undefined
   let watchTimer: ReturnType<typeof setTimeout> | undefined
   let lastSeq = -1
@@ -174,12 +174,14 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
   const send = (
     seq: number,
     d: PtyOutputDetection | null,
-    exitError?: PtyOutputDetection['error']
+    exitError?: PtyOutputDetection['error'],
+    idleClockAgoMs?: number
   ): void => {
     const spawnId = ids.spawnId()
     emit({
       sessionId: ids.sessionId(),
       ...(spawnId !== undefined ? { spawnId } : {}),
+      ...(idleClockAgoMs ? { idleClockAgoMs } : {}),
       ...(exitError ? { exitError } : {}),
       seq,
       activity: d?.activity ?? null,
@@ -197,10 +199,10 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
   const flushTrailing = (): void => {
     trailingTimer = undefined
     if (!trailing) return
-    const { seq } = trailing
+    const { seq, at } = trailing
     trailing = null
     lastClockSignalAt = now()
-    send(seq, null)
+    send(seq, null, undefined, lastClockSignalAt - at)
   }
 
   return {
@@ -236,7 +238,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
         send(seq, d)
         return
       }
-      trailing = { seq }
+      trailing = { seq, at: now() }
       if (!trailingTimer) {
         trailingTimer = setTimeout(
           flushTrailing,

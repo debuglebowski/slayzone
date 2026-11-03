@@ -2268,7 +2268,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         // status redraws don't pin the clock open; output-driven adapters
         // (`transitionOnInput === false`, e.g. plain shell) refresh on every chunk.
         if (detection.refreshIdleClock) {
-          session.lastOutputTime = Date.now()
+          const agoMs = 'idleClockAgoMs' in detection ? (detection.idleClockAgoMs ?? 0) : 0
+          session.lastOutputTime = Date.now() - agoMs
         }
 
         if (detectedActivity) {

@@ -108,6 +108,8 @@ export interface PtySignal {
   seq: number
   activity: ActivityState | null
   refreshIdleClock: boolean
+  /** The idle-clock output happened this long before the signal (coalesced). */
+  idleClockAgoMs?: number
   preview: string
   error: ErrorInfo | null
   /** A failed resume's cause, sent just before the exit (sets the error, no transition). */
