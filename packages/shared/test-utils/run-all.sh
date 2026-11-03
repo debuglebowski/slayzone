@@ -966,6 +966,7 @@ run_harness packages/domains/terminal/src/server/skills.test.ts
 run_harness packages/domains/terminal/src/server/commands.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-event-handler.test.ts
 run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
+run_harness packages/domains/terminal-contracts/src/api-retry.test.ts
 # The conversation ids a fresh agent spawn passes (desktop terminal + hub startMainAgent).
 run_harness packages/domains/terminal-contracts/src/spawn-conversation-ids.test.ts
 run_harness packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
@@ -1108,6 +1109,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/useBrowserPickElement.test.tsx \
   packages/domains/task-terminals/src/client/chat/autocomplete/useAutocomplete.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
+  packages/domains/task-terminals/src/client/chat/renderers.api-retry.test.tsx \
   packages/domains/task-terminals/src/client/chat/AssistantAnswer.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \

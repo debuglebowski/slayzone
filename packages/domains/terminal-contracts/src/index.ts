@@ -4,6 +4,7 @@ export * from './dev-server'
 export * from './strip-underline'
 export * from './osc'
 export * from './agent-events'
+export * from './api-retry'
 export {
   HOOK_SUPPORTED_AGENT_IDS,
   mapEventType,

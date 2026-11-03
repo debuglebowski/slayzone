@@ -7,6 +7,7 @@
  * demand), compactions, command output, hooks and notices.
  */
 import { useLiveBlock } from '@slayzone/terminal/live-blocks'
+import { apiRetryReason } from '@slayzone/terminal-contracts'
 import { streamKeyOf, type TimelineItem } from '@slayzone/terminal/reducer'
 import { memo, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
@@ -122,8 +123,8 @@ export const TimelineRow = memo(function TimelineRow({
     case 'api-retry':
       return (
         <Text style={[s.line, s.warn]}>
-          Retrying ({item.attempt}/{item.maxRetries}) in{' '}
-          {Math.max(1, Math.round(item.delayMs / 1000))}s — {item.error}
+          API request retried {item.attempt === 1 ? 'once' : `${item.attempt}×`} (max{' '}
+          {item.maxRetries}) · {apiRetryReason(item.error, item.errorStatus)}
         </Text>
       )
     case 'rate-limit':

@@ -920,6 +920,33 @@ describe('ClaudeCodeAdapter — hook output', () => {
     ).toEqual({ kind: 'notice', id: 'n1', level: 'warning', text: 'PostToolUse:Bash says: hi' })
   })
 
+  test('system/api_retry: the failure category and its HTTP status (null = no response)', () => {
+    const frame = (error_status: number | null, error: string) =>
+      JSON.stringify({
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 2,
+        max_retries: 10,
+        retry_delay_ms: 1046,
+        error_status,
+        error,
+        uuid: 'r1',
+        session_id: 's'
+      })
+    expect(claudeCodeAdapter.parseLine(frame(null, 'unknown'))).toEqual({
+      kind: 'api-retry',
+      attempt: 2,
+      maxRetries: 10,
+      delayMs: 1046,
+      error: 'unknown',
+      errorStatus: null
+    })
+    expect(claudeCodeAdapter.parseLine(frame(529, 'overloaded'))).toMatchObject({
+      error: 'overloaded',
+      errorStatus: 529
+    })
+  })
+
   test('serializeUserTurn: attachments travel as image / document blocks', () => {
     const content = [
       {

@@ -212,12 +212,24 @@ export type TimelineItem =
       parentToolUseId?: string
     }
   | {
+      /**
+       * One retry loop of an API request: every attempt of the loop updates
+       * this one row (the latest attempt's numbers), never a row per attempt.
+       */
       kind: 'api-retry'
+      /** The latest attempt (1-based). */
       attempt: number
       maxRetries: number
+      /** How long after `timestamp` the latest attempt is retried. */
       delayMs: number
+      /** The latest failure's category (`ApiRetryEvent.error`). */
       error: string
+      /** The latest failure's HTTP status; null = no response; absent = not recorded. */
+      errorStatus?: number | null
+      /** When the latest attempt was announced. */
       timestamp: number
+      /** When the loop's first retry was announced. */
+      firstTimestamp: number
       parentToolUseId?: string
     }
   | { kind: 'rate-limit'; status: string; timestamp: number; parentToolUseId?: string }
@@ -1963,18 +1975,33 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         usage
       }
     }
-    case 'api-retry':
+    case 'api-retry': {
+      const latest = {
+        attempt: event.attempt,
+        maxRetries: event.maxRetries,
+        delayMs: event.delayMs,
+        error: event.error,
+        errorStatus: event.errorStatus,
+        timestamp: ts
+      }
+      // The next attempt of the loop the last row shows (nothing happened
+      // between them): that row, updated. Else a new loop, a new row.
+      const at = state.timeline.length - 1
+      const last = state.timeline[at]
+      if (last?.kind === 'api-retry' && event.attempt > last.attempt) {
+        const t = writable(state.timeline)
+        t[at] = { ...last, ...latest }
+        return { ...state, timeline: t }
+      }
       return {
         ...state,
         timeline: appended<TimelineItem | undefined>(state.timeline, {
           kind: 'api-retry',
-          attempt: event.attempt,
-          maxRetries: event.maxRetries,
-          delayMs: event.delayMs,
-          error: event.error,
-          timestamp: ts
+          ...latest,
+          firstTimestamp: ts
         })
       }
+    }
     case 'rate-limit':
       // Suppress 'allowed' / 'allowed_warning' — informational, not actionable. Only surface
       // blocked / exceeded / hard-limit statuses.
@@ -3146,7 +3173,9 @@ export function deriveLoadingLabel(state: ChatTimelineState): string | null {
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const item = state.timeline[i]
     if (!item || item.kind === 'user-text' || item.kind === 'result') break
-    if (item.kind === 'api-retry') {
+    // Only while it is the turn's newest row: once anything follows, the
+    // request went through and the label moves on.
+    if (item.kind === 'api-retry' && i === state.timeline.length - 1) {
       const sec = Math.max(1, Math.round(item.delayMs / 1000))
       return `Retrying (${item.attempt}/${item.maxRetries}) in ${sec}s…`
     }

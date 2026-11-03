@@ -411,7 +411,7 @@ test.describe('Chat theme tokens', () => {
     ]) {
       await expect(mainWindow.getByText(text).first(), text).toBeVisible()
     }
-    await expect(mainWindow.getByText(/API retry 1\/5/)).toBeVisible()
+    await expect(mainWindow.getByText(/API request retried once/)).toBeVisible()
     await expect(mainWindow.getByText('rate limit: rejected')).toBeVisible()
 
     // Selected option: filled radio + tinted row.
@@ -472,7 +472,12 @@ test.describe('Chat theme tokens', () => {
         'color',
         '--agent-foreground'
       ],
-      ['retry banner text', scroller.getByText(/API retry 1\/5/), 'color', '--warning-foreground'],
+      [
+        'settled retry text',
+        scroller.getByText(/API request retried once/),
+        'color',
+        '--muted-foreground'
+      ],
       [
         'question header',
         scroller.locator('button', { hasText: 'Question' }).first(),

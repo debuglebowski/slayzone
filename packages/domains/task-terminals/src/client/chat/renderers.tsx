@@ -1,6 +1,11 @@
 import { MessageDetails } from './MessageDetails'
 import { useContext, useDeferredValue, useEffect, useId, useMemo } from 'react'
-import { CODEX_AGENT_TOOL_PREFIX, stripAnsi } from '@slayzone/terminal-contracts'
+import {
+  CODEX_AGENT_TOOL_PREFIX,
+  apiRetryReason,
+  formatRetrySpan,
+  stripAnsi
+} from '@slayzone/terminal-contracts'
 import { useChatProvider, useChatView } from './ChatViewContext'
 import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
 import { useToolFocusRequest } from './tool-cards/tool-focus'
@@ -12,6 +17,7 @@ import {
   CircleStop,
   CircleX,
   Loader2,
+  RotateCw,
   FileText,
   Pencil,
   Search,
@@ -229,11 +235,48 @@ export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 're
   )
 }
 
+/**
+ * One API retry loop (the reducer folds its attempts into one row). Live — the
+ * timeline's newest row while the turn runs — it counts down to the next
+ * attempt; once anything follows, it is a quiet record of what was retried.
+ */
 export function ApiRetryBanner({ item }: { item: Extract<TimelineItem, { kind: 'api-retry' }> }) {
+  const { timeline, inFlight } = useChatView()
+  const live = Boolean(inFlight) && timeline[timeline.length - 1] === item
+  const now = useNow(1000, { enabled: live })
+  const reason = apiRetryReason(item.error, item.errorStatus)
+  if (!live) {
+    const span = item.timestamp - item.firstTimestamp
+    return (
+      <div
+        data-testid="api-retry"
+        data-live="false"
+        className="mx-4 my-1 px-3 py-1 text-[11px] text-muted-foreground flex items-center gap-2"
+      >
+        <RotateCw className="size-3 shrink-0" />
+        <span>
+          API request retried {item.attempt === 1 ? 'once' : `${item.attempt}×`}
+          {span >= 1000 && ` over ${formatRetrySpan(span)}`} · {reason}
+        </span>
+      </div>
+    )
+  }
+  const remaining = item.timestamp + item.delayMs - now
   return (
-    <div className="mx-4 my-1 px-3 py-1.5 text-xs rounded-md border border-warning/40 bg-warning/10 text-warning-foreground flex items-center gap-2">
+    <div
+      data-testid="api-retry"
+      data-live="true"
+      role="status"
+      className="mx-4 my-1 px-3 py-1.5 text-xs rounded-md border border-warning/40 bg-warning/10 text-warning-foreground flex items-center gap-2"
+    >
       <Loader2 className="size-3 animate-spin shrink-0" />
-      API retry {item.attempt}/{item.maxRetries} in {item.delayMs}ms: {item.error}
+      <span>
+        Retrying API request · attempt {item.attempt}/{item.maxRetries} ·{' '}
+        <span className="tabular-nums">
+          {remaining >= 1000 ? `next in ${formatRetrySpan(remaining)}` : 'retrying now'}
+        </span>{' '}
+        · {reason}
+      </span>
     </div>
   )
 }

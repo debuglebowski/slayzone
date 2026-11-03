@@ -396,7 +396,8 @@ function parseSystem(obj: Record<string, unknown>, parent: string | undefined): 
       attempt: (obj.attempt as number) ?? 0,
       maxRetries: (obj.max_retries as number) ?? 0,
       delayMs: (obj.retry_delay_ms as number) ?? 0,
-      error: (obj.error as string) ?? ''
+      error: (obj.error as string) ?? '',
+      errorStatus: typeof obj.error_status === 'number' ? obj.error_status : null
     }
   }
   // A hook run that blocked, failed or told the model something is shown; the

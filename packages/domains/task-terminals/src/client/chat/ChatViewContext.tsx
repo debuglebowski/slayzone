@@ -104,6 +104,8 @@ export interface ChatViewState {
    */
   timeline: Readonly<TimelineRows>
   childIndex: Map<string, number[]>
+  /** The agent is on a turn now (rows that show "still going" read it; absent: not). */
+  inFlight?: boolean
   /**
    * Cmd+Click on URL → in-app slay browser. Mirrors terminal pane wiring.
    * Cmd+Shift+Click always goes external regardless. Bare click does nothing.

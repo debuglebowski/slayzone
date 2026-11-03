@@ -1068,6 +1068,57 @@ test('deriveLoadingLabel: api-retry overrides open block', () => {
   expect(deriveLoadingLabel(s)).toBe('Retrying (2/5) in 3s…')
 })
 
+const retry = (attempt: number, delayMs = 1000, errorStatus: number | null = null) =>
+  ({ kind: 'api-retry', attempt, maxRetries: 10, delayMs, error: 'unknown', errorStatus }) as const
+
+test('api-retry: one loop of attempts is one row with the latest attempt', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'user-sent', text: 'hi' })
+  s = reducer(s, { type: 'event', event: retry(1, 500), at: 1_000 })
+  s = reducer(s, { type: 'event', event: retry(2, 1000, 529), at: 2_000 })
+  s = reducer(s, { type: 'event', event: retry(3, 2000, null), at: 4_000 })
+  const rows = s.timeline.filter((it) => it?.kind === 'api-retry')
+  expect(rows).toEqual([
+    {
+      kind: 'api-retry',
+      attempt: 3,
+      maxRetries: 10,
+      delayMs: 2000,
+      error: 'unknown',
+      errorStatus: null,
+      timestamp: 4_000,
+      firstTimestamp: 1_000
+    }
+  ])
+  expect(deriveLoadingLabel(s)).toBe('Retrying (3/10) in 2s…')
+})
+
+test('api-retry: a loop after other rows, or restarting at attempt 1, is a new row', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'user-sent', text: 'hi' })
+  s = reducer(s, { type: 'event', event: retry(1) })
+  s = reducer(s, { type: 'event', event: retry(2) })
+  s = reducer(s, { type: 'event', event: ev.text('m-1', 'went through') })
+  s = reducer(s, { type: 'event', event: retry(1) })
+  s = reducer(s, { type: 'event', event: retry(1) })
+  expect(
+    s.timeline
+      .filter((it) => it?.kind === 'api-retry')
+      .map((it) => it?.kind === 'api-retry' && it.attempt)
+  ).toEqual([2, 1, 1])
+})
+
+test('deriveLoadingLabel: a retry that went through no longer reads "Retrying"', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'user-sent', text: 'hi' })
+  s = reducer(s, { type: 'event', event: retry(1) })
+  s = reducer(s, { type: 'event', event: ev.text('m-1', 'went through') })
+  expect(deriveLoadingLabel(s) ?? '').not.toMatch(/Retrying/)
+})
+
 test('deriveLoadingLabel: completed tool does not appear active', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })

@@ -427,7 +427,13 @@ export interface ApiRetryEvent {
   attempt: number
   maxRetries: number
   delayMs: number
+  /**
+   * Claude Code's category for the failure (`rate_limit`, `overloaded`,
+   * `server_error`, `authentication_failed`, `unknown`…), not a message.
+   */
   error: string
+  /** The HTTP status of the failed request; null = no response (connection error, timeout). Absent on events saved before it was kept. */
+  errorStatus?: number | null
 }
 
 /** The CLI finished compacting the conversation (manual `/compact` or automatic). */
