@@ -157,6 +157,7 @@ import {
 import { createRoutingSlayExecutor } from './slay-routing'
 import { createChatPromptRecorder, setTurnGitRouting } from '@slayzone/agent-turns/server'
 import { setUsageCollectRouting, type ParseResult } from '@slayzone/usage-analytics/server'
+import { setTestScanRouting } from '@slayzone/test-panel/server'
 import {
   AutomationEngine,
   setAutomationsEvents,
@@ -221,6 +222,7 @@ import {
   execRunResultSchema,
   agentConfigFsResultSchema,
   usageCollectResultSchema,
+  testPanelScanResultSchema,
   gitWatchEventSchema,
   GIT_WATCH_EVENT,
   HubToComputerMethods,
@@ -1867,6 +1869,15 @@ export function composeServer(opts: {
       gitWatchComputerGone(computerId)
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
+    // The test panel's scan reads the project's files: on the project's computer.
+    setTestScanRouting({
+      computerFor: async ({ projectPath, projectId }) =>
+        placement.forTarget((await gitTargetForPath(db, projectPath)) ?? { projectId }),
+      scan: async (computerId, input) =>
+        testPanelScanResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.testPanelScan, input)
+        )
+    })
     // Agent usage logs are on the computers: each refresh asks every usable one for
     // what is new since its own cursors.
     setUsageCollectRouting({

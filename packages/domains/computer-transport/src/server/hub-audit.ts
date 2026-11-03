@@ -105,6 +105,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   },
   // Reads the agents' own usage logs; changes nothing.
   'usage.collect': null,
+  // Lists file names; reads no content, changes nothing.
+  'testPanel.scan': null,
   // An automation's shell command: the program, never the command line (it can
   // carry a templated prompt).
   'exec.run': {

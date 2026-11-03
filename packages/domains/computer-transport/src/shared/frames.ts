@@ -568,6 +568,8 @@ export const HubToComputerMethods = {
   agentConfigFs: 'agentConfig.fs',
   /** The agents' usage logs on the computer, parsed there from the hub's cursors. */
   usageCollect: 'usage.collect',
+  /** The test panel's file scan, in a project folder on the computer. */
+  testPanelScan: 'testPanel.scan',
   // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
@@ -1376,6 +1378,21 @@ export const usageCollectResultSchema = z.object({
   )
 })
 export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
+
+/**
+ * `testPanel.scan`: match the files under `projectPath` (jailed) against the
+ * project's test categories (`@slayzone/test-panel`'s scanner). Answers its
+ * `ScanResult` ({ matches: [{ path, categoryId }], totalScanned }).
+ */
+export const testPanelScanParamsSchema = z.object({
+  projectPath: z.string().min(1),
+  categories: z.array(z.object({ id: z.string(), pattern: z.string() }))
+})
+export type TestPanelScanParams = z.infer<typeof testPanelScanParamsSchema>
+export const testPanelScanResultSchema = z.object({
+  matches: z.array(z.object({ path: z.string(), categoryId: z.string() })),
+  totalScanned: z.number().int().nonnegative()
+})
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)

@@ -32,6 +32,7 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
+    "@slayzone/test-panel": "workspace:*",
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {

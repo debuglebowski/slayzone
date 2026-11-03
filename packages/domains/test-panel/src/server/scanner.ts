@@ -1,7 +1,13 @@
 import { readdir } from 'fs/promises'
 import { join, relative } from 'path'
 import picomatch from 'picomatch'
-import type { TestCategory, TestFileMatch, ScanResult } from '../shared/types'
+import type { TestFileMatch, ScanResult } from '../shared/types'
+
+/** What a scan needs of a category: its id and glob. */
+export interface ScanCategory {
+  id: string
+  pattern: string
+}
 
 const IGNORED_DIRS = new Set([
   'node_modules',
@@ -21,7 +27,7 @@ function shouldSkip(name: string): boolean {
 
 export async function scanTestFiles(
   projectPath: string,
-  categories: TestCategory[]
+  categories: readonly ScanCategory[]
 ): Promise<ScanResult> {
   if (categories.length === 0) return { matches: [], totalScanned: 0 }
 

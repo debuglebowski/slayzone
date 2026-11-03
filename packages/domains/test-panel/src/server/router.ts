@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { scanTestFiles } from './scanner'
+import { scanTestFilesWhereTheyAre } from './scan-routing'
 import {
   listCategories,
   createCategory,
@@ -85,7 +85,8 @@ export const testPanelRouter = router({
     .input(z.object({ projectPath: z.string(), projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       const categories = await listCategories(ctx.db, input.projectId)
-      return scanTestFiles(input.projectPath, categories)
+      // The files are on the project's computer: the scan runs there.
+      return scanTestFilesWhereTheyAre(input, categories)
     }),
 
   // Labels CRUD

@@ -804,6 +804,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal
+      '@slayzone/test-panel':
+        specifier: workspace:*
+        version: link:../../domains/test-panel
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics
@@ -910,6 +913,9 @@ importers:
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../../domains/terminal-contracts
+      '@slayzone/test-panel':
+        specifier: workspace:*
+        version: link:../../domains/test-panel
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types
