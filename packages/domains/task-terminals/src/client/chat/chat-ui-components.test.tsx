@@ -376,7 +376,7 @@ describe('TurnTriggerRow', () => {
       { wrapper: TooltipProvider }
     )
 
-  it('a line a watch printed: a card labelling the watch and the line', () => {
+  it('a line a watch printed: one line naming the watch; the line it printed on click', () => {
     trigger([
       {
         uuid: 'n1',
@@ -386,6 +386,12 @@ describe('TurnTriggerRow', () => {
       }
     ])
     const card = screen.getByTestId('turn-trigger-notification')
+    // Collapsed: the agent's answer below says what it made of the line.
+    expect(card.textContent).toBe('Watchdemo-mode subtask')
+    const toggle = within(card).getByRole('button')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(card.textContent).toBe(
       'Watchdemo-mode subtaskPrintedstatus=in_progress | changed_files=6'
     )

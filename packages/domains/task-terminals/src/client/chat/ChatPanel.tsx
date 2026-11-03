@@ -372,7 +372,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       loadPages,
       searchPages,
       summary: historyOfSession,
-      unloadPages
+      unloadPages,
+      cwd
     })
     const activeUsers = useMemo(
       () => activeUserRows(display.summary, display.conversationFolded),

@@ -11,7 +11,7 @@ import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
 import { FilesChangedRow, useShowFileChange } from './FilesChangedRow'
 import { relativeToCwd } from './relative-path'
-import { turnChangeSources, type RecordedChanges } from './turn-changes'
+import { turnChangeSources, workspaceChangesShows, type RecordedChanges } from './turn-changes'
 import { TurnFooterPanel } from '../turn-footer'
 
 type Row = Extract<TimelineItem, { kind: 'workspace-changes' }>
@@ -137,16 +137,6 @@ function SavedFile({
   )
 }
 
-/** A recorded edit touched a file inside `cwd` (unknown cwd: assume yes). */
-function editedInside(recorded: RecordedChanges | undefined, cwd: string | undefined): boolean {
-  if (!recorded) return false
-  if (!cwd) return true
-  // A relative path is relative to the agent's cwd: inside.
-  return recorded.files.some(
-    (f) => !/^([/\\]|[A-Za-z]:)/.test(f.path) || relativeToCwd(f.path, cwd) !== f.path
-  )
-}
-
 /** One turn summary: filesystem result takes precedence over tool activity. */
 export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; embedded?: boolean }) {
   const [open, setOpen] = useRowUiState('workspace-changes', false, false)
@@ -158,13 +148,7 @@ export function WorkspaceChangesRow({ item, embedded = false }: { item: Row; emb
   if (item.status === 'unavailable' && recorded) {
     return <FilesChangedRow item={recorded} embedded={embedded} captureId={item.captureId} />
   }
-  // Failed capture + no recorded edits = nothing to show. An agent-cut turn keeps its card:
-  // it is that turn's only "Turn interrupted" signal.
-  if (item.status === 'unavailable' && !item.interrupted) return null
-  // Nothing changed in the workspace: no card, unless an edit inside it was reverted (true zero).
-  // Edits outside the workspace (e.g. artifacts) can't show up in its diff, so they don't count.
-  if (item.status === 'complete' && item.fileCount === 0 && !editedInside(recorded, cwd))
-    return null
+  if (!workspaceChangesShows(item, recorded, cwd)) return null
   const label =
     item.status === 'pending'
       ? 'Checking changes…'

@@ -753,6 +753,72 @@ test('sub-agent: late notification after tool-result does not regress phase', ()
   expect(sub.totalTokens).toBe(100)
 })
 
+// A resumed CLI reports the previous process's orphaned background tasks with
+// the `task_notification` frame sub-agents use. One that was a command (a
+// Monitor, a run_in_background Bash) is that command ending, not a sub-agent.
+describe('sub-agent: orphan notification after a restart', () => {
+  const orphan = (toolUseId: string): AgentEvent => ({
+    kind: 'sub-agent',
+    phase: 'in-flight',
+    toolUseId,
+    status: 'stopped',
+    summary: 'Orphaned by a previous Claude Code process exit and reported in an aggregate summary.',
+    raw: {}
+  })
+  const apply = (s: ChatTimelineState, events: AgentEvent[]): ChatTimelineState =>
+    events.reduce((acc, event) => reducer(acc, { type: 'event', event }), s)
+
+  test('for a command: no sub-agent row, the command ends', () => {
+    let s = apply(initialState(), [
+      ev.turnInit(),
+      ev.call('tu_mon', 'Monitor'),
+      {
+        kind: 'command-task',
+        taskId: 'bh1',
+        toolUseId: 'tu_mon',
+        status: 'running',
+        backgrounded: true
+      },
+      ev.result('tu_mon'),
+      ev.turnResult()
+    ])
+    // The command's process went away without a process-exit: still running.
+    expect(s.commandTasks.get('tu_mon')?.status).toBe('running')
+    s = apply(s, [orphan('tu_mon')])
+    expect(rowsOf(s).some((i) => i.kind === 'sub-agent')).toBe(false)
+    expect(s.inFlightSubAgents).toEqual([])
+    expect(s.commandTasks.get('tu_mon')?.status).toBe('killed')
+  })
+
+  test('for a command after the new process spawned: still no sub-agent row', () => {
+    const s = apply(initialState(), [
+      ev.turnInit(),
+      ev.call('tu_bash', 'Bash'),
+      {
+        kind: 'command-task',
+        taskId: 'bd1',
+        toolUseId: 'tu_bash',
+        status: 'running',
+        backgrounded: true
+      },
+      ev.result('tu_bash'),
+      ev.turnResult(),
+      { kind: 'session-spawn', spawnId: 'sp-2' },
+      orphan('tu_bash')
+    ])
+    expect(rowsOf(s).some((i) => i.kind === 'sub-agent')).toBe(false)
+    expect(s.commandTasks.get('tu_bash')?.status).toBe('killed')
+  })
+
+  test('for a task with no row: an ended row, never a running one', () => {
+    const s = apply(initialState(), [ev.turnInit(), orphan('tu_unknown')])
+    const sub = rowsOf(s).find((i) => i.kind === 'sub-agent')
+    if (!sub || sub.kind !== 'sub-agent') throw new Error('missing')
+    expect(sub.phase).toBe('failed')
+    expect(s.inFlightSubAgents).toEqual([])
+  })
+})
+
 test('sub-agent: interrupt flips in-flight rows to failed', () => {
   // Send a user message so isInFlight() is true (interrupted is a no-op otherwise).
   let s = initialState()
