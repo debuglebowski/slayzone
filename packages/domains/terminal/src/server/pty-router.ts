@@ -178,9 +178,14 @@ export const ptyRouter = router({
           if (filter && !filter.includes(sessionId)) return
           emit.next({ sessionId, data, seq })
         }
-        const ev = getPtyDeps().events
+        const { events: ev, ops: o } = getPtyDeps()
         ev.on('data', handler)
-        return () => ev.off('data', handler)
+        // Watching is what makes a session's owner stream its bytes here at all.
+        const unwatch = o?.ptyWatchOutput?.(filter ?? 'all')
+        return () => {
+          ev.off('data', handler)
+          unwatch?.()
+        }
       })
     ),
   onStateChange: publicProcedure.subscription(() =>

@@ -754,6 +754,37 @@ describe('createRoutingPtyBackend', () => {
     expect(await handle.clearOutput?.()).toEqual({ clearedSeq: 0 })
   })
 
+  it('relay on demand: spawned unrelayed, turned on at the seq the computer reached, no backfill of the gap', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.relay', () => ({ seq: 7 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false },
+      relay: false
+    })) as PtyHandle
+    await handle.whenSpawned
+    expect(requireCall(gateway, 'pty.spawn').params).toMatchObject({ relay: false })
+    const got: Array<[string, number | undefined]> = []
+    handle.onData((d, seq) => got.push([d, seq]))
+    handle.setRelay?.(true)
+    await vi.waitFor(() =>
+      expect(requireCall(gateway, 'pty.relay').params).toMatchObject({
+        sessionId: 'sess-1',
+        on: true
+      })
+    )
+    await new Promise((r) => setTimeout(r, 10))
+    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 8, data: 'x' })
+    expect(got).toEqual([['x', 8]])
+    expect(gateway.calls.filter((c) => c.method === 'pty.getBufferSince')).toEqual([])
+  })
+
   it('without the ack the hub keeps owning output (older computer)', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))

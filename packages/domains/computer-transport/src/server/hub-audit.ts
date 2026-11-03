@@ -77,6 +77,7 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.setTheme': null,
   'pty.getBufferSince': null,
   'pty.getReplay': null,
+  'pty.relay': null,
   // Empties a session's scrollback (the terminal's "clear"); starts nothing.
   'pty.clearBuffer': null,
   'pty.list': null,

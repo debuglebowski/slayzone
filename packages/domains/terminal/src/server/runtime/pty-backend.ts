@@ -89,6 +89,12 @@ export interface PtySpawnSpec {
    * the new output follows it. Ignored by an owner that keeps no output.
    */
   carryOutput?: { preamble: string }
+  /**
+   * Stream the output to this side now (someone watches the session). False: the
+   * owner only buffers + detects it until `PtyHandle.setRelay(true)`. Ignored by an
+   * owner that always streams.
+   */
+  relay?: boolean
 }
 
 /** What output detection needs for one session (mirrors `PtyOutputDetector` options). */
@@ -120,6 +126,8 @@ export interface PtySignal {
   error: ErrorInfo | null
   /** A failed resume's cause, sent just before the exit (sets the error, no transition). */
   exitError?: ErrorInfo
+  /** The session's first output (sent even when nothing is relayed). */
+  firstOutput?: true
   suppressOutput: boolean
   prompt: PromptInfo | null
   title: string | null
@@ -218,6 +226,8 @@ export interface PtyHandle {
   getReplay?(afterSeq: number): Promise<BufferSinceResult>
   /** Clear the owner's buffer. With {@link ownsOutput}. */
   clearOutput?(): Promise<{ clearedSeq: number }>
+  /** Start/stop streaming output to this side (see `PtySpawnSpec.relay`). */
+  setRelay?(on: boolean): void
 }
 
 export interface PtyBackend {
@@ -240,7 +250,9 @@ export interface PtyBackend {
     processName: string,
     taskId?: string,
     /** Run output detection on the computer from adoption on (see `PtySpawnSpec`). */
-    detection?: PtyDetectionSpec
+    detection?: PtyDetectionSpec,
+    /** See `PtySpawnSpec.relay`. */
+    relay?: boolean
   ): Promise<PtyHandle>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing

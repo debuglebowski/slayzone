@@ -68,6 +68,30 @@ describe('pty router', () => {
     expect(got).toEqual([])
   })
 
+  test('onData registers live-output interest for exactly what it watches, until it ends', async () => {
+    const interest: Array<string[] | 'all'> = []
+    const ended: Array<string[] | 'all'> = []
+    setPtyDeps({
+      ops: {
+        ptyWatchOutput: (target: string[] | 'all') => {
+          interest.push(target)
+          return () => ended.push(target)
+        }
+      } as unknown as PtyDeps['ops'],
+      events
+    } as unknown as PtyDeps)
+    const caller = ptyRouter.createCaller(ctx)
+    const all = (await caller.onData(undefined)).subscribe({ next: () => undefined })
+    const some = (await caller.onData({ sessionIds: ['sess-a'] })).subscribe({
+      next: () => undefined
+    })
+    expect(interest).toEqual(['all', ['sess-a']])
+    all.unsubscribe()
+    some.unsubscribe()
+    expect(ended).toEqual(['all', ['sess-a']])
+    setPtyDeps({ ops: {} as unknown as PtyDeps['ops'], events } as unknown as PtyDeps)
+  })
+
   test('attach answers exists + state + buffer in one call (live and missing session)', async () => {
     const live = { chunks: [{ seq: 4, data: 'hi' }], currentSeq: 4, prelude: '' }
     setPtyDeps({

@@ -12,6 +12,7 @@ import type { PtySessionWindow } from '../pty-host'
 import {
   clearBuffer,
   createPty,
+  watchPtyOutput,
   getBuffer,
   getBufferSince,
   getState,
@@ -54,6 +55,7 @@ const signal = (over: Partial<PtySignal>): PtySignal => ({
 function routedBackend(detectsOutput: boolean) {
   const specs: PtySpawnSpec[] = []
   const writes: Array<[string, unknown]> = []
+  const relays: boolean[] = []
   let dataCb: ((d: string) => void) | undefined
   let signalCb: ((s: PtySignal) => void) | undefined
   let exitCb: ((e: { exitCode: number }) => void) | undefined
@@ -78,7 +80,8 @@ function routedBackend(detectsOutput: boolean) {
         },
         write: (data: string, opts?: unknown) => writes.push([data, opts]),
         kill: () => undefined,
-        resize: () => undefined
+        resize: () => undefined,
+        setRelay: (on: boolean) => relays.push(on)
       } as never
     }
   } as PtyBackend)
@@ -87,7 +90,8 @@ function routedBackend(detectsOutput: boolean) {
     writes,
     output: (d: string) => dataCb?.(d),
     signal: (s: PtySignal) => signalCb?.(s),
-    exit: (exitCode: number) => exitCb?.({ exitCode })
+    exit: (exitCode: number) => exitCb?.({ exitCode }),
+    relays
   }
 }
 
@@ -268,4 +272,36 @@ test('owner owns the output: no hub copy; replay, clear and seqs come from the o
   // No hub copy: the full buffer is the owner's replay too.
   expect(await getBuffer('mirror:owner')).toBe('\x1b[0mfrom owner')
   expect(await clearBuffer('mirror:owner')).toEqual({ success: true, clearedSeq: 41 })
+})
+
+test('output is relayed only while someone watches the session', async () => {
+  const b = routedBackend(true)
+  await open('mirror:relay')
+  // Nobody watching at spawn: the owner keeps it to itself.
+  expect(b.specs.at(-1)?.relay).toBe(false)
+  const stop = watchPtyOutput(['mirror:relay'])
+  expect(b.relays).toEqual([true])
+  const stopAll = watchPtyOutput('all')
+  stop()
+  // Still watched (by the unfiltered watcher): no flip.
+  expect(b.relays).toEqual([true])
+  stopAll()
+  expect(b.relays).toEqual([true, false])
+})
+
+test('a session spawned while watched starts relayed', async () => {
+  const b = routedBackend(true)
+  const stop = watchPtyOutput('all')
+  await open('mirror:relay-on')
+  expect(b.specs.at(-1)?.relay).toBe(true)
+  stop()
+})
+
+test('first output known from the owner even when nothing is relayed', async () => {
+  const b = routedBackend(true)
+  await open('mirror:first')
+  expect(getState('mirror:first')).toBe('starting')
+  b.signal(signal({ seq: 0, firstOutput: true }))
+  await new Promise((r) => setTimeout(r, 150))
+  expect(getState('mirror:first')).toBe('idle')
 })

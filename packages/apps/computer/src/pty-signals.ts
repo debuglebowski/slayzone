@@ -135,6 +135,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
   let lastSeq = -1
   let disposed = false
   let reportedError = false
+  let sentFirst = false
   const current: PtyDetectedSnapshot = {
     activity: null,
     title: null,
@@ -205,12 +206,14 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     seq: number,
     d: PtyOutputDetection | null,
     exitError?: PtyOutputDetection['error'],
-    idleClockAgoMs?: number
+    idleClockAgoMs?: number,
+    firstOutput?: true
   ): void => {
     const spawnId = ids.spawnId()
     emit({
       sessionId: ids.sessionId(),
       ...(spawnId !== undefined ? { spawnId } : {}),
+      ...(firstOutput ? { firstOutput } : {}),
       ...(idleClockAgoMs ? { idleClockAgoMs } : {}),
       ...(exitError ? { exitError } : {}),
       seq,
@@ -253,6 +256,13 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
       if (d.conversationId && watchTimer) {
         clearTimeout(watchTimer)
         watchTimer = undefined
+      }
+      if (!sentFirst) {
+        // Always told: the hub learns the process started even when it gets no bytes.
+        sentFirst = true
+        if (d.refreshIdleClock) lastClockSignalAt = now()
+        send(seq, d, undefined, undefined, true)
+        return
       }
       if (says(d)) {
         if (d.refreshIdleClock) {

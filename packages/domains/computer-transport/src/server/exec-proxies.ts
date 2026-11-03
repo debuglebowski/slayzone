@@ -67,6 +67,7 @@ import type {
   PtyWriteOptions
 } from '@slayzone/terminal/server'
 import {
+  ptyRelayResultSchema,
   ptyClearBufferResultSchema,
   ptyGetReplayResultSchema,
   type PtyDetectedSnapshot,
@@ -949,6 +950,15 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   signalEmitter: BufferingEmitter<PtySignal>
   /** See `ackDetection`: the computer's buffer is the session's only one. */
   ownsOutput: boolean
+  /**
+   * Signals that arrived before the spawn's reply said whether the computer
+   * detects (the reply and the first output race on the hub's side); decided at
+   * the reply. Null when no detection was asked for, or once decided.
+   */
+  preAckSignals: PtySignal[] | null
+  /** The relay state last asked for (`setRelay`); re-sent after a reattach. */
+  relay?: boolean
+  setRelay?: (on: boolean) => void
 }
 
 /**
@@ -957,6 +967,9 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
  * out-of-order frames trigger a `pty.getBufferSince` backfill so delivery stays
  * monotonic. Sessions are disposed on `pty.exit` and on computer loss/disconnect.
  */
+/** Signals held while a spawn's detection ack is still in flight (see `preAckSignals`). */
+const PRE_ACK_SIGNALS_MAX = 256
+
 /** The computer keeps a reaped pty's scrollback this long for a continuing spawn. */
 const PTY_CARRY_WINDOW_MS = 60_000
 
@@ -1102,6 +1115,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     entry.detectsOutput = true
     entry.ownsOutput = fresh
     entry.detectFromSeq = entry.lastSeq
+    const early = entry.preAckSignals ?? []
+    entry.preAckSignals = null
+    for (const signal of early)
+      if (signal.seq > entry.detectFromSeq) entry.signalEmitter.emit(signal)
   }
   gateway.events.on('event', (event) => {
     if (event.name !== PTY_SIGNAL_EVENT_NAME) return
@@ -1109,8 +1126,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     if (!parsed.success) return
     const { sessionId, spawnId, ...signal } = parsed.data
     const entry = sessions.get(sessionKey(event.computerId, sessionId))
-    if (!entry || entry.disposed || !entry.detectsOutput) return
+    if (!entry || entry.disposed) return
     if (spawnId && entry.spawnId && spawnId !== entry.spawnId) return
+    if (!entry.detectsOutput) {
+      // Bounded: a reply that never comes must not grow it without end.
+      if (entry.preAckSignals && entry.preAckSignals.length < PRE_ACK_SIGNALS_MAX)
+        entry.preAckSignals.push(signal)
+      return
+    }
     if (signal.seq <= entry.detectFromSeq) return
     entry.signalEmitter.emit(signal)
   })
@@ -1133,6 +1156,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       entry.sealed = false
       // A spawn confirmed by listing (its reply was lost) is acknowledged here.
       if (listed.detection) ackDetection(entry)
+      // The computer may have dropped relay state with the connection: ask again.
+      if (entry.relay !== undefined) entry.setRelay?.(entry.relay)
       // The computer kept detecting while the hub was away; its signals then went
       // nowhere. Its settled view brings the mirror up to date in one step.
       if (entry.detectsOutput && listed.detected) {
@@ -1210,7 +1235,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       detectsOutput: false,
       detectFromSeq: -1,
       signalEmitter,
-      ownsOutput: false
+      ownsOutput: false,
+      preAckSignals: null
     }
     sessions.set(key, entry)
 
@@ -1256,6 +1282,28 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       get ownsOutput(): boolean {
         return entry.ownsOutput
       },
+      setRelay: (on: boolean): void => {
+        entry.relay = on
+        void send(HubToComputerMethods.ptyRelay, {
+          sessionId,
+          ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+          on
+        })
+          .then((res) => {
+            const parsed = ptyRelayResultSchema.safeParse(res)
+            if (!on || !parsed.success || entry.disposed) return
+            // Frames up to here were never streamed (nobody watched): not a gap to
+            // backfill — a watcher reads them as replay. Live delivery resumes after.
+            if (parsed.data.seq > entry.lastSeq) {
+              entry.lastSeq = parsed.data.seq
+              for (const seq of [...entry.pending.keys()]) {
+                if (seq <= entry.lastSeq) entry.pending.delete(seq)
+              }
+            }
+            drain(entry)
+          })
+          .catch(noop)
+      },
       getReplay: async (afterSeq: number) =>
         ptyGetReplayResultSchema.parse(
           await gateway.request(computerId, HubToComputerMethods.ptyGetReplay, {
@@ -1298,6 +1346,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         }).catch(noop)
       }
     }
+    entry.setRelay = handle.setRelay
     return { entry, handle, setPid: (next) => (pid = next) }
   }
 
@@ -1410,7 +1459,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       sessionId: string,
       processName: string,
       taskId?: string,
-      detection?: PtyDetectionSpec
+      detection?: PtyDetectionSpec,
+      relay?: boolean
     ) {
       // Before anything is tracked: a refused adopt leaves no session behind.
       if (gate) await gate(computerId, { kind: 'session', id: sessionId })
@@ -1419,13 +1469,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
       const { entry, handle, setPid } = register(computerId, sessionId, processName, true)
       entry.spawnId = warmId
+      if (detection) entry.preAckSignals = []
+      entry.relay = relay
       lastSpawnIds.set(sessionKey(computerId, sessionId), warmId)
       try {
         const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
           warmId,
           sessionId,
           ...(taskId ? { taskId } : {}),
-          ...(detection ? { detection } : {})
+          ...(detection ? { detection } : {}),
+          ...(relay !== undefined ? { relay } : {})
         })
         const parsed = ptyWarmAdoptResultSchema.parse(res)
         setPid(parsed.pid)
@@ -1439,6 +1492,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // detects it), but the buffer it came from is the session's only one.
         entry.lastSeq = parsed.seq
         if (detection && parsed.detection) ackDetection(entry, true)
+        else entry.preAckSignals = null
         entry.detectFromSeq = parsed.seq
         if (parsed.data) entry.dataEmitter.emit({ data: parsed.data, seq: parsed.seq })
         if (entry.detectsOutput && parsed.detected) {
@@ -1496,6 +1550,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         const spawnId = randomUUID()
         entry.spawnId = spawnId
         lastSpawnIds.set(key, spawnId)
+        entry.relay = spec.relay
+        if (spec.detection) entry.preAckSignals = []
         // The startup deadline travels with the spawn: the computer sees the output
         // directly, so only it can tell a silent session from one whose output is
         // merely still in flight to a stalled hub.
@@ -1510,6 +1566,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           ...(spec.admission ? { admission: spec.admission } : {}),
           // Detection runs where the output is; acknowledged in the reply.
           ...(spec.detection ? { detection: spec.detection } : {}),
+          ...(spec.relay !== undefined ? { relay: spec.relay } : {}),
           ...(continuesFrom !== undefined && spec.carryOutput
             ? { carryOutput: { fromSpawnId: continuesFrom, preamble: spec.carryOutput.preamble } }
             : {}),
@@ -1577,6 +1634,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
                   drain(entry)
                 }
                 if (acked) ackDetection(entry)
+                else entry.preAckSignals = null
                 confirm(
                   parsed.success ? parsed.data.pid : null,
                   requestsDeadline && parsed.success && parsed.data.startupDeadline === true

@@ -169,6 +169,31 @@ describe('output detection on the computer (pty-signal)', () => {
     pty.disposeAll()
   })
 
+  it('relay off: output is buffered and detected but not streamed until the hub watches', async () => {
+    const { notifies, child, pty } = setup(9108)
+    await pty.handlers['pty.spawn']({
+      sessionId: 's',
+      command: 'cat',
+      cwd: process.cwd(),
+      detection: { mode: 'claude-code', resuming: false },
+      relay: false
+    })
+    child.say('quiet one')
+    child.say('quiet two')
+    expect(notifies.filter((n) => n.method === 'pty.data')).toEqual([])
+    // The first chunk always signals, so the hub knows the process started.
+    expect(signals(notifies)).toEqual([expect.objectContaining({ seq: 0, firstOutput: true })])
+    expect(pty.handlers['pty.relay']({ sessionId: 's', on: true })).toEqual({ seq: 1 })
+    child.say('loud')
+    expect(notifies.filter((n) => n.method === 'pty.data').map((n) => n.params)).toEqual([
+      expect.objectContaining({ seq: 2, data: 'loud' })
+    ])
+    expect(pty.handlers['pty.relay']({ sessionId: 's', on: false })).toEqual({ seq: 2 })
+    child.say('quiet again')
+    expect(notifies.filter((n) => n.method === 'pty.data')).toHaveLength(1)
+    pty.disposeAll()
+  })
+
   it('an older hub (no `detection`) gets no signals and no ack', async () => {
     const { notifies, child, pty } = setup(9102)
     const reply = await pty.handlers['pty.spawn']({

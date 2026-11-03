@@ -29,6 +29,11 @@ function harness(mode: string, resuming = false) {
     watchConversationId: () => pipeline.watchConversationId(),
     dispose: () => pipeline.dispose()
   }
+  // The first chunk always signals (`firstOutput`); prime past it so each test
+  // below sees steady-state behavior.
+  signals.onOutput('', 0)
+  sent.length = 0
+  cleaned.length = 0
   return { sent, answers, cleaned, signals, pipeline, advance: (ms: number) => (t += ms) }
 }
 
@@ -49,6 +54,19 @@ describe('pty signals (computer-side detection)', () => {
       title: 'Gemini busy',
       devServerUrls: ['http://localhost:5173']
     })
+  })
+
+  test('the first chunk always signals firstOutput, even saying nothing', () => {
+    const sent: PtySignalPayload[] = []
+    const pipeline = createPtySessionSignals({
+      params: { mode: 'claude-code', resuming: false },
+      ids,
+      emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+      respond: () => undefined
+    })
+    pipeline.report(pipeline.process('\x1b[2K\r spinner').detection, 0)
+    pipeline.report(pipeline.process('\x1b[2K\r spinner').detection, 1)
+    expect(sent).toEqual([expect.objectContaining({ seq: 0, firstOutput: true })])
   })
 
   test('a chunk that says nothing (hook-driven claude redraw) sends nothing', () => {
@@ -83,6 +101,7 @@ describe('pty signals (computer-side detection)', () => {
   test('idle-clock-only chunks (plain shell) coalesce: leading + trailing per window', () => {
     vi.useFakeTimers()
     const { sent, signals, advance } = harness('terminal')
+    advance(IDLE_CLOCK_SIGNAL_MS) // past the primed first chunk's window
     signals.onOutput('a', 1)
     signals.onOutput('b', 2)
     signals.onOutput('c', 3)

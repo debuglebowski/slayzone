@@ -18,6 +18,7 @@ import {
   getBuffer,
   clearBuffer,
   getBufferSince,
+  watchPtyOutput,
   listPtys,
   getState,
   setDatabase,
@@ -403,6 +404,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptyGetBufferSince = (sessionId: string, afterSeq: number) =>
     getBufferSince(sessionId, afterSeq)
   const ptyList = () => listPtys()
+  const ptyWatchOutput = (target: readonly string[] | 'all') => watchPtyOutput(target)
   const chatList = () => listChatSessionEntries()
   const ptyGetState = (sessionId: string) => getState(sessionId)
   const sessionList = () => listSessions()
@@ -476,6 +478,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     ptyGetBuffer,
     ptyClearBuffer,
     ptyGetBufferSince,
+    ptyWatchOutput,
     ptyList,
     chatList,
     ptyGetState,

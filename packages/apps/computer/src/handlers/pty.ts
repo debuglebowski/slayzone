@@ -50,6 +50,8 @@ import {
   type PtyGetReplayResult,
   ptyClearBufferParamsSchema,
   type PtyClearBufferResult,
+  ptyRelayParamsSchema,
+  type PtyRelayResult,
   PTY_SIGNAL_EVENT_NAME,
   RpcError,
   ComputerNotificationMethods,
@@ -100,6 +102,8 @@ interface PtySession {
    * output says goes to the hub as `pty-signal` events. Absent: the hub detects.
    */
   signals?: PtySessionSignals
+  /** Stream output to the hub (`pty.data`); off while nobody watches (`pty.relay`). */
+  relay: boolean
   /** Where and when the process started (disk conversation-id detection matches on it). */
   cwd: string
   startedAt: number
@@ -370,6 +374,7 @@ export function createPtyHandlers(
       startupTimeoutMs?: number
       taskId?: string
       detection?: PtyDetectionParams
+      relay?: boolean
       /** A continued buffer (`carryOutput`); absent = a fresh one. */
       buffer?: RingBuffer
     }
@@ -401,6 +406,7 @@ export function createPtyHandlers(
       proc,
       buffer,
       id,
+      relay: opts.relay !== false,
       cwd,
       startedAt: Date.now(),
       ...(opts.taskId ? { taskId: opts.taskId } : {}),
@@ -454,6 +460,9 @@ export function createPtyHandlers(
       // What the chunk says goes FIRST: a stale-resume error suppresses this very
       // chunk on the hub, which must know before the bytes arrive.
       if (processed) session.signals?.report(processed.detection, seq)
+      // Nobody watches it: buffered and detected, not streamed (the hub reads the
+      // buffer when someone attaches, and turns relay on).
+      if (!session.relay) return
       ctx.dialer.notify(ComputerNotificationMethods.ptyData, {
         sessionId: session.id,
         ...(session.spawnId ? { spawnId: session.spawnId } : {}),
@@ -940,6 +949,7 @@ export function createPtyHandlers(
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
     releaseAdmission(session)
+    if (params.relay !== undefined) session.relay = params.relay
     if (params.detection) {
       attachSignals(session, params.detection)
       // What the warm output said, so the hub's mirror starts from it — read raw,
@@ -1149,6 +1159,15 @@ export function createPtyHandlers(
     }
   }
 
+  function relay(rawParams: unknown): PtyRelayResult {
+    const params = ptyRelayParamsSchema.parse(rawParams)
+    const session = sessions.get(params.sessionId)
+    if (!session || (params.spawnId !== undefined && session.spawnId !== params.spawnId))
+      return { seq: -1 }
+    session.relay = params.on
+    return { seq: session.buffer.getCurrentSeq() }
+  }
+
   function clearBuffer(rawParams: unknown): PtyClearBufferResult {
     const params = ptyClearBufferParamsSchema.parse(rawParams)
     const buffer = bufferFor(params.sessionId, params.spawnId)
@@ -1202,6 +1221,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptySetTheme]: setTheme,
     [HubToComputerMethods.ptyGetReplay]: getReplay,
     [HubToComputerMethods.ptyClearBuffer]: clearBuffer,
+    [HubToComputerMethods.ptyRelay]: relay,
     [HubToComputerMethods.ptyGetBufferSince]: getBufferSince,
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,

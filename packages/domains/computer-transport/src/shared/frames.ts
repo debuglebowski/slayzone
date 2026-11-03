@@ -391,6 +391,8 @@ export const ptySignalPayloadSchema = z.object({
    * not a state transition. Absent on every other signal.
    */
   exitError: ptySignalErrorSchema.optional(),
+  /** The session's first output: it started (sent even when nothing is relayed). */
+  firstOutput: z.literal(true).optional(),
   suppressOutput: z.boolean(),
   prompt: ptySignalPromptSchema.nullable(),
   title: z.string().nullable(),
@@ -482,6 +484,8 @@ export const HubToComputerMethods = {
    *  buffer is the only one, so the hub forwards its clients' reads here. */
   ptyGetReplay: 'pty.getReplay',
   ptyClearBuffer: 'pty.clearBuffer',
+  /** Start/stop streaming a session's output (someone started/stopped watching it). */
+  ptyRelay: 'pty.relay',
   /** Live (non-warm) sessions the computer still holds — drives reattach. */
   ptyList: 'pty.list',
   /** Move a session still waiting for an agent-start slot to the front (tab revealed). */
@@ -639,6 +643,12 @@ export const ptySpawnParamsSchema = z
      * the session keeps ONE scrollback across the process change. Absent from an
      * older hub; an older computer ignores it and starts fresh.
      */
+    /**
+     * Stream this session's output to the hub (`pty.data`) — `false`: only while the
+     * hub asks (`pty.relay`), because nobody is watching it. Output is buffered and
+     * detected either way. Absent (an older hub): always streamed.
+     */
+    relay: z.boolean().optional(),
     carryOutput: z
       .object({
         fromSpawnId: z.string().min(1),
@@ -875,6 +885,17 @@ export const ptyClearBufferResultSchema = z.object({
 })
 export type PtyClearBufferResult = z.infer<typeof ptyClearBufferResultSchema>
 
+export const ptyRelayParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField,
+  on: z.boolean()
+})
+export const ptyRelayResultSchema = z.object({
+  /** The highest seq assigned when relaying changed: live frames follow it. */
+  seq: z.number().int()
+})
+export type PtyRelayResult = z.infer<typeof ptyRelayResultSchema>
+
 /**
  * Live (non-warm) sessions the computer still holds. The computer is the AUTHORITY
  * on this — the hub's own registry is only a belief about it, and after a
@@ -950,7 +971,9 @@ export const ptyWarmAdoptParamsSchema = z.object({
   taskId: z.string().min(1).optional(),
   sessionId: z.string().min(1),
   /** Start output detection for the adopted session (see `pty.spawn`). */
-  detection: ptyDetectionParamsSchema.optional()
+  detection: ptyDetectionParamsSchema.optional(),
+  /** See `pty.spawn` `relay`. */
+  relay: z.boolean().optional()
 })
 export type PtyWarmAdoptParams = z.infer<typeof ptyWarmAdoptParamsSchema>
 
