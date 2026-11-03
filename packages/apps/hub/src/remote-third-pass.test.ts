@@ -216,6 +216,11 @@ test('remote third: rolling upgrade preserves hub stop controls through a declar
       sessionId: 'legacy-job',
       command: process.execPath,
       args: ['-e', 'setInterval(() => {}, 1000)'],
+      // The computer strips ELECTRON_RUN_AS_NODE from inherited env, so under the
+      // Electron-run harness this would start a GUI Electron: alive on macOS, but
+      // exiting at once on a headless Linux runner, leaving the host idle. The
+      // spawn's own env keeps the busy job a real Node process on every runtime.
+      env: { ELECTRON_RUN_AS_NODE: '1' },
       cwd: dir
     })
     expect(await control.rpc.request('health')).toMatchObject({ idle: false, version: '0.36.3' })

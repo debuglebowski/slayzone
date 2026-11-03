@@ -148,7 +148,12 @@ describe('stop and restart take the whole tree', () => {
   const script =
     "const c=require('child_process').spawn('sleep',['33'],{detached:true,stdio:'ignore'});" +
     "console.log('worker:'+c.pid);setInterval(()=>{},1000)"
-  const command = `"${process.execPath}" -e "${script}"`
+  // `process.execPath` is Electron under the harness, and the backend strips
+  // ELECTRON_RUN_AS_NODE from every run (NON_PREFIXED_INFRA): without it set
+  // here, `-e` is ignored and a full Electron app starts instead — it exits at
+  // once on a headless Linux box and idles windowless on macOS, never printing
+  // the worker line. `env` sets it in any user shell (fish included).
+  const command = `env ELECTRON_RUN_AS_NODE=1 "${process.execPath}" -e "${script}"`
   let id = ''
   const workerPids: number[] = []
 
@@ -166,8 +171,13 @@ describe('stop and restart take the whole tree', () => {
     return pid
   }
 
-  afterAll(() => {
-    if (id) removeProcess(id)
+  afterAll(async () => {
+    // removeProcess only starts the tree sweep; this fork can exit before it signals
+    // anything, leaking the leader (it never exits on its own). stop awaits it.
+    if (id) {
+      await stopProcess(id)
+      removeProcess(id)
+    }
     for (const pid of workerPids) {
       try {
         process.kill(pid, 'SIGKILL')
