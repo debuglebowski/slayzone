@@ -44,4 +44,10 @@ export {
   type TerminalTheme
 } from './sync-query-response'
 export { shouldHonorDetectedError } from './session-error-gate'
+export {
+  PtyOutputDetector,
+  stripAnsiForSessionParse,
+  type PtyOutputDetection,
+  type PtyOutputDetectorOptions
+} from './pty-output-detector'
 export { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal-contracts'

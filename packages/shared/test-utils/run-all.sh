@@ -593,6 +593,8 @@ run_harness packages/domains/terminal/src/server/ring-buffer.test.ts
 run_harness packages/domains/terminal/src/server/ring-buffer-backfill.test.ts
 # Terminal — lean pty-detection entry the computer bundles: no hub/app tree reachable.
 run_harness packages/domains/terminal/src/server/pty-detection.test.ts
+# Terminal — detection over raw pty output (activity/error/prompt/title/dev URL/conv id).
+run_harness packages/domains/terminal/src/server/pty-output-detector.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
