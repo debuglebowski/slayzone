@@ -20,7 +20,7 @@ import {
   spawnProcess,
   updateProcess
 } from './process-manager'
-import { localProcessBackend, setProcessBackend } from './process-backend'
+import { noComputerProcessBackend, setProcessBackend } from './process-backend'
 import type { ProcessBackend, ProcHandle } from './process-backend'
 import type { ProcessPersistence } from './process-persistence'
 
@@ -146,14 +146,14 @@ describe('processes switched off', () => {
     expect(listAllProcesses()).toHaveLength(0)
   })
 
-  // --- the backend refuses on its own: a path that skipped the manager still cannot spawn ---
-  describe('the backend refuses on its own', () => {
+  // --- the default backend refuses on its own: there is no local one to reach ---
+  describe('the default backend refuses on its own', () => {
     let childrenBefore = 0
     let backendErr: unknown = null
-    test('localProcessBackend.spawn refused', async () => {
+    test('noComputerProcessBackend.spawn refused ("connect a computer")', async () => {
       childrenBefore = childPids().length
       backendErr = await refusal(() =>
-        localProcessBackend.spawn({
+        noComputerProcessBackend.spawn({
           id: 'direct',
           taskId: null,
           projectId: null,
@@ -163,9 +163,10 @@ describe('processes switched off', () => {
         })
       )
       expect(isHubSwitchedOffError(backendErr)).toBe(true)
+      expect((backendErr as { code?: string }).code).toBe('NO_COMPUTER_CONNECTED')
     })
-    test('backend refusal audited (op backend.spawn)', () => {
-      expect(lines[lines.length - 1]?.detail.op).toBe('backend.spawn')
+    test('backend refusal audited (op processes.backend.spawn)', () => {
+      expect(lines[lines.length - 1]?.detail.op).toBe('processes.backend.spawn')
     })
     test('no child process started', () => {
       expect(childPids().length).toBe(childrenBefore)

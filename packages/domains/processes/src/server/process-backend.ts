@@ -1,15 +1,10 @@
-import { spawn, execFile } from 'child_process'
-import type { ChildProcess } from 'child_process'
-import { buildShellInvocation, childProcessEnv, killPidTree } from '@slayzone/platform'
-import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { getEnrichedPath } from '@slayzone/terminal/server'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 
 /**
  * The exec inputs the process manager hands a backend to launch a process.
- * Mirrors exactly what the in-process `doSpawn` consumed: identity + routing
- * metadata (`id`, `taskId`, `projectId`, `computerId`) plus the exec spec proper
- * (`command`, `cwd`, optional `env`). `computerId` is dark today (always `null`
- * for the local backend); a future computer-side backend routes on it.
+ * Identity + routing metadata (`id`, `taskId`, `projectId`, `computerId`) plus the
+ * exec spec proper (`command`, `cwd`, optional `env`; an empty `cwd` = the
+ * project's folder on that computer).
  */
 export interface ProcSpawnSpec {
   id: string
@@ -48,7 +43,7 @@ export interface ProcHandle {
   onSpawned?(cb: (e: { pid: number }) => void): { dispose(): void }
 }
 
-/** Spawns processes for the manager. Swappable so exec can be remoted later. */
+/** Spawns processes for the manager — on a computer (the hub's routing backend). */
 export interface ProcessBackend {
   spawn(spec: ProcSpawnSpec): ProcHandle
   /**
@@ -57,15 +52,10 @@ export interface ProcessBackend {
    */
   stats?(ids: string[]): Promise<Record<string, { cpu: number; rss: number; title: string | null }>>
   /**
-   * Command line of a still-running process, or `null` if `pid` isn't alive.
-   * POSIX only (via `ps`) — mirrors the existing precedent in `pid-stats.ts`,
-   * which is also `ps`/`pgrep`-only with no Windows branch. Used to verify a
-   * pid persisted from a previous run is still *the same command* before
-   * `killByPid` touches it, so a reused pid never reaps an unrelated process.
-   * Returns `null` unconditionally on win32 — `killByPid` still works there,
-   * it's just never called without this confirming identity first.
+   * @deprecated Unused: the hub never inspects a pid (processes run on computers).
+   * Optional until every implementer drops it.
    */
-  getCommandLine(pid: number): Promise<string | null>
+  getCommandLine?(pid: number): Promise<string | null>
   /**
    * Processes `computerId` runs that this backend does not track — runs a previous
    * hub left there (it restarted; they kept going). Absent on the local backend
@@ -74,127 +64,32 @@ export interface ProcessBackend {
   listSessions?(computerId: string): Promise<Array<{ sessionId: string; pid?: number }>>
   /** End such an untracked run on its computer (tree-kill there). */
   killSession?(computerId: string, sessionId: string): Promise<void>
-  /** Kill the process tree rooted at `pid` without a live `ProcHandle` — used to
-   *  reap a leftover process whose parent (this app) exited without ever
-   *  running `kill()` on its handle. Same POSIX detached-group / Windows
-   *  `taskkill /T` mechanism as `ProcHandle.kill`. */
-  killByPid(pid: number, sig?: string): void
-}
-
-function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
-  const pid = child.pid
-  if (pid == null) return
-  killPidTree(pid, signal)
-}
-
-function getCommandLine(pid: number): Promise<string | null> {
-  if (process.platform === 'win32') return Promise.resolve(null)
-  return new Promise((resolve) => {
-    execFile('ps', ['-o', 'command=', '-p', String(pid)], { timeout: 2000 }, (err, stdout) => {
-      resolve(err ? null : stdout.trim() || null)
-    })
-  })
+  /** @deprecated Unused: the hub never signals a pid. Optional until implementers drop it. */
+  killByPid?(pid: number, sig?: string): void
 }
 
 /**
- * Wrap a live `ChildProcess` as a `ProcHandle`. A single stdout/stderr/exit
- * listener fans out to every subscriber (iterating a snapshot, as Node's
- * `EventEmitter` does, so a subscriber disposing itself mid-dispatch is safe).
- * stdout/stderr are decoded to strings here — the pre-seam `handleProcessData`
- * did `data.toString()` first thing, so decoding at the seam is byte-identical.
+ * The default: no computer to run on. The hub wires the routing backend (its
+ * computers); until then — and on any host without one — every spawn is the
+ * actionable "connect a computer". There is no local `child_process` backend: the hub
+ * never runs a background process itself.
  */
-function makeLocalHandle(child: ChildProcess, cwd: string): ProcHandle {
-  const dataSubs = new Set<(chunk: string, stream: 'stdout' | 'stderr') => void>()
-  const exitSubs = new Set<(e: { code: number | null; signal: string | null }) => void>()
-
-  child.stdout?.on('data', (data: Buffer) => {
-    const chunk = data.toString()
-    for (const cb of [...dataSubs]) cb(chunk, 'stdout')
-  })
-  child.stderr?.on('data', (data: Buffer) => {
-    const chunk = data.toString()
-    for (const cb of [...dataSubs]) cb(chunk, 'stderr')
-  })
-  child.on('exit', (code, signal) => {
-    for (const cb of [...exitSubs]) cb({ code, signal })
-  })
-  // An 'error' event with no listener throws, outside any caller: a cwd that does not
-  // exist (or a missing shell) is reported that way, after `spawn()` returned, and it
-  // ended the hub's process (T-102). A process that never started gets no 'exit', so
-  // it is reported as one: its reason as output, then an exit with no code, which the
-  // manager shows like any failed command. An error once it did start (it has a pid)
-  // is followed by its own 'exit'.
-  child.on('error', (err) => {
-    if (child.pid !== undefined) {
-      console.warn(`[processes] child ${child.pid}: ${err.message}`)
-      return
-    }
-    const line = `[failed to start: ${err.message} (cwd ${cwd})]\n`
-    for (const cb of [...dataSubs]) cb(line, 'stderr')
-    for (const cb of [...exitSubs]) cb({ code: null, signal: null })
-  })
-
-  return {
-    get pid() {
-      return child.pid
-    },
-    onData(cb) {
-      dataSubs.add(cb)
-      return { dispose: () => void dataSubs.delete(cb) }
-    },
-    onExit(cb) {
-      exitSubs.add(cb)
-      return { dispose: () => void exitSubs.delete(cb) }
-    },
-    kill(sig?: string) {
-      killProcessTree(child, (sig as NodeJS.Signals | undefined) ?? 'SIGTERM')
-    }
-  }
-}
-
-/**
- * Default backend: the current in-process `child_process.spawn`. Keeps the
- * exact env/shell/detached semantics `doSpawn` used — shell invocation via
- * `buildShellInvocation`, PATH enrichment via `getEnrichedPath`, `detached` on
- * POSIX. `spec.env` (unused by the manager today) layers over the base env so a
- * caller can override without changing this byte-identical default path.
- */
-export const localProcessBackend: ProcessBackend = {
+export const noComputerProcessBackend: ProcessBackend = {
   spawn(spec: ProcSpawnSpec): ProcHandle {
-    // Last stop before `child_process.spawn`: a path that skipped the manager's
-    // checks still cannot start a process on a hub with processes switched off.
-    assertHubProcessesEnabled('hub.process.spawn', {
-      op: 'backend.spawn',
+    return refuseNoComputer({
+      op: 'processes.backend.spawn',
       detail: { processId: spec.id, taskId: spec.taskId, projectId: spec.projectId }
     })
-    const isWin = process.platform === 'win32'
-    // buildShellInvocation handles fish (-i -l for PATH init inside
-    // `if status is-interactive` blocks), bash/zsh (-l only), and Windows (cmd /c).
-    const { file, args } = buildShellInvocation(spec.command)
-    // Sanitized base: the user's `run` process keeps PATH/HOME/toolchains but
-    // never inherits SlayZone infra/secret/identity vars (fail closed on
-    // unmanifested SLAYZONE_*). PATH-enrichment + the caller's `spec.env` overlay
-    // apply on top.
-    const env = childProcessEnv()
-    const enrichedPath = getEnrichedPath()
-    if (enrichedPath) env.PATH = enrichedPath
-    if (spec.env) Object.assign(env, spec.env)
-    const child = spawn(file, args, { cwd: spec.cwd, env, detached: !isWin })
-    return makeLocalHandle(child, spec.cwd)
-  },
-  getCommandLine,
-  killByPid(pid: number, sig?: string) {
-    killPidTree(pid, (sig as NodeJS.Signals | undefined) ?? 'SIGTERM')
   }
 }
 
-let backend: ProcessBackend = localProcessBackend
+let backend: ProcessBackend = noComputerProcessBackend
 
 export function getProcessBackend(): ProcessBackend {
   return backend
 }
 
-/** Swap the spawn backend. `null` restores the local `child_process` default. */
+/** Swap the spawn backend (the hub's routing one). `null` restores "no computer". */
 export function setProcessBackend(b: ProcessBackend | null): void {
-  backend = b ?? localProcessBackend
+  backend = b ?? noComputerProcessBackend
 }

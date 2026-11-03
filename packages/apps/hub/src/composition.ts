@@ -179,7 +179,6 @@ import {
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
-  setProjectCwdResolver,
   setProcessComputerResolver,
   processesComputerConnected,
   setProcessBackend,
@@ -249,7 +248,6 @@ import {
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
   getComputer,
-  localProjectRoot,
   recordedProjectRoot,
   setComputerBindingChangedListener
 } from '@slayzone/computers/server'
@@ -1048,13 +1046,6 @@ export function composeServer(opts: {
   // ops here (supervised) and standalone owns its own. The Electron host no
   // longer inits it in local mode (would double-spawn auto-restart processes).
   bootBestEffort('process-manager-init', () => initProcessManager(db))
-  // Project-scoped processes re-resolve their cwd from the project's CURRENT
-  // folder at every spawn/restart (see doSpawn) instead of trusting whatever
-  // was snapshotted into the row at creation — a renamed/moved project
-  // folder used to leave every process created before the move permanently
-  // pointed at a stale, possibly-deleted directory. They run on THIS machine, so
-  // the folder is the local computer's; none there = none.
-  setProjectCwdResolver((projectId) => localProjectRoot(db, projectId))
   setProcessesDeps({
     create: createProcess,
     spawn: spawnProcess,

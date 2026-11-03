@@ -32,14 +32,8 @@ const EXEC_MODULE =
  */
 const ALLOWLIST = {
   // Refused by assertHubProcessesEnabled (T-04/T-05).
-  'packages/domains/processes/src/server/process-backend.ts':
-    'background processes; localProcessBackend refuses (T-04)',
-  'packages/domains/processes/src/server/process-manager.ts':
-    'background processes; every entry point refuses, boot loads no row (T-04)',
-  'packages/domains/processes/src/server/pid-stats.ts':
-    'ps/pgrep for running hub processes; none exist with processes off (T-04)',
   'packages/shared/platform/src/process-tree.ts':
-    'Windows taskkill in killPidTree; the hub calls it only from localProcessBackend, which refuses (T-04)',
+    'Windows taskkill in killPidTree; bundled via the @slayzone/platform barrel, never called by the hub (background processes run on computers)',
   'packages/domains/terminal/src/server/runtime/pty-backend.ts':
     'node-pty for localPtyBackend; refuses (T-04), required on first spawn only (T-30)',
   'packages/domains/terminal/src/server/runtime/pty-manager.ts':

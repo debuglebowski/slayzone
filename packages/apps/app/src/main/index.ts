@@ -597,9 +597,9 @@ import {
   killAllProcesses,
   shutdownAllProcesses,
   processEvents,
-  createStatsPoller,
   setProcessesDeps
 } from '@slayzone/processes/server'
+import { createStatsPoller } from '@slayzone/processes/pid-stats'
 import { notifyEvents } from './notify-renderer'
 import { presentWindow } from './present-window'
 import { menuEvents } from './menu-events'

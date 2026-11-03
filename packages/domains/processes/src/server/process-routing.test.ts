@@ -82,9 +82,12 @@ describe('background processes on a computer', () => {
     expect(specs.at(-1)).toMatchObject({ computerId: 'computer-1', cwd: '/worktrees/task-1' })
   })
 
-  test('without a resolver it runs where it always did (local, stored cwd)', async () => {
-    await spawnProcess('proj-1', null, 'dev', 'pnpm dev', '/tmp', false)
-    expect(specs.at(-1)).toMatchObject({ computerId: null, cwd: '/tmp' })
+  test('without a resolver nothing reaches the backend: "connect a computer"', async () => {
+    const before = specs.length
+    const id = await spawnProcess('proj-1', null, 'dev', 'pnpm dev', '/tmp', false)
+    expect(specs.length).toBe(before)
+    expect(status(id)?.status).toBe('error')
+    expect(status(id)?.logBuffer.join('\n')).toMatch(/Connect a computer/)
   })
 
   test("a routed process's unplanned exit leaves group reaping to its computer", async () => {

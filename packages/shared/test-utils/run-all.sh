@@ -251,12 +251,14 @@ run_harness packages/domains/processes/src/server/process-manager.test.ts
 run_harness packages/domains/processes/src/server/process-routing.test.ts
 # Persistence seam — fake ProcessPersistence records insert/update/remove; loadAll hydration.
 run_harness packages/domains/processes/src/server/process-persistence.test.ts
-# Wave-2 spawn backend seam — fake ProcessBackend streaming/exit/autoRestart/kill.
+# Spawn backend seam — fake routed ProcessBackend streaming/exit/autoRestart/kill.
 run_harness packages/domains/processes/src/server/process-backend.test.ts
-# Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
+# Processes switched off: no persisted row loaded, every spawn path refused; the default backend refuses too.
 run_harness packages/domains/processes/src/server/process-switch.test.ts
-# Real trees: a run that outlived the app session reads 'orphaned'; stop/restart take escaped descendants; start/restart contract.
-run_harness packages/domains/processes/src/server/process-lifecycle.test.ts
+# Start/stop/restart contract over a routed backend; no computer = "connect a computer", never a local child.
+run_harness packages/domains/processes/src/server/process-routed-lifecycle.test.ts
+# Processes switched off but routed to computers: rows load, starts go to the computer.
+run_harness packages/domains/processes/src/server/process-switch-routed.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
