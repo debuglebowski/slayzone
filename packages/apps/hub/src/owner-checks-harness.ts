@@ -355,17 +355,24 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.project,
       o.mark
     )
-    // A queued chat message is the computer's; the hub keeps only its route.
+    // A queued chat message is the computer's; the hub keeps only its route — on its
+    // own chat tab, so the conversation's ownership fences nothing the other fixtures
+    // write on the task's terminal tab.
     run(
-      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, 'claude-chat', NULL, 1, 'active')`,
+      `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES (?, ?, 'claude-chat', 0)`,
+      `${o.chatQueueItem}-tab`,
+      o.task
+    )
+    run(
+      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, 'claude-chat', NULL, 1, 'legacy')`,
       `conv-${o.chatQueueItem}`,
       o.task,
-      o.tab
+      `${o.chatQueueItem}-tab`
     )
     run(
       `INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES (?, ?, ?)`,
       o.chatQueueItem,
-      o.tab,
+      `${o.chatQueueItem}-tab`,
       `conv-${o.chatQueueItem}`
     )
     run(
