@@ -19,3 +19,9 @@ export {
   type SlayExecutor,
   type SlayTarget
 } from './slay-executor'
+export {
+  localAiConfigFs,
+  type AiConfigFs,
+  type AiConfigStat,
+  type AiConfigDirEntry
+} from './ai-config-fs'

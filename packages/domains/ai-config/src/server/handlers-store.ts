@@ -1,5 +1,3 @@
-import * as fs from 'node:fs'
-import { homedir } from 'node:os'
 import { checkSlayConfigured } from './slay-setup'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -58,6 +56,7 @@ import {
   stripCanonicalSkillMetadata,
   writeSkillValidationMetadata
 } from './skill-normalize'
+import { localAiConfigFs, type AiConfigFs } from './ai-config-fs'
 
 const KNOWN_CONTEXT_FILES: Array<{
   relative: string
@@ -75,15 +74,16 @@ function contentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-function computeLinkedSyncState(
+async function computeLinkedSyncState(
+  fs: AiConfigFs,
   filePath: string,
   expectedContent: string
-): {
+): Promise<{
   syncHealth: SyncHealth
   syncReason: SyncReason | null
   diskContent: string | null
-} {
-  if (!fs.existsSync(filePath)) {
+}> {
+  if (!(await fs.exists(filePath))) {
     return {
       syncHealth: 'stale',
       syncReason: 'missing_file',
@@ -91,7 +91,7 @@ function computeLinkedSyncState(
     }
   }
 
-  const diskContent = fs.readFileSync(filePath, 'utf-8')
+  const diskContent = await fs.readFile(filePath)
   const diskHash = contentHash(diskContent)
   const expectedHash = contentHash(expectedContent)
   if (diskHash === expectedHash) {
@@ -109,11 +109,14 @@ function computeLinkedSyncState(
   }
 }
 
-function computeUnlinkedSyncState(filePath: string): {
+async function computeUnlinkedSyncState(
+  fs: AiConfigFs,
+  filePath: string
+): Promise<{
   syncHealth: SyncHealth
   syncReason: SyncReason
-} {
-  if (!fs.existsSync(filePath)) {
+}> {
+  if (!(await fs.exists(filePath))) {
     return {
       syncHealth: 'not_synced',
       syncReason: 'not_linked'
@@ -235,21 +238,22 @@ function getCanonicalSelectionTargetPath(
   return path.isAbsolute(targetPath) ? canonicalPath : canonicalPath.split(path.sep).join('/')
 }
 
-function removeLegacySkillFileIfPresent(
+async function removeLegacySkillFileIfPresent(
+  fs: AiConfigFs,
   provider: CliProvider,
   itemType: string,
   itemSlug: string,
   currentTargetPath: string,
   resolvedProject: string,
   projectPath: string
-): void {
+): Promise<void> {
   const legacyPath = getLegacySkillPath(provider, itemType, itemSlug)
   if (!legacyPath) return
   if (currentTargetPath === legacyPath) return
   const legacyFilePath = path.join(resolvedProject, legacyPath)
-  if (!fs.existsSync(legacyFilePath)) return
-  if (!isPathAllowed(legacyFilePath, projectPath)) return
-  fs.unlinkSync(legacyFilePath)
+  if (!(await fs.exists(legacyFilePath))) return
+  if (!isPathAllowed(fs, legacyFilePath, projectPath)) return
+  await fs.unlink(legacyFilePath)
 }
 
 function ensureSkillValidationForSync(
@@ -301,9 +305,9 @@ function withDerivedSkillValidation(item: AiConfigItem): AiConfigItem {
   }
 }
 
-function isPathAllowed(filePath: string, projectPath: string | null): boolean {
+function isPathAllowed(fs: AiConfigFs, filePath: string, projectPath: string | null): boolean {
   const resolved = path.resolve(filePath)
-  const home = homedir()
+  const home = fs.homedir()
   // Allow all computer-level provider base dirs
   for (const [, spec] of Object.entries(COMPUTER_PROVIDER_PATHS)) {
     const dir = path.join(home, spec.baseDir)
@@ -316,16 +320,16 @@ function isPathAllowed(filePath: string, projectPath: string | null): boolean {
   return false
 }
 
-function collectMarkdownFilesRecursive(dirPath: string): string[] {
-  if (!fs.existsSync(dirPath)) return []
+async function collectMarkdownFilesRecursive(fs: AiConfigFs, dirPath: string): Promise<string[]> {
+  if (!(await fs.exists(dirPath))) return []
   const files: string[] = []
-  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+  for (const entry of await fs.readdir(dirPath)) {
     const fullPath = path.join(dirPath, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...collectMarkdownFilesRecursive(fullPath))
+    if (entry.isDirectory) {
+      files.push(...(await collectMarkdownFilesRecursive(fs, fullPath)))
       continue
     }
-    if (entry.isFile() && entry.name.endsWith('.md')) {
+    if (entry.isFile && entry.name.endsWith('.md')) {
       files.push(fullPath)
     }
   }
@@ -336,12 +340,12 @@ function toProjectRelativePath(projectRoot: string, filePath: string): string {
   return path.relative(projectRoot, filePath).split(path.sep).join('/')
 }
 
-export function createAiConfigOps(db: SlayzoneDb) {
-  function fileContentMeta(
+export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfigFs) {
+  async function fileContentMeta(
     filePath: string
-  ): { contentHash: string; lineCount: number } | undefined {
+  ): Promise<{ contentHash: string; lineCount: number } | undefined> {
     try {
-      const text = fs.readFileSync(filePath, 'utf-8')
+      const text = await fs.readFile(filePath)
       return {
         contentHash: createHash('md5').update(text).digest('hex'),
         lineCount: text.split('\n').length
@@ -419,8 +423,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
       const filePath = path.join(resolvedProject, rootPath)
       let fileHash: string | null = null
       let lineCount: number | null = null
-      if (fs.existsSync(filePath)) {
-        const text = fs.readFileSync(filePath, 'utf-8')
+      if (await fs.exists(filePath)) {
+        const text = await fs.readFile(filePath)
         fileHash = contentHash(text)
         lineCount = text.split('\n').length
       }
@@ -433,7 +437,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         }
         continue
       }
-      const syncState = computeLinkedSyncState(filePath, variant.content)
+      const syncState = await computeLinkedSyncState(fs, filePath, variant.content)
       providerHealth[provider] = {
         health: syncState.syncHealth,
         reason: syncState.syncReason,
@@ -488,7 +492,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         const filePath = path.isAbsolute(effectiveTargetPath)
           ? effectiveTargetPath
           : path.join(resolvedProject, effectiveTargetPath)
-        const syncState = computeLinkedSyncState(filePath, expectedContent)
+        const syncState = await computeLinkedSyncState(fs, filePath, expectedContent)
         providerMap[provider] = {
           path: effectiveTargetPath,
           syncHealth: syncState.syncHealth,
@@ -508,7 +512,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
           continue
         }
         const filePath = path.join(resolvedProject, defaultPath)
-        const unlinkedState = computeUnlinkedSyncState(filePath)
+        const unlinkedState = await computeUnlinkedSyncState(fs, filePath)
         providerMap[provider] = {
           path: defaultPath,
           syncHealth: unlinkedState.syncHealth,
@@ -553,26 +557,26 @@ export function createAiConfigOps(db: SlayzoneDb) {
       const filePath = path.isAbsolute(effectiveTargetPath)
         ? effectiveTargetPath
         : path.join(resolvedProject, effectiveTargetPath)
-      const state = computeLinkedSyncState(filePath, expectedContent)
+      const state = await computeLinkedSyncState(fs, filePath, expectedContent)
       if (state.syncHealth === 'stale') stale += 1
     }
     return stale
   }
 
-  function discoverMcpConfigsFromSpecs(
+  async function discoverMcpConfigsFromSpecs(
     baseDir: string,
     specs: Partial<Record<McpTarget, McpConfigSpec>>
-  ): McpConfigFileResult[] {
+  ): Promise<McpConfigFileResult[]> {
     const results: McpConfigFileResult[] = []
     for (const provider of getConfigurableMcpTargets()) {
       const spec = specs[provider]
       if (!spec) continue
       const filePath = path.join(baseDir, spec.relativePath)
-      const exists = fs.existsSync(filePath)
+      const exists = await fs.exists(filePath)
       let servers: Record<string, McpServerConfig> = {}
       if (exists) {
         try {
-          servers = spec.read(fs.readFileSync(filePath, 'utf-8'))
+          servers = spec.read(await fs.readFile(filePath))
         } catch {
           /* ignore */
         }
@@ -582,20 +586,20 @@ export function createAiConfigOps(db: SlayzoneDb) {
     return results
   }
 
-  function writeMcpServerToSpecs(
+  async function writeMcpServerToSpecs(
     baseDir: string,
     specs: Partial<Record<McpTarget, McpConfigSpec>>,
     provider: McpTarget,
     serverKey: string,
     config: McpServerConfig
-  ): void {
+  ): Promise<void> {
     if (!isConfigurableMcpTarget(provider))
       throw new Error(`MCP config for ${provider} is disabled`)
     const spec = specs[provider]
     if (!spec) throw new Error(`MCP config for ${provider} is not supported`)
     if (!spec.writable) throw new Error(`MCP config for ${provider} is read-only`)
     const filePath = path.join(baseDir, spec.relativePath)
-    const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null
+    const existing = (await fs.exists(filePath)) ? await fs.readFile(filePath) : null
     const servers = existing
       ? (() => {
           try {
@@ -607,34 +611,34 @@ export function createAiConfigOps(db: SlayzoneDb) {
       : {}
     servers[serverKey] = { ...config }
     const dir = path.dirname(filePath)
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(filePath, spec.write(existing, servers), 'utf-8')
+    if (!(await fs.exists(dir))) await fs.mkdir(dir)
+    await fs.writeFile(filePath, spec.write(existing, servers))
   }
 
-  function removeMcpServerFromSpecs(
+  async function removeMcpServerFromSpecs(
     baseDir: string,
     specs: Partial<Record<McpTarget, McpConfigSpec>>,
     provider: McpTarget,
     serverKey: string
-  ): void {
+  ): Promise<void> {
     if (!isConfigurableMcpTarget(provider))
       throw new Error(`MCP config for ${provider} is disabled`)
     const spec = specs[provider]
     if (!spec) throw new Error(`MCP config for ${provider} is not supported`)
     if (!spec.writable) throw new Error(`MCP config for ${provider} is read-only`)
     const filePath = path.join(baseDir, spec.relativePath)
-    if (!fs.existsSync(filePath)) return
+    if (!(await fs.exists(filePath))) return
     let servers: Record<string, McpServerConfig>
     try {
-      servers = spec.read(fs.readFileSync(filePath, 'utf-8'))
+      servers = spec.read(await fs.readFile(filePath))
     } catch {
       return
     }
     delete servers[serverKey]
-    fs.writeFileSync(filePath, spec.write(fs.readFileSync(filePath, 'utf-8'), servers), 'utf-8')
+    await fs.writeFile(filePath, spec.write(await fs.readFile(filePath), servers))
   }
 
-  const homeDir = homedir()
+  const homeDir = fs.homedir()
 
   return {
     listItems: async (input: ListAiConfigItemsInput) => {
@@ -858,7 +862,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         .run(projectId, itemId)
       return result.changes > 0
     },
-    discoverContextFiles: (projectPath: string) => {
+    discoverContextFiles: async (projectPath: string) => {
       const results: ContextFileInfo[] = []
 
       // Project-specific files (only if project path provided)
@@ -869,33 +873,33 @@ export function createAiConfigOps(db: SlayzoneDb) {
           results.push({
             path: filePath,
             name: spec.name,
-            exists: fs.existsSync(filePath),
+            exists: await fs.exists(filePath),
             category: spec.category
           })
         }
       }
 
       // ~/.claude/CLAUDE.md (always shown — computer-level config)
-      const computerClaude = path.join(homedir(), '.claude', 'CLAUDE.md')
+      const computerClaude = path.join(fs.homedir(), '.claude', 'CLAUDE.md')
       results.push({
         path: computerClaude,
         name: '~/.claude/CLAUDE.md',
-        exists: fs.existsSync(computerClaude),
+        exists: await fs.exists(computerClaude),
         category: 'claude'
       })
 
-      const computerCopilot = path.join(homedir(), '.copilot', 'AGENTS.md')
+      const computerCopilot = path.join(fs.homedir(), '.copilot', 'AGENTS.md')
       results.push({
         path: computerCopilot,
         name: '~/.copilot/AGENTS.md',
-        exists: fs.existsSync(computerCopilot),
+        exists: await fs.exists(computerCopilot),
         category: 'agents'
       })
 
       return results
     },
-    getComputerFiles: () => {
-      const home = homedir()
+    getComputerFiles: async () => {
+      const home = fs.homedir()
       const entries: ComputerFileEntry[] = []
 
       for (const [key, spec] of Object.entries(COMPUTER_PROVIDER_PATHS)) {
@@ -904,8 +908,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
         // Instructions file
         if (spec.instructions) {
           const filePath = path.join(baseDir, spec.instructions)
-          const exists = fs.existsSync(filePath)
-          const meta = exists ? fileContentMeta(filePath) : undefined
+          const exists = await fs.exists(filePath)
+          const meta = exists ? await fileContentMeta(filePath) : undefined
           entries.push({
             path: filePath,
             name: `~/${spec.baseDir}/${spec.instructions}`,
@@ -919,8 +923,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
         // MCP config file
         if (spec.mcpConfig) {
           const filePath = path.join(baseDir, spec.mcpConfig)
-          const exists = fs.existsSync(filePath)
-          const meta = exists ? fileContentMeta(filePath) : undefined
+          const exists = await fs.exists(filePath)
+          const meta = exists ? await fileContentMeta(filePath) : undefined
           entries.push({
             path: filePath,
             name: `~/${spec.baseDir}/${spec.mcpConfig}`,
@@ -934,10 +938,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
         // Skills directory — supports both flat (slug.md) and directory (slug/SKILL.md) formats
         if (spec.skillsDir) {
           const dir = path.join(baseDir, spec.skillsDir)
-          if (fs.existsSync(dir)) {
+          if (await fs.exists(dir)) {
             try {
-              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                if (entry.isFile() && entry.name.endsWith('.md')) {
+              for (const entry of await fs.readdir(dir)) {
+                if (entry.isFile && entry.name.endsWith('.md')) {
                   const fp = path.join(dir, entry.name)
                   entries.push({
                     path: fp,
@@ -945,18 +949,18 @@ export function createAiConfigOps(db: SlayzoneDb) {
                     provider: key,
                     category: 'skill',
                     exists: true,
-                    ...fileContentMeta(fp)
+                    ...(await fileContentMeta(fp))
                   })
-                } else if (entry.isDirectory()) {
+                } else if (entry.isDirectory) {
                   const skillFile = path.join(dir, entry.name, 'SKILL.md')
-                  if (fs.existsSync(skillFile)) {
+                  if (await fs.exists(skillFile)) {
                     entries.push({
                       path: skillFile,
                       name: `~/${spec.baseDir}/${spec.skillsDir}/${entry.name}/SKILL.md`,
                       provider: key,
                       category: 'skill',
                       exists: true,
-                      ...fileContentMeta(skillFile)
+                      ...(await fileContentMeta(skillFile))
                     })
                   }
                 }
@@ -970,28 +974,28 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
       return entries
     },
-    readContextFile: (filePath: string, projectPath: string) => {
-      if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
-      return fs.readFileSync(filePath, 'utf-8')
+    readContextFile: async (filePath: string, projectPath: string) => {
+      if (!isPathAllowed(fs, filePath, projectPath)) throw new Error('Path not allowed')
+      return await fs.readFile(filePath)
     },
-    writeContextFile: (filePath: string, content: string, projectPath: string) => {
-      if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
+    writeContextFile: async (filePath: string, content: string, projectPath: string) => {
+      if (!isPathAllowed(fs, filePath, projectPath)) throw new Error('Path not allowed')
       const dir = path.dirname(filePath)
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(filePath, content, 'utf-8')
+      if (!(await fs.exists(dir))) await fs.mkdir(dir)
+      await fs.writeFile(filePath, content)
     },
-    deleteComputerFile: (filePath: string) => {
-      if (!isPathAllowed(filePath, null)) throw new Error('Path not allowed')
-      if (!fs.existsSync(filePath)) return
-      const stat = fs.statSync(filePath)
-      if (!stat.isFile()) throw new Error('Only files can be deleted')
-      fs.unlinkSync(filePath)
+    deleteComputerFile: async (filePath: string) => {
+      if (!isPathAllowed(fs, filePath, null)) throw new Error('Path not allowed')
+      const stat = await fs.stat(filePath)
+      if (!stat) return
+      if (!stat.isFile) throw new Error('Only files can be deleted')
+      await fs.unlink(filePath)
     },
-    createComputerFile: (
+    createComputerFile: async (
       provider: string,
       category: 'skill',
       slugInput: string
-    ): ComputerFileEntry => {
+    ): Promise<ComputerFileEntry> => {
       const spec = COMPUTER_PROVIDER_PATHS[provider]
       if (!spec)
         throw new Error(`Provider ${provider} does not support computer-level file management`)
@@ -1001,13 +1005,13 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
       const slug = normalizeSlug(slugInput)
       const fileName = `${slug}.md`
-      const home = homedir()
+      const home = fs.homedir()
       const filePath = path.join(home, spec.baseDir, dirSegment, fileName)
-      if (!isPathAllowed(filePath, null)) throw new Error('Path not allowed')
-      if (fs.existsSync(filePath)) throw new Error('File already exists')
+      if (!isPathAllowed(fs, filePath, null)) throw new Error('Path not allowed')
+      if (await fs.exists(filePath)) throw new Error('File already exists')
 
-      fs.mkdirSync(path.dirname(filePath), { recursive: true })
-      fs.writeFileSync(filePath, '', 'utf-8')
+      await fs.mkdir(path.dirname(filePath))
+      await fs.writeFile(filePath, '')
 
       return {
         path: filePath,
@@ -1017,17 +1021,17 @@ export function createAiConfigOps(db: SlayzoneDb) {
         exists: true
       }
     },
-    writeComputerSkill: (provider: CliProvider, slug: string, content: string) => {
+    writeComputerSkill: async (provider: CliProvider, slug: string, content: string) => {
       if (!isConfigurableCliProvider(provider))
         throw new Error(`Provider ${provider} is not configurable`)
       const spec = COMPUTER_PROVIDER_PATHS[provider]
       if (!spec?.skillsDir) throw new Error(`${provider} does not support computer-level skills`)
-      const home = homedir()
+      const home = fs.homedir()
       const normalizedSlug = normalizeSlug(slug)
       const filePath = path.join(home, spec.baseDir, spec.skillsDir, normalizedSlug, 'SKILL.md')
-      if (!isPathAllowed(filePath, null)) throw new Error('Path not allowed')
-      fs.mkdirSync(path.dirname(filePath), { recursive: true })
-      fs.writeFileSync(filePath, content, 'utf-8')
+      if (!isPathAllowed(fs, filePath, null)) throw new Error('Path not allowed')
+      await fs.mkdir(path.dirname(filePath))
+      await fs.writeFile(filePath, content)
     },
     getContextTree: async (projectPath: string, projectId: string) => {
       const entries: ContextTreeEntry[] = []
@@ -1037,7 +1041,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
       // 1. Discovered known files
       for (const spec of KNOWN_CONTEXT_FILES) {
         const filePath = path.join(resolvedProject, spec.relative)
-        const exists = fs.existsSync(filePath)
+        const exists = await fs.exists(filePath)
         seenPaths.add(filePath)
         entries.push({
           path: filePath,
@@ -1051,8 +1055,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
       }
 
       // ~/.claude/CLAUDE.md
-      const computerClaude = path.join(homedir(), '.claude', 'CLAUDE.md')
-      const computerClaudeExists = fs.existsSync(computerClaude)
+      const computerClaude = path.join(fs.homedir(), '.claude', 'CLAUDE.md')
+      const computerClaudeExists = await fs.exists(computerClaude)
       seenPaths.add(computerClaude)
       entries.push({
         path: computerClaude,
@@ -1088,8 +1092,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
         category: 'skill'
       })
       for (const { dir, relDir, category, provider: scanProvider } of scanDirs) {
-        if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
-          for (const filePath of collectMarkdownFilesRecursive(dir)) {
+        if ((await fs.stat(dir))?.isDirectory) {
+          for (const filePath of await collectMarkdownFilesRecursive(fs, dir)) {
             if (seenPaths.has(filePath)) continue
             seenPaths.add(filePath)
             const relFile = path.relative(dir, filePath).split(path.sep).join('/')
@@ -1148,12 +1152,12 @@ export function createAiConfigOps(db: SlayzoneDb) {
         const existing = entries.find((e) => e.path === filePath)
         if (existing) {
           existing.linkedItemId = sel.item_id
-          const syncState = computeLinkedSyncState(filePath, expectedContent)
+          const syncState = await computeLinkedSyncState(fs, filePath, expectedContent)
           existing.syncHealth = syncState.syncHealth
           existing.syncReason = syncState.syncReason
         } else {
-          const exists = fs.existsSync(filePath)
-          const syncState = computeLinkedSyncState(filePath, expectedContent)
+          const exists = await fs.exists(filePath)
+          const syncState = await computeLinkedSyncState(fs, filePath, expectedContent)
           seenPaths.add(filePath)
           entries.push({
             path: filePath,
@@ -1194,10 +1198,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
           item.metadata_json
         )
         const hash = contentHash(syncedContent)
-        if (!isPathAllowed(filePath, input.projectPath)) throw new Error('Path not allowed')
+        if (!isPathAllowed(fs, filePath, input.projectPath)) throw new Error('Path not allowed')
         const dir = path.dirname(filePath)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(filePath, syncedContent, 'utf-8')
+        if (!(await fs.exists(dir))) await fs.mkdir(dir)
+        await fs.writeFile(filePath, syncedContent)
 
         await db
           .prepare(`
@@ -1243,11 +1247,11 @@ export function createAiConfigOps(db: SlayzoneDb) {
           item.metadata_json
         )
         const hash = contentHash(syncedContent)
-        if (!isPathAllowed(filePath, input.projectPath)) continue
+        if (!isPathAllowed(fs, filePath, input.projectPath)) continue
 
         const dir = path.dirname(filePath)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(filePath, syncedContent, 'utf-8')
+        if (!(await fs.exists(dir))) await fs.mkdir(dir)
+        await fs.writeFile(filePath, syncedContent)
 
         await db
           .prepare(`
@@ -1359,11 +1363,11 @@ export function createAiConfigOps(db: SlayzoneDb) {
             localItem.metadata_json
           )
           const filePath = path.join(resolvedProject, relativePath)
-          if (!isPathAllowed(filePath, projectPath)) continue
+          if (!isPathAllowed(fs, filePath, projectPath)) continue
 
           const dir = path.dirname(filePath)
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-          fs.writeFileSync(filePath, syncedContent, 'utf-8')
+          if (!(await fs.exists(dir))) await fs.mkdir(dir)
+          await fs.writeFile(filePath, syncedContent)
           await insertSelection.run(
             crypto.randomUUID(),
             projectId,
@@ -1372,7 +1376,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
             relativePath,
             contentHash(syncedContent)
           )
-          removeLegacySkillFileIfPresent(
+          await removeLegacySkillFileIfPresent(
+            fs,
             providerId,
             localItem.type,
             localItem.slug,
@@ -1430,13 +1435,14 @@ export function createAiConfigOps(db: SlayzoneDb) {
           ? effectiveTargetPath
           : path.join(resolvedProject, effectiveTargetPath)
 
-        if (!isPathAllowed(filePath, projectPath)) continue
+        if (!isPathAllowed(fs, filePath, projectPath)) continue
 
         const dir = path.dirname(filePath)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(filePath, syncedContent, 'utf-8')
+        if (!(await fs.exists(dir))) await fs.mkdir(dir)
+        await fs.writeFile(filePath, syncedContent)
         await updateSelection.run(effectiveTargetPath, contentHash(syncedContent), sel.id)
-        removeLegacySkillFileIfPresent(
+        await removeLegacySkillFileIfPresent(
+          fs,
           providerId,
           sel.item_type,
           sel.item_slug,
@@ -1451,10 +1457,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
             : path.join(resolvedProject, sel.target_path)
           if (
             oldFilePath !== filePath &&
-            fs.existsSync(oldFilePath) &&
-            isPathAllowed(oldFilePath, projectPath)
+            (await fs.exists(oldFilePath)) &&
+            isPathAllowed(fs, oldFilePath, projectPath)
           ) {
-            fs.unlinkSync(oldFilePath)
+            await fs.unlink(oldFilePath)
           }
         }
 
@@ -1483,12 +1489,12 @@ export function createAiConfigOps(db: SlayzoneDb) {
       return result.changes > 0
     },
     renameContextFile: async (oldPath: string, newPath: string, projectPath: string) => {
-      if (!isPathAllowed(oldPath, projectPath)) throw new Error('Path not allowed')
-      if (!isPathAllowed(newPath, projectPath)) throw new Error('Path not allowed')
-      if (!fs.existsSync(oldPath)) throw new Error('File not found')
+      if (!isPathAllowed(fs, oldPath, projectPath)) throw new Error('Path not allowed')
+      if (!isPathAllowed(fs, newPath, projectPath)) throw new Error('Path not allowed')
+      if (!(await fs.exists(oldPath))) throw new Error('File not found')
       const dir = path.dirname(newPath)
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-      fs.renameSync(oldPath, newPath)
+      if (!(await fs.exists(dir))) await fs.mkdir(dir)
+      await fs.rename(oldPath, newPath)
       // Update any project selections pointing to old path
       const resolvedProject = path.resolve(projectPath)
       const oldRel = path.relative(resolvedProject, oldPath)
@@ -1500,13 +1506,13 @@ export function createAiConfigOps(db: SlayzoneDb) {
         .run(newRel, oldRel)
     },
     deleteContextFile: async (filePath: string, projectPath: string, projectId: string) => {
-      if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+      if (!isPathAllowed(fs, filePath, projectPath)) throw new Error('Path not allowed')
+      if (await fs.exists(filePath)) await fs.unlink(filePath)
       // Remove empty parent dir (e.g. skills/slug/ after deleting SKILL.md)
       const parentDir = path.dirname(filePath)
       try {
-        const remaining = fs.readdirSync(parentDir)
-        if (remaining.length === 0) fs.rmdirSync(parentDir)
+        const remaining = await fs.readdir(parentDir)
+        if (remaining.length === 0) await fs.rmdir(parentDir)
       } catch {
         /* ignore — dir may not exist or not be empty */
       }
@@ -1622,10 +1628,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
             const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
             if (!rootPath) continue
             const filePath = path.join(resolvedProject, rootPath)
-            if (!isPathAllowed(filePath, projectPath)) continue
+            if (!isPathAllowed(fs, filePath, projectPath)) continue
             const dir = path.dirname(filePath)
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-            fs.writeFileSync(filePath, variant.content, 'utf-8')
+            if (!(await fs.exists(dir))) await fs.mkdir(dir)
+            await fs.writeFile(filePath, variant.content)
             await db
               .prepare(`
             INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
@@ -1704,11 +1710,11 @@ export function createAiConfigOps(db: SlayzoneDb) {
         const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
         if (!rootPath) continue
         const filePath = path.join(resolvedProject, rootPath)
-        if (!isPathAllowed(filePath, projectPath)) continue
+        if (!isPathAllowed(fs, filePath, projectPath)) continue
 
         const dir = path.dirname(filePath)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(filePath, content, 'utf-8')
+        if (!(await fs.exists(dir))) await fs.mkdir(dir)
+        await fs.writeFile(filePath, content)
 
         await db
           .prepare(`
@@ -1725,13 +1731,16 @@ export function createAiConfigOps(db: SlayzoneDb) {
       const result: RootInstructionsResult = { content, providerHealth }
       return result
     },
-    readProviderInstructions: (projectPath: string, provider: CliProvider): ProviderFileContent => {
+    readProviderInstructions: async (
+      projectPath: string,
+      provider: CliProvider
+    ): Promise<ProviderFileContent> => {
       const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
       if (!rootPath) return { provider, content: '', exists: false }
       const filePath = path.join(path.resolve(projectPath), rootPath)
-      if (!isPathAllowed(filePath, projectPath)) return { provider, content: '', exists: false }
-      if (!fs.existsSync(filePath)) return { provider, content: '', exists: false }
-      return { provider, content: fs.readFileSync(filePath, 'utf-8'), exists: true }
+      if (!isPathAllowed(fs, filePath, projectPath)) return { provider, content: '', exists: false }
+      if (!(await fs.exists(filePath))) return { provider, content: '', exists: false }
+      return { provider, content: await fs.readFile(filePath), exists: true }
     },
     pushProviderInstructions: async (
       projectId: string,
@@ -1743,7 +1752,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
       if (!rootPath) throw new Error(`No root instructions path for ${provider}`)
       const resolvedProject = path.resolve(projectPath)
       const filePath = path.join(resolvedProject, rootPath)
-      if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
+      if (!isPathAllowed(fs, filePath, projectPath)) throw new Error('Path not allowed')
 
       const item = (await db
         .prepare(
@@ -1753,8 +1762,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
       if (!item) throw new Error('No instructions to push')
 
       const dir = path.dirname(filePath)
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(filePath, content, 'utf-8')
+      if (!(await fs.exists(dir))) await fs.mkdir(dir)
+      await fs.writeFile(filePath, content)
 
       const hash = contentHash(content)
       await db
@@ -1776,10 +1785,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
       const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
       if (!rootPath) throw new Error(`No root instructions path for ${provider}`)
       const filePath = path.join(path.resolve(projectPath), rootPath)
-      if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
-      if (!fs.existsSync(filePath)) throw new Error('Provider file does not exist')
+      if (!isPathAllowed(fs, filePath, projectPath)) throw new Error('Path not allowed')
+      if (!(await fs.exists(filePath))) throw new Error('Provider file does not exist')
 
-      const diskContent = fs.readFileSync(filePath, 'utf-8')
+      const diskContent = await fs.readFile(filePath)
 
       const existing = (await db
         .prepare(
@@ -1880,7 +1889,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
             const filePath = path.isAbsolute(effectiveTargetPath)
               ? effectiveTargetPath
               : path.join(resolvedProject, effectiveTargetPath)
-            const syncState = computeLinkedSyncState(filePath, expectedContent)
+            const syncState = await computeLinkedSyncState(fs, filePath, expectedContent)
             providerMap[provider] = {
               path: effectiveTargetPath,
               syncHealth: syncState.syncHealth,
@@ -1900,7 +1909,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
               continue
             }
             const filePath = path.join(resolvedProject, defaultPath)
-            const unlinkedState = computeUnlinkedSyncState(filePath)
+            const unlinkedState = await computeUnlinkedSyncState(fs, filePath)
             providerMap[provider] = {
               path: defaultPath,
               syncHealth: unlinkedState.syncHealth,
@@ -1928,9 +1937,9 @@ export function createAiConfigOps(db: SlayzoneDb) {
       if (!skillPath) return { provider, content: '', exists: false }
 
       const filePath = path.join(path.resolve(projectPath), skillPath)
-      if (!isPathAllowed(filePath, projectPath)) return { provider, content: '', exists: false }
-      if (!fs.existsSync(filePath)) return { provider, content: '', exists: false }
-      return { provider, content: fs.readFileSync(filePath, 'utf-8'), exists: true }
+      if (!isPathAllowed(fs, filePath, projectPath)) return { provider, content: '', exists: false }
+      if (!(await fs.exists(filePath))) return { provider, content: '', exists: false }
+      return { provider, content: await fs.readFile(filePath), exists: true }
     },
     getExpectedSkillContent: async (
       _projectPath: string,
@@ -1969,10 +1978,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
       if (!skillPath) throw new Error(`No skill path for ${provider}`)
 
       const filePath = path.join(path.resolve(projectPath), skillPath)
-      if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
-      if (!fs.existsSync(filePath)) throw new Error('Skill file does not exist')
+      if (!isPathAllowed(fs, filePath, projectPath)) throw new Error('Path not allowed')
+      if (!(await fs.exists(filePath))) throw new Error('Skill file does not exist')
 
-      const diskContent = fs.readFileSync(filePath, 'utf-8')
+      const diskContent = await fs.readFile(filePath)
       const normalized = normalizeSkillForPersistence(
         item.slug,
         diskContent,
@@ -2060,8 +2069,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
         const dir = path.join(resolvedProject, mapping.skillsDir)
         if (scannedDirs.has(dir)) continue // avoid re-scanning shared dirs (codex+gemini → .agents/skills/)
         scannedDirs.add(dir)
-        if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue
-        for (const filePath of collectMarkdownFilesRecursive(dir)) {
+        if (!(await fs.stat(dir))?.isDirectory) continue
+        for (const filePath of await collectMarkdownFilesRecursive(fs, dir)) {
           const relFile = path.relative(dir, filePath).split(path.sep).join('/')
           const relPath = `${mapping.skillsDir}/${relFile}`
           const slug = skillSlugFromContextPath(relPath)
@@ -2112,7 +2121,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         // Create item if not in DB
         if (!item) {
           const id = crypto.randomUUID()
-          const rawContent = fs.readFileSync(entry.filePath, 'utf-8')
+          const rawContent = await fs.readFile(entry.filePath)
           const normalized = normalizeSkillForPersistence(entry.slug, rawContent, '{}')
           const content = normalized ? normalized.content : rawContent
           const metadataJson = normalized ? normalized.metadataJson : '{}'
@@ -2191,8 +2200,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
           const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
           if (!rootPath) continue
           const filePath = path.join(resolvedProject, rootPath)
-          if (!fs.existsSync(filePath)) return true
-          if (contentHash(fs.readFileSync(filePath, 'utf-8')) !== hash) return true
+          if (!(await fs.exists(filePath))) return true
+          if (contentHash(await fs.readFile(filePath)) !== hash) return true
         }
       }
 
@@ -2220,8 +2229,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
         const filePath = path.isAbsolute(effectiveTargetPath)
           ? effectiveTargetPath
           : path.join(resolvedProject, effectiveTargetPath)
-        if (!fs.existsSync(filePath)) return true
-        const diskHash = contentHash(fs.readFileSync(filePath, 'utf-8'))
+        if (!(await fs.exists(filePath))) return true
+        const diskHash = contentHash(await fs.readFile(filePath))
         const itemHash = contentHash(expectedContent)
         if (diskHash !== itemHash) return true
       }
@@ -2326,7 +2335,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         const filePath = path.isAbsolute(effectiveTargetPath)
           ? effectiveTargetPath
           : path.join(resolvedProject, effectiveTargetPath)
-        if (!isPathAllowed(filePath, input.projectPath)) continue
+        if (!isPathAllowed(fs, filePath, input.projectPath)) continue
 
         if (sel.item_type === 'skill') {
           keepPathsByProvider.get(provider)?.add(path.resolve(filePath))
@@ -2334,8 +2343,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
         // Check for external edits via content hash.
         // Skipped for single-item sync: the user explicitly chose to overwrite disk after seeing the diff in the edit panel.
-        if (!singleItemId && fs.existsSync(filePath) && sel.content_hash) {
-          const diskHash = contentHash(fs.readFileSync(filePath, 'utf-8'))
+        if (!singleItemId && (await fs.exists(filePath)) && sel.content_hash) {
+          const diskHash = contentHash(await fs.readFile(filePath))
           if (diskHash !== sel.content_hash && diskHash !== hash) {
             result.conflicts.push({
               path: effectiveTargetPath,
@@ -2349,10 +2358,11 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
         // Write file
         const dir = path.dirname(filePath)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(filePath, syncedContent, 'utf-8')
+        if (!(await fs.exists(dir))) await fs.mkdir(dir)
+        await fs.writeFile(filePath, syncedContent)
         await updateSelection.run(effectiveTargetPath, hash, sel.id)
-        removeLegacySkillFileIfPresent(
+        await removeLegacySkillFileIfPresent(
+          fs,
           provider,
           sel.item_type,
           sel.item_slug,
@@ -2367,10 +2377,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
             : path.join(resolvedProject, sel.target_path)
           if (
             oldFilePath !== filePath &&
-            fs.existsSync(oldFilePath) &&
-            isPathAllowed(oldFilePath, input.projectPath)
+            (await fs.exists(oldFilePath)) &&
+            isPathAllowed(fs, oldFilePath, input.projectPath)
           ) {
-            fs.unlinkSync(oldFilePath)
+            await fs.unlink(oldFilePath)
           }
         }
 
@@ -2401,12 +2411,12 @@ export function createAiConfigOps(db: SlayzoneDb) {
           if (!relativePath) continue
 
           const filePath = path.join(resolvedProject, relativePath)
-          if (!isPathAllowed(filePath, input.projectPath)) continue
+          if (!isPathAllowed(fs, filePath, input.projectPath)) continue
 
           keepPathsByProvider.get(provider)?.add(path.resolve(filePath))
 
           const dir = path.dirname(filePath)
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+          if (!(await fs.exists(dir))) await fs.mkdir(dir)
           const syncedContent = getSyncedItemContent(
             provider,
             item.type,
@@ -2415,8 +2425,9 @@ export function createAiConfigOps(db: SlayzoneDb) {
             item.content,
             item.metadata_json
           )
-          fs.writeFileSync(filePath, syncedContent, 'utf-8')
-          removeLegacySkillFileIfPresent(
+          await fs.writeFile(filePath, syncedContent)
+          await removeLegacySkillFileIfPresent(
+            fs,
             provider,
             item.type,
             item.slug,
@@ -2450,10 +2461,10 @@ export function createAiConfigOps(db: SlayzoneDb) {
           if (!rootPath) continue
           const filePath = path.join(resolvedProject, rootPath)
           const resolvedFile = path.resolve(filePath)
-          if (!fs.existsSync(resolvedFile)) continue
-          if (!isPathAllowed(resolvedFile, input.projectPath)) continue
+          if (!(await fs.exists(resolvedFile))) continue
+          if (!isPathAllowed(fs, resolvedFile, input.projectPath)) continue
           if (managedInstructionPaths.has(resolvedFile)) continue
-          fs.unlinkSync(resolvedFile)
+          await fs.unlink(resolvedFile)
           result.deleted.push({
             path: toProjectRelativePath(resolvedProject, resolvedFile),
             provider: provider as CliProvider,
@@ -2471,11 +2482,11 @@ export function createAiConfigOps(db: SlayzoneDb) {
           const skillsDir = mapping.skillsDir
           if (skillsDir) {
             const dirPath = path.join(resolvedProject, skillsDir)
-            for (const markdownFile of collectMarkdownFilesRecursive(dirPath)) {
+            for (const markdownFile of await collectMarkdownFilesRecursive(fs, dirPath)) {
               const resolvedFile = path.resolve(markdownFile)
               if (keep.has(resolvedFile)) continue
-              if (!isPathAllowed(resolvedFile, input.projectPath)) continue
-              fs.unlinkSync(resolvedFile)
+              if (!isPathAllowed(fs, resolvedFile, input.projectPath)) continue
+              await fs.unlink(resolvedFile)
               result.deleted.push({
                 path: toProjectRelativePath(resolvedProject, resolvedFile),
                 provider,
@@ -2496,12 +2507,12 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
           const provider = target as CliProvider
           const filePath = path.join(resolvedProject, spec.relativePath)
-          if (!fs.existsSync(filePath)) continue
-          if (!isPathAllowed(filePath, input.projectPath)) continue
+          if (!(await fs.exists(filePath))) continue
+          if (!isPathAllowed(fs, filePath, input.projectPath)) continue
 
           // Keep MCP files only for enabled providers.
           if (!enabledSet.has(provider)) {
-            fs.unlinkSync(filePath)
+            await fs.unlink(filePath)
             result.deleted.push({
               path: toProjectRelativePath(resolvedProject, filePath),
               provider,
@@ -2512,9 +2523,9 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
           // For enabled providers, prune empty config files.
           try {
-            const parsed = spec.read(fs.readFileSync(filePath, 'utf-8'))
+            const parsed = spec.read(await fs.readFile(filePath))
             if (Object.keys(parsed).length === 0) {
-              fs.unlinkSync(filePath)
+              await fs.unlink(filePath)
               result.deleted.push({
                 path: toProjectRelativePath(resolvedProject, filePath),
                 provider,
@@ -2570,8 +2581,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
           ? effectiveTargetPath
           : path.join(resolvedProject, effectiveTargetPath)
 
-        if (!fs.existsSync(filePath)) continue
-        const diskHash = contentHash(fs.readFileSync(filePath, 'utf-8'))
+        if (!(await fs.exists(filePath))) continue
+        const diskHash = contentHash(await fs.readFile(filePath))
         const expectedHash = contentHash(expectedContent)
         if (sel.content_hash && diskHash !== sel.content_hash && diskHash !== expectedHash) {
           conflicts.push({
@@ -2585,11 +2596,11 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
       return conflicts
     },
-    discoverMcpConfigs: (projectPath: string): McpConfigFileResult[] => {
-      return discoverMcpConfigsFromSpecs(path.resolve(projectPath), PROJECT_MCP_SPECS)
+    discoverMcpConfigs: async (projectPath: string): Promise<McpConfigFileResult[]> => {
+      return await discoverMcpConfigsFromSpecs(path.resolve(projectPath), PROJECT_MCP_SPECS)
     },
-    writeMcpServer: (input: WriteMcpServerInput) => {
-      writeMcpServerToSpecs(
+    writeMcpServer: async (input: WriteMcpServerInput) => {
+      await writeMcpServerToSpecs(
         path.resolve(input.projectPath),
         PROJECT_MCP_SPECS,
         input.provider,
@@ -2597,19 +2608,19 @@ export function createAiConfigOps(db: SlayzoneDb) {
         input.config
       )
     },
-    removeMcpServer: (input: RemoveMcpServerInput) => {
-      removeMcpServerFromSpecs(
+    removeMcpServer: async (input: RemoveMcpServerInput) => {
+      await removeMcpServerFromSpecs(
         path.resolve(input.projectPath),
         PROJECT_MCP_SPECS,
         input.provider,
         input.serverKey
       )
     },
-    discoverComputerMcpConfigs: (): McpConfigFileResult[] => {
-      return discoverMcpConfigsFromSpecs(homeDir, COMPUTER_MCP_SPECS)
+    discoverComputerMcpConfigs: async (): Promise<McpConfigFileResult[]> => {
+      return await discoverMcpConfigsFromSpecs(homeDir, COMPUTER_MCP_SPECS)
     },
-    writeComputerMcpServer: (input: WriteComputerMcpServerInput) => {
-      writeMcpServerToSpecs(
+    writeComputerMcpServer: async (input: WriteComputerMcpServerInput) => {
+      await writeMcpServerToSpecs(
         homeDir,
         COMPUTER_MCP_SPECS,
         input.provider,
@@ -2617,8 +2628,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
         input.config
       )
     },
-    removeComputerMcpServer: (input: RemoveComputerMcpServerInput) => {
-      removeMcpServerFromSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey)
+    removeComputerMcpServer: async (input: RemoveComputerMcpServerInput) => {
+      await removeMcpServerFromSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey)
     },
     checkSlayConfigured: (projectPath: string): boolean => {
       // Reads the project's instruction files on THIS machine: refused like setupSlay.
