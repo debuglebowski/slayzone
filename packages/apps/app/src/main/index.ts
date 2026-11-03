@@ -588,11 +588,11 @@ import {
   spawnProcess,
   updateProcess,
   stopProcess,
-  killProcess,
+  removeProcess,
   restartProcess,
   listForTask,
   listAllProcesses,
-  killTaskProcesses,
+  removeTaskProcesses,
   killAllProcesses,
   shutdownAllProcesses,
   processEvents,
@@ -2149,7 +2149,7 @@ app
 
     configureTaskRuntimeAdapters({
       killPtysByTaskId,
-      killTaskProcesses,
+      removeTaskProcesses,
       recordDiagnosticEvent,
       requestPtyRespawn: broadcastRespawnRequest,
       onReachedTerminal: onTaskReachedTerminal,
@@ -2595,11 +2595,11 @@ app
               spawn: spawnProcess,
               update: updateProcess,
               stop: stopProcess,
-              kill: killProcess,
+              remove: removeProcess,
               restart: restartProcess,
               listForTask,
               listAll: listAllProcesses,
-              killTask: killTaskProcesses,
+              removeForTask: removeTaskProcesses,
               events: processEvents
             })
             // Cutover: no in-process appRouter server. The desktop app serves ONE
@@ -4265,15 +4265,15 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           updateProcess(processId, updates)
       )
       ipcMain.handle('processes:stop', (_event, processId: string) => stopProcess(processId))
-      ipcMain.handle('processes:kill', (_event, processId: string) => killProcess(processId))
+      ipcMain.handle('processes:remove', (_event, processId: string) => removeProcess(processId))
       ipcMain.handle('processes:restart', (_event, processId: string) => restartProcess(processId))
       ipcMain.handle(
         'processes:listForTask',
         (_event, taskId: string | null, projectId: string | null) => listForTask(taskId, projectId)
       )
       ipcMain.handle('processes:listAll', () => listAllProcesses())
-      ipcMain.handle('processes:killTask', (_event, taskId: string) => {
-        killTaskProcesses(taskId)
+      ipcMain.handle('processes:removeForTask', (_event, taskId: string) => {
+        removeTaskProcesses(taskId)
       })
     }
 

@@ -1019,11 +1019,11 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     path('updates.cwd')
   ),
   'processes.stop': checked(proc('processId')),
-  'processes.kill': checked(proc('processId')),
+  'processes.remove': checked(proc('processId')),
   'processes.restart': checked(proc('processId')),
   'processes.listForTask': then(checked(task('taskId'), project('projectId')), processRows),
   'processes.listAll': listed(processRows),
-  'processes.killTask': checked(task('taskId')),
+  'processes.removeForTask': checked(task('taskId')),
   'processes.onLog': streamed(on('id', 'process')),
   'processes.onStatus': streamed(on('id', 'process')),
   'processes.onTitle': streamed(on('id', 'process')),

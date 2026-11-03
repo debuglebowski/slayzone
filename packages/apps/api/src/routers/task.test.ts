@@ -992,7 +992,7 @@ test('revive: configure adapter spies', async () => {
   configureTaskRuntimeAdapters({
     ...baseAdapters,
     killPtysByTaskId: (id) => killCalls.push(id),
-    killTaskProcesses: () => {},
+    removeTaskProcesses: () => {},
     recordDiagnosticEvent: () => {},
     requestPtyRespawn: (id) => respawnCalls.push(id),
     onReachedTerminal: (id) => killCalls.push(id)

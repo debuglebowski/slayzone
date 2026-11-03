@@ -4,7 +4,7 @@ import {
   initProcessManagerWith,
   createProcess,
   updateProcess,
-  killProcess,
+  removeProcess,
   restartProcess,
   listAllProcesses
 } from './process-manager'
@@ -16,7 +16,7 @@ import type { ProcessBackend, ProcHandle } from './process-backend'
 // One sequential scenario against the process manager's module state; vitest runs
 // tests in declaration order, so later tests read the state earlier ones produced.
 
-// Fake persistence: records every call so the create→update→kill lifecycle
+// Fake persistence: records every call so the create→update→remove lifecycle
 // can be asserted without a DB. loadAll seeds one pre-existing row to cover
 // hydration on init.
 const inserts: PersistedProcess[] = []
@@ -80,7 +80,7 @@ const fake: ProcessPersistence = {
   },
   remove: async (id) => {
     // Capture in-memory state at persistence time: `processes.delete` must
-    // already have run (statement order inside killProcess is load-bearing —
+    // already have run (statement order inside removeProcess is load-bearing —
     // the exit handler's auto-restart checks `processes.has`).
     removes.push({ id, stillListed: listAllProcesses().some((p) => p.id === id) })
   },
@@ -197,7 +197,7 @@ describe('process manager lifecycle over the persistence seam', () => {
     })
   })
 
-  describe('create / update / kill', () => {
+  describe('create / update / remove', () => {
     let id = ''
 
     // --- create → insert ---
@@ -286,25 +286,25 @@ describe('process manager lifecycle over the persistence seam', () => {
       expect(patched?.label).toBe('renamed')
     })
 
-    // --- kill → remove (after in-memory delete) ---
-    test('killProcess returns true', () => {
-      expect(killProcess(id)).toBe(true)
+    // --- remove → persistence remove (after in-memory delete) ---
+    test('removeProcess returns true', () => {
+      expect(removeProcess(id)).toBe(true)
     })
-    test('killProcess persists exactly one remove', () => {
+    test('removeProcess persists exactly one remove', () => {
       expect(removes.map((r) => r.id)).toEqual([id])
     })
     test('remove fires after processes.delete (order preserved)', () => {
       expect(removes[0].stillListed).toBe(false)
     })
-    test('killed process gone from memory', () => {
+    test('removed process gone from memory', () => {
       expect(listAllProcesses().map((p) => p.id)).not.toContain(id)
     })
 
     // Hydrated (never-spawned) processes are removable too.
-    test('killProcess works on hydrated process', () => {
-      expect(killProcess('seed-1')).toBe(true)
+    test('removeProcess works on hydrated process', () => {
+      expect(removeProcess('seed-1')).toBe(true)
     })
-    test('hydrated kill persists remove', () => {
+    test('hydrated remove persists remove', () => {
       expect(removes.map((r) => r.id)).toEqual([id, 'seed-1'])
     })
   })

@@ -533,17 +533,17 @@ test.describe('CLI: slay', () => {
       expect(r.stderr).toContain('Could not connect')
     })
 
-    test('kill stops a process', () => {
-      // Kill the 'CLI test process' seeded in beforeAll (via the side-car), then
+    test('remove stops and removes a process', () => {
+      // Remove the 'CLI test process' seeded in beforeAll (via the side-car), then
       // verify it is gone from the side-car's process list.
       const freshId = runProcessesCli('processes', 'list', '--json')
       const before = JSON.parse(freshId.stdout) as { id: string; label: string }[]
       expect(before.some((p) => p.label === 'CLI test process')).toBe(true)
 
       const target = before.find((p) => p.label === 'CLI test process')!
-      const r = runProcessesCli('processes', 'kill', target.id.slice(0, 8))
+      const r = runProcessesCli('processes', 'remove', target.id.slice(0, 8))
       expect(r.status).toBe(0)
-      expect(r.stdout).toContain('Killed:')
+      expect(r.stdout).toContain('Removed:')
 
       const after = JSON.parse(runProcessesCli('processes', 'list', '--json').stdout) as {
         id: string
@@ -551,8 +551,8 @@ test.describe('CLI: slay', () => {
       expect(after.some((p) => p.id === target.id)).toBe(false)
     })
 
-    test('kill exits non-zero on unknown id', () => {
-      const r = runProcessesCli('processes', 'kill', 'xxxxxxxx')
+    test('remove exits non-zero on unknown id', () => {
+      const r = runProcessesCli('processes', 'remove', 'xxxxxxxx')
       expect(r.status).not.toBe(0)
       expect(r.stderr).toContain('not found')
     })
@@ -578,6 +578,78 @@ test.describe('CLI: slay', () => {
       expect(r.stderr).toContain('not found')
     })
 
+    // stop keeps the row; start brings it back under the same id with a new pid;
+    // restart replaces the run; failures exit non-zero.
+    test('stop / start / restart keep the process tracked', async ({ mainWindow }) => {
+      const id = await spawnViaSidecar(mainWindow, 'lifecycle test', 'sleep 60')
+      const short = id.slice(0, 8)
+      const row = () =>
+        (
+          JSON.parse(runProcessesCli('processes', 'list', '--json').stdout) as {
+            id: string
+            status: string
+            pid: number | null
+          }[]
+        ).find((p) => p.id === id)
+      try {
+        const firstPid = row()!.pid
+        expect(firstPid).not.toBeNull()
+
+        const busy = runProcessesCli('processes', 'start', short)
+        expect(busy.status).not.toBe(0)
+        expect(busy.stderr).toContain('already running')
+
+        const stopped = runProcessesCli('processes', 'stop', short)
+        expect(stopped.status, stopped.stderr).toBe(0)
+        expect(stopped.stdout).toContain('Stopped:')
+        expect(row()).toMatchObject({ status: 'stopped', pid: null })
+
+        const started = runProcessesCli(
+          'processes',
+          'start',
+          short,
+          '--wait',
+          '--settle',
+          '500',
+          '--json'
+        )
+        expect(started.status, started.stderr).toBe(0)
+        const startedOut = JSON.parse(started.stdout) as { id: string; pid: number }
+        expect(startedOut.id).toBe(id)
+        expect(startedOut.pid).toBeGreaterThan(0)
+        expect(startedOut.pid).not.toBe(firstPid)
+        expect(row()).toMatchObject({ status: 'running', pid: startedOut.pid })
+
+        const restarted = runProcessesCli('processes', 'restart', short)
+        expect(restarted.status, restarted.stderr).toBe(0)
+        const newPid = Number(restarted.stdout.match(/pid (\d+)/)?.[1])
+        expect(newPid).toBeGreaterThan(0)
+        expect(newPid).not.toBe(startedOut.pid)
+        expect(row()).toMatchObject({ status: 'running', pid: newPid })
+      } finally {
+        runProcessesCli('processes', 'remove', short)
+      }
+    })
+
+    test('start --wait exits non-zero when the process dies', async ({ mainWindow }) => {
+      const id = await spawnViaSidecar(mainWindow, 'dies test', 'echo dying; exit 3')
+      try {
+        const r = runProcessesCli(
+          'processes',
+          'restart',
+          id.slice(0, 8),
+          '--wait',
+          '--settle',
+          '1500'
+        )
+        expect(r.status).not.toBe(0)
+        expect(r.stderr).toContain('did not stay up')
+        expect(r.stderr).toContain('dying')
+      } finally {
+        runProcessesCli('processes', 'remove', id.slice(0, 8))
+      }
+    })
+
     test('spawns command via user shell and captures output', async ({ mainWindow }) => {
       const id = await spawnViaSidecar(mainWindow, 'shell test', 'echo "hello from $SHELL"')
       await new Promise((r) => setTimeout(r, 500))
@@ -587,7 +659,7 @@ test.describe('CLI: slay', () => {
       // Verifies command runs through a real shell (variable expansion works)
       expect(r.stdout).toContain('hello from /')
 
-      runProcessesCli('processes', 'kill', id.slice(0, 8))
+      runProcessesCli('processes', 'remove', id.slice(0, 8))
     })
 
     test('process inherits enriched PATH even with bare shell and minimal env', async ({
@@ -626,7 +698,7 @@ test.describe('CLI: slay', () => {
         expect(match).toBeTruthy()
         expect(match![1].split(':').length).toBeGreaterThan(2)
 
-        runProcessesCli('processes', 'kill', id.slice(0, 8))
+        runProcessesCli('processes', 'remove', id.slice(0, 8))
       } finally {
         await mainWindow.evaluate(() =>
           window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null })

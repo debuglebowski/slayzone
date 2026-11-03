@@ -288,6 +288,9 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'DELETE /api/processes/:id': checked(proc('params.id')),
   'GET /api/processes/:id/follow': checked(proc('params.id')),
   'GET /api/processes/:id/logs': checked(proc('params.id')),
+  'POST /api/processes/:id/restart': checked(proc('params.id')),
+  'POST /api/processes/:id/start': checked(proc('params.id')),
+  'POST /api/processes/:id/stop': checked(proc('params.id')),
 
   // ── projects ──
   'GET /api/projects': listed(dataRows('id', 'project')),

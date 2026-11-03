@@ -101,7 +101,7 @@ export const IPC_TELEMETRY_MAP: Record<string, IpcTelemetryEntry> = {
   // Processes
   'processes:create': bare('process_created'),
   'processes:stop': bare('process_stopped'),
-  'processes:kill': bare('process_stopped'),
+  'processes:remove': bare('process_stopped'),
 
   // Backup
   'backup:create': bare('backup_created'),

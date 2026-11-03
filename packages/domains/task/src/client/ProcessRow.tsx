@@ -41,7 +41,7 @@ export function ProcessRow({
   onToggleLog,
   onRestart,
   onStop,
-  onKill,
+  onRemove,
   onEdit,
   onInject,
   onOpenUrl,
@@ -53,7 +53,7 @@ export function ProcessRow({
   onToggleLog: () => void
   onRestart: () => void
   onStop: () => void
-  onKill: () => void
+  onRemove: () => void
   onEdit: () => void
   onInject: () => void
   onOpenUrl?: (url: string) => void
@@ -152,9 +152,9 @@ export function ProcessRow({
                 Edit
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onKill} className="text-red-500 focus:text-red-500">
+              <DropdownMenuItem onClick={onRemove} className="text-red-500 focus:text-red-500">
                 <Trash2 className="size-3.5 mr-2 text-red-500" />
-                Delete
+                Remove
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

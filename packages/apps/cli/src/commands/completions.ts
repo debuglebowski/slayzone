@@ -14,7 +14,7 @@ complete -c slay -n '__fish_use_subcommand' -a 'computer' -d 'Run and manage Sla
 complete -c slay -n '__fish_use_subcommand' -a 'update' -d 'Update globally npm-installed @slayzone packages'
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
-complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
+complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs start stop restart remove follow'
 complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use login current forget users owner-password'
 complete -c slay -n '__fish_seen_subcommand_from computer' -a 'ls mint create start stop rm restart logs roots'
 complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
@@ -60,7 +60,10 @@ _slay() {
   process_commands=(
     'list:List processes'
     'logs:Show process logs'
-    'kill:Kill a process'
+    'start:Start a stopped process'
+    'stop:Stop a process (keeps it listed)'
+    'restart:Restart a process'
+    'remove:Stop and remove a process'
     'follow:Stream process logs'
   )
   local -a tag_commands
@@ -171,7 +174,7 @@ _slay_completions() {
         COMPREPLY=( $(compgen -W "list create view done update archive delete open search subtasks subtask-add tag" -- "$cur") )
         ;;
       processes)
-        COMPREPLY=( $(compgen -W "list logs kill follow" -- "$cur") )
+        COMPREPLY=( $(compgen -W "list logs start stop restart remove follow" -- "$cur") )
         ;;
       projects)
         COMPREPLY=( $(compgen -W "list create update" -- "$cur") )

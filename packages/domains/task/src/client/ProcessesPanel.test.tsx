@@ -45,7 +45,7 @@ const trpc = {
     }
   )
 }
-/** `mutateAsync` per procedure name (kill/stop/restart); unset ones resolve. */
+/** `mutateAsync` per procedure name (remove/stop/restart); unset ones resolve. */
 let mutations: Record<string, (input: unknown) => Promise<unknown>> = {}
 const trpcClient = {
   processes: {
@@ -93,13 +93,13 @@ vi.mock('./ProcessRow', () => ({
   ProcessRow: ({
     proc,
     expanded,
-    onKill,
+    onRemove,
     onStop,
     onRestart
   }: {
     proc: ProcessEntry
     expanded: boolean
-    onKill: () => void
+    onRemove: () => void
     onStop: () => void
     onRestart: () => void
   }) => (
@@ -107,7 +107,7 @@ vi.mock('./ProcessRow', () => ({
       <div data-testid="proc" data-expanded={String(expanded)}>
         {proc.label}
       </div>
-      <button type="button" onClick={onKill}>{`kill-${proc.id}`}</button>
+      <button type="button" onClick={onRemove}>{`remove-${proc.id}`}</button>
       <button type="button" onClick={onStop}>{`stop-${proc.id}`}</button>
       <button type="button" onClick={onRestart}>{`restart-${proc.id}`}</button>
     </>
@@ -560,7 +560,7 @@ describe('ProcessesPanel reload after the dialog saves or spawns', () => {
   })
 })
 
-// Kill / Stop / Restart used to `await` the mutation with no `.catch`: a failure (the
+// Remove / Stop / Restart used to `await` the mutation with no `.catch`: a failure (the
 // computer offline, the process already gone) was an unhandled rejection and the
 // user saw nothing. A failed action now says so and leaves the list as it was.
 describe('ProcessesPanel row actions', () => {
@@ -585,15 +585,15 @@ describe('ProcessesPanel row actions', () => {
     await act(async () => listCalls[0].d.resolve(list))
   }
 
-  it('a kill removes the process from the list', async () => {
+  it('a remove removes the process from the list', async () => {
     await loaded([proc('a', 't1', 'Dev server'), proc('b', 't1', 'Watcher')])
-    click('kill-a')
+    click('remove-a')
     await settle()
     expect(labels()).toEqual(['Watcher'])
     expect(toastErrors).toEqual([])
   })
 
-  for (const action of ['kill', 'stop', 'restart'] as const) {
+  for (const action of ['remove', 'stop', 'restart'] as const) {
     it(`a failed ${action} says so, keeps the list, and rejects nothing unhandled`, async () => {
       mutations[action] = async () => {
         throw new Error('computer offline')

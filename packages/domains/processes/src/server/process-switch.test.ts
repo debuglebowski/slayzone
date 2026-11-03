@@ -13,9 +13,10 @@ import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import {
   createProcess,
   initProcessManagerWith,
-  killProcess,
+  removeProcess,
   listAllProcesses,
   restartProcess,
+  startProcess,
   spawnProcess,
   updateProcess
 } from './process-manager'
@@ -112,7 +113,8 @@ describe('processes switched off', () => {
     ['create', () => createProcess('p1', null, 'dev', 'sleep 30', '/tmp', false)],
     ['spawn', () => spawnProcess('p1', null, 'dev', 'sleep 30', '/tmp', false)],
     ['update', () => updateProcess('persisted-1', { command: 'sleep 31' })],
-    ['restart', () => restartProcess('persisted-1')]
+    ['restart', () => restartProcess('persisted-1')],
+    ['start', () => startProcess('persisted-1')]
   ]
   for (const [op, fn] of cases) {
     describe(op, () => {
@@ -170,9 +172,9 @@ describe('processes switched off', () => {
     })
   })
 
-  // --- stop/kill/list stay available (nothing to act on) ---
-  test('kill of an unknown id still answers', () => {
-    expect(killProcess('missing')).toBe(false)
+  // --- stop/remove/list stay available (nothing to act on) ---
+  test('remove of an unknown id still answers', () => {
+    expect(removeProcess('missing')).toBe(false)
   })
 })
 
@@ -183,6 +185,6 @@ describe('switch back on', () => {
     const id = await createProcess('p1', null, 'dev', 'echo hi', '/tmp', false)
     expect(typeof id).toBe('string')
     expect(listAllProcesses().map((p) => p.id)).toContain(id)
-    killProcess(id)
+    removeProcess(id)
   })
 })

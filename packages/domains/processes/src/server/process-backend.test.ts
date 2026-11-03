@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import {
   spawnProcess,
   stopProcess,
-  killProcess,
+  removeProcess,
   processEvents,
   listAllProcesses
 } from './process-manager'
@@ -115,15 +115,15 @@ describe('fake backend', () => {
     })
 
     // --- kill: stopProcess routes handle.kill() (default SIGTERM) + emits stopped ---
-    test('stopProcess returns true', () => {
-      expect(stopProcess(idA)).toBe(true)
+    test('stopProcess returns true', async () => {
+      expect(await stopProcess(idA)).toBe(true)
     })
     test('stopProcess routes handle.kill(SIGTERM)', () => {
       expect(spawned[0].killSignals).toEqual(['SIGTERM'])
     })
     test('stopProcess emits stopped status', () => {
       expect(statuses).toContainEqual({ id: idA, status: 'stopped' })
-      killProcess(idA)
+      removeProcess(idA)
     })
   })
 
@@ -132,14 +132,14 @@ describe('fake backend', () => {
     const idB = await spawnProcess('proj', 'task', 'B', 'echo b', '/tmp', false)
     await spawned[spawned.length - 1].emitExit(0)
     expect(statuses).toContainEqual({ id: idB, status: 'completed' })
-    killProcess(idB)
+    removeProcess(idB)
   })
 
   test('exit code 1 (no autoRestart) → error', async () => {
     const idC = await spawnProcess('proj', 'task', 'C', 'false', '/tmp', false)
     await spawned[spawned.length - 1].emitExit(1)
     expect(statuses).toContainEqual({ id: idC, status: 'error' })
-    killProcess(idC)
+    removeProcess(idC)
   })
 
   // --- exit → autoRestart: restart signals synchronously, re-spawn after timer ---
@@ -165,11 +165,15 @@ describe('fake backend', () => {
       await delay(1200) // doSpawn re-fires on a 1s timer
       expect(spawned.length).toBe(beforeRestart + 1)
     })
-    test('killProcess stops the restart loop', () => {
-      expect(killProcess(idD)).toBe(true)
+    test('removeProcess stops the restart loop', () => {
+      expect(removeProcess(idD)).toBe(true)
     })
-    test('killProcess routes handle.kill on the restarted handle', () => {
-      expect(spawned[spawned.length - 1].killSignals.length).toBeGreaterThanOrEqual(1)
+    // The row goes synchronously; its tree is terminated right after (a descendant
+    // snapshot precedes the first signal).
+    test('removeProcess routes handle.kill on the restarted handle', async () => {
+      await vi.waitFor(() =>
+        expect(spawned[spawned.length - 1].killSignals.length).toBeGreaterThanOrEqual(1)
+      )
     })
   })
 })
@@ -196,7 +200,7 @@ describe('real child_process (local backend)', () => {
       }
     })
     afterAll(() => {
-      killProcess(idR)
+      removeProcess(idR)
     })
 
     test('localProcessBackend streams real stdout → processEvents log', () => {
@@ -239,7 +243,7 @@ describe('real child_process (local backend)', () => {
       delete process.env.SLAYZONE_HUB_ADDRESS
     })
     afterAll(() => {
-      killProcess(idE)
+      removeProcess(idE)
     })
 
     test('sanitize case: child emitted its env line', () => {
@@ -274,7 +278,7 @@ describe('real child_process (local backend)', () => {
       }
     })
     afterAll(() => {
-      killProcess(idX)
+      removeProcess(idX)
     })
 
     test('missing cwd: the reason is logged (failed to start … ENOENT)', () => {

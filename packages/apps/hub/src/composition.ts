@@ -166,9 +166,11 @@ import {
   spawnProcess,
   updateProcess,
   stopProcess,
-  killProcess,
+  removeProcess,
   restartProcess,
-  killTaskProcesses,
+  restartProcessDetailed,
+  startProcess,
+  removeTaskProcesses,
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
@@ -548,7 +550,7 @@ export function composeServer(opts: {
     getDataRoot: () => dataRoot,
     worktrees: defaultWorktreeExecAdapters,
     worktreePolicy: defaultWorktreePolicyAdapters,
-    killTaskProcesses,
+    removeTaskProcesses,
     killPtysByTaskId,
     recordDiagnosticEvent,
     // PTY lifecycle now lives in THIS process (slice 9), so the task-status
@@ -1028,11 +1030,11 @@ export function composeServer(opts: {
     spawn: spawnProcess,
     update: updateProcess,
     stop: stopProcess,
-    kill: killProcess,
+    remove: removeProcess,
     restart: restartProcess,
     listForTask,
     listAll: listAllProcesses,
-    killTask: killTaskProcesses,
+    removeForTask: removeTaskProcesses,
     events: processEvents
   })
 
@@ -1571,7 +1573,10 @@ export function composeServer(opts: {
     terminalStateBridge,
     processes: {
       listAll: listAllProcesses,
-      kill: killProcess,
+      remove: removeProcess,
+      stop: stopProcess,
+      start: startProcess,
+      restart: restartProcessDetailed,
       subscribeToLogs: subscribeToProcessLogs
     }
   }

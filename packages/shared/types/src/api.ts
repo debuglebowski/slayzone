@@ -1628,11 +1628,11 @@ export interface _LegacyElectronAPI {
       >
     ) => Promise<boolean>
     stop: (processId: string) => Promise<boolean>
-    kill: (processId: string) => Promise<boolean>
+    remove: (processId: string) => Promise<boolean>
     restart: (processId: string) => Promise<boolean>
     listForTask: (taskId: string | null, projectId: string | null) => Promise<ProcessInfo[]>
     listAll: () => Promise<ProcessInfo[]>
-    killTask: (taskId: string) => Promise<void>
+    removeForTask: (taskId: string) => Promise<void>
     onLog: (cb: (processId: string, line: string) => void) => () => void
     onStatus: (cb: (processId: string, status: ProcessStatus) => void) => () => void
     onStats: (cb: (stats: Record<string, ProcessStats>) => void) => () => void

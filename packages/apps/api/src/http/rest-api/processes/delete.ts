@@ -5,12 +5,12 @@ import { refusedHubProcesses } from '../switch-refusal'
 
 export function registerProcessesDeleteRoute(app: Express, deps: RestApiDeps): void {
   app.delete('/api/processes/:id', async (req, res) => {
-    if (refusedHubProcesses(res, 'kill')) return
+    if (refusedHubProcesses(res, 'remove')) return
     if (!deps.processes) {
       res.status(501).json({ error: NOT_AVAILABLE_STANDALONE })
       return
     }
-    const ok = await deps.processes.kill(req.params.id)
+    const ok = await deps.processes.remove(req.params.id)
     if (!ok) {
       res.status(404).json({ error: `Process not found` })
       return

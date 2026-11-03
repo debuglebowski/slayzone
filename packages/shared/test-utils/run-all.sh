@@ -250,6 +250,8 @@ run_harness packages/domains/processes/src/server/process-persistence.test.ts
 run_harness packages/domains/processes/src/server/process-backend.test.ts
 # Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
 run_harness packages/domains/processes/src/server/process-switch.test.ts
+# Real trees: a run that outlived the app session reads 'orphaned'; stop/restart take escaped descendants; start/restart contract.
+run_harness packages/domains/processes/src/server/process-lifecycle.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
