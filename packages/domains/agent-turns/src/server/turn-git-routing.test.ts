@@ -51,7 +51,8 @@ describe('turns on the computer', () => {
     const out = await listAgentTurnsForWorktree(db, '/remote/wt')
     expect(out).toEqual([{ id: 'r1' }])
     expect(sent.map((s) => s.op)).toEqual(['canonical', 'filterTurns'])
-    expect((sent[1]?.input.rows as Array<{ id: string }>).map((r) => r.id)).toEqual(['r1'])
+    const rows = sent[1]?.input.rows as Array<{ id: string }> | undefined
+    expect(rows?.map((r) => r.id)).toEqual(['r1'])
   })
 
   test('record: the snapshot is taken there and its row stored here', async () => {

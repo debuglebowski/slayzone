@@ -2,7 +2,7 @@
  * turn-tracker integration tests (worktree-scoped).
  */
 import { afterAll, describe, expect, test } from 'vitest'
-import { useLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
+import { installLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import {
   deterministicLocalComputerId,
@@ -21,7 +21,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 
 // The hub runs no git: turns' git runs on a (loopback) computer, as in production.
-useLoopbackTurnComputer()
+installLoopbackTurnComputer()
 
 function git(repo: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' })

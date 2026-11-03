@@ -13,4 +13,6 @@ export async function runAiCommand(mode: string, prompt: string): Promise<string
 }
 
 /** The real module routes the CLI to a computer; the mock has nothing to route. */
-export function setAiCommandRunner(_runner: unknown): void {}
+export function setAiCommandRunner(_runner: unknown): void {
+  /* nothing to route */
+}

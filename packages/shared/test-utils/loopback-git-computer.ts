@@ -24,7 +24,7 @@ import { setWorktreesRouterDeps } from '../../domains/worktrees/src/server/workt
 
 export const LOOPBACK_COMPUTER_ID = 'loopback-test-computer'
 
-export function useLoopbackGitComputer(): void {
+export function installLoopbackGitComputer(): void {
   setWorktreesRouterDeps({
     getWorkspace: () => ({
       fs: {} as never,
@@ -58,7 +58,7 @@ export function useLoopbackGitComputer(): void {
  * The same for agent-turn git (snapshots, the turn list's filter). It answers as the
  * LOCAL computer, where fixtures' project folders are placed (migration v176).
  */
-export function useLoopbackTurnComputer(): void {
+export function installLoopbackTurnComputer(): void {
   const local = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
   setTurnGitRouting({
     computerForPath: async () => local,
@@ -72,7 +72,7 @@ export function useLoopbackTurnComputer(): void {
  * The same for automation actions: `exec.run` on the test machine (shell, cwd,
  * timeout), answering as the LOCAL computer so fixtures' project folders resolve.
  */
-export function useLoopbackCommandComputer(): void {
+export function installLoopbackCommandComputer(): void {
   const local = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
   setAutomationCommandRouting({
     computerFor: async () => local,
@@ -96,7 +96,7 @@ export function useLoopbackCommandComputer(): void {
  * The same for AI config: `agentConfig.fs` on the test machine's disk (the work a
  * real computer does after its jail), for project and computer-level files alike.
  */
-export function useLoopbackAiConfigComputer(): void {
+export function installLoopbackAiConfigComputer(): void {
   setAiConfigFsRouting({
     computerForProject: async () => LOOPBACK_COMPUTER_ID,
     computerForCaller: async () => LOOPBACK_COMPUTER_ID,

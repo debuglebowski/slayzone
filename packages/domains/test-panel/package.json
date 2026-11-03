@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@types/picomatch": "^4.0.2",
+    "@slayzone/test-utils": "workspace:*",
     "@types/react": "^19.3.0",
     "lucide-react": "^1.48.0"
   }

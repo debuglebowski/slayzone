@@ -3124,6 +3124,9 @@ importers:
         specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/picomatch':
         specifier: ^4.0.2
         version: 4.0.3

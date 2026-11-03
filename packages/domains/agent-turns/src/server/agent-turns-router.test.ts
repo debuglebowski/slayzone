@@ -8,7 +8,7 @@
  *   packages/domains/agent-turns/src/server/agent-turns-router.test.ts
  */
 import { describe, test, expect, afterAll } from 'vitest'
-import { useLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
+import { installLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { agentTurnsRouter } from './agent-turns-router.js'
 import { agentTurnsEvents } from './events.js'
@@ -20,7 +20,7 @@ import * as path from 'node:path'
 import type { AgentTurnRange } from '../shared/types.js'
 
 // The hub runs no git: turns' git runs on a (loopback) computer, as in production.
-useLoopbackTurnComputer()
+installLoopbackTurnComputer()
 
 // --- onChanged subscription (unchanged — nothing else touches it) ---
 

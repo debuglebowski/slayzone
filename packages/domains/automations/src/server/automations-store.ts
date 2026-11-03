@@ -65,8 +65,6 @@ export async function updateAutomation(
   db: SlayzoneDb,
   data: UpdateAutomationInput
 ): Promise<Automation> {
-  if (data.actions !== undefined) {
-  }
   const fields: string[] = []
   const values: unknown[] = []
 

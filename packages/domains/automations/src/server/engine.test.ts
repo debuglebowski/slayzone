@@ -2,7 +2,7 @@
  * AutomationEngine tests
  */
 import { afterAll, describe, expect, test } from 'vitest'
-import { useLoopbackCommandComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
+import { installLoopbackCommandComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine, cronMatches } from './engine.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
@@ -14,7 +14,7 @@ import {
 } from '@slayzone/computers/server'
 
 // Actions run on computers, never the hub: here a loopback test computer runs them.
-useLoopbackCommandComputer()
+installLoopbackCommandComputer()
 
 const h = await createTestHarness()
 

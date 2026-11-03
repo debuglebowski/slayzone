@@ -13,7 +13,7 @@
  */
 import { describe, test, expect, beforeAll } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { useLoopbackAiConfigComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
+import { installLoopbackAiConfigComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { skillSlugFromContextPath } from '@slayzone/ai-config/shared'
 import { aiConfigRouter } from './ai-config-router.js'
@@ -24,7 +24,7 @@ import * as os from 'node:os'
 import type {} from './marketplace-txns.js'
 
 // The hub reads no config off its own disk: a loopback computer serves it.
-useLoopbackAiConfigComputer()
+installLoopbackAiConfigComputer()
 
 // Router mutations/queries are async (the ops resolve Promises); rejections are
 // checked with this await-guard (ported from the old sync-only harness `expect`).
