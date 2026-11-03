@@ -871,6 +871,9 @@ export function createChatTransport(
 
   function transitionState(tab: ChatTab, next: ChatTerminalState): void {
     if (tab.terminalState === next) return
+    // A process the host is stopping only ends: nothing it still says (a late
+    // `result`, a prompt) brings the tab back. A respawn clears `tab.proc` first.
+    if (next !== 'dead' && tab.proc?.stopRequested && !tab.proc.ended) return
     // Leaving a watched state for a resting/terminal one — disarm.
     if (next === 'idle' || next === 'error' || next === 'dead') {
       clearWatchdog(tab)
@@ -3270,6 +3273,10 @@ export function createChatTransport(
       if (!proc.ended) proc.kill('SIGKILL')
     }, 2000)
     t.unref?.()
+    // The stop is certain (SIGKILL follows), so the tab reads `dead` now — not
+    // after the CLI's own shutdown (~0.8 s for Claude Code). transitionState
+    // keeps it there until the exit (see its stopping-process guard).
+    transitionState(tab, 'dead')
   }
 
   /**
