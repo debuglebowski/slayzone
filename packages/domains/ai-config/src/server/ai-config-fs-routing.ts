@@ -4,13 +4,12 @@
  * the checkout path the client names, like the git panel); the computer-level ones
  * (`~/.claude`, …) on an explicit computer, else the caller's own. The hub's
  * composition wires {@link setAiConfigFsRouting}; the ops then run over a
- * computer-backed {@link AiConfigFs} (`agentConfig.fs` frames). With no computer
- * they run on the hub's own disk — refused there on a hub with processes off (T-06).
+ * computer-backed {@link AiConfigFs} (`agentConfig.fs` frames). With no computer —
+ * or unwired — "connect a computer" on every hub: the hub's own disk holds neither.
  */
 import type { SlayzoneDb } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import type { AiConfigDirEntry, AiConfigFs, AiConfigStat } from './ai-config-fs'
-import { getAiConfigOps } from './ai-config-ops'
 import { createAiConfigOps } from './handlers-store'
 
 export type AiConfigOps = ReturnType<typeof createAiConfigOps>
@@ -87,10 +86,7 @@ export function aiConfigComputerGone(computerId: string): void {
 }
 
 async function opsOn(db: SlayzoneDb, computerId: string | null, op: string): Promise<AiConfigOps> {
-  if (computerId == null || !routing) {
-    assertHubLocalExecEnabled({ op })
-    return getAiConfigOps()
-  }
+  if (computerId == null || !routing) return refuseNoComputer({ op })
   return createAiConfigOps(db, await fsFor(routing, computerId))
 }
 

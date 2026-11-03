@@ -13,6 +13,8 @@ import { deterministicLocalComputerId } from '../../domains/computers/src/server
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 import { exec } from 'node:child_process'
 import { setAutomationCommandRouting } from '../../domains/automations/src/server/command-routing'
+import { localAiConfigFs } from '../../domains/ai-config/src/server/ai-config-fs'
+import { setAiConfigFsRouting } from '../../domains/ai-config/src/server/ai-config-fs-routing'
 import { createGitWatcher, runGitOpLocally } from '../../domains/worktrees/src/server/git-ops'
 import {
   deliverGitWatchEvent,
@@ -87,5 +89,29 @@ export function useLoopbackCommandComputer(): void {
         })
         void child
       })
+  })
+}
+
+/**
+ * The same for AI config: `agentConfig.fs` on the test machine's disk (the work a
+ * real computer does after its jail), for project and computer-level files alike.
+ */
+export function useLoopbackAiConfigComputer(): void {
+  setAiConfigFsRouting({
+    computerForProject: async () => LOOPBACK_COMPUTER_ID,
+    computerForCaller: async () => LOOPBACK_COMPUTER_ID,
+    request: async (_computerId, call) => {
+      const fs = localAiConfigFs
+      switch (call.op) {
+        case 'homedir':
+          return fs.homedir()
+        case 'writeFile':
+          return fs.writeFile(call.path, call.content)
+        case 'rename':
+          return fs.rename(call.path, call.to)
+        default:
+          return fs[call.op](call.path)
+      }
+    }
   })
 }

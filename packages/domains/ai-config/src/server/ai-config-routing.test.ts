@@ -2,8 +2,8 @@
  * The AI-config ops read and write the files where they live: a project's on the
  * project's computer, the computer-level ones (`~/.claude`, …) on an explicit
  * computer, else the caller's own — every fs call one `agentConfig.fs` request. So
- * they work on a hub with processes switched off; with no computer, the hub's own
- * disk is refused there (`NO_COMPUTER_CONNECTED`).
+ * they work on a hub with processes switched off; with no computer, every hub says
+ * "connect a computer" (`NO_COMPUTER_CONNECTED`) — the hub's own disk is never read.
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -102,10 +102,9 @@ describe('AI config on the computer', () => {
     expect(JSON.stringify(files)).toContain(path.join(computerHome, '.claude', 'CLAUDE.md'))
   })
 
-  test('no computer on a processes-off hub: NO_COMPUTER_CONNECTED, nothing read', async () => {
+  test('no computer, on any hub: NO_COMPUTER_CONNECTED, nothing read', async () => {
     route()
     computer = null
-    process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
     const err = await caller
       .readContextFile({ filePath: path.join(projectPath, 'CLAUDE.md'), projectPath })
       .catch((e: unknown) => e)
