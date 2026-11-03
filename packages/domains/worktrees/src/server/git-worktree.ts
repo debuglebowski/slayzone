@@ -10,7 +10,6 @@ import {
 } from 'fs'
 import { cp, stat, mkdir } from 'fs/promises'
 import path from 'path'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type {
   ConflictFileContent,
   DetectedWorktree,
@@ -45,7 +44,8 @@ import {
   execGitFileList,
   hubSpawn,
   hubSpawnSync,
-  trimOutput
+  trimOutput,
+  gitDiagnostic as recordDiagnosticEvent
 } from './exec-async'
 
 /**

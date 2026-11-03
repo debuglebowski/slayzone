@@ -1,72 +1,6 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import {
-  isGitRepo,
-  removeWorktree,
-  initRepo,
-  getCurrentBranch,
-  listBranches,
-  checkoutBranch,
-  createBranch,
-  hasUncommittedChanges,
-  mergeIntoParent,
-  abortMerge,
-  isMergeInProgress,
-  getConflictedFiles,
-  getConflictContent,
-  writeResolvedFile,
-  commitFiles,
-  getWorkingDiff,
-  stageFile,
-  unstageFile,
-  discardFile,
-  stageAll,
-  unstageAll,
-  getFileDiff,
-  getUntrackedFileDiff,
-  getUntrackedFileDiffs,
-  isRebaseInProgress,
-  getRebaseProgress,
-  abortRebase,
-  continueRebase,
-  skipRebaseCommit,
-  getMergeContext,
-  getRecentCommits,
-  getAheadBehind,
-  getAheadBehindUpstream,
-  getStatusSummary,
-  getRemoteUrl,
-  gitFetch,
-  gitPush,
-  gitPull,
-  getDefaultBranch,
-  listBranchesDetailed,
-  listRemoteBranches,
-  getMergeBase,
-  getCommitsSince,
-  getCommitsBeforeRef,
-  deleteBranch,
-  pruneRemote,
-  rebaseOnto,
-  mergeFrom,
-  getDiffStats,
-  getWorktreeMetadata,
-  getCommitDag,
-  resolveChildBranches,
-  copyIgnoredFiles,
-  getIgnoredFileTree,
-  getResolvedCommitDag,
-  getResolvedForkGraph,
-  getResolvedUpstreamGraph,
-  getResolvedRecentCommits,
-  listStashes,
-  createStash,
-  applyStash,
-  popStash,
-  dropStash,
-  branchFromStash,
-  getStashDiff
-} from './git-worktree'
+import { removeWorktree } from './git-worktree'
 import {
   resolveCopyBehavior,
   detectWorktreesWithColors,
@@ -101,6 +35,8 @@ import type {
 } from '../shared/types'
 import type { GitDiffChangedPayload } from './git-watcher'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
+import { gitOpsContract } from '../shared/git-ops-contract'
+import { runGitOpLocally } from './git-ops'
 import { getWorktreesRouterDeps } from './worktrees-router-deps'
 
 const u = z.unknown()
@@ -126,7 +62,9 @@ export const worktreesRouter = router({
     getGitWatcher().unsubscribe(input.worktreePath)
   }),
 
-  isGitRepo: hubLocalProcedure.input(obj({ path: s })).query(({ input }) => isGitRepo(input.path)),
+  isGitRepo: hubLocalProcedure
+    .input(gitOpsContract.isGitRepo.input)
+    .query(({ input }) => runGitOpLocally('isGitRepo', input)),
   // Repo discovery runs on the machine that owns the directory — it decides the
   // terminal cwd, the editor root, and the git panel, so a hub-local walk pointed
   // all three at the wrong filesystem for any project living on a computer.
@@ -175,75 +113,75 @@ export const worktreesRouter = router({
   removeWorktree: hubLocalProcedure
     .input(obj({ repoPath: s, worktreePath: s, branchHint: s.optional() }))
     .mutation(({ input }) => removeWorktree(input.repoPath, input.worktreePath, input.branchHint)),
-  init: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => initRepo(input.path)),
+  init: hubLocalProcedure
+    .input(gitOpsContract.init.input)
+    .mutation(({ input }) => runGitOpLocally('init', input)),
   getCurrentBranch: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => getCurrentBranch(input.path)),
+    .input(gitOpsContract.getCurrentBranch.input)
+    .query(({ input }) => runGitOpLocally('getCurrentBranch', input)),
   listBranches: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => listBranches(input.path)),
+    .input(gitOpsContract.listBranches.input)
+    .query(({ input }) => runGitOpLocally('listBranches', input)),
   checkoutBranch: hubLocalProcedure
-    .input(obj({ path: s, branch: s }))
-    .mutation(({ input }) => checkoutBranch(input.path, input.branch)),
+    .input(gitOpsContract.checkoutBranch.input)
+    .mutation(({ input }) => runGitOpLocally('checkoutBranch', input)),
   createBranch: hubLocalProcedure
-    .input(obj({ path: s, branch: s }))
-    .mutation(({ input }) => createBranch(input.path, input.branch)),
+    .input(gitOpsContract.createBranch.input)
+    .mutation(({ input }) => runGitOpLocally('createBranch', input)),
   hasUncommittedChanges: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => hasUncommittedChanges(input.path)),
+    .input(gitOpsContract.hasUncommittedChanges.input)
+    .query(({ input }) => runGitOpLocally('hasUncommittedChanges', input)),
   mergeIntoParent: hubLocalProcedure
-    .input(obj({ projectPath: s, parentBranch: s, sourceBranch: s }))
-    .mutation(({ input }) =>
-      mergeIntoParent(input.projectPath, input.parentBranch, input.sourceBranch)
-    ),
+    .input(gitOpsContract.mergeIntoParent.input)
+    .mutation(({ input }) => runGitOpLocally('mergeIntoParent', input)),
   abortMerge: hubLocalProcedure
-    .input(obj({ path: s }))
-    .mutation(({ input }) => abortMerge(input.path)),
+    .input(gitOpsContract.abortMerge.input)
+    .mutation(({ input }) => runGitOpLocally('abortMerge', input)),
   mergeWithAI: hubLocalProcedure
     .input(obj({ projectPath: s, worktreePath: s, parentBranch: s, sourceBranch: s }))
     .mutation(({ input }) => mergeWithAI(input)),
   isMergeInProgress: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => isMergeInProgress(input.path)),
+    .input(gitOpsContract.isMergeInProgress.input)
+    .query(({ input }) => runGitOpLocally('isMergeInProgress', input)),
   getConflictedFiles: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => getConflictedFiles(input.path)),
+    .input(gitOpsContract.getConflictedFiles.input)
+    .query(({ input }) => runGitOpLocally('getConflictedFiles', input)),
   getWorkingDiff: hubLocalProcedure
-    .input(obj({ path: s, opts: u.optional() }))
-    .query(({ input }) => getWorkingDiff(input.path, input.opts as never)),
+    .input(gitOpsContract.getWorkingDiff.input)
+    .query(({ input }) => runGitOpLocally('getWorkingDiff', input)),
   stageFile: hubLocalProcedure
-    .input(obj({ path: s, filePath: s }))
-    .mutation(({ input }) => stageFile(input.path, input.filePath)),
+    .input(gitOpsContract.stageFile.input)
+    .mutation(({ input }) => runGitOpLocally('stageFile', input)),
   unstageFile: hubLocalProcedure
-    .input(obj({ path: s, filePath: s }))
-    .mutation(({ input }) => unstageFile(input.path, input.filePath)),
+    .input(gitOpsContract.unstageFile.input)
+    .mutation(({ input }) => runGitOpLocally('unstageFile', input)),
   discardFile: hubLocalProcedure
-    .input(obj({ path: s, filePath: s, untracked: z.boolean().optional() }))
-    .mutation(({ input }) => discardFile(input.path, input.filePath, input.untracked)),
-  stageAll: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => stageAll(input.path)),
+    .input(gitOpsContract.discardFile.input)
+    .mutation(({ input }) => runGitOpLocally('discardFile', input)),
+  stageAll: hubLocalProcedure
+    .input(gitOpsContract.stageAll.input)
+    .mutation(({ input }) => runGitOpLocally('stageAll', input)),
   unstageAll: hubLocalProcedure
-    .input(obj({ path: s }))
-    .mutation(({ input }) => unstageAll(input.path)),
+    .input(gitOpsContract.unstageAll.input)
+    .mutation(({ input }) => runGitOpLocally('unstageAll', input)),
   getFileDiff: hubLocalProcedure
-    .input(obj({ repoPath: s, filePath: s, staged: z.boolean(), opts: u.optional() }))
-    .query(({ input }) =>
-      getFileDiff(input.repoPath, input.filePath, input.staged, input.opts as never)
-    ),
+    .input(gitOpsContract.getFileDiff.input)
+    .query(({ input }) => runGitOpLocally('getFileDiff', input)),
   getUntrackedFileDiff: hubLocalProcedure
-    .input(obj({ repoPath: s, filePath: s }))
-    .query(({ input }) => getUntrackedFileDiff(input.repoPath, input.filePath)),
+    .input(gitOpsContract.getUntrackedFileDiff.input)
+    .query(({ input }) => runGitOpLocally('getUntrackedFileDiff', input)),
   getUntrackedFileDiffs: hubLocalProcedure
-    .input(obj({ repoPath: s, filePaths: z.array(s) }))
-    .query(({ input }) => getUntrackedFileDiffs(input.repoPath, input.filePaths)),
+    .input(gitOpsContract.getUntrackedFileDiffs.input)
+    .query(({ input }) => runGitOpLocally('getUntrackedFileDiffs', input)),
   getConflictContent: hubLocalProcedure
-    .input(obj({ repoPath: s, filePath: s }))
-    .query(({ input }) => getConflictContent(input.repoPath, input.filePath)),
+    .input(gitOpsContract.getConflictContent.input)
+    .query(({ input }) => runGitOpLocally('getConflictContent', input)),
   writeResolvedFile: hubLocalProcedure
-    .input(obj({ repoPath: s, filePath: s, content: s }))
-    .mutation(({ input }) => writeResolvedFile(input.repoPath, input.filePath, input.content)),
+    .input(gitOpsContract.writeResolvedFile.input)
+    .mutation(({ input }) => runGitOpLocally('writeResolvedFile', input)),
   commitFiles: hubLocalProcedure
-    .input(obj({ repoPath: s, message: s }))
-    .mutation(({ input }) => commitFiles(input.repoPath, input.message)),
+    .input(gitOpsContract.commitFiles.input)
+    .mutation(({ input }) => runGitOpLocally('commitFiles', input)),
   analyzeConflict: hubLocalProcedure
     .input(obj({ mode: s, filePath: s, base: sn, ours: sn, theirs: sn }))
     .mutation(({ input }) =>
@@ -252,182 +190,142 @@ export const worktreesRouter = router({
 
   // Rebase
   isRebaseInProgress: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => isRebaseInProgress(input.path)),
+    .input(gitOpsContract.isRebaseInProgress.input)
+    .query(({ input }) => runGitOpLocally('isRebaseInProgress', input)),
   getRebaseProgress: hubLocalProcedure
-    .input(obj({ repoPath: s }))
-    .query(({ input }) => getRebaseProgress(input.repoPath)),
+    .input(gitOpsContract.getRebaseProgress.input)
+    .query(({ input }) => runGitOpLocally('getRebaseProgress', input)),
   abortRebase: hubLocalProcedure
-    .input(obj({ path: s }))
-    .mutation(({ input }) => abortRebase(input.path)),
+    .input(gitOpsContract.abortRebase.input)
+    .mutation(({ input }) => runGitOpLocally('abortRebase', input)),
   continueRebase: hubLocalProcedure
-    .input(obj({ path: s }))
-    .mutation(({ input }) => continueRebase(input.path)),
+    .input(gitOpsContract.continueRebase.input)
+    .mutation(({ input }) => runGitOpLocally('continueRebase', input)),
   skipRebaseCommit: hubLocalProcedure
-    .input(obj({ path: s }))
-    .mutation(({ input }) => skipRebaseCommit(input.path)),
+    .input(gitOpsContract.skipRebaseCommit.input)
+    .mutation(({ input }) => runGitOpLocally('skipRebaseCommit', input)),
   getMergeContext: hubLocalProcedure
-    .input(obj({ repoPath: s }))
-    .query(({ input }) => getMergeContext(input.repoPath)),
-
+    .input(gitOpsContract.getMergeContext.input)
+    .query(({ input }) => runGitOpLocally('getMergeContext', input)),
   getRecentCommits: hubLocalProcedure
-    .input(obj({ repoPath: s, count: z.number().optional() }))
-    .query(({ input }) => getRecentCommits(input.repoPath, input.count)),
+    .input(gitOpsContract.getRecentCommits.input)
+    .query(({ input }) => runGitOpLocally('getRecentCommits', input)),
   getAheadBehind: hubLocalProcedure
-    .input(obj({ repoPath: s, branch: s, upstream: s }))
-    .query(({ input }) => getAheadBehind(input.repoPath, input.branch, input.upstream)),
+    .input(gitOpsContract.getAheadBehind.input)
+    .query(({ input }) => runGitOpLocally('getAheadBehind', input)),
   getStatusSummary: hubLocalProcedure
-    .input(obj({ repoPath: s }))
-    .query(({ input }) => getStatusSummary(input.repoPath)),
+    .input(gitOpsContract.getStatusSummary.input)
+    .query(({ input }) => runGitOpLocally('getStatusSummary', input)),
   // Electron shell op (host-only) — forwarded over the capability bridge so it
   // runs in the Electron host when the renderer talks to the side-car.
   revealInFinder: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => getWorktreesRouterDeps().shellOpenPath(input.path)),
-  isDirty: hubLocalProcedure.input(obj({ path: s })).query(async ({ input }) => {
-    const summary = await getStatusSummary(input.path)
-    return summary.staged + summary.unstaged + summary.untracked > 0
-  }),
+  isDirty: hubLocalProcedure
+    .input(gitOpsContract.isDirty.input)
+    .query(({ input }) => runGitOpLocally('isDirty', input)),
   getRemoteUrl: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => getRemoteUrl(input.path)),
+    .input(gitOpsContract.getRemoteUrl.input)
+    .query(({ input }) => runGitOpLocally('getRemoteUrl', input)),
   getAheadBehindUpstream: hubLocalProcedure
-    .input(obj({ path: s, branch: s }))
-    .query(({ input }) => getAheadBehindUpstream(input.path, input.branch)),
-  fetch: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => gitFetch(input.path)),
+    .input(gitOpsContract.getAheadBehindUpstream.input)
+    .query(({ input }) => runGitOpLocally('getAheadBehindUpstream', input)),
+  fetch: hubLocalProcedure
+    .input(gitOpsContract.fetch.input)
+    .mutation(({ input }) => runGitOpLocally('fetch', input)),
   push: hubLocalProcedure
-    // No branch input: the server pushes what is checked out at `path` (see gitPush).
-    .input(obj({ path: s, force: z.boolean().optional() }))
-    .mutation(({ input }) => gitPush(input.path, input.force)),
-  pull: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => gitPull(input.path)),
-
+    .input(gitOpsContract.push.input)
+    .mutation(({ input }) => runGitOpLocally('push', input)),
+  pull: hubLocalProcedure
+    .input(gitOpsContract.pull.input)
+    .mutation(({ input }) => runGitOpLocally('pull', input)),
   // Branch tab
   getDefaultBranch: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => getDefaultBranch(input.path)),
+    .input(gitOpsContract.getDefaultBranch.input)
+    .query(({ input }) => runGitOpLocally('getDefaultBranch', input)),
   listBranchesDetailed: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => listBranchesDetailed(input.path)),
+    .input(gitOpsContract.listBranchesDetailed.input)
+    .query(({ input }) => runGitOpLocally('listBranchesDetailed', input)),
   listRemoteBranches: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => listRemoteBranches(input.path)),
+    .input(gitOpsContract.listRemoteBranches.input)
+    .query(({ input }) => runGitOpLocally('listRemoteBranches', input)),
   getMergeBase: hubLocalProcedure
-    .input(obj({ path: s, branch1: s, branch2: s }))
-    .query(({ input }) => getMergeBase(input.path, input.branch1, input.branch2)),
+    .input(gitOpsContract.getMergeBase.input)
+    .query(({ input }) => runGitOpLocally('getMergeBase', input)),
   getCommitsSince: hubLocalProcedure
-    .input(obj({ path: s, sinceRef: s, branch: s }))
-    .query(({ input }) => getCommitsSince(input.path, input.sinceRef, input.branch)),
+    .input(gitOpsContract.getCommitsSince.input)
+    .query(({ input }) => runGitOpLocally('getCommitsSince', input)),
   getCommitsBeforeRef: hubLocalProcedure
-    .input(obj({ path: s, ref: s, count: z.number().optional() }))
-    .query(({ input }) => getCommitsBeforeRef(input.path, input.ref, input.count)),
+    .input(gitOpsContract.getCommitsBeforeRef.input)
+    .query(({ input }) => runGitOpLocally('getCommitsBeforeRef', input)),
   deleteBranch: hubLocalProcedure
-    .input(obj({ path: s, branch: s, force: z.boolean().optional() }))
-    .mutation(({ input }) => deleteBranch(input.path, input.branch, input.force)),
+    .input(gitOpsContract.deleteBranch.input)
+    .mutation(({ input }) => runGitOpLocally('deleteBranch', input)),
   pruneRemote: hubLocalProcedure
-    .input(obj({ path: s }))
-    .mutation(({ input }) => pruneRemote(input.path)),
-
+    .input(gitOpsContract.pruneRemote.input)
+    .mutation(({ input }) => runGitOpLocally('pruneRemote', input)),
   // Worktree tab
   rebaseOnto: hubLocalProcedure
-    .input(obj({ path: s, ontoBranch: s }))
-    .mutation(({ input }) => rebaseOnto(input.path, input.ontoBranch)),
+    .input(gitOpsContract.rebaseOnto.input)
+    .mutation(({ input }) => runGitOpLocally('rebaseOnto', input)),
   mergeFrom: hubLocalProcedure
-    .input(obj({ path: s, branch: s }))
-    .mutation(({ input }) => mergeFrom(input.path, input.branch)),
+    .input(gitOpsContract.mergeFrom.input)
+    .mutation(({ input }) => runGitOpLocally('mergeFrom', input)),
   getDiffStats: hubLocalProcedure
-    .input(obj({ path: s, ref: s }))
-    .query(({ input }) => getDiffStats(input.path, input.ref)),
+    .input(gitOpsContract.getDiffStats.input)
+    .query(({ input }) => runGitOpLocally('getDiffStats', input)),
   getWorktreeMetadata: hubLocalProcedure
-    .input(obj({ path: s }))
-    .query(({ input }) => getWorktreeMetadata(input.path)),
+    .input(gitOpsContract.getWorktreeMetadata.input)
+    .query(({ input }) => runGitOpLocally('getWorktreeMetadata', input)),
   getCommitDag: hubLocalProcedure
-    .input(obj({ path: s, limit: z.number(), branches: z.array(s).optional() }))
-    .query(({ input }) => getCommitDag(input.path, input.limit, input.branches)),
+    .input(gitOpsContract.getCommitDag.input)
+    .query(({ input }) => runGitOpLocally('getCommitDag', input)),
   resolveChildBranches: hubLocalProcedure
-    .input(obj({ path: s, baseBranch: s }))
-    .query(({ input }) => resolveChildBranches(input.path, input.baseBranch)),
+    .input(gitOpsContract.resolveChildBranches.input)
+    .query(({ input }) => runGitOpLocally('resolveChildBranches', input)),
   resolveCopyBehavior: publicProcedure
     .input(obj({ projectId: s.optional() }))
     .query(({ ctx, input }) => resolveCopyBehavior(ctx.db, input.projectId)),
   getIgnoredFileTree: hubLocalProcedure
-    .input(obj({ repoPath: s }))
-    .query(({ input }) => getIgnoredFileTree(input.repoPath)),
+    .input(gitOpsContract.getIgnoredFileTree.input)
+    .query(({ input }) => runGitOpLocally('getIgnoredFileTree', input)),
   copyIgnoredFiles: hubLocalProcedure
-    .input(
-      obj({
-        repoPath: s,
-        worktreePath: s,
-        paths: z.array(s),
-        mode: z.enum(['all', 'custom']).optional()
-      })
-    )
-    .mutation(({ input }) =>
-      copyIgnoredFiles(
-        input.repoPath,
-        input.worktreePath,
-        input.mode ?? (input.paths.length > 0 ? 'custom' : 'all'),
-        input.paths
-      )
-    ),
-
+    .input(gitOpsContract.copyIgnoredFiles.input)
+    .mutation(({ input }) => runGitOpLocally('copyIgnoredFiles', input)),
   getResolvedCommitDag: hubLocalProcedure
-    .input(obj({ path: s, limit: z.number(), branches: z.array(s).optional(), baseBranch: s }))
-    .query(({ input }) =>
-      getResolvedCommitDag(input.path, input.limit, input.branches, input.baseBranch)
-    ),
+    .input(gitOpsContract.getResolvedCommitDag.input)
+    .query(({ input }) => runGitOpLocally('getResolvedCommitDag', input)),
   getResolvedForkGraph: hubLocalProcedure
-    .input(
-      obj({
-        targetPath: s,
-        repoPath: s,
-        activeBranch: s,
-        compareBranch: s,
-        activeBranchLabel: s,
-        compareBranchLabel: s
-      })
-    )
-    .query(({ input }) =>
-      getResolvedForkGraph(
-        input.targetPath,
-        input.repoPath,
-        input.activeBranch,
-        input.compareBranch,
-        input.activeBranchLabel,
-        input.compareBranchLabel
-      )
-    ),
+    .input(gitOpsContract.getResolvedForkGraph.input)
+    .query(({ input }) => runGitOpLocally('getResolvedForkGraph', input)),
   getResolvedUpstreamGraph: hubLocalProcedure
-    .input(obj({ repoPath: s, branch: s }))
-    .query(({ input }) => getResolvedUpstreamGraph(input.repoPath, input.branch)),
+    .input(gitOpsContract.getResolvedUpstreamGraph.input)
+    .query(({ input }) => runGitOpLocally('getResolvedUpstreamGraph', input)),
   getResolvedRecentCommits: hubLocalProcedure
-    .input(obj({ path: s, count: z.number(), branchName: s }))
-    .query(({ input }) => getResolvedRecentCommits(input.path, input.count, input.branchName)),
-
+    .input(gitOpsContract.getResolvedRecentCommits.input)
+    .query(({ input }) => runGitOpLocally('getResolvedRecentCommits', input)),
   // Stashes
   listStashes: hubLocalProcedure
-    .input(obj({ repoPath: s }))
-    .query(({ input }) => listStashes(input.repoPath)),
+    .input(gitOpsContract.listStashes.input)
+    .query(({ input }) => runGitOpLocally('listStashes', input)),
   createStash: hubLocalProcedure
-    .input(obj({ repoPath: s, message: s, includeUntracked: z.boolean(), keepIndex: z.boolean() }))
-    .mutation(({ input }) =>
-      createStash(input.repoPath, input.message, input.includeUntracked, input.keepIndex)
-    ),
+    .input(gitOpsContract.createStash.input)
+    .mutation(({ input }) => runGitOpLocally('createStash', input)),
   applyStash: hubLocalProcedure
-    .input(obj({ repoPath: s, index: z.number() }))
-    .mutation(({ input }) => applyStash(input.repoPath, input.index)),
+    .input(gitOpsContract.applyStash.input)
+    .mutation(({ input }) => runGitOpLocally('applyStash', input)),
   popStash: hubLocalProcedure
-    .input(obj({ repoPath: s, index: z.number() }))
-    .mutation(({ input }) => popStash(input.repoPath, input.index)),
+    .input(gitOpsContract.popStash.input)
+    .mutation(({ input }) => runGitOpLocally('popStash', input)),
   dropStash: hubLocalProcedure
-    .input(obj({ repoPath: s, index: z.number() }))
-    .mutation(({ input }) => dropStash(input.repoPath, input.index)),
+    .input(gitOpsContract.dropStash.input)
+    .mutation(({ input }) => runGitOpLocally('dropStash', input)),
   branchFromStash: hubLocalProcedure
-    .input(obj({ repoPath: s, index: z.number(), branchName: s }))
-    .mutation(({ input }) => branchFromStash(input.repoPath, input.index, input.branchName)),
+    .input(gitOpsContract.branchFromStash.input)
+    .mutation(({ input }) => runGitOpLocally('branchFromStash', input)),
   getStashDiff: hubLocalProcedure
-    .input(obj({ repoPath: s, index: z.number() }))
-    .query(({ input }) => getStashDiff(input.repoPath, input.index)),
-
+    .input(gitOpsContract.getStashDiff.input)
+    .query(({ input }) => runGitOpLocally('getStashDiff', input)),
   // GitHub CLI
   // Routed like every gh call: answered by the machine that would run gh for this
   // checkout (a computer), not the hub — so not hub-local-gated here.

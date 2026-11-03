@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const recorded = vi.hoisted(() => [] as Array<{ level: string; event: string }>)
-vi.mock('@slayzone/diagnostics/server', () => ({
+vi.mock('@slayzone/diagnostics/record', () => ({
   recordDiagnosticEvent: (e: { level: string; event: string }) => recorded.push(e)
 }))
 

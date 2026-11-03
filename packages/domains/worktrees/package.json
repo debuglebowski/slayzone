@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
+    "./git-ops": "./src/server/git-ops.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
     "./hooks": "./src/client/hooks.ts",

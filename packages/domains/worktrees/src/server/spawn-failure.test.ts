@@ -13,11 +13,11 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const recorded = vi.hoisted(() => [] as Array<{ level: string; event: string; message?: string }>)
-vi.mock('@slayzone/diagnostics/server', () => ({
+vi.mock('@slayzone/diagnostics/record', () => ({
   recordDiagnosticEvent: (e: { level: string; event: string; message?: string }) => recorded.push(e)
 }))
 // No login-shell PATH: with process.env.PATH pointed at nothing, `git` cannot start.
-vi.mock('@slayzone/terminal/server', () => ({ getEnrichedPath: () => '' }))
+vi.mock('@slayzone/terminal/shell-env', () => ({ getEnrichedPath: () => '' }))
 
 const { execAsync } = await import('./exec-async')
 const { isGitRepo } = await import('./git-worktree')
