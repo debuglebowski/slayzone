@@ -24,3 +24,10 @@ export {
   type AutomationsEventMap
 } from './automations-events'
 export type { AutomationEngineLike } from './automation-engine-context'
+
+export {
+  setAutomationCommandRouting,
+  type AutomationCommand,
+  type AutomationCommandResult,
+  type AutomationCommandRouting
+} from './command-routing'

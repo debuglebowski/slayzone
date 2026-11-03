@@ -153,6 +153,7 @@ import { createChatPromptRecorder, setTurnGitRouting } from '@slayzone/agent-tur
 import {
   AutomationEngine,
   setAutomationsEvents,
+  setAutomationCommandRouting,
   type AutomationsEventMap
 } from '@slayzone/automations/server'
 import {
@@ -209,6 +210,7 @@ import {
   claudeSessionReadResultSchema,
   claudeSessionLocateResultSchema,
   gitOpResultSchema,
+  execRunResultSchema,
   gitWatchEventSchema,
   GIT_WATCH_EVENT,
   HubToComputerMethods,
@@ -1855,6 +1857,19 @@ export function composeServer(opts: {
       gitWatchComputerGone(computerId)
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
+    // Automation shell actions (run_command, ai) run on the task's, else the project's,
+    // computer as one exec.run; with none, the engine's hub-local path (and refusal).
+    setAutomationCommandRouting({
+      computerFor: async ({ taskId, projectId }) => {
+        if (taskId) return resolveComputerForTask(taskId)
+        if (projectId) return resolveComputerForProject(projectId)
+        return null
+      },
+      run: async (computerId, command) =>
+        execRunResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.execRun, command)
+        )
+    })
     // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
     // resolved like the git panel (by path, or by the task for a boundary).
     setTurnGitRouting({
