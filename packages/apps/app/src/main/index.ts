@@ -580,6 +580,7 @@ import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
 import { attachDocumentLinkBridges, setDocumentShortcutKeysResolver } from './document-link-bridge'
+import { setBrowserViewScreenshotKeysResolver } from './browser-view-keys'
 import { attachAppWindowNavigationGuard } from './app-window-navigation-guard'
 import {
   setProcessManagerWindow,
@@ -613,6 +614,9 @@ import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handof
 setDocumentShortcutKeysResolver(() => [
   resolveShortcutKeys(currentOverrides, 'artifacts-toggle-sidebar')
 ])
+setBrowserViewScreenshotKeysResolver(() =>
+  resolveShortcutKeys(currentOverrides, 'terminal-screenshot')
+)
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280

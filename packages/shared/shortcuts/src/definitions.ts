@@ -311,7 +311,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     id: 'terminal-screenshot',
     label: 'Screenshot',
     group: 'Terminal',
-    defaultKeys: 'mod+shift+s',
+    defaultKeys: 'mod+shift+y',
     scope: 'terminal'
   },
   {
@@ -366,7 +366,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     id: 'artifacts-toggle-sidebar',
     label: 'Toggle Artifacts Sidebar',
     group: 'Artifacts',
-    defaultKeys: 'mod+shift+y',
+    defaultKeys: 'mod+shift+s',
     scope: 'task'
   },
 

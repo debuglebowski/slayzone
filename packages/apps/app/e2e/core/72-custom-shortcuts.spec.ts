@@ -315,12 +315,12 @@ test.describe
     // ─── Task detail panel shortcuts respect overrides ───
 
     test('rebind panel-editor — works on task detail page', async ({ mainWindow }) => {
-      await rebindShortcut(mainWindow, 'Editor', 'Meta+Shift+y')
+      await rebindShortcut(mainWindow, 'Editor', 'Meta+Shift+o')
 
       await openTask(mainWindow, 'Shortcut task')
 
       // New shortcut should toggle editor panel
-      await mainWindow.keyboard.press('Meta+Shift+y')
+      await mainWindow.keyboard.press('Meta+Shift+o')
       // Fixed wait: no asserted signal; let the toggle land before the next key.
       await mainWindow.waitForTimeout(500)
 

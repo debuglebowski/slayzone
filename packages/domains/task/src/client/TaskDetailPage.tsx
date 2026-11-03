@@ -1102,7 +1102,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
   }, [shortcutActive, handleInjectTitle, handleInjectDescription, handleRestartTerminal])
 
-  // Cmd+Shift+S screenshot trigger from main process
+  // Screenshot trigger (terminal-screenshot shortcut) from main process
   const handleScreenshotTrigger = useStableCallback(() => {
     const viewId = browserPanelRef.current?.getActiveViewId()
     if (viewId) void handleScreenshot(viewId)
