@@ -56,16 +56,23 @@ const tick = (ms = 5): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 // --- the spawn layer, faked: a live-session registry --------------------------
 const MODES = [
-  { id: 'claude-code', initialCommand: 'claude --session-id {id} {flags}' },
-  { id: 'codex', initialCommand: 'codex {flags}' },
-  { id: 'claude-chat', initialCommand: null }
+  { id: 'claude-code', initialCommand: 'claude --session-id {id} {flags}', enabled: true },
+  { id: 'codex', initialCommand: 'codex {flags}', enabled: true },
+  { id: 'claude-chat', initialCommand: null, enabled: true },
+  { id: 'gemini', initialCommand: 'gemini {flags}', enabled: false }
 ]
 let livePtys: Map<string, string>
 let liveChats: Map<string, string>
 let ptyCreates: Array<Record<string, unknown>>
 let chatStarts: Array<Record<string, unknown>>
 let failNextCreate: string | null
+let killed: string[]
 const ptyOps = {
+  ptyKill: (sid: string) => {
+    killed.push(`pty:${sid}`)
+    livePtys.delete(sid)
+    return true
+  },
   terminalModesList: async () => MODES,
   ptyExists: (sid: string) => livePtys.has(sid),
   ptyGetState: (sid: string) => livePtys.get(sid) ?? null,
@@ -87,6 +94,9 @@ const ptyOps = {
 setPtyDeps({ ops: ptyOps as unknown as PtyDeps['ops'], events: new TypedEmitter() } as PtyDeps)
 setChatDeps({
   ops: {
+    kill: (tabId: string) => {
+      killed.push(`chat:${tabId}`)
+    },
     start: async (o: { taskId: string; tabId: string }) => {
       chatStarts.push(o)
       await tick(20)
@@ -117,6 +127,7 @@ beforeEach(() => {
   chatStarts = []
   failNextCreate = null
   detectCalls = []
+  killed = []
 })
 
 // --- fixtures -------------------------------------------------------------------
@@ -321,5 +332,68 @@ describe('chat agents', () => {
     const taskId = seedTask(seedProject('/p'), { mode: 'claude-chat' })
     await Promise.all([caller.startMainAgent({ taskId }), caller.startMainAgent({ taskId })])
     expect(chatStarts).toHaveLength(1)
+  })
+})
+
+describe('task.switchMode', () => {
+  const providerConfig = async (taskId: string): Promise<Record<string, unknown>> =>
+    JSON.parse(
+      (
+        h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as {
+          provider_config: string
+        }
+      ).provider_config
+    )
+
+  test('stops the terminal agent, stores the mode, clears every conversation id', async () => {
+    const taskId = seedTask(seedProject('/p'), { flags: '--x' })
+    h.db
+      .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+      .run(JSON.stringify({ 'claude-code': { flags: '--x', conversationId: 'conv-1' } }), taskId)
+    livePtys.set(`${taskId}:${taskId}`, 'running')
+
+    const updated = await caller.switchMode({ taskId, mode: 'codex' })
+
+    expect(updated.terminal_mode).toBe('codex')
+    expect(killed).toEqual([`pty:${taskId}:${taskId}`])
+    // Flags survive (deep merge); the conversation is gone.
+    expect((await providerConfig(taskId))['claude-code']).toMatchObject({
+      flags: '--x',
+      conversationId: null
+    })
+    // It does not start the new agent.
+    expect(ptyCreates).toEqual([])
+  })
+
+  test('from a chat mode: stops the chat process, not a pty', async () => {
+    const taskId = seedTask(seedProject('/p'), { mode: 'claude-chat' })
+    await caller.switchMode({ taskId, mode: 'claude-code' })
+    expect(killed).toEqual([`chat:${taskId}`])
+  })
+
+  test('same mode: no-op, nothing stopped', async () => {
+    const taskId = seedTask(seedProject('/p'))
+    const r = await caller.switchMode({ taskId, mode: 'claude-code' })
+    expect(r.terminal_mode).toBe('claude-code')
+    expect(killed).toEqual([])
+  })
+
+  test('unknown or disabled mode: BAD_REQUEST naming the enabled ones, nothing stopped', async () => {
+    const taskId = seedTask(seedProject('/p'))
+    await expect(caller.switchMode({ taskId, mode: 'nope' })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'Unknown agent "nope". Enabled: claude-code, codex, claude-chat'
+    })
+    await expect(caller.switchMode({ taskId, mode: 'gemini' })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'Disabled agent "gemini". Enabled: claude-code, codex, claude-chat'
+    })
+    expect(killed).toEqual([])
+  })
+
+  test('an unknown task: NOT_FOUND', async () => {
+    await expect(caller.switchMode({ taskId: 'nope', mode: 'codex' })).rejects.toMatchObject({
+      code: 'NOT_FOUND'
+    })
   })
 })

@@ -14,6 +14,8 @@ import {
 } from '../../../../../../shared/test-utils/mock-electron.js'
 import { taskEvents, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import { tmpdir } from 'node:os'
+import { TypedEmitter } from '@slayzone/platform/events'
+import { setChatDeps, setPtyDeps, type ChatDeps, type PtyDeps } from '@slayzone/terminal/server'
 import { registerUpdateTaskRoute } from './update.js'
 
 const h = await createTestHarness()
@@ -35,6 +37,29 @@ registerUpdateTaskRoute(app, {
   }
 })
 const rest = await mountRestApp(app)
+
+// The agent runtime, faked: which main agents a mode switch stopped.
+let killed: string[] = []
+setPtyDeps({
+  ops: {
+    terminalModesList: async () => [
+      { id: 'claude-code', enabled: true },
+      { id: 'codex', enabled: true },
+      { id: 'gemini', enabled: false }
+    ],
+    ptyKill: (sid: string) => {
+      killed.push(`pty:${sid}`)
+      return true
+    }
+  } as unknown as PtyDeps['ops'],
+  events: new TypedEmitter()
+} as PtyDeps)
+setChatDeps({
+  ops: { kill: (tabId: string) => void killed.push(`chat:${tabId}`) },
+  queueOps: {},
+  events: new TypedEmitter(),
+  queueEvents: new TypedEmitter()
+} as unknown as ChatDeps)
 
 function seedTask(extra: Record<string, unknown> = {}): string {
   const id = (extra.id as string) ?? crypto.randomUUID()
@@ -250,6 +275,54 @@ describe('PATCH /api/tasks/:id', () => {
     })
     expect(res.status).toBe(404)
     expect(res.body.ok).toBe(false)
+  })
+
+  test('terminalMode: a mode switch — stops the main agent, clears conversations', async () => {
+    const id = seedTask()
+    h.db
+      .prepare('UPDATE tasks SET terminal_mode = ?, provider_config = ? WHERE id = ?')
+      .run('claude-code', JSON.stringify({ 'claude-code': { conversationId: 'c1' } }), id)
+    killed = []
+    const res = await rest.request<{ ok: boolean; data: { terminal_mode: string; title: string } }>(
+      'PATCH',
+      `/api/tasks/${id.slice(0, 8)}`,
+      { terminalMode: 'codex', title: 'Both' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ terminal_mode: 'codex', title: 'Both' })
+    expect(killed).toEqual([`pty:${id}:${id}`])
+    const row = h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
+      provider_config: string
+    }
+    expect(JSON.parse(row.provider_config)['claude-code'].conversationId).toBeNull()
+  })
+
+  test('400: unknown or disabled terminalMode names the enabled ones; nothing stopped', async () => {
+    const id = seedTask()
+    killed = []
+    for (const [mode, word] of [
+      ['nope', 'Unknown'],
+      ['gemini', 'Disabled']
+    ]) {
+      const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
+        terminalMode: mode
+      })
+      expect(res.status).toBe(400)
+      expect(res.body.error).toBe(`${word} agent "${mode}". Enabled: claude-code, codex`)
+    }
+    expect(killed).toEqual([])
+  })
+
+  test('400: an invalid field next to terminalMode stops nothing', async () => {
+    const id = seedTask()
+    h.db.prepare('UPDATE tasks SET terminal_mode = ? WHERE id = ?').run('claude-code', id)
+    killed = []
+    const res = await rest.request('PATCH', `/api/tasks/${id}`, {
+      terminalMode: 'codex',
+      priority: 9
+    })
+    expect(res.status).toBe(400)
+    expect(killed).toEqual([])
   })
 
   test('500: invalid reparent throws (cyclic)', async () => {
