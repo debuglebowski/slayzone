@@ -4652,18 +4652,24 @@ export const migrations: Migration[] = [
     up(db) {
       // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
       // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
-      // Existing cursors were the hub's own parse ('' = this hub's disk).
+      // Existing cursors were the hub's own parse ('' = this hub's disk). A schema
+      // built from a later baseline may lack the old table: then there is nothing to keep.
+      const hadOld = !!db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_parse_state'")
+        .get()
       db.exec(`CREATE TABLE usage_parse_state_by_computer (
         computer_id TEXT NOT NULL DEFAULT '',
         file_path TEXT NOT NULL,
         last_offset INTEGER NOT NULL DEFAULT 0,
         last_modified_ms INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (computer_id, file_path)
-      );
-      INSERT INTO usage_parse_state_by_computer (computer_id, file_path, last_offset, last_modified_ms)
-        SELECT '', file_path, last_offset, last_modified_ms FROM usage_parse_state;
-      DROP TABLE usage_parse_state;
-      ALTER TABLE usage_parse_state_by_computer RENAME TO usage_parse_state;`)
+      );`)
+      if (hadOld) {
+        db.exec(`INSERT INTO usage_parse_state_by_computer (computer_id, file_path, last_offset, last_modified_ms)
+          SELECT '', file_path, last_offset, last_modified_ms FROM usage_parse_state;
+        DROP TABLE usage_parse_state;`)
+      }
+      db.exec(`ALTER TABLE usage_parse_state_by_computer RENAME TO usage_parse_state;`)
     }
   }
 ]
