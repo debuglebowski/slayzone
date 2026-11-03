@@ -700,6 +700,7 @@ run_harness packages/apps/hub/src/historical-chat-migration.test.ts
 # Optional private snapshots are supplied explicitly; default runs never read live state.
 run_harness packages/apps/hub/src/real-corpus-stability-audit.test.ts
 run_harness packages/apps/hub/src/real-metadata-stability-audit.test.ts
+run_harness packages/apps/hub/src/production-copy-migration.audit.test.ts
 run_harness packages/apps/hub/src/storage-stability-audit.test.ts
 run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts

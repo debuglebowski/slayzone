@@ -1,0 +1,318 @@
+{
+  "date": "2026-11-03",
+  "source": "current main working tree; actual migration and RPC handlers; no packaged production upgrade",
+  "headAtReport": "0cd5bd6b0ebc305b98fe4eb192d2bea557c25e00",
+  "assessment": "Content preservation and crash recovery passed. Historical hub privacy cleanup has unresolved ownership exceptions.",
+  "testResult": {
+    "passed": 3,
+    "failed": 0,
+    "seconds": 317.21,
+    "defaultWithoutOptIn": "3 skipped; no fixture access"
+  },
+  "eventRowsCheckedAcrossOverlappingSnapshots": 355178,
+  "forcedDisconnects": 6,
+  "cases": [
+    {
+      "id": "stable-legacy",
+      "label": "Installed app \u00b7 old hub storage",
+      "hubSchemaBefore": 181,
+      "hubSchemaAfter": 191,
+      "eventsChecked": 72316,
+      "missingOrChangedContent": 0,
+      "attachmentRecordsVerified": 0,
+      "missingOrCorruptBlobs": 0,
+      "simulatedDisconnects": 3,
+      "migrationMs": 42249,
+      "restartAndRepeatMs": 13490,
+      "rpcErrors": 0,
+      "unavailableOwners": 0,
+      "forbiddenOperations": 0,
+      "unassignedDiagnosticsRetained": 2,
+      "unassignedPromptPreviewsRetained": 4,
+      "foreignKeys": {
+        "preexistingForeignKeyViolations": 0,
+        "newForeignKeyViolations": 0,
+        "foreignKeyTables": []
+      },
+      "exactComparisons": {
+        "events": {
+          "checked": 72316,
+          "migrated": 72316,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "queue": {
+          "checked": 1,
+          "migrated": 1,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "unassignedTurnPreviews": {
+          "checked": 4,
+          "migrated": 0,
+          "retained": 4,
+          "missingOrChanged": 0
+        },
+        "unassignedDiagnostics": {
+          "checked": 2,
+          "migrated": 0,
+          "retained": 2,
+          "missingOrChanged": 0
+        },
+        "diagnostics": {
+          "checked": 5,
+          "migrated": 5,
+          "retained": 0,
+          "missingOrChanged": 0
+        }
+      }
+    },
+    {
+      "id": "dev-legacy",
+      "label": "Original migration backup",
+      "hubSchemaBefore": 186,
+      "hubSchemaAfter": 191,
+      "eventsChecked": 131547,
+      "missingOrChangedContent": 0,
+      "attachmentRecordsVerified": 120,
+      "missingOrCorruptBlobs": 0,
+      "simulatedDisconnects": 3,
+      "migrationMs": 161840,
+      "restartAndRepeatMs": 6117,
+      "rpcErrors": 0,
+      "unavailableOwners": 0,
+      "forbiddenOperations": 0,
+      "unassignedDiagnosticsRetained": null,
+      "unassignedPromptPreviewsRetained": 4,
+      "foreignKeys": {
+        "preexistingForeignKeyViolations": 2,
+        "newForeignKeyViolations": 0,
+        "foreignKeyTables": [
+          {
+            "table": "activity_events",
+            "parent": "projects",
+            "count": 1
+          },
+          {
+            "table": "activity_events",
+            "parent": "tasks",
+            "count": 1
+          }
+        ]
+      },
+      "exactComparisons": {
+        "events": {
+          "checked": 131547,
+          "migrated": 131547,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "drafts": {
+          "checked": 96,
+          "migrated": 96,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "queue": {
+          "checked": 2,
+          "migrated": 2,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "prompts": {
+          "checked": 15854,
+          "migrated": 15854,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "timelineCheckpoints": {
+          "checked": 101,
+          "migrated": 101,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "timelinePages": {
+          "checked": 21,
+          "migrated": 21,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "attachmentMessages": {
+          "checked": 59,
+          "migrated": 59,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "workspace": {
+          "checked": 638,
+          "migrated": 638,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "unassignedTurnPreviews": {
+          "checked": 4,
+          "migrated": 0,
+          "retained": 4,
+          "missingOrChanged": 0
+        }
+      }
+    },
+    {
+      "id": "dev-current",
+      "label": "Current dev \u00b7 computer storage",
+      "hubSchemaBefore": 190,
+      "hubSchemaAfter": 191,
+      "eventsChecked": 151315,
+      "missingOrChangedContent": 0,
+      "attachmentRecordsVerified": 81,
+      "missingOrCorruptBlobs": 0,
+      "simulatedDisconnects": 0,
+      "migrationMs": 5309,
+      "restartAndRepeatMs": 6348,
+      "rpcErrors": 0,
+      "unavailableOwners": 0,
+      "forbiddenOperations": 0,
+      "unassignedDiagnosticsRetained": 644,
+      "unassignedPromptPreviewsRetained": 4,
+      "foreignKeys": {
+        "preexistingForeignKeyViolations": 2,
+        "newForeignKeyViolations": 0,
+        "foreignKeyTables": [
+          {
+            "table": "activity_events",
+            "parent": "projects",
+            "count": 1
+          },
+          {
+            "table": "activity_events",
+            "parent": "tasks",
+            "count": 1
+          }
+        ],
+        "deletedConversationPayloads": {
+          "events": 0,
+          "records": 0,
+          "pendingTaskCleanup": 0
+        }
+      },
+      "exactComparisons": {
+        "existingEvents": {
+          "checked": 151315,
+          "migrated": 151315,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:settings": {
+          "checked": 75096,
+          "migrated": 75096,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:prompt": {
+          "checked": 16037,
+          "migrated": 16037,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:attachment": {
+          "checked": 81,
+          "migrated": 81,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:draft": {
+          "checked": 109,
+          "migrated": 109,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:timeline": {
+          "checked": 163,
+          "migrated": 163,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:workspace": {
+          "checked": 813,
+          "migrated": 813,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:thread": {
+          "checked": 2,
+          "migrated": 2,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "existingRecords:queue": {
+          "checked": 2,
+          "migrated": 2,
+          "retained": 0,
+          "missingOrChanged": 0
+        },
+        "unassignedTurnPreviews": {
+          "checked": 4,
+          "migrated": 0,
+          "retained": 4,
+          "missingOrChanged": 0
+        },
+        "unassignedDiagnostics": {
+          "checked": 644,
+          "migrated": 0,
+          "retained": 644,
+          "missingOrChanged": 0
+        }
+      }
+    }
+  ],
+  "method": [
+    "Read-only SQLite online backups include committed WAL data.",
+    "Private directories; independent copies, no hard links. Blob, artifact and transfer companions copied.",
+    "Actual schema bootstrap, computer RPC validation, transfer, verification, activation, cleanup and recovery.",
+    "Original computer/session provenance retained. Execution paths point only at disposable directories.",
+    "Provider starts and user invocations blocked. No live RPC connection or process restart.",
+    "Every historical event payload and sequence checked; independent timestamp comparison; current records checked exactly.",
+    "Forced acknowledgement loss after a chunk write, prepared destination commit, and activation; restart and retry.",
+    "Original private snapshot hashes remain unchanged. No production source database or file was migrated."
+  ],
+  "exceptions": {
+    "currentDev": {
+      "diagnostics": 644,
+      "promptPreviews": 4,
+      "missingTaskEvidence": 572,
+      "noResolvableOwnerIds": 72,
+      "diagnosticScreenshotFilesCopiedAndHashVerified": 17
+    },
+    "installedApp": {
+      "diagnostics": 2,
+      "promptPreviews": 4
+    },
+    "explanation": "These records already lack an identifiable task owner. Migration preserves them unchanged on the hub instead of guessing a destination or deleting them.",
+    "preexistingForeignKeys": "Two dangling activity_events references in the dev datasets; exactly the same before and after. Zero new foreign-key violations.",
+    "deletedConversations": "Zero events/records remain in deleted computer conversations; zero pending task purges."
+  },
+  "limitations": [
+    "Local offline rehearsal; real remote networking, live providers and packaged rollout were not exercised.",
+    "The schema-186 backup has no paired historical diagnostic database. Today\u2019s diagnostics were tested only with today\u2019s hub snapshot.",
+    "Snapshot datasets overlap; event counts are comparison counts, not unique messages. Active hub/computer stores were snapshotted independently, then reconciled.",
+    "Initial strict checks flagged four unowned previews in each dataset. The final suite explicitly verifies preservation of unassigned data and reports it as deferred privacy cleanup."
+  ],
+  "recommendation": "Resolve ownership or approve a deliberate quarantine/deletion policy for orphaned historical content before declaring hub privacy cleanup complete.",
+  "validation": [
+    "3 real-data migration/recovery tests passed",
+    "6 forced disconnects recovered",
+    "Hub typecheck, scoped ESLint and Biome passed",
+    "Unit registration check passed",
+    "Default suite skips all real data without explicit opt-in"
+  ],
+  "eventTimestampChecks": {
+    "stable-legacy": {
+      "eventTimestampsChecked": 72316,
+      "missingOrDifferent": 0
+    },
+    "dev-legacy": {
+      "eventTimestampsChecked": 131547,
+      "missingOrDifferent": 0
+    }
+  }
+}
