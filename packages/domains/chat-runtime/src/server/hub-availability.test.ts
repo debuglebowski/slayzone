@@ -146,3 +146,29 @@ test('maintenance bridge exposes upgrade waiting instead of ready history and re
     h.cleanup()
   }
 })
+test("a legacy chat's computer is its recorded one (backfilled), never read from the legacy table", async () => {
+  const { h, owners } = await setup()
+  try {
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: null,
+      epoch: 1
+    })
+    h.db.exec(
+      "INSERT INTO computers (id, name, platform, version, capabilities_json, created_at) VALUES ('ran-here','R','darwin','1','[]',1), ('stale','S','darwin','1','[]',1); INSERT INTO chat_legacy_tab_computers (tab_id, computer_id) VALUES ('tab','ran-here'); INSERT INTO chat_workspace_changes (id,tab_id,message_id,computer_id,root_path,status,created_at) VALUES ('w','tab','m','stale','/r','complete',1)"
+    )
+    const availability = createChatAvailability({
+      db: h.slayDb,
+      ownership: owners,
+      resolveComputer: async () => 'task-computer',
+      connected: () => false,
+      hasLiveTask: async () => false
+    })
+    expect((await availability('tab')).computer).toMatchObject({ id: 'ran-here' })
+  } finally {
+    h.cleanup()
+  }
+})

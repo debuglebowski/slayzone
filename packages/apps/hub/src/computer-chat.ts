@@ -253,7 +253,7 @@ export function createComputerChatServices(opts: {
     collectReleasedAttachments: opts.attachments.readForMigration?.collectGarbage,
     resolveSessionComputer: async (owner) => {
       const recorded = await opts.db.get<{ computer_id: string }>(
-        'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+        'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
         [owner.tabId]
       )
       return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
@@ -332,7 +332,7 @@ export function createComputerChatServices(opts: {
         : ((await opts.diagnostics?.tasks()) ?? []).includes(taskId),
     resolveMigrationComputer: async (owner) => {
       const recorded = await opts.db.get<{ computer_id: string }>(
-        'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+        'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
         [owner.tabId]
       )
       return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
@@ -572,7 +572,7 @@ export function createComputerChatServices(opts: {
           )
           const recorded = tab
             ? await opts.db.get<{ computer_id: string }>(
-                'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+                'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
                 [tab.id]
               )
             : null

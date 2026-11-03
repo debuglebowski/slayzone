@@ -27,7 +27,7 @@ export function createChatAvailability(opts: {
     const recorded =
       !owner?.computerId && !owner?.destinationComputerId
         ? await opts.db.get<{ computer_id: string }>(
-            'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+            'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
             [tabId]
           )
         : null

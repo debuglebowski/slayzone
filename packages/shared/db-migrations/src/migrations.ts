@@ -4671,6 +4671,30 @@ export const migrations: Migration[] = [
       }
       db.exec(`ALTER TABLE usage_parse_state_by_computer RENAME TO usage_parse_state;`)
     }
+  },
+  {
+    version: 193,
+    up(db) {
+      // Which computer a legacy (hub-era) chat tab's agent ran on — where its provider
+      // session lives, so the migration copies it from there. It was read from the
+      // legacy `chat_workspace_changes` (nothing writes it any more); kept here, so the
+      // legacy tables are no longer read and can be dropped.
+      db.exec(`CREATE TABLE chat_legacy_tab_computers (
+        tab_id TEXT PRIMARY KEY,
+        computer_id TEXT NOT NULL
+      );`)
+      const hasLegacy = !!db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_workspace_changes'")
+        .get()
+      if (!hasLegacy) return
+      db.exec(`INSERT INTO chat_legacy_tab_computers (tab_id, computer_id)
+        SELECT w.tab_id, w.computer_id FROM chat_workspace_changes w
+        WHERE w.computer_id IS NOT NULL AND w.id = (
+          SELECT w2.id FROM chat_workspace_changes w2
+          WHERE w2.tab_id = w.tab_id AND w2.computer_id IS NOT NULL
+          ORDER BY w2.created_at DESC, w2.id DESC LIMIT 1
+        );`)
+    }
   }
 ]
 
