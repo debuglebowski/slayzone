@@ -11,3 +11,6 @@ export const _mock = {
 export async function runAiCommand(mode: string, prompt: string): Promise<string> {
   return _mock.runAiCommand(mode, prompt)
 }
+
+/** The real module routes the CLI to a computer; the mock has nothing to route. */
+export function setAiCommandRunner(_runner: unknown): void {}

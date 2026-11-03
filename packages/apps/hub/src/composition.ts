@@ -206,7 +206,8 @@ import {
   setGitOpTransport,
   deliverGitWatchEvent,
   gitWatchComputerGone,
-  gitTargetForPath
+  gitTargetForPath,
+  setAiCommandRunner
 } from '@slayzone/worktrees/server'
 import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
@@ -1881,6 +1882,18 @@ export function composeServer(opts: {
     computerGateway.events.on('computer-disconnected', ({ computerId }) =>
       aiConfigComputerGone(computerId)
     )
+    // The conflict analysis's agent CLI runs on the caller's own computer (agents run
+    // on computers); with none (null) it runs here, refused where processes are off.
+    setAiCommandRunner(async (command, timeoutMs) => {
+      const computerId = await placement.forCaller()
+      if (computerId == null) return null
+      return execRunResultSchema.parse(
+        await computerGateway.request(computerId, HubToComputerMethods.execRun, {
+          command,
+          timeoutMs
+        })
+      )
+    })
     // Automation shell actions (run_command, ai) run on the task's, else the project's,
     // computer as one exec.run; with none, the engine's hub-local path (and refusal).
     setAutomationCommandRouting({

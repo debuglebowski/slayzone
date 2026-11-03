@@ -92,7 +92,7 @@ export {
   runGhLocally,
   type GhExecutor
 } from './gh-cli'
-export { runAiCommand } from './merge-ai'
+export { runAiCommand, setAiCommandRunner, type AiCommandRunner } from './merge-ai'
 export {
   listProjectRepos,
   detectChildRepos,
