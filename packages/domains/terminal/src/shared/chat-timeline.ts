@@ -675,6 +675,8 @@ export interface ChatTimelineState {
 export interface TurnTriggerSubAgent {
   toolUseId: string
   description?: string
+  /** It failed, was stopped or killed (absent: it completed). */
+  failed?: true
 }
 
 /** A background notification (what a `turn-trigger` row names). */
@@ -2066,7 +2068,11 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
             turnTriggers: endedInBackground
               ? [
                   ...state.turnTriggers,
-                  { toolUseId: id, ...(next.description ? { description: next.description } : {}) }
+                  {
+                    toolUseId: id,
+                    ...(next.description ? { description: next.description } : {}),
+                    ...(next.phase === 'failed' ? { failed: true as const } : {})
+                  }
                 ]
               : state.turnTriggers,
             inFlightSubAgents:

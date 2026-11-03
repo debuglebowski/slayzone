@@ -3249,7 +3249,7 @@ describe('background sub-agents (Agent run in the background)', () => {
       expect(s.turnTriggers).toEqual([])
     })
 
-    test('two ended before the turn opened: one row names both', () => {
+    test('two ended before the turn opened: one row names both (a failed one marked)', () => {
       let s = reducer(claudeRunning(), { type: 'event', event: ev.turnResult() })
       s = reducer(s, { type: 'event', event: notified('tu_A', 'completed') })
       s = reducer(s, { type: 'event', event: notified('tu_B', 'failed') })
@@ -3257,7 +3257,7 @@ describe('background sub-agents (Agent run in the background)', () => {
       expect(triggers(s)).toEqual([
         [
           { toolUseId: 'tu_A', description: 'bg' },
-          { toolUseId: 'tu_B', description: 'second' }
+          { toolUseId: 'tu_B', description: 'second', failed: true }
         ]
       ])
     })

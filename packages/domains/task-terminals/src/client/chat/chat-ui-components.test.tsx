@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { TooltipProvider } from '@slayzone/ui'
 import { isSyntheticChatPrompt } from '@slayzone/terminal-contracts'
@@ -15,6 +15,14 @@ import { PromptHistorySearch } from './PromptHistorySearch'
 import { formatCost, formatTokens } from './usage-format'
 import { PLAN_APPROVED_MARKER, PLAN_CANCELLED_MARKER } from './renderers'
 
+beforeAll(() => {
+  // Radix tooltip content measures itself; jsdom has no layout.
+  globalThis.ResizeObserver ??= class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+})
 afterEach(cleanup)
 
 describe('usage formatting', () => {
@@ -359,57 +367,76 @@ describe('plan markers', () => {
 })
 
 describe('TurnTriggerRow', () => {
-  it('names a Monitor event that opened the turn: summary + the line it reported', () => {
+  const trigger = (
+    notifications: Extract<TimelineItem, { kind: 'turn-trigger' }>['notifications'],
+    subAgents: Extract<TimelineItem, { kind: 'turn-trigger' }>['subAgents'] = []
+  ) =>
     render(
-      <TurnTriggerRow
-        item={{
-          kind: 'turn-trigger',
-          subAgents: [],
-          notifications: [
-            {
-              uuid: 'n1',
-              taskId: 'bzdf0phch',
-              summary: 'Monitor event: "demo-mode subtask"',
-              event: 'status=in_progress | changed_files=6'
-            }
-          ],
-          timestamp: 1
-        }}
-      />
+      <TurnTriggerRow item={{ kind: 'turn-trigger', subAgents, notifications, timestamp: 1 }} />,
+      { wrapper: TooltipProvider }
     )
-    const row = screen.getByTestId('turn-trigger-notification')
-    expect(row.textContent).toBe(
-      'AfterMonitor event: "demo-mode subtask"status=in_progress | changed_files=6'
+
+  it('a line a watch printed: a card labelling the watch and the line', () => {
+    trigger([
+      {
+        uuid: 'n1',
+        taskId: 'bzdf0phch',
+        summary: 'Monitor event: "demo-mode subtask"',
+        event: 'status=in_progress | changed_files=6'
+      }
+    ])
+    const card = screen.getByTestId('turn-trigger-notification')
+    expect(card.textContent).toBe(
+      'Watchdemo-mode subtaskPrintedstatus=in_progress | changed_files=6'
     )
-    expect(row.getAttribute('title')).toBe(
-      'Monitor event: "demo-mode subtask"\nstatus=in_progress | changed_files=6'
+    expect(screen.getByText('status=in_progress | changed_files=6').className).toContain(
+      'font-mono'
     )
     expect(screen.queryByText('finished')).toBeNull()
   })
 
-  it('sub-agents and a notification: both named', () => {
-    render(
-      <TurnTriggerRow
-        item={{
-          kind: 'turn-trigger',
-          subAgents: [{ toolUseId: 'tu_A', description: 'review' }],
-          notifications: [
-            {
-              uuid: 'n2',
-              taskId: 'b2',
-              toolUseId: 'tu_B',
-              status: 'completed',
-              summary: 'Background command "build" completed (exit code 0)'
-            }
-          ],
-          timestamp: 1
-        }}
-      />
+  it("a watch's expiry: a short 'stopped' pill; which watch on hover; never the CLI's text", async () => {
+    trigger([
+      {
+        uuid: 'n1',
+        taskId: 'b1',
+        summary: 'Monitor event: "agent needs attention"',
+        event:
+          '[Monitor expired after 30m with 1 event delivered. Re-arm it if you still need the watch.]'
+      }
+    ])
+    const pill = screen.getByTestId('turn-trigger-notification')
+    expect(pill.textContent).toBe('Watch stopped · 30m limit')
+    fireEvent.focus(pill)
+    const tip = await screen.findByTestId('turn-trigger-notification-tooltip')
+    expect(tip.textContent).toContain('Watch "agent needs attention"')
+    expect(tip.textContent).toContain('Reached its 30m time limit and stopped after 1 update.')
+    expect(tip.textContent).not.toContain('Re-arm')
+  })
+
+  it('sub-agents: one-line card each (✓ / ✕); a notification: its card', () => {
+    trigger(
+      [
+        {
+          uuid: 'n2',
+          taskId: 'b2',
+          toolUseId: 'tu_B',
+          status: 'completed',
+          summary: 'Background command "build" completed (exit code 0)'
+        }
+      ],
+      [
+        { toolUseId: 'tu_A', description: 'review' },
+        { toolUseId: 'tu_C', description: 'trace', failed: true }
+      ]
     )
-    expect(screen.getByText('review')).toBeTruthy()
-    expect(screen.getByText('finished')).toBeTruthy()
+    const cards = screen.getAllByTestId('turn-trigger-sub-agent')
+    expect(cards.map((c) => c.textContent)).toEqual(['review', 'trace'])
+    expect(within(cards[0]).getByRole('img', { name: 'Finished' })).toBeTruthy()
+    expect(within(cards[1]).getByRole('img', { name: 'Failed' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'review' })).toBeTruthy()
     expect(screen.getByTestId('turn-trigger-notification').textContent).toBe(
-      'AfterBackground command "build" completed (exit code 0)'
+      'TaskBackground command "build" completed (exit code 0)'
     )
   })
 })
