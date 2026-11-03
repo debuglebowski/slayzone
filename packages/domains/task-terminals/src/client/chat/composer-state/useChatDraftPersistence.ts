@@ -16,6 +16,12 @@ import { useTRPC, useTRPCClient } from '../../trpc'
  * conflicting saved copy stays authoritative until the user explicitly keeps
  * both or dismisses it (keeping only the current draft); neither local content
  * nor another provider's draft is overwritten.
+ *
+ * A saved draft this composer itself sent, whose reply has not arrived yet, is
+ * not a conflict: re-reading the server (reconnect, remount, reload) while a
+ * save is on its way finds a newer revision that is our own write. Those sends
+ * are recorded (`<journal key>:sent`) until acknowledged, so a re-read can tell
+ * "ours, reply pending" from "changed elsewhere".
  */
 
 const SAVE_DELAY_MS = 300
@@ -105,7 +111,8 @@ function sweepInvalidJournals(): void {
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i)
-      if (!key?.startsWith(JOURNAL_PREFIX) || key.endsWith(':conflicts')) continue
+      if (!key?.startsWith(JOURNAL_PREFIX) || key.endsWith(':conflicts') || key.endsWith(':sent'))
+        continue
       const j = readJournal(key)
       if (!j) localStorage.removeItem(key)
     }
@@ -173,6 +180,54 @@ function preserveConflict(key: string, draft: ChatDraft): boolean {
   }
 }
 
+/** Drafts sent to the computer, in send order, whose reply has not arrived. */
+interface Unacknowledged {
+  ownership?: Ownership
+  drafts: ChatDraft[]
+}
+const MAX_UNACKNOWLEDGED = 20
+const sentKey = (key: string) => `${key}:sent`
+function readUnacknowledged(key: string): Unacknowledged {
+  try {
+    const raw = localStorage.getItem(sentKey(key))
+    const value = raw ? (JSON.parse(raw) as Partial<Unacknowledged>) : null
+    if (!value || !Array.isArray(value.drafts)) return { drafts: [] }
+    return { ownership: value.ownership, drafts: value.drafts.filter(validDraft) }
+  } catch {
+    return { drafts: [] }
+  }
+}
+function writeUnacknowledged(key: string, value: Unacknowledged): void {
+  try {
+    if (value.drafts.length) localStorage.setItem(sentKey(key), JSON.stringify(value))
+    else localStorage.removeItem(sentKey(key))
+  } catch {
+    /* storage unavailable: a re-read during this save may then report a conflict */
+  }
+}
+/** Recorded just before the save request goes out (sends are serialized). */
+function recordSent(key: string, draft: ChatDraft, ownership: Ownership | undefined): void {
+  const sent = readUnacknowledged(key)
+  const drafts = sameOwnership(sent.ownership, ownership) ? sent.drafts : []
+  writeUnacknowledged(key, { ownership, drafts: [...drafts, draft].slice(-MAX_UNACKNOWLEDGED) })
+}
+/** The computer committed `draft`: it and every earlier send are settled. */
+function acknowledgeSent(key: string, draft: ChatDraft, ownership: Ownership | undefined): void {
+  const sent = readUnacknowledged(key)
+  if (!sameOwnership(sent.ownership, ownership)) return
+  const index = sent.drafts.findIndex((value) => sameDraft(value, draft))
+  if (index >= 0) writeUnacknowledged(key, { ownership, drafts: sent.drafts.slice(index + 1) })
+}
+/** The server's draft is one this composer sent and is still waiting to hear back about. */
+function isOwnUnacknowledged(key: string, server: ChatTabState | null): boolean {
+  if (!server) return false
+  const sent = readUnacknowledged(key)
+  return (
+    sameOwnership(sent.ownership, server.ownership) &&
+    sent.drafts.some((draft) => sameDraft(draft, server.draft))
+  )
+}
+
 interface Resolved {
   draft: ChatDraft | null
   persisted: ChatDraft
@@ -200,7 +255,10 @@ function resolveSaved(key: string, server: ChatTabState | null, current: ChatDra
         journal.baseRev === null &&
         rev === 0 &&
         sameDraft(persisted, EMPTY)) ||
-      sameDraft(journal, persisted))
+      sameDraft(journal, persisted) ||
+      // The newer revision is our own save whose reply never arrived (reload,
+      // remount): the journal holds the typing made on top of it.
+      (sameOwner && isOwnUnacknowledged(key, server)))
   ) {
     return {
       draft: { text: journal.text, attachments: journal.attachments },
@@ -325,7 +383,9 @@ export function useChatDraftPersistence({
           : EMPTY
         const remoteChanged =
           (state?.draft.rev ?? 0) !== revRef.current &&
-          !sameDraft(remoteDraft, persistedRef.current)
+          !sameDraft(remoteDraft, persistedRef.current) &&
+          // Our own save, read back before its reply arrived.
+          !isOwnUnacknowledged(key, state)
         if (!resolved || !sameOwnership(resolved.ownership, state?.ownership) || remoteChanged) {
           // The mode may have switched away and back without this mounted view
           // observing it. Do not flush old pending work into the replacement owner.
@@ -491,6 +551,7 @@ export function useChatDraftPersistence({
       savingRef.current += 1
       const persist = () => {
         if (authorityRef.current !== resolved) return Promise.resolve()
+        recordSent(key, draft, ownership)
         return trpcClient.chat.tabState.saveDraft
           .mutate({
             tabId,
@@ -499,6 +560,7 @@ export function useChatDraftPersistence({
             ...(ownership ? { expectedOwnership: ownership } : {})
           })
           .then((res) => {
+            if (res) acknowledgeSent(key, draft, ownership)
             if (!res || authorityRef.current !== resolved) return // gone or reconciled while waiting
             if (sameOwnership(ownershipRef.current, ownership)) {
               revRef.current = res.rev
