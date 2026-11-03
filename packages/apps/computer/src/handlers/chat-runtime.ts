@@ -14,7 +14,8 @@ import {
   parseChatInvocation,
   chatRouteSchema,
   chatAttachmentSchema,
-  chatTransferManifestSchema
+  chatTransferManifestSchema,
+  chatTabTransitionSchema
 } from '@slayzone/chat-runtime/shared'
 import {
   createRoutingChatBackend,
@@ -51,6 +52,7 @@ const requestSchema = z.discriminatedUnion('kind', [
     days: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
   }),
   z.object({ kind: z.literal('conversation.delete'), identity: chatIdentitySchema }),
+  z.object({ kind: z.literal('conversation.transition'), value: chatTabTransitionSchema }),
   z.object({
     kind: z.literal('hook.capture'),
     hook: z.object({
@@ -381,6 +383,8 @@ export function createChatRuntimeHandlers(opts: {
       case 'conversation.delete':
         await r.deleteConversation(req.identity)
         return { ok: true }
+      case 'conversation.transition':
+        return r.transitionTab(req.value)
       case 'hook.capture':
         r.captureHook(req.hook)
         return { ok: true }
@@ -395,6 +399,10 @@ export function createChatRuntimeHandlers(opts: {
               r.storage.getRecord<ChatBootstrap>(o.identity.id, 'settings', 'bootstrap')
                 ?.revision ?? 0,
             inbox: !!r.storage.getRecord(o.identity.id, 'settings', 'inbox'),
+            tabTransitions: r.storage
+              .records(o.identity.id, 'settings')
+              .filter((record) => record.id.startsWith('tab-transition:'))
+              .map((record) => record.value),
             lifecycle: r.storage.taskLifecycle(o.identity.taskId)
           }))
       case 'metadata.snapshot':

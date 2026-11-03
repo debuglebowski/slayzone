@@ -106,6 +106,8 @@ export interface ChatEventStore {
 
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
 export interface TransportDeps {
+  /** Recheck durable lifecycle/identity fences at the actual spawn boundary. */
+  beforeSpawn?: (tabId: string) => void
   userInputTracker: {
     mark(sessionId: string): void
     clear(sessionId: string): void
@@ -217,6 +219,7 @@ export interface TransportDeps {
  */
 export type ChatEventMap = {
   'threads-changed': [parentTabId: string]
+  'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   exit: [tabId: string, sessionId: string, code: number | null, signal: string | null]
 }
@@ -1862,6 +1865,7 @@ export function createChatTransport(
         `ensureSpawned: no hydrated session for tabId=${tabId} — call hydrateSession first`
       )
     }
+    deps.beforeSpawn?.(tabId)
     if (tab.storageFailed)
       throw new ChatTransportError(
         'Chat storage is unavailable. Restart chat after fixing storage.'
@@ -1942,6 +1946,7 @@ export function createChatTransport(
     let rawChild: ChildProcess | null = null
     try {
       if (deps.backend) {
+        deps.beforeSpawn?.(tab.tabId)
         // Routed (or routing-capable) spawn. Binary resolution is NOT done here:
         // `whichBinary` runs a LOCAL login shell, so a hub-resolved absolute path is
         // meaningless on a computer's filesystem. The spec carries the binary NAME and
@@ -1983,6 +1988,7 @@ export function createChatTransport(
             backend.binaryName
           )
         }
+        deps.beforeSpawn?.(tab.tabId)
         rawChild = deps.spawn(binary, args, {
           cwd: opts.cwd,
           // Sanitized base (user env survives; SlayZone infra/secret/identity
@@ -3300,6 +3306,27 @@ export function createChatTransport(
     closing.set(tabId, flushed)
     return flushed
   }
+  /** Provider identity changes wait for the old process (including an admitted
+   * spawn) to exit, retaining final output before the log is flushed/closed. */
+  async function quiesceSession(tabId: string): Promise<void> {
+    const tab = tabs.get(tabId)
+    if (!tab) return closing.get(tabId) ?? Promise.resolve()
+    tab.outbox.dispose()
+    const stop = async () => {
+      const result = await shutdownSession(tab, {
+        termGraceMs: DEFAULT_SHUTDOWN_TERM_GRACE_MS,
+        hardTimeoutMs: DEFAULT_SHUTDOWN_HARD_TIMEOUT_MS
+      })
+      if (!result.exited)
+        throw new ChatTransportError(
+          'Previous provider has not confirmed exit; retry the provider change.'
+        )
+    }
+    await stop()
+    await inFlightSpawns.get(tabId)?.catch(() => undefined)
+    if (tab.proc && !tab.proc.ended) await stop()
+    await removeSession(tabId)
+  }
 
   /** A tab's projection, from its checkpoint or rebuilt from `history` (null: none). */
   function openProjection(
@@ -3451,7 +3478,7 @@ export function createChatTransport(
       const errors: TransportShutdownResult['errors'] = []
       const proc = tab.proc
       const id = tab.tabId
-      if (tab.ended || !proc || proc.ended) {
+      if (!proc || proc.ended) {
         forceFinalizeForShutdown(tab)
         resolve({ id, exited: true, killed: false, timedOut: false, errors })
         return
@@ -3627,6 +3654,7 @@ export function createChatTransport(
     isReadyForQueuedMessage,
     hydrateSession,
     ensureSpawned,
+    quiesceSession,
     respawn,
     dispatchUserMessage,
     recordCodexPlanDecision,

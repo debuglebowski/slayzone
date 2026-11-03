@@ -12,7 +12,8 @@ import type {
   ChatRecord,
   CommandReceipt,
   ConversationIdentity,
-  StoredChatEvent
+  StoredChatEvent,
+  ChatTabTransition
 } from '../shared'
 
 function digest(value: unknown): string {
@@ -30,6 +31,7 @@ function digest(value: unknown): string {
     )
     .digest('hex')
 }
+export { digest as chatStorageDigest }
 function requireEpoch(epoch: number): void {
   if (!Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Invalid ownership epoch')
 }
@@ -44,7 +46,7 @@ interface OwnerRow {
   migration_hash: string | null
 }
 
-export const CHAT_STORAGE_SCHEMA_VERSION = 4
+export const CHAT_STORAGE_SCHEMA_VERSION = 5
 
 /** One database per authenticated hub namespace. Never accepts a caller-supplied disk path. */
 export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
@@ -103,6 +105,12 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         value TEXT NOT NULL, PRIMARY KEY(task_id,mode)
       );
       CREATE TABLE IF NOT EXISTS storage_maintenance (id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS task_cleanup_pending (task_id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS queue_message_identities (
+        task_id TEXT NOT NULL,id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        value TEXT NOT NULL,PRIMARY KEY(task_id,id)
+      );
     `)
     if (schema < 3) {
       db.exec(
@@ -132,6 +140,17 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             (SELECT count(*) FROM json_each(result))=1 ELSE 0 END`)
         .run().changes
     }
+    if (schema < 5)
+      db.prepare(
+        "INSERT OR IGNORE INTO task_cleanup_pending SELECT task_id FROM task_lifecycle WHERE state='deleted'"
+      ).run()
+    // Local index is not part of transfer records. Rebuild from copied ledgers
+    // even when their per-conversation initialization marker is already true.
+    db.prepare(`INSERT OR IGNORE INTO queue_message_identities
+      SELECT c.task_id,substr(r.id,15),c.id,r.value FROM records r
+      JOIN conversations c ON c.id=r.conversation_id
+      WHERE r.kind='settings' AND r.id GLOB 'queue-message:*'
+      ORDER BY r.saved_at,c.rowid`).run()
     db.pragma(`user_version = ${CHAT_STORAGE_SCHEMA_VERSION}`)
   })()
   if (redactedSideAnswers) db.pragma('wal_checkpoint(TRUNCATE)')
@@ -184,6 +203,19 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         saved_at: number
       }>
     ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
+  }
+  function indexQueueMessage(id: string, record: Pick<ChatRecord, 'kind' | 'id' | 'value'>) {
+    if (record.kind !== 'settings' || !record.id.startsWith('queue-message:')) return
+    const target = row(id)
+    if (!target) throw new Error('Unknown queue message owner')
+    db.prepare(`INSERT INTO queue_message_identities VALUES(?,?,?,?)
+      ON CONFLICT(task_id,id) DO UPDATE SET value=excluded.value
+      WHERE queue_message_identities.conversation_id=excluded.conversation_id`).run(
+      target.task_id,
+      record.id.slice(14),
+      id,
+      JSON.stringify(record.value)
+    )
   }
   type ReceiptRow = {
     id: string
@@ -344,6 +376,31 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     onTaskPurge(listener: (taskId: string) => void) {
       purgeListeners.push(listener)
     },
+    pendingTaskCleanup(): string[] {
+      return (
+        db.prepare('SELECT task_id FROM task_cleanup_pending ORDER BY task_id').all() as Array<{
+          task_id: string
+        }>
+      ).map((r) => r.task_id)
+    },
+    completeTaskCleanup(taskId: string): void {
+      if (api.taskLifecycle(taskId).state !== 'deleted')
+        throw new Error('Task cleanup requires committed deletion')
+      db.prepare('DELETE FROM task_cleanup_pending WHERE task_id=?').run(taskId)
+    },
+    queueMessageIdentity<T>(
+      taskId: string,
+      messageId: string
+    ): { conversationId: string; value: T } | null {
+      const found = db
+        .prepare(
+          'SELECT conversation_id,value FROM queue_message_identities WHERE task_id=? AND id=?'
+        )
+        .get(taskId, messageId) as { conversation_id: string; value: string } | undefined
+      return found
+        ? { conversationId: found.conversation_id, value: JSON.parse(found.value) as T }
+        : null
+    },
     inventory(): ChatOwnership[] {
       return (
         db.prepare('SELECT id FROM conversations ORDER BY task_id,rowid').all() as { id: string }[]
@@ -370,6 +427,152 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       db.prepare(
         "INSERT INTO conversations(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,?,?,'active')"
       ).run(value.id, value.taskId, value.tabId, value.mode, value.epoch)
+    },
+    prepareTabTransition(value: ChatTabTransition): void {
+      api.transaction(() => {
+        const { from, to, next } = value
+        if (
+          !value.id ||
+          from.id !== to.id ||
+          from.taskId !== to.taskId ||
+          from.mode !== to.mode ||
+          from.tabId === to.tabId ||
+          to.epoch !== from.epoch + 1 ||
+          next.id === from.id ||
+          next.taskId !== from.taskId ||
+          next.tabId !== from.tabId ||
+          next.mode === from.mode ||
+          next.epoch !== 1
+        )
+          throw new Error('Invalid provider transition')
+        requireEpoch(to.epoch)
+        const committed = api.getRecord<ChatTabTransition>(
+          from.id,
+          'settings',
+          `tab-transition:${value.id}`
+        )
+        if (committed) {
+          if (digest(committed) !== digest(value)) throw new Error('Provider transition conflict')
+          return
+        }
+        const owner = requireOwner(from.id, from.epoch)
+        if (digest(identity(owner)) !== digest(from))
+          throw new Error('Provider transition identity mismatch')
+        if (api.taskLifecycle(from.taskId).state === 'deleted')
+          throw new Error('Task chat is deleted')
+        const pending = api.getRecord<ChatTabTransition>(
+          from.id,
+          'settings',
+          'tab-transition-pending'
+        )
+        if (pending && digest(pending) !== digest(value))
+          throw new Error('Another provider transition is pending')
+        api.putRecord(from.id, from.epoch, {
+          kind: 'settings',
+          id: 'tab-transition-pending',
+          value,
+          at: Date.now()
+        })
+      })
+    },
+    commitTabTransition(value: ChatTabTransition): ConversationIdentity {
+      return api.transaction(() => {
+        const committed = api.getRecord<ChatTabTransition>(
+          value.from.id,
+          'settings',
+          `tab-transition:${value.id}`
+        )
+        if (committed) {
+          if (digest(committed) !== digest(value)) throw new Error('Provider transition conflict')
+          const owner = api.conversation(value.to.id)
+          if (!owner || owner.state === 'deleted') throw new Error('Conversation deleted')
+          return owner.identity
+        }
+        const owner = requireOwner(value.from.id, value.from.epoch)
+        if (
+          digest(identity(owner)) !== digest(value.from) ||
+          digest(api.getRecord(value.from.id, 'settings', 'tab-transition-pending')) !==
+            digest(value)
+        )
+          throw new Error('Provider transition is not reserved')
+        if (
+          db
+            .prepare("SELECT 1 FROM conversations WHERE tab_id=? AND state<>'deleted'")
+            .get(value.to.tabId)
+        )
+          throw new Error('Provider archive tab already belongs to another conversation')
+        db.prepare('UPDATE conversations SET tab_id=?,epoch=? WHERE id=?').run(
+          value.to.tabId,
+          value.to.epoch,
+          value.from.id
+        )
+        const draft = api.getRecord(value.from.id, 'draft', 'state')
+        if (draft)
+          api.putRecord(value.to.id, value.to.epoch, {
+            kind: 'draft',
+            id: `transition:${value.id}`,
+            value: { ...(draft as object), targetConversationId: value.next.id },
+            at: Date.now()
+          })
+        for (const r of db
+          .prepare(
+            `SELECT r.conversation_id,r.kind,r.id,r.value FROM records r JOIN conversations c ON c.id=r.conversation_id WHERE c.task_id=?`
+          )
+          .all(value.from.taskId) as Array<{
+          conversation_id: string
+          kind: string
+          id: string
+          value: string
+        }>) {
+          let record = JSON.parse(r.value) as unknown
+          let changed = false
+          const own = r.conversation_id === value.from.id
+          if (r.kind === 'settings' && r.id === 'thread-parent' && record === value.from.tabId) {
+            record = value.to.tabId
+            changed = true
+          } else if (record && typeof record === 'object' && !Array.isArray(record)) {
+            const data = record as Record<string, unknown>
+            if (own && r.kind === 'settings' && r.id === 'bootstrap') {
+              data.identity = value.to
+              changed = true
+            }
+            if (own && ['queue', 'workspace'].includes(r.kind) && data.tabId === value.from.tabId) {
+              data.tabId = value.to.tabId
+              changed = true
+            }
+            if (r.kind === 'thread' && data.parentTabId === value.from.tabId) {
+              data.parentTabId = value.to.tabId
+              changed = true
+            }
+            if (r.kind === 'settings' && r.id.startsWith('metadata:')) {
+              if (own) {
+                data.tabId = value.to.tabId
+                data.epoch = value.to.epoch
+                changed = true
+              }
+              const content = data.value as Record<string, unknown> | undefined
+              if (data.kind === 'thread-created' && content?.parentTabId === value.from.tabId) {
+                content.parentTabId = value.to.tabId
+                changed = true
+              }
+            }
+          }
+          if (changed)
+            db.prepare(
+              'UPDATE records SET value=? WHERE conversation_id=? AND kind=? AND id=?'
+            ).run(JSON.stringify(record), r.conversation_id, r.kind, r.id)
+        }
+        db.prepare(
+          "DELETE FROM records WHERE conversation_id=? AND kind='settings' AND id='tab-transition-pending'"
+        ).run(value.from.id)
+        api.putRecord(value.to.id, value.to.epoch, {
+          kind: 'settings',
+          id: `tab-transition:${value.id}`,
+          value,
+          at: Date.now()
+        })
+        return value.to
+      })
     },
     forTab(tabId: string): ChatOwnership | null {
       const found = db
@@ -546,6 +749,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         db.prepare(
           'INSERT INTO records VALUES(?,?,?,?,?) ON CONFLICT(conversation_id,kind,id) DO UPDATE SET value=excluded.value,saved_at=excluded.saved_at'
         ).run(id, record.kind, record.id, JSON.stringify(record.value), record.at)
+        indexQueueMessage(id, record)
       })()
     },
     removeRecord(id: string, epoch: number, kind: ChatRecord['kind'], key: string): void {
@@ -728,6 +932,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
               JSON.stringify(r.value),
               r.at
             )
+            indexQueueMessage(i.id, r)
             records++
           } else if (entry.kind === 'receipt') {
             const r = entry.value as CommandReceipt
@@ -794,7 +999,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             e.at,
             JSON.stringify(e.event)
           )
-        for (const r of snapshot.records)
+        for (const r of snapshot.records) {
           db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').run(
             i.id,
             r.kind,
@@ -802,6 +1007,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             JSON.stringify(r.value),
             r.at
           )
+          indexQueueMessage(i.id, r)
+        }
         for (const r of snapshot.receipts)
           db.prepare(
             'INSERT INTO receipts(conversation_id,id,hash,state,result,saved_at,result_expired,method) VALUES(?,?,?,?,?,?,?,?)'
@@ -861,14 +1068,16 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           if (digest(JSON.parse(previous.identity)) !== digest(value))
             throw new Error('Migration checkpoint identity mismatch')
           const saved = JSON.parse(previous.value) as ChatRecord[]
-          const manifest = (r: ChatRecord) =>
-            r.kind === 'settings' && r.id === 'legacy-attachment-manifest'
-          if (candidate?.some(manifest) && !saved.some(manifest)) {
+          const upgrade = (r: ChatRecord) =>
+            r.kind === 'settings' &&
+            ['legacy-attachment-manifest', 'legacy-task-content-authority'].includes(r.id)
+          const added = candidate?.slice(saved.length) ?? []
+          if (added.length && added.every(upgrade)) {
             if (
               (owner && ['prepared', 'active', 'deleted'].includes(owner.state)) ||
-              candidate.length !== saved.length + 1 ||
-              !manifest(candidate[saved.length]) ||
-              digest(candidate.slice(0, -1)) !== digest(saved)
+              new Set([...saved, ...added].map((r) => `${r.kind}:${r.id}`)).size !==
+                saved.length + added.length ||
+              digest(candidate!.slice(0, saved.length)) !== digest(saved)
             )
               throw new Error('Migration checkpoint cannot replace frozen content')
             const encoded = JSON.stringify(candidate)
@@ -935,10 +1144,25 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       requireEpoch(value.epoch)
       api.transaction(() => {
         const existing = row(value.id)
+        let inheritedTab = value.tabId
+        if (
+          existing &&
+          existing.tab_id !== value.tabId &&
+          existing.task_id === value.taskId &&
+          existing.mode === value.mode
+        ) {
+          const transitions = records(value.id, 'settings')
+            .filter((r) => r.id.startsWith('tab-transition:'))
+            .map((r) => r.value as ChatTabTransition)
+            .sort((a, b) => a.from.epoch - b.from.epoch)
+          for (const transition of transitions)
+            if (transition.from.tabId === inheritedTab && transition.to.epoch <= value.epoch)
+              inheritedTab = transition.to.tabId
+        }
         if (
           existing &&
           (existing.task_id !== value.taskId ||
-            existing.tab_id !== value.tabId ||
+            existing.tab_id !== inheritedTab ||
             existing.mode !== value.mode)
         )
           throw new Error('Deletion ownership mismatch')
@@ -949,6 +1173,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           "INSERT INTO conversations(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,?,?,'deleted') ON CONFLICT(id) DO UPDATE SET state='deleted',epoch=excluded.epoch"
         ).run(value.id, value.taskId, value.tabId, value.mode, epoch)
         if (taskDeleted) {
+          // Filesystem removal runs only after this tombstone and its cleanup
+          // intent commit together. A SQL rollback must preserve live originals.
+          db.prepare('INSERT OR IGNORE INTO task_cleanup_pending VALUES(?)').run(value.taskId)
           for (const listener of purgeListeners) listener(value.taskId)
           const id = `task-tombstone:${value.taskId}`
           db.prepare(
@@ -979,6 +1206,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         }
         if (taskDeleted)
           db.prepare('DELETE FROM provider_configs WHERE task_id=?').run(value.taskId)
+        if (taskDeleted)
+          db.prepare('DELETE FROM queue_message_identities WHERE task_id=?').run(value.taskId)
       })
     },
     deleteConversation(id: string, epoch: number): void {

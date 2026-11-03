@@ -264,7 +264,7 @@ export function createChatTransfers(store: ChatStorage) {
     },
     collectActivated() {
       let pending = 0
-      for (const { id, header, progress: p } of entries()) {
+      for (const { id, header } of entries()) {
         try {
           const owner = store.conversation(header.identity.id)
           if (
@@ -278,9 +278,15 @@ export function createChatTransfers(store: ChatStorage) {
             owner?.state === 'active' &&
             owner.migrationId === header.migrationId &&
             owner.identity.epoch === header.identity.epoch + 1 &&
-            (!p || owner.migrationHash === p.manifest.hash) &&
+            owner.identity.taskId === header.identity.taskId &&
+            owner.identity.tabId === header.identity.tabId &&
+            owner.identity.mode === header.identity.mode &&
+            owner.migrationHash &&
             existsSync(path(id, '.data'))
           ) {
+            // Activation proves the complete destination for this exact owner.
+            // An older partial stream (e.g. before a checkpoint-format upgrade)
+            // cannot stage over it, even when its manifest hash differs.
             unlinkSync(path(id, '.data'))
             syncDirectory()
           }

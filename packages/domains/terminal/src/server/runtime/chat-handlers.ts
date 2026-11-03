@@ -90,7 +90,8 @@ import {
   type CliCommandList,
   type ChatDraft,
   type ChatScrollAnchor,
-  type ChatTabState
+  type ChatTabState,
+  type ChatTabStateScope
 } from '@slayzone/terminal-contracts'
 
 /** Who a persisted chat event belongs to (null when the tab has no live session). */
@@ -1831,12 +1832,19 @@ export function createChatOps(opts: ChatHandlerOpts) {
     },
 
     /** A chat tab's saved draft + scroll anchor (null = nothing saved). */
-    getTabState: (tabId: string): Promise<ChatTabState | null> => data.getTabState(tabId),
+    getTabState: (tabId: string, scope?: ChatTabStateScope): Promise<ChatTabState | null> =>
+      data.getTabState(tabId, scope),
     /** Save a chat tab's draft (text + attached files); resolves its new revision. */
-    saveTabDraft: (tabId: string, draft: ChatDraft): Promise<{ rev: number } | null> =>
-      data.saveTabDraft(tabId, draft),
-    saveTabScroll: (tabId: string, anchor: ChatScrollAnchor): Promise<void> =>
-      data.saveTabScroll(tabId, anchor),
+    saveTabDraft: (
+      tabId: string,
+      draft: ChatDraft,
+      scope?: ChatTabStateScope
+    ): Promise<{ rev: number } | null> => data.saveTabDraft(tabId, draft, scope),
+    saveTabScroll: (
+      tabId: string,
+      anchor: ChatScrollAnchor,
+      scope?: ChatTabStateScope
+    ): Promise<void> => data.saveTabScroll(tabId, anchor, scope),
 
     /** The CLI's stored command descriptions + argument hints for the task's project (null = none). */
     getCliCommandDetails: async (

@@ -564,14 +564,50 @@ export const chatRouter = router({
   // A tab's composer state: draft + scroll anchor, restored after a remount / reload.
   tabState: router({
     get: publicProcedure
-      .input(z.object({ tabId: z.string() }))
-      .query(({ input }) => ops().getTabState(input.tabId)),
+      .input(z.object({ tabId: z.string(), expectedMode: z.string().optional() }))
+      .query(({ input }) =>
+        input.expectedMode
+          ? ops().getTabState(input.tabId, { expectedMode: input.expectedMode })
+          : ops().getTabState(input.tabId)
+      ),
     saveDraft: publicProcedure
-      .input(z.object({ tabId: z.string(), draft: chatDraft }))
-      .mutation(({ input }) => ops().saveTabDraft(input.tabId, input.draft)),
+      .input(
+        z.object({
+          tabId: z.string(),
+          draft: chatDraft,
+          expectedMode: z.string().optional(),
+          expectedOwnership: z
+            .object({ id: z.string().min(1), epoch: z.number().int().positive() })
+            .optional()
+        })
+      )
+      .mutation(({ input }) =>
+        input.expectedMode || input.expectedOwnership
+          ? ops().saveTabDraft(input.tabId, input.draft, {
+              expectedMode: input.expectedMode,
+              expectedOwnership: input.expectedOwnership
+            })
+          : ops().saveTabDraft(input.tabId, input.draft)
+      ),
     saveScroll: publicProcedure
-      .input(z.object({ tabId: z.string(), anchor: scrollAnchor }))
-      .mutation(({ input }) => ops().saveTabScroll(input.tabId, input.anchor))
+      .input(
+        z.object({
+          tabId: z.string(),
+          anchor: scrollAnchor,
+          expectedMode: z.string().optional(),
+          expectedOwnership: z
+            .object({ id: z.string().min(1), epoch: z.number().int().positive() })
+            .optional()
+        })
+      )
+      .mutation(({ input }) =>
+        input.expectedMode || input.expectedOwnership
+          ? ops().saveTabScroll(input.tabId, input.anchor, {
+              expectedMode: input.expectedMode,
+              expectedOwnership: input.expectedOwnership
+            })
+          : ops().saveTabScroll(input.tabId, input.anchor)
+      )
   }),
 
   // Queue (mirrors the `chat:queue:*` IPC channels)
@@ -585,6 +621,7 @@ export const chatRouter = router({
           tabId: z.string(),
           send: z.string(),
           original: z.string(),
+          expectedMode: z.string().min(1).max(200).optional(),
           expectedConversationId: z.string().min(1).max(200).optional(),
           // Client-minted: the queued message's id becomes its outbox id when sent.
           id: z.string().min(1).max(200).optional(),
@@ -594,6 +631,7 @@ export const chatRouter = router({
       .mutation(({ input }) =>
         queueOps().push(input.tabId, input.send, input.original, {
           ...(input.id ? { id: input.id } : {}),
+          ...(input.expectedMode ? { expectedMode: input.expectedMode } : {}),
           ...(input.expectedConversationId
             ? { expectedConversationId: input.expectedConversationId }
             : {}),
@@ -643,6 +681,20 @@ export const chatRouter = router({
   // (pty-router.ts): this is otherwise every chat event on the hub, filtered
   // only client-side. Omitted (every existing caller) reproduces today's
   // unfiltered behavior exactly.
+  onReplayRequired: publicProcedure
+    .input(z.object({ tabId: z.string() }))
+    .subscription(({ input }) =>
+      observable<{ tabId: string; generation: string }>((emit) => {
+        const handler = (tabId: string, generation: string): void => {
+          if (tabId === input.tabId) emit.next({ tabId, generation })
+        }
+        const ev = getChatDeps().events
+        ev.on('replay-required', handler)
+        return () => {
+          ev.off('replay-required', handler)
+        }
+      })
+    ),
   onEvent: publicProcedure
     .input(z.object({ tabIds: z.array(z.string()).optional() }).optional())
     .subscription(({ input }) =>

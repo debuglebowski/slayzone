@@ -175,8 +175,50 @@ export function createLocalArtifacts(
       raw.prepare('DELETE FROM task_artifacts WHERE task_id=?').run(taskId)
       raw.prepare('DELETE FROM artifact_folders WHERE task_id=?').run(taskId)
     })
-    store.cleanupTaskArtifacts(taskId)
   })
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
+  function retryTaskCleanup() {
+    if (closed || cleanupTimer) return
+    cleanupTimer = setTimeout(() => {
+      cleanupTimer = undefined
+      try {
+        cleanupDeletedTasks()
+      } catch {
+        // The durable intent remains until every working file is removed.
+      }
+    }, 5000)
+    cleanupTimer.unref()
+  }
+  function cleanupDeletedTasks() {
+    if (storage.compose((raw) => raw.inTransaction))
+      throw new Error('Task file cleanup requires a committed tombstone')
+    let failure: unknown
+    for (const taskId of storage.pendingTaskCleanup()) {
+      try {
+        store.cleanupTaskArtifacts(taskId)
+        // Persist directory-entry removal before clearing the durable intent.
+        // Otherwise a power loss could resurrect bytes after a successful ACK.
+        if (process.platform !== 'win32')
+          for (const dir of [store.artifactsDir, join(store.artifactsDir, '.transactions')])
+            if (existsSync(dir)) {
+              const fd = openSync(dir, 'r')
+              try {
+                fsyncSync(fd)
+              } finally {
+                closeSync(fd)
+              }
+            }
+        storage.completeTaskCleanup(taskId)
+      } catch (error) {
+        failure ??= error
+      }
+    }
+    if (failure) {
+      retryTaskCleanup()
+      throw failure
+    }
+  }
   storage.compose((raw) => {
     raw.function('computer_chat_artifact_owner', () => context.getStore()?.id ?? '')
     raw.exec(`CREATE TABLE IF NOT EXISTS artifact_folder_tombstones(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,task_id TEXT NOT NULL);
@@ -197,6 +239,11 @@ export function createLocalArtifacts(
           : blobs.collectDeleted(referencedArtifactBlobHashes(raw))
       )
     )
+  try {
+    cleanupDeletedTasks()
+  } catch {
+    // A damaged deleted task must not make unrelated live history unavailable.
+  }
   async function checkArtifact(id: string, taskId: string) {
     const a = await store.getArtifact(db, id)
     if (!a || a.task_id !== taskId) throw new Error('Artifact is outside this task')
@@ -515,6 +562,11 @@ export function createLocalArtifacts(
   }
   return {
     invoke,
+    cleanupDeletedTasks,
+    close() {
+      closed = true
+      if (cleanupTimer) clearTimeout(cleanupTimer)
+    },
     deleteFolders,
     deletedFolderInventory(after: number) {
       const rows = storage.compose((raw) =>

@@ -483,6 +483,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.listSkills': 'agent',
   'chat.onEvent': 'agent',
   'chat.onExit': 'agent',
+  'chat.onReplayRequired': 'agent',
   'chat.onQueueChanged': 'agent',
   'chat.onQueueDrained': 'agent',
   'chat.openTimeline': 'agent',

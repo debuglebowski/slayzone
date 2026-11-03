@@ -3,6 +3,7 @@ import type {
   ChatDataOps,
   ChatQueueData,
   ChatQueueAdmissions,
+  ChatQueuePushOptions,
   QueueAdmission,
   ProviderConfigEntry,
   TimelineWrite,
@@ -21,6 +22,7 @@ import type {
   ChatModelInfo
 } from '@slayzone/terminal-contracts'
 import {
+  assertChatTabStateScope,
   userMessageAttachments,
   isSyntheticChatPrompt,
   chatCapabilitiesForMode,
@@ -28,7 +30,7 @@ import {
   resolveDefaultChatMode
 } from '@slayzone/terminal-contracts'
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
-import type { ChatStorage } from './storage'
+import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
 import { chatStorageMode, terminalStorageMode } from './storage-mode'
 
@@ -275,7 +277,27 @@ export function createLocalChatData(
       }
       const existing = store.conversation(value.identity.id)
       store.createConversation(value.identity)
-      if (value.identity.tabId.startsWith('artifact-store:'))
+      if (!existing) {
+        const inherited = store
+          .findRecords('draft', value.identity.taskId, { idPrefix: 'transition:' })
+          .find(
+            (r) =>
+              (r.value as { targetConversationId?: string }).targetConversationId ===
+              value.identity.id
+          )
+        if (inherited) {
+          const { targetConversationId: _target, ...state } = inherited.value as ChatTabState & {
+            targetConversationId: string
+          }
+          set(value.identity.tabId, 'draft', 'state', state)
+          const previous = store.conversation(inherited.conversationId)!
+          store.removeRecord(previous.identity.id, previous.identity.epoch, 'draft', inherited.id)
+        }
+      }
+      if (
+        value.identity.tabId.startsWith('artifact-store:') ||
+        value.identity.tabId === `task-content:${value.identity.taskId}`
+      )
         set(value.identity.tabId, 'settings', 'inbox', true)
       store.transaction(() => {
         const previous =
@@ -364,9 +386,243 @@ export function createLocalChatData(
     return r ? (r.value as QueuedChatMessage) : null
   }
   type SyncQueueData = {
-    [K in keyof ChatQueueData]: (
-      ...args: Parameters<ChatQueueData[K]>
-    ) => Awaited<ReturnType<ChatQueueData[K]>>
+    [K in keyof Required<ChatQueueData>]: (
+      ...args: Parameters<NonNullable<ChatQueueData[K]>>
+    ) => Awaited<ReturnType<NonNullable<ChatQueueData[K]>>>
+  }
+  type QueueMessageIdentity = {
+    inputHash?: string
+    unsealedInputHash?: string
+    messageHash: string
+    position: number
+    createdAt: string
+    // Only version identities persist here, never user text or attachment names.
+    seals?: Record<string, string>
+    handedOff?: boolean
+  }
+  const queueMessagePrefix = 'queue-message:'
+  const queueMessageKey = (id: string) => queueMessagePrefix + id
+  const messageContent = (send: string, content?: UserContentBlock[]) =>
+    content ?? [{ type: 'text' as const, text: send }]
+  const unsealedContent = (content?: UserContentBlock[]) =>
+    content?.map((block) => {
+      if (block.type !== 'attachment') return block
+      const { contentHash: _hash, ...attachment } = block.attachment
+      return { ...block, attachment }
+    })
+  function sameQueueMessage(item: QueuedChatMessage, sent: UserContentBlock[]) {
+    const queued = messageContent(item.send, item.content).map((block, index) => {
+      const accepted = sent[index]
+      return block.type === 'attachment' &&
+        !block.attachment.contentHash &&
+        accepted?.type === 'attachment' &&
+        accepted.attachment.contentHash
+        ? {
+            ...block,
+            attachment: { ...block.attachment, contentHash: accepted.attachment.contentHash }
+          }
+        : block
+    })
+    return chatStorageDigest(queued) === chatStorageDigest(sent)
+  }
+  function queueInputHash(send: string, original: string, opts?: ChatQueuePushOptions) {
+    return chatStorageDigest({
+      send,
+      original,
+      content: opts?.submittedContent ?? opts?.content ?? null,
+      expectedConversationId: opts?.expectedConversationId ?? null
+    })
+  }
+  function queueIdentity(
+    item: QueuedChatMessage,
+    inputHash?: string,
+    legacy = false
+  ): QueueMessageIdentity {
+    const seals: Record<string, string> = {}
+    item.content?.forEach((block, index) => {
+      if (block.type === 'attachment' && block.attachment.contentHash)
+        seals[index] = block.attachment.contentHash
+    })
+    return {
+      inputHash: inputHash ?? queueInputHash(item.send, item.original, item),
+      ...(legacy
+        ? {
+            unsealedInputHash: queueInputHash(item.send, item.original, {
+              ...item,
+              content: unsealedContent(item.content)
+            })
+          }
+        : {}),
+      messageHash: chatStorageDigest(messageContent(item.send, item.content)),
+      position: item.position,
+      createdAt: item.createdAt,
+      ...(Object.keys(seals).length ? { seals } : {})
+    }
+  }
+  function recordQueueHandoff(tabId: string, id: string, content: UserContentBlock[], at: number) {
+    const key = queueMessageKey(id),
+      previous = get<QueueMessageIdentity>(tabId, 'settings', key),
+      item = store.getRecord<QueuedChatMessage>(owner(tabId).id, 'queue', id),
+      messageHash = chatStorageDigest(content)
+    if (item && !sameQueueMessage(item, content))
+      throw new Error('Queue message id conflicts with accepted history')
+    set(tabId, 'settings', key, {
+      ...(previous ??
+        (item ? queueIdentity(item) : { position: 0, createdAt: new Date(at).toISOString() })),
+      messageHash,
+      handedOff: true
+    } satisfies QueueMessageIdentity)
+  }
+  function repairQueueIdentities(tabId: string) {
+    if (get(tabId, 'settings', 'queue-message-identities-v5')) return
+    store.transaction(() => {
+      const i = owner(tabId)
+      // Pre-fix operation receipts can recover the original enqueue fingerprint,
+      // including raw command text that is absent from the user-message event.
+      store.compose((db) => {
+        let cursor = 0
+        for (;;) {
+          const rows = db
+            .prepare(`SELECT rowid AS cursor,result FROM receipts WHERE conversation_id=?
+            AND state='delivered' AND result_expired=0 AND rowid>? ORDER BY rowid LIMIT 256`)
+            .all(i.id, cursor) as Array<{ cursor: number; result: string }>
+          for (const row of rows) {
+            cursor = row.cursor
+            const item = JSON.parse(row.result) as Partial<QueuedChatMessage> | null
+            if (
+              !item ||
+              typeof item.id !== 'string' ||
+              typeof item.send !== 'string' ||
+              typeof item.original !== 'string' ||
+              typeof item.createdAt !== 'string' ||
+              typeof item.position !== 'number'
+            )
+              continue
+            const key = queueMessageKey(item.id)
+            if (!get(tabId, 'settings', key))
+              set(tabId, 'settings', key, queueIdentity(item as QueuedChatMessage, undefined, true))
+          }
+          if (rows.length < 256) break
+        }
+      })
+      for (const record of store.records(i.id, 'queue')) {
+        const item = record.value as QueuedChatMessage,
+          key = queueMessageKey(item.id)
+        if (!get(tabId, 'settings', key))
+          set(tabId, 'settings', key, queueIdentity(item, undefined, true))
+      }
+      store.compose((db) => {
+        let cursor = -1
+        for (;;) {
+          const rows = db
+            .prepare(`SELECT seq,saved_at,event FROM events WHERE conversation_id=?
+            AND seq>? AND json_extract(event,'$.kind')='user-message' AND COALESCE(json_extract(event,'$.history'),0)=0
+            ORDER BY seq LIMIT 256`)
+            .all(i.id, cursor) as Array<{ seq: number; saved_at: number; event: string }>
+          for (const row of rows) {
+            cursor = row.seq
+            const event = JSON.parse(row.event) as Extract<
+              import('@slayzone/terminal-contracts').AgentEvent,
+              { kind: 'user-message' }
+            >
+            if (!event.id) continue
+            const content = messageContent(event.text, event.content),
+              item = store.getRecord<QueuedChatMessage>(i.id, 'queue', event.id)
+            if (item && !sameQueueMessage(item, content)) {
+              const previous = get<QueueMessageIdentity>(
+                tabId,
+                'settings',
+                queueMessageKey(event.id)
+              )!
+              set(tabId, 'settings', queueMessageKey(event.id), {
+                ...previous,
+                messageHash: chatStorageDigest(content),
+                handedOff: true
+              })
+              continue // Preserve an unprovable conflicting row for explicit recovery.
+            }
+            recordQueueHandoff(tabId, event.id, content, row.saved_at)
+            if (item) {
+              remove(tabId, 'queue', item.id)
+              metadata(tabId, 'queue-item', { id: item.id, removed: true })
+            }
+          }
+          if (rows.length < 256) break
+        }
+      })
+      set(tabId, 'settings', 'queue-message-identities-v5', true)
+    })
+  }
+  function replayQueueMessage(
+    tabId: string,
+    send: string,
+    original: string,
+    opts: ChatQueuePushOptions
+  ): QueuedChatMessage | null {
+    const current = owner(tabId)
+    // The same logical tab can acquire a new provider/storage owner. Initialize
+    // historical siblings before choosing a task-wide client message identity.
+    for (const sibling of store.listForTask(current.taskId))
+      if (sibling.state === 'active') repairQueueIdentities(sibling.identity.tabId)
+    if (!opts.id) return null
+    const accepted = store.queueMessageIdentity<QueueMessageIdentity>(current.taskId, opts.id)
+    if (!accepted) return null
+    const saved = accepted.value
+    const content = (opts.submittedContent ?? opts.content)?.map((block, index) =>
+      block.type === 'attachment' && saved.seals?.[index]
+        ? { ...block, attachment: { ...block.attachment, contentHash: saved.seals[index] } }
+        : block
+    )
+    const inputHash = queueInputHash(send, original, opts)
+    const legacyEquivalent =
+      saved.unsealedInputHash ===
+        queueInputHash(send, original, {
+          ...opts,
+          submittedContent: undefined,
+          content: unsealedContent(opts.submittedContent ?? opts.content)
+        }) &&
+      (opts.submittedContent ?? opts.content ?? []).every(
+        (block, index) =>
+          block.type !== 'attachment' ||
+          !block.attachment.contentHash ||
+          block.attachment.contentHash === saved.seals?.[index]
+      )
+    if (
+      saved.inputHash
+        ? saved.inputHash !== inputHash && !legacyEquivalent
+        : saved.messageHash !== chatStorageDigest(messageContent(send, content))
+    )
+      throw new Error('Queue message id reused with different input')
+    if (accepted.conversationId !== current.id) {
+      const source = store.conversation(accepted.conversationId)
+      throw new Error(
+        source?.state === 'deleted'
+          ? 'Message already accepted in a previous chat that was deleted; retry will not send it again'
+          : 'Message already accepted in a previous chat; its local copy is retained there'
+      )
+    }
+    if (!saved.inputHash) set(tabId, 'settings', queueMessageKey(opts.id), { ...saved, inputHash })
+    if (opts.admission) {
+      const reservation = get<AdmissionRecord>(
+        tabId,
+        'settings',
+        admissionPrefix + opts.admission.key
+      )
+      if (reservation?.token === opts.admission.token && reservation.id === opts.id)
+        remove(tabId, 'settings', admissionPrefix + opts.admission.key)
+    }
+    return {
+      id: opts.id,
+      tabId,
+      send,
+      original,
+      position: saved.position,
+      createdAt: saved.createdAt,
+      ...(content ? { content } : {}),
+      ...(opts.expectedConversationId
+        ? { expectedConversationId: opts.expectedConversationId }
+        : {})
+    }
   }
   type AdmissionRecord = QueueAdmission & {
     id: string
@@ -413,6 +669,7 @@ export function createLocalChatData(
     return found
   }
   const reserveQueue: ChatQueueAdmissions['reserve'] = atomic((tabId, id, key, inputHash) => {
+    repairQueueIdentities(tabId)
     const old = get<AdmissionRecord>(tabId, 'settings', admissionPrefix + key)
     if (old) {
       const current = requireAdmission(tabId, old)
@@ -470,14 +727,22 @@ export function createLocalChatData(
     })
   }
   const queueSync: SyncQueueData = {
-    list: (tabId) => queued(tabId),
+    list: (tabId) => {
+      repairQueueIdentities(tabId)
+      return queued(tabId)
+    },
+    replay: replayQueueMessage,
     push: (tabId, send, original, opts) => {
       const id = opts?.id ?? randomUUID(),
         previous = queueItem(id)
+      const replay = replayQueueMessage(tabId, send, original, { ...opts, id })
+      if (replay) return replay
       if (previous) {
         if (
           previous.tabId !== tabId ||
           previous.send !== send ||
+          previous.original !== original ||
+          previous.expectedConversationId !== opts?.expectedConversationId ||
           JSON.stringify(previous.content) !== JSON.stringify(opts?.content)
         )
           throw new Error('Queue operation id conflict')
@@ -509,12 +774,28 @@ export function createLocalChatData(
           : {})
       }
       set(tabId, 'queue', id, item)
+      set(
+        tabId,
+        'settings',
+        queueMessageKey(id),
+        queueIdentity(item, queueInputHash(send, original, opts))
+      )
       if (reservation) remove(tabId, 'settings', admissionPrefix + reservation.key)
       metadata(tabId, 'queue-item', { id, removed: false })
       return item
     },
     pop: (tabId, held = []) => {
+      repairQueueIdentities(tabId)
       const item = queued(tabId)[0]
+      const accepted =
+        item && get<QueueMessageIdentity>(tabId, 'settings', queueMessageKey(item.id))
+      if (
+        accepted?.handedOff &&
+        accepted.messageHash !== chatStorageDigest(messageContent(item!.send, item!.content))
+      )
+        throw new Error(
+          'Queue message id conflicts with accepted history; enqueue it with a new id'
+        )
       if (
         !item ||
         held.includes(item.id) ||
@@ -527,12 +808,14 @@ export function createLocalChatData(
     update: (id, next) => {
       const item = queueItem(id)
       if (!item) return false
+      repairQueueIdentities(item.tabId)
       set(item.tabId, 'queue', id, { ...item, ...next })
       return true
     },
     move: (id, toIndex) => {
       const item = queueItem(id)
       if (!item) return false
+      repairQueueIdentities(item.tabId)
       if (pendingAdmissions(item.tabId).length) return false
       const list = queued(item.tabId).filter((i) => i.id !== id)
       list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, item)
@@ -541,6 +824,10 @@ export function createLocalChatData(
       return true
     },
     requeue: (item) => {
+      repairQueueIdentities(item.tabId)
+      // Computer pops retain the row until durable event handoff. A late
+      // failure must not recreate a row cleared/expired during async dispatch.
+      if (!queueItem(item.id)) return
       set(item.tabId, 'queue', item.id, {
         ...item,
         position: (queued(item.tabId)[0]?.position ?? 0) - 1
@@ -549,11 +836,13 @@ export function createLocalChatData(
     remove: (id) => {
       const item = queueItem(id)
       if (!item) return false
+      repairQueueIdentities(item.tabId)
       remove(item.tabId, 'queue', id)
       metadata(item.tabId, 'queue-item', { id, removed: true })
       return true
     },
     clear: (tabId) => {
+      repairQueueIdentities(tabId)
       for (const r of pendingAdmissions(tabId)) remove(tabId, 'settings', admissionPrefix + r.key)
       const list = queued(tabId)
       for (const item of list) {
@@ -572,6 +861,7 @@ export function createLocalChatData(
     renewReservation: renewQueue,
     cancelReservation: cancelQueue,
     list: atomic(queueSync.list),
+    replay: atomic(queueSync.replay),
     push: atomic(queueSync.push),
     pop: atomic(queueSync.pop),
     update: atomic(queueSync.update),
@@ -695,6 +985,8 @@ export function createLocalChatData(
       store.transaction(() => {
         const i = owner(tabId)
         const outcome = store.appendAt(i.id, i.epoch, seq, event, at)
+        if (outcome === 'inserted' && event.kind === 'user-message' && !event.history && event.id)
+          recordQueueHandoff(tabId, event.id, messageContent(event.text, event.content), at)
         if (
           outcome === 'inserted' &&
           event.kind === 'user-message' &&
@@ -862,20 +1154,34 @@ export function createLocalChatData(
       get<CliCommandDetails>(taskTab(t, m), 'settings', 'cli-details'),
     saveCliModels: async (t, m, v) => set(taskTab(t, m), 'settings', 'cli-models', v),
     getCliModels: async (t, m) => get<ChatModelInfo[]>(taskTab(t, m), 'settings', 'cli-models'),
-    getTabState: async (tabId) => get<ChatTabState>(tabId, 'draft', 'state'),
-    saveTabDraft: async (tabId, draft: ChatDraft) => {
+    getTabState: async (tabId, scope) => {
+      const identity = owner(tabId)
+      assertChatTabStateScope(identity, scope)
       const state = get<ChatTabState>(tabId, 'draft', 'state')
-      const rev = (state?.draft.rev ?? 0) + 1
-      set(tabId, 'draft', 'state', { draft: { ...draft, rev }, scroll: state?.scroll ?? null })
-      return { rev }
+      return scope
+        ? {
+            ...(state ?? { draft: { text: '', attachments: [], rev: 0 }, scroll: null }),
+            ownership: { id: identity.id, epoch: identity.epoch }
+          }
+        : state
     },
-    saveTabScroll: async (tabId, anchor: ChatScrollAnchor) => {
-      const state = get<ChatTabState>(tabId, 'draft', 'state')
-      set(tabId, 'draft', 'state', {
-        draft: state?.draft ?? { text: '', attachments: [], rev: 0 },
-        scroll: anchor
-      })
-    },
+    saveTabDraft: async (tabId, draft: ChatDraft, scope) =>
+      store.transaction(() => {
+        assertChatTabStateScope(owner(tabId), scope)
+        const state = get<ChatTabState>(tabId, 'draft', 'state')
+        const rev = (state?.draft.rev ?? 0) + 1
+        set(tabId, 'draft', 'state', { draft: { ...draft, rev }, scroll: state?.scroll ?? null })
+        return { rev }
+      }),
+    saveTabScroll: async (tabId, anchor: ChatScrollAnchor, scope) =>
+      store.transaction(() => {
+        assertChatTabStateScope(owner(tabId), scope)
+        const state = get<ChatTabState>(tabId, 'draft', 'state')
+        set(tabId, 'draft', 'state', {
+          draft: state?.draft ?? { text: '', attachments: [], rev: 0 },
+          scroll: anchor
+        })
+      }),
     attachments: {
       tab: async (tabId) => {
         const i = owner(tabId)
@@ -953,6 +1259,7 @@ export function createLocalChatData(
             mode?: string
             origin?: string
             createdAt?: number
+            ownershipClaim?: boolean
           }
           if (
             (v.conversationId && !deleted(i.taskId, v.mode ?? i.mode, v.conversationId)) ||
@@ -963,12 +1270,17 @@ export function createLocalChatData(
               conversationId: v.conversationId,
               origin: v.origin ?? 'legacy-migration',
               createdAt: v.createdAt ?? r.at,
+              ...(v.ownershipClaim !== undefined ? { ownershipClaim: v.ownershipClaim } : {}),
               legacyJsonField: (v.mode ?? i.mode).endsWith('-chat')
                 ? 'chatConversationId'
                 : 'conversationId'
             })
         }
-        if (r.kind === 'settings' && (r.id === 'provider' || r.id.startsWith('provider:'))) {
+        if (
+          i.tabId !== `task-content:${i.taskId}` &&
+          r.kind === 'settings' &&
+          (r.id === 'provider' || r.id.startsWith('provider:'))
+        ) {
           const mode = r.id === 'provider' ? i.mode : r.id.slice(9),
             current = providerState(i.taskId, mode),
             cfg = current.value
@@ -1011,6 +1323,7 @@ export function createLocalChatData(
     remove,
     metadata,
     metadataSnapshot,
-    cancelPendingQueueAdmissions
+    cancelPendingQueueAdmissions,
+    repairQueueIdentities
   }
 }

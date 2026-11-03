@@ -2,11 +2,15 @@
 import { connect, type Socket } from 'node:net'
 import { DuplexRpc, LineDecoder, RpcError } from '@slayzone/computer-transport/shared'
 
-// v2 adds computer-owned chat dispatch and content-safe notification delivery.
-// A v1 host is available only through an explicitly unready, stop-only bridge.
-export const HOST_CONTRACT_VERSION = 2
-/** v1 can only be bridged for inspecting/stopping work before an idle upgrade. */
+// v3 adds provider transitions and scoped draft/queue ownership preconditions.
+// The hub protocol belongs to the replaceable connector and cannot prove that a
+// retained v2 host enforces these payloads. v1/v2 remain explicitly unready until
+// idle replacement, through inspection/stop controls only.
+export const HOST_CONTRACT_VERSION = 3
+/** v1/v2 can be bridged for inspecting/stopping work before an idle upgrade. */
 export const HOST_MAINTENANCE_MIN_CONTRACT_VERSION = 1
+/** Computer-owned chat stop/clear first existed in host v2. */
+export const HOST_CHAT_STOP_MIN_CONTRACT_VERSION = 2
 export class ConnectorLease {
   private generation = 0
   claim(generation: number): boolean {

@@ -164,3 +164,66 @@ test('prompt-only phantom repair preserves a tab the user converted to a native 
     h.cleanup()
   }
 })
+
+test.each(['empty', 'draft', 'native'] as const)(
+  'task-content recovery repairs an unbound generated prompt alias without removing %s history',
+  async (content) => {
+    const h = await createTestHarness()
+    try {
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task')"
+      )
+      h.db
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,label,mode,position) VALUES('prompt-history:t','t','Chat',?,0)"
+        )
+        .run(content === 'native' ? 'claude-code' : 'claude-chat')
+      if (content === 'draft')
+        h.db
+          .prepare(
+            "INSERT INTO chat_tab_state(tab_id,draft_text,draft_attachments,rev,updated_at) VALUES('prompt-history:t','retained legacy draft','[]',1,1)"
+          )
+          .run()
+      const identity = {
+        id: 'task-content-owner',
+        taskId: 't',
+        tabId: 'task-content:t',
+        mode: 'claude-chat',
+        epoch: 2
+      }
+      const owners = createChatOwnershipStore(h.slayDb)
+      await owners.register({ ...identity, computerId: 'pc' })
+      const recovery = createChatRecovery({
+        db: h.slayDb,
+        request: async () => [
+          {
+            identity,
+            state: 'active',
+            migrationId: 'move',
+            migrationHash: 'a'.repeat(64),
+            bootstrapRevision: 1,
+            hasConversationContent: false,
+            inbox: true
+          }
+        ]
+      })
+      await recovery.reconcile('pc')
+      const tab = h.db.prepare("SELECT id FROM terminal_tabs WHERE id='prompt-history:t'").get()
+      if (content === 'empty') {
+        expect(tab).toBeUndefined()
+        expect(await owners.forTab('prompt-history:t')).toBeNull()
+      } else {
+        expect(tab).toEqual({ id: 'prompt-history:t' })
+        expect(await owners.forTab('prompt-history:t')).toBeNull()
+      }
+      if (content === 'draft')
+        expect(
+          h.db
+            .prepare("SELECT draft_text FROM chat_tab_state WHERE tab_id='prompt-history:t'")
+            .get()
+        ).toEqual({ draft_text: 'retained legacy draft' })
+    } finally {
+      h.cleanup()
+    }
+  }
+)

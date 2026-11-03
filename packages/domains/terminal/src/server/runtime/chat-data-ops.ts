@@ -48,7 +48,12 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { AttachmentLookup } from './chat-attachment-guard'
 import { getChatTabState, saveChatDraft, saveChatScroll } from '../chat-tab-state-store'
-import type { ChatDraft, ChatScrollAnchor, ChatTabState } from '@slayzone/terminal-contracts'
+import type {
+  ChatDraft,
+  ChatScrollAnchor,
+  ChatTabState,
+  ChatTabStateScope
+} from '@slayzone/terminal-contracts'
 
 export interface ProviderConfigEntry {
   conversationId?: string | null
@@ -186,10 +191,14 @@ export interface ChatDataOps {
   /** Stored models for the task's project + mode, or null. */
   getCliModels(taskId: string, mode: string): Promise<ChatModelInfo[] | null>
   /** A chat tab's saved draft + scroll anchor, or null. */
-  getTabState(tabId: string): Promise<ChatTabState | null>
+  getTabState(tabId: string, scope?: ChatTabStateScope): Promise<ChatTabState | null>
   /** Save the draft; the new revision, or null when the tab is gone. */
-  saveTabDraft(tabId: string, draft: ChatDraft): Promise<{ rev: number } | null>
-  saveTabScroll(tabId: string, anchor: ChatScrollAnchor): Promise<void>
+  saveTabDraft(
+    tabId: string,
+    draft: ChatDraft,
+    scope?: ChatTabStateScope
+  ): Promise<{ rev: number } | null>
+  saveTabScroll(tabId: string, anchor: ChatScrollAnchor, scope?: ChatTabStateScope): Promise<void>
   /** What the attachment gate reads (`chat-attachment-guard.ts`). */
   attachments: AttachmentLookup
 }

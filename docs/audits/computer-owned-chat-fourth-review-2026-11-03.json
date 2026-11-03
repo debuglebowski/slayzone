@@ -1,0 +1,541 @@
+{
+  "reviewedCommit": "e8013f303708774e6f895e058f5445e78e86b38f",
+  "date": "2026-11-03",
+  "review": "Fourth independent computer-owned chat migration review",
+  "reviewers": 4,
+  "disposition": "All nine confirmed findings fixed on main; regression and integration checks pass.",
+  "scope": "Full computer-owned storage feature, legacy migration, recovery, durability, queues, desktop/mobile loading and reconnect integration; not only the latest commit.",
+  "provenance": "Fixes and integration checks ran in the uncommitted main working tree. Original red-test evidence remains labeled before-fix; unrelated concurrent edits were preserved.",
+  "findings": [
+    {
+      "id": "F34",
+      "priority": "P1",
+      "status": "fixed",
+      "title": "Closing a tab during migration can erase uncopied prompts",
+      "category": "Migration",
+      "trigger": "Tab A is the original task-content owner. Tab B copies its own history without task-wide prompts. Close A after B activates, before B cleans up.",
+      "impact": "Cleanup elects B as the new content owner and deletes task-wide prompts that were absent from its verified transfer. The normal service retry succeeds after the data is lost.",
+      "proposedFix": "Give task-wide content durable migration ownership independent of tab lifetime. Freeze it in the checkpoint, clean only verified copied content, and explicitly migrate any remaining task-wide records.",
+      "sources": [
+        {
+          "path": "packages/domains/chat-runtime/src/server/legacy-source.ts",
+          "line": 701
+        },
+        {
+          "path": "packages/domains/chat-runtime/src/server/legacy-source.ts",
+          "line": 721
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/domains/chat-runtime/src/server/review-migration-state.test.ts",
+          "test": "review: closing the original content leader cannot erase prompts excluded from a sibling transfer",
+          "status": "failed",
+          "failure": "AssertionError: expected [] to include 'retained-prompt'"
+        },
+        {
+          "file": "packages/domains/chat-runtime/src/server/review-migration-state.test.ts",
+          "test": "review: normal hub migration and tab close preserve task-wide prompts",
+          "status": "failed",
+          "failure": "AssertionError: expected [] to include 'retained-prompt'"
+        }
+      ],
+      "implementedFix": "Task-wide prompts have their own durable owner. Cleanup deletes only source rows proven present in the verified transfer.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F35",
+      "priority": "P1",
+      "status": "fixed",
+      "title": "Mixed-computer migration creates conflicting session owners",
+      "category": "Migration",
+      "trigger": "One task has Claude history recorded on computer 1 and Codex history on computer 2. Both migrate, then both computers reconnect.",
+      "impact": "Each transfer contains every task provider session. The first recovery claims both sessions; the second fails with Provider conversation belongs to another storage owner.",
+      "proposedFix": "Separate historical session metadata from exclusive ownership claims. Assign ownership only with deterministic tab/computer provenance, preserving conflict fences and historical records.",
+      "sources": [
+        {
+          "path": "packages/domains/chat-runtime/src/server/legacy-source.ts",
+          "line": 120
+        },
+        {
+          "path": "packages/domains/chat-runtime/src/server/hub-ownership.ts",
+          "line": 444
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/domains/chat-runtime/src/server/review-migration-state.test.ts",
+          "test": "review: legacy providers with different recorded computers reconnect without cross-claiming sessions",
+          "status": "failed",
+          "failure": "Error: promise rejected \"Error: Provider conversation belongs to a\u2026\" instead of resolving"
+        }
+      ],
+      "implementedFix": "Historical session metadata no longer claims every provider session. Proven old cross-provider misclaims are repaired; real owner conflicts stay fenced.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F36",
+      "priority": "P1",
+      "status": "fixed",
+      "title": "Switching chat provider leaves the new provider unusable",
+      "category": "Integration",
+      "trigger": "Initialize a Claude main chat, switch the main tab to Codex Chat, then open it.",
+      "impact": "The tab retains its immutable Claude storage binding. Codex hydration fails with Chat tab ownership mismatch; the selected provider cannot open.",
+      "proposedFix": "Implement an explicit provider/binding transition that fences the previous writer and preserves previous history. Keep strict invocation identity checks.",
+      "sources": [
+        {
+          "path": "packages/domains/chat-runtime/src/server/hub-relay.ts",
+          "line": 236
+        },
+        {
+          "path": "packages/domains/chat-runtime/src/server/invocation.ts",
+          "line": 82
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/apps/hub/src/review-integration-upgrade.test.ts",
+          "test": "review: changing main provider preserves history and admits selected codex-chat",
+          "status": "failed",
+          "failure": "Error: promise rejected \"Error: Chat tab ownership mismatch\" instead of resolving"
+        }
+      ],
+      "implementedFix": "Provider changes stop and fence the previous writer, archive its history and queue, and copy the unsent draft to the selected provider. Interrupted changes resume safely.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F37",
+      "priority": "P1",
+      "status": "fixed",
+      "title": "A rejected queued message clears text and attachments",
+      "category": "Content safety",
+      "trigger": "A turn is running or a queue exists. The computer goes offline; the user submits another message.",
+      "impact": "The composer clears before remote queue admission succeeds. A rejected admission leaves no input, queue entry or failed-message bubble. Desktop is reproduced; the equivalent mobile path is source-confirmed.",
+      "proposedFix": "Persist a local pending submission with stable identity before clearing input. On rejection retain or recover text/files without overwriting later edits; handle lost acknowledgements without duplicate delivery.",
+      "sources": [
+        {
+          "path": "packages/domains/task-terminals/src/client/chat/useChatComposer.ts",
+          "line": 434
+        },
+        {
+          "path": "packages/apps/mobile/src/chat/useChatComposer.ts",
+          "line": 156
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/domains/task-terminals/src/client/chat/review-integration-upgrade.test.tsx",
+          "test": "review: queue submission preserves input until accepted, offline=true",
+          "status": "failed",
+          "failure": "AssertionError: expected '' to be 'keep unsent queued input' // Object.is equality"
+        }
+      ],
+      "implementedFix": "Pending sends persist locally before RPC with one stable ID. Failed or ambiguous sends retain text/files; retry cannot duplicate an accepted send or clear newer edits.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F38",
+      "priority": "P1",
+      "status": "fixed",
+      "title": "Typing during the first offline load has no durable draft",
+      "category": "Content safety",
+      "trigger": "Open a chat whose initial draft read fails while the computer is offline. Type text, then close or reload the tab.",
+      "impact": "Local journaling waits for the first successful remote read. No local journal or server save exists, so the only draft copy disappears.",
+      "proposedFix": "Journal edits immediately, including an unresolved server revision. Reconcile safely with the authoritative saved draft when the computer returns; preserve both copies on conflict.",
+      "sources": [
+        {
+          "path": "packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.ts",
+          "line": 294
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/domains/task-terminals/src/client/chat/composer-state/review-integration-upgrade.test.tsx",
+          "test": "review: typing before an offline draft load must journal the only local copy",
+          "status": "failed",
+          "failure": "AssertionError: expected null to match object { Object (text) }"
+        }
+      ],
+      "implementedFix": "Typing is journaled before the first remote read. Owner/revision conflicts preserve both drafts; late saves are fenced and valid unsent copies never expire by age.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F39",
+      "priority": "P2",
+      "status": "fixed",
+      "title": "Retrying a drained message can permanently block its queue",
+      "category": "Retries",
+      "trigger": "The original queued message drains, but its acknowledgement is lost. Retry the same client message ID under a fresh operation ID, then enqueue another message.",
+      "impact": "A duplicate queue row is created. The outbox already knows that message and emits no new user-message event to remove it. The duplicate remains at the head and later messages never reach the provider.",
+      "proposedFix": "Deduplicate durable message admission/delivery identities across operation IDs and validate payloads. Atomically reconcile already-delivered queue rows without another provider invocation.",
+      "sources": [
+        {
+          "path": "packages/domains/chat-runtime/src/server/local-data.ts",
+          "line": 474
+        },
+        {
+          "path": "packages/domains/terminal/src/server/runtime/chat-transport-manager.ts",
+          "line": 2215
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/apps/hub/src/review-integration-upgrade.test.ts",
+          "test": "review: retrying an already-drained queue message cannot block later messages, newOperation=true",
+          "status": "failed",
+          "failure": "AssertionError: expected [ \u2026(2) ] to deeply equal []"
+        }
+      ],
+      "implementedFix": "A task-wide, content-free message identity index survives drain, retention, provider changes and tab deletion. Reused IDs cannot start another provider turn.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F40",
+      "priority": "P2",
+      "status": "fixed",
+      "title": "A short computer disconnect leaves the visible chat stale",
+      "category": "Reconnect",
+      "trigger": "The provider finishes while the computer link is down. The renderer remains connected to the hub, and the computer reconnects between availability polls.",
+      "impact": "The answer is safely stored on the computer, but no replay/invalidation reaches the open chat. Availability is sampled ready before and after, so the shared desktop/mobile hook never reloads history.",
+      "proposedFix": "Publish an authorized reconnect generation or history watermark and catch up from it independently of sampled availability transitions. Faster polling alone cannot guarantee recovery.",
+      "sources": [
+        {
+          "path": "packages/domains/terminal/src/client/useChatAvailability.ts",
+          "line": 56
+        },
+        {
+          "path": "packages/domains/terminal/src/client/useChatAvailability.ts",
+          "line": 73
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/apps/hub/src/review-integration-upgrade.test.ts",
+          "test": "review: computer reconnect maintenance must expose persisted output, dropped=true",
+          "status": "failed",
+          "failure": "AssertionError: expected '[{\"kind\":\"user-message\",\"id\":\"request\u2026' to contain 'answer-completed-while-computer-link-\u2026'"
+        },
+        {
+          "file": "packages/domains/terminal/src/client/review-integration-upgrade.test.tsx",
+          "test": "review: computer reconnect refreshes missed history, sampledOffline=false",
+          "status": "failed",
+          "failure": "AssertionError: expected false to be true // Object.is equality"
+        }
+      ],
+      "implementedFix": "A recovery/binding watermark and explicit signal reload missed output even if availability was always ready. Hidden tabs and in-flight status requests catch up safely.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F41",
+      "priority": "P2",
+      "status": "fixed",
+      "title": "A failed purge can delete the only working file copy",
+      "category": "Durability",
+      "trigger": "An artifact has external changes not yet saved as a version. Task deletion removes its working file, then a later SQLite write fails or the transaction rolls back.",
+      "impact": "The task and artifact rows return to an active state, but the unversioned file bytes are already gone. An injected final SQL abort reproduces this rollback window.",
+      "proposedFix": "Commit the tombstone and a durable filesystem-cleanup intent first. Perform idempotent file removal after commit and resume unfinished cleanup after restart.",
+      "sources": [
+        {
+          "path": "packages/domains/chat-runtime/src/server/artifacts.ts",
+          "line": 172
+        },
+        {
+          "path": "packages/domains/chat-runtime/src/server/storage.ts",
+          "line": 952
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/domains/chat-runtime/src/server/review-storage-durability.test.ts",
+          "test": "review: a failed task purge preserves externally edited working originals with the live DB rows",
+          "status": "failed",
+          "failure": "AssertionError: rolled-back deletion must preserve the only working original: expected false to be true // Object.is equality"
+        }
+      ],
+      "implementedFix": "Deletion first commits its tombstone and cleanup intent. File removal happens afterward, with startup and IO-failure retries.",
+      "evidencePhase": "before-fix"
+    },
+    {
+      "id": "F42",
+      "priority": "P2",
+      "status": "fixed",
+      "title": "Tool metadata can retain expired attachment bytes",
+      "category": "Retention",
+      "trigger": "An old user attachment expires, but a retained tool payload contains an object with the same artifactId and contentHash.",
+      "impact": "Retention recursively treats opaque tool data as an attachment reference. The expired attachment pin and private bytes survive; the control without similarly shaped metadata is collected.",
+      "proposedFix": "Use the normalized eventAttachmentReferences and recordAttachmentReferences helpers. Inspect real user-content containers rather than arbitrary tool payload objects.",
+      "sources": [
+        {
+          "path": "packages/domains/chat-runtime/src/server/retention.ts",
+          "line": 214
+        },
+        {
+          "path": "packages/domains/chat-runtime/src/server/retention.ts",
+          "line": 232
+        }
+      ],
+      "evidence": [
+        {
+          "file": "packages/domains/chat-runtime/src/server/review-storage-durability.test.ts",
+          "test": "review: opaque tool metadata cannot retain an otherwise expired sealed attachment (metadata=true)",
+          "status": "failed",
+          "failure": "AssertionError: expected { events: 1, records: +0, \u2026(3) } to match object { events: 1, attachments: 1 }"
+        }
+      ],
+      "implementedFix": "Retention recognizes normalized user attachment references and ignores attachment-shaped tool input.",
+      "evidencePhase": "before-fix"
+    }
+  ],
+  "verification": {
+    "runs": [
+      {
+        "name": "Backend + migration",
+        "passed": 1758,
+        "failed": 0,
+        "skipped": 2,
+        "files": 75
+      },
+      {
+        "name": "Desktop",
+        "passed": 218,
+        "failed": 0,
+        "skipped": 0,
+        "files": 15
+      },
+      {
+        "name": "Mobile",
+        "passed": 678,
+        "failed": 0,
+        "skipped": 0,
+        "files": 89
+      },
+      {
+        "name": "Isolated app smoke",
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0
+      }
+    ],
+    "passed": 2661,
+    "failed": 0,
+    "skipped": 2,
+    "typecheck": "69/69 package tasks pass",
+    "builds": ["hub", "computer", "CLI", "web shell", "Electron app"],
+    "scopedLint": "pass",
+    "testRegistration": "pass"
+  },
+  "reproducedFailures": 0,
+  "passingScenarios": [
+    "Existing core migration/storage/transfer/recovery/backup/retention suites: 279 passed.",
+    "Real migration chain upgrades from schemas 171 (v0.36.2), 177, 182 and 186: mixed Claude, Codex and Gemini history, drafts/prompts, then reconnect: 4 passed.",
+    "First bootstrap interruption before request or after a lost acknowledgement, followed by archive/Trash, isolated computer restart and restore: 4 passed.",
+    "Positive controls: same-provider hydration, same-operation queue replay, continuous connection, sampled-offline reconnect, previously loaded draft, accepted enqueue, opaque metadata without an attachment-shaped object.",
+    "Existing renderer session/availability/notice/first-commit regressions passed."
+  ],
+  "limits": [
+    "Two private pre-upgrade corpus checks remain skipped: no private database/blob fixture was supplied.",
+    "Released-schema fixtures cover the real migration chain; retained-host fixtures restore old contracts in disposable bundle copies, rather than every historical released binary.",
+    "Tests use temporary data and fake providers; no live databases, billed providers or physical power-loss test.",
+    "Fixes committed on main. The live app was not restarted during this work."
+  ],
+  "harnessConfig": "/tmp/slayzone-ownership-review.config.mts",
+  "harnessNote": "Inherits packages/shared/test-utils/vitest.harness.config.ts, with globalSetup disabled and maxWorkers=1; caller isolation/setup retained. Renderer uses packages/apps/app/vitest.config.ts and excludes **/.claude/worktrees/**.",
+  "next": [
+    "Ship matching hub/computer binaries; older busy hosts finish through the maintenance bridge."
+  ],
+  "implementation": {
+    "branch": "main",
+    "committed": true,
+    "testedHead": "c4b129088",
+    "hubSchema": 191,
+    "computerSchema": 5,
+    "computerProtocol": 7,
+    "hostContract": 3,
+    "files": [
+      "docs/audits/computer-owned-chat-fourth-review-2026-11-03.html",
+      "docs/audits/computer-owned-chat-fourth-review-2026-11-03.json",
+      "packages/apps/api/src/admin-policy.ts",
+      "packages/apps/api/src/owner-policy.ts",
+      "packages/apps/computer/src/bin.ts",
+      "packages/apps/computer/src/connector.ts",
+      "packages/apps/computer/src/handlers/chat-runtime.ts",
+      "packages/apps/computer/src/retained-host-contract.test.ts",
+      "packages/apps/computer/src/upgrade-runtime.ts",
+      "packages/apps/hub/src/computer-chat-stability-audit.test.ts",
+      "packages/apps/hub/src/computer-chat.ts",
+      "packages/apps/hub/src/migration-stability-audit.test.ts",
+      "packages/apps/hub/src/review-integration-upgrade.test.ts",
+      "packages/apps/hub/src/review-released-chat-upgrade.test.ts",
+      "packages/apps/mobile/src/chat/ChatSession.fixture.test.tsx",
+      "packages/apps/mobile/src/chat/ChatSession.test.tsx",
+      "packages/apps/mobile/src/chat/ChatSession.tsx",
+      "packages/apps/mobile/src/chat/Composer.tsx",
+      "packages/apps/mobile/src/chat/fake-hub.ts",
+      "packages/apps/mobile/src/chat/queued-submission-journal.test.ts",
+      "packages/apps/mobile/src/chat/queued-submission-journal.ts",
+      "packages/apps/mobile/src/chat/useChatComposer.queue.test.tsx",
+      "packages/apps/mobile/src/chat/useChatComposer.ts",
+      "packages/apps/mobile/src/chat/useChatQueue.pending.test.tsx",
+      "packages/apps/mobile/src/chat/useChatQueue.ts",
+      "packages/apps/mobile/src/chat/useStableCallback.ts",
+      "packages/apps/mobile/src/demo/demo-hub.ts",
+      "packages/domains/chat-runtime/src/server/artifacts.ts",
+      "packages/domains/chat-runtime/src/server/computer-runtime.ts",
+      "packages/domains/chat-runtime/src/server/hub-availability.ts",
+      "packages/domains/chat-runtime/src/server/hub-ownership.ts",
+      "packages/domains/chat-runtime/src/server/hub-provider-transition.ts",
+      "packages/domains/chat-runtime/src/server/hub-recovery.test.ts",
+      "packages/domains/chat-runtime/src/server/hub-recovery.ts",
+      "packages/domains/chat-runtime/src/server/hub-relay.ts",
+      "packages/domains/chat-runtime/src/server/invocation.ts",
+      "packages/domains/chat-runtime/src/server/legacy-session-authority.test.ts",
+      "packages/domains/chat-runtime/src/server/legacy-session-authority.ts",
+      "packages/domains/chat-runtime/src/server/legacy-source.ts",
+      "packages/domains/chat-runtime/src/server/local-data.ts",
+      "packages/domains/chat-runtime/src/server/migration-task-authority.test.ts",
+      "packages/domains/chat-runtime/src/server/provider-transition.test.ts",
+      "packages/domains/chat-runtime/src/server/queue-message-identities.test.ts",
+      "packages/domains/chat-runtime/src/server/retention.test.ts",
+      "packages/domains/chat-runtime/src/server/retention.ts",
+      "packages/domains/chat-runtime/src/server/review-migration-state.test.ts",
+      "packages/domains/chat-runtime/src/server/review-provider-transition-storage.test.ts",
+      "packages/domains/chat-runtime/src/server/review-storage-durability.test.ts",
+      "packages/domains/chat-runtime/src/server/review-superseded-transfer.test.ts",
+      "packages/domains/chat-runtime/src/server/storage.ts",
+      "packages/domains/chat-runtime/src/server/tab-state-ownership.test.ts",
+      "packages/domains/chat-runtime/src/server/transfers.ts",
+      "packages/domains/chat-runtime/src/shared/index.ts",
+      "packages/domains/chat-runtime/src/shared/protocol.ts",
+      "packages/domains/computer-runtime/DOMAIN.md",
+      "packages/domains/computer-runtime/src/index.ts",
+      "packages/domains/computer-transport/src/shared/frames.ts",
+      "packages/domains/task-terminals/package.json",
+      "packages/domains/task-terminals/src/client/TerminalSplitGroup.test.tsx",
+      "packages/domains/task-terminals/src/client/TerminalSplitGroup.tsx",
+      "packages/domains/task-terminals/src/client/chat/ChatComposer.tsx",
+      "packages/domains/task-terminals/src/client/chat/ChatPanel.tsx",
+      "packages/domains/task-terminals/src/client/chat/PendingQueuedMessages.tsx",
+      "packages/domains/task-terminals/src/client/chat/composer-state/queued-submission-journal.ts",
+      "packages/domains/task-terminals/src/client/chat/composer-state/review-integration-upgrade.test.tsx",
+      "packages/domains/task-terminals/src/client/chat/composer-state/review-offline-journal-expiry.test.tsx",
+      "packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.test.tsx",
+      "packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.ts",
+      "packages/domains/task-terminals/src/client/chat/composer-state/useChatScrollMemory.ts",
+      "packages/domains/task-terminals/src/client/chat/queued-submissions.test.ts",
+      "packages/domains/task-terminals/src/client/chat/queued-submissions.ts",
+      "packages/domains/task-terminals/src/client/chat/review-integration-upgrade.test.tsx",
+      "packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx",
+      "packages/domains/task-terminals/src/client/chat/useChatComposer.ts",
+      "packages/domains/task-terminals/src/client/chat/useChatQueue.pending.test.tsx",
+      "packages/domains/task-terminals/src/client/chat/useChatQueue.ts",
+      "packages/domains/terminal-contracts/src/chat-tab-state.ts",
+      "packages/domains/terminal-contracts/src/computer-chat.ts",
+      "packages/domains/terminal/src/client/review-integration-upgrade.test.tsx",
+      "packages/domains/terminal/src/client/useChatAvailability.test.tsx",
+      "packages/domains/terminal/src/client/useChatAvailability.ts",
+      "packages/domains/terminal/src/server/chat-router.test.ts",
+      "packages/domains/terminal/src/server/chat-router.ts",
+      "packages/domains/terminal/src/server/runtime/chat-data-ops.ts",
+      "packages/domains/terminal/src/server/runtime/chat-handlers.ts",
+      "packages/domains/terminal/src/server/runtime/chat-queue-data.ts",
+      "packages/domains/terminal/src/server/runtime/chat-queue-handlers.ts",
+      "packages/domains/terminal/src/server/runtime/chat-transport-manager.ts",
+      "packages/shared/db-migrations/src/migrations.ts",
+      "packages/shared/test-utils/run-all.sh",
+      "packages/shared/transport/package.json",
+      "packages/shared/transport/src/client/index.ts",
+      "packages/shared/transport/src/client/useStableCallback.ts",
+      "packages/shared/transport/src/shared/scopes.ts"
+    ]
+  },
+  "verificationAfterFix": {
+    "runs": [
+      {
+        "name": "Backend + migration",
+        "passed": 1758,
+        "failed": 0,
+        "skipped": 2,
+        "files": 75
+      },
+      {
+        "name": "Desktop",
+        "passed": 218,
+        "failed": 0,
+        "skipped": 0,
+        "files": 15
+      },
+      {
+        "name": "Mobile",
+        "passed": 678,
+        "failed": 0,
+        "skipped": 0,
+        "files": 89
+      },
+      {
+        "name": "Isolated app smoke",
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0
+      }
+    ],
+    "passed": 2661,
+    "failed": 0,
+    "skipped": 2,
+    "typecheck": "69/69 package tasks pass",
+    "builds": ["hub", "computer", "CLI", "web shell", "Electron app"],
+    "scopedLint": "pass",
+    "testRegistration": "pass"
+  },
+  "verificationBeforeFix": {
+    "passed": 343,
+    "failed": 11,
+    "skipped": 2,
+    "files": 54,
+    "reports": [
+      {
+        "name": "baseline-tests",
+        "passed": 279,
+        "failed": 0,
+        "skipped": 2,
+        "files": 42
+      },
+      {
+        "name": "released-upgrades",
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "files": 1
+      },
+      {
+        "name": "migration-final",
+        "passed": 4,
+        "failed": 3,
+        "skipped": 0,
+        "files": 1
+      },
+      {
+        "name": "storage-integration-repros",
+        "passed": 4,
+        "failed": 5,
+        "skipped": 0,
+        "files": 2
+      },
+      {
+        "name": "renderer-final",
+        "passed": 52,
+        "failed": 3,
+        "skipped": 0,
+        "files": 8
+      }
+    ]
+  },
+  "reproducedFailuresBeforeFix": 11,
+  "provenanceBeforeFix": "Tests ran in the shared working tree. Every cited defect source file matched committed HEAD; unrelated concurrent edits were excluded from findings.",
+  "additionalRegressionFixes": [
+    "Delayed duplicate provider controls cannot stop the replacement session; late binary resolution cannot revive the previous writer.",
+    "Old-host contract v1/v2 remains stop-only while busy; v3 replacement restores full readiness without changing enrollment.",
+    "Superseded transfer payloads are collected only after activation proves the same ownership lineage.",
+    "Same-provider round trips fence stale draft/scroll writes and preserve late acknowledgements without changing newer journals.",
+    "Asynchronous local journal writes preserve submission order; local confirmation cleanup failures do not re-send accepted work."
+  ]
+}

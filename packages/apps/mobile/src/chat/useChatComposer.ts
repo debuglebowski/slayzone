@@ -43,6 +43,7 @@ import type { ChatQueue } from './useChatQueue'
 import type { ChatSessionApi, ChatTarget } from './useChatSession'
 import type { ChatSettings } from './useChatSettings'
 import type { SlashCommands } from './useSlashCommands'
+import type { QueuedSubmission } from '@slayzone/task-terminals/queued-submissions'
 
 const MENU_SIZE = 40
 
@@ -59,6 +60,9 @@ export interface ChatComposer {
   stop: () => void
   /** Text or files a send would carry. */
   canSend: boolean
+  pendingQueuedMessages?: QueuedSubmission[]
+  retryQueuedSubmission?: (id: string) => Promise<void>
+  dismissQueuedSubmission?: (id: string) => Promise<void>
 }
 
 export function useChatComposer({
@@ -85,8 +89,23 @@ export function useChatComposer({
   sessionEnded: boolean
 }): ChatComposer {
   const client = useTRPCClient()
-  const [draft, setDraft] = useState('')
-  const [attachments, setAttachments] = useState<readonly ChatAttachment[]>([])
+  const version = useRef(0)
+  const draftSnapshot = useRef<{ text: string; attachments: readonly ChatAttachment[] }>({
+    text: '',
+    attachments: []
+  })
+  const [draft, setDraftState] = useState('')
+  const [attachments, setAttachmentsState] = useState<readonly ChatAttachment[]>([])
+  const setDraft = useCallback((text: string) => {
+    version.current++
+    draftSnapshot.current = { ...draftSnapshot.current, text }
+    setDraftState(text)
+  }, [])
+  const setAttachments = useCallback((files: readonly ChatAttachment[]) => {
+    version.current++
+    draftSnapshot.current = { ...draftSnapshot.current, attachments: files }
+    setAttachmentsState(files)
+  }, [])
   /** The entry picked from the menu for this draft (its use is counted on send). */
   const pickedRef = useRef<{ source: string; name: string } | null>(null)
   /** What was sent for the running turn (put back when Stop withdraws it). */
@@ -97,7 +116,7 @@ export function useChatComposer({
     query === null ? null : rankSlash(slash.items, query, slash.usage).slice(0, MENU_SIZE)
 
   const { inFlight, sendMessage, resetLocal, abortAndPop } = session
-  const queued = queue.items.length
+  const queued = queue.items.length + (queue.pending?.length ?? 0)
 
   // Send a prompt the way the composer does: behind a turn it waits in the queue.
   const submitPrompt = useCallback(
@@ -116,23 +135,57 @@ export function useChatComposer({
     },
     [inFlight, queued, queue, sendMessage]
   )
+  const sendDraft = useCallback(
+    async (send: string, original: string, files: readonly ChatAttachment[]) => {
+      const submittedVersion = version.current
+      const queuedSend = inFlight || queued > 0
+      if (!queuedSend) {
+        setDraft('')
+        setAttachments([])
+      }
+      try {
+        await submitPrompt(send, original, files)
+        if (queuedSend && version.current === submittedVersion) {
+          setDraft('')
+          setAttachments([])
+        }
+      } catch (err) {
+        notify(`Could not queue the message: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    },
+    [inFlight, queued, submitPrompt, notify, setDraft, setAttachments]
+  )
+  const retryQueuedSubmission = useCallback(
+    async (id: string) => {
+      const entry = queue.pending?.find((item) => item.id === id)
+      const submittedVersion = version.current
+      const same =
+        entry?.expectedMode === target.mode &&
+        entry?.original === draft.trim() &&
+        JSON.stringify(userMessageAttachments(entry.content)) === JSON.stringify(attachments)
+      try {
+        await queue.retryPending?.(id)
+        if (same && version.current === submittedVersion) {
+          setDraft('')
+          setAttachments([])
+        }
+      } catch {
+        /* The pending row retains its input and failure reason. */
+      }
+    },
+    [queue, draft, attachments, setDraft, setAttachments, target.mode]
+  )
 
   const sendText = useCallback(
     async (raw: string): Promise<void> => {
       if (sessionEnded) return
-      const files = attachments
+      const files = draftSnapshot.current.attachments
       const plan = planSend(raw, { view: models, current: settings.model }, caps, slash.commands)
       switch (plan.type) {
         case 'empty':
           // Files alone are a message too.
           if (files.length === 0) return
-          setDraft('')
-          setAttachments([])
-          await submitPrompt('', '', files).catch((err: unknown) =>
-            notify(
-              `Could not queue the message: ${err instanceof Error ? err.message : String(err)}`
-            )
-          )
+          await sendDraft('', '', files)
           return
         case 'invalid':
           notify(plan.message)
@@ -153,20 +206,14 @@ export function useChatComposer({
           return
         case 'send': {
           const original = raw.trim()
-          setDraft('')
-          setAttachments([])
           const used = usageTarget(original, slash.items, pickedRef.current)
           pickedRef.current = null
-          await submitPrompt(plan.text, original, files).catch((err: unknown) =>
-            notify(
-              `Could not queue the message: ${err instanceof Error ? err.message : String(err)}`
-            )
-          )
+          await sendDraft(plan.text, original, files)
           if (used) slash.bump(used)
         }
       }
     },
-    [sessionEnded, attachments, models, caps, slash, notify, settings, submitPrompt]
+    [sessionEnded, models, caps, slash, notify, settings, sendDraft, setDraft]
   )
 
   const chatActions: ChatActions = {
@@ -235,14 +282,14 @@ export function useChatComposer({
         return
       }
     }
-    void sendText(draft)
+    void sendText(draftSnapshot.current.text)
   }
 
   const stop = (): void => {
     void queue.clear().catch(() => undefined)
     void abortAndPop().then(
       (result) => {
-        if (!result.popped || draft.trim() !== '') return
+        if (!result.popped || draftSnapshot.current.text.trim() !== '') return
         // What this phone sent, else the popped message itself (sent elsewhere, or
         // before a remount): its text and its files.
         const sent = lastSentRef.current
@@ -261,11 +308,14 @@ export function useChatComposer({
     draft,
     setDraft,
     attachments,
-    removeAttachment: (index) => setAttachments((prev) => prev.filter((_, i) => i !== index)),
+    removeAttachment: (index) => setAttachments(attachments.filter((_, i) => i !== index)),
     menu: menu && menu.length > 0 ? menu : null,
     pick: (item) => run(acceptSlash(item, draft, caps), item),
     send,
     stop,
-    canSend: (draft.trim().length > 0 || attachments.length > 0) && !sessionEnded
+    canSend: (draft.trim().length > 0 || attachments.length > 0) && !sessionEnded,
+    pendingQueuedMessages: queue.pending,
+    retryQueuedSubmission,
+    dismissQueuedSubmission: queue.dismissPending
   }
 }

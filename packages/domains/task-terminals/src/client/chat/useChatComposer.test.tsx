@@ -388,6 +388,42 @@ describe('useChatComposer send', () => {
 })
 
 describe('useChatComposer queue', () => {
+  it('a stale send handler cannot submit the cleared draft twice after queue acknowledgement', async () => {
+    setup({ inFlight: true })
+    type('once')
+    const sendSameHandler = composer.handleSend
+    await act(async () => {
+      await sendSameHandler()
+      await sendSameHandler()
+    })
+    expect(mocks.queue.push).toHaveBeenCalledTimes(1)
+    expect(composer.draft).toBe('')
+  })
+
+  it('queue acknowledgement preserves text and files edited while it was pending', async () => {
+    let finish!: () => void
+    mocks.queue.push.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    setup({ inFlight: true })
+    type('queued')
+    attach([IMG_A])
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = composer.handleSend()
+    })
+    type('newer')
+    attach([IMG_B])
+    await act(async () => {
+      finish()
+      await pending
+    })
+    expect(composer.draft).toBe('newer')
+    expect(composer.attachments).toEqual([IMG_B])
+  })
   it('queues instead of sending while a turn is in flight', async () => {
     setup({ inFlight: true })
     type('next one')

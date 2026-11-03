@@ -1,6 +1,8 @@
 import type { ChatStorage } from './storage'
 import type { createLocalChatData } from './local-data'
 import type { ChatOwnership, ChatRecord } from '../shared'
+import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
+import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
 
 const DAY = 86_400_000,
   BATCH = 500
@@ -90,6 +92,9 @@ export function createChatRetention(opts: {
             report.skipped++
             continue
           }
+          // Keep content-free message identities before old history is expired,
+          // including legacy conversations activated since this runtime opened.
+          opts.local.repairQueueIdentities(i.tabId)
           for (;;) {
             if (!valid()) break
             const n = store.transaction(() => {
@@ -205,20 +210,10 @@ export function createChatRetention(opts: {
           // Scan retained references in pages; only distinct attachment identities stay in memory.
           const hashes = new Set<string>(),
             unversioned = new Set<string>()
-          function remember(value: unknown) {
-            const todo: unknown[] = [value]
-            while (todo.length) {
-              const item = todo.pop()
-              if (!item || typeof item !== 'object') continue
-              const ref = item as { artifactId?: unknown; contentHash?: unknown }
-              if (typeof ref.artifactId === 'string') {
-                if (typeof ref.contentHash === 'string')
-                  hashes.add(`${ref.artifactId}:${ref.contentHash}`)
-                else unversioned.add(ref.artifactId)
-              }
-              for (const child of Object.values(item))
-                if (child && typeof child === 'object') todo.push(child)
-            }
+          function remember(refs: ChatAttachment[]) {
+            for (const ref of refs)
+              if (ref.contentHash) hashes.add(`${ref.artifactId}:${ref.contentHash}`)
+              else unversioned.add(ref.artifactId)
           }
           let after = -1
           while (valid()) {
@@ -229,7 +224,7 @@ export function createChatRetention(opts: {
               .all(i.id, after, BATCH) as { seq: number; event: string }[]
             for (const row of rows) {
               after = row.seq
-              remember(JSON.parse(row.event))
+              remember(eventAttachmentReferences(JSON.parse(row.event) as AgentEvent))
             }
             if (rows.length < BATCH) break
             await pause()
@@ -238,12 +233,17 @@ export function createChatRetention(opts: {
           while (valid()) {
             const rows = db
               .prepare(
-                "SELECT rowid AS cursor,value FROM records WHERE conversation_id=? AND rowid>? AND (kind IN ('draft','queue') OR (kind='settings' AND id LIKE 'attachment-message:%')) ORDER BY rowid LIMIT ?"
+                "SELECT rowid AS cursor,kind,id,value FROM records WHERE conversation_id=? AND rowid>? AND (kind IN ('draft','queue') OR (kind='settings' AND id LIKE 'attachment-message:%')) ORDER BY rowid LIMIT ?"
               )
-              .all(i.id, after, BATCH) as { cursor: number; value: string }[]
+              .all(i.id, after, BATCH) as {
+              cursor: number
+              kind: ChatRecord['kind']
+              id: string
+              value: string
+            }[]
             for (const row of rows) {
               after = row.cursor
-              remember(JSON.parse(row.value))
+              remember(recordAttachmentReferences({ ...row, value: JSON.parse(row.value) }))
             }
             if (rows.length < BATCH) break
             await pause()

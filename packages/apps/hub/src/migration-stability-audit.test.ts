@@ -707,7 +707,7 @@ test.each(['chat_attachment_messages', 'agent_turns'] as const)(
         hasLiveTask: async () => false
       })
       await services.migrateIdleComputer('pc')
-      const owner = await services.ownership.forTab('prompt-history:task')
+      const owner = await services.ownership.forTab('task-content:task')
       expect(owner).toMatchObject({ state: 'active', cleanupPending: false })
       const sqlite = new Database(
         join(

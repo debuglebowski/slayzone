@@ -7,8 +7,14 @@ import type { ChatDraft, ChatTabState } from '@slayzone/terminal-contracts'
 const server = vi.hoisted(() => ({
   hubId: 'local',
   state: null as ChatTabState | null,
-  saves: [] as Array<{ tabId: string; draft: ChatDraft }>,
+  saves: [] as Array<{
+    tabId: string
+    draft: ChatDraft
+    expectedMode?: string
+    expectedOwnership?: { id: string; epoch: number }
+  }>,
   fail: false,
+  load: null as Promise<ChatTabState | null> | null,
   delays: new Map<string, Promise<void>>(),
   rev: 0
 }))
@@ -20,9 +26,16 @@ vi.mock('../../trpc', () => ({
     chat: {
       tabState: {
         get: {
-          queryOptions: (input: { tabId: string }, opts?: { enabled?: boolean }) => ({
-            queryKey: ['tabState', input.tabId],
-            queryFn: async () => server.state,
+          queryOptions: (
+            input: { tabId: string; expectedMode?: string },
+            opts?: { enabled?: boolean }
+          ) => ({
+            queryKey: [
+              'tabState',
+              input.tabId,
+              ...(input.expectedMode ? [input.expectedMode] : [])
+            ],
+            queryFn: async () => (server.load ? server.load : server.state),
             enabled: opts?.enabled ?? true
           })
         }
@@ -33,12 +46,30 @@ vi.mock('../../trpc', () => ({
     chat: {
       tabState: {
         saveDraft: {
-          mutate: async ({ tabId, draft }: { tabId: string; draft: ChatDraft }) => {
-            server.saves.push({ tabId, draft })
+          mutate: async (input: {
+            tabId: string
+            draft: ChatDraft
+            expectedMode?: string
+            expectedOwnership?: { id: string; epoch: number }
+          }) => {
+            const { draft } = input
+            const acceptedRev = (server.state?.draft.rev ?? server.rev) + 1
+            server.saves.push(input)
             if (server.fail) throw new Error('Computer offline')
             await server.delays.get(draft.text)
+            if (
+              input.expectedOwnership &&
+              server.state?.ownership &&
+              (input.expectedOwnership.id !== server.state.ownership.id ||
+                input.expectedOwnership.epoch !== server.state.ownership.epoch)
+            )
+              return { rev: acceptedRev } // A delayed ACK belongs to its captured old store.
             server.rev += 1
-            server.state = { draft: { ...draft, rev: server.rev }, scroll: null }
+            server.state = {
+              ...server.state,
+              draft: { ...draft, rev: server.rev },
+              scroll: server.state?.scroll ?? null
+            }
             return { rev: server.rev }
           }
         }
@@ -51,15 +82,18 @@ import { draftJournalKey, useChatDraftPersistence } from './useChatDraftPersiste
 
 const empty: ChatDraft = { text: '', attachments: [] }
 
-function setup(initial: { draft: ChatDraft; enabled?: boolean; paused?: boolean }) {
-  const client = new QueryClient()
+function setup(
+  initial: { draft: ChatDraft; enabled?: boolean; paused?: boolean; mode?: string },
+  client = new QueryClient()
+) {
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
   return renderHook(
-    (p: { draft: ChatDraft; enabled?: boolean; paused?: boolean }) =>
+    (p: { draft: ChatDraft; enabled?: boolean; paused?: boolean; mode?: string }) =>
       useChatDraftPersistence({
         tabId: 'tab-1',
+        mode: p.mode,
         enabled: p.enabled ?? true,
         text: p.draft.text,
         attachments: p.draft.attachments,
@@ -76,11 +110,13 @@ beforeEach(() => {
   server.saves = []
   server.rev = 0
   server.fail = false
+  server.load = null
   server.delays.clear()
   localStorage.clear()
 })
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
@@ -268,7 +304,7 @@ describe('useChatDraftPersistence', () => {
     )
   })
 
-  it('a journal based on an older revision (another window saved since) loses', async () => {
+  it('a newer server draft stays authoritative while a stale local journal remains recoverable', async () => {
     server.state = {
       draft: { text: 'from the other window', attachments: [], rev: 5 },
       scroll: null
@@ -281,7 +317,301 @@ describe('useChatDraftPersistence', () => {
     await vi.waitFor(() =>
       expect(h.result.current.saved).toEqual({ text: 'from the other window', attachments: [] })
     )
-    expect(localStorage.getItem(draftJournalKey('tab-1'))).toBeNull()
+    expect(JSON.parse(localStorage.getItem(draftJournalKey('tab-1'))!).text).toBe('stale')
+    expect(h.result.current.conflictAvailable).toBe(true)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+  })
+
+  it('journals early edits with unknown revision and combines a conflicting saved draft only explicitly', async () => {
+    const remoteFile = {
+      artifactId: 'remote',
+      name: 'remote.txt',
+      kind: 'text' as const,
+      mediaType: 'text/plain' as const,
+      size: 1
+    }
+    const localFile = { ...remoteFile, artifactId: 'local', name: 'local.txt' }
+    let finish!: (state: ChatTabState | null) => void
+    server.load = new Promise((resolve) => {
+      finish = resolve
+    })
+    const h = setup({ draft: empty })
+    const local = { text: 'typed before remote load', attachments: [localFile] }
+    h.rerender({ draft: local })
+    expect(JSON.parse(localStorage.getItem(draftJournalKey('tab-1'))!)).toMatchObject({
+      ...local,
+      baseRev: null
+    })
+    const remote = {
+      draft: { text: 'saved on another device', attachments: [remoteFile], rev: 7 },
+      scroll: null
+    }
+    server.state = remote
+    server.rev = 7
+    await act(async () => {
+      finish(remote)
+    })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    expect(server.state?.draft.text).toBe('saved on another device')
+    let recovered!: ChatDraft | null
+    act(() => {
+      recovered = h.result.current.recoverConflict(local)
+    })
+    expect(recovered).toEqual({
+      text: 'typed before remote load\n\nsaved on another device',
+      attachments: [localFile, remoteFile]
+    })
+    h.rerender({ draft: recovered! })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves.at(-1)?.draft).toEqual(recovered)
+    expect(h.result.current.conflictAvailable).toBe(false)
+  })
+
+  it('an unresolved journal restores while offline; later remote recovery preserves newer typing', async () => {
+    localStorage.setItem(
+      draftJournalKey('tab-1'),
+      JSON.stringify({ text: 'offline edit', attachments: [], baseRev: null, savedAt: Date.now() })
+    )
+    let finish!: (state: ChatTabState | null) => void
+    server.load = new Promise((resolve) => {
+      finish = resolve
+    })
+    const h = setup({ draft: empty })
+    expect(h.result.current.loaded).toBe(true)
+    expect(h.result.current.saved).toEqual({ text: 'offline edit', attachments: [] })
+    h.rerender({ draft: { text: 'newer local edit', attachments: [] } })
+    const remote = { draft: { text: 'other device', attachments: [], rev: 4 }, scroll: null }
+    await act(async () => {
+      finish(remote)
+    })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    expect(JSON.parse(localStorage.getItem(draftJournalKey('tab-1'))!).text).toBe(
+      'newer local edit'
+    )
+    h.unmount()
+    expect(localStorage.getItem(`${draftJournalKey('tab-1')}:conflicts`)).toContain('other device')
+  })
+
+  it('failed conflict preservation cannot replace the only durable local copy with a shorter restored draft', async () => {
+    const key = draftJournalKey('tab-1')
+    const local = { text: 'long local copy that must survive a quota error', attachments: [] }
+    localStorage.setItem(key, JSON.stringify({ ...local, baseRev: 1, savedAt: Date.now() }))
+    server.state = { draft: { text: 'short', attachments: [], rev: 2 }, scroll: null }
+    const originalSet = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key.endsWith(':conflicts')) throw new Error('Quota exceeded')
+      originalSet.call(this, key, value)
+    })
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    h.rerender({ draft: { text: 'short', attachments: [] } })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(JSON.parse(localStorage.getItem(key)!).text).toBe(local.text)
+    expect(server.saves).toEqual([])
+  })
+
+  it('malformed attachment recovery records are ignored without crashing draft reconciliation', async () => {
+    localStorage.setItem(
+      `${draftJournalKey('tab-1')}:conflicts`,
+      JSON.stringify([{ text: 'bad', attachments: [null] }])
+    )
+    const h = setup({ draft: empty })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    expect(h.result.current.conflictAvailable).toBe(false)
+    let recovered!: ChatDraft | null
+    act(() => {
+      recovered = h.result.current.recoverConflict({ text: 'current', attachments: [] })
+    })
+    expect(recovered).toEqual({ text: 'current', attachments: [] })
+  })
+
+  it('captures old ownership for an unmount flush and isolates journals by provider', async () => {
+    const ownership = { id: 'old-provider-store', epoch: 3 }
+    server.state = { draft: { ...empty, rev: 4 }, scroll: null, ownership }
+    const h = setup({ draft: empty, mode: 'claude-chat' })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    h.rerender({ draft: { text: 'old provider edit', attachments: [] }, mode: 'claude-chat' })
+    expect(
+      JSON.parse(localStorage.getItem(draftJournalKey('tab-1', 'local', 'claude-chat'))!)
+    ).toMatchObject({ ownership })
+    expect(localStorage.getItem(draftJournalKey('tab-1', 'local', 'codex-chat'))).toBeNull()
+    h.unmount()
+    await vi.waitFor(() => expect(server.saves).toHaveLength(1))
+    expect(server.saves[0]).toMatchObject({
+      expectedMode: 'claude-chat',
+      expectedOwnership: ownership,
+      draft: { text: 'old provider edit' }
+    })
+  })
+
+  it('a same-provider replacement ownership conflicts even when draft revision matches', async () => {
+    const key = draftJournalKey('tab-1', 'local', 'claude-chat')
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        text: 'old A edit',
+        attachments: [],
+        baseRev: 5,
+        ownership: { id: 'old-A', epoch: 1 },
+        savedAt: Date.now()
+      })
+    )
+    server.state = {
+      draft: { text: 'new A draft', attachments: [], rev: 5 },
+      scroll: null,
+      ownership: { id: 'new-A', epoch: 1 }
+    }
+    const h = setup({ draft: empty, mode: 'claude-chat' })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    h.rerender({ draft: { text: 'old A edit', attachments: [] }, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    expect(h.result.current.saved?.text).toBe('new A draft')
+  })
+
+  it('late acknowledged save cannot remove a newer owner journal or overwrite its cached draft', async () => {
+    const oldOwnership = { id: 'old-A', epoch: 1 }
+    const newOwnership = { id: 'new-A', epoch: 1 }
+    server.state = { draft: { ...empty, rev: 1 }, scroll: null, ownership: oldOwnership }
+    let finish!: () => void
+    server.delays.set(
+      'same text',
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    const client = new QueryClient()
+    const h = setup({ draft: empty, mode: 'claude-chat' }, client)
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    h.rerender({ draft: { text: 'same text', attachments: [] }, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    h.unmount()
+    const key = draftJournalKey('tab-1', 'local', 'claude-chat')
+    const newer = {
+      text: 'same text',
+      attachments: [],
+      baseRev: 9,
+      ownership: newOwnership,
+      savedAt: Date.now()
+    }
+    localStorage.setItem(key, JSON.stringify(newer))
+    client.setQueryData(['tabState', 'tab-1', 'claude-chat'], {
+      draft: { text: 'new owner cached draft', attachments: [], rev: 9 },
+      scroll: null,
+      ownership: newOwnership
+    })
+    await act(async () => {
+      finish()
+    })
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual(newer)
+    expect(client.getQueryData(['tabState', 'tab-1', 'claude-chat'])).toMatchObject({
+      draft: { text: 'new owner cached draft' },
+      ownership: newOwnership
+    })
+    client.clear()
+  })
+
+  it('reconnect refetches replacement ownership in the same mounted provider and fences its old pending save', async () => {
+    const oldOwner = { id: 'old-A', epoch: 1 }
+    const newOwner = { id: 'new-A', epoch: 2 }
+    server.state = { draft: { ...empty, rev: 1 }, scroll: null, ownership: oldOwner }
+    let acknowledge!: () => void
+    server.delays.set(
+      'local pending edit',
+      new Promise((resolve) => {
+        acknowledge = resolve
+      })
+    )
+    const h = setup({ draft: empty, mode: 'claude-chat' })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    const local = { text: 'local pending edit', attachments: [] }
+    h.rerender({ draft: local, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves[0].expectedOwnership).toEqual(oldOwner)
+    server.state = {
+      draft: { text: 'replacement owner draft', attachments: [], rev: 10 },
+      scroll: null,
+      ownership: newOwner
+    }
+    server.rev = 10
+    await act(async () => {
+      await h.result.current.retry()
+    })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    await act(async () => {
+      acknowledge()
+    })
+    expect(server.state.ownership).toEqual(newOwner)
+    expect(server.state.draft.text).toBe('replacement owner draft')
+    let recovered!: ChatDraft | null
+    act(() => {
+      recovered = h.result.current.recoverConflict(local)
+    })
+    h.rerender({ draft: recovered!, mode: 'claude-chat' })
+    const journal = JSON.parse(
+      localStorage.getItem(draftJournalKey('tab-1', 'local', 'claude-chat'))!
+    )
+    expect(journal).toMatchObject({ baseRev: 10, ownership: newOwner })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves.at(-1)).toMatchObject({ expectedOwnership: newOwner, draft: recovered })
+  })
+
+  it('reconnect retains both local and newer remote drafts even when ownership did not change', async () => {
+    const ownership = { id: 'same-owner', epoch: 1 }
+    server.state = { draft: { ...empty, rev: 1 }, scroll: null, ownership }
+    const h = setup({ draft: empty, mode: 'claude-chat' })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    const local = { text: 'local offline edit', attachments: [] }
+    h.rerender({ draft: local, mode: 'claude-chat' })
+    server.state = {
+      draft: { text: 'newer other-device draft', attachments: [], rev: 2 },
+      scroll: null,
+      ownership
+    }
+    await act(async () => {
+      await h.result.current.retry()
+    })
+    await vi.waitFor(() => expect(h.result.current.conflictAvailable).toBe(true))
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.saves).toEqual([])
+    expect(server.state.draft.text).toBe('newer other-device draft')
+    let recovered!: ChatDraft | null
+    act(() => {
+      recovered = h.result.current.recoverConflict(local)
+    })
+    expect(recovered?.text).toBe('local offline edit\n\nnewer other-device draft')
+  })
+
+  it('old unscoped journals require explicit recovery into the selected provider', async () => {
+    const oldKey = draftJournalKey('tab-1')
+    localStorage.setItem(
+      oldKey,
+      JSON.stringify({ text: 'provider unknown', attachments: [], baseRev: 0, savedAt: Date.now() })
+    )
+    server.state = {
+      draft: { ...empty, rev: 0 },
+      scroll: null,
+      ownership: { id: 'codex', epoch: 1 }
+    }
+    const h = setup({ draft: empty, mode: 'codex-chat' })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    expect(h.result.current.saved).toBeNull()
+    expect(h.result.current.legacyAvailable).toBe(true)
+    expect(localStorage.getItem(oldKey)).not.toBeNull()
+    let recovered!: ChatDraft | null
+    act(() => {
+      recovered = h.result.current.recoverLegacy(empty)
+    })
+    expect(recovered?.text).toBe('provider unknown')
+    expect(localStorage.getItem(oldKey)).toBeNull()
+    expect(localStorage.getItem(draftJournalKey('tab-1', 'local', 'codex-chat'))).toContain(
+      'provider unknown'
+    )
   })
 
   it('saves a restored journal to the computer without saving the initial empty composer', async () => {
@@ -326,7 +656,9 @@ describe('useChatDraftPersistence', () => {
     expect(server.saves).toHaveLength(1)
     expect(localStorage.getItem(draftJournalKey('tab-1'))).not.toBeNull()
     server.fail = false
-    act(() => h.result.current.retry())
+    await act(async () => {
+      await h.result.current.retry()
+    })
     await act(() => vi.advanceTimersByTimeAsync(400))
     expect(server.saves).toEqual([
       { tabId: 'tab-1', draft },

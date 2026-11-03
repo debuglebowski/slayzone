@@ -32,3 +32,8 @@ busy older host while declaring chat unavailable. It cannot start new work. Buil
 identity also detects same-release host rebuilds, which are applied only at idle.
 Only native hooks use the durable notification journal; chat events replay from
 their owning content/outbox store.
+
+Host contract v3 requires provider transitions and scoped draft/queue ownership
+preconditions. A new hub connection alone proves only the connector's protocol;
+retained v1/v2 hosts remain unready until idle replacement. Native inspection and
+stop controls bridge both versions; computer-owned chat stop/clear bridge v2 only.

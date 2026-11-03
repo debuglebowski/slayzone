@@ -4621,6 +4621,31 @@ export const migrations: Migration[] = [
         DELETE FROM artifact_blob_pins WHERE scope='legacy-chat-migration' AND task_id=OLD.id;
       END;`)
     }
+  },
+  {
+    version: 191,
+    up(db) {
+      db.exec(`CREATE TABLE chat_legacy_task_authority (
+        task_id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES chat_ownership(id)
+      );
+      CREATE TABLE chat_legacy_task_copies (
+        conversation_id TEXT NOT NULL,migration_id TEXT NOT NULL,manifest_hash TEXT NOT NULL,
+        kind TEXT NOT NULL,source_id TEXT NOT NULL,
+        PRIMARY KEY(conversation_id,migration_id,kind,source_id)
+      );
+      CREATE TABLE chat_legacy_session_authority (
+        task_id TEXT NOT NULL,mode TEXT NOT NULL,provider_session_id TEXT NOT NULL,
+        conversation_id TEXT REFERENCES chat_ownership(id),
+        PRIMARY KEY(task_id,mode,provider_session_id)
+      );
+      CREATE TABLE chat_provider_transitions (
+        id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES chat_ownership(id),
+        task_id TEXT NOT NULL,tab_id TEXT NOT NULL,archive_tab_id TEXT NOT NULL UNIQUE,
+        next_conversation_id TEXT NOT NULL UNIQUE,next_mode TEXT NOT NULL,computer_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,state TEXT NOT NULL CHECK(state IN ('reserved','complete'))
+      );
+      CREATE UNIQUE INDEX chat_provider_transition_pending ON chat_provider_transitions(conversation_id) WHERE state='reserved';`)
+    }
   }
 ]
 

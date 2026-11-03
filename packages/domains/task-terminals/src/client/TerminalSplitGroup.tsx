@@ -152,7 +152,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
         return (
           <ChatPanel
             ref={handleRefFor(chatRefs, pane.tab.id)}
-            key={JSON.stringify([hubId, pane.taskId, pane.tab.id])}
+            key={JSON.stringify([hubId, pane.taskId, pane.tab.id, pane.tab.mode])}
             tabId={pane.tab.id}
             taskId={pane.taskId}
             mode={pane.tab.mode}

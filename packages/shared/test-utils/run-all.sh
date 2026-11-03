@@ -700,6 +700,19 @@ run_harness packages/domains/chat-runtime/src/server/attachment-pin-review.test.
 run_harness packages/domains/chat-runtime/src/server/migration-attachment-pins.test.ts
 run_harness packages/domains/chat-runtime/src/server/queue-admission.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-ownership.test.ts
+# Migration interruption, provider rebinding, durable submissions and cleanup regressions.
+run_harness packages/apps/hub/src/review-integration-upgrade.test.ts
+run_harness packages/apps/hub/src/review-released-chat-upgrade.test.ts
+run_harness packages/domains/chat-runtime/src/server/review-migration-state.test.ts
+run_harness packages/domains/chat-runtime/src/server/migration-task-authority.test.ts
+run_harness packages/domains/chat-runtime/src/server/review-storage-durability.test.ts
+run_harness packages/domains/chat-runtime/src/server/review-provider-transition-storage.test.ts
+run_harness packages/domains/chat-runtime/src/server/review-superseded-transfer.test.ts
+run_harness packages/domains/chat-runtime/src/server/provider-transition.test.ts
+run_harness packages/domains/chat-runtime/src/server/legacy-session-authority.test.ts
+run_harness packages/domains/chat-runtime/src/server/queue-message-identities.test.ts
+run_harness packages/domains/chat-runtime/src/server/tab-state-ownership.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/queued-submissions.test.ts
 run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
 run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
 # Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
@@ -1041,6 +1054,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/DeviceWebview.test.tsx \
   packages/domains/terminal/src/client/useChatSession.test.tsx \
   packages/domains/terminal/src/client/useChatAvailability.test.tsx \
+  packages/domains/terminal/src/client/review-integration-upgrade.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/worktrees/src/server/gh-pr-for-checkout.test.ts \
   packages/domains/worktrees/src/server/git-push.test.ts \
@@ -1120,9 +1134,14 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
+  packages/domains/task-terminals/src/client/TerminalSplitGroup.test.tsx \
+  packages/domains/task-terminals/src/client/chat/review-integration-upgrade.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useChatQueue.pending.test.tsx \
   packages/domains/task-terminals/src/client/chat/attachments/useChatAttachments.test.tsx \
   packages/domains/task-terminals/src/client/chat/UserMessageAttachments.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.test.tsx \
+  packages/domains/task-terminals/src/client/chat/composer-state/review-integration-upgrade.test.tsx \
+  packages/domains/task-terminals/src/client/chat/composer-state/review-offline-journal-expiry.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatScrollMemory.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/chat/provider-wording.test.tsx \

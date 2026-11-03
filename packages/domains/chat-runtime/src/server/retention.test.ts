@@ -309,7 +309,13 @@ test('expired queue receipts reject delayed retries without recreating a message
   await expect(r.invoke(req)).rejects.toThrow(/expired.*not repeated/)
   expect(await r.local.queue.list('tab')).toEqual([])
   await r.invoke({ ...req, operationId: 'explicit-new-attempt' })
-  expect(await r.local.queue.list('tab')).toMatchObject([{ id: 'queued', send: 'old text' }])
+  expect(await r.local.queue.list('tab')).toEqual([])
+  await r.invoke({
+    ...req,
+    operationId: 'new-message',
+    args: ['tab', 'old text', 'old text', { id: 'new-message' }]
+  })
+  expect(await r.local.queue.list('tab')).toMatchObject([{ id: 'new-message', send: 'old text' }])
 })
 
 test('a large sweep yields to foreground work and disabling stops further batches', async () => {

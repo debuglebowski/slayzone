@@ -2,6 +2,7 @@ import { parseChatInvocation, CHAT_READ_OPERATIONS, type ChatOperation } from '.
 import type { createChatOps, ChatQueueRuntime } from '@slayzone/terminal/runtime'
 import type { ChatStorage } from './storage'
 import type { createLocalChatData } from './local-data'
+import { assertChatTabStateScope, type ChatTabStateScope } from '@slayzone/terminal-contracts'
 
 type Runtime = {
   storage: ChatStorage
@@ -64,7 +65,7 @@ export function createChatInvoker(runtime: Runtime) {
       ephemeralBytes -= entry.bytes
     }
   }
-  return async function invoke(input: unknown): Promise<unknown> {
+  const invoke = async function (input: unknown): Promise<unknown> {
     const req = parseChatInvocation(input),
       owner = runtime.storage.conversation(req.route.id)
     if (!owner || owner.identity.epoch !== req.route.epoch)
@@ -72,6 +73,11 @@ export function createChatInvoker(runtime: Runtime) {
     if (owner.state !== 'active') throw new Error(`Chat conversation ${owner.state}`)
     if (req.method === 'testSetWatchdogTimings' && process.env.PLAYWRIGHT !== '1')
       throw new Error('Test-only chat operation unavailable')
+    if (req.target === 'queue' && req.method === 'push') {
+      const expectedMode = (req.args[3] as { expectedMode?: string } | undefined)?.expectedMode
+      if (expectedMode !== undefined && expectedMode !== owner.identity.mode)
+        throw new Error('Chat provider changed before queue admission; message was not submitted.')
+    }
     const first = req.args[0],
       identity = owner.identity
     if (first && typeof first === 'object' && !Array.isArray(first) && 'tabId' in first) {
@@ -102,6 +108,14 @@ export function createChatInvoker(runtime: Runtime) {
       if (tab && tab !== identity.tabId) throw new Error('Chat queue item ownership mismatch')
     }
     const target = req.target === 'ops' ? runtime.ops : runtime.queueOps
+    if (
+      req.target === 'ops' &&
+      ['getTabState', 'saveTabDraft', 'saveTabScroll'].includes(req.method)
+    )
+      assertChatTabStateScope(
+        identity,
+        req.args[req.method === 'getTabState' ? 1 : 2] as ChatTabStateScope | undefined
+      )
     const operation = (target as unknown as Record<string, (...args: unknown[]) => unknown>)[
       req.method
     ]
@@ -110,6 +124,12 @@ export function createChatInvoker(runtime: Runtime) {
       req.target === 'queue'
         ? req.method === 'list'
         : CHAT_READ_OPERATIONS.has(req.method as ChatOperation)
+    if (
+      !read &&
+      !['kill', 'remove'].includes(req.method) &&
+      runtime.storage.getRecord(identity.id, 'settings', 'tab-transition-pending')
+    )
+      throw new Error('Chat provider transition is pending')
     if (
       runtime.storage.taskLifecycle(identity.taskId).state !== 'active' &&
       !read &&
@@ -172,4 +192,13 @@ export function createChatInvoker(runtime: Runtime) {
     )
     return run
   }
+  return Object.assign(invoke, {
+    settle: async (conversationId: string) => {
+      await Promise.allSettled(
+        [...inFlight]
+          .filter(([key]) => (JSON.parse(key) as string[])[0] === conversationId)
+          .map(([, work]) => work)
+      )
+    }
+  })
 }

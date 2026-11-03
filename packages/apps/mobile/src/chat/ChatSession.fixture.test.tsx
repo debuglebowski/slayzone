@@ -207,7 +207,10 @@ describe('ChatSession against a recorded hub session', () => {
       await type('And then this')
       await user.press(screen.getByLabelText('Queue message'))
       await deliver()
-      expect(inputs[6].input).toEqual(inputs[6].recorded)
+      expect(inputs[6].input).toEqual({
+        ...(inputs[6].recorded as Record<string, unknown>),
+        expectedMode: 'claude-chat'
+      })
       await waitFor(() => expect(textOf('Answer to the queued message.')).toBe(true))
       expect(screen.queryByTestId('chat-queue')).toBeNull()
 

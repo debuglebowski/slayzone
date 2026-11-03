@@ -8,6 +8,12 @@ export interface ConversationIdentity {
   mode: string
   epoch: number
 }
+export interface ChatTabTransition {
+  id: string
+  from: ConversationIdentity
+  to: ConversationIdentity
+  next: ConversationIdentity
+}
 export interface StoredChatEvent {
   seq: number
   at: number

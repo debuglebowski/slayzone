@@ -15,7 +15,8 @@
     "./hibernated-sessions": "./src/client/hibernated-sessions.ts",
     "./prompt-options": "./src/client/chat/prompts/prompt-options.ts",
     "./tab-label": "./src/client/get-tab-label.ts",
-    "./slash-commands": "./src/client/chat/autocomplete/slash-commands.ts"
+    "./slash-commands": "./src/client/chat/autocomplete/slash-commands.ts",
+    "./queued-submissions": "./src/client/chat/queued-submissions.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

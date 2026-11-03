@@ -53,6 +53,9 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 /**
  * Bump on any breaking change to the frames below.
  *
+ * v7: durable provider-tab transitions and verified task-content cleanup proof.
+ * Rekeying history requires matching identity/epoch and a persisted restore proof.
+ *
  * v6: durable queue admissions and explicit chat runtime readiness. A restricted
  * connector can stop work on an old host without advertising full chat support.
  *
@@ -71,7 +74,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 6
+export const COMPUTER_PROTOCOL_VERSION = 7
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {

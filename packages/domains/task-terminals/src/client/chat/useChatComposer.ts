@@ -83,6 +83,9 @@ export interface UseChatComposerOpts {
    */
   onSideQuestion?: (question: string) => void
 }
+function queueFailureMessage(err: unknown): string {
+  return `Could not queue the message: ${err instanceof Error ? err.message : String(err)}`
+}
 
 /**
  * Owns the chat composer: the draft + attachment state, the autocomplete it
@@ -125,14 +128,22 @@ export function useChatComposer({
 }: UseChatComposerOpts) {
   const trpcClient = useTRPCClient()
   const capabilities = chatCapabilitiesForMode(mode)
+  const draftVersion = useRef(0)
+  const draftSnapshot = useRef<{ text: string; attachments: ChatAttachment[] }>({
+    text: '',
+    attachments: []
+  })
   const [draft, setDraftState] = useState('')
   const [cursorPos, setCursorPos] = useState(0)
   // Anything (typing, Stop's restore, Reset, a history pick, a send) set the
   // draft: a saved draft that arrives later must not overwrite it.
   const [touched, setTouched] = useState(false)
   const setDraft = useStableCallback((next: SetStateAction<string>) => {
+    draftVersion.current++
     setTouched(true)
-    setDraftState(next)
+    const value = typeof next === 'function' ? next(draftSnapshot.current.text) : next
+    draftSnapshot.current = { ...draftSnapshot.current, text: value }
+    setDraftState(value)
   })
   // Prompt history (↑/↓ recall, Ctrl+R search) — modes with `promptHistory` only.
   const { entries: historyEntries, record: recordHistory } = usePromptHistory({
@@ -165,6 +176,9 @@ export function useChatComposer({
    */
   const {
     items: queuedMessages,
+    pending: pendingQueuedMessages = [],
+    retryPending: retryPendingQueue,
+    dismissPending: dismissPendingQueue,
     push: pushQueue,
     remove: removeQueue,
     clear: clearQueue,
@@ -176,12 +190,16 @@ export function useChatComposer({
     tabId,
     useStableCallback((original: string) => {
       void bumpUsageRef.current(original)
-    })
+    }),
+    mode
   )
   const [attachments, setAttachmentsState] = useState<ChatAttachment[]>([])
   const setAttachments = useStableCallback((next: SetStateAction<ChatAttachment[]>) => {
+    draftVersion.current++
     setTouched(true)
-    setAttachmentsState(next)
+    const value = typeof next === 'function' ? next(draftSnapshot.current.attachments) : next
+    draftSnapshot.current = { ...draftSnapshot.current, attachments: value }
+    setAttachmentsState(value)
   })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const clearDraft = useStableCallback(() => {
@@ -191,10 +209,42 @@ export function useChatComposer({
     setCursorPos(0)
     textareaRef.current?.focus()
   })
+  const queueDraft = useStableCallback(
+    async (send: string, original: string, content?: UserContentBlock[]) => {
+      const version = draftVersion.current
+      const push = content
+        ? () => pushQueue(send, original, content)
+        : () => pushQueue(send, original)
+      try {
+        await push()
+        if (draftVersion.current === version) clearDraft()
+      } catch (err) {
+        toast(queueFailureMessage(err))
+      }
+    }
+  )
+  const retryQueuedSubmission = useStableCallback(async (id: string) => {
+    const entry = pendingQueuedMessages.find((item) => item.id === id)
+    const version = draftVersion.current
+    const same =
+      entry?.expectedMode === mode &&
+      entry?.original === draft.trim() &&
+      JSON.stringify(userMessageAttachments(entry.content)) === JSON.stringify(attachments)
+    if (!retryPendingQueue) return
+    try {
+      await retryPendingQueue(id)
+      if (same) {
+        if (draftVersion.current === version) clearDraft()
+      }
+    } catch {
+      /* The pending row retains the exact text/files and error. */
+    }
+  })
 
   // The tab's draft survives remounts and reloads (`restoreComposerState`).
   const persistence = useChatDraftPersistence({
     tabId,
+    mode,
     enabled: capabilities.restoreComposerState,
     text: draft,
     attachments,
@@ -204,6 +254,18 @@ export function useChatComposer({
     const recovered = persistence.recoverLegacy({ text: draft, attachments })
     if (!recovered) {
       toast.error('Draft no longer available on this device.')
+      return
+    }
+    setHistoryNav(HISTORY_IDLE)
+    setDraft(recovered.text)
+    setAttachments(recovered.attachments)
+    setCursorPos(recovered.text.length)
+    textareaRef.current?.focus()
+  })
+  const recoverDraftConflict = useStableCallback(() => {
+    const recovered = persistence.recoverConflict({ text: draft, attachments })
+    if (!recovered) {
+      toast.error('Could not save the recovered draft on this device.')
       return
     }
     setHistoryNav(HISTORY_IDLE)
@@ -257,7 +319,7 @@ export function useChatComposer({
   // a prompt (custom commands, /init, /review) use this — they used to skip the
   // queue and could land in the middle of a turn.
   const submitPrompt = useStableCallback(async (toSend: string, original: string) => {
-    if (inFlight || queuedMessages.length > 0) {
+    if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
       await pushQueue(toSend, original)
       return
     }
@@ -347,7 +409,8 @@ export function useChatComposer({
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
   const handleSend = useCallback(
     async (textOverride?: string) => {
-      const text = (textOverride ?? draft).trim()
+      const text = (textOverride ?? draftSnapshot.current.text).trim()
+      const attachments = draftSnapshot.current.attachments
       if (sessionEnded) return
       if (!text && attachments.length === 0) return
       setHistoryNav(HISTORY_IDLE)
@@ -431,13 +494,13 @@ export function useChatComposer({
         ]
         // Clear BEFORE anything is awaited: the draft is saved per tab, and a
         // save in between would bring the sent text back.
+        if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
+          await queueDraft(toSend, text, files.length > 0 ? content : undefined)
+          return
+        }
         setDraft('')
         setAttachments([])
         void scrollToBottom()
-        if (inFlight || queuedMessages.length > 0) {
-          await (files.length > 0 ? pushQueue(toSend, text, content) : pushQueue(toSend, text))
-          return
-        }
         lastSentRef.current = { text, attachments: [...files] }
         await sendMessage(files.length > 0 ? content : toSend)
         void bumpUsageRef.current(text)
@@ -471,6 +534,10 @@ export function useChatComposer({
       // restore them if the turn is popped. Skip when queueing: lastSentRef must
       // remain aligned with the in-flight turn, not the queued one.
       const snapshot = { text, attachments: [...attachments] }
+      if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
+        await queueDraft(toSend, text)
+        return
+      }
       setDraft('')
       setAttachments([])
       void scrollToBottom()
@@ -479,10 +546,6 @@ export function useChatComposer({
       // even after reload — the renderer's `inFlight` mirror could be `false`
       // while persisted queue items still need to flush in order). Backend
       // drainer pops on session→idle.
-      if (inFlight || queuedMessages.length > 0) {
-        await pushQueue(toSend, text)
-        return
-      }
       lastSentRef.current = snapshot
       await sendMessage(toSend)
       // Bump usage from the ORIGINAL `text` — slash tokens may not survive template
@@ -493,11 +556,8 @@ export function useChatComposer({
       void bumpUsageRef.current(text)
     },
     [
-      draft,
-      attachments,
       getArtifactFilePath,
       inFlight,
-      pushQueue,
       sessionEnded,
       sendMessage,
       autocomplete,
@@ -510,6 +570,8 @@ export function useChatComposer({
       capabilities.attachments,
       attachmentsUsedBytes,
       queuedMessages,
+      pendingQueuedMessages,
+      queueDraft,
       mode,
       recordHistory,
       setDraft,
@@ -526,6 +588,7 @@ export function useChatComposer({
   // after commit, so it always sees this commit's function.
   const bumpUsageFromMessage = autocomplete.bumpUsageFromMessage
   useInsertionEffect(() => {
+    draftSnapshot.current = { text: draft, attachments }
     bumpUsageRef.current = bumpUsageFromMessage
     submitRef.current = (text) => {
       void handleSend(text)
@@ -623,7 +686,7 @@ export function useChatComposer({
   const sendCommand = useStableCallback(async (text: string): Promise<void> => {
     if (sessionEnded) return
     void scrollToBottom()
-    if (inFlight || queuedMessages.length > 0) {
+    if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
       await pushQueue(text, text)
       return
     }
@@ -680,6 +743,8 @@ export function useChatComposer({
     draft,
     retryDraftSave: persistence.retry,
     legacyDraftAvailable: persistence.legacyAvailable,
+    draftConflictAvailable: persistence.conflictAvailable,
+    recoverDraftConflict,
     recoverLegacyDraft,
     setDraft,
     clearDraft,
@@ -687,6 +752,9 @@ export function useChatComposer({
     attachments,
     setAttachments,
     queuedMessages,
+    pendingQueuedMessages,
+    retryQueuedSubmission,
+    dismissQueuedSubmission: dismissPendingQueue,
     removeQueue,
     clearQueue,
     queueApi,

@@ -1,19 +1,26 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ChatOwnership } from '../shared'
+import type { ChatOwnership, ChatTabTransition, ConversationIdentity } from '../shared'
 import { createChatOwnershipStore } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
+import { legacyChatTabContentSql } from './legacy-census'
 
 export interface ComputerChatInventory extends ChatOwnership {
   inbox?: boolean
   hasConversationContent?: boolean
   lifecycle?: { state: 'active' | 'paused' | 'deleted'; revision: number }
   bootstrapRevision: number
+  tabTransitions?: ChatTabTransition[]
 }
 /** Computer commits and tombstones survive restoring an older hub database. */
 export function createChatRecovery(opts: {
   db: SlayzoneDb
   request: ChatComputerRequest
   gate?(computerId: string, taskId: string): Promise<void>
+  recoverTabTransitions?(
+    computerId: string,
+    identity: ConversationIdentity,
+    transitions: ChatTabTransition[]
+  ): Promise<void>
 }) {
   const { db } = opts,
     owners = createChatOwnershipStore(db),
@@ -43,6 +50,7 @@ export function createChatRecovery(opts: {
       // A task absent from this hub snapshot stays only on the computer for now.
       if (!(await db.get('SELECT 1 FROM tasks WHERE id=?', [i.taskId]))) continue
       await opts.gate?.(computerId, i.taskId)
+      if (entry.state !== 'deleted' && (await owners.get(i.id))?.state === 'deleted') continue
       if (i.id.startsWith('task-tombstone:')) {
         if (entry.state === 'deleted') await owners.deleteForTask(i.taskId)
         continue
@@ -71,14 +79,30 @@ export function createChatRecovery(opts: {
           ])
         }
       }
+      if (
+        entry.state === 'active' &&
+        entry.tabTransitions?.length &&
+        !(await db.get("SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'", [
+          i.taskId
+        ]))
+      )
+        await opts.recoverTabTransitions?.(computerId, i, entry.tabTransitions)
       const artifactRoot = i.tabId.startsWith('artifact-store:')
-      const promptRoot = i.tabId === `prompt-history:${i.taskId}`
+      const promptRoot =
+        i.tabId === `prompt-history:${i.taskId}` || i.tabId === `task-content:${i.taskId}`
       // Unknown historical providers retain their identity/content without
       // implying a resumable backend or materializing an invented chat tab.
       const storageOnly =
         artifactRoot || promptRoot || !['claude-chat', 'codex-chat'].includes(i.mode)
-      if (entry.inbox && !artifactRoot) continue
+      if (entry.inbox && !artifactRoot && i.tabId !== `task-content:${i.taskId}`) continue
       if (entry.state === 'deleted') {
+        const exact = await owners.get(i.id)
+        if (exact) {
+          if (exact.taskId !== i.taskId || exact.mode !== i.mode)
+            throw new Error('Deleted chat identity conflict')
+          await owners.deleteConversation(exact.id, i.epoch)
+          continue
+        }
         const current = await owners.forTab(i.tabId)
         if (current && (current.taskId !== i.taskId || current.mode !== i.mode))
           throw new Error('Deleted chat identity conflict')
@@ -294,6 +318,27 @@ export function createChatRecovery(opts: {
       if (adopted?.id !== i.id || adopted.computerId !== computerId || adopted.epoch !== i.epoch)
         throw new Error('Chat ownership changed during recovery')
       await owners.clearUnavailable(i.id, computerId, i.epoch)
+      // New task-wide authorities replace the old prompt-history storage root.
+      // Older reconnects could leave its generated UI row without a locator.
+      // Remove it only when neither hub content nor any computer store
+      // claims it; a real later chat (including an un-migrated draft) survives.
+      const oldPromptTab = `prompt-history:${i.taskId}`
+      if (
+        i.tabId === `task-content:${i.taskId}` &&
+        !inventory.some((item) => item.identity.tabId === oldPromptTab) &&
+        (await db.get(
+          `SELECT 1 FROM terminal_tabs t WHERE t.id=? AND t.task_id=? AND t.label='Chat' AND t.mode=?
+          AND NOT EXISTS(SELECT 1 FROM chat_tab_bindings WHERE tab_id=t.id)
+          AND NOT ${legacyChatTabContentSql()}`,
+          [oldPromptTab, i.taskId, i.mode]
+        ))
+      )
+        await db.run(
+          `DELETE FROM terminal_tabs WHERE id=? AND task_id=? AND label='Chat' AND mode=?
+              AND NOT EXISTS(SELECT 1 FROM chat_tab_bindings WHERE tab_id=terminal_tabs.id)
+              AND NOT ${legacyChatTabContentSql('terminal_tabs')}`,
+          [oldPromptTab, i.taskId, i.mode]
+        )
       // The replaced unbound row is only a stale locator, never a second owner.
       if (replace)
         await db.run(

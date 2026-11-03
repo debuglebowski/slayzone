@@ -41,3 +41,28 @@ test('chat composers render on the first commit without a second lazy-loading bo
   expect(screen.getByRole('textbox', { name: 'Composer main' })).toBeTruthy()
   expect(screen.getByRole('textbox', { name: 'Composer split' })).toBeTruthy()
 })
+
+test('provider change remounts composer authority while the logical tab stays the same', () => {
+  const pane = {
+    tab: {
+      id: 'main',
+      taskId: 'task',
+      groupId: 'main',
+      label: null,
+      mode: 'claude-chat',
+      isMain: true,
+      position: 0,
+      createdAt: '2026-11-03',
+      agentState: 'new'
+    } as TerminalTab,
+    taskId: 'task',
+    sessionId: 'task:main',
+    cwd: '/repo'
+  }
+  const view = render(<TerminalSplitGroup isActive panes={[pane]} />)
+  const previous = screen.getByRole('textbox')
+  view.rerender(
+    <TerminalSplitGroup isActive panes={[{ ...pane, tab: { ...pane.tab, mode: 'codex-chat' } }]} />
+  )
+  expect(screen.getByRole('textbox')).not.toBe(previous)
+})

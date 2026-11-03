@@ -7,6 +7,7 @@
   "types": "./src/index.ts",
   "exports": {
     "./client": "./src/client/index.ts",
+    "./client/use-stable-callback": "./src/client/useStableCallback.ts",
     "./scopes": "./src/shared/scopes.ts",
     "./testing": "./src/testing/index.tsx"
   },

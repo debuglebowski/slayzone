@@ -4,7 +4,11 @@
  * carries (given back by Stop; removable), and the input with Send — and Stop while a
  * turn runs. Keyboard dictation works as in any text field.
  */
-import { type ChatAttachment, type QueuedChatMessage } from '@slayzone/terminal-contracts'
+import {
+  userMessageAttachments,
+  type ChatAttachment,
+  type QueuedChatMessage
+} from '@slayzone/terminal-contracts'
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { attachmentLabel, queuedFiles, queuedLabel } from './attachments'
@@ -70,6 +74,55 @@ export function Composer({
             </Pressable>
           )}
         />
+      )}
+      {!!composer.pendingQueuedMessages?.length && (
+        <View style={s.queue} accessibilityLabel="Unconfirmed queued messages">
+          {composer.pendingQueuedMessages.map((entry) => (
+            <View key={entry.id} style={s.queueRow}>
+              <View style={s.queueBody}>
+                <Text style={s.queueText} numberOfLines={2}>
+                  {entry.original || entry.send || 'Attached files'}
+                </Text>
+                {userMessageAttachments(entry.content).length > 0 && (
+                  <Text style={s.queueFiles}>
+                    {userMessageAttachments(entry.content)
+                      .map((file) => file.name)
+                      .join(', ')}
+                  </Text>
+                )}
+                <Text style={s.queueFiles} accessibilityLiveRegion="polite">
+                  {entry.state === 'pending' ? 'Waiting for queue confirmation…' : entry.error}
+                </Text>
+              </View>
+              {entry.state === 'failed' && (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry queued message: ${entry.original || 'Attached files'}`}
+                    onPress={() => {
+                      void composer.retryQueuedSubmission?.(entry.id).catch(() => {
+                        /* Pending copy retains the error. */
+                      })
+                    }}
+                  >
+                    <Text style={s.queueRemove}>Retry</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove local copy; accepted messages are not cancelled"
+                    onPress={() => {
+                      void composer.dismissQueuedSubmission?.(entry.id).catch(() => {
+                        /* Keep the local copy if deletion fails. */
+                      })
+                    }}
+                  >
+                    <Text style={s.queueRemove}>Dismiss</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          ))}
+        </View>
       )}
       {queued.length > 0 && (
         <View style={s.queue} testID="chat-queue">

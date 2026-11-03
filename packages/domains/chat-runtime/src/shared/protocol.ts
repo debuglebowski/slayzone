@@ -16,6 +16,33 @@ export const chatRouteSchema = z.object({
   id,
   epoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 })
+export const chatTabTransitionSchema = z
+  .object({
+    id: z.string().uuid(),
+    from: chatIdentitySchema,
+    to: chatIdentitySchema,
+    next: chatIdentitySchema.extend({ mode: z.enum(['claude-chat', 'codex-chat']) })
+  })
+  .refine(
+    ({ from, to, next }) =>
+      from.id === to.id &&
+      from.taskId === to.taskId &&
+      from.mode === to.mode &&
+      from.tabId !== to.tabId &&
+      to.epoch === from.epoch + 1 &&
+      next.id !== from.id &&
+      next.taskId === from.taskId &&
+      next.tabId === from.tabId &&
+      next.mode !== from.mode &&
+      next.epoch === 1,
+    'Invalid provider transition'
+  )
+const tabStateScope = z
+  .object({
+    expectedMode: z.string().min(1).max(200).optional(),
+    expectedOwnership: chatRouteSchema.optional()
+  })
+  .strict()
 export const chatAttachmentSchema = z
   .object({
     artifactId: id,
@@ -190,8 +217,8 @@ export const chatOperationSchemas = {
   listFiles: z.tuple([z.string(), z.string(), z.number().positive().optional()]),
   bumpAutocompleteUsage: z.tuple([z.string(), z.string()]),
   getAutocompleteUsage: z.tuple([]),
-  getTabState: tab,
-  saveTabDraft: z.tuple([id, chatDraftSchema]),
+  getTabState: z.tuple([id, tabStateScope.optional()]),
+  saveTabDraft: z.tuple([id, chatDraftSchema, tabStateScope.optional()]),
   saveTabScroll: z.tuple([
     id,
     z.union([
@@ -202,7 +229,8 @@ export const chatOperationSchemas = {
         offsetPx: z.number(),
         row: z.number().int().nonnegative().optional()
       })
-    ])
+    ]),
+    tabStateScope.optional()
   ])
 } as const
 const queueOptions = z
@@ -210,7 +238,8 @@ const queueOptions = z
     id: id.optional(),
     content: chatContentSchema.optional(),
     admission: z.object({ key: id, token: id }).optional(),
-    expectedConversationId: id.optional()
+    expectedConversationId: id.optional(),
+    expectedMode: z.string().min(1).max(200).optional()
   })
   .optional()
 export const chatQueueOperationSchemas = {

@@ -61,6 +61,7 @@ function watchScrollPauses(el: HTMLElement, onPause: () => void): () => void {
  */
 export function useChatScrollMemory({
   tabId,
+  mode,
   enabled,
   ready,
   scrollRef,
@@ -69,6 +70,7 @@ export function useChatScrollMemory({
   revealKey
 }: {
   tabId: string
+  mode?: string
   /** The mode's `restoreComposerState` capability. */
   enabled: boolean
   /** The timeline has its history (hydration done). */
@@ -83,8 +85,16 @@ export function useChatScrollMemory({
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
-  const queryOptions = trpc.chat.tabState.get.queryOptions({ tabId }, { enabled })
-  const { data, isSuccess } = useQuery(queryOptions)
+  const queryOptions = trpc.chat.tabState.get.queryOptions(
+    { tabId, ...(mode ? { expectedMode: mode } : {}) },
+    { enabled }
+  )
+  const { data, isSuccess, isFetchedAfterMount } = useQuery({
+    ...queryOptions,
+    staleTime: 0,
+    refetchOnMount: 'always'
+  })
+  const ownershipRef = useRef<ChatTabState['ownership']>(undefined)
 
   // Written in effects only (React Compiler).
   const restoredRef = useRef(false)
@@ -93,7 +103,9 @@ export function useChatScrollMemory({
 
   // Restore once, when both the timeline and the saved anchor are there.
   useEffect(() => {
-    if (!enabled || !ready || !isSuccess || restoredRef.current) return
+    if (!enabled || !ready || !isSuccess || (mode && !isFetchedAfterMount) || restoredRef.current)
+      return
+    ownershipRef.current = data?.ownership
     restoredRef.current = true
     const anchor = (data as ChatTabState | null | undefined)?.scroll ?? null
     lastSavedRef.current = anchor ? JSON.stringify(anchor) : null
@@ -101,7 +113,7 @@ export function useChatScrollMemory({
     if (!anchor || anchor.atBottom) return
     revealKey(anchor.key, anchor.row)
     cancelRestoreRef.current = restoreWhenRendered(anchor, restoreAnchor)
-  }, [enabled, ready, isSuccess, data, restoreAnchor, revealKey])
+  }, [enabled, ready, isSuccess, isFetchedAfterMount, mode, data, restoreAnchor, revealKey])
 
   useEffect(() => () => cancelRestoreRef.current?.(), [])
 
@@ -116,10 +128,17 @@ export function useChatScrollMemory({
       const key = JSON.stringify(anchor)
       if (key === lastSavedRef.current) return
       lastSavedRef.current = key
-      trpcClient.chat.tabState.saveScroll.mutate({ tabId, anchor }).catch((err: unknown) => {
-        lastSavedRef.current = null
-        console.error('[chat] saving the scroll position failed:', err)
-      })
+      trpcClient.chat.tabState.saveScroll
+        .mutate({
+          tabId,
+          anchor,
+          ...(mode ? { expectedMode: mode } : {}),
+          ...(ownershipRef.current ? { expectedOwnership: ownershipRef.current } : {})
+        })
+        .catch((err: unknown) => {
+          lastSavedRef.current = null
+          console.error('[chat] saving the scroll position failed:', err)
+        })
       queryClient.setQueryData(queryOptions.queryKey, (old: ChatTabState | null | undefined) =>
         old ? { ...old, scroll: anchor } : old
       )

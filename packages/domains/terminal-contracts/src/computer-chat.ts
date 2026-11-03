@@ -115,6 +115,8 @@ export interface ChatAvailability {
     | 'upgrading'
   computer: { id: string; name: string } | null
   waitingForAgents?: boolean
+  /** Hub recovery watermark. A ready computer can have missed live notifications. */
+  recoveryGeneration?: string
 }
 export function chatAvailabilityMessage(
   status: ChatAvailability

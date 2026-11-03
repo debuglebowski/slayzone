@@ -150,7 +150,8 @@ async function main(): Promise<void> {
     process.stdout.write(
       JSON.stringify({
         // Old supervisors understand only min/max. This connector can bridge
-        // v1 safely, while fullChatMin tells new supervisors to replace its host.
+        // v1/v2 safely for stops, while fullChatMin tells new supervisors to
+        // replace a host which lacks current chat ownership preconditions.
         min: HOST_MAINTENANCE_MIN_CONTRACT_VERSION,
         max: HOST_CONTRACT_VERSION,
         fullChatMin: HOST_CONTRACT_VERSION,

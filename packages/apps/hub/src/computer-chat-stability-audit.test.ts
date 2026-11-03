@@ -389,11 +389,80 @@ test.each([false, true])(
           draft: { text: 'user kept this chat' }
         })
       } else expect(visible).toBeUndefined()
-      expect(await after.ownership.forTab('prompt-history:task')).toMatchObject({
+      expect(await after.ownership.forTab('task-content:task')).toMatchObject({
         state: 'active',
         cleanupPending: false
       })
+      if (hasActivity)
+        expect(await after.ownership.forTab('prompt-history:task')).toMatchObject({
+          state: 'active'
+        })
+      else expect(await after.ownership.forTab('prompt-history:task')).toBeNull()
       expect(await after.prompts('task', 'codex')).toMatchObject([{ text: 'preserved prompt' }])
+    } finally {
+      await f.close()
+    }
+  }
+)
+
+test.each([false, true])(
+  'recovery preserves genuine pre-fix prompt ownership while repairing phantom row, later chat=%s',
+  async (hasActivity) => {
+    const f = await fixture()
+    try {
+      f.db
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('native-tab','task','codex',0)"
+        )
+        .run()
+      f.db
+        .prepare(
+          "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','codex','preserved pre-fix prompt',123)"
+        )
+        .run()
+      const before = f.services()
+      // Recreate a real pre-fix storage identity, before the independent task
+      // authority existed, using the real source/transfer/activation path.
+      await before.ownership.register({
+        id: 'pre-fix-prompt-owner',
+        taskId: 'task',
+        tabId: 'prompt-history:task',
+        mode: 'claude-chat',
+        computerId: null,
+        epoch: 1
+      })
+      await before.migration.ensure('pre-fix-prompt-owner', 'pc')
+      expect(await before.prompts('task', 'codex')).toMatchObject([
+        { text: 'preserved pre-fix prompt' }
+      ])
+      f.db
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,label,mode,position) VALUES('prompt-history:task','task','Chat','claude-chat',1)"
+        )
+        .run()
+      if (hasActivity)
+        await before.relay.ops.saveTabDraft('prompt-history:task', {
+          text: 'retained pre-fix chat draft',
+          attachments: []
+        })
+      await f.restartComputer()
+      const after = f.services()
+      await after.recoverComputer('pc')
+      const tab = f.db.prepare("SELECT id FROM terminal_tabs WHERE id='prompt-history:task'").get()
+      if (hasActivity) {
+        expect(tab).toEqual({ id: 'prompt-history:task' })
+        expect(await after.relay.ops.getTabState('prompt-history:task')).toMatchObject({
+          draft: { text: 'retained pre-fix chat draft' }
+        })
+      } else expect(tab).toBeUndefined()
+      expect(await after.ownership.forTab('prompt-history:task')).toMatchObject({
+        id: 'pre-fix-prompt-owner',
+        state: 'active',
+        cleanupPending: false
+      })
+      expect(await after.prompts('task', 'codex')).toMatchObject([
+        { text: 'preserved pre-fix prompt' }
+      ])
     } finally {
       await f.close()
     }

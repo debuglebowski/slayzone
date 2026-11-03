@@ -1,5 +1,5 @@
 import { createChatRetention } from './retention'
-import { parseChatInvocation } from '../shared'
+import { parseChatInvocation, type ChatTabTransition } from '../shared'
 import { createLocalArtifacts } from './artifacts'
 import { createChatBackups } from './backups'
 import { createLocalPrompts } from './prompts'
@@ -70,6 +70,19 @@ export function createComputerChatRuntime(opts: {
   const transport = createChatTransport(
     {
       ...opts.transport,
+      beforeSpawn: (tabId) => {
+        const owner = storage.forTab(tabId)
+        if (
+          !owner ||
+          owner.state !== 'active' ||
+          storage.taskLifecycle(owner.identity.taskId).state !== 'active' ||
+          storage.getRecord(owner.identity.id, 'settings', 'tab-transition-pending')
+        )
+          throw new Error(
+            'Chat provider transition or lifecycle change prevents starting this writer'
+          )
+        opts.transport?.beforeSpawn?.(tabId)
+      },
       userInputTracker: {
         mark: (id) => {
           userInputSessions.add(id)
@@ -114,13 +127,27 @@ export function createComputerChatRuntime(opts: {
     conversations
   )
   let retention: ReturnType<typeof createChatRetention> | undefined
+  const transitioning = (tabId: string) => {
+    const owner = storage.forTab(tabId)
+    return !owner || !!storage.getRecord(owner.identity.id, 'settings', 'tab-transition-pending')
+  }
   const queueRuntime = createChatQueueRuntime({
     ...transport,
+    ensureSpawned: (tabId) => {
+      if (transitioning(tabId))
+        return Promise.reject(new Error('Chat provider transition is pending'))
+      return transport.ensureSpawned(tabId)
+    },
+    dispatchUserMessage: (tabId, message) => {
+      if (transitioning(tabId)) throw new Error('Chat provider transition is pending')
+      return transport.dispatchUserMessage(tabId, message)
+    },
     getSessionTerminalState: (tabId) =>
-      retention?.isPruning(storage.forTab(tabId)?.identity.id ?? '')
+      transitioning(tabId) || retention?.isPruning(storage.forTab(tabId)?.identity.id ?? '')
         ? null
         : transport.getSessionTerminalState(tabId),
     isReadyForQueuedMessage: (tabId) =>
+      !transitioning(tabId) &&
       !retention?.isPruning(storage.forTab(tabId)?.identity.id ?? '') &&
       transport.isReadyForQueuedMessage(tabId)
   })
@@ -140,6 +167,7 @@ export function createComputerChatRuntime(opts: {
   )
   let closed = false
   const invoke = createChatInvoker({ storage, local, ops, queueOps })
+  const tabTransitions = new Map<string, Promise<ChatTabTransition['to']>>()
   retention = createChatRetention({
     storage,
     local,
@@ -195,6 +223,23 @@ export function createComputerChatRuntime(opts: {
     events: transport.chatEvents,
     queueEvents: queueRuntime.chatQueueEvents,
     bootstrap: local.bootstrap,
+    async transitionTab(value: ChatTabTransition) {
+      storage.prepareTabTransition(value)
+      if (storage.getRecord(value.from.id, 'settings', `tab-transition:${value.id}`))
+        return storage.conversation(value.from.id)!.identity
+      const current = tabTransitions.get(value.from.id)
+      if (current) return current
+      // Pending transition fences new commands, while the old writer can still
+      // persist its final output/projection before its identity changes.
+      const work = (async () => {
+        await queueRuntime.settleTab(value.from.tabId)
+        await transport.quiesceSession(value.from.tabId)
+        await invoke.settle(value.from.id)
+        return storage.commitTabTransition(value)
+      })().finally(() => tabTransitions.delete(value.from.id))
+      tabTransitions.set(value.from.id, work)
+      return work
+    },
     async deleteConversation(identity: import('../shared').ConversationIdentity) {
       const parents = storage
         .findRecords('thread', identity.taskId)
@@ -216,6 +261,7 @@ export function createComputerChatRuntime(opts: {
       const previous = storage.taskLifecycle(taskId)
       if (previous.state === 'deleted') {
         const applied = storage.applyTaskLifecycle(taskId, state, revision)
+        artifacts.cleanupDeletedTasks()
         transfers.removeTask(taskId)
         attachments.collectGarbage()
         artifacts.collectGarbage()
@@ -232,6 +278,7 @@ export function createComputerChatRuntime(opts: {
       const applied = storage.applyTaskLifecycle(taskId, state, revision)
       await Promise.all(closing)
       if (applied.state === 'deleted') {
+        artifacts.cleanupDeletedTasks()
         transfers.removeTask(taskId)
         attachments.collectGarbage()
         artifacts.collectGarbage()
@@ -247,6 +294,7 @@ export function createComputerChatRuntime(opts: {
       await queueRuntime.close()
       await transport.shutdownAll()
       transfers.close()
+      artifacts.close()
       storage.close()
     }
   }

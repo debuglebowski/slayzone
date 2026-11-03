@@ -112,6 +112,7 @@ export function fakeHub(opts: {
   const subscriptions: NonNullable<TrpcTestBackend['subscriptions']> = {}
   for (const path of [
     'chat.onEvent',
+    'chat.onReplayRequired',
     'chat.onExit',
     'chat.onQueueChanged',
     'chat.onQueueDrained'

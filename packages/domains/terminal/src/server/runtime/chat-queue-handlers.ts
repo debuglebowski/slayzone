@@ -344,6 +344,12 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
         opts?: ChatQueuePushOptions
       ): Promise<QueuedChatMessage> => {
         const id = opts?.id ?? randomUUID()
+        const replay = await data.replay?.(tabId, send, original, { ...opts, id })
+        if (replay) {
+          broadcast('chat:queue-changed', tabId)
+          await drainChatQueue(db, tabId, data)
+          return replay
+        }
         const admission =
           opts?.admission ??
           (data.reserve
@@ -377,7 +383,8 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
             ...(opts?.expectedConversationId
               ? { expectedConversationId: opts.expectedConversationId }
               : {}),
-            ...(content ? { content } : {})
+            ...(content ? { content } : {}),
+            ...(opts?.content ? { submittedContent: opts.content } : {})
           })
           settled = true
           broadcast('chat:queue-changed', tabId)
@@ -498,6 +505,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
     HOLD_MS,
     drainChatQueue,
     createChatQueueOps,
+    settleTab: (tabId: string) => draining.get(tabId) ?? Promise.resolve(),
     close
   }
 }

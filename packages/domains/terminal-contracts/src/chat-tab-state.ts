@@ -31,4 +31,24 @@ export interface ChatTabState {
   /** `rev` counts saves (the composer's local journal compares it). */
   draft: ChatDraft & { rev: number }
   scroll: ChatScrollAnchor | null
+  /** Storage binding used to fence delayed saves after provider switches. */
+  ownership?: { id: string; epoch: number }
+}
+
+export interface ChatTabStateScope {
+  expectedMode?: string
+  expectedOwnership?: { id: string; epoch: number }
+}
+
+export function assertChatTabStateScope(
+  identity: { id: string; epoch: number; mode: string },
+  scope?: ChatTabStateScope
+): void {
+  if (scope?.expectedMode !== undefined && scope.expectedMode !== identity.mode)
+    throw new Error('Chat provider changed. Reopen this chat before continuing.')
+  if (
+    scope?.expectedOwnership &&
+    (scope.expectedOwnership.id !== identity.id || scope.expectedOwnership.epoch !== identity.epoch)
+  )
+    throw new Error('Chat ownership changed. Reopen this chat before saving.')
 }

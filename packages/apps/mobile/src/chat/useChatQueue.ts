@@ -6,15 +6,23 @@
  * Desktop's counterpart: `task-terminals/src/client/chat/useChatQueue.ts`.
  */
 import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
-import { useSubscription } from '@slayzone/transport/client'
+import { useHubId, useSubscription } from '@slayzone/transport/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { newMessageId } from './ids'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { useStableCallback } from './useStableCallback'
+import {
+  useQueuedSubmissions,
+  type QueuedSubmission
+} from '@slayzone/task-terminals/queued-submissions'
+import { createQueuedSubmissionJournal } from './queued-submission-journal'
 
 export interface ChatQueue {
   items: QueuedChatMessage[]
+  pending?: QueuedSubmission[]
+  retryPending?: (id: string) => Promise<void>
+  dismissPending?: (id: string) => Promise<void>
   /**
    * `send` goes to the agent; `original` is what was typed (shown, counted for usage).
    * `content` defaults to `send` as one text block (desktop's rule).
@@ -24,10 +32,16 @@ export interface ChatQueue {
   clear: () => Promise<void>
 }
 
-export function useChatQueue(tabId: string, onDrained?: (original: string) => void): ChatQueue {
+export function useChatQueue(
+  tabId: string,
+  onDrained?: (original: string) => void,
+  expectedMode?: string
+): ChatQueue {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
+  const hubId = useHubId() ?? 'local'
+  const storage = useMemo(() => createQueuedSubmissionJournal(hubId, tabId), [hubId, tabId])
   const list = useQuery(trpc.chat.queue.list.queryOptions({ tabId }))
   const refresh = useCallback(
     () => void queryClient.invalidateQueries(trpc.chat.queue.list.queryFilter({ tabId })),
@@ -46,18 +60,31 @@ export function useChatQueue(tabId: string, onDrained?: (original: string) => vo
   })
   useSubscription(trpc.chat.onQueueDrained.subscriptionOptions(undefined, { onData: onDrainedMsg }))
 
-  const push = useCallback(
-    async (send: string, original: string, content?: UserContentBlock[]) => {
+  const deliver = useCallback(
+    async ({ id, send, original, content, expectedMode }: QueuedSubmission) => {
       // The id it gets here is the id it is sent with (the outbox tracks it by it).
       await trpcClient.chat.queue.push.mutate({
         tabId,
         send,
         original,
-        id: newMessageId(),
-        content: content ?? [{ type: 'text', text: send }]
+        id,
+        content,
+        ...(expectedMode ? { expectedMode } : {})
       })
     },
     [trpcClient, tabId]
+  )
+  const submissions = useQueuedSubmissions({ storage, deliver, createId: newMessageId })
+  const { push: pushSubmission } = submissions
+  const push = useCallback(
+    (send: string, original: string, content?: UserContentBlock[]) =>
+      pushSubmission({
+        send,
+        original,
+        content: content ?? [{ type: 'text', text: send }],
+        ...(expectedMode ? { expectedMode } : {})
+      }),
+    [pushSubmission, expectedMode]
   )
   const remove = useCallback(
     async (id: string) => {
@@ -69,5 +96,13 @@ export function useChatQueue(tabId: string, onDrained?: (original: string) => vo
     await trpcClient.chat.queue.clear.mutate({ tabId })
   }, [trpcClient, tabId])
 
-  return { items: list.data ?? [], push, remove, clear }
+  return {
+    items: list.data ?? [],
+    pending: submissions.pending,
+    retryPending: submissions.retry,
+    dismissPending: submissions.dismiss,
+    push,
+    remove,
+    clear
+  }
 }

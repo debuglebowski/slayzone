@@ -27,7 +27,10 @@ export interface ChatQueuePushOptions {
   id?: string
   content?: UserContentBlock[]
   expectedConversationId?: string
+  expectedMode?: string
   admission?: Pick<QueueAdmission, 'key' | 'token'>
+  /** Data-adapter only: original blocks before asynchronous attachment sealing. */
+  submittedContent?: UserContentBlock[]
 }
 
 /**
@@ -41,6 +44,13 @@ export interface ChatQueuePushOptions {
 export interface ChatQueueData {
   /** All queued messages for a tab, position ASC. */
   list(tabId: string): Promise<QueuedChatMessage[]>
+  /** Recover a prior durable acceptance before attachment admission/transfer. */
+  replay?(
+    tabId: string,
+    send: string,
+    original: string,
+    opts: ChatQueuePushOptions
+  ): Promise<QueuedChatMessage | null>
   /** Append at tail (atomic MAX(position)+1 insert) and return the stored row. */
   push(
     tabId: string,

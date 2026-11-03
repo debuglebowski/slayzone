@@ -711,6 +711,10 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
         if (!ids || ids.includes((event as { tabId: string }).tabId)) push(event as never)
       }),
     'chat.onExit': (_input, push) => listen('chat.onExit', push as Listener),
+    'chat.onReplayRequired': (input, push) =>
+      listen('chat.onReplayRequired', (event) => {
+        if ((event as { tabId: string }).tabId === input.tabId) push(event as never)
+      }),
     'chat.onQueueChanged': (_input, push) => listen('chat.onQueueChanged', push as Listener),
     'chat.onQueueDrained': (_input, push) => listen('chat.onQueueDrained', push as Listener),
     'artifacts.onContentChanged': (_input, push) =>

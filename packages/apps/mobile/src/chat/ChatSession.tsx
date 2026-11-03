@@ -111,7 +111,7 @@ export function ChatSession({
     case 'ready':
       return (
         <ChatView
-          key={`${tabId}\n${cwd.cwd}`}
+          key={JSON.stringify([tabId, mode, cwd.cwd])}
           target={{ tabId, taskId, mode, cwd: cwd.cwd, providerFlagsOverride: null }}
         />
       )
@@ -150,11 +150,15 @@ function ChatView({ target }: { target: ChatTarget }) {
     liveCliDetails: state.cliCommandDetails,
     effortLevels
   })
-  const queue = useChatQueue(target.tabId, (original) => {
-    const token = /^\/([a-zA-Z0-9_:-]+)/.exec(original.trim())?.[1]
-    const hit = token ? slash.items.find((i) => i.name === token) : undefined
-    if (hit) slash.bump({ source: hit.source, name: hit.name })
-  })
+  const queue = useChatQueue(
+    target.tabId,
+    (original) => {
+      const token = /^\/([a-zA-Z0-9_:-]+)/.exec(original.trim())?.[1]
+      const hit = token ? slash.items.find((i) => i.name === token) : undefined
+      if (hit) slash.bump({ source: hit.source, name: hit.name })
+    },
+    target.mode
+  )
   const codexPlanReview = useMemo(
     () =>
       target.mode === 'codex-chat'

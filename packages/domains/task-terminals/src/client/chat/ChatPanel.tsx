@@ -11,6 +11,7 @@ import {
 import { CornerDownLeft } from 'lucide-react'
 import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
+import { PendingQueuedMessages } from './PendingQueuedMessages'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
 import { useSideQuestions } from './side-questions/useSideQuestions'
@@ -456,6 +457,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // Where the timeline was scrolled survives remounts and reloads (per tab).
     useChatScrollMemory({
       tabId,
+      mode,
       enabled: chatCapabilitiesForMode(mode).restoreComposerState,
       ready: !hydrating,
       scrollRef,
@@ -961,6 +963,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           </button>
                         </div>
                       )}
+                      {composer.draftConflictAvailable && (
+                        <div
+                          role="status"
+                          className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs"
+                        >
+                          <p className="text-muted-foreground">
+                            Saved and local drafts differ. Keep both before saving.
+                          </p>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
+                            onClick={composer.recoverDraftConflict}
+                          >
+                            Keep both
+                          </button>
+                        </div>
+                      )}
                       {composer.legacyDraftAvailable && (
                         <div
                           role="status"
@@ -979,6 +998,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         </div>
                       )}
                       <ChatComposer
+                        pendingMessages={
+                          <PendingQueuedMessages
+                            items={composer.pendingQueuedMessages}
+                            onRetry={composer.retryQueuedSubmission}
+                            onDismiss={composer.dismissQueuedSubmission}
+                          />
+                        }
                         backgroundJobs={
                           backgroundJobs.length > 0 ? (
                             <ComposerBackgroundJobs jobs={backgroundJobs} />

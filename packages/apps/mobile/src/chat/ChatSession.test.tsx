@@ -25,6 +25,84 @@ async function hubSends(hub: FakeHub, events: AgentEvent[], from = 0) {
 }
 
 describe('ChatSession: computer availability', () => {
+  it('replays output saved during a computer disconnect even when availability stays ready', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    let generation = 'boot:0'
+    let missed = false
+    hub.on('chat.availability', () => ({
+      state: 'ready',
+      computer: { id: 'pc', name: 'Laptop' },
+      recoveryGeneration: generation
+    }))
+    hub.on('chat.getReplay', () => ({
+      events: missed
+        ? [
+            {
+              seq: 0,
+              event: {
+                kind: 'assistant-text',
+                messageId: 'offline-answer',
+                text: 'Completed while computer disconnected'
+              }
+            }
+          ]
+        : [],
+      live: { afterSeq: missed ? 0 : -1, liveSeq: 0, events: [] }
+    }))
+    await open(hub)
+    await screen.findByTestId('chat-input')
+    await waitFor(() => expect(hub.callsTo('chat.getReplay')).toHaveLength(1))
+    await waitFor(() => expect(screen.queryByTestId('chat-loading')).toBeNull())
+    expect(hub.callsTo('chat.getReplay')).toHaveLength(1)
+    await waitFor(() => expect(hub.subscribed['chat.onReplayRequired']).toEqual([{ tabId: TAB }]))
+    await act(async () => {
+      missed = true
+      generation = 'boot:1'
+      hub.emit('chat.onReplayRequired', { tabId: TAB, generation })
+    })
+    expect(await screen.findByText('Completed while computer disconnected')).toBeOnTheScreen()
+    expect(hub.callsTo('chat.getReplay')).toHaveLength(2)
+    expect(hub.callsTo('chat.send')).toEqual([])
+  })
+
+  it('a delayed old-provider queue acknowledgement cannot clear the newly selected provider draft', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    const { wrapper } = trpcTest(hub.backend)
+    let confirm!: () => void
+    hub.on(
+      'chat.queue.push',
+      () =>
+        new Promise<void>((resolve) => {
+          confirm = resolve
+        })
+    )
+    const view = await render(
+      <ChatSession hubId="hub-1" taskId={TASK} tabId={TAB} mode="claude-chat" />,
+      { wrapper }
+    )
+    await screen.findByTestId('chat-input')
+    await hubSends(hub, [
+      { kind: 'turn-init', sessionId: 'old', model: 'opus', cwd: '/w', tools: [] },
+      {
+        kind: 'user-message',
+        id: 'turn',
+        text: 'running',
+        content: [{ type: 'text', text: 'running' }]
+      }
+    ])
+    await fireEvent.changeText(screen.getByTestId('chat-input'), 'old provider queued text')
+    await fireEvent.press(screen.getByLabelText('Queue message'))
+    await waitFor(() => expect(hub.callsTo('chat.queue.push')).toHaveLength(1))
+    await view.rerender(<ChatSession hubId="hub-1" taskId={TASK} tabId={TAB} mode="codex-chat" />)
+    await waitFor(() => expect(screen.queryByTestId('chat-loading')).toBeNull())
+    await fireEvent.changeText(screen.getByTestId('chat-input'), 'new provider draft')
+    await act(async () => {
+      confirm()
+    })
+    expect(screen.getByTestId('chat-input').props.value).toBe('new provider draft')
+    expect(hub.callsTo('chat.queue.push')[0]).toMatchObject({ expectedMode: 'claude-chat' })
+  })
+
   it('uses one loader through computer setup and history loading without a separate storage banner', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
     let finishSetup!: () => void

@@ -9,11 +9,40 @@ const hub = vi.hoisted(() => ({
   status: { state: 'ready', computer: { id: 'pc', name: 'Laptop' } } as ChatAvailability,
   error: null as Error | null,
   pending: null as Promise<ChatAvailability> | null,
-  calls: 0
+  calls: 0,
+  replayHandlers: new Map<string, (message: { tabId: string; generation: string }) => void>()
 }))
+vi.mock('@slayzone/transport/client', async () => {
+  const { useEffect } = await import('react')
+  const { useStableCallback } = await vi.importActual<typeof import('@slayzone/transport/client')>(
+    '@slayzone/transport/client'
+  )
+  return {
+    useStableCallback,
+    useSubscription: (opts: {
+      tabId: string
+      enabled: boolean
+      onData: (message: { tabId: string; generation: string }) => void
+    }) => {
+      useEffect(() => {
+        if (!opts.enabled) return
+        hub.replayHandlers.set(opts.tabId, opts.onData)
+        return () => {
+          hub.replayHandlers.delete(opts.tabId)
+        }
+      }, [opts.tabId, opts.enabled, opts.onData])
+    }
+  }
+})
 vi.mock('./trpc', () => ({
   useTRPC: () => ({
     chat: {
+      onReplayRequired: {
+        subscriptionOptions: (input: { tabId: string }, options: object) => ({
+          ...input,
+          ...options
+        })
+      },
       availability: {
         queryOptions: ({ tabId }: { tabId: string }) => ({
           queryKey: ['availability', tabId],
@@ -36,6 +65,7 @@ beforeEach(() => {
   hub.error = null
   hub.pending = null
   hub.calls = 0
+  hub.replayHandlers.clear()
 })
 afterEach(() => {
   cleanup()
@@ -250,4 +280,129 @@ test('history finishing before the initial status response still gets a fresh re
   await waitFor(() => expect(hub.calls).toBe(2))
   await waitFor(() => expect(result.current.status?.state).toBe('ready'))
   expect(onReady).not.toHaveBeenCalled()
+})
+
+const readyGeneration = (generation: string): ChatAvailability =>
+  ({
+    state: 'ready',
+    computer: { id: 'pc', name: 'Laptop' },
+    recoveryGeneration: generation
+  }) as ChatAvailability
+
+test('a recovery signal still reloads history when the first status already reports its new watermark', async () => {
+  let resolve!: (status: ChatAvailability) => void
+  hub.pending = new Promise((done) => {
+    resolve = done
+  })
+  const onReady = vi.fn()
+  renderHook(
+    () => useChatAvailability({ tabId: 'tab', active: true, historyReady: true, onReady }),
+    { wrapper }
+  )
+  await waitFor(() => expect(hub.calls).toBe(1))
+  hub.pending = null
+  hub.status = readyGeneration('boot:1')
+  act(() => {
+    hub.replayHandlers.get('tab')?.({ tabId: 'tab', generation: 'boot:1' })
+  })
+  await act(async () => {
+    resolve(hub.status)
+  })
+  await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1))
+})
+
+test('reconnect signal fetches a new watermark and reloads once without sampling offline', async () => {
+  hub.status = readyGeneration('boot:0')
+  const onReady = vi.fn()
+  const h = renderHook(
+    () => useChatAvailability({ tabId: 'tab', active: true, historyReady: true, onReady }),
+    { wrapper }
+  )
+  await waitFor(() => expect(h.result.current.status?.state).toBe('ready'))
+  expect(hub.calls).toBe(1)
+  expect(onReady).not.toHaveBeenCalled()
+  hub.status = readyGeneration('boot:1')
+  act(() => {
+    hub.replayHandlers.get('tab')?.({ tabId: 'tab', generation: 'boot:1' })
+  })
+  await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1))
+  expect(hub.calls).toBe(2)
+  act(() => {
+    hub.replayHandlers.get('tab')?.({ tabId: 'tab', generation: 'boot:1' })
+  })
+  await refetch()
+  expect(onReady).toHaveBeenCalledTimes(1)
+})
+
+test('hidden chat catches up from watermark on activation without a live replay listener', async () => {
+  hub.status = readyGeneration('boot:0')
+  const onReady = vi.fn()
+  const h = renderHook(
+    ({ active }) => useChatAvailability({ tabId: 'tab', active, historyReady: true, onReady }),
+    { wrapper, initialProps: { active: true } }
+  )
+  await waitFor(() => expect(h.result.current.status?.state).toBe('ready'))
+  h.rerender({ active: false })
+  expect(hub.replayHandlers.size).toBe(0)
+  hub.status = readyGeneration('boot:1')
+  expect(onReady).not.toHaveBeenCalled()
+  h.rerender({ active: true })
+  await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1))
+})
+
+test('a replay signal waits out an older in-flight status request, then verifies its watermark', async () => {
+  hub.status = readyGeneration('boot:0')
+  const onReady = vi.fn()
+  const h = renderHook(
+    () => useChatAvailability({ tabId: 'tab', active: true, historyReady: true, onReady }),
+    { wrapper }
+  )
+  await waitFor(() => expect(h.result.current.status?.state).toBe('ready'))
+  let resolve!: (status: ChatAvailability) => void
+  hub.pending = new Promise((done) => {
+    resolve = done
+  })
+  act(() => {
+    void client.invalidateQueries({ queryKey: ['availability'] })
+  })
+  await waitFor(() => expect(hub.calls).toBe(2))
+  hub.pending = null
+  hub.status = readyGeneration('boot:1')
+  act(() => {
+    hub.replayHandlers.get('tab')?.({ tabId: 'tab', generation: 'boot:1' })
+  })
+  await act(async () => {
+    resolve(readyGeneration('boot:0'))
+  })
+  await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1))
+  expect(hub.calls).toBe(3)
+})
+
+test('a reconnect during post-load status confirmation cannot be swallowed as already-loaded history', async () => {
+  hub.status = readyGeneration('boot:0')
+  const onReady = vi.fn()
+  const h = renderHook(
+    ({ historyReady }) =>
+      useChatAvailability({ tabId: 'tab', active: true, historyReady, onReady }),
+    { wrapper, initialProps: { historyReady: false } }
+  )
+  await waitFor(() => expect(h.result.current.status?.state).toBe('ready'))
+  hub.status = { state: 'offline', computer: { id: 'pc', name: 'Laptop' } }
+  await refetch()
+  await waitFor(() => expect(h.result.current.status?.state).toBe('offline'))
+  let resolve!: (status: ChatAvailability) => void
+  hub.pending = new Promise((done) => {
+    resolve = done
+  })
+  h.rerender({ historyReady: true })
+  await waitFor(() => expect(hub.calls).toBe(3))
+  hub.pending = null
+  hub.status = readyGeneration('boot:1')
+  act(() => {
+    hub.replayHandlers.get('tab')?.({ tabId: 'tab', generation: 'boot:1' })
+  })
+  await act(async () => {
+    resolve(hub.status)
+  })
+  await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1))
 })

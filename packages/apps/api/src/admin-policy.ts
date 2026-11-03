@@ -409,6 +409,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.listSkills': 'user',
   'chat.onEvent': 'user',
   'chat.onExit': 'user',
+  'chat.onReplayRequired': 'user',
   'chat.onQueueChanged': 'user',
   'chat.onQueueDrained': 'user',
   'chat.queue.clear': 'user',

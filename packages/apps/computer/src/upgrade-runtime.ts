@@ -734,7 +734,9 @@ async function initializeUpgradeSupervisor(
                   maintenanceReason:
                     'Session host configuration changed; waiting for running work to finish'
                 }
-              : hostInfo.version !== displayedVersion || hostBuildChanged
+              : hostInfo.version !== displayedVersion ||
+                  hostBuildChanged ||
+                  incompatibleHostTargets.has(hubUrl)
                 ? { maintenanceReason: 'Session host update waits for running work to finish' }
                 : {}),
             currentVersion: displayedVersion,

@@ -764,6 +764,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.tabState.saveScroll': checked(tab('tabId')),
   'chat.onEvent': streamed(on('tabId', 'tab')),
   'chat.onExit': streamed(on('tabId', 'tab')),
+  'chat.onReplayRequired': { ...checked(tab('tabId')), events: on('tabId', 'tab') },
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
   // A bare signal (no payload to filter): the tab named in the input is checked instead.
   'chat.threads.onChanged': checked(tab('tabId')),

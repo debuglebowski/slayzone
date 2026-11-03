@@ -15,6 +15,7 @@ import { chatRouter } from './chat-router.js'
 import { getChatDeps, setChatDeps, type ChatDeps } from './chat-router-deps.js'
 
 const events = new TypedEmitter<{
+  'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: unknown, seq: number]
   exit: [tabId: string, sessionId: string, code: number | null, signal: string | null]
 }>()
@@ -139,6 +140,21 @@ describe('chat router', () => {
       if (saved === undefined) delete process.env.PLAYWRIGHT
       else process.env.PLAYWRIGHT = saved
     }
+  })
+
+  test('reconnect replay notifications are tab-scoped, content-free and unsubscribed', async () => {
+    const before = events.listenerCount('replay-required')
+    const caller = chatRouter.createCaller(ctx)
+    const obs = await caller.onReplayRequired({ tabId: 'tab-a' })
+    const got: unknown[] = []
+    const sub = obs.subscribe({ next: (v) => got.push(v) })
+    expect(events.listenerCount('replay-required')).toBe(before + 1)
+    events.emit('replay-required', 'tab-b', 'recovery-1')
+    events.emit('replay-required', 'tab-a', 'recovery-1')
+    sub.unsubscribe()
+    events.emit('replay-required', 'tab-a', 'recovery-2')
+    expect(got).toEqual([{ tabId: 'tab-a', generation: 'recovery-1' }])
+    expect(events.listenerCount('replay-required')).toBe(before)
   })
 
   test('onEvent forwards each emit, stops after unsubscribe', async () => {

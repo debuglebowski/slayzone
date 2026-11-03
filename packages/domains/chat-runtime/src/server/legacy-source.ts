@@ -19,6 +19,7 @@ import type { HubChatOwnership } from './hub-ownership'
 import type { ChatMigrationSource } from './migration'
 import { TRANSFER_CHUNK_BYTES } from './transfers'
 import { legacyChatTabContentSql } from './legacy-census'
+import { legacySessionAuthority } from './legacy-session-authority'
 import { migrationAttachmentScope } from './migration-attachments'
 import {
   LEGACY_CHAT_BLOB_PIN_SCOPE,
@@ -52,6 +53,7 @@ export function createLegacyChatSource(opts: {
   readAttachment(owner: HubChatOwnership, ref: ChatAttachment): Promise<Uint8Array>
   readPinnedAttachment?(scope: MigrationAttachmentScope, ref: ChatAttachment): Promise<Uint8Array>
   collectReleasedAttachments?(): Promise<unknown>
+  resolveSessionComputer?(owner: HubChatOwnership): Promise<string | null>
 }): ChatMigrationSource {
   const { db } = opts
   async function* rows<T>(sql: string, params: unknown[]): AsyncGenerator<T> {
@@ -79,6 +81,21 @@ export function createLegacyChatSource(opts: {
       )
     )?.id
   }
+  const taskAuthorityKey = 'legacy-task-content-authority'
+  async function includesTaskContent(owner: HubChatOwnership) {
+    const authority = await db.get<{ conversation_id: string }>(
+      'SELECT conversation_id FROM chat_legacy_task_authority WHERE task_id=?',
+      [owner.taskId]
+    )
+    return authority
+      ? authority.conversation_id === owner.id
+      : owner.tabId === `prompt-history:${owner.taskId}` ||
+          owner.tabId === (await leader(owner.taskId))
+  }
+  function frozenTaskContent(metadata: ChatRecord[]): boolean | undefined {
+    const marker = metadata.find((r) => r.kind === 'settings' && r.id === taskAuthorityKey)
+    return marker ? marker.value === true : undefined
+  }
   const record = (kind: ChatRecord['kind'], id: string, value: unknown, at = 0): Item => ({
     kind: 'record',
     value: { kind, id, value, at }
@@ -87,18 +104,18 @@ export function createLegacyChatSource(opts: {
     owner: HubChatOwnership,
     bootstrap: ChatBootstrap
   ): AsyncGenerator<Item> {
-    if (
-      opts.diagnostics &&
-      (owner.tabId === (await leader(owner.taskId)) ||
-        owner.tabId === `prompt-history:${owner.taskId}`)
-    )
+    const taskContent = await includesTaskContent(owner)
+    if (owner.tabId === `task-content:${owner.taskId}`) yield record('settings', 'inbox', true)
+    yield record('settings', taskAuthorityKey, taskContent)
+    if (opts.diagnostics && taskContent)
       yield record(
         'settings',
         'legacy-diagnostics-cutoff',
         await opts.diagnostics.freeze(owner.taskId)
       )
     yield record('settings', 'bootstrap', bootstrap)
-    yield record('settings', 'provider', bootstrap.providerConfig)
+    const storageOnly = owner.tabId === `task-content:${owner.taskId}`
+    if (!storageOnly) yield record('settings', 'provider', bootstrap.providerConfig)
     const canonicalMode =
       owner.mode === 'claude-chat'
         ? 'claude-code'
@@ -110,7 +127,8 @@ export function createLegacyChatSource(opts: {
       [owner.taskId]
     )
     const config = JSON.parse(task?.provider_config ?? '{}')
-    yield record('settings', `provider:${canonicalMode}`, config[canonicalMode] ?? {})
+    if (!storageOnly)
+      yield record('settings', `provider:${canonicalMode}`, config[canonicalMode] ?? {})
     for await (const r of rows<{
       conversation_id: string
       mode: string
@@ -128,7 +146,15 @@ export function createLegacyChatSource(opts: {
           mode: r.mode,
           conversationId: r.conversation_id,
           origin: r.origin,
-          createdAt: r.created_at
+          createdAt: r.created_at,
+          ownershipClaim:
+            (await legacySessionAuthority(
+              db,
+              owner.taskId,
+              r.mode,
+              r.conversation_id,
+              opts.resolveSessionComputer
+            )) === owner.id
         },
         r.created_at
       )
@@ -148,7 +174,7 @@ export function createLegacyChatSource(opts: {
         },
         r.created_at
       )
-    if (task?.project_id) {
+    if (task?.project_id && !storageOnly) {
       const snapshot = await db.get<{
         slash_commands: string
         terminal_slash_commands: string
@@ -300,10 +326,7 @@ export function createLegacyChatSource(opts: {
         r.created_at
       )
     }
-    if (
-      owner.tabId === (await leader(owner.taskId)) ||
-      owner.tabId === `prompt-history:${owner.taskId}`
-    ) {
+    if (frozenTaskContent(metadata) ?? (await includesTaskContent(owner))) {
       const cutoff = metadata.find(
         (r) => r.kind === 'settings' && r.id === 'legacy-diagnostics-cutoff'
       )?.value
@@ -579,6 +602,22 @@ export function createLegacyChatSource(opts: {
         })
         metadata = (await opts.freezeMetadata?.(owner, migrationId, candidate)) ?? candidate
       }
+      if (frozenTaskContent(metadata) === undefined) {
+        const upgraded = [
+          ...metadata,
+          {
+            kind: 'settings' as const,
+            id: taskAuthorityKey,
+            value: await includesTaskContent(owner),
+            at: 0
+          }
+        ]
+        metadata = (await opts.freezeMetadata?.(owner, migrationId, upgraded)) ?? upgraded
+        if (frozenTaskContent(metadata) === undefined)
+          throw new Error(
+            'Computer cannot freeze task content ownership; update it before retrying migration'
+          )
+      }
       if (!metadata.some((r) => r.kind === 'settings' && r.id === 'legacy-attachment-manifest')) {
         const upgraded: ChatRecord[] = [
           ...metadata,
@@ -604,8 +643,16 @@ export function createLegacyChatSource(opts: {
           originals.set(attachmentKey(ref), ref)
           return ref
         })
-      if (Object.keys(mapping).some((key) => !originals.has(key)))
-        throw new Error('Frozen attachment map contains a reference outside this source')
+      for (const key of Object.keys(mapping))
+        if (!originals.has(key)) {
+          // An older checkpoint may also have copied task-wide history before
+          // it gained an independent authority. Its established source pin is
+          // proof for that frozen reference even after the task scope cleans up.
+          await db.namedTxn('chat-migration:read-attachment-pin', {
+            scope: await migrationAttachmentScope(db, owner, migrationId),
+            ref: mapping[key]
+          })
+        }
       const expected = [...originals].map(([key, ref]) => {
         const pinned = mapping[key]
         if (!pinned?.contentHash || pinned.artifactId !== ref.artifactId)
@@ -637,18 +684,44 @@ export function createLegacyChatSource(opts: {
         if (item.kind === 'event') header.events++
         else header.records++
       }
-      async function* buffers() {
+      const copied: Array<{ kind: string; id: string }> = []
+      async function* buffers(proof = false) {
         yield Buffer.from(JSON.stringify(header) + '\n')
-        for await (const item of items(owner, metadata!))
+        for await (const item of items(owner, metadata!)) {
+          if (proof && frozenTaskContent(metadata!) && item.kind === 'record') {
+            const r = item.value
+            if (r.kind === 'prompt') copied.push({ kind: 'prompt', id: r.id })
+            if (r.kind === 'settings') {
+              if (r.id.startsWith('attachment-message:'))
+                copied.push({ kind: 'attachment-message', id: r.id.slice(19) })
+              if (r.id.startsWith('legacy-turn-preview:'))
+                copied.push({ kind: 'turn-preview', id: r.id.slice(20) })
+              if (r.id === 'legacy-diagnostics-cutoff' && typeof r.value === 'number')
+                copied.push({ kind: 'diagnostics-cutoff', id: String(r.value) })
+            }
+          }
           yield Buffer.from(JSON.stringify(item) + '\n')
+        }
       }
       const hash = createHash('sha256')
       let bytes = 0
-      for await (const b of buffers()) {
+      for await (const b of buffers(true)) {
         hash.update(b)
         bytes += b.length
       }
       const manifest: ChatTransferManifest = { header, bytes, hash: hash.digest('hex') }
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: 'DELETE FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=?',
+          params: [owner.id, migrationId]
+        },
+        ...copied.map((r) => ({
+          type: 'run' as const,
+          sql: 'INSERT INTO chat_legacy_task_copies VALUES(?,?,?,?,?)',
+          params: [owner.id, migrationId, manifest.hash, r.kind, r.id]
+        }))
+      ])
       return {
         manifest,
         async *chunks(offset: number) {
@@ -696,13 +769,16 @@ export function createLegacyChatSource(opts: {
         authoritative.migration_id !== owner.migrationId
       )
         throw new Error('Legacy cleanup ownership changed')
-      // Membership must remain stable after deleting the native tab's last
-      // content row, including a retry after SQL cleanup already committed.
-      const ownsTaskContent =
-        owner.tabId === (await leader(owner.taskId)) ||
-        owner.tabId === `prompt-history:${owner.taskId}`
-      const diagnosticsCutoff =
-        opts.diagnostics && ownsTaskContent ? await opts.diagnostics.freeze(owner.taskId) : null
+      // A terminal tab can close at any phase. Only source IDs actually present
+      // in this verified stream authorize task-wide cleanup; never elect a new
+      // leader here. Historical prepared streams without this ledger retain
+      // their source until the independent task-content conversation copies it.
+      const proofParams = [owner.id, owner.migrationId, owner.manifestHash]
+      const diagnostics = await db.get<{ source_id: string }>(
+        "SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='diagnostics-cutoff'",
+        proofParams
+      )
+      const diagnosticsCutoff = diagnostics ? Number(diagnostics.source_id) : null
       await db.get('PRAGMA secure_delete=ON')
       const ops: BatchOp[] = [
         'chat_events',
@@ -716,21 +792,23 @@ export function createLegacyChatSource(opts: {
         sql: `DELETE FROM ${table} WHERE tab_id=?`,
         params: [owner.tabId]
       }))
-      if (ownsTaskContent) {
-        ops.push(
-          { type: 'run', sql: 'DELETE FROM agent_prompts WHERE task_id=?', params: [owner.taskId] },
-          {
-            type: 'run',
-            sql: 'DELETE FROM chat_attachment_messages WHERE task_id=?',
-            params: [owner.taskId]
-          },
-          {
-            type: 'run',
-            sql: "UPDATE agent_turns SET prompt_preview='' WHERE task_id=?",
-            params: [owner.taskId]
-          }
-        )
-      }
+      ops.push(
+        {
+          type: 'run',
+          sql: "DELETE FROM agent_prompts WHERE task_id=? AND id IN(SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='prompt')",
+          params: [owner.taskId, ...proofParams]
+        },
+        {
+          type: 'run',
+          sql: "DELETE FROM chat_attachment_messages WHERE task_id=? AND message_id IN(SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='attachment-message')",
+          params: [owner.taskId, ...proofParams]
+        },
+        {
+          type: 'run',
+          sql: "UPDATE agent_turns SET prompt_preview='' WHERE task_id=? AND id IN(SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='turn-preview')",
+          params: [owner.taskId, ...proofParams]
+        }
+      )
       // Keep thread ids for authorization and hidden-tab lifetime; content stays local.
       ops.push(
         {

@@ -421,6 +421,28 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
         'INSERT INTO chat_provider_bindings VALUES(?,?,?) ON CONFLICT(provider_session_id,mode) DO NOTHING',
         [providerSessionId, providerMode(mode), id]
       )
+      // Early legacy exports copied every provider's session list into each
+      // owner. Repair only a proven cross-provider misclaim: the durable legacy
+      // authority must name this target, and the old owner's provider must not
+      // match the session. Genuine same-provider conflicts remain fenced.
+      await db.run(
+        `UPDATE chat_provider_bindings SET conversation_id=? WHERE provider_session_id=? AND mode=?
+        AND EXISTS(SELECT 1 FROM chat_ownership old JOIN chat_ownership target ON target.id=?
+          JOIN chat_legacy_session_authority a ON a.task_id=target.task_id AND a.mode=? AND a.provider_session_id=? AND a.conversation_id=target.id
+          WHERE old.id=chat_provider_bindings.conversation_id AND old.task_id=target.task_id AND target.state='active'
+          AND (CASE old.mode WHEN 'claude-chat' THEN 'claude-code' WHEN 'codex-chat' THEN 'codex' ELSE old.mode END)<>?
+          AND (CASE target.mode WHEN 'claude-chat' THEN 'claude-code' WHEN 'codex-chat' THEN 'codex' ELSE target.mode END)=?)`,
+        [
+          id,
+          providerSessionId,
+          providerMode(mode),
+          id,
+          providerMode(mode),
+          providerSessionId,
+          providerMode(mode),
+          providerMode(mode)
+        ]
+      )
       // A deleted owner holds no history, so its binding is dead. Let a live
       // owner of the same task resume the session (e.g. a closed tab's session
       // reopened in the task's main tab); otherwise every metadata retry fails.

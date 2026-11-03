@@ -72,9 +72,19 @@ export function createComputerChatServices(opts: {
   const folderDeletions = createChatFolderDeletions(opts.db)
   const lifecycle = createChatLifecycle({ db: opts.db, request: opts.request })
   const request = lifecycle.request
-  const recovery = createChatRecovery({ db: opts.db, request: opts.request, gate: opts.gate })
+  const recovery = createChatRecovery({
+    db: opts.db,
+    request: opts.request,
+    gate: opts.gate,
+    recoverTabTransitions: (computerId, identity, transitions) =>
+      relay.recoverProviderTransitions(computerId, identity, transitions)
+  })
   const recovered = new Map<string, Promise<void>>()
   const recoveryFinished = new Set<string>()
+  const recoveryNonce = randomUUID()
+  const recoveryGenerations = new Map<string, number>()
+  const recoveryGeneration = (computerId: string) =>
+    `${recoveryNonce}:${computerId}:${recoveryGenerations.get(computerId) ?? 0}`
   function invalidateRecovery(computerId: string) {
     recovered.delete(computerId)
     recoveryFinished.delete(computerId)
@@ -91,8 +101,9 @@ export function createComputerChatServices(opts: {
     if (force && recoveryFinished.has(computerId)) invalidateRecovery(computerId)
     const existing = recovered.get(computerId)
     if (existing) return existing
-    const work = recovery
-      .reconcile(computerId)
+    const work = relay
+      .resumeProviderTransitions(computerId)
+      .then(() => recovery.reconcile(computerId))
       .then(() => lifecycle.sync(computerId))
       .then(() => relay.resumeInitializations(computerId))
       .then(async () => {
@@ -119,7 +130,13 @@ export function createComputerChatServices(opts: {
           kind: 'retention.configure',
           days: opts.retentionDays ?? 0
         })
-        if (recovered.get(computerId) === work) recoveryFinished.add(computerId)
+        if (recovered.get(computerId) === work) {
+          const previous = recoveryGenerations.get(computerId)
+          recoveryGenerations.set(computerId, previous === undefined ? 0 : previous + 1)
+          recoveryFinished.add(computerId)
+          if (previous !== undefined)
+            await relay.notifyReplayRequired(computerId, recoveryGeneration(computerId))
+        }
       })
       .catch((error) => {
         if (recovered.get(computerId) === work) invalidateRecovery(computerId)
@@ -134,14 +151,16 @@ export function createComputerChatServices(opts: {
       [owner.taskId]
     )
     if (!task) throw new Error('Chat task no longer exists')
-    if (owner.tabId.startsWith('artifact-store:'))
+    if (owner.tabId.startsWith('artifact-store:') || owner.tabId === `task-content:${owner.taskId}`)
       return {
         identity: {
           id: owner.id,
           taskId: owner.taskId,
           tabId: owner.tabId,
           mode: owner.mode,
-          epoch: owner.epoch
+          epoch:
+            owner.epoch +
+            (owner.tabId.startsWith('task-content:') && owner.state !== 'active' ? 1 : 0)
         },
         projectId: null,
         cwd: '',
@@ -149,7 +168,10 @@ export function createComputerChatServices(opts: {
         defaultFlags: null,
         env: {},
         revision: (await ownership.get(owner.id))
-          ? await ownership.settingsRevision(owner.id, 'artifact-store-v1')
+          ? await ownership.settingsRevision(
+              owner.id,
+              owner.tabId.startsWith('task-content:') ? 'task-content-v1' : 'artifact-store-v1'
+            )
           : 0
       }
     const computerId = owner.destinationComputerId ?? owner.computerId
@@ -229,6 +251,13 @@ export function createComputerChatServices(opts: {
     readAttachment: (_owner, ref) => opts.attachments.read(ref),
     readPinnedAttachment: opts.attachments.readForMigration,
     collectReleasedAttachments: opts.attachments.readForMigration?.collectGarbage,
+    resolveSessionComputer: async (owner) => {
+      const recorded = await opts.db.get<{ computer_id: string }>(
+        'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+        [owner.tabId]
+      )
+      return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
+    },
     quiesce: async (owner) => {
       if (await opts.hasLiveTask(owner.taskId))
         throw new Error(
@@ -311,6 +340,17 @@ export function createComputerChatServices(opts: {
     recoverComputer,
     bootstrap,
     migrate: migration.ensure,
+    quiesceProvider: async (owner) => {
+      for (const mode of [owner.mode, terminalStorageMode(owner.mode)]) {
+        const config = await opts.legacyData.readProviderConfig(owner.taskId, mode)
+        for (const session of [config.conversationId, config.chatConversationId])
+          if (
+            session &&
+            defaultConversationRegistry.isConversationLive('terminal', owner.taskId, session)
+          )
+            await defaultConversationRegistry.releaseConversation('terminal', owner.taskId, session)
+      }
+    },
     beforeInvoke: async (owner, method, args) => {
       await sealAttachments(owner, method, args)
       if (
@@ -490,6 +530,7 @@ export function createComputerChatServices(opts: {
     } satisfies NonNullable<ChatDeps['testing']>,
     computers,
     availability: createChatAvailability({
+      recoveryGeneration,
       db: opts.db,
       ownership,
       resolveComputer: opts.resolveAvailabilityComputer ?? opts.resolveComputer,
@@ -659,6 +700,18 @@ export function createComputerChatServices(opts: {
           : null)
       const owner =
         native && context?.mode ? await ownership.forProviderSession(native, context.mode) : null
+      if (
+        !owner &&
+        native &&
+        context?.mode &&
+        (await opts.db.get(
+          'SELECT 1 FROM chat_legacy_session_authority WHERE task_id=? AND mode=? AND provider_session_id=? AND conversation_id IS NULL',
+          [taskId, terminalStorageMode(context.mode), native]
+        ))
+      )
+        throw new Error(
+          'Original computer for this historical provider session is ambiguous. Open its original chat before continuing.'
+        )
       if (owner) {
         await recoverComputer(owner.computerId!)
         await assertTaskHistory()
