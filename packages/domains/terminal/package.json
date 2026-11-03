@@ -27,7 +27,8 @@
     "./suppress-device-status": "./src/client/suppress-device-status.ts",
     "./terminal-state": "./src/client/terminal-state-reducer.ts",
     "./live-blocks": "./src/client/live-blocks.ts",
-    "./runtime": "./src/server/chat-runtime.ts"
+    "./runtime": "./src/server/chat-runtime.ts",
+    "./pty-detection": "./src/server/pty-detection.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

@@ -590,6 +590,8 @@ run_harness packages/domains/terminal/src/client/option-as-meta.test.ts
 run_harness packages/domains/terminal/src/client/suppress-device-status.test.ts
 # Terminal — hub replay buffer: eviction prelude + chunk immutability.
 run_harness packages/domains/terminal/src/server/ring-buffer.test.ts
+# Terminal — lean pty-detection entry the computer bundles: no hub/app tree reachable.
+run_harness packages/domains/terminal/src/server/pty-detection.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
