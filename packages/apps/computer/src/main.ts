@@ -53,6 +53,7 @@ import { createGitHandlers } from './handlers/git'
 import { createGitOpHandlers } from './handlers/git-op'
 import { createExecRunHandlers } from './handlers/exec-run'
 import { createAgentConfigHandlers } from './handlers/agent-config'
+import { createUsageCollectHandlers } from './handlers/usage-collect'
 import { createWorkspaceChangesHandlers } from './handlers/workspace-changes'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
@@ -231,6 +232,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createGitOpHandlers(ctx),
     ...createExecRunHandlers(ctx, deps.getProjectPaths),
     ...createAgentConfigHandlers(ctx),
+    ...createUsageCollectHandlers(ctx),
     ...createWorkspaceChangesHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...fs.handlers,
     ...createComputerConfigHandlers(ctx),

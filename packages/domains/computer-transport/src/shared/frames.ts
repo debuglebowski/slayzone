@@ -566,6 +566,8 @@ export const HubToComputerMethods = {
   execRun: 'exec.run',
   /** The AI-config ops' filesystem (instructions, skills, MCP) — see below. */
   agentConfigFs: 'agentConfig.fs',
+  /** The agents' usage logs on the computer, parsed there from the hub's cursors. */
+  usageCollect: 'usage.collect',
   // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
@@ -1349,6 +1351,31 @@ export const agentConfigFsParamsSchema = z.discriminatedUnion('op', [
 ])
 export type AgentConfigFsParams = z.infer<typeof agentConfigFsParamsSchema>
 export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
+
+/**
+ * `usage.collect`: parse this computer's agent usage logs from `cursors` (per log
+ * file: the offset and mtime the last parse ended at — the hub keeps them per
+ * computer). Answers each changed file's new records and its new cursor.
+ */
+export const usageCollectParamsSchema = z.object({
+  cursors: z.record(
+    z.string(),
+    z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
+  )
+})
+export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
+export const usageCollectResultSchema = z.object({
+  results: z.array(
+    z.object({
+      sourceFile: z.string(),
+      fileMtimeMs: z.number(),
+      endOffset: z.number().int().nonnegative(),
+      // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
+      records: z.array(z.record(z.string(), z.unknown()))
+    })
+  )
+})
+export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)

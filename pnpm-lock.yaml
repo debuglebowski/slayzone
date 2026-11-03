@@ -804,6 +804,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal
+      '@slayzone/usage-analytics':
+        specifier: workspace:*
+        version: link:../../domains/usage-analytics
       '@slayzone/worktrees':
         specifier: workspace:*
         version: link:../../domains/worktrees

@@ -103,6 +103,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
     when: (p) => ['writeFile', 'mkdir', 'unlink', 'rmdir', 'rename'].includes(String(p.op)),
     detail: (p) => ({ op: p.op, path: p.path, ...(p.to ? { to: p.to } : {}) })
   },
+  // Reads the agents' own usage logs; changes nothing.
+  'usage.collect': null,
   // An automation's shell command: the program, never the command line (it can
   // carry a templated prompt).
   'exec.run': {
