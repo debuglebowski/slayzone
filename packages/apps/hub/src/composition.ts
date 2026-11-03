@@ -80,12 +80,8 @@ import {
   setPtySpawnLookups,
   setRemoteMcpEnvProvider,
   ptyEvents,
-  createChatOps,
   setClaudeSessionReader,
   setClaudeTranscriptLocator,
-  createChatQueueOps,
-  chatEvents,
-  chatQueueEvents,
   listPtys,
   hasPty,
   hasLivePty,
@@ -121,15 +117,12 @@ import {
   hasSessionUserInput,
   markSessionUserInput,
   clearSessionUserInputMark,
-  configureTransport,
   createDbChatDataOps,
   setPtyEnricher,
   resetTerminalRuntimeForTest,
   setAgentLifecycleEvents,
   setPtyDeps,
   setChatDeps,
-  setChatAttachmentReader,
-  createWorkspaceChangesStore,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
@@ -155,7 +148,7 @@ import {
   aiConfigComputerGone
 } from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
-import { createChatPromptRecorder, setTurnGitRouting } from '@slayzone/agent-turns/server'
+import { setTurnGitRouting } from '@slayzone/agent-turns/server'
 import { setUsageCollectRouting, type ParseResult } from '@slayzone/usage-analytics/server'
 import { setTestScanRouting } from '@slayzone/test-panel/server'
 import {
@@ -230,8 +223,6 @@ import {
 } from '@slayzone/computer-transport/shared'
 import {
   createHubComputerGateway,
-  createRoutingChatBackend,
-  createRoutingWorkspaceCaptureBackend,
   createRoutingPtyBackend,
   createRoutingProcessBackend,
   createRemoteFsAdapters,
