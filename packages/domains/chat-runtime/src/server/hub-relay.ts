@@ -852,14 +852,24 @@ export function createHubChatRelay(opts: {
     metadataChains.set(key, next)
     return next
   }
-  async function drainMetadata(computerId: string, restore = false) {
+  /**
+   * `skip`: conversations whose migration to this computer is still unfinished
+   * (recovery isolated its failure). Their destination may hold them only as
+   * prepared, so active metadata must not be requested from it yet.
+   */
+  async function drainMetadata(
+    computerId: string,
+    restore = false,
+    skip: ReadonlySet<string> = new Set()
+  ) {
     if (restore) {
       const owners = await db.all<{ id: string }>(
         `SELECT id FROM chat_ownership o WHERE computer_id=? AND state='active' AND NOT EXISTS(
           SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
         [computerId]
       )
-      for (const owner of owners) await recoverMetadata(computerId, owner.id)
+      for (const owner of owners)
+        if (!skip.has(owner.id)) await recoverMetadata(computerId, owner.id)
     }
     for (;;) {
       const updates = (await opts.request(computerId, {

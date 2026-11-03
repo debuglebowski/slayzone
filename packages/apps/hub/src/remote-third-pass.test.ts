@@ -282,14 +282,11 @@ test('remote third: rolling upgrade preserves hub stop controls through a declar
       { timeout: 10_000 }
     )
     barrier = createComputerChatCommandBarrier({
-      recover: async () => {
-        throw new Error('Chat recovery pending')
-      },
       lifecycle: async () => {
-        throw new Error('must not reach lifecycle')
+        throw new Error('Task lifecycle fence pending')
       }
     })
-    await expect(barrier('pc', 'fs.pathExists')).rejects.toThrow('Chat recovery pending')
+    await expect(barrier('pc', 'fs.pathExists')).rejects.toThrow('Task lifecycle fence pending')
     await barrier('pc', 'pty.kill')
     await barrier('pc', 'proc.kill')
     await expect(

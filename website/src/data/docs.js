@@ -135,7 +135,15 @@ slay tasks create "Fix nav bug" --project "My App"
 slay tasks open &lt;id&gt;
 
 # See running background processes
-slay processes list</code></pre>
+slay processes list
+
+# Drive a task's agent (chat or terminal) and read its answer
+slay agent send --task &lt;id&gt; "Fix the failing tests" --wait
+slay agent read --task &lt;id&gt; --last 5
+
+# Answer what a chat agent asks
+slay chat prompts --task &lt;id&gt;
+slay chat allow &lt;requestId&gt; --task &lt;id&gt;</code></pre>
     `
   },
   {

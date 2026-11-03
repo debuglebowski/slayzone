@@ -2034,6 +2034,16 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // No tool id = no row it could belong to (rows saved before the driver
       // resolved `task_updated` by task id carry an empty one).
       if (!event.toolUseId) return state
+      // A command's task (a Monitor, a run_in_background Bash) reported with the
+      // sub-agent frame: a resumed CLI's notice for the previous process's
+      // orphans, which its tracker never saw start. It ends that command.
+      const command = state.commandTasks.get(event.toolUseId)
+      if (command) {
+        const ended = endedCommandStatus(event.status)
+        return ended && command.status === 'running'
+          ? setCommandTask(state, event.toolUseId, { ...command, status: ended })
+          : state
+      }
       // Every `task_*` system event is treated as enrichment of an in-flight
       // row. The row is closed (→ 'completed'/'failed') only by the outer Task
       // tool's `tool-result` event — see `case 'tool-result'` below. This
@@ -2096,10 +2106,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           }
         }
       }
+      // No row yet: a notification of a task that already ended (an orphan of a
+      // previous process) is a row that ended, never one left running.
+      const phase = endedPhase(event.status) ?? incomingPhase
       const item: TimelineItem = {
         kind: 'sub-agent',
         toolUseId: id,
-        phase: incomingPhase,
+        phase,
         description: event.description,
         status: event.status,
         summary: event.summary,
@@ -2120,7 +2133,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         subAgentIndex: nextIdx,
         childIndex,
         inFlightSubAgents:
-          incomingPhase === 'in-flight'
+          phase === 'in-flight'
             ? withRowIn(state.inFlightSubAgents, at)
             : state.inFlightSubAgents
       }
@@ -3149,6 +3162,13 @@ function isAsyncLaunch(event: ToolResultEvent): boolean {
 function endedPhase(status: string | undefined): 'completed' | 'failed' | null {
   if (status === 'completed') return 'completed'
   if (status === 'failed' || status === 'killed' || status === 'stopped') return 'failed'
+  return null
+}
+
+/** The status a `task_notification` ends a command task in; null = still running. */
+function endedCommandStatus(status: string | undefined): CommandTaskStatus | null {
+  if (status === 'completed' || status === 'failed') return status
+  if (status === 'killed' || status === 'stopped') return 'killed'
   return null
 }
 

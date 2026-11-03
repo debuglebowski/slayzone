@@ -16,6 +16,8 @@ const server = vi.hoisted(() => ({
   fail: false,
   load: null as Promise<ChatTabState | null> | null,
   delays: new Map<string, Promise<void>>(),
+  /** Committed on the computer, but the reply is late (slow relay / busy computer). */
+  ackDelays: new Map<string, Promise<void>>(),
   rev: 0
 }))
 
@@ -70,7 +72,9 @@ vi.mock('../../trpc', () => ({
               draft: { ...draft, rev: server.rev },
               scroll: server.state?.scroll ?? null
             }
-            return { rev: server.rev }
+            const rev = server.rev
+            await server.ackDelays.get(draft.text)
+            return { rev }
           }
         }
       }
@@ -112,6 +116,7 @@ beforeEach(() => {
   server.fail = false
   server.load = null
   server.delays.clear()
+  server.ackDelays.clear()
   localStorage.clear()
 })
 afterEach(() => {
@@ -614,6 +619,63 @@ describe('useChatDraftPersistence', () => {
       recovered = h.result.current.recoverConflict(local)
     })
     expect(recovered?.text).toBe('local offline edit\n\nnewer other-device draft')
+  })
+
+  it('reconnect while its own save is unacknowledged is not a conflict (send right after typing)', async () => {
+    const ownership = { id: 'same-owner', epoch: 1 }
+    server.state = { draft: { ...empty, rev: 1 }, scroll: null, ownership }
+    server.rev = 1
+    let acknowledge!: () => void
+    server.ackDelays.set(
+      'Commit',
+      new Promise((resolve) => {
+        acknowledge = resolve
+      })
+    )
+    const h = setup({ draft: empty, mode: 'claude-chat' })
+    await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    h.rerender({ draft: { text: 'Commit', attachments: [] }, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.state.draft).toMatchObject({ text: 'Commit', rev: 2 })
+    // Enter sends it: the composer clears while the save's reply is still on its way.
+    h.rerender({ draft: empty, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    // The computer comes back "ready": the composer re-reads its own unacknowledged save.
+    await act(async () => {
+      await h.result.current.retry()
+    })
+    expect(h.result.current.conflictAvailable).toBe(false)
+    await act(async () => {
+      acknowledge()
+    })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(h.result.current.conflictAvailable).toBe(false)
+    expect(server.state.draft.text).toBe('')
+    expect(localStorage.getItem(draftJournalKey('tab-1', 'local', 'claude-chat'))).toBeNull()
+  })
+
+  it('a reload before its own save was acknowledged restores the newer journal, no conflict', async () => {
+    const ownership = { id: 'same-owner', epoch: 1 }
+    server.state = { draft: { ...empty, rev: 1 }, scroll: null, ownership }
+    server.rev = 1
+    // The reload kills the old page: its reply never arrives, its queued save never runs.
+    server.ackDelays.set('Commit', new Promise(() => undefined))
+    const before = setup({ draft: empty, mode: 'claude-chat' })
+    await vi.waitFor(() => expect(before.result.current.loaded).toBe(true))
+    before.rerender({ draft: { text: 'Commit', attachments: [] }, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    before.rerender({ draft: empty, mode: 'claude-chat' })
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.state.draft).toMatchObject({ text: 'Commit', rev: 2 })
+
+    const after = setup({ draft: empty, mode: 'claude-chat' }, new QueryClient())
+    await vi.waitFor(() => expect(after.result.current.loaded).toBe(true))
+    // `loaded` is already true from the journal: let the server read land too.
+    await act(() => vi.advanceTimersByTimeAsync(50))
+    expect(after.result.current.conflictAvailable).toBe(false)
+    expect(after.result.current.saved).toEqual(empty)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(server.state.draft).toMatchObject({ text: '', rev: 3 })
   })
 
   it('old unscoped journals require explicit recovery into the selected provider', async () => {

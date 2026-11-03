@@ -7,7 +7,8 @@
  *
  * @module chat/tool-cards/codex-items
  */
-import type { ToolInvocation } from '@slayzone/terminal/client'
+// DOM-free subpath: the hub reaches this file through `prompt-answers`.
+import type { ToolInvocation } from '@slayzone/terminal/reducer'
 
 export const CODEX_COMMAND_TOOL = 'codex/commandExecution'
 export const CODEX_WEB_SEARCH_TOOL = 'codex/webSearch'

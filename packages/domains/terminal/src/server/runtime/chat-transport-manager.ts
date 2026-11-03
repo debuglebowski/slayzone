@@ -10,7 +10,8 @@ import type {
   AgentEvent,
   CommandTaskOutput,
   OutgoingUserMessage,
-  ResultEvent
+  ResultEvent,
+  ChatTurnStatus
 } from '@slayzone/terminal-contracts'
 import {
   chatCapabilitiesForMode,
@@ -975,6 +976,18 @@ export function createChatTransport(
     return (
       tab.terminalState === 'running' || tab.pendingPrompts.size > 0 || tab.outbox.inFlight() > 0
     )
+  }
+
+  /** Where the tab's turn stands (see `ChatTurnStatus`); null for an unknown tab. */
+  function getTurnStatus(tabId: string): ChatTurnStatus | null {
+    const tab = tabs.get(tabId)
+    if (!tab) return null
+    return {
+      state: tab.terminalState,
+      turnOpen: turnOpen(tab),
+      pendingRequestIds: [...tab.pendingPrompts],
+      outboxInFlight: tab.outbox.inFlight()
+    }
   }
 
   function isReadyForQueuedMessage(tabId: string): boolean {
@@ -3828,6 +3841,7 @@ export function createChatTransport(
     getSessionTerminalState,
     isSessionAwaitingUserInput,
     isTurnOpen,
+    getTurnStatus,
     isReadyForQueuedMessage,
     hydrateSession,
     ensureSpawned,
@@ -3901,6 +3915,7 @@ export const {
   getSessionTerminalState,
   isSessionAwaitingUserInput,
   isTurnOpen,
+  getTurnStatus,
   isReadyForQueuedMessage,
   hydrateSession,
   ensureSpawned,

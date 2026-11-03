@@ -20,6 +20,7 @@ const tabOperations = new Set([
   'getReplay',
   'getBufferSince',
   'getInfo',
+  'getTurnStatus',
   'openTimeline',
   'timelinePages',
   'searchTimeline',

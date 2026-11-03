@@ -316,6 +316,35 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
 
+  // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──
+  'GET /api/chat/:id/status': checked(taskPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/prompts': checked(taskPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/transcript': checked(taskPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/wait': checked(taskPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/follow': checked(taskPrefix('params.id'), tab('query.tab')),
+  'POST /api/chat/:id/send': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/prompts/:requestId': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/interrupt': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/stop': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/restart': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/kill': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/reset': checked(taskPrefix('params.id'), tab('body.tab')),
+  'GET /api/chat/:id/queue': checked(taskPrefix('params.id'), tab('query.tab')),
+  'DELETE /api/chat/:id/queue': checked(taskPrefix('params.id'), tab('query.tab')),
+  'DELETE /api/chat/:id/queue/:itemId': checked(taskPrefix('params.id'), tab('query.tab')),
+  'POST /api/chat/:id/queue/:itemId/steer': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/settings': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/fork': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/rewind': checked(taskPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/handoff': checked(taskPrefix('params.id'), tab('body.tab')),
+
+  // ── agent (a task's main agent, chat or terminal) ──
+  'GET /api/agent/:id/status': checked(taskPrefix('params.id')),
+  'POST /api/agent/:id/send': checked(taskPrefix('params.id')),
+  'GET /api/agent/:id/wait': checked(taskPrefix('params.id')),
+  'GET /api/agent/:id/read': checked(taskPrefix('params.id')),
+  'POST /api/agent/:id/interrupt': checked(taskPrefix('params.id')),
+
   // ── terminal tabs ──
   'POST /api/tabs/create': checked(task('body.taskId')),
   'POST /api/tabs/rename': checked(tab('body.id')),

@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3'
 import { randomUUID, createHash } from 'node:crypto'
 import {
+  chmodSync,
   closeSync,
   constants,
   copyFileSync,
@@ -17,6 +18,7 @@ import {
   statSync
 } from 'node:fs'
 import path from 'node:path'
+import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { isPathSafeId } from '@slayzone/platform/safe-path'
 import { artifactFilePathIn, artifactsDirOf } from '@slayzone/task/server/artifact-paths'
 
@@ -54,12 +56,10 @@ function save(file: string, bytes: Buffer | string): void {
 
 function saveCopy(file: string, source: string): void {
   copyFileSync(source, file, constants.COPYFILE_FICLONE)
-  const fd = openSync(file, 'r')
-  try {
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
-  }
+  // The copy inherits the source's mode. Normalize to save()'s private 0o600: on Windows a
+  // read-only attribute blocks both the flush handle and a later rename over the working file.
+  chmodSync(file, 0o600)
+  fsyncFileSync(file)
 }
 
 function sameContents(left: string, right: string): boolean {

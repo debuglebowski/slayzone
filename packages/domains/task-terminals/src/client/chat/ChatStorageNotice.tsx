@@ -1,42 +1,52 @@
-import { LoaderCircle, MonitorOff } from 'lucide-react'
+import { LoaderCircle, MonitorOff, RotateCw } from 'lucide-react'
 import { chatAvailabilityMessage, type ChatAvailability } from '@slayzone/terminal-contracts'
+import { Button } from '@slayzone/ui'
+
+/**
+ * An exceptional storage state (offline, migrating, …) above a chat that still
+ * works or waits. A chat that failed to open shows `ChatOpenFailure` instead.
+ */
 export function ChatStorageNotice({
   status,
-  error = null,
   onRetry
 }: {
   status: ChatAvailability | null
-  error?: string | null
   onRetry: () => void | Promise<void>
 }) {
   const message = status ? chatAvailabilityMessage(status) : null
-  if (!message && !error) return null
-  const pending = !error && status?.state === 'migrating'
+  if (!message) return null
+  const pending = status?.state === 'migrating'
   return (
-    <div role="status" className="flex items-start gap-2 border-b bg-muted/40 px-3 py-2 text-xs">
+    <div
+      role="status"
+      data-testid="chat-storage-notice"
+      className="flex items-start gap-3 border-b bg-muted/40 px-4 py-3 text-xs"
+    >
       {pending ? (
         <LoaderCircle
           aria-hidden
-          className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none"
+          className="mt-px size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
         />
       ) : (
-        <MonitorOff aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <MonitorOff aria-hidden className="mt-px size-4 shrink-0 text-muted-foreground" />
       )}
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{error ? 'Chat unavailable' : message?.title}</p>
-        {message?.detail && <p className="text-muted-foreground">{message.detail}</p>}
-        {error && <p className="text-destructive">{error}</p>}
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="text-sm font-medium leading-4 text-foreground">{message.title}</p>
+        <p className="text-muted-foreground">{message.detail}</p>
       </div>
       {status?.state !== 'deleted' && (
-        <button
+        <Button
           type="button"
-          className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
+          variant="outline"
+          size="sm"
+          className="-my-0.5 h-7 gap-1.5 px-2.5 text-xs"
           onClick={() => {
             void onRetry()
           }}
         >
+          <RotateCw aria-hidden className="size-3" />
           Retry
-        </button>
+        </Button>
       )}
     </div>
   )

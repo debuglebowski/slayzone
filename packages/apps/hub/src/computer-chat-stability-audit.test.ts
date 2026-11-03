@@ -165,10 +165,7 @@ test('audit: interrupted activation also blocks native stop through global comma
     )
     await f.restartComputer()
     const after = f.services()
-    const barrier = createComputerChatCommandBarrier({
-      recover: after.recoverComputer,
-      lifecycle: after.lifecycle.sync
-    })
+    const barrier = createComputerChatCommandBarrier({ lifecycle: after.lifecycle.syncNative })
     await expect(barrier('pc', 'pty.kill')).resolves.toBeUndefined()
   } finally {
     await f.close()

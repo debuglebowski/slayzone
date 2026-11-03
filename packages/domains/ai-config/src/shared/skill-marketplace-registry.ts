@@ -41,6 +41,7 @@ depends_on:
   - slay-projects
   - slay-processes
   - slay-pty
+  - slay-chat
   - slay-panels
   - slay-auto-title
 ---
@@ -61,6 +62,7 @@ All ID arguments support prefix matching (e.g., \`a1b2\` matches the full UUID s
 | slay-projects | \`slay projects\` | Project CRUD |
 | slay-processes | \`slay processes\` | Inspect and control running processes |
 | slay-pty | \`slay pty\` | Interact with PTY terminal sessions |
+| slay-chat | \`slay chat\`, \`slay agent\` | Drive chat-mode agents; one surface for any task's main agent |
 | slay-panels | \`slay panels\` | Manage custom web panels |
 | slay-auto-title | — | Auto-title tasks from conversation context |
 
@@ -655,6 +657,8 @@ All commands support ID prefix matching.
 
 ## Orchestration patterns
 
+Tasks in **chat mode** (\`claude-chat\`, \`codex-chat\`) have no PTY: drive them with \`slay chat\`. To drive a task's main agent without caring which mode it runs in, use \`slay agent\` (see the \`slay-chat\` skill).
+
 Submit a prompt to a Claude Code session and wait for completion:
 \`\`\`bash
 slay pty submit <id> "Fix the failing tests in src/auth.ts"
@@ -665,6 +669,85 @@ slay pty buffer <id>  # read the result
 Pipe multi-line input:
 \`\`\`bash
 cat prompt.md | slay pty submit <id>
+\`\`\`
+`
+  },
+
+  {
+    slug: 'slay-chat',
+    name: 'Slay Chat',
+    description: 'Drive chat-mode agents (and any task main agent) via the slay CLI',
+    category: 'cli',
+    author: 'SlayZone',
+
+    content: `---
+name: slay-chat
+description: "Drive chat-mode agents (and any task main agent) via the slay CLI"
+trigger: auto
+---
+
+A task in **chat mode** (\`claude-chat\`, \`codex-chat\`) runs its agent as a chat, not a terminal — it has no PTY, so \`slay pty\` cannot see it. \`slay chat\` drives it the way the chat panel does. \`slay agent\` drives a task's main agent whatever it runs in (chat or terminal) — the one to use when orchestrating subtasks.
+
+Every command targets \`--task <id>\` (id or prefix; default \`$SLAYZONE_TASK_ID\`). \`slay chat\` also takes \`--tab <id>\` for another chat tab of the task (default: its main tab).
+
+## Exit codes (\`wait\`, \`send --wait\`)
+
+- \`0\` — settled (turn done, nothing queued) / the message was answered
+- \`3\` — the agent is **waiting on a prompt** (permission, question, plan): see \`slay chat prompts\`
+- \`2\` — timeout
+- \`1\` — error, or the agent is not running
+
+An agent may not \`wait\` on its own chat turn (it would never settle) — the CLI refuses it.
+
+## slay chat
+
+- \`slay chat status [--json]\` — state, open turn, pending prompts, queue, model, permission mode
+- \`slay chat send [text] [--steer] [--wait] [--timeout <ms>] [--json]\` — send a message; reads stdin without text. Queued like the composer (it waits for the running turn); \`--steer\` takes it into the running turn now. Starts the agent if it is not running. Prints the message id; \`--wait\` waits until the agent answered it (or stops on a prompt). Default timeout 10 min
+- \`slay chat wait [--until idle|prompt] [--timeout <ms>] [--json]\` — wait until the turn settles (or, \`--until prompt\`, only until the agent asks)
+- \`slay chat read [--last <n>] [--since <row>] [-v] [--json]\` — the conversation as text, as the panel shows it (rewound rows left out). \`-v\` adds thinking and tool results. \`--json\` rows carry \`row\` (for \`--since\`) and, for user messages, \`messageId\` (for fork / rewind)
+- \`slay chat follow [--since <row>] [-v] [--json]\` — stream rows, prompts and state changes as they happen (\`--since -1\` replays everything first)
+- \`slay chat prompts [--json]\` — what the agent waits on: each prompt's id, kind (\`permission\`, \`plan\`, \`question\`, \`codex-question\`), its option ids / questions
+- Answering (prompt id prefix ok):
+  - \`slay chat allow <requestId>\` — the card's Yes (a plan: approve)
+  - \`slay chat always <requestId>\` — allow and don't ask again (the rule / directory row)
+  - \`slay chat deny <requestId> [-m <text>]\` — No (the turn stops); with \`-m\`: reject and tell the agent what to do instead (the turn goes on)
+  - \`slay chat respond <requestId> <optionId> [-m <text>]\` — any row by its id from \`prompts\`
+  - \`slay chat answer <requestId> [answers...] [-a "<key>=<value>"] [--decline]\` — a question: one positional answer per question in order, or \`-a\` keyed by question text, header or number (repeat a key for several values). A value is an option label, an option number, or your own text
+- \`slay chat interrupt\` — stop the running turn (session and queue stay)
+- \`slay chat stop\` — the panel's Stop: clear the queue, stop the turn, pop an unanswered last message back
+- \`slay chat restart\` / \`kill\` — restart / kill the agent process (the conversation stays)
+- \`slay chat reset\` — a fresh conversation in this tab (history and queue cleared)
+- \`slay chat queue\` / \`queue rm <id>\` / \`queue steer <id>\` / \`queue clear\` — queued messages
+- \`slay chat set [--permission-mode <m>] [--model <m>] [--effort <e>]\` — session settings
+- \`slay chat fork <messageId>\` — a new conversation up to that message's turn
+- \`slay chat rewind <messageId> [--before] [--files | --files-only] [--preview]\` — rewind the conversation (and/or files)
+- \`slay chat handoff\` — continue the main chat in the terminal (claude-chat → claude-code), resuming the conversation
+
+## slay agent (chat or terminal)
+
+- \`slay agent status [--json]\` — kind (\`chat\` | \`pty\`), mode, state, pending prompts
+- \`slay agent send [text] [--steer] [--wait] [--timeout <ms>]\` — chat: queued; terminal: submitted. Starts the agent if needed
+- \`slay agent wait [--timeout <ms>]\` — same exit codes as \`slay chat wait\`
+- \`slay agent read [--last <n>] [-v]\` — chat transcript, or the terminal buffer
+- \`slay agent interrupt\` — chat: interrupt; terminal: Ctrl-C
+
+## Orchestration patterns
+
+Hand a subtask its work and collect the result, whatever mode it runs in:
+\`\`\`bash
+slay agent send --task <id> "Fix the failing tests in src/auth.ts" --wait --timeout 1800000
+case $? in
+  0) slay agent read --task <id> --last 5 ;;
+  3) slay chat prompts --task <id> ;;   # it needs an answer
+  *) echo "failed or timed out" ;;
+esac
+\`\`\`
+
+Answer what a chat agent asks:
+\`\`\`bash
+slay chat prompts --task <id>
+slay chat allow <requestId> --task <id>
+slay chat answer <requestId> "Postgres" --task <id>
 \`\`\`
 `
   },

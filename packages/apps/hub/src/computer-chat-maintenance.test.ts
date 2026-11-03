@@ -4,16 +4,13 @@ import {
   createComputerChatCommandBarrier
 } from './computer-chat-maintenance'
 
-test('normal computer commands await recovery and lifecycle; control frames cannot recurse', async () => {
+test('normal computer commands await lifecycle fences, never chat recovery; control frames cannot recurse', async () => {
   const calls: string[] = []
   let fail = false
   const barrier = createComputerChatCommandBarrier({
-    recover: async (pc) => {
-      calls.push(`recover:${pc}`)
-      if (fail) throw new Error('pending')
-    },
     lifecycle: async (pc) => {
       calls.push(`lifecycle:${pc}`)
+      if (fail) throw new Error('pending')
     }
   })
   for (const method of [
@@ -35,14 +32,14 @@ test('normal computer commands await recovery and lifecycle; control frames cann
     'claudeSession.read'
   ])
     await barrier('pc', method)
-  expect(calls).toEqual(Array.from({ length: 5 }, () => ['recover:pc', 'lifecycle:pc']).flat())
+  expect(calls).toEqual(Array.from({ length: 5 }, () => 'lifecycle:pc'))
   calls.length = 0
   fail = true
   await barrier('pc', 'pty.kill')
   await barrier('pc', 'proc.kill')
   expect(calls).toEqual([])
   await expect(barrier('pc', 'fs.readFile')).rejects.toThrow('pending')
-  expect(calls).toEqual(['recover:pc'])
+  expect(calls).toEqual(['lifecycle:pc'])
 })
 
 test('reconnect orders project sync before recovery and migration, under computer owner', async () => {

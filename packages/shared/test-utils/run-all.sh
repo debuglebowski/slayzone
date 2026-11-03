@@ -728,10 +728,12 @@ run_harness packages/apps/hub/src/storage-stability-audit.test.ts
 run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
 run_harness packages/apps/hub/src/recovery-second-pass.test.ts
+run_harness packages/apps/hub/src/computer-chat-isolation.test.ts
 run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
 run_harness packages/apps/hub/src/content-third-pass.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-recovery-fixes.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifact-backup.test.ts
+run_harness packages/domains/chat-runtime/src/server/windows-fsync.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachment-pin-review.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration-attachment-pins.test.ts
 run_harness packages/domains/chat-runtime/src/server/queue-admission.test.ts
@@ -765,6 +767,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-turn-status.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
@@ -844,6 +847,10 @@ run_harness packages/apps/api/src/http/rest-api/tasks/blocked.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/tags.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/progress.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/reset-conversation.test.ts
+# /api/chat/* (slay chat) against a stub chat runtime: addressing, prompts, send, wait outcomes.
+run_harness packages/apps/api/src/http/rest-api/chat/chat.test.ts
+# /api/agent/* (slay agent): one surface dispatching to the chat core or the pty runtime.
+run_harness packages/apps/api/src/http/rest-api/agent/agent.test.ts
 run_harness packages/apps/api/src/http/rest-api/tags/crud.test.ts
 run_harness packages/apps/api/src/http/rest-api/projects/list.test.ts
 run_harness packages/apps/api/src/http/rest-api/projects/resolve-by-path.test.ts
@@ -891,6 +898,10 @@ run_harness packages/apps/cli/test/tasks-ext.test.ts
 run_harness packages/apps/cli/test/projects-update.test.ts
 # Wave-3 CLI read commands routed through REST (hub-aware cutover).
 run_harness packages/apps/cli/test/cli-read-rest.test.ts
+# slay chat / slay agent → /api/chat + /api/agent over a scripted chat runtime: exit codes, answers, self-wait guard.
+run_harness packages/apps/cli/test/chat-rest.test.ts
+# Shell completions are generated from the command tree (nothing to keep in sync by hand).
+run_harness packages/apps/cli/src/commands/completions.test.ts
 # Wave-3.5 CLI artifact commands routed through REST — metadata AND content
 # (read/create/upload/delete/download), incl. a no-local-database suite.
 run_harness packages/apps/cli/test/cli-artifacts-rest.test.ts
@@ -948,6 +959,7 @@ run_harness packages/domains/task-terminals/src/client/chat/autocomplete/ranking
 run_harness packages/domains/task-terminals/src/client/chat/attachments/prepare-attachment.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-answers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-trigger-notification.test.ts
@@ -977,6 +989,7 @@ run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
+run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
 run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts
 # Replay guards: batch = one by one (both providers), never changes its input, linear,
 # indexes = scans after every event.
@@ -1192,6 +1205,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/prompts/codex-approvals.test.tsx \
   packages/shared/ui/src/agent-pills.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatOpenFailure.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatStorageNotice.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.final-plan.test.tsx \

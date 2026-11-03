@@ -407,11 +407,24 @@ export function createLegacyChatSource(opts: {
     }
   }
   const attachmentKey = (ref: ChatAttachment) => `${ref.artifactId}:${ref.contentHash ?? ''}`
-  function visitItem(item: Item, attachment: (ref: ChatAttachment) => ChatAttachment): Item {
+  /** What a reference to a no-longer-available artifact becomes in migrated history. */
+  const unavailableText = (ref: ChatAttachment) => `[Attachment unavailable: ${ref.name}]`
+  /**
+   * Rewrites every attachment reference a migrated item owns. `null` from the
+   * callback means the referenced artifact is unavailable (deleted, or moved to
+   * another task): the reference is dropped and, where the item has visible text,
+   * replaced by a placeholder naming the file, so no dangling reference reaches
+   * the computer and history keeps a trace of what was attached.
+   */
+  function visitItem(item: Item, attachment: (ref: ChatAttachment) => ChatAttachment | null): Item {
     const content = (blocks: import('@slayzone/terminal-contracts').UserContentBlock[]) =>
-      blocks.map((block) =>
-        block.type === 'attachment' ? { ...block, attachment: attachment(block.attachment) } : block
-      )
+      blocks.map((block): import('@slayzone/terminal-contracts').UserContentBlock => {
+        if (block.type !== 'attachment') return block
+        const next = attachment(block.attachment)
+        return next
+          ? { ...block, attachment: next }
+          : { type: 'text', text: unavailableText(block.attachment) }
+      })
     if (item.kind === 'event') {
       const event = item.value.event
       return event.kind === 'user-message' && event.content
@@ -423,14 +436,21 @@ export function createLegacyChatSource(opts: {
     }
     if (item.value.kind === 'draft') {
       const value = item.value.value as ChatTabState
+      const attachments: ChatAttachment[] = []
+      const unavailable: string[] = []
+      for (const ref of value.draft.attachments) {
+        const next = attachment(ref)
+        if (next) attachments.push(next)
+        else unavailable.push(unavailableText(ref))
+      }
+      const text = unavailable.length
+        ? [value.draft.text, ...unavailable].filter(Boolean).join('\n')
+        : value.draft.text
       return {
         ...item,
         value: {
           ...item.value,
-          value: {
-            ...value,
-            draft: { ...value.draft, attachments: value.draft.attachments.map(attachment) }
-          }
+          value: { ...value, draft: { ...value.draft, text, attachments } }
         }
       }
     }
@@ -446,7 +466,10 @@ export function createLegacyChatSource(opts: {
     if (item.value.kind === 'settings' && item.value.id.startsWith('attachment-message:'))
       return {
         ...item,
-        value: { ...item.value, value: (item.value.value as ChatAttachment[]).map(attachment) }
+        value: {
+          ...item.value,
+          value: (item.value.value as ChatAttachment[]).flatMap((ref) => attachment(ref) ?? [])
+        }
       }
     if (item.kind === 'record' && item.value.kind === 'timeline') {
       const value = { ...(item.value.value as Record<string, unknown>) }
@@ -459,10 +482,10 @@ export function createLegacyChatSource(opts: {
             if (record.kind !== 'user-text' || !Array.isArray(record.attachments)) return input
             return {
               ...record,
-              attachments: record.attachments.map((ref: ChatAttachment) => {
+              attachments: record.attachments.flatMap((ref: ChatAttachment) => {
                 const next = attachment(ref)
                 changed ||= next !== ref
-                return next
+                return next ?? []
               })
             }
           }
@@ -485,7 +508,8 @@ export function createLegacyChatSource(opts: {
     }
     return item
   }
-  type AttachmentMap = Record<string, ChatAttachment>
+  /** Frozen per-migration reference map; `null` = artifact unavailable at freeze. */
+  type AttachmentMap = Record<string, ChatAttachment | null>
   async function attachmentManifest(
     owner: HubChatOwnership,
     metadata: ChatRecord[],
@@ -519,16 +543,19 @@ export function createLegacyChatSource(opts: {
       )
         yield visitItem(item, (ref) => {
           // The map may itself contain already sealed references.
+          const key = attachmentKey(ref)
+          if (Object.hasOwn(mapping, key) && mapping[key] === null) return null
           const sealed =
-            mapping[attachmentKey(ref)] ??
+            mapping[key] ??
             Object.values(mapping).find(
-              (r) => r.artifactId === ref.artifactId && r.contentHash === ref.contentHash
+              (r) => r?.artifactId === ref.artifactId && r.contentHash === ref.contentHash
             )
           if (!sealed) throw new Error('Migration attachment reference changed after checkpoint')
           return { ...ref, contentHash: sealed.contentHash, size: sealed.size }
         })
     const emitted = new Set<string>()
     for (const ref of Object.values(mapping)) {
+      if (!ref) continue
       const key = attachmentKey(ref)
       if (emitted.has(key)) continue
       emitted.add(key)
@@ -644,7 +671,7 @@ export function createLegacyChatSource(opts: {
           return ref
         })
       for (const key of Object.keys(mapping))
-        if (!originals.has(key)) {
+        if (!originals.has(key) && mapping[key]) {
           // An older checkpoint may also have copied task-wide history before
           // it gained an independent authority. Its established source pin is
           // proof for that frozen reference even after the task scope cleans up.
@@ -653,16 +680,18 @@ export function createLegacyChatSource(opts: {
             ref: mapping[key]
           })
         }
-      const expected = [...originals].map(([key, ref]) => {
+      // Frozen as unavailable: carried as a placeholder, never pinned.
+      const available = [...originals].filter(([key]) => mapping[key] !== null)
+      const expected = available.map(([key, ref]) => {
         const pinned = mapping[key]
         if (!pinned?.contentHash || pinned.artifactId !== ref.artifactId)
           throw new Error('Frozen attachment map is incomplete or changed')
         return { contentHash: pinned.contentHash, size: pinned.size }
       })
-      if (originals.size)
+      if (available.length)
         await db.namedTxn('chat-migration:pin-attachments', {
           scope: await migrationAttachmentScope(db, owner, migrationId),
-          refs: [...originals.values()],
+          refs: available.map(([, ref]) => ref),
           expected
         })
       const header: ChatTransferHeader = {

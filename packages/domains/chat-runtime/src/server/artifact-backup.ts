@@ -10,6 +10,7 @@ import {
   rmSync,
   statSync
 } from 'node:fs'
+import { fsyncFile } from '@slayzone/platform/durable-fs'
 import { join } from 'node:path'
 import {
   BlobStore,
@@ -98,12 +99,9 @@ async function captureWorkingFiles(store: ChatStorage, stagingDir: string) {
       await fsAsync.copyFile(original.linked, original.sealed, constants.COPYFILE_FICLONE)
       if (fileProof(original.linked) !== original.stat)
         throw new Error('Working original changed during backup capture; retry backup')
-      const fd = await fsAsync.open(original.sealed, 'r')
-      try {
-        await fd.sync()
-      } finally {
-        await fd.close()
-      }
+      // Private copy: owner-writable so Windows can flush it even if the user made the original read-only.
+      await fsAsync.chmod(original.sealed, 0o600)
+      await fsyncFile(original.sealed)
       const hash = createHash('sha256')
       for await (const chunk of createReadStream(original.sealed)) hash.update(chunk)
       const contentHash = hash.digest('hex'),

@@ -42,6 +42,8 @@ export interface UseChatDisplayOpts {
   summary?: TimelinePageSummary
   /** Drop pages' rows from memory (paged history: what is far from the view). */
   unloadPages?: (pages: readonly number[]) => void
+  /** The agent's cwd: which turn captures show a card (`activityView`). */
+  cwd?: string
 }
 
 /** Pages of a paged history kept loaded besides the tail, at most (~6,000 rows). */
@@ -186,7 +188,8 @@ export function useChatDisplay({
   loadPages,
   searchPages,
   summary: givenSummary,
-  unloadPages
+  unloadPages,
+  cwd
 }: UseChatDisplayOpts) {
   // When `finalOnly` is on, keep user msgs + result + the last assistant
   // text per turn. Drop thinking/tools/intermediate text/noise.
@@ -376,8 +379,8 @@ export function useChatDisplay({
   )
   const search = useChatSearch(searchTimeline)
   const activity = useMemo(
-    () => (groupActivity && !search.query ? activityView(baseTimeline, inFlight) : null),
-    [baseTimeline, groupActivity, inFlight, search.query]
+    () => (groupActivity && !search.query ? activityView(baseTimeline, inFlight, cwd) : null),
+    [baseTimeline, groupActivity, inFlight, search.query, cwd]
   )
   const displayedTimeline = activity?.rows ?? (search.query ? searchTimeline : baseTimeline)
 

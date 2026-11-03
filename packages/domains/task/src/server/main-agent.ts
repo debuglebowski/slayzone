@@ -34,7 +34,8 @@ import {
 import {
   mainTerminalCwd,
   mainTerminalCwdNeedsRepos,
-  mainTerminalProps
+  mainTerminalProps,
+  type MainTerminalProps
 } from '../shared/main-terminal'
 
 export type MainAgentDeps = {
@@ -96,51 +97,94 @@ export function startMainAgent(
   return run
 }
 
-async function startOnce(
+/**
+ * Everything needed to start (or address) `taskId`'s main agent, resolved from what
+ * the hub stores — ONE derivation for `startMainAgent` and the REST agent/chat
+ * routes. Ensures the main tab row (it follows the task's mode). The folder is
+ * resolved on demand (`resolveCwd`): it may run repo discovery on the task's computer.
+ */
+export interface MainAgentLaunch {
+  taskId: string
+  /** The main tab (its id is the task id). */
+  tabId: string
+  /** `${taskId}:${tabId}`, as every `pty.*` / chat event keys it. */
+  sessionId: string
+  mode: string
+  kind: 'pty' | 'chat'
+  props: MainTerminalProps
+  /** What the desktop's main chat tab passes as `providerFlagsOverride`. */
+  providerFlagsOverride: string | null
+  /** The folder the agent runs in; throws PRECONDITION_FAILED when the task has none. */
+  resolveCwd(): Promise<string>
+}
+
+export async function resolveMainAgentLaunch(
   db: SlayzoneDb,
-  { taskId, cols, rows }: StartMainAgentInput,
+  taskId: string,
   getTask: (taskId: string) => Promise<Task | null>
-): Promise<StartMainAgentResult> {
+): Promise<MainAgentLaunch> {
   const task = await getTask(taskId)
   if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
   const project = parseProject(
     await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
   )
-  // The project's folder on the computer this task's work runs on — where its
-  // worktrees are and where the task's other agents start.
-  const projectRoot = await getRuntimeAdapters().projectRootForTask(db, taskId, task.project_id)
   const pty = getPtyDeps().ops
   const props = mainTerminalProps(task, project, await pty.terminalModesList())
   // The main tab follows the task's mode, as the desktop's `taskTerminals.ensureMain`.
   const tab = await ensureMainTab(db, taskId, props.mode)
-  const sessionId = `${taskId}:${tab.id}`
-  const kind = isChatSupported(props.mode) ? 'chat' : 'pty'
-  const base = { sessionId, tabId: tab.id, mode: props.mode, kind } as const
+  return {
+    taskId,
+    tabId: tab.id,
+    sessionId: `${taskId}:${tab.id}`,
+    mode: props.mode,
+    kind: isChatSupported(props.mode) ? 'chat' : 'pty',
+    props,
+    providerFlagsOverride: props.providerFlags ?? null,
+    async resolveCwd() {
+      // The project's folder on the computer this task's work runs on — where its
+      // worktrees are and where the task's other agents start.
+      const projectRoot = await getRuntimeAdapters().projectRootForTask(db, taskId, task.project_id)
+      const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
+        ? await detectChildRepos(taskId, projectRoot!)
+        : []
+      const cwd = mainTerminalCwd(task, project, projectRoot, detected)
+      if (!cwd) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            "This task has no folder to run in: set the project's folder or the task's base dir"
+        })
+      }
+      return cwd
+    }
+  }
+}
+
+async function startOnce(
+  db: SlayzoneDb,
+  { taskId, cols, rows }: StartMainAgentInput,
+  getTask: (taskId: string) => Promise<Task | null>
+): Promise<StartMainAgentResult> {
+  const launch = await resolveMainAgentLaunch(db, taskId, getTask)
+  const { sessionId, kind, props } = launch
+  const pty = getPtyDeps().ops
+  const base = { sessionId, tabId: launch.tabId, mode: launch.mode, kind } as const
 
   // Live already: answer it. Starting again would replace it — a pty create kills
   // the session at this id; a chat hydrate with any other cwd tears the tab down.
   const live = await liveState(kind, sessionId)
   if (live) return { ...base, cwd: null, state: live, started: false }
 
-  const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
-    ? await detectChildRepos(taskId, projectRoot!)
-    : []
-  const cwd = mainTerminalCwd(task, project, projectRoot, detected)
-  if (!cwd) {
-    throw new TRPCError({
-      code: 'PRECONDITION_FAILED',
-      message: "This task has no folder to run in: set the project's folder or the task's base dir"
-    })
-  }
+  const cwd = await launch.resolveCwd()
 
   if (kind === 'chat') {
     await getChatDeps().ops.start({
-      tabId: tab.id,
+      tabId: launch.tabId,
       taskId,
       mode: props.mode,
       cwd,
       // What the desktop's main chat tab passes (`pane.providerFlags ?? null`).
-      providerFlagsOverride: props.providerFlags ?? null,
+      providerFlagsOverride: launch.providerFlagsOverride,
       // Asked for now: the computer's foreground admission lane.
       reason: 'user'
     })

@@ -19,7 +19,9 @@ import {
   childProcessEnv,
   ENV_MANIFEST,
   type EnvOverlay,
+  LAUNCHER_NODE_ENV,
   NON_PREFIXED_INFRA,
+  overrideNodeEnv,
   sanitizeSpawnEnv,
   type EnvScope
 } from './env-manifest'
@@ -429,5 +431,60 @@ describe('childProcessEnv', () => {
 
   test('defaults base to process.env', () => {
     expect(Object.entries(childProcessEnv())).toEqual(Object.entries(sanitizeSpawnEnv(process.env)))
+  })
+})
+
+// SlayZone's own processes run as `NODE_ENV=production` (packaged-node-env.ts, the hub's
+// default-node-env.ts), but a user terminal or agent must get the NODE_ENV its user
+// launched SlayZone with — a leaked `production` makes `npm ci` skip devDependencies
+// and runs Vite/vitest outside dev mode (issue #171).
+describe('NODE_ENV SlayZone set for itself', () => {
+  function launchedWith(nodeEnv: string | undefined): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
+    if (nodeEnv !== undefined) env.NODE_ENV = nodeEnv
+    overrideNodeEnv(env, 'production')
+    return env
+  }
+
+  test("overrideNodeEnv sets the value and records the launcher's", () => {
+    const env = launchedWith('development')
+    expect(env.NODE_ENV).toBe('production')
+    expect(env[LAUNCHER_NODE_ENV]).toBe('development')
+  })
+
+  test('a launcher without NODE_ENV: the child gets none', () => {
+    const env = launchedWith(undefined)
+    expect(env.NODE_ENV).toBe('production')
+    expect(sanitizeSpawnEnv(env)).toEqual({ PATH: '/usr/bin' })
+    expect(childProcessEnv(undefined, env)).toEqual({ PATH: '/usr/bin' })
+  })
+
+  test("a launcher's own NODE_ENV: the child gets it back", () => {
+    const env = launchedWith('development')
+    expect(sanitizeSpawnEnv(env)).toEqual({ PATH: '/usr/bin', NODE_ENV: 'development' })
+    expect(childProcessEnv(undefined, env)).toEqual({ PATH: '/usr/bin', NODE_ENV: 'development' })
+  })
+
+  test('a launcher that already had the value: nothing recorded, child keeps it', () => {
+    const env = launchedWith('production')
+    expect(env[LAUNCHER_NODE_ENV]).toBeUndefined()
+    expect(sanitizeSpawnEnv(env).NODE_ENV).toBe('production')
+  })
+
+  test('a second override down the tree keeps the FIRST launcher value', () => {
+    // main overrides, the hub sidecar inherits main's env and overrides again
+    const env = launchedWith(undefined)
+    overrideNodeEnv(env, 'test')
+    expect(env.NODE_ENV).toBe('test')
+    expect(env[LAUNCHER_NODE_ENV]).toBe('')
+    expect(sanitizeSpawnEnv(env).NODE_ENV).toBeUndefined()
+  })
+
+  test('a per-spawn overlay still wins', () => {
+    expect(childProcessEnv({ NODE_ENV: 'x' }, launchedWith(undefined)).NODE_ENV).toBe('x')
+  })
+
+  test('the record itself is infra: never reaches a child', () => {
+    expect(ENV_MANIFEST[LAUNCHER_NODE_ENV]).toBe('infra')
   })
 })

@@ -1,10 +1,11 @@
-import { Fragment, type ReactNode, useContext } from 'react'
-import { Bot, Check, Timer, X } from 'lucide-react'
+import { Fragment, type ReactNode, useContext, useId } from 'react'
+import { Bot, Check, ChevronRight, Timer, X } from 'lucide-react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import { CHAT_CARD_INDENT } from './tool-cards/card-shell'
 import { ToolFocusContext } from './tool-cards/tool-focus'
 import { flashRow, useRevealTimelineItem } from './timeline-reveal'
+import { useRowUiState } from './row-ui-state'
 import {
   describeTurnTriggerNotification,
   type TurnTriggerNotification
@@ -16,9 +17,10 @@ type TurnTriggerItem = Extract<TimelineItem, { kind: 'turn-trigger' }>
  * The agent opened this turn because background work told it something; each
  * message it received is shown above its answer. A sub-agent that ended: a
  * one-line card, its name and ✓ / ✕ (the name shows its sub-agent row —
- * scrolled to, its Activities opened). A line a watch printed: a labelled card
- * (`Watch` / `Printed`); a background task's end: `Task`. A watch that hit its
- * time limit: a short "Watch stopped" pill (which watch on hover).
+ * scrolled to, its Activities opened). A line a watch printed: one line naming
+ * the watch, the line itself (`Printed`) on click (the answer below already
+ * says what the agent made of it); a background task's end: `Task`. A watch
+ * that hit its time limit: a short "Watch stopped" pill (which watch on hover).
  */
 export function TurnTriggerRow({ item }: { item: TurnTriggerItem }) {
   const reveal = useRevealTimelineItem()
@@ -71,6 +73,7 @@ function NotificationRow({ notification }: { notification: TurnTriggerNotificati
   if (view.kind === 'card') {
     return (
       <TriggerCard
+        id={notification.uuid}
         testId="turn-trigger-notification"
         rows={view.rows.map((row) => ({
           label: row.label,
@@ -113,26 +116,76 @@ interface TriggerCardRow {
   className?: string
 }
 
-/** One message the agent received, labelled: `Watch <name>` / `Printed <line>`. */
-function TriggerCard({ rows, testId }: { rows: readonly TriggerCardRow[]; testId: string }) {
+/**
+ * One message the agent received, labelled (`Watch <name>` / `Printed <line>`):
+ * one line, its first row; expanded, every row in full.
+ */
+function TriggerCard({
+  id,
+  rows,
+  testId
+}: {
+  id: string
+  rows: readonly TriggerCardRow[]
+  testId: string
+}) {
+  const [expanded, setExpanded] = useRowUiState(`turn-trigger:${id}`, false, false)
+  const detailsId = useId()
+  const [first, ...rest] = rows
+  if (!first) return null
   return (
     <div
-      className="grid w-fit max-w-full grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-0.5 rounded-lg border border-border/50 bg-card px-3 py-2"
+      // One grid (label · value · chevron): the details' labels line up with the line's.
+      className="grid w-fit max-w-full grid-cols-[auto_minmax(0,1fr)_auto] rounded-lg border border-border/50 bg-card"
       data-testid={testId}
     >
-      {rows.map((row) => (
-        <Fragment key={row.label}>
-          <span>{row.label}</span>
-          <span
-            className={cn(
-              'whitespace-pre-wrap [overflow-wrap:anywhere]',
-              row.className ?? 'text-foreground'
-            )}
-          >
-            {row.value}
-          </span>
-        </Fragment>
-      ))}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        onClick={() => setExpanded(!expanded)}
+        className={cn(
+          'col-span-3 grid grid-cols-subgrid items-center gap-x-3.5 rounded-lg px-3 py-1.5 text-left hover:bg-muted/40',
+          expanded && 'items-start'
+        )}
+      >
+        <span>{first.label}</span>
+        <span
+          className={cn(
+            expanded ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'truncate',
+            first.className ?? 'text-foreground'
+          )}
+        >
+          {first.value}
+        </span>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            'size-3 shrink-0 transition-transform motion-reduce:transition-none',
+            expanded && 'mt-0.5 rotate-90'
+          )}
+        />
+      </button>
+      <div
+        id={detailsId}
+        hidden={!expanded || rest.length === 0}
+        className="col-span-3 grid grid-cols-subgrid gap-x-3.5 gap-y-0.5 px-3 pb-2"
+      >
+        {expanded &&
+          rest.map((row) => (
+            <Fragment key={row.label}>
+              <span>{row.label}</span>
+              <span
+                className={cn(
+                  'whitespace-pre-wrap [overflow-wrap:anywhere]',
+                  row.className ?? 'text-foreground'
+                )}
+              >
+                {row.value}
+              </span>
+            </Fragment>
+          ))}
+      </div>
     </div>
   )
 }

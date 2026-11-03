@@ -1,5 +1,5 @@
 import type { TimelineItem } from '@slayzone/terminal/client'
-import { unifiedChangeRows } from './files-changed/turn-changes'
+import { turnChangeSources, unifiedChangeRows, workspaceChangesShows } from './files-changed/turn-changes'
 
 export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
 export type SubAgentItem = Extract<TimelineItem, { kind: 'sub-agent' }>
@@ -27,12 +27,15 @@ export interface ActivityTurn {
 /** Group each loaded part of a turn without associating items across history gaps. */
 export function activityView(
   rows: readonly TimelineItem[],
-  inFlight: boolean
+  inFlight: boolean,
+  /** The agent's cwd: whether a capture shows a card depends on it (`workspaceChangesShows`). */
+  cwd?: string
 ): {
   rows: TimelineItem[]
   turns: Map<TimelineItem, ActivityTurn>
   hosts: Map<TimelineItem, TimelineItem>
 } {
+  const sources = turnChangeSources(rows)
   rows = unifiedChangeRows(rows)
   // Captures may finish after the result, even after the next user message.
   // Attach by message identity; a gap ends the association window.
@@ -95,13 +98,18 @@ export function activityView(
         ? last
         : null
     const entries = final ? activity.filter((item) => item !== final) : activity
-    const files = segment.filter(
+    const allFiles = segment.filter(
       (item): item is Extract<TimelineItem, { kind: 'files-changed' | 'workspace-changes' }> =>
         item.kind === 'files-changed' || item.kind === 'workspace-changes'
     )
+    // A capture that shows no card is no content: no turn block, no footer for it.
+    const files = allFiles.filter(
+      (item) =>
+        item.kind !== 'workspace-changes' || workspaceChangesShows(item, sources.get(item), cwd)
+    )
     const subAgents = segment.filter((item): item is SubAgentItem => item.kind === 'sub-agent')
     const trigger = segment.find((item): item is TurnTriggerItem => item.kind === 'turn-trigger')
-    const hidden = new Set<TimelineItem>([...entries, ...files, ...subAgents, ...empty])
+    const hidden = new Set<TimelineItem>([...entries, ...allFiles, ...subAgents, ...empty])
     if (final && result) hidden.add(result)
     let kept = segment.filter((item) => !hidden.has(item))
     // A turn carries its trigger as a header; it never anchors the turn itself.
@@ -134,7 +142,7 @@ export function activityView(
       })
       if (trigger) hosts.set(trigger, host)
       for (const item of entries) hosts.set(item, host)
-      for (const item of files) hosts.set(item, host)
+      for (const item of allFiles) hosts.set(item, host)
       for (const item of subAgents) hosts.set(item, host)
       if (final && result) hosts.set(result, host)
     }
@@ -144,9 +152,12 @@ export function activityView(
   }
   for (const item of rows) {
     if (consumed.has(item)) continue
-    // CLI process diagnostics can arrive after turn completion. Keep consecutive
-    // diagnostics with that turn, stopping at any new content or history boundary.
-    if (completed && item.kind !== 'stderr') flush(false)
+    // CLI process diagnostics and workspace captures are published after turn
+    // completion. A capture with no user message to attach to (an agent-started
+    // turn's) belongs to the turn that just ended: alone it is an empty turn
+    // block, and the next turn would claim it. Keep them with that turn,
+    // stopping at any new content or history boundary.
+    if (completed && item.kind !== 'stderr' && item.kind !== 'workspace-changes') flush(false)
     if (item.kind === 'history-gap' || item.kind === 'conversation-branch') {
       flush(false, false)
       output.push(item)

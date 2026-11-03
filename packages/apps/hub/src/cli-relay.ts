@@ -23,7 +23,7 @@ export function createHubCliRelay(deps: {
   const relay = createHttpTunnelServer((computerId, req, res) => {
     const raw = req.url ?? ''
     const allowed =
-      /^\/api\/(?:tasks|projects|tags|templates|automations|artifacts|artifact-folders|pty|tabs|panels|processes|notify|open-task|close-task|open-artifact|browser)(?:[/?]|$)/.test(
+      /^\/api\/(?:tasks|projects|tags|templates|automations|artifacts|artifact-folders|pty|tabs|panels|processes|notify|open-task|close-task|open-artifact|browser|chat|agent)(?:[/?]|$)/.test(
         raw
       ) ||
       (req.method === 'GET' && raw.split('?')[0] === '/api/computers')

@@ -21,13 +21,20 @@ const controls = new Set<string>([
   HubToComputerMethods.projectSetPath,
   HubToComputerMethods.projectForgetPath
 ])
+/**
+ * Native commands (pty/proc/fs/git) wait only for task lifecycle fences: a
+ * paused or deleted task's work must be stopped on the computer before new work
+ * is admitted. They deliberately do NOT wait for chat recovery. Chat history is
+ * per conversation; one damaged conversation, or chat storage that cannot open,
+ * must not take terminals, files and git down for every task on the computer.
+ * Chat operations and agent placement (`resolvePtyComputer`) enforce recovery
+ * for the tasks whose history depends on it.
+ */
 export function createComputerChatCommandBarrier(opts: {
-  recover(computerId: string): Promise<void>
   lifecycle(computerId: string): Promise<void>
 }) {
   return async (computerId: string, method: string) => {
     if (controls.has(method)) return
-    await opts.recover(computerId)
     await opts.lifecycle(computerId)
   }
 }

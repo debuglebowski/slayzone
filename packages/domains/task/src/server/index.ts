@@ -18,6 +18,9 @@ export { setTaskDeps, getTaskOps } from './task-router-deps'
 // `task.startMainAgent`'s repo-discovery seam (api wires worktrees' `detectChildRepos`).
 export {
   setMainAgentDeps,
+  resolveMainAgentLaunch,
+  startMainAgent,
+  type MainAgentLaunch,
   type MainAgentDeps,
   type StartMainAgentInput,
   type StartMainAgentResult

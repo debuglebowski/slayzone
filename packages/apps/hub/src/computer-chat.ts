@@ -101,6 +101,11 @@ export function createComputerChatServices(opts: {
     if (force && recoveryFinished.has(computerId)) invalidateRecovery(computerId)
     const existing = recovered.get(computerId)
     if (existing) return existing
+    // Conversations whose migration failed this pass. One damaged legacy
+    // conversation stays fenced on its own (its task refuses agents and its chat
+    // reports the error, retried on the next pass) instead of failing recovery
+    // for every task on the computer.
+    const unfinished = new Set<string>()
     const work = relay
       .resumeProviderTransitions(computerId)
       .then(() => recovery.reconcile(computerId))
@@ -116,10 +121,17 @@ export function createComputerChatServices(opts: {
               SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
           [computerId, computerId]
         )
-        for (const owner of owners) await migration.ensure(owner.id, computerId)
+        for (const owner of owners)
+          await migration.ensure(owner.id, computerId).catch((error: unknown) => {
+            unfinished.add(owner.id)
+            console.error(
+              `[chat] migration of conversation ${owner.id} to computer ${computerId} pending:`,
+              error
+            )
+          })
       })
       .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
-      .then(() => relay.drainMetadata(computerId, true))
+      .then(() => relay.drainMetadata(computerId, true, unfinished))
       .then(() => lifecycle.sync(computerId))
       .then(async () => {
         await opts.request(computerId, {
@@ -723,10 +735,26 @@ export function createComputerChatServices(opts: {
       }
       const computerId = await opts.resolveComputer(taskId)
       if (computerId) {
-        await recoverComputer(computerId)
+        // Chat recovery guards this task's own chat history on the computer. A
+        // task with none there must not inherit another conversation's (or a
+        // broken chat store's) recovery failure: native agents and shells start.
+        const ownsChat = async () =>
+          !!(await opts.db.get(
+            "SELECT 1 FROM chat_ownership WHERE task_id=? AND state<>'deleted' AND (computer_id=? OR destination_computer_id=?) LIMIT 1",
+            [taskId, computerId, computerId]
+          ))
+        await recoverComputer(computerId).catch(async (error: unknown) => {
+          if (await ownsChat()) throw error
+        })
         await assertTaskHistory()
         await lifecycle.track(taskId, computerId)
-        await lifecycle.sync(computerId)
+        // Same split for lifecycle: the full sync also delivers chat-store state
+        // (reactivation, conversation/folder deletions). Without chat there, only
+        // the pause/delete fence that stops native work is required.
+        await lifecycle.sync(computerId).catch(async (error: unknown) => {
+          if (await ownsChat()) throw error
+          await lifecycle.syncNative(computerId)
+        })
       }
       return computerId
     },

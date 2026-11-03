@@ -15,6 +15,8 @@ import { processesCommand } from './commands/processes'
 import { completionsCommand } from './commands/completions'
 import { initCommand } from './commands/init'
 import { ptyCommand } from './commands/pty'
+import { chatCommand } from './commands/chat'
+import { agentCommand } from './commands/agent'
 import { tagsCommand } from './commands/tags'
 import { templatesCommand } from './commands/templates'
 import { automationsCommand } from './commands/automations'
@@ -93,9 +95,11 @@ program.addCommand(templatesCommand())
 program.addCommand(automationsCommand())
 program.addCommand(panelsCommand())
 program.addCommand(processesCommand())
-program.addCommand(completionsCommand())
+program.addCommand(completionsCommand(() => program))
 program.addCommand(initCommand())
 program.addCommand(ptyCommand())
+program.addCommand(chatCommand())
+program.addCommand(agentCommand())
 program.addCommand(hubCommand())
 program.addCommand(computerCommand())
 program.addCommand(updateCommand())

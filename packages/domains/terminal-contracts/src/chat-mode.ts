@@ -33,28 +33,53 @@ export function rawPermissionModeToChatMode(raw: string | null | undefined): Cha
 }
 
 /**
+ * The process identity the Claude CLI's startup root guard reads: the uid it
+ * runs as (null where the platform has none, i.e. Windows) and its env.
+ */
+export interface ClaudeSpawnIdentity {
+  uid: number | null
+  env: { IS_SANDBOX?: string | undefined }
+}
+
+/**
+ * True when the Claude CLI refuses to start with bypass active OR merely
+ * allowed. Verified in 2.1.317's `setup()`: `--permission-mode
+ * bypassPermissions` or `--allow-dangerously-skip-permissions` under uid 0
+ * exits 1 ("cannot be used with root/sudo privileges") unless `IS_SANDBOX=1`.
+ * (The CLI also exempts `CLAUDE_CODE_BUBBLEWRAP`; its truthiness parse is not
+ * verified, so it is not counted: that only costs the live bypass switch.)
+ */
+export function claudeRefusesBypass(identity: ClaudeSpawnIdentity): boolean {
+  return identity.uid === 0 && identity.env.IS_SANDBOX !== '1'
+}
+
+/**
  * Inverse: produce CLI flags for a Claude `ChatMode`. Non-Claude modes
  * (codex-chat carries its policy over the JSON-RPC protocol, not flags)
  * yield no flags — that backend ignores `providerFlags` entirely.
  *
  * `bypass` uses `--permission-mode bypassPermissions`: the older
  * `--allow-dangerously-skip-permissions` only ALLOWS bypass and starts the CLI
- * in `default`. Every other mode carries that allow flag too, so switching INTO
- * bypass later is a live `set_permission_mode` (the CLI refuses it with
- * `bypass_not_launched` otherwise) — no restart cutting the running turn.
+ * in `default`. With `allowBypass`, every other mode carries that allow flag
+ * too, so switching INTO bypass later is a live `set_permission_mode` (the CLI
+ * refuses it with `bypass_not_launched` otherwise, and the caller respawns) —
+ * no restart cutting the running turn. Pass `allowBypass: false` where
+ * {@link claudeRefusesBypass}: there the allow flag alone makes the CLI exit 1,
+ * so it would break every mode, not just bypass.
  */
 const ALLOW_BYPASS_FLAG = '--allow-dangerously-skip-permissions'
 
-export function chatModeToFlags(mode: string): string[] {
+export function chatModeToFlags(mode: string, opts: { allowBypass: boolean }): string[] {
+  const allow = opts.allowBypass ? [ALLOW_BYPASS_FLAG] : []
   switch (mode) {
     case 'plan':
-      return ['--permission-mode', 'plan', ALLOW_BYPASS_FLAG]
+      return ['--permission-mode', 'plan', ...allow]
     case 'ask':
-      return ['--permission-mode', 'default', ALLOW_BYPASS_FLAG]
+      return ['--permission-mode', 'default', ...allow]
     case 'auto-accept':
-      return ['--permission-mode', 'acceptEdits', ALLOW_BYPASS_FLAG]
+      return ['--permission-mode', 'acceptEdits', ...allow]
     case 'auto':
-      return ['--permission-mode', 'auto', ALLOW_BYPASS_FLAG]
+      return ['--permission-mode', 'auto', ...allow]
     case 'bypass':
       return ['--permission-mode', 'bypassPermissions']
     default:
@@ -66,7 +91,7 @@ export function chatModeToFlags(mode: string): string[] {
  * Map our ChatMode to the raw CLI permission_mode string used by the SDK's
  * `control_request {subtype:'set_permission_mode', mode}`. `bypass` applies
  * live only to a process spawned allowing it ({@link chatModeToFlags}); one
- * spawned before that refuses, and the caller falls back to a restart.
+ * spawned without that refuses, and the caller falls back to a restart.
  */
 export function chatModeToCliPermissionMode(mode: string): string | null {
   switch (mode) {

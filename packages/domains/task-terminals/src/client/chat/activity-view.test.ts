@@ -223,3 +223,93 @@ describe('activity view: a message sent into the running turn', () => {
     expect(view.turns.get(user)?.continuedBy).toBeUndefined()
   })
 })
+
+describe('activity view: late workspace capture of an agent-started turn', () => {
+  const trigger = {
+    kind: 'turn-trigger',
+    subAgents: [],
+    notifications: [{ uuid: 'n1', taskId: 't1', summary: 'Monitor event: "x"' }],
+    timestamp: 0
+  } as TimelineItem
+  // Agent-started turns have no user message to attach the capture to; it lands after the result.
+  const capture = {
+    kind: 'workspace-changes',
+    id: 'workspace:c1',
+    tabId: 'tab',
+    captureId: 'c1',
+    messageId: 'agent-turn:a1',
+    status: 'unavailable',
+    fileCount: 0,
+    reason: 'Agent started this turn without a workspace baseline.',
+    timestamp: 2
+  } as TimelineItem
+  const nextReply = { ...reply, messageId: 'next', text: 'Next' } as TimelineItem
+
+  it('stays with the turn that just ended: no empty turn block of its own', () => {
+    const view = activityView([trigger, reply, result, capture], false)
+    expect(view.rows).toEqual([reply])
+    expect(view.turns.size).toBe(1)
+    // It shows no card (no baseline): the turn keeps it, but lists no files.
+    expect(view.turns.get(reply)?.files).toEqual([])
+    expect(view.hosts.get(capture)).toBe(reply)
+  })
+
+  it('is never handed to the next agent-started turn', () => {
+    const view = activityView([trigger, reply, result, capture, trigger, nextReply, result], false)
+    expect(view.rows).toEqual([reply, nextReply])
+    expect(view.hosts.get(capture)).toBe(reply)
+    expect(view.turns.get(nextReply)?.files).toEqual([])
+  })
+})
+
+// A capture that shows no card (nothing changed, or a failed capture with no
+// recorded edits) is no turn content: alone it would be an empty turn block,
+// and beside an answer it would hold its footer open with nothing in it.
+describe('activity view: a capture that shows no card', () => {
+  const user = { kind: 'user-text', id: 'u1', text: 'Resume', timestamp: 0 } as TimelineItem
+  const capture = (over: Record<string, unknown>) =>
+    ({
+      kind: 'workspace-changes',
+      id: 'workspace:c1',
+      tabId: 'tab',
+      captureId: 'c1',
+      messageId: 'u1',
+      status: 'complete',
+      fileCount: 0,
+      timestamp: 2,
+      ...over
+    }) as TimelineItem
+
+  it('nothing changed: no turn block for an empty turn', () => {
+    const view = activityView([user, result, capture({})], false)
+    expect(view.rows).toEqual([user, result])
+    expect(view.turns.size).toBe(0)
+  })
+
+  it('nothing changed: an answer’s turn lists no files', () => {
+    const silent = capture({})
+    const view = activityView([user, reply, result, silent], false)
+    expect(view.turns.get(reply)?.files).toEqual([])
+    expect(view.hosts.get(silent)).toBe(reply)
+  })
+
+  it('a failed capture with no recorded edits: no files', () => {
+    const view = activityView(
+      [user, reply, result, capture({ status: 'unavailable', reason: 'x' })],
+      false
+    )
+    expect(view.turns.get(reply)?.files).toEqual([])
+  })
+
+  it('cards that show stay: files changed, checking, an interrupted turn', () => {
+    for (const over of [
+      { fileCount: 2 },
+      { status: 'pending' },
+      { status: 'unavailable', interrupted: true }
+    ]) {
+      const shown = capture(over)
+      const view = activityView([user, reply, result, shown], false)
+      expect(view.turns.get(reply)?.files).toEqual([shown])
+    }
+  })
+})

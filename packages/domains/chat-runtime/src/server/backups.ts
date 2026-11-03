@@ -16,6 +16,7 @@ import {
   chmodSync,
   fsyncSync
 } from 'node:fs'
+import { fsyncFile } from '@slayzone/platform/durable-fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { createReadStream, promises as fsAsync } from 'node:fs'
 import { z } from 'zod'
@@ -115,7 +116,8 @@ async function hashFileAsync(path: string) {
   for await (const chunk of createReadStream(path)) hash.update(chunk)
   return hash.digest('hex')
 }
-async function syncFile(path: string) {
+async function syncDir(path: string) {
+  if (process.platform === 'win32') return
   const fd = await fsAsync.open(path, 'r')
   try {
     await fd.sync()
@@ -123,13 +125,10 @@ async function syncFile(path: string) {
     await fd.close()
   }
 }
-async function syncDir(path: string) {
-  if (process.platform !== 'win32') await syncFile(path)
-}
 async function copyDurable(source: string, dest: string) {
   await fsAsync.copyFile(source, dest)
   await fsAsync.chmod(dest, 0o600)
-  await syncFile(dest)
+  await fsyncFile(dest)
   await syncDir(resolve(dest, '..'))
 }
 function durableJson(path: string, value: unknown) {
@@ -506,7 +505,7 @@ export function createChatBackups(store: ChatStorage) {
         } finally {
           db.close()
         }
-        await syncFile(join(temp, 'chat.sqlite'))
+        await fsyncFile(join(temp, 'chat.sqlite'))
         const files: FileEntry[] = [
           {
             path: 'chat.sqlite',
