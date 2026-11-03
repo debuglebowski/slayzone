@@ -17,6 +17,7 @@ import {
   useHubOwnershipStore
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
+import { useComputerConnectRefetch } from './app-shell/computer-connect-refetch'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
@@ -300,6 +301,8 @@ function App(): React.JSX.Element {
 
   // Warm keystroke-triggered lazy chunks (Cmd+K palette) on idle → no blank gap on first open.
   useIdlePreload()
+  // Computer-backed views refetch once a computer connects (none stays on "connect a computer").
+  useComputerConnectRefetch()
 
   // Home panel state (extracted — owns its own state fully)
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
