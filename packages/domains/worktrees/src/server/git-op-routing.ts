@@ -6,14 +6,13 @@
  * ({@link setGitOpTransport}). The computer runs the SAME table
  * (`@slayzone/worktrees/git-ops`) after validating and jailing the input.
  *
- * With no computer the op runs on the hub's own disk (the desktop before its local
- * computer enrolls) — refused first on a hub with processes switched off, so nothing
- * there ever touches project files.
+ * With no computer the op is refused — "connect a computer" — on every hub: the hub
+ * never runs git or reads a checkout itself.
  */
 import type { SlayzoneDb } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import { gitOpAbsolutePaths, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
-import { runGitOpLocally, type GitOpResult } from './git-ops'
+import type { GitOpResult } from './git-ops'
 import { getGitWatcher } from './git-watcher'
 import { getWorktreesRouterDepsOrNull, type WorktreesComputerTarget } from './worktrees-router-deps'
 
@@ -50,12 +49,9 @@ async function computerFor(
   return deps.getWorkspace().resolveComputer(resolvedTarget)
 }
 
-/**
- * The panel's watches, refcounted per checkout path: many panels on one checkout =
- * one watch. `computerId` null = the hub's own watcher (no computer).
- */
+/** The panel's watches, refcounted per checkout path: many panels on one checkout = one watch. */
 interface RoutedWatch {
-  computerId: string | null
+  computerId: string
   watchId: string
   count: number
 }
@@ -75,39 +71,27 @@ export async function watchGitCheckout(worktreePath: string, db?: SlayzoneDb): P
     again.count++
     return
   }
-  if (computerId != null && transport) {
-    const watch: RoutedWatch = {
-      computerId,
-      watchId: `gw-${process.pid}-${++watchSeq}`,
-      count: 1
-    }
-    routedWatches.set(worktreePath, watch)
-    try {
-      await transport.watchStart(computerId, { watchId: watch.watchId, worktreePath })
-    } catch (err) {
-      if (routedWatches.get(worktreePath) === watch) routedWatches.delete(worktreePath)
-      throw err
-    }
-    return
+  if (computerId == null || !transport) refuseNoComputer({ op: 'worktrees.watchStart' })
+  const watch: RoutedWatch = {
+    computerId,
+    watchId: `gw-${process.pid}-${++watchSeq}`,
+    count: 1
   }
-  getGitWatcher().subscribe(worktreePath)
-  routedWatches.set(worktreePath, { computerId: null, watchId: '', count: 1 })
+  routedWatches.set(worktreePath, watch)
+  try {
+    await transport.watchStart(computerId, { watchId: watch.watchId, worktreePath })
+  } catch (err) {
+    if (routedWatches.get(worktreePath) === watch) routedWatches.delete(worktreePath)
+    throw err
+  }
 }
 
 /** `worktrees.watchStop`: release one subscription; the last one ends the watch. */
 export async function unwatchGitCheckout(worktreePath: string): Promise<void> {
   const watch = routedWatches.get(worktreePath)
-  if (!watch) {
-    // Started before routing existed (or on the hub's watcher directly).
-    getGitWatcher().unsubscribe(worktreePath)
-    return
-  }
+  if (!watch) return // never started (refused), or its computer is gone
   if (--watch.count > 0) return
   routedWatches.delete(worktreePath)
-  if (watch.computerId == null) {
-    getGitWatcher().unsubscribe(worktreePath)
-    return
-  }
   await transport?.watchStop(watch.computerId, { watchId: watch.watchId }).catch(() => {
     /* the computer is gone — its watch went with it */
   })
@@ -192,9 +176,6 @@ export async function executeGitOp<K extends GitOpName>(
 ): Promise<GitOpResult<K>> {
   const repoPath = gitOpAbsolutePaths(op, input as GitOpInput<K>)[0]
   const computerId = await computerFor(target, repoPath, db)
-  if (computerId != null && transport) {
-    return (await transport.request(computerId, { op, input, mutates })) as GitOpResult<K>
-  }
-  assertHubLocalExecEnabled({ op: `worktrees.${op}` })
-  return runGitOpLocally(op, input as GitOpInput<K>)
+  if (computerId == null || !transport) refuseNoComputer({ op: `worktrees.${op}` })
+  return (await transport.request(computerId, { op, input, mutates })) as GitOpResult<K>
 }

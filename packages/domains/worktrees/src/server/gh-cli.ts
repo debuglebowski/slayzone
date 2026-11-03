@@ -9,6 +9,7 @@ import type {
   EditPrCommentInput
 } from '../shared/types'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import { execAsync } from './exec-async'
 import { ensureBranchPushed } from './git-worktree'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -71,15 +72,17 @@ export const runGhLocally: GhExecutor = async (args, opts) => {
   return execAsync(gh, args, { ...opts, source: 'gh' })
 }
 
-let ghExecutor: GhExecutor = runGhLocally
+/** No executor wired: `gh` has nowhere to run — the hub never runs it itself. */
+const noComputer: GhExecutor = async () => refuseNoComputer({ op: 'gh' })
+
+let ghExecutor: GhExecutor = noComputer
 
 /**
  * Point every gh call at a computer. Called by the hub composition once the computer
- * gateway exists; without it the local executor stands, which is correct for a
- * host with no computers.
+ * gateway exists; null = none ("connect a computer").
  */
 export function setGhExecutor(executor: GhExecutor | null): void {
-  ghExecutor = executor ?? runGhLocally
+  ghExecutor = executor ?? noComputer
 }
 
 async function spawnGh(

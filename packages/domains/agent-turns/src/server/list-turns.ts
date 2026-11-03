@@ -1,5 +1,4 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { listTurnsForWorktree } from './db'
 import { computerForTurnPath, runTurnGitOp } from './turn-git-routing'
 import type { AgentTurnRange } from '../shared/types'
@@ -16,10 +15,8 @@ export async function listAgentTurnsForWorktree(
   worktreePath: string
 ): Promise<AgentTurnRange[]> {
   if (!worktreePath) return []
+  // No computer: refused ("connect a computer") — the hub reads no checkout itself.
   const computerId = await computerForTurnPath(worktreePath)
-  // No computer: the hub's own disk — refused on a hub with processes switched off
-  // (T-06), before the realpath probe.
-  if (computerId == null) assertHubLocalExecEnabled({ op: 'git.turns' })
   const path = await runTurnGitOp(computerId, 'canonical', { repoPath: worktreePath })
   const raw = await listTurnsForWorktree(db, path)
   return runTurnGitOp(computerId, 'filterTurns', {

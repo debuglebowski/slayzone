@@ -28,7 +28,8 @@ import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   assertHubIntegrationsEnabled,
-  assertHubLocalExecEnabled
+  assertHubLocalExecEnabled,
+  refuseNoComputer
 } from '@slayzone/platform/hub-switch-refusal'
 import {
   setNotifyEvents,
@@ -191,7 +192,6 @@ import {
   setWorkspaceDeps
 } from '@slayzone/file-editor/server'
 import {
-  runGhLocally,
   setGhExecutor,
   invalidateProjectReposCache,
   resetWorktreeColorsForTest,
@@ -1940,10 +1940,9 @@ export function composeServer(opts: {
       // does not know falls back to the caller's own computer.
       const pathTarget = opts.cwd ? await gitTargetForPath(db, opts.cwd) : null
       const computerId = await placement.forTarget(pathTarget ?? {})
-      // No computer = this hub's own disk is the only one, so its own `gh` is the
-      // only meaningful identity. Falls through to the local executor — which refuses
-      // on a hub with processes switched off (T-06): there, no computer = no `gh`.
-      if (computerId == null || !opts.cwd) return runGhLocally(args, opts)
+      // No computer: `gh` has nowhere to run ("connect a computer") — the hub never
+      // runs it itself.
+      if (computerId == null || !opts.cwd) refuseNoComputer({ op: 'gh' })
       const res = await computerGateway.request(computerId, HubToComputerMethods.ghExec, {
         args,
         cwd: opts.cwd,

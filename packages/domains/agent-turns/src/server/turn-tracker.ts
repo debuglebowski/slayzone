@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { localProjectRoot, recordedProjectRoot } from '@slayzone/computers/server'
-import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { recordedProjectRoot } from '@slayzone/computers/server'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { computerForTurnTask, runTurnGitOp } from './turn-git-routing'
 import { insertTurn, deleteTurn, getLatestTurnForWorktree, findTurnsToPrune } from './db'
@@ -27,7 +26,7 @@ function isCleanPrompt(text: string): boolean {
 async function resolveTabContext(
   db: SlayzoneDb,
   tabId: string
-): Promise<{ taskId: string; worktreePath: string; computerId: string | null } | null> {
+): Promise<{ taskId: string; worktreePath: string; computerId: string } | null> {
   const tab = (await db.prepare(`SELECT task_id FROM terminal_tabs WHERE id = ?`).get(tabId)) as
     | { task_id: string }
     | undefined
@@ -37,13 +36,11 @@ async function resolveTabContext(
     .get(tab.task_id)) as { worktree_path: string | null; project_id: string | null } | undefined
   if (!row) return null
   const computerId = await computerForTurnTask(tab.task_id)
-  // A hub with processes switched off runs no git (T-06), so with no computer the
-  // snapshot has nowhere to run. Skipped quietly — this fires on every agent turn.
-  if (computerId == null && !hubProcessesEnabled()) return null
+  // No computer: the snapshot has nowhere to run (the hub runs no git). Skipped
+  // quietly — this fires on every agent turn.
+  if (computerId == null) return null
   const projectRoot = row.project_id
-    ? computerId != null
-      ? await recordedProjectRoot(db, row.project_id, computerId)
-      : await localProjectRoot(db, row.project_id)
+    ? await recordedProjectRoot(db, row.project_id, computerId)
     : null
   const repoPath = row.worktree_path || projectRoot
   if (!repoPath) return null

@@ -10,14 +10,11 @@ import { runAiCommand, setAiCommandRunner } from '../server/merge-ai'
 afterEach(() => setAiCommandRunner(null))
 
 describe('runAiCommand on a computer', () => {
-  test('no computer (null): runs here, as before — refused on a processes-off hub', async () => {
+  test('no computer (null), on any hub: "connect a computer" — the hub runs no agent', async () => {
     setAiCommandRunner(async () => null)
-    process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
-    try {
-      await expect(runAiCommand('codex', 'x')).rejects.toThrow(/Connect a computer/)
-    } finally {
-      delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
-    }
+    await expect(runAiCommand('codex', 'x')).rejects.toThrow(/Connect a computer/)
+    setAiCommandRunner(null)
+    await expect(runAiCommand('codex', 'x')).rejects.toThrow(/Connect a computer/)
   })
 
   test('one shell command, the prompt quoted, its stdout the answer', async () => {

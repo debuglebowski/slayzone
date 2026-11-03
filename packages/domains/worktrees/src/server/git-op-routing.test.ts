@@ -86,6 +86,21 @@ describe('git panel ops routed to the computer', () => {
     expect(sent).toHaveLength(1)
   })
 
+  test('no computer, on ANY hub: "connect a computer" — the hub never runs git itself', async () => {
+    resolved = null
+    for (const op of [
+      () => caller.getCurrentBranch({ path: '/w/repo' }),
+      () => caller.stageAll({ path: '/w/repo' }),
+      () => caller.watchStart({ worktreePath: '/w/never' })
+    ]) {
+      const err = await op().catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(TRPCError)
+      expect((err as TRPCError).code).toBe('FORBIDDEN')
+      expect((err as TRPCError).message).toMatch(/Connect a computer/)
+    }
+    expect(sent).toHaveLength(0)
+  })
+
   test('no computer on a hub with processes off: NO_COMPUTER_CONNECTED, nothing sent', async () => {
     resolved = null
     process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'

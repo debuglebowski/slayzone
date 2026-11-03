@@ -1,0 +1,65 @@
+/**
+ * A "computer" for tests of the hub's git panel: the hub has no local git fallback,
+ * so a router test needs somewhere for `git.op` to run. This one runs the same op
+ * table (`runGitOpLocally`) on the test machine — the work a real computer does
+ * after its jail — and answers watches with a real GitWatcher, reported back as a
+ * computer's `git-watch` events. Call it before creating the caller.
+ */
+// Relative repo paths (as the other helpers here): no package edge, and the very
+// module instances the tests under test load.
+import { runTurnGitOpLocally } from '../../domains/agent-turns/src/server/turn-git'
+import { setTurnGitRouting } from '../../domains/agent-turns/src/server/turn-git-routing'
+import { deterministicLocalComputerId } from '../../domains/computers/src/server/store'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
+import { createGitWatcher, runGitOpLocally } from '../../domains/worktrees/src/server/git-ops'
+import {
+  deliverGitWatchEvent,
+  setGitOpTransport
+} from '../../domains/worktrees/src/server/git-op-routing'
+import { setWorktreesRouterDeps } from '../../domains/worktrees/src/server/worktrees-router-deps'
+
+export const LOOPBACK_COMPUTER_ID = 'loopback-test-computer'
+
+export function useLoopbackGitComputer(): void {
+  setWorktreesRouterDeps({
+    getWorkspace: () => ({
+      fs: {} as never,
+      resolveComputer: async () => LOOPBACK_COMPUTER_ID
+    }),
+    shellOpenPath: async () => ''
+  })
+  const watcher = createGitWatcher({ refuse: () => undefined })
+  const watchIds = new Map<string, string>()
+  watcher.on('git:diff-changed', ({ worktreePath, refsChanged }) => {
+    for (const [id, p] of watchIds)
+      if (p === worktreePath)
+        deliverGitWatchEvent(LOOPBACK_COMPUTER_ID, { watchId: id, kind: 'changed', refsChanged })
+  })
+  setGitOpTransport({
+    request: async (_computerId, { op, input }) =>
+      (await runGitOpLocally(op, input as never)) ?? null,
+    watchStart: async (_computerId, { watchId, worktreePath }) => {
+      watchIds.set(watchId, worktreePath)
+      watcher.subscribe(worktreePath)
+    },
+    watchStop: async (_computerId, { watchId }) => {
+      const p = watchIds.get(watchId)
+      watchIds.delete(watchId)
+      if (p) watcher.unsubscribe(p)
+    }
+  })
+}
+
+/**
+ * The same for agent-turn git (snapshots, the turn list's filter). It answers as the
+ * LOCAL computer, where fixtures' project folders are placed (migration v176).
+ */
+export function useLoopbackTurnComputer(): void {
+  const local = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+  setTurnGitRouting({
+    computerForPath: async () => local,
+    computerForTask: async () => local,
+    request: async (_computerId, op, input) =>
+      (await runTurnGitOpLocally(op, input as never)) ?? null
+  })
+}

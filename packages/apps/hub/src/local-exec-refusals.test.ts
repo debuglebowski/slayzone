@@ -484,12 +484,14 @@ describe('defaults (switch unset): local, exactly as before', () => {
     expect(execCalls.length).toBeGreaterThan(before.exec)
     expect(lines.length).toBe(before.lines)
   })
-  test('worktrees.isGitRepo answers over tRPC, no refusal', async () => {
-    const before = lines.length
+  // The git panel has no hub-local fallback on ANY hub: with no computer it answers
+  // "connect a computer" and runs nothing here.
+  test('worktrees.isGitRepo with no computer: "connect a computer", no local git', async () => {
+    const before = { exec: execCalls.length }
     const res = await call('worktrees.isGitRepo', { path: OUTSIDE })
-    expect(res.status).toBe(200)
-    expect(res.error).toBeUndefined()
-    expect(lines.length).toBe(before)
+    expect(res.status).toBe(403)
+    expect(JSON.stringify(res.error)).toMatch(/Connect a computer/)
+    expect(execCalls.length).toBe(before.exec)
   })
 })
 

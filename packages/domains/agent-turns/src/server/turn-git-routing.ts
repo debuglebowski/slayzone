@@ -1,16 +1,11 @@
 /**
  * Where a turn's git runs: on the computer that holds the checkout. The hub's
  * composition wires {@link setTurnGitRouting} (resolve the computer for a checkout
- * path or a task, send one `git.turnOp`); unwired, or with no computer, the op runs
- * on the hub's own disk — refused there on a hub with processes switched off (the
- * git spawns carry the T-06 refusal).
+ * path or a task, send one `git.turnOp`). With no computer it is refused ("connect a
+ * computer"): the hub never runs git itself.
  */
-import {
-  runTurnGitOpLocally,
-  type TurnGitOpInput,
-  type TurnGitOpName,
-  type TurnGitOpResult
-} from './turn-git'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
+import type { TurnGitOpInput, TurnGitOpName, TurnGitOpResult } from './turn-git'
 
 export interface TurnGitRouting {
   computerForPath(path: string): Promise<string | null>
@@ -32,14 +27,12 @@ export function computerForTurnTask(taskId: string): Promise<string | null> {
   return routing ? routing.computerForTask(taskId) : Promise.resolve(null)
 }
 
-/** Run `op` on `computerId` (null = this hub's disk). */
+/** Run `op` on `computerId`; none = refused. */
 export async function runTurnGitOp<K extends TurnGitOpName>(
   computerId: string | null,
   op: K,
   input: TurnGitOpInput<K>
 ): Promise<TurnGitOpResult<K>> {
-  if (computerId != null && routing) {
-    return (await routing.request(computerId, op, input)) as TurnGitOpResult<K>
-  }
-  return runTurnGitOpLocally(op, input)
+  if (computerId == null || !routing) refuseNoComputer({ op: `agentTurns.${op}` })
+  return (await routing.request(computerId, op, input)) as TurnGitOpResult<K>
 }

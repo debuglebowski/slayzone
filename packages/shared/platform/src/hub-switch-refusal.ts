@@ -77,8 +77,11 @@ export class HubSwitchedOffError extends Error {
   /** The env var of the switch that is off. */
   readonly variable: string
 
-  constructor(readonly code: HubSwitchedOffCode) {
-    super(MESSAGES[code])
+  constructor(
+    readonly code: HubSwitchedOffCode,
+    message: string = MESSAGES[code]
+  ) {
+    super(message)
     this.name = 'HubSwitchedOffError'
     this.variable = VARIABLES[code]
   }
@@ -171,6 +174,27 @@ export function assertHubIntegrationsEnabled(refusal: HubRefusal): void {
  */
 export function assertHubLocalExecEnabled(refusal: HubRefusal): void {
   if (!hubProcessesEnabled()) refuse('hub.local_exec', 'NO_COMPUTER_CONNECTED', refusal)
+}
+
+/** Why project work has nowhere to run: it runs on computers, and none is there. */
+export const NO_COMPUTER_MESSAGE =
+  'Connect a computer: project files, git and commands run on a computer ' +
+  '(Settings → Computers), and none is connected for this.'
+
+/**
+ * Throw {@link HubSwitchedOffError} (`NO_COMPUTER_CONNECTED`, the actionable "connect
+ * a computer") after one `hub.local_exec` audit line — on EVERY hub. Project work (git,
+ * `gh`, files, commands, agents) runs only on computers; the hub has no local fallback,
+ * whatever its switches.
+ */
+export function refuseNoComputer(refusal: HubRefusal): never {
+  securityEvent({
+    event: 'hub.local_exec',
+    outcome: 'denied',
+    targetKind: 'hub',
+    detail: { ...refusal.detail, op: refusal.op, code: 'NO_COMPUTER_CONNECTED' }
+  })
+  throw new HubSwitchedOffError('NO_COMPUTER_CONNECTED', NO_COMPUTER_MESSAGE)
 }
 
 /**
