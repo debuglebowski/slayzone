@@ -34,17 +34,9 @@ const ALLOWLIST = {
   // Refused by assertHubProcessesEnabled (T-04/T-05).
   'packages/shared/platform/src/process-tree.ts':
     'Windows taskkill in killPidTree; bundled via the @slayzone/platform barrel, never called by the hub (background processes run on computers)',
-  'packages/domains/terminal/src/server/runtime/chat-proc-handle.ts':
-    'in-process chat agent; refuses (T-04)',
-  'packages/domains/terminal/src/server/runtime/chat-transport-manager.ts':
-    'in-process chat agent; refuses (T-04)',
   // Refused by assertHubLocalExecEnabled, "connect a computer" (T-06).
-  'packages/domains/terminal/src/server/shell-env.ts':
-    'login-shell PATH and which probes; refuse (T-06)',
   'packages/shared/platform/src/login-shell-path.ts':
-    'login-shell PATH probe; the hub runs it only through shell-env getEnrichedPathAsync, which refuses (T-06)',
-  'packages/domains/terminal/src/server/files-scan.ts':
-    '@file autocomplete git ls-files; refuses (T-06)',
+    'login-shell PATH probe; bundled via the @slayzone/platform barrel, never called by the hub (its caller, terminal shell-env, runs on computers)',
   'packages/apps/hub/src/shell-native.ts': 'open/xdg-open/explorer; refuse (T-06)',
   'packages/shared/db-migrations/src/migrations.ts':
     'v122 git backfill over existing agent_turns rows; skipped with processes off (T-06)',

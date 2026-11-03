@@ -32,13 +32,13 @@ import {
   type ChatBootstrap,
   type LegacyChatDiagnostics,
   createChatMigrationAttachmentReader
-} from '@slayzone/chat-runtime/server'
-import {
-  defaultConversationRegistry,
-  type ChatDataOps,
-  type ChatAttachmentReader,
-  type ChatTerminalState
+} from '@slayzone/chat-runtime/hub'
+import type {
+  ChatDataOps,
+  ChatAttachmentReader,
+  ChatTerminalState
 } from '@slayzone/terminal/runtime'
+import { defaultConversationRegistry } from '@slayzone/terminal/hub'
 
 export function createComputerChatServices(opts: {
   db: SlayzoneDb

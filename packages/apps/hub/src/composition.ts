@@ -1,5 +1,4 @@
 import { acceptComputerGeneration } from '@slayzone/computers/server'
-import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
@@ -82,7 +81,6 @@ import {
   setPtySpawnLookups,
   setRemoteMcpEnvProvider,
   ptyEvents,
-  setClaudeSessionReader,
   setClaudeTranscriptLocator,
   listPtys,
   hasPty,
@@ -124,6 +122,7 @@ import {
   resetTerminalRuntimeForTest,
   setAgentLifecycleEvents,
   setPtyDeps,
+  defaultConversationRegistry,
   setChatDeps,
   setExecutionContextProbe,
   setTerminalCommandProbe,
@@ -208,7 +207,6 @@ import { createComputerProjectSync } from './computer-project-sync'
 // unconditionally at boot (a hub always accepts computers).
 import {
   ghExecResultSchema,
-  claudeSessionReadResultSchema,
   claudeSessionLocateResultSchema,
   gitOpResultSchema,
   execRunResultSchema,
@@ -1961,27 +1959,6 @@ export function composeServer(opts: {
         ...(opts.stdin === undefined ? {} : { stdin: opts.stdin })
       })
       return ghExecResultSchema.parse(res)
-    })
-
-    // A Claude conversation's history (chat A: Sessions picker, hand-off) is read
-    // where its session file is — on the computer the task's agents run on,
-    // whose HOME and cwd the CLI used. Same resolution and gate as a chat spawn.
-    setClaudeSessionReader(async (req) => {
-      const computerId = resolveExecComputer(req.computerId)
-      if (computerId == null) throw new Error('no computer for this task')
-      if (placement.gate) await placement.gate(computerId, { kind: 'task', id: req.taskId })
-      const res = await computerGateway.request(
-        computerId,
-        HubToComputerMethods.claudeSessionRead,
-        {
-          ...(req.cwd ? { cwd: req.cwd } : {}),
-          ...(req.projectId ? { projectId: req.projectId } : {}),
-          sessionId: req.sessionId,
-          maxRecords: req.maxRecords,
-          maxBytes: req.maxBytes
-        }
-      )
-      return claudeSessionReadResultSchema.parse(res)
     })
 
     // Where a Claude conversation's transcript is, and which folder to resume it

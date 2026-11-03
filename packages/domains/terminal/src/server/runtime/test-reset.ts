@@ -3,11 +3,7 @@ import {
   setShuttingDown as setPtyShuttingDown,
   shutdownAllPtys
 } from './pty-manager'
-import {
-  __resetForTests as resetChatTransports,
-  configureTransport,
-  shutdownAll as shutdownChats
-} from './chat-transport-manager'
+import { localChatRuntime } from './local-chat-runtime'
 import { __resetForTests as resetWarmPool } from './warm-process-manager'
 import { clearAllSessionUserInputMarks } from '../user-input-tracker'
 import { beginTerminalShutdown } from './shutdown'
@@ -29,15 +25,15 @@ const RESET_SHUTDOWN = { termGraceMs: 300, hardTimeoutMs: 2_000 }
 export async function resetTerminalRuntimeForTest(): Promise<void> {
   setPtyCreateCapture(false)
   beginTerminalShutdown()
-  await Promise.all([shutdownAllPtys(RESET_SHUTDOWN), shutdownChats(RESET_SHUTDOWN)]).catch(
+  const chats = localChatRuntime()
+  await Promise.all([shutdownAllPtys(RESET_SHUTDOWN), chats?.shutdownAll(RESET_SHUTDOWN)]).catch(
     (err: unknown) => console.error('[terminal] test reset: shutdown failed:', err)
   )
   // Kills warm/reserved agents, bumps the pool epoch, re-opens the pool gate.
   resetWarmPool()
-  // Clears ended sessions + in-flight spawns, re-opens the chat gate.
-  resetChatTransports()
-  // A spec's shortened watchdog (chat.testSetWatchdogTimings) must not outlive it.
-  configureTransport({ watchdogTimings: undefined })
+  // Clears ended sessions + in-flight spawns, re-opens the chat gate; a spec's
+  // shortened watchdog (chat.testSetWatchdogTimings) must not outlive it.
+  chats?.resetForTests()
   setPtyShuttingDown(false)
   clearAllSessionUserInputMarks()
 }

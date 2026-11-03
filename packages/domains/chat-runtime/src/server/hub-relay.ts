@@ -3,23 +3,23 @@ import { TypedEmitter } from '@slayzone/platform/events'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   assertChatTabStateScope,
+  isChatSupported,
   type ChatTabStateScope,
   chatModeForTerminal,
   type AgentEvent,
   type ChatSessionStateEntry
 } from '@slayzone/terminal-contracts'
-import {
-  supportsChatMode,
-  type ChatTerminalState,
-  type ChatDeps,
-  type ChatEventMap,
-  type ChatQueueEventMap,
-  type ChatCatalog,
-  type ChatCatalogOperation,
-  type ChatCatalogContext,
-  type ChatDataOps,
-  type QueueAdmission,
-  type ChatQueuePushOptions
+import type {
+  ChatTerminalState,
+  ChatDeps,
+  ChatEventMap,
+  ChatQueueEventMap,
+  ChatCatalog,
+  ChatCatalogOperation,
+  ChatCatalogContext,
+  ChatDataOps,
+  QueueAdmission,
+  ChatQueuePushOptions
 } from '@slayzone/terminal/runtime'
 import {
   chatOperationSchemas,
@@ -297,7 +297,7 @@ export function createHubChatRelay(opts: {
       ])
       if (
         !tab ||
-        (!supportsChatMode(chatStorageMode(tab.mode)) &&
+        (!isChatSupported(chatStorageMode(tab.mode)) &&
           !(await db.get(
             `SELECT 1 FROM terminal_tabs t WHERE t.id=? AND ${legacyChatTabContentSql()}`,
             [tab.id]
@@ -327,7 +327,7 @@ export function createHubChatRelay(opts: {
         tabId
       ])
       const mode = tab && chatStorageMode(tab.mode)
-      if (!mode || !supportsChatMode(mode) || mode === owner.mode) break
+      if (!mode || !isChatSupported(mode) || mode === owner.mode) break
       await providerTransitions.ensure(owner, mode)
       owner = (await ownership.forTab(tabId))!
       if (!owner || owner.state === 'deleted')
@@ -345,7 +345,7 @@ export function createHubChatRelay(opts: {
       [taskId]
     )
     const tab =
-      tabs.find((t) => supportsChatMode(t.mode) && (!mode || t.mode === mode)) ??
+      tabs.find((t) => isChatSupported(t.mode) && (!mode || t.mode === mode)) ??
       tabs.find((t) => (chatModeForTerminal(t.mode) ?? t.mode) === mode)
     if (!tab) throw new Error('Task has no chat tab for this provider')
     return ensureTab(tab.id)
@@ -880,7 +880,7 @@ export function createHubChatRelay(opts: {
   ): Promise<unknown> {
     args = trimUnsetArgs(args)
     if (target === 'queue' && method === 'push') args = structuredClone(args)
-    if (target === 'ops' && method === 'supports') return supportsChatMode(String(args[0]))
+    if (target === 'ops' && method === 'supports') return isChatSupported(String(args[0]))
     if (target === 'ops' && method === 'testSetWatchdogTimings') {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
       const pc = await opts.defaultComputer()

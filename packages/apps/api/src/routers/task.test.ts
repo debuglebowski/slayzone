@@ -45,6 +45,7 @@ import {
   handleAttentionTransition,
   taskEvents
 } from '@slayzone/task/server'
+import { defaultConversationRegistry } from '@slayzone/terminal/hub'
 import {
   defaultWorktreeExecAdapters,
   defaultWorktreePolicyAdapters
@@ -1431,6 +1432,36 @@ test('switchConversation: re-points the task at an earlier session', async () =>
     conversationId: 'CONV-A'
   })
   expect(after.currentConversationByMode!['claude-code']).toBe('CONV-A')
+})
+
+test('switchConversation: a chat → terminal hand-off stops the chat where it runs first', async () => {
+  // Chats run on computers: the hub's conversation registry holds them (the computer
+  // relay registers as the 'chat' side). The hand-off must release through it —
+  // never only this process, which runs no chat.
+  const released: Array<[string, string]> = []
+  defaultConversationRegistry.registerConversationHolder('chat', {
+    isLive: () => true,
+    release: async (taskId, conversationId) => {
+      released.push([taskId, conversationId])
+    }
+  })
+  try {
+    const t = await createTask('hand off')
+    seedSession(t.id, 'CONV-CHAT', 1000, 'claude-chat')
+    const after = await caller.switchConversation({
+      id: t.id,
+      mode: 'claude-code',
+      conversationId: 'CONV-CHAT',
+      sourceMode: 'claude-chat'
+    })
+    expect(released).toEqual([[t.id, 'CONV-CHAT']])
+    expect(after.currentConversationByMode!['claude-code']).toBe('CONV-CHAT')
+  } finally {
+    defaultConversationRegistry.registerConversationHolder('chat', {
+      isLive: () => false,
+      release: async () => undefined
+    })
+  }
 })
 
 test('switchConversation: rejects an id the task does not own', async () => {

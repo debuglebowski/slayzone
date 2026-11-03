@@ -87,7 +87,7 @@ import { PtyOutputUnavailableError } from './pty-output-unavailable'
 import { decideFreshReuse, resolveSpawnConversation } from '../spawn-conversation'
 import { locateClaudeTranscripts, type ClaudeTranscriptLocated } from './claude-transcript-locator'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
-import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
+import { localChatRuntime } from './local-chat-runtime'
 import {
   conversationInUseMessage,
   isConversationLive,
@@ -3842,7 +3842,7 @@ export function requestEnsureAlive(
  *  bulk remap, project automation). Add new side-effects here, not at call sites. */
 export function onTaskReachedTerminal(taskId: string): void {
   killPtysByTaskId(taskId)
-  killChatsByTaskId(taskId)
+  localChatRuntime()?.killByTaskId(taskId)
 }
 
 export function killPtysByTaskId(taskId: string): void {

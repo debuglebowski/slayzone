@@ -48,11 +48,7 @@ export {
   setPtyDeps
 } from './pty-router-deps'
 export { createDbChatDataOps } from './runtime/chat-data-ops'
-export { setClaudeSessionReader } from './runtime/chat-handlers'
-export {
-  releaseChatConversation,
-  setAgentStateTabRecorder as setChatAgentStateTabRecorder
-} from './runtime/chat-transport-manager'
+export { defaultConversationRegistry, releaseConversation } from './runtime/live-conversations'
 export {
   locateClaudeTranscripts,
   setClaudeTranscriptLocator

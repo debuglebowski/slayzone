@@ -4,7 +4,7 @@ import type {
   ChatSessionStateEntry
 } from '@slayzone/terminal-contracts'
 import { listPtys, getState as getPtyState } from './pty-manager'
-import { listChatSessions, getChatSessionState } from './chat-transport-manager'
+import { localChatRuntime } from './local-chat-runtime'
 import { mergeSessions } from '../session-merge'
 
 let chatSource: {
@@ -15,7 +15,7 @@ export function setChatSessionSource(source: typeof chatSource): void {
   chatSource = source
 }
 export const listChatSessionEntries = (): ChatSessionStateEntry[] =>
-  chatSource ? chatSource.list() : listChatSessions()
+  chatSource ? chatSource.list() : (localChatRuntime()?.listChatSessions() ?? [])
 
 /**
  * Aggregates terminal sessions across all transports (PTY + chat). The
@@ -35,7 +35,9 @@ export function getSessionState(sessionId: string): TerminalState | null {
   if (ptyState !== null) return ptyState
   // getChatSessionState already filters `not-spawned` skeletons, so the
   // remaining variants are all valid TerminalState members.
-  const chatState = chatSource ? chatSource.get(sessionId) : getChatSessionState(sessionId)
+  const chatState = chatSource
+    ? chatSource.get(sessionId)
+    : (localChatRuntime()?.getChatSessionState(sessionId) ?? null)
   if (chatState === 'not-spawned') return null
   return chatState
 }

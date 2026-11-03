@@ -1,10 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { setTabAgentState } from '@slayzone/task-terminals/server'
-import {
-  setPtyAgentStateTabRecorder,
-  setChatAgentStateTabRecorder,
-  type AgentStateRecorder
-} from '@slayzone/terminal/hub'
+import { setPtyAgentStateTabRecorder, type AgentStateRecorder } from '@slayzone/terminal/hub'
 
 /**
  * Wire `terminal_tabs.agent_state` to the process that actually owns the
@@ -36,5 +32,6 @@ export function wireTabFlagRecorders(db: SlayzoneDb): void {
     })
   }
   setPtyAgentStateTabRecorder(record)
-  setChatAgentStateTabRecorder(record)
+  // Chat agents run on computers, which record their own state (computer chat
+  // runtime → `agent-state` metadata); the hub runs none.
 }

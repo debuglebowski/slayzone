@@ -13,7 +13,7 @@ import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
 import { startMainAgent } from './main-agent'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { releaseChatConversation } from '@slayzone/terminal/hub'
+import { releaseConversation } from '@slayzone/terminal/hub'
 import {
   getTaskBus,
   getTaskOps,
@@ -188,9 +188,9 @@ export const taskRouter = router({
           conversationId: input.conversationId,
           ...(input.sourceMode ? { sourceMode: input.sourceMode } : {})
         },
-        // Never two processes on one conversation: a chat still running it stops
-        // (and has exited) before the terminal resumes it.
-        { release: releaseChatConversation }
+        // Never two processes on one conversation: a chat still running it — on
+        // its computer — stops (and has exited) before the terminal resumes it.
+        { release: (taskId, conversationId) => releaseConversation('chat', taskId, conversationId) }
       )
       if (outcome !== 'switched') {
         throw new TRPCError({

@@ -4,7 +4,7 @@ import { extname } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ArtifactStore } from '@slayzone/task-artifacts/server'
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
-import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/server'
+import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/hub'
 import type { createComputerChatServices } from './computer-chat'
 
 const reads = new Set([
