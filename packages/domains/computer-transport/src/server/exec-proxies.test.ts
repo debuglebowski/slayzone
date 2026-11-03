@@ -785,6 +785,29 @@ describe('createRoutingPtyBackend', () => {
     expect(gateway.calls.filter((c) => c.method === 'pty.getBufferSince')).toEqual([])
   })
 
+  it('a routed handle reports its output unavailable while the computer is away, and back on resume', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: -1 }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const seen: boolean[] = []
+    handle.onAvailability?.((available) => seen.push(available))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    expect(seen).toEqual([false])
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(seen).toEqual([false, true]))
+  })
+
   it('without the ack the hub keeps owning output (older computer)', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))

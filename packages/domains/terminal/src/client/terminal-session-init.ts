@@ -124,6 +124,8 @@ export interface TerminalInitContext {
   setIsResuming: Dispatch<SetStateAction<boolean>>
   /** Mirrors `searchAddonRef` into state so the search bar renders from it. */
   setSearchAddon: Dispatch<SetStateAction<SearchAddon | null>>
+  /** The session exists but its computer is offline: no scrollback to restore yet. */
+  markComputerOffline: () => void
 }
 
 /**
@@ -178,7 +180,8 @@ export async function initTerminalSession(
     setInitErrorCode,
     setPtyState,
     setIsResuming,
-    setSearchAddon
+    setSearchAddon,
+    markComputerOffline
   } = ctx
   const {
     fontSize: terminalFontSize,
@@ -562,6 +565,7 @@ export async function initTerminalSession(
         const attached = await attachPty(trpcClient, sessionId, lastRenderedSeqRef.current)
         if (signal.aborted) return // Don't setState if unmounted
         if (attached.state) setPtyState(attached.state)
+        if (attached.unavailable) markComputerOffline()
         const missed = attached.buffer
         if (missed && missed.chunks.length > 0) {
           cached.terminal.write('\x1b[0m')
@@ -726,6 +730,8 @@ export async function initTerminalSession(
     if (exists) {
       // Sync state from main process (fixes stuck loading spinner)
       if (attached.state) setPtyState(attached.state)
+      // Its computer is offline: nothing to restore yet; it catches up on reconnect.
+      if (attached.unavailable) markComputerOffline()
 
       // Restore from backend ring buffer (single source of truth).
       // afterSeq -1 gets all chunks. `prelude` resets

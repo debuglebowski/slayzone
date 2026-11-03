@@ -19,6 +19,7 @@ import { describe, test, expect } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { ptyRouter } from './pty-router.js'
 import { setPtyDeps, type PtyDeps } from './pty-router-deps.js'
+import { PtyOutputUnavailableError } from './runtime/pty-manager.js'
 
 const events = new TypedEmitter<PtyDeps['events'] extends TypedEmitter<infer M> ? M : never>()
 
@@ -117,6 +118,65 @@ describe('pty router', () => {
       buffer: null,
       size: null
     })
+  })
+
+  test("attach says the session's computer is offline instead of failing or hanging", async () => {
+    setPtyDeps({
+      ops: {
+        ptyExists: () => true,
+        ptyGetState: () => 'running',
+        ptyGetBufferSince: async () => {
+          throw new PtyOutputUnavailableError('live')
+        },
+        ptyGetSize: () => ({ cols: 80, rows: 24 })
+      } as unknown as PtyDeps['ops'],
+      events
+    } as unknown as PtyDeps)
+    const caller = ptyRouter.createCaller(ctx)
+    expect(await caller.attach({ sessionId: 'live', afterSeq: 5 })).toEqual({
+      exists: true,
+      state: 'running',
+      buffer: null,
+      size: { cols: 80, rows: 24 },
+      unavailable: 'computer-offline'
+    })
+    setPtyDeps({ ops: {} as unknown as PtyDeps['ops'], events } as unknown as PtyDeps)
+  })
+
+  test('scrollback reads answer SERVICE_UNAVAILABLE while the computer is offline', async () => {
+    const offline = async () => {
+      throw new PtyOutputUnavailableError('live')
+    }
+    setPtyDeps({
+      ops: {
+        ptyGetBufferSince: offline,
+        ptyGetBuffer: offline,
+        ptyClearBuffer: offline
+      } as unknown as PtyDeps['ops'],
+      events
+    } as unknown as PtyDeps)
+    const caller = ptyRouter.createCaller(ctx)
+    for (const call of [
+      () => caller.getBufferSince({ sessionId: 'live', afterSeq: -1 }),
+      () => caller.getBuffer({ sessionId: 'live' }),
+      () => caller.clearBuffer({ sessionId: 'live' })
+    ]) {
+      await expect(call()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    }
+    setPtyDeps({ ops: {} as unknown as PtyDeps['ops'], events } as unknown as PtyDeps)
+  })
+
+  test('onOutputAvailability streams a session going offline and back', async () => {
+    const caller = ptyRouter.createCaller(ctx)
+    const got: Array<{ sessionId: string; available: boolean }> = []
+    const sub = (await caller.onOutputAvailability()).subscribe({ next: (v) => got.push(v) })
+    events.emit('output-availability', 'sess-a', false)
+    events.emit('output-availability', 'sess-a', true)
+    sub.unsubscribe()
+    expect(got).toEqual([
+      { sessionId: 'sess-a', available: false },
+      { sessionId: 'sess-a', available: true }
+    ])
   })
 
   // A client that must not resize the agent's terminal (the phone) renders at the

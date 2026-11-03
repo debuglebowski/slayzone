@@ -50,6 +50,8 @@ import { trimSelectionTrailingSpaces } from './Terminal.utils'
 import { syncMacOptionIsMeta } from './option-as-meta'
 import { noteTerminalOutput } from './focus-loss-diag'
 import { TerminalDeadOverlay } from './TerminalDeadOverlay'
+import { TerminalComputerOffline } from './TerminalComputerOffline'
+import { isComputerOfflineError, useComputerOffline } from './useComputerOffline'
 import '@xterm/xterm/css/xterm.css'
 
 import { downgradedSessions, fakeDowngradeRegistry } from './terminal-webgl-sessions'
@@ -223,7 +225,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const trpcClient = useTRPCClient()
   const trpc = useTRPC()
-  const { subscribe, subscribeExit, getCrashOutput, resetTaskState, cleanupTask } = usePty()
+  const {
+    subscribe,
+    subscribeExit,
+    subscribeAvailability,
+    getCrashOutput,
+    resetTaskState,
+    cleanupTask
+  } = usePty()
   const { terminalThemeId, contentVariant } = useTheme()
   const {
     terminalFontSize,
@@ -450,6 +459,42 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     [mode, sessionId, clearBufferWithoutRestart, trpcClient, track]
   )
 
+  // Write what this terminal has not rendered yet (seq > lastRenderedSeq), from the
+  // session's scrollback — the computer's, when it owns it. Gap-free: live chunks
+  // at or below the rendered seq are dropped, so nothing is written twice.
+  const replayMissed = useStableCallback(async (isCancelled: () => boolean = () => false) => {
+    if (!terminalRef.current) return
+    // Drain any throttled-but-pending chunks synchronously so
+    // lastRenderedSeqRef reflects the true rendered seq before getBufferSince
+    // captures it — otherwise the in-queue chunks come back via the missed[]
+    // array and get double-written.
+    forceFlushRef.current?.()
+    const afterSeq = lastRenderedSeqRef.current
+    const missed = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq })
+    if (isCancelled() || !missed || missed.chunks.length === 0) return
+    // Only show overlay when there's actually data to write
+    setIsReplaying(true)
+    // A first restore (nothing rendered yet) into a buffer that evicted its head.
+    if (afterSeq === -1 && missed.prelude) terminalRef.current?.write(missed.prelude)
+    for (const chunk of missed.chunks) {
+      const cutoff = clearedSeqRef.current
+      if (cutoff !== null && chunk.seq <= cutoff) continue
+      terminalRef.current?.write(chunk.data)
+      lastRenderedSeqRef.current = chunk.seq
+    }
+    // Wait for xterm to finish processing all queued writes
+    if (terminalRef.current) {
+      await new Promise<void>((resolve) => terminalRef.current!.write('', resolve))
+    }
+  })
+
+  // The session's computer offline: say so; on reconnect, catch up then clear.
+  const { offline: computerOffline, markOffline: markComputerOffline } = useComputerOffline({
+    sessionId,
+    subscribeAvailability,
+    catchUp: () => replayMissed().finally(() => setIsReplaying(false))
+  })
+
   const initTerminal = useCallback(
     (signal: AbortSignal) =>
       initTerminalSession(
@@ -497,7 +542,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           setInitErrorCode,
           setPtyState,
           setIsResuming,
-          setSearchAddon
+          setSearchAddon,
+          markComputerOffline
         },
         signal
       ),
@@ -509,7 +555,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       handleTerminalKeyEvent,
       clearBufferWithoutRestart,
       trpcClient,
-      scheduleAtlasCorrection
+      scheduleAtlasCorrection,
+      markComputerOffline
     ]
   )
 
@@ -723,38 +770,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Replay missed PTY data when task becomes active
   useEffect(() => {
     if (!isActive || !terminalRef.current) return
-    // Drain any throttled-but-pending chunks synchronously so
-    // lastRenderedSeqRef reflects the true rendered seq before getBufferSince
-    // captures it — otherwise the in-queue chunks come back via the missed[]
-    // array and get double-written.
-    forceFlushRef.current?.()
     let cancelled = false
-    const replay = async () => {
-      const missed = await trpcClient.pty.getBufferSince.query({
-        sessionId,
-        afterSeq: lastRenderedSeqRef.current
+    void replayMissed(() => cancelled)
+      .catch((err: unknown) => {
+        // Its computer is offline: shown as such; caught up when it reconnects.
+        if (isComputerOfflineError(err)) markComputerOffline()
       })
-      if (cancelled || !missed || missed.chunks.length === 0) return
-      // Only show overlay when there's actually data to write
-      setIsReplaying(true)
-      for (const chunk of missed.chunks) {
-        const cutoff = clearedSeqRef.current
-        if (cutoff !== null && chunk.seq <= cutoff) continue
-        terminalRef.current?.write(chunk.data)
-        lastRenderedSeqRef.current = chunk.seq
-      }
-      // Wait for xterm to finish processing all queued writes
-      if (terminalRef.current) {
-        await new Promise<void>((resolve) => terminalRef.current!.write('', resolve))
-      }
-    }
-    void replay().finally(() => {
-      if (!cancelled) setIsReplaying(false)
-    })
+      .finally(() => {
+        if (!cancelled) setIsReplaying(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [isActive, sessionId, trpcClient])
+  }, [isActive, sessionId, replayMissed, markComputerOffline])
 
   // Sync the loading-indicator state from the reactive store. Local overrides
   // (watchdog 'dead'/'error') are transient — the next store change reasserts,
@@ -1374,6 +1402,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             {...(continueHere ? { onContinueHere: continueHere } : {})}
           />
         )}
+        {computerOffline && !showDeadOverlay && <TerminalComputerOffline />}
         {showDeadOverlay && (
           <TerminalDeadOverlay
             isStaleSession={isStaleSession}

@@ -634,6 +634,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'pty.onRespawnSuggested': 'user',
   'pty.onSessionDetected': 'user',
   'pty.onStateChange': 'user',
+  'pty.onOutputAvailability': 'user',
   'pty.onStats': 'user',
   'pty.onTitleChange': 'user',
   'pty.resize': 'user',

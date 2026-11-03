@@ -35,6 +35,7 @@ type PromptCallback = (prompt: PromptInfo) => void
 type SessionDetectedCallback = (sessionId: string) => void
 type DevServerCallback = (url: string) => void
 type TitleChangeCallback = (title: string) => void
+type AvailabilityCallback = (available: boolean) => void
 
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
@@ -44,6 +45,8 @@ interface PtyContextValue {
   subscribeSessionDetected: (sessionId: string, cb: SessionDetectedCallback) => () => void
   subscribeDevServer: (sessionId: string, cb: DevServerCallback) => () => void
   subscribeTitle: (sessionId: string, cb: TitleChangeCallback) => () => void
+  /** The session's computer went offline (false) / came back (true). */
+  subscribeAvailability: (sessionId: string, cb: AvailabilityCallback) => () => void
   getLastSeq: (sessionId: string) => number
   getCrashOutput: (sessionId: string) => string | undefined
   getState: (sessionId: string) => TerminalState
@@ -64,6 +67,7 @@ interface PtyStreamSinks {
   sessionDetectedSubsRef: MutableRefObject<Map<string, Set<SessionDetectedCallback>>>
   devServerSubsRef: MutableRefObject<Map<string, Set<DevServerCallback>>>
   titleSubsRef: MutableRefObject<Map<string, Set<TitleChangeCallback>>>
+  availabilitySubsRef: MutableRefObject<Map<string, Set<AvailabilityCallback>>>
 }
 
 /**
@@ -85,7 +89,8 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
     promptSubsRef,
     sessionDetectedSubsRef,
     devServerSubsRef,
-    titleSubsRef
+    titleSubsRef,
+    availabilitySubsRef
   } = sinks
 
   // Reactive terminal-state store wiring (state-change / exit / hibernated subs +
@@ -222,6 +227,16 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
     trpc.pty.onTitleChange.subscriptionOptions(undefined, { onData: handleTitleChange })
   )
 
+  const handleAvailability = useStableCallback(
+    ({ sessionId, available }: { sessionId: string; available: boolean }) => {
+      const subs = availabilitySubsRef.current.get(sessionId)
+      if (subs) subs.forEach((cb) => cb(available))
+    }
+  )
+  useSubscription(
+    trpc.pty.onOutputAvailability.subscriptionOptions(undefined, { onData: handleAvailability })
+  )
+
   return null
 }
 
@@ -236,6 +251,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   const sessionDetectedSubsRef = useRef<Map<string, Set<SessionDetectedCallback>>>(new Map())
   const devServerSubsRef = useRef<Map<string, Set<DevServerCallback>>>(new Map())
   const titleSubsRef = useRef<Map<string, Set<TitleChangeCallback>>>(new Map())
+  const availabilitySubsRef = useRef<Map<string, Set<AvailabilityCallback>>>(new Map())
 
   // Multi-hub: the PTY event streams must run per connected hub (a remote task's
   // pty lives on its hub, so onData/onExit only arrive from that hub's socket).
@@ -250,7 +266,8 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     promptSubsRef,
     sessionDetectedSubsRef,
     devServerSubsRef,
-    titleSubsRef
+    titleSubsRef,
+    availabilitySubsRef
   }
   const hubStreams = fed ? (
     fed.hubs.map((h) => (
@@ -369,6 +386,21 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const subscribeAvailability = useCallback(
+    (sessionId: string, cb: AvailabilityCallback): (() => void) => {
+      let subs = availabilitySubsRef.current.get(sessionId)
+      if (!subs) {
+        subs = new Set()
+        availabilitySubsRef.current.set(sessionId, subs)
+      }
+      subs.add(cb)
+      return () => {
+        subs!.delete(cb)
+      }
+    },
+    []
+  )
+
   const getLastSeq = useCallback((sessionId: string): number => {
     return statesRef.current.get(sessionId)?.lastSeq ?? -1
   }, [])
@@ -409,6 +441,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       subscribeSessionDetected,
       subscribeDevServer,
       subscribeTitle,
+      subscribeAvailability,
       getLastSeq,
       getCrashOutput,
       getState,
@@ -416,6 +449,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       cleanupTask
     }),
     [
+      subscribeAvailability,
       subscribe,
       subscribeExit,
       subscribeState,

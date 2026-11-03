@@ -87,6 +87,7 @@ import {
   SESSION_ERROR_WINDOW_MS,
   type PtyOutputDetection
 } from '../pty-output-detector'
+import { PtyOutputUnavailableError } from './pty-output-unavailable'
 import { resolveSpawnConversation } from '../spawn-conversation'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
@@ -349,6 +350,8 @@ interface PtySession {
   syncQueryPending: string
   // Last emitted process title (to deduplicate pty:title-change events)
   lastEmittedTitle: string
+  // The current pty's owner (a computer) is unreachable: its scrollback can't be read.
+  outputUnavailable?: boolean
   // Whether the current pty's owner was last told to stream output here
   // (`watchPtyOutput`); an owner that always streams ignores it.
   relayed: boolean
@@ -2561,6 +2564,16 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           }
         }
       }
+      // The owner going away and coming back: the session's output is unavailable
+      // meanwhile, and clients say so instead of showing a blank or hung terminal.
+      ;(target as unknown as PtyHandle).onAvailability?.(
+        guardPtyCallback(sessionId, taskId, 'onAvailability', (available: boolean) => {
+          const session = sessions.get(sessionId)
+          if (!session || session.pty !== target) return
+          session.outputUnavailable = !available
+          ptyEvents.emit('output-availability', sessionId, available)
+        })
+      )
       // Owner-detected output (see `PtySpawnSpec.detection`): same effects, for a
       // chunk this side delivered but did not detect.
       ;(target as unknown as PtyHandle).onSignal?.(
@@ -3407,13 +3420,29 @@ function outputOwner(session: PtySession): PtyHandle | null {
   return handle.ownsOutput === true && handle.getReplay ? handle : null
 }
 
+export { PtyOutputUnavailableError }
+
+/** Replay from the owner; unavailable (never a hang or a raw transport error) while away. */
+async function ownerReplay(
+  session: PtySession,
+  owner: PtyHandle,
+  afterSeq: number
+): Promise<BufferSinceResult> {
+  if (session.outputUnavailable) throw new PtyOutputUnavailableError(session.sessionId)
+  try {
+    return await owner.getReplay!(afterSeq)
+  } catch (err) {
+    throw new PtyOutputUnavailableError(session.sessionId, err)
+  }
+}
+
 /** The full scrollback, ready to replay into a fresh terminal. */
 export async function getBuffer(sessionId: string): Promise<string | null> {
   const session = sessions.get(sessionId)
   if (!session) return null
   const owner = outputOwner(session)
   if (!owner) return session.buffer.toString()
-  const { chunks, prelude } = await owner.getReplay!(-1)
+  const { chunks, prelude } = await ownerReplay(session, owner, -1)
   return prelude + chunks.map((c) => c.data).join('')
 }
 
@@ -3425,6 +3454,7 @@ export async function clearBuffer(sessionId: string): Promise<{
   if (!session) return { success: false, clearedSeq: null }
   const owner = outputOwner(session)
   if (owner?.clearOutput) {
+    if (session.outputUnavailable) throw new PtyOutputUnavailableError(sessionId)
     const { clearedSeq } = await owner.clearOutput()
     return { success: true, clearedSeq }
   }
@@ -3440,7 +3470,7 @@ export async function getBufferSince(
   const session = sessions.get(sessionId)
   if (!session) return null
   const owner = outputOwner(session)
-  if (owner) return owner.getReplay!(afterSeq)
+  if (owner) return ownerReplay(session, owner, afterSeq)
   const { chunks, prelude } = session.buffer.getReplaySince(afterSeq)
   return {
     chunks,

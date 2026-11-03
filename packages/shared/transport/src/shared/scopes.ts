@@ -714,6 +714,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.onRespawnSuggested': 'agent',
   'pty.onSessionDetected': 'agent',
   'pty.onStateChange': 'agent',
+  'pty.onOutputAvailability': 'agent',
   'pty.onStats': 'agent',
   'pty.onTitleChange': 'agent',
   'pty.prioritize': 'agent',

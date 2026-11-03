@@ -228,6 +228,11 @@ export interface PtyHandle {
   clearOutput?(): Promise<{ clearedSeq: number }>
   /** Start/stop streaming output to this side (see `PtySpawnSpec.relay`). */
   setRelay?(on: boolean): void
+  /**
+   * The owner went unreachable (false; the process may well still run) or came
+   * back (true). While away, an owner-held scrollback cannot be read.
+   */
+  onAvailability?(cb: (available: boolean) => void): { dispose(): void }
 }
 
 export interface PtyBackend {

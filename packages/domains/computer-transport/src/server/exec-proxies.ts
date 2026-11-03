@@ -534,6 +534,8 @@ interface DetachControllerOptions<E extends DetachableEntry> {
   resume: (entry: E, listed: ListedSession) => void
   /** Computer reaped this session while the hub was away: deliver its tail + real exit. */
   settleExited: (entry: E, exit: ListedExit) => void
+  /** The computer went away with this session live: its outcome is now unknown. */
+  onDetach?: (entry: E) => void
 }
 
 /**
@@ -575,6 +577,7 @@ interface DetachParticipant {
   finalize: (entry: DetachableEntry, reason: string) => void
   resume: (entry: DetachableEntry, listed: ListedSession) => void
   settleExited: (entry: DetachableEntry, exit: ListedExit) => void
+  onDetach?: (entry: DetachableEntry) => void
   /** Has this participant ever held a session? Gates pruning — see `prune`. */
   everUsed?: boolean
 }
@@ -598,12 +601,13 @@ const detachControllers = new WeakMap<RoutingGateway, Map<string, DetachControll
 function joinDetachController<E extends DetachableEntry>(
   options: DetachControllerOptions<E>
 ): DetachEntry {
-  const { gateway, sessions, kind, finalize, resume, settleExited } = options
+  const { gateway, sessions, kind, finalize, resume, settleExited, onDetach } = options
   const participant = {
     sessions,
     finalize,
     resume,
-    settleExited
+    settleExited,
+    onDetach
   } as unknown as DetachParticipant
 
   let byKind = detachControllers.get(gateway)
@@ -723,7 +727,10 @@ function createDetachController<E extends DetachableEntry>(
   function detachComputer(computerId: string, reason: string): void {
     prune()
     const fresh = liveEntries(computerId).filter((o) => !o.entry.detached)
-    for (const o of fresh) o.entry.detached = true
+    for (const o of fresh) {
+      o.entry.detached = true
+      o.owner.onDetach?.(o.entry)
+    }
     if (liveEntries(computerId).some((o) => o.entry.detached)) armGrace(computerId)
     if (fresh.length === 0) return
     // INFO, not error: nothing has gone wrong yet. Recorded because it is the
@@ -958,6 +965,8 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   preAckSignals: PtySignal[] | null
   /** The relay state last asked for (`setRelay`); re-sent after a reattach. */
   relay?: boolean
+  /** Listeners for the computer going away (false) and coming back (true). */
+  availability: Set<(available: boolean) => void>
   setRelay?: (on: boolean) => void
 }
 
@@ -1148,8 +1157,12 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       return parsed.success ? toSessionList(parsed.data) : null
     },
     finalize: (entry, reason) => finalize(entry, null, null, reason),
+    onDetach: (entry) => {
+      for (const cb of entry.availability) cb(false)
+    },
     resume: (entry, listed) => {
       entry.detached = false
+      for (const cb of entry.availability) cb(true)
       entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
       // A continued spawn whose reply was lost: its resume point is unknown, so the
       // backfill below may repeat some scrollback rather than lose output.
@@ -1236,7 +1249,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       detectFromSeq: -1,
       signalEmitter,
       ownsOutput: false,
-      preAckSignals: null
+      preAckSignals: null,
+      availability: new Set()
     }
     sessions.set(key, entry)
 
@@ -1281,6 +1295,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       },
       get ownsOutput(): boolean {
         return entry.ownsOutput
+      },
+      onAvailability: (cb: (available: boolean) => void): ExecDisposable => {
+        entry.availability.add(cb)
+        return { dispose: () => entry.availability.delete(cb) }
       },
       setRelay: (on: boolean): void => {
         entry.relay = on

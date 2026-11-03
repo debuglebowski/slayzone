@@ -12,6 +12,7 @@ import type { PtySessionWindow } from '../pty-host'
 import {
   clearBuffer,
   createPty,
+  PtyOutputUnavailableError,
   watchPtyOutput,
   getBuffer,
   getBufferSince,
@@ -304,4 +305,53 @@ test('first output known from the owner even when nothing is relayed', async () 
   b.signal(signal({ seq: 0, firstOutput: true }))
   await new Promise((r) => setTimeout(r, 150))
   expect(getState('mirror:first')).toBe('idle')
+})
+
+test("owner's computer away: scrollback reads fail fast as unavailable, and recover", async () => {
+  let availability: ((available: boolean) => void) | undefined
+  let reachable = true
+  setPtyBackend({
+    spawn: () =>
+      ({
+        pid: 4646,
+        process: 'gemini',
+        detectsOutput: true,
+        ownsOutput: true,
+        onData: () => ({ dispose: () => undefined }),
+        onSignal: () => ({ dispose: () => undefined }),
+        onExit: () => ({ dispose: () => undefined }),
+        onAvailability: (cb: (available: boolean) => void) => {
+          availability = cb
+          return { dispose: () => undefined }
+        },
+        write: () => undefined,
+        kill: () => undefined,
+        resize: () => undefined,
+        getReplay: async () => {
+          if (!reachable) throw new Error('computer unreachable')
+          return { chunks: [{ seq: 3, data: 'back' }], prelude: '', currentSeq: 3 }
+        },
+        clearOutput: async () => ({ clearedSeq: 3 })
+      }) as never
+  } as PtyBackend)
+  const events: boolean[] = []
+  ptyEvents.on('output-availability', (id: string, available: boolean) => {
+    if (id === 'mirror:offline') events.push(available)
+  })
+  await open('mirror:offline')
+  reachable = false
+  availability?.(false)
+  expect(events).toEqual([false])
+  await expect(getBufferSince('mirror:offline', -1)).rejects.toBeInstanceOf(
+    PtyOutputUnavailableError
+  )
+  await expect(getBuffer('mirror:offline')).rejects.toBeInstanceOf(PtyOutputUnavailableError)
+  reachable = true
+  availability?.(true)
+  expect(events).toEqual([false, true])
+  expect(await getBufferSince('mirror:offline', 2)).toEqual({
+    chunks: [{ seq: 3, data: 'back' }],
+    prelude: '',
+    currentSeq: 3
+  })
 })
