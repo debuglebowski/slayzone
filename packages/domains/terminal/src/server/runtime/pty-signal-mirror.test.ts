@@ -130,6 +130,20 @@ test('owner detects: the hub does not parse output, and mirrors signals', async 
   expect(getState('mirror:on')).toBe('running')
 })
 
+test('owner runs the pipeline: the hub does not answer terminal queries a second time', async () => {
+  const b = routedBackend(true)
+  await open('mirror:query')
+  b.output('\x1b[c')
+  expect(b.writes).toEqual([])
+})
+
+test('owner did not acknowledge: the hub answers terminal queries, as before', async () => {
+  const b = routedBackend(false)
+  await open('mirror:query-local')
+  b.output('\x1b[c')
+  expect(b.writes.map(([d]) => d)).toEqual(['\x1b[?62;4;22c'])
+})
+
 test('owner did not acknowledge: the hub detects the output itself', async () => {
   const b = routedBackend(false)
   const titles = collect('title-change')

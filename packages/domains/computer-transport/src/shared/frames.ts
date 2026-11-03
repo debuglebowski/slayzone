@@ -305,7 +305,21 @@ export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
  */
 export const PTY_SIGNAL_EVENT_NAME = 'pty-signal'
 
-/** What the computer needs to run output detection for one pty session. */
+/** The hub's terminal theme: what the computer answers OSC colour queries with. */
+export const ptyThemeSchema = z.object({
+  foreground: z.string().min(1).max(64),
+  background: z.string().min(1).max(64),
+  cursor: z.string().min(1).max(64),
+  /** ANSI palette 0-15 as displayed; absent → xterm defaults. */
+  ansi: z.array(z.string().min(1).max(64)).max(16).optional()
+})
+export type PtyTheme = z.infer<typeof ptyThemeSchema>
+
+/**
+ * Run the pty's OUTPUT PIPELINE on the computer: answer timing-critical terminal
+ * queries (with `theme`), detect what the output says (`pty-signal`), filter what is
+ * buffered and streamed. The hub then neither answers, filters nor parses it.
+ */
 export const ptyDetectionParamsSchema = z.object({
   /** Terminal mode id (adapter selection, OSC-title policy). */
   mode: z.string().min(1),
@@ -319,7 +333,9 @@ export const ptyDetectionParamsSchema = z.object({
     })
     .optional(),
   /** Spawned to resume a conversation: opens the stale-resume error window. */
-  resuming: z.boolean()
+  resuming: z.boolean(),
+  /** Absent: xterm defaults until `pty.setTheme`. */
+  theme: ptyThemeSchema.optional()
 })
 export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
 
@@ -425,6 +441,8 @@ export const HubToComputerMethods = {
   ptyKill: 'pty.kill',
   ptyResize: 'pty.resize',
   ptyWrite: 'pty.write',
+  /** The hub's terminal theme changed; best-effort (an older computer has no pipeline). */
+  ptySetTheme: 'pty.setTheme',
   ptyGetBufferSince: 'pty.getBufferSince',
   /** Live (non-warm) sessions the computer still holds — drives reattach. */
   ptyList: 'pty.list',
@@ -744,6 +762,9 @@ export const ptyWriteParamsSchema = z.object({
   watchConversationId: z.literal(true).optional()
 })
 export type PtyWriteParams = z.infer<typeof ptyWriteParamsSchema>
+
+export const ptySetThemeParamsSchema = z.object({ theme: ptyThemeSchema })
+export type PtySetThemeParams = z.infer<typeof ptySetThemeParamsSchema>
 
 /** Replay buffered output with `seq > since.seq` (gap recovery on reconnect). */
 export const ptyGetBufferSinceParamsSchema = z.object({

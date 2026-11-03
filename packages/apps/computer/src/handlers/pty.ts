@@ -44,12 +44,15 @@ import {
   ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
   type PtyDetectionParams,
+  type PtyTheme,
+  ptySetThemeParamsSchema,
   PTY_SIGNAL_EVENT_NAME,
   RpcError,
   ComputerNotificationMethods,
   ComputerTransportErrorCodes,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
+import { writeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
 import * as pty from 'node-pty'
@@ -221,6 +224,8 @@ export function createPtyHandlers(
   options: PtyHandlerOptions = {}
 ): PtyHandlers {
   const sessions = new Map<string, PtySession>()
+  /** The hub's terminal theme, as last pushed (`pty.setTheme`); new pipelines start with it. */
+  let theme: PtyTheme | undefined
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
   const spawnPty = options.spawnPty ?? pty.spawn
@@ -424,19 +429,17 @@ export function createPtyHandlers(
       // whichever copy of a seq arrives first and drops the other, then emits that
       // seq exactly once, so a stream can be assembled from live frame 3 +
       // backfilled frame 4 + live frame 5. Any per-seq divergence corrupts the
-      // result — and a filter that holds a torn escape tail diverges by
-      // construction (`two` vs `two ESC [ ? 6`), losing bytes in one interleaving
-      // and stranding a half-sequence in the other.
+      // result. So whatever transforms a chunk runs ONCE, before the append, and
+      // the same string is both buffered and streamed.
       //
-      // So device-status filtering does NOT belong here. It belongs where the
-      // stream is consumed, and it already lives there: every remote frame —
-      // live or backfilled — re-enters the hub's own pty onData
-      // (`attachPtyHandlers` wraps remote handles too), which answers what it
-      // answers via `interceptSyncQueries` and strips cursor-status queries via
-      // `filterBufferData` before anything is buffered or rendered. Stripping on
-      // the computer would only risk starving a remote program of an answer the hub
-      // would otherwise have given it.
-      const seq = buffer.append(data)
+      // For a session the hub asked to run the output pipeline (`detection`), that
+      // transform happens here: terminal queries answered at once, detection run,
+      // the replay filter applied (`pty-signals.ts`, stateless per chunk). Without
+      // it (an older hub) the raw bytes go out and the hub's own pty onData answers
+      // and filters them, as it always did.
+      const processed = session.signals?.process(data)
+      const out = processed ? processed.clean : data
+      const seq = buffer.append(out)
       // A WARM session buffers but does not stream: the hub has no session to
       // route it to yet, and `pty.warmAdopt` hands the whole buffer over at
       // adopt. Emitting under a `warmId` the hub never registered would be
@@ -444,12 +447,12 @@ export function createPtyHandlers(
       if (session.warm) return
       // What the chunk says goes FIRST: a stale-resume error suppresses this very
       // chunk on the hub, which must know before the bytes arrive.
-      session.signals?.onOutput(data, seq)
+      if (processed) session.signals?.report(processed.detection, seq)
       ctx.dialer.notify(ComputerNotificationMethods.ptyData, {
         sessionId: session.id,
         ...(session.spawnId ? { spawnId: session.spawnId } : {}),
         seq,
-        data
+        data: out
       })
     })
 
@@ -469,19 +472,30 @@ export function createPtyHandlers(
   /** Start output detection for a session; ids are read live (warm adopt rekeys). */
   function attachSignals(session: PtySession, detection: PtyDetectionParams): void {
     session.signals?.dispose()
-    session.signals = createPtySessionSignals(
-      detection,
-      { sessionId: () => session.id, spawnId: () => session.spawnId },
-      (payload) => {
+    session.signals = createPtySessionSignals({
+      // The latest theme the hub pushed wins over the one it spawned with.
+      params: { ...detection, ...(theme ? { theme } : {}) },
+      ids: { sessionId: () => session.id, spawnId: () => session.spawnId },
+      emit: (payload) => {
         if (sessions.get(session.id) !== session) return
         ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: PTY_SIGNAL_EVENT_NAME,
           payload
         })
       },
-      Date.now,
-      { cwd: session.cwd, startedAt: session.startedAt }
-    )
+      // Synchronously when the pty exposes its fd, so the answer reaches the program
+      // in the same read loop iteration (as the hub did); else node-pty's write.
+      respond: (answer) => {
+        const fd = (session.proc as unknown as { fd?: number }).fd
+        try {
+          if (typeof fd !== 'number') throw new Error('no fd')
+          writeSync(fd, answer)
+        } catch {
+          session.proc.write(answer)
+        }
+      },
+      disk: { cwd: session.cwd, startedAt: session.startedAt }
+    })
   }
 
   /**
@@ -1022,6 +1036,12 @@ export function createPtyHandlers(
     return { ok: true }
   }
 
+  function setTheme(rawParams: unknown): { ok: true } {
+    theme = ptySetThemeParamsSchema.parse(rawParams).theme
+    for (const session of sessions.values()) session.signals?.setTheme(theme)
+    return { ok: true }
+  }
+
   function write(rawParams: unknown): { ok: true } {
     const params = ptyWriteParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
@@ -1114,6 +1134,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyKill]: kill,
     [HubToComputerMethods.ptyResize]: resize,
     [HubToComputerMethods.ptyWrite]: write,
+    [HubToComputerMethods.ptySetTheme]: setTheme,
     [HubToComputerMethods.ptyGetBufferSince]: getBufferSince,
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,

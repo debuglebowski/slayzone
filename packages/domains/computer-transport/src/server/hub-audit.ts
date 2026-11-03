@@ -73,6 +73,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.warmKill': { event: 'computer.pty.kill', detail: (p) => ({ warmId: p.warmId, warm: true }) },
   'pty.resize': null,
   'pty.write': null,
+  // Appearance only (OSC colour-query answers); no session, nothing started.
+  'pty.setTheme': null,
   'pty.getBufferSince': null,
   'pty.list': null,
   'pty.prioritize': null,

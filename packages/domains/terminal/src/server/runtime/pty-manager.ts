@@ -704,6 +704,8 @@ let currentTerminalTheme: TerminalTheme = {
 
 export function setTerminalTheme(theme: TerminalTheme): void {
   currentTerminalTheme = theme
+  // Owners that answer terminal queries themselves answer with this theme too.
+  getPtyBackend().setTheme?.(theme)
 }
 
 // Answer timing-critical terminal queries synchronously. See computeSyncQueryResponse
@@ -1776,7 +1778,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       mode: terminalMode,
       ...(type ? { type } : {}),
       patterns: { working: patternWorking ?? null, error: patternError ?? null },
-      resuming
+      resuming,
+      theme: currentTerminalTheme
     }
     const buildSpec = (
       rawFile: string,
@@ -2517,7 +2520,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           // Intercept all terminal queries synchronously before data reaches the renderer.
           // An async renderer round-trip would arrive too late — once readline is active,
           // late response bytes appear as garbage text in the user's prompt.
-          const data = interceptSyncQueries(session, data0)
+          // A process owner that runs the output pipeline (`detection` acked) has
+          // already answered terminal queries and filtered the chunk; doing either
+          // again here would answer a query twice.
+          const ownerPipeline = (target as unknown as PtyHandle).detectsOutput === true
+          const data = ownerPipeline ? data0 : interceptSyncQueries(session, data0)
 
           // NOTE: output does NOT touch the idle-close clock. Hook-driven TUI
           // agents emit cosmetic redraws while idle; counting those as activity
@@ -2526,7 +2533,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           // blocked/working" axis is the hook-driven state + `awaitingUser`.
 
           // Append to buffer for history restoration (filter problematic sequences)
-          const cleanData = filterBufferData(data)
+          const cleanData = ownerPipeline ? data : filterBufferData(data)
           const seq = session.buffer.append(cleanData)
           // Notify external data subscribers (REST API follow endpoints)
           const listeners = dataListeners.get(sessionId)

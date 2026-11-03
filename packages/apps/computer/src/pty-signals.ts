@@ -1,15 +1,15 @@
 /**
- * Output detection for one pty, run where the output is: the computer.
+ * The output pipeline for one pty, run where the output is: the computer.
  *
- * The hub spawns a session with `detection` (mode, patterns, resuming); this runs the
- * SAME `PtyOutputDetector` the hub used to run over every chunk, and reports what it
- * finds as small `pty-signal` events. The hub's state machine mirrors those instead
- * of parsing a copy of the output.
- *
- * Detection sees the chunk the way the hub's did: with timing-critical terminal
- * queries (DA/DSR/CPR/OSC colour queries) already taken out, so a query is never
- * mistaken for agent output. Whoever answers those queries, the forwarded text is
- * the same (`computeSyncQueryResponse` is pure).
+ * The hub spawns a session with `detection` (mode, patterns, resuming, theme); this
+ * runs the SAME steps the hub used to run over every chunk:
+ *  1. answer timing-critical terminal queries (DA/DSR/CPR/OSC colour) at once, with
+ *     the hub's terminal theme — an answer that waits for a network round-trip lands
+ *     after the program moved on and shows up as garbage in its input;
+ *  2. `PtyOutputDetector` over what is left, reported as small `pty-signal` events
+ *     the hub's state machine mirrors;
+ *  3. `filterBufferData`, giving the bytes that are buffered and streamed (one copy
+ *     for both, so a seq's bytes never depend on the delivery path).
  *
  * A chunk that only refreshes the silence (idle) clock — a plain shell's every
  * redraw — is coalesced to at most one signal per {@link IDLE_CLOCK_SIGNAL_MS}
@@ -22,6 +22,7 @@ import {
   DISK_SESSION_POLL_ATTEMPTS,
   DISK_SESSION_POLL_MS,
   computeSyncQueryResponse,
+  filterBufferData,
   getAdapter,
   PtyOutputDetector,
   SESSION_ERROR_WINDOW_MS,
@@ -44,18 +45,29 @@ const EMPTY: PtyOutputDetection = {
   conversationId: null
 }
 
-/** Any theme: the forwarded text of `computeSyncQueryResponse` does not depend on it. */
-const NO_THEME: TerminalTheme = { foreground: '#ffffff', background: '#000000', cursor: '#ffffff' }
+/** Until the hub says otherwise: xterm.js's own defaults. */
+const DEFAULT_THEME: TerminalTheme = {
+  foreground: '#ffffff',
+  background: '#000000',
+  cursor: '#ffffff'
+}
 
 export interface PtySignalSink {
   (payload: PtySignalPayload): void
 }
 
 export interface PtySessionSignals {
-  /** Run detection over one raw output chunk (as streamed under `seq`). */
-  onOutput(data: string, seq: number): void
+  /**
+   * One raw chunk in: queries answered (via `respond`), detection run. Returns the
+   * bytes to buffer and stream, and the detection to {@link report} under the seq
+   * those bytes are buffered as.
+   */
+  process(data: string): { clean: string; detection: PtyOutputDetection }
+  report(detection: PtyOutputDetection, seq: number): void
   /** `/status` was submitted: look for a conversation id in the next output. */
   watchConversationId(): void
+  /** The hub's terminal theme changed (OSC colour query answers). */
+  setTheme(theme: TerminalTheme): void
   dispose(): void
 }
 
@@ -81,13 +93,20 @@ function says(d: PtyOutputDetection): boolean {
   )
 }
 
-export function createPtySessionSignals(
-  params: PtyDetectionParams,
-  ids: Ids,
-  emit: PtySignalSink,
-  now: () => number = Date.now,
+export interface PtySessionSignalsOptions {
+  params: PtyDetectionParams
+  ids: Ids
+  emit: PtySignalSink
+  /** Write a terminal-query answer to the process, synchronously when possible. */
+  respond: (answer: string) => void
+  now?: () => number
   disk?: PtyDiskSessionContext
-): PtySessionSignals {
+}
+
+export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySessionSignals {
+  const { params, ids, emit, respond, disk } = opts
+  const now = opts.now ?? Date.now
+  let theme: TerminalTheme = params.theme ?? DEFAULT_THEME
   const detector = new PtyOutputDetector({
     adapter: getAdapter({ mode: params.mode, type: params.type, patterns: params.patterns }),
     mode: params.mode,
@@ -172,12 +191,18 @@ export function createPtySessionSignals(
   }
 
   return {
-    onOutput(data, seq) {
+    process(data) {
+      const { response, forwarded, pendingPartial } = computeSyncQueryResponse(
+        syncPending + data,
+        theme
+      )
+      syncPending = pendingPartial
+      if (response) respond(response)
+      return { clean: filterBufferData(forwarded), detection: detector.detect(forwarded) }
+    },
+    report(d, seq) {
       lastSeq = seq
       if (!diskPollStarted) startDiskPoll()
-      const { forwarded, pendingPartial } = computeSyncQueryResponse(syncPending + data, NO_THEME)
-      syncPending = pendingPartial
-      const d = detector.detect(forwarded)
       if (d.conversationId && watchTimer) {
         clearTimeout(watchTimer)
         watchTimer = undefined
@@ -205,6 +230,9 @@ export function createPtySessionSignals(
         )
         trailingTimer.unref?.()
       }
+    },
+    setTheme(next) {
+      theme = next
     },
     watchConversationId() {
       detector.watchConversationId()

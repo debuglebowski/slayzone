@@ -9,14 +9,27 @@ const ids = { sessionId: () => 's-1', spawnId: () => 'sp-1' }
 
 function harness(mode: string, resuming = false) {
   const sent: PtySignalPayload[] = []
+  const answers: string[] = []
   let t = 1_000
-  const signals = createPtySessionSignals(
-    { mode, resuming },
+  const pipeline = createPtySessionSignals({
+    params: { mode, resuming },
     ids,
-    (p) => sent.push(ptySignalPayloadSchema.parse(p)),
-    () => t
-  )
-  return { sent, signals, advance: (ms: number) => (t += ms) }
+    emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+    respond: (a) => answers.push(a),
+    now: () => t
+  })
+  const cleaned: string[] = []
+  /** What the pty handler does per chunk: process, buffer as `seq`, report. */
+  const signals = {
+    onOutput(data: string, seq: number) {
+      const { clean, detection } = pipeline.process(data)
+      cleaned.push(clean)
+      pipeline.report(detection, seq)
+    },
+    watchConversationId: () => pipeline.watchConversationId(),
+    dispose: () => pipeline.dispose()
+  }
+  return { sent, answers, cleaned, signals, pipeline, advance: (ms: number) => (t += ms) }
 }
 
 afterEach(() => {
@@ -44,11 +57,27 @@ describe('pty signals (computer-side detection)', () => {
     expect(sent).toEqual([])
   })
 
-  test('terminal queries are taken out before detection', () => {
+  test('terminal queries are answered at once and taken out before detection', () => {
     // DA1 is `ESC [ c`; as text it would be output. Answered/stripped, it says nothing.
-    const { sent, signals } = harness('claude-code')
-    signals.onOutput('\x1b[c', 1)
+    const { sent, signals, answers, cleaned } = harness('claude-code')
+    signals.onOutput('before\x1b[cafter', 1)
     expect(sent).toEqual([])
+    expect(answers).toEqual(['\x1b[?62;4;22c'])
+    expect(cleaned).toEqual(['beforeafter'])
+  })
+
+  test('what is buffered + streamed is the replay-filtered chunk (OSC title out, detected)', () => {
+    const { sent, signals, cleaned } = harness('codex')
+    signals.onOutput('\x1b]0;Codex busy\x07hello', 1)
+    expect(cleaned).toEqual(['hello'])
+    expect(sent[0]?.title).toBe('Codex busy')
+  })
+
+  test("OSC colour queries are answered with the hub's theme, updated live", () => {
+    const { answers, pipeline } = harness('claude-code')
+    pipeline.setTheme({ foreground: '#112233', background: '#445566', cursor: '#778899' })
+    pipeline.process('\x1b]11;?\x07')
+    expect(answers.join('')).toContain('4444/5555/6666')
   })
 
   test('idle-clock-only chunks (plain shell) coalesce: leading + trailing per window', () => {
@@ -101,14 +130,14 @@ describe('pty signals (computer-side detection)', () => {
         `${JSON.stringify({ payload: { cwd: '/work/repo' } })}\n`
       )
       const sent: PtySignalPayload[] = []
-      const signals = createPtySessionSignals(
-        { mode: 'codex', resuming: false },
+      const signals = createPtySessionSignals({
+        params: { mode: 'codex', resuming: false },
         ids,
-        (p) => sent.push(ptySignalPayloadSchema.parse(p)),
-        Date.now,
-        { cwd: '/work/repo', startedAt: Date.now() }
-      )
-      signals.onOutput('booting', 4)
+        emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+        respond: () => undefined,
+        disk: { cwd: '/work/repo', startedAt: Date.now() }
+      })
+      signals.report(signals.process('booting').detection, 4)
       vi.advanceTimersByTime(3_000)
       await vi.waitFor(() =>
         expect(sent).toContainEqual(expect.objectContaining({ seq: 4, conversationId: id }))

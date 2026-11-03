@@ -4,6 +4,7 @@ import type * as pty from 'node-pty'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { wrapShellWithUlimit } from '../shell-env'
 import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
+import type { TerminalTheme } from '../sync-query-response'
 
 /**
  * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
@@ -89,6 +90,8 @@ export interface PtyDetectionSpec {
   type?: string
   patterns?: { working?: string | null; error?: string | null }
   resuming: boolean
+  /** What OSC colour queries are answered with (`setTerminalTheme`). */
+  theme?: TerminalTheme
 }
 
 /** One chunk's detection, reported by the owner (see `PtyOutputDetection`). */
@@ -228,6 +231,8 @@ export interface PtyBackend {
     }
   ): Promise<{ pid: number }>
   warmKill?(computerId: string, warmId: string): Promise<void>
+  /** The hub's terminal theme changed: tell every owner that answers terminal queries. */
+  setTheme?(theme: TerminalTheme): void
   /** Warm sessions the computer still holds — used to reap orphans on reconnect. */
   warmList?(computerId: string): Promise<Array<{ warmId: string; cwd: string; pid: number }>>
   /**

@@ -1311,6 +1311,15 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
     },
 
+    setTheme(theme) {
+      for (const computer of gateway.listComputers()) {
+        // Best-effort: an older computer has no pipeline (method not found).
+        void gateway
+          .request(computer.computerId, HubToComputerMethods.ptySetTheme, { theme })
+          .catch(noop)
+      }
+    },
+
     async warmKill(computerId: string, warmId: string) {
       await gateway.request(computerId, HubToComputerMethods.ptyWarmKill, {
         warmId
