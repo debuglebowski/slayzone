@@ -71,6 +71,11 @@ export interface UseChatSessionResult {
   /** True until the initial buffer replay resolves (on mount / tab reopen). */
   hydrating: boolean
   loadError: string | null
+  /**
+   * The tab's chat session could not be opened (`chat.hydrate` rejected). History
+   * may still have loaded; this is shown beside it, never as a timeline row.
+   */
+  hydrateError: string | null
   /** Retry loading history without dropping locally unsent messages. */
   reload: () => void
   /** Paged history (null: the whole history was replayed — every row is here). */
@@ -207,6 +212,7 @@ interface HydrateChatCtx {
   onHydrated: () => void
   restoreLocal: (confirmed: ReadonlySet<string>) => void
   onError: (message: string | null) => void
+  onHydrateError: (message: string | null) => void
 }
 
 /**
@@ -240,17 +246,18 @@ async function hydrateAndReplay({
   dispatch,
   onHydrated,
   restoreLocal,
-  onError
+  onError,
+  onHydrateError
 }: HydrateChatCtx): Promise<void> {
   try {
     await trpcClient.chat.hydrate.mutate(target)
+    if (gen === genRef.current) onHydrateError(null)
   } catch (e) {
     // Surface hydrate failure but still attempt replay (e.g. session may
-    // exist from a previous reattach despite this hydrate rejecting).
-    dispatch({
-      type: 'event',
-      event: { kind: 'error', message: (e as Error).message ?? String(e) }
-    })
+    // exist from a previous reattach despite this hydrate rejecting). Not a
+    // timeline row: the panel's notice owns load failures, so one cause is
+    // shown once, and a reload's reset cannot erase it.
+    if (gen === genRef.current) onHydrateError(e instanceof Error ? e.message : String(e))
   }
   if (gen !== genRef.current) return
   try {
@@ -369,6 +376,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     stateRef.current = state
   }, [state])
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [hydrateError, setHydrateError] = useState<string | null>(null)
   const lastSeqRef = useRef<number>(-1)
   // Newest live event applied (live events carry their own counter; see applyLive).
   const lastLiveRef = useRef<number>(0)
@@ -780,6 +788,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       dispatch,
       restoreLocal,
       onError: setLoadError,
+      onHydrateError: setHydrateError,
       onHydrated: () => setLoadedInputs(inputs)
     })
 
@@ -974,6 +983,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     inFlight: isTurnOpen(state),
     hydrating,
     loadError,
+    hydrateError,
     reload,
     paging,
     loadPages,

@@ -29,24 +29,12 @@ test('migration explains why an active task must wait', () => {
   )
   expect(screen.getByText(/Stop this task’s agents/)).toBeTruthy()
 })
-test.each(['ready', 'preparing'] as const)(
-  '%s storage has no separate notice; a history load failure remains retryable',
-  (state) => {
-    const { rerender } = render(
-      <ChatStorageNotice
-        status={{ state, computer: { id: 'pc', name: 'Laptop' } }}
-        onRetry={() => undefined}
-      />
-    )
-    expect(screen.queryByRole('status')).toBeNull()
-    rerender(
-      <ChatStorageNotice
-        status={{ state, computer: { id: 'pc', name: 'Laptop' } }}
-        error="Storage cannot be read"
-        onRetry={() => undefined}
-      />
-    )
-    expect(screen.getByText('Storage cannot be read')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-  }
-)
+test.each(['ready', 'preparing'] as const)('%s storage has no notice', (state) => {
+  render(
+    <ChatStorageNotice
+      status={{ state, computer: { id: 'pc', name: 'Laptop' } }}
+      onRetry={() => undefined}
+    />
+  )
+  expect(screen.queryByRole('status')).toBeNull()
+})

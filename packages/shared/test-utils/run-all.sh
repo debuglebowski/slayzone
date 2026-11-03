@@ -1168,6 +1168,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/prompts/codex-approvals.test.tsx \
   packages/shared/ui/src/agent-pills.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatQueueList.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatOpenFailure.test.tsx \
   packages/domains/task-terminals/src/client/chat/ChatStorageNotice.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.prompts.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.final-plan.test.tsx \

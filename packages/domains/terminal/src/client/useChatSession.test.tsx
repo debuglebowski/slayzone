@@ -340,6 +340,44 @@ describe('useChatSession — must keep working', () => {
   })
 })
 
+describe('useChatSession — hydrate failure', () => {
+  it('is reported once as hydrateError beside the loaded history, never as a timeline row', async () => {
+    const { result } = setup()
+    await act(async () => {
+      bufferLoad = 0
+      loads[0].hydrate.reject(new Error('Provider conversation belongs to another storage owner'))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      loads[0].buffer.resolve(HISTORY)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(result.current.hydrateError).toBe(
+      'Provider conversation belongs to another storage owner'
+    )
+    expect(result.current.loadError).toBeNull()
+    expect(texts(result)).toEqual(['one', 'two'])
+    expect(result.current.timeline.some((it) => it?.kind === 'turn-error')).toBe(false)
+  })
+
+  it('a later successful load clears it', async () => {
+    const { result, rerender } = setup()
+    await act(async () => {
+      bufferLoad = 0
+      loads[0].hydrate.reject(new Error('boom'))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      loads[0].buffer.resolve(HISTORY)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(result.current.hydrateError).toBe('boom')
+    rerender({ cwd: '/wt' })
+    await finishLoad(1, HISTORY)
+    expect(result.current.hydrateError).toBeNull()
+  })
+})
+
 describe('useChatSession — bugs', () => {
   it('Bug 2: a reload (folder change on the same tab) does not show every message twice', async () => {
     const { result, rerender } = setup()

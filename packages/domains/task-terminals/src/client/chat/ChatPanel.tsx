@@ -11,6 +11,7 @@ import {
 import { CornerDownLeft } from 'lucide-react'
 import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
+import { ChatOpenFailure } from './ChatOpenFailure'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
 import { useSideQuestions } from './side-questions/useSideQuestions'
@@ -163,6 +164,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inFlight,
       hydrating,
       loadError,
+      hydrateError,
       reload,
       paging,
       loadPages,
@@ -771,6 +773,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const isEmpty =
       timeline.length === 0 || (timeline.length === 1 && timeline[0]?.kind === 'session-start')
+    // The chat did not open: nothing can be sent, so the failure takes the
+    // composer's place (the composer stays mounted, hidden, so a draft survives).
+    const openError = loadError ?? hydrateError ?? storage.error
 
     // What streams right now reaches only the rows that stream (plan 3.2): the
     // store's identity never changes, so providing it re-renders nothing, and a
@@ -858,11 +863,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         </div>
                       )}
 
-                      <ChatStorageNotice
-                        status={storage.status}
-                        error={loadError ?? storage.error}
-                        onRetry={storage.retry}
-                      />
+                      {openError ? (
+                        isEmpty && (
+                          <ChatOpenFailure
+                            status={storage.status}
+                            error={openError}
+                            placement="center"
+                            onRetry={storage.retry}
+                          />
+                        )
+                      ) : (
+                        <ChatStorageNotice status={storage.status} onRetry={storage.retry} />
+                      )}
                       <ChatTimeline
                         overrideNotice={overrideNotice}
                         search={search}
@@ -965,106 +977,120 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           </button>
                         </div>
                       )}
-                      <ChatComposer
-                        notices={
-                          <>
-                            {composer.draftConflictAvailable && (
-                              <div
-                                role="status"
-                                className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
-                              >
-                                <p className="text-muted-foreground">
-                                  Saved and local drafts differ. Keep both before saving.
-                                </p>
-                                <div className="flex shrink-0 items-center gap-1">
+                      {openError && !isEmpty && (
+                        <ChatOpenFailure
+                          status={storage.status}
+                          error={openError}
+                          placement="bottom"
+                          onRetry={storage.retry}
+                        />
+                      )}
+                      <div
+                        data-testid="chat-composer-slot"
+                        className={openError ? 'hidden' : 'contents'}
+                      >
+                        <ChatComposer
+                          notices={
+                            <>
+                              {composer.draftConflictAvailable && (
+                                <div
+                                  role="status"
+                                  className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                                >
+                                  <p className="text-muted-foreground">
+                                    Saved and local drafts differ. Keep both before saving.
+                                  </p>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    <button
+                                      type="button"
+                                      className="rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                      onClick={composer.recoverDraftConflict}
+                                    >
+                                      Keep both
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title="Keep only the current draft"
+                                      className="rounded-full px-3 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                      onClick={composer.dismissDraftConflict}
+                                    >
+                                      Dismiss
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              {composer.legacyDraftAvailable && (
+                                <div
+                                  role="status"
+                                  className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                                >
+                                  <p className="text-muted-foreground">
+                                    Older unsaved draft on this device. Recover adds it to this
+                                    chat.
+                                  </p>
                                   <button
                                     type="button"
-                                    className="rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
-                                    onClick={composer.recoverDraftConflict}
+                                    className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                    onClick={composer.recoverLegacyDraft}
                                   >
-                                    Keep both
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title="Keep only the current draft"
-                                    className="rounded-full px-3 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                                    onClick={composer.dismissDraftConflict}
-                                  >
-                                    Dismiss
+                                    Recover draft
                                   </button>
                                 </div>
-                              </div>
-                            )}
-                            {composer.legacyDraftAvailable && (
-                              <div
-                                role="status"
-                                className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
-                              >
-                                <p className="text-muted-foreground">
-                                  Older unsaved draft on this device. Recover adds it to this chat.
-                                </p>
-                                <button
-                                  type="button"
-                                  className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
-                                  onClick={composer.recoverLegacyDraft}
-                                >
-                                  Recover draft
-                                </button>
-                              </div>
-                            )}
-                          </>
-                        }
-                        backgroundJobs={
-                          backgroundJobs.length > 0 ? (
-                            <ComposerBackgroundJobs jobs={backgroundJobs} />
-                          ) : null
-                        }
-                        compact={props.isThread}
-                        hasPlanReview={!!codexPlanReview}
-                        appearance={appearance}
-                        finalOnly={finalOnly}
-                        inFlight={inFlight}
-                        mode={mode}
-                        queuedMessages={composer.queuedMessages}
-                        removeQueue={composer.removeQueue}
-                        queueApi={composer.queueApi}
-                        attachments={composer.attachments}
-                        setAttachments={composer.setAttachments}
-                        attachmentsApi={attachmentsApi}
-                        autocomplete={composer.autocomplete}
-                        textareaRef={composer.textareaRef}
-                        draft={composer.draft}
-                        setDraft={composer.setDraft}
-                        argumentHint={composer.argumentHint}
-                        setCursorPos={composer.setCursorPos}
-                        onKeyDown={composer.onKeyDown}
-                        handleSend={composer.handleSend}
-                        handleStop={composer.handleStop}
-                        historySearch={composer.historySearch}
-                        usage={selectUsageSummary(state)}
-                        displaySessionEnded={displaySessionEnded}
-                        handleRestart={handleRestart}
-                        restarting={restarting}
-                        handleReset={handleReset}
-                        resetting={resetting}
-                        chatMode={chatMode}
-                        handleModeChange={handleModeChange}
-                        autoCapability={autoCapability}
-                        chatDefaults={chatDefaults}
-                        chatModel={chatModel}
-                        models={models}
-                        handleModelChange={handleModelChange}
-                        modelChanging={modelChanging}
-                        chatEffort={chatEffort}
-                        handleEffortChange={handleEffortChange}
-                        effortChanging={effortChanging}
-                        chatCollaboration={chatCollaboration}
-                        handleCollaborationChange={handleCollaborationChange}
-                        collaborationChanging={collaborationChanging}
-                        chatFastMode={chatFastMode}
-                        handleFastModeChange={handleFastModeChange}
-                        fastModeChanging={fastModeChanging}
-                      />
+                              )}
+                            </>
+                          }
+                          backgroundJobs={
+                            backgroundJobs.length > 0 ? (
+                              <ComposerBackgroundJobs jobs={backgroundJobs} />
+                            ) : null
+                          }
+                          compact={props.isThread}
+                          hasPlanReview={!!codexPlanReview}
+                          appearance={appearance}
+                          finalOnly={finalOnly}
+                          inFlight={inFlight}
+                          mode={mode}
+                          queuedMessages={composer.queuedMessages}
+                          removeQueue={composer.removeQueue}
+                          queueApi={composer.queueApi}
+                          attachments={composer.attachments}
+                          setAttachments={composer.setAttachments}
+                          attachmentsApi={attachmentsApi}
+                          autocomplete={composer.autocomplete}
+                          textareaRef={composer.textareaRef}
+                          draft={composer.draft}
+                          setDraft={composer.setDraft}
+                          argumentHint={composer.argumentHint}
+                          setCursorPos={composer.setCursorPos}
+                          onKeyDown={composer.onKeyDown}
+                          handleSend={composer.handleSend}
+                          handleStop={composer.handleStop}
+                          historySearch={composer.historySearch}
+                          usage={selectUsageSummary(state)}
+                          displaySessionEnded={displaySessionEnded}
+                          handleRestart={handleRestart}
+                          restarting={restarting}
+                          handleReset={handleReset}
+                          resetting={resetting}
+                          chatMode={chatMode}
+                          handleModeChange={handleModeChange}
+                          autoCapability={autoCapability}
+                          chatDefaults={chatDefaults}
+                          chatModel={chatModel}
+                          models={models}
+                          handleModelChange={handleModelChange}
+                          modelChanging={modelChanging}
+                          chatEffort={chatEffort}
+                          handleEffortChange={handleEffortChange}
+                          effortChanging={effortChanging}
+                          chatCollaboration={chatCollaboration}
+                          handleCollaborationChange={handleCollaborationChange}
+                          collaborationChanging={collaborationChanging}
+                          chatFastMode={chatFastMode}
+                          handleFastModeChange={handleFastModeChange}
+                          fastModeChanging={fastModeChanging}
+                        />
+                      </div>
                     </div>
                     {filesPanel && (
                       <FilesChangedPanel
