@@ -1,0 +1,102 @@
+{
+  "date": "2026-11-03",
+  "kind": "live local packaged pilot",
+  "sourceCommit": "0cd5bd6b0ebc305b98fe4eb192d2bea557c25e00",
+  "cleanSourceExport": true,
+  "gitWorktreeUsed": false,
+  "version": "0.36.4",
+  "privateBuild": true,
+  "published": false,
+  "signing": "local ad-hoc signature; not notarized",
+  "productionStorageUpgraded": true,
+  "storageChannel": "stable",
+  "originalInstalledAppRetained": true,
+  "devSessionLeftRunning": true,
+  "backups": {
+    "beforeUpgrade": {
+      "verified": true,
+      "files": 4057,
+      "bytes": 3113075009
+    },
+    "afterUpgrade": {
+      "verified": true,
+      "files": 2376,
+      "bytes": 3149133701
+    },
+    "scope": "Complete stable client/hub/computer directory; quiescent copy, independent files, SHA-256 verified."
+  },
+  "history": {
+    "eventsVerified": 72316,
+    "missingOrChangedEvents": 0,
+    "missingOrChangedTimestamps": 0,
+    "artifactFilesVerified": 733,
+    "missingOrChangedArtifactFiles": 0,
+    "hubSchema": 191,
+    "computerSchemas": [5],
+    "remainingHubEvents": 0,
+    "ownership": [["active", 245]],
+    "unavailableOwners": 0,
+    "newForeignKeyViolations": 0
+  },
+  "newData": {
+    "newMessageEventsVerified": 13,
+    "newMessageEventsMissingOrChanged": 0,
+    "userMessagesAfterRestart": 1,
+    "expectedAssistantReplyAfterRestart": true,
+    "attachmentHashMatches": true,
+    "attachmentBytesMatch": true,
+    "preexistingQueuedMessagesVerified": 1,
+    "queuedMessagesMissingOrChanged": 0,
+    "unassignedPromptPreviewsRetained": 4,
+    "unassignedPreviewsMissingOrChanged": 0,
+    "integrity": {
+      "hub": "ok",
+      "computer": "ok"
+    }
+  },
+  "finalRpc": {
+    "userMessages": 1,
+    "expectedReplyReadable": true,
+    "attachmentReadable": true,
+    "draftClearedAfterSend": true
+  },
+  "restartCycles": 2,
+  "uiChecks": {
+    "oldChatRendered": true,
+    "draftAndAttachmentRendered": true,
+    "attachmentOpenedInArtifactsPanel": true,
+    "newReplyRendered": true
+  },
+  "result": "Storage migration and persistence checks passed. Pilot is not a clean shutdown pass.",
+  "warnings": {
+    "quitWatchdogFiringsDuringPilot": 2,
+    "quitWatchdogAlreadyPresentBeforePilot": true,
+    "normalQuit": "Each tested quit required the existing 15-second watchdog fallback; a later launch reports an unclean prior shutdown.",
+    "startupUnhandledRejectionEvents": 3,
+    "startupRejectionCause": "Not established; diagnostic privacy policy redacts the error text.",
+    "unassignedLegacyDiagnosticRows": 3,
+    "unassignedPromptPreviews": 4,
+    "historicalContentCleanup": "Original unassigned content remains preserved on the hub; one additional held diagnostic is redacted startup metadata.",
+    "artifactListRefresh": "The CLI-created report was present immediately in REST and tRPC listings, but the already-open artifact UI showed it only after Reload App."
+  },
+  "method": [
+    "Packaged committed source in a separate export; unrelated working changes excluded. No release pushed.",
+    "Verified the stable installation was stopped before copying its complete storage directory.",
+    "Ran the actual packaged app against real stable storage; schema 181 to 191, computer schema 5.",
+    "Compared every preexisting event payload, sequence and timestamp, all 733 artifact files, and the one old queued message against the pre-upgrade backup.",
+    "Viewed old history in the app. Created an isolated pilot project/task and a benign 43-byte attachment.",
+    "Native typing automation dropped characters. Created the final draft/attachment and sent the test message through the normal stable app RPC interface; no direct production DB writes.",
+    "Verified the draft and attachment after restart. Claude returned the exact expected reply without using tools.",
+    "Stopped only the pilot provider, quit/restarted again, verified all 13 new event rows and attachment bytes plus normal RPC readability.",
+    "The first immediate post-launch replay probe preceded session hydration. The final probe uses the renderer's hydrate-before-replay contract, then checks one user message, exact assistant reply, attachment and cleared sent draft.",
+    "Created a full post-upgrade backup while the pilot was stopped. Left the private pilot app available for normal-use testing."
+  ],
+  "remaining": [
+    "Investigate/fix the existing shutdown hang before calling the packaged pilot clean.",
+    "Identify the startup unhandled rejection.",
+    "Complete a normal-use trial; this was an automated pilot, not a day of human use.",
+    "Resolve the held historical content under an explicit ownership/quarantine policy.",
+    "Check external artifact-list notification/refresh behavior."
+  ],
+  "launchInstructions": "Use ~/Applications/SlayZone Pilot 2026-11-03.app. The old installed build cannot read the upgraded storage; a downgrade needs a coordinated restore of the full pre-upgrade backup, with any later work preserved separately."
+}

@@ -25,7 +25,12 @@ import { getAppDeps, getMenuEvents, getNotifyEvents, type AppRouter } from '@sla
 import { getAutomationsEvents } from '@slayzone/automations/server'
 import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
-import { getAgentLifecycleEvents, getChatDeps, getPtyDeps } from '@slayzone/terminal/server'
+import {
+  agentStarts,
+  getAgentLifecycleEvents,
+  getChatDeps,
+  getPtyDeps
+} from '@slayzone/terminal/server'
 import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
 import { settingsEvents } from '@slayzone/settings-core/server'
@@ -472,6 +477,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'chat.onExit': (o) => getChatDeps().events.emit('exit', o.tab, o.session, 0, null),
   'chat.onQueueChanged': (o) => getChatDeps().queueEvents.emit('queue-changed', o.tab),
   'chat.onQueueDrained': (o) => getChatDeps().queueEvents.emit('queue-drained', o.tab, o.mark),
+  'chat.onReplayRequired': (o) => getChatDeps().events.emit('replay-required', o.tab, o.mark),
   'menu.onGoHome': (o) => asUser(o.userId, () => getMenuEvents().emit('go-home')),
   'menu.onToggleGlobalAgentPanel': (o) =>
     asUser(o.userId, () => getMenuEvents().emit('toggle-global-agent-panel')),
@@ -536,6 +542,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onHibernated': (o) => getPtyDeps().events.emit('hibernated', o.session),
   'pty.onStats': (o) => getPtyDeps().events.emit('stats', { [o.session]: { cpu: 1, rss: 1 } }),
   'pty.onResizeNeeded': (o) => getPtyDeps().events.emit('resize-needed', o.session),
+  'pty.onAgentStarts': (o) => agentStarts.mark(o.session, 'queued'),
   'taskTerminals.onChanged': (o) => tabsEvents.emit('tabs:changed', { taskId: o.task }),
   'worktrees.onDiffChanged': (o) =>
     getGitWatcher().emit('git:diff-changed', { worktreePath: o.path, refsChanged: true }),

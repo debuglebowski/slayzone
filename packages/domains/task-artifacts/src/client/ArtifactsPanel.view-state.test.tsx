@@ -219,7 +219,7 @@ afterEach(() => {
   client.clear()
 })
 
-function pressSidebarShortcut(key = 'y') {
+function pressSidebarShortcut(key = 's') {
   const event = new KeyboardEvent('keydown', {
     key,
     metaKey: detectPlatform() === 'mac',

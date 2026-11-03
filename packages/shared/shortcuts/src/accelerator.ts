@@ -180,7 +180,11 @@ export interface ElectronInput {
  * Check if an Electron before-input-event Input matches a shortcut string.
  * Same logic as matchesShortcut but for Electron's Input type.
  */
-export function matchesElectronInput(input: ElectronInput, keys: string | null): boolean {
+export function matchesElectronInput(
+  input: ElectronInput,
+  keys: string | null,
+  platform: Platform = detectPlatform()
+): boolean {
   if (keys === null) return false
   if (input.type !== 'keyDown') return false
 
@@ -191,7 +195,7 @@ export function matchesElectronInput(input: ElectronInput, keys: string | null):
   const wantAlt = parts.includes('alt')
   const wantCtrl = parts.includes('ctrl')
 
-  const isMac = detectPlatform() === 'mac'
+  const isMac = platform === 'mac'
 
   if (isMac) {
     if (wantMod !== input.meta) return false

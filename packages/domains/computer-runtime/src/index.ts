@@ -9,8 +9,6 @@ import { DuplexRpc, LineDecoder, RpcError } from '@slayzone/computer-transport/s
 export const HOST_CONTRACT_VERSION = 3
 /** v1/v2 can be bridged for inspecting/stopping work before an idle upgrade. */
 export const HOST_MAINTENANCE_MIN_CONTRACT_VERSION = 1
-/** Computer-owned chat stop/clear first existed in host v2. */
-export const HOST_CHAT_STOP_MIN_CONTRACT_VERSION = 2
 export class ConnectorLease {
   private generation = 0
   claim(generation: number): boolean {

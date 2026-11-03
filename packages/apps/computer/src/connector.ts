@@ -1,7 +1,6 @@
 import {
   HOST_CONTRACT_VERSION,
-  HOST_MAINTENANCE_MIN_CONTRACT_VERSION,
-  HOST_CHAT_STOP_MIN_CONTRACT_VERSION
+  HOST_MAINTENANCE_MIN_CONTRACT_VERSION
 } from '@slayzone/computer-runtime'
 import { HubToComputerMethods, RpcError } from '@slayzone/computer-transport/shared'
 import { stageComputerHooks } from './agent-hooks'
@@ -122,14 +121,7 @@ export async function startConnector(
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
     onHubRequest: async (method, params, actor) => {
       await ready
-      if (
-        maintenance &&
-        !maintenanceMethods.has(method) &&
-        !(
-          identity.contract >= HOST_CHAT_STOP_MIN_CONTRACT_VERSION &&
-          isMaintenanceChatStop(method, params)
-        )
-      )
+      if (maintenance && !maintenanceMethods.has(method) && !isMaintenanceChatStop(method, params))
         throw new RpcError(
           -32001,
           'Computer update pending. Stop its running agents to finish the update; chat and new work are unavailable until then.'

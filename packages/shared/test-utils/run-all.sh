@@ -191,6 +191,8 @@ run_harness packages/apps/api/src/routers/upload-sources.test.ts
 run_harness packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+# Agent-start tracker behind the sidebar's startup card (queued / booting per agent).
+run_harness packages/domains/terminal/src/server/runtime/agent-starts.test.ts
 # The hub decides an agent's computer and folder before the spawn (task sessions and
 # the project-wide agent panel); an explicit folder wins, none known = none guessed.
 run_harness packages/domains/terminal/src/server/runtime/spawn-target.test.ts
@@ -705,6 +707,7 @@ run_harness packages/apps/hub/src/historical-chat-migration.test.ts
 # Optional private snapshots are supplied explicitly; default runs never read live state.
 run_harness packages/apps/hub/src/real-corpus-stability-audit.test.ts
 run_harness packages/apps/hub/src/real-metadata-stability-audit.test.ts
+run_harness packages/apps/hub/src/production-copy-migration.audit.test.ts
 run_harness packages/apps/hub/src/storage-stability-audit.test.ts
 run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
@@ -720,12 +723,12 @@ run_harness packages/domains/chat-runtime/src/server/hub-ownership.test.ts
 # Migration interruption, provider rebinding, durable submissions and cleanup regressions.
 run_harness packages/apps/hub/src/review-integration-upgrade.test.ts
 run_harness packages/apps/hub/src/review-released-chat-upgrade.test.ts
-run_harness packages/domains/chat-runtime/src/server/review-migration-state.test.ts
-run_harness packages/domains/chat-runtime/src/server/migration-task-authority.test.ts
+run_harness packages/apps/hub/src/review-migration-state.test.ts
+run_harness packages/apps/hub/src/migration-task-authority.test.ts
 run_harness packages/domains/chat-runtime/src/server/review-storage-durability.test.ts
 run_harness packages/domains/chat-runtime/src/server/review-provider-transition-storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/review-superseded-transfer.test.ts
-run_harness packages/domains/chat-runtime/src/server/provider-transition.test.ts
+run_harness packages/apps/hub/src/provider-transition.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-session-authority.test.ts
 run_harness packages/domains/chat-runtime/src/server/queue-message-identities.test.ts
 run_harness packages/domains/chat-runtime/src/server/tab-state-ownership.test.ts
@@ -931,6 +934,7 @@ run_harness packages/domains/task-terminals/src/client/chat/prompt-history.test.
 run_harness packages/domains/task-terminals/src/client/chat/prompts/prompt-options.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/turn-trigger-notification.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/history-summary.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/activity-view.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/turn-changes.test.ts
@@ -1293,6 +1297,7 @@ run_vitest_files "vitest (tasks-changed refresh)" \
 # a tab's page is mounted are held for it.
 run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
+  packages/apps/app/src/renderer/src/app-shell/startup-progress.test.ts \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts

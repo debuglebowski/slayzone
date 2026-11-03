@@ -260,3 +260,31 @@ describe('pty attach', () => {
     expect(r.exists, `expired mark ignored (calls ${calls})`).toBe(true)
   })
 })
+
+describe('init scheduler: queued count (startup card)', () => {
+  test('counts queued inits and notifies on enqueue, grant, promote and abort', async () => {
+    const h = harness({ a: 0, b: 1, c: 2 })
+    const counts: number[] = []
+    const off = h.s.subscribeQueued(() => counts.push(h.s.queuedCount()))
+    expect(h.s.queuedCount()).toBe(0)
+
+    const abort = new AbortController()
+    void h.request('a')
+    void h.request('b')
+    void h.request('c', false, abort.signal)
+    void h.request('visible', true)
+    expect(h.s.queuedCount()).toBe(3)
+
+    await h.runIdle()
+    expect(h.s.queuedCount()).toBe(2)
+    h.s.promote('b')
+    expect(h.s.queuedCount()).toBe(1)
+    abort.abort()
+    expect(h.s.queuedCount()).toBe(0)
+    expect(counts).toEqual([1, 2, 3, 2, 1, 0])
+
+    off()
+    void h.request('d')
+    expect(counts.length).toBe(6)
+  })
+})

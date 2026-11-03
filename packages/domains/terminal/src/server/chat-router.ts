@@ -681,20 +681,14 @@ export const chatRouter = router({
       .mutation(({ input }) => queueOps().clear(input.tabId))
   }),
 
-  // Streaming subscriptions — replace the 4 `webContents.send` broadcasts.
-  // Source emitters are dual-emitted in the terminal domain; IPC stays until
-  // the renderer cuts over (slice 5).
-  //
-  // `tabIds` is an OPTIONAL server-side filter — same reasoning as `pty.onData`
-  // (pty-router.ts): this is otherwise every chat event on the hub, filtered
-  // only client-side. Omitted (every existing caller) reproduces today's
-  // unfiltered behavior exactly.
+  // `tabId` optional like every filtered stream: omitted = every tab's signal; the
+  // owner policy checks a given tabId and filters each event by its tab either way.
   onReplayRequired: publicProcedure
-    .input(z.object({ tabId: z.string() }))
+    .input(z.object({ tabId: z.string() }).optional())
     .subscription(({ input }) =>
       observable<{ tabId: string; generation: string }>((emit) => {
         const handler = (tabId: string, generation: string): void => {
-          if (tabId === input.tabId) emit.next({ tabId, generation })
+          if (!input || tabId === input.tabId) emit.next({ tabId, generation })
         }
         const ev = getChatDeps().events
         ev.on('replay-required', handler)
@@ -703,6 +697,14 @@ export const chatRouter = router({
         }
       })
     ),
+  // Streaming subscriptions — replace the 4 `webContents.send` broadcasts.
+  // Source emitters are dual-emitted in the terminal domain; IPC stays until
+  // the renderer cuts over (slice 5).
+  //
+  // `tabIds` is an OPTIONAL server-side filter — same reasoning as `pty.onData`
+  // (pty-router.ts): this is otherwise every chat event on the hub, filtered
+  // only client-side. Omitted (every existing caller) reproduces today's
+  // unfiltered behavior exactly.
   onEvent: publicProcedure
     .input(z.object({ tabIds: z.array(z.string()).optional() }).optional())
     .subscription(({ input }) =>

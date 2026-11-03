@@ -55,6 +55,7 @@ export {
 } from './user-input-tracker'
 // E2E: in-process runtime reset (replaces restarting the side-car per spec).
 export { resetTerminalRuntimeForTest } from './runtime/test-reset'
+export { agentStarts, type AgentStartEntry } from './runtime/agent-starts'
 // Cross-domain seam: server-side callers (integrations sync, pty.killTask) invoke
 // the no-op default; the host injects the real agent teardown at boot.
 export { onTaskReachedTerminal, setTaskAgentsStopper, stopTaskAgents } from './task-events'

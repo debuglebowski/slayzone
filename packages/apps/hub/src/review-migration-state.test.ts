@@ -2,16 +2,18 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
-import { createChatRuntimeHandlers } from '../../../../apps/computer/src/handlers/chat-runtime'
-import { createComputerChatServices } from '../../../../apps/hub/src/computer-chat'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
+import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createComputerChatServices } from './computer-chat'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from '@slayzone/task/server'
-import { deleteTab } from '../../../task-terminals/src/server/tabs-store'
-import { createChatOwnershipStore } from './hub-ownership'
-import { createChatMigration } from './migration'
-import { createLegacyChatSource } from './legacy-source'
-import type { ChatRecord } from '../shared'
+import { deleteTab } from '@slayzone/task-terminals/server'
+import {
+  createChatMigration,
+  createChatOwnershipStore,
+  createLegacyChatSource
+} from '@slayzone/chat-runtime/server'
+import type { ChatRecord } from '@slayzone/chat-runtime/shared'
 
 test('review: closing the original content leader cannot erase prompts excluded from a sibling transfer', async () => {
   const h = await createTestHarness()

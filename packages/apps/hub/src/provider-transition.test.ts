@@ -4,23 +4,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
-import {
-  createTestHarness,
-  createSlayzoneDbAdapter
-} from '../../../../shared/test-utils/ipc-harness'
-import { createComputerChatServices } from '../../../../apps/hub/src/computer-chat'
-import { createChatRuntimeHandlers } from '../../../../apps/computer/src/handlers/chat-runtime'
+import { createTestHarness, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
+import { createComputerChatServices } from './computer-chat'
+import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from '@slayzone/task/server'
-import { deleteTab } from '../../../task-terminals/src/server/tabs-store'
-import { createComputerChatRuntime } from './computer-runtime'
+import { deleteTab } from '@slayzone/task-terminals/server'
+import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import {
   fakeChild,
   emitLine,
   sj,
   until
-} from '../../../terminal/src/server/runtime/chat-transport-testkit'
-import type { ChatTabTransition } from '../shared'
+} from '../../../domains/terminal/src/server/runtime/chat-transport-testkit'
+import type { ChatTabTransition } from '@slayzone/chat-runtime/shared'
 
 async function fixture() {
   const h = await createTestHarness()

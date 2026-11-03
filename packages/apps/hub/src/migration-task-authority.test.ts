@@ -2,12 +2,12 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
-import { createComputerChatServices } from '../../../../apps/hub/src/computer-chat'
-import { createChatRuntimeHandlers } from '../../../../apps/computer/src/handlers/chat-runtime'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
+import { createComputerChatServices } from './computer-chat'
+import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from '@slayzone/task/server'
-import { deleteTab } from '../../../task-terminals/src/server/tabs-store'
+import { deleteTab } from '@slayzone/task-terminals/server'
 
 test.each(['before-snapshot', 'after-prepare', 'after-commit'] as const)(
   'task content authority survives original tab closure %s and completes source cleanup',

@@ -117,6 +117,7 @@ import {
   TabPanes,
   AppTabBar,
   ActiveTabSync,
+  StartupProgressStatus,
   LeaderboardPage,
   UsageAnalyticsPage,
   ContextManagerPage,
@@ -1485,6 +1486,7 @@ function App(): React.JSX.Element {
             tags={tags}
             taskTags={taskTags}
             compactFooter={headerHidden ? compactFooterContent : undefined}
+            statusSlot={<StartupProgressStatus />}
             updateState={
               updateDownloadPercent != null
                 ? { phase: 'downloading', percent: updateDownloadPercent, version: updateVersion }

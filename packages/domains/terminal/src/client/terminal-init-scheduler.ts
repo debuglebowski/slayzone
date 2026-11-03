@@ -67,6 +67,11 @@ export function createInitScheduler(env: SchedulerEnv = defaultEnv()) {
   let held = false
   let idleScheduled = false
   let deadline: IdleDeadlineLike | null = null
+  // Read by the sidebar's startup card: hidden terminals still waiting for a turn.
+  const queuedListeners = new Set<() => void>()
+  const queuedChanged = (): void => {
+    for (const cb of [...queuedListeners]) cb()
+  }
 
   const takeBest = (): Pending | undefined => {
     if (pending.length === 0) return undefined
@@ -78,7 +83,9 @@ export function createInitScheduler(env: SchedulerEnv = defaultEnv()) {
       const rb = env.rank(b.sessionId)
       if (ra < rb || (ra === rb && a.seq < b.seq)) best = i
     }
-    return pending.splice(best, 1)[0]
+    const [taken] = pending.splice(best, 1)
+    queuedChanged()
+    return taken
   }
 
   const grantNext = (): void => {
@@ -146,11 +153,15 @@ export function createInitScheduler(env: SchedulerEnv = defaultEnv()) {
       }
       const onAbort = (): void => {
         const i = pending.indexOf(entry)
-        if (i >= 0) pending.splice(i, 1)
+        if (i >= 0) {
+          pending.splice(i, 1)
+          queuedChanged()
+        }
         resolve(makeSlot(false))
       }
       opts.signal.addEventListener('abort', onAbort, { once: true })
       pending.push(entry)
+      queuedChanged()
       pump()
     })
   }
@@ -166,13 +177,26 @@ export function createInitScheduler(env: SchedulerEnv = defaultEnv()) {
       // Outside the shared slot: the queue keeps moving while this one runs.
       p.grant(false)
     }
-    if (promoted) pump()
+    if (promoted) {
+      queuedChanged()
+      pump()
+    }
     return promoted
   }
 
   const isQueued = (sessionId: string): boolean => pending.some((p) => p.sessionId === sessionId)
 
-  return { acquire, promote, isQueued }
+  /** Hidden terminals still waiting for their turn. */
+  const queuedCount = (): number => pending.length
+  /** Notified whenever `queuedCount()` changes. */
+  const subscribeQueued = (cb: () => void): (() => void) => {
+    queuedListeners.add(cb)
+    return () => {
+      queuedListeners.delete(cb)
+    }
+  }
+
+  return { acquire, promote, isQueued, queuedCount, subscribeQueued }
 }
 
 const scheduler = createInitScheduler()
@@ -180,3 +204,5 @@ const scheduler = createInitScheduler()
 export const acquireInitSlot = scheduler.acquire
 export const promoteInitSlot = scheduler.promote
 export const isInitQueued = scheduler.isQueued
+export const initQueuedCount = scheduler.queuedCount
+export const subscribeInitQueued = scheduler.subscribeQueued

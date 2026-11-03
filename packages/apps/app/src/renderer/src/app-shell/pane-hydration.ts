@@ -83,6 +83,15 @@ export interface PaneHydrator {
   isHydrated: (id: string) => boolean
   /** Notified when `id` hydrates. */
   subscribe: (id: string, cb: () => void) => () => void
+  /** Panes hydrated so far, and still waiting. Same object until either changes. */
+  progress: () => HydrationProgress
+  /** Notified whenever `progress()` changes. */
+  subscribeProgress: (cb: () => void) => () => void
+}
+
+export interface HydrationProgress {
+  hydrated: number
+  queued: number
 }
 
 export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrator {
@@ -93,11 +102,20 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
   let idleScheduled = false
   let everQueued = false
   let drainMarked = false
+  const progressListeners = new Set<() => void>()
+  let progressSnapshot: HydrationProgress = { hydrated: 0, queued: 0 }
+  const progressChanged = (): void => {
+    if (progressSnapshot.hydrated === hydrated.size && progressSnapshot.queued === queue.size)
+      return
+    progressSnapshot = { hydrated: hydrated.size, queued: queue.size }
+    for (const cb of [...progressListeners]) cb()
+  }
 
   const hydrate = (id: string): void => {
     queue.delete(id)
-    if (hydrated.has(id)) return
+    if (hydrated.has(id)) return progressChanged()
     hydrated.add(id)
+    progressChanged()
     const subs = listeners.get(id)
     if (subs) for (const cb of [...subs]) cb()
     if (everQueued && !drainMarked && queue.size === 0) {
@@ -150,6 +168,7 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     const entry: Entry = { id, seq: seq++, rank: opts.rank, ready: false }
     queue.set(id, entry)
     everQueued = true
+    progressChanged()
     const markReady = (): void => {
       if (queue.get(id) !== entry) return
       entry.ready = true
@@ -158,6 +177,7 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     opts.ready.then(markReady, markReady)
     return () => {
       if (queue.get(id) === entry) queue.delete(id)
+      progressChanged()
     }
   }
 
@@ -175,7 +195,14 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     enqueue,
     hydrateNow: hydrate,
     isHydrated: (id) => hydrated.has(id),
-    subscribe
+    subscribe,
+    progress: () => progressSnapshot,
+    subscribeProgress: (cb) => {
+      progressListeners.add(cb)
+      return () => {
+        progressListeners.delete(cb)
+      }
+    }
   }
 }
 

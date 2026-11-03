@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
 import * as mgr from './chat-transport-manager'
+import { agentStarts } from './agent-starts'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -887,6 +888,37 @@ test('onStateChange: fires alongside broadcastStateChange so global listeners se
   expect(globalNotices[0].sessionId).toBe('task-state:tab-state')
   expect(globalNotices.some((g) => g.next === 'running')).toBeTruthy()
   expect(globalNotices.some((g) => g.next === 'idle' && g.old === 'running')).toBeTruthy()
+})
+
+test('agent-start tracker: a chat agent counts as starting until its process is up', async () => {
+  // The sidebar's startup card. In-process spawn: launched at once → `booting`
+  // (a routed spawn is `queued` until its computer admits it); `spawn` → gone.
+  await setup()
+  const fake = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const key = 'task-track:tab-track'
+  const phaseOf = () => agentStarts.snapshot().find((e) => e.sessionId === key)?.phase ?? 'none'
+  await createChat(
+    {
+      tabId: 'tab-track',
+      taskId: 'task-track',
+      mode: 'claude-chat',
+      cwd: '/tmp',
+      conversationId: null,
+      providerFlags: []
+    },
+    { autoSpawn: false }
+  )
+  expect(phaseOf(), 'before the process is up').toBe('booting')
+  ;(fake as unknown as EventEmitter).emit('spawn')
+  await new Promise((r) => setTimeout(r, 50))
+  expect(phaseOf(), 'after spawn').toBe('none')
 })
 
 test('createChat: initialBuffer with unfinished turn → emits synthetic interrupted', async () => {

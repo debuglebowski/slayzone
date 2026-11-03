@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from '@slayzone/task/server'
@@ -9,10 +9,14 @@ import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runt
 import { createComputerChatServices } from './computer-chat'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
+import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
 
 async function fixture() {
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-stability-integration-'))
+  // Any provider spawn resolves `claude` to the scripted fake, never to a real
+  // CLI that happens to be on this machine's PATH (CI has none; dev boxes do).
+  const fakeClaude = createFakeClaude({ root: join(dir, 'fake-claude') })
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
     .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
@@ -28,7 +32,8 @@ async function fixture() {
           hubUrl: 'ws://hub/computers',
           name: 'test',
           allowedRoots: [realpathSync(tmpdir())],
-          capabilities: ['proc']
+          capabilities: ['proc'],
+          binOverrideDir: fakeClaude.binDir
         },
         dialer: { notify: () => true },
         log: () => {}
@@ -58,6 +63,7 @@ async function fixture() {
   return {
     ...h,
     dir,
+    fakeClaude,
     request: (raw: unknown) => pc.request(JSON.parse(JSON.stringify(raw))),
     services,
     failActivation: () => {
@@ -69,6 +75,7 @@ async function fixture() {
     },
     close: async () => {
       await pc.close()
+      fakeClaude.dispose()
       h.cleanup()
       rmSync(dir, { recursive: true, force: true })
     }
@@ -480,6 +487,9 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
     f.db
       .prepare("UPDATE tasks SET provider_config=? WHERE id='task'")
       .run(JSON.stringify({ 'claude-chat': { chatModel: 'sonnet' } }))
+    // The tab has no hydrated session, so the edit takes setModel's
+    // kill+respawn path: the provider is started with the edited model.
+    const provider = f.fakeClaude.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
     const before = f.services()
     await before.relay.ops.getTabState('tab')
     let release!: () => void, entered!: () => void
@@ -520,6 +530,9 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
         }
       })
     ).toBe('opus')
+    await vi.waitFor(() =>
+      expect(provider.runs().map((run) => run.flag('--model'))).toEqual(['opus'])
+    )
     expect(
       JSON.parse(
         (

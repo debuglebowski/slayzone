@@ -4,8 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useChatAvailability } from './useChatAvailability'
-import { ChatSync } from '../../../../apps/mobile/src/chat/chat-sync'
-import { initialState, reducer } from '@slayzone/terminal/reducer'
 import type { ChatAvailability } from '@slayzone/terminal-contracts'
 
 const hub = vi.hoisted(() => ({ online: true, calls: 0, generation: 'boot:0' }))
@@ -48,35 +46,9 @@ test.each([false, true])(
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client }, children)
-    let timeline = initialState()
-    const sync = new ChatSync('tab', {
-      dispatch: (action) => {
-        timeline = reducer(timeline, action)
-      },
-      requestFrame: () => {},
-      cancelFrame: () => {}
-    })
-    sync.completeLoad(sync.beginLoad('full'), {
-      events: [],
-      live: { afterSeq: -1, liveSeq: 0, events: [] }
-    })
-    const saved = [
-      {
-        seq: 0,
-        event: {
-          kind: 'user-message',
-          id: 'offline-message',
-          text: 'persisted on computer during disconnect',
-          content: [{ type: 'text', text: 'persisted on computer during disconnect' }]
-        }
-      }
-    ]
-    const reload = vi.fn(() =>
-      sync.completeLoad(sync.beginLoad('full'), {
-        events: saved,
-        live: { afterSeq: 0, liveSeq: 0, events: [] }
-      })
-    )
+    // Content saved on the computer while its link was down: only a history reload
+    // (onReady) brings it in. Replaying that reload into a timeline: chat-sync.test.ts.
+    const reload = vi.fn()
     const h = renderHook(
       () =>
         useChatAvailability({
@@ -104,13 +76,7 @@ test.each([false, true])(
     })
     expect(hub.calls).toBeGreaterThanOrEqual(2)
     await waitFor(() => expect(h.result.current.status?.state).toBe('ready'))
-    await waitFor(() =>
-      expect(
-        timeline.timeline.some(
-          (item) => item?.kind === 'user-text' && item.id === 'offline-message'
-        )
-      ).toBe(true)
-    )
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
     client.clear()
   }
 )

@@ -349,6 +349,34 @@ describe('Codex chat on the virtualized timeline', () => {
     expect(document.body.textContent).toContain('apply_patch verification failed')
   })
 
+  it('marks the part of a turn a message was sent into as kept going', async () => {
+    const events: AgentEvent[] = [
+      { kind: 'turn-init', sessionId: 'thread-1', model: 'codex', cwd: '/repo', tools: [] },
+      { kind: 'user-message', id: 'u1', text: 'run the build' },
+      { kind: 'tool-call', id: 'cmd-1', name: 'Bash', input: { command: 'pnpm build' } },
+      {
+        kind: 'tool-result',
+        toolUseId: 'cmd-1',
+        isError: false,
+        rawContent: 'ok',
+        structured: null
+      },
+      { kind: 'user-message', id: 's1', text: 'also run lint', joinsTurn: true },
+      { kind: 'tool-call', id: 'cmd-2', name: 'Bash', input: { command: 'pnpm lint' } }
+    ]
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness events={events} grouped inFlight />
+      </QueryClientProvider>
+    )
+    await settle()
+    const marks = document.querySelectorAll('[data-testid="chat-turn-continued"]')
+    expect(marks).toHaveLength(1)
+    const text = document.body.textContent!
+    expect(text.indexOf('run the build')).toBeLessThan(text.indexOf('Kept going'))
+    expect(text.indexOf('Kept going')).toBeLessThan(text.indexOf('also run lint'))
+  })
+
   it('places Activities and file changes together after the answer', async () => {
     const events = codexSession(1)
     const client = new QueryClient()

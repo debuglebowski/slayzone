@@ -153,6 +153,25 @@ const rows =
     return out
   }
 
+/**
+ * A stream whose every event is a full snapshot (a list): each subscriber gets its
+ * cut of it, but only when that cut differs from the last one it got. Another user's
+ * change leaves the cut as it was, so it reaches this subscriber as nothing at all —
+ * not as a repeat that would reveal that something happened. The first cut is always
+ * sent: it is the subscriber's initial state.
+ */
+const snapshotRows = (field: string, kind: ResourceKind): EventFilter => {
+  const last = new WeakMap<StreamState, string>()
+  const cut = rows(field, kind)
+  return async (event, state) => {
+    const out = await cut(event, state.scope)
+    const key = JSON.stringify(out)
+    if (last.get(state) === key) return DROP
+    last.set(state, key)
+    return out
+  }
+}
+
 /** Rows of a process list: the task when set, else the project. */
 const processRows: OutputFilter = async (data, scope) => {
   if (!Array.isArray(data)) return data
@@ -1112,8 +1131,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.onStateChange': streamed(on('sessionId', 'session')),
   'pty.onOutputAvailability': streamed(on('sessionId', 'session')),
   // A full snapshot of starting agents: cut to the caller's sessions. An empty cut is
-  // still sent — it is the snapshot ("none of yours are starting"), not a no-op.
-  'pty.onAgentStarts': streamed((event, { scope }) => rows('sessionId', 'session')(event, scope)),
+  // still sent when it changes the caller's view ("none of yours are starting").
+  'pty.onAgentStarts': streamed(snapshotRows('sessionId', 'session')),
   'pty.onBackgroundJobs': streamed(on('sessionId', 'session')),
   'pty.onResize': streamed(on('sessionId', 'session')),
   'pty.onTitleChange': streamed(on('sessionId', 'session')),

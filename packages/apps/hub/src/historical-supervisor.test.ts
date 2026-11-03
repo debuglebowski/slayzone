@@ -193,6 +193,11 @@ test.each([
         sessionId: 'preserved-native-job',
         command: process.execPath,
         args: ['-e', 'setInterval(()=>{},1000)'],
+        // The computer strips ELECTRON_RUN_AS_NODE from inherited env, so under the
+        // Electron-run harness this would start a GUI Electron: alive on macOS, but
+        // exiting at once on a headless Linux runner, leaving the host idle. The
+        // spawn's own env keeps the busy job a real Node process on every runtime.
+        env: { ELECTRON_RUN_AS_NODE: '1' },
         cwd: dir
       })
       const sessions = await hub.gateway.request(id, 'proc.list')

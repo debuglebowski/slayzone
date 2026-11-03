@@ -9,7 +9,7 @@ import {
   type Key,
   type SetStateAction
 } from 'react'
-import { ArrowDown, ChevronRight, Sparkles, Wrench } from 'lucide-react'
+import { ArrowDown, ChevronRight, CornerRightDown, Sparkles, Wrench } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import {
@@ -198,6 +198,16 @@ export function ChatTimeline({
               {turn.trigger && <TurnTriggerRow item={turn.trigger} />}
               {showWorking && <TypingIndicator label={loadingLabel} />}
               <ActivityTurn turn={turn} appearance={activityAppearance} rowOf={rowOf} />
+              {turn.continuedBy && (
+                // Sent into the running turn: this part has no answer, the turn goes on below.
+                <div
+                  className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"
+                  data-testid="chat-turn-continued"
+                >
+                  <CornerRightDown className="size-3 shrink-0" />
+                  Kept going with your next message
+                </div>
+              )}
             </div>
           </>
         )

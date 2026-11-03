@@ -217,15 +217,47 @@ export function useChatComposer({
     setCursorPos(0)
     textareaRef.current?.focus()
   })
+  // "Send now": the agent takes it after its current step; it stays
+  // listed ("With agent…") until then. A refusal (the turn just ended…) says why.
+  // A request that fails (an older computer has no such method) says so too.
+  const steerQueued = useStableCallback(async (id: string): Promise<void> => {
+    const reason = await steerQueue(id).then(
+      (result) => (result.ok ? null : result.reason),
+      (err: unknown) => (err instanceof Error ? err.message : String(err))
+    )
+    if (reason !== null) toast(`Could not send it now: ${reason}`)
+  })
+  // The queued row's "Send now", for a message just queued: it waits for the
+  // hub's copy (steer reads the hub's queue). One the agent can't take now stays
+  // queued, and says why; a failed delivery says so on its row.
+  const sendQueuedIntoTurn = useStableCallback(
+    async (queued: { id: string; delivered: Promise<void> }): Promise<void> => {
+      if (!capabilities.steerQueued) {
+        toast("Queued: this agent can't take a message mid-turn.")
+        return
+      }
+      if (!steerAvailable) {
+        toast("Queued: the agent is waiting for your answer, so it can't take a message now.")
+        return
+      }
+      const delivered = await queued.delivered.then(
+        () => true,
+        () => false
+      )
+      if (delivered) await steerQueued(queued.id)
+    }
+  )
+  /** `now` (Cmd+Shift+Enter mid-turn): into the running turn once the hub has it. */
   const queueDraft = useStableCallback(
-    async (send: string, original: string, content?: UserContentBlock[]) => {
+    async (send: string, original: string, content?: UserContentBlock[], now = false) => {
       const version = draftVersion.current
       const push = content
         ? () => pushQueue(send, original, content)
         : () => pushQueue(send, original)
       try {
-        await push()
+        const queued = await push()
         if (draftVersion.current === version) clearDraft()
+        if (now) void sendQueuedIntoTurn(queued)
       } catch (err) {
         toast(queueFailureMessage(err))
       }
@@ -419,8 +451,10 @@ export function useChatComposer({
   }, [draft])
 
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
+  // `now` (Cmd+Shift+Enter): mid-turn, straight into the running turn — queued,
+  // then taken by the agent after its current step — not after the queue.
   const handleSend = useCallback(
-    async (textOverride?: string) => {
+    async (textOverride?: string, { now = false }: { now?: boolean } = {}) => {
       const text = (textOverride ?? draftSnapshot.current.text).trim()
       const attachments = draftSnapshot.current.attachments
       if (sessionEnded) return
@@ -507,7 +541,7 @@ export function useChatComposer({
         // Clear BEFORE anything is awaited: the draft is saved per tab, and a
         // save in between would bring the sent text back.
         if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
-          await queueDraft(toSend, text, files.length > 0 ? content : undefined)
+          await queueDraft(toSend, text, files.length > 0 ? content : undefined, now && inFlight)
           return
         }
         setDraft('')
@@ -547,7 +581,7 @@ export function useChatComposer({
       // remain aligned with the in-flight turn, not the queued one.
       const snapshot = { text, attachments: [...attachments] }
       if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
-        await queueDraft(toSend, text)
+        await queueDraft(toSend, text, undefined, now && inFlight)
         return
       }
       setDraft('')
@@ -677,6 +711,12 @@ export function useChatComposer({
           return
         }
       }
+      // Cmd+Shift+Enter (Ctrl+Shift+Enter): send now — into a running turn too.
+      if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey) && !e.altKey) {
+        e.preventDefault()
+        void handleSend(undefined, { now: true })
+        return
+      }
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
         void handleSend()
@@ -724,16 +764,6 @@ export function useChatComposer({
     if (!interruptTurn) return
     await moveQueue(id, 0)
     await interruptTurn()
-  })
-  // "Send now": the agent takes it after its current step; it stays
-  // listed ("With agent…") until then. A refusal (the turn just ended…) says why.
-  // A request that fails (an older computer has no such method) says so too.
-  const steerQueued = useStableCallback(async (id: string): Promise<void> => {
-    const reason = await steerQueue(id).then(
-      (result) => (result.ok ? null : result.reason),
-      (err: unknown) => (err instanceof Error ? err.message : String(err))
-    )
-    if (reason !== null) toast(`Could not send it now: ${reason}`)
   })
   const queueApi = {
     editable: capabilities.editableQueue,

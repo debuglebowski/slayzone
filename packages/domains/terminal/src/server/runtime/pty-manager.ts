@@ -98,6 +98,7 @@ import {
   registerConversationHolder
 } from './live-conversations'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
+import { agentStarts } from './agent-starts'
 export { filterBufferData }
 
 /** What `createPty` answers; `code` names a refusal the UI can act on. */
@@ -833,6 +834,8 @@ function emitStateChange(
     }
   })
 
+  // Leaving `starting` by any road (first output, exit, kill) ends the start.
+  if (newState !== 'starting') agentStarts.clear(sessionId)
   ptyEvents.emit('state-change', sessionId, newState, oldState)
   if (session.win && !session.win.isDestroyed()) {
     try {
@@ -2120,12 +2123,20 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // Never stuck: a session that prints nothing is killed by the startup
     // deadline (computer-owned, or the hub's fallback), and its exit → `dead`.
     stateMachine.register(sessionId, 'starting')
+    // An AGENT's start is tracked for the startup card: `queued` until its owner
+    // confirms the launch (after any wait for an admission slot), then `booting`
+    // until its first output. A plain shell starts at once — not tracked.
+    if (terminalMode !== 'terminal') {
+      agentStarts.mark(sessionId, spawnConfirmation ? 'queued' : 'booting')
+    }
     let firstOutputTs: number | null = null
     /** When the owner confirmed the spawn (round-trip backends) — after any admission wait. */
     let spawnConfirmedTs: number | null = null
     void spawnConfirmation?.then(
       () => {
         spawnConfirmedTs = Date.now()
+        // Only this spawn's own entry: a replacement at the same id tracks itself.
+        if (sessions.get(sessionId)?.pty === ptyProcess) agentStarts.markBooting(sessionId)
       },
       () => {
         // Refusals are handled where the confirmation is consumed below.
