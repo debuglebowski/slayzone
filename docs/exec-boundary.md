@@ -79,7 +79,7 @@ On a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (the shared Normain hub) the hub
 holds or touches project data. Every hub-local path above that is not hub storage —
 the zero-computer fallbacks (workspace fs, `gh`, the default worktree adapters) and the
 calls that never route yet (the git panel's `worktrees.*`, turn snapshots, file and
-autocomplete scans, shell probes, `slay init`, the OS opener) — refuses with
+autocomplete scans, shell probes, `slay init`, AI-config file reads and edits, the OS opener) — refuses with
 `NO_COMPUTER_CONNECTED` ("Connect a computer") and one `hub.local_exec` audit line.
 Hub storage (`hubPathExists`, `removeArtifactDir`) and worktree colors stay; colors
 on such a hub stay empty because their detection runs git.

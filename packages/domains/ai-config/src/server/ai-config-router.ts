@@ -17,7 +17,8 @@ import type {
   InstallSkillInput,
   ListEntriesInput
 } from '@slayzone/ai-config/shared'
-import { router, publicProcedure } from '@slayzone/trpc-server'
+import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 // Mirrors the 54 `ai-config:*` + 12 `ai-config:marketplace:*` IPC handlers
 // (ai-config/src/main/handlers.ts + handlers-marketplace.ts). Both call the same
@@ -29,6 +30,12 @@ import { router, publicProcedure } from '@slayzone/trpc-server'
 // (the still-live IPC path is validated by TypeScript only). superjson handles
 // serialization end-to-end.
 const anyInput = z.unknown()
+
+// Reads or writes instruction files, skills or MCP config on the hub's OWN disk (the
+// project folder the client names, or the hub process's home). Refused up front on a
+// hub with processes off (T-06), like the git panel. DB-only procedures (library,
+// selections, providers, marketplace) stay `publicProcedure`.
+const hubDiskProcedure = hubLocalProcedure
 
 export const aiConfigRouter = router({
   // Items
@@ -64,40 +71,40 @@ export const aiConfigRouter = router({
     ),
 
   // Context files
-  discoverContextFiles: publicProcedure
+  discoverContextFiles: hubDiskProcedure
     .input(z.object({ projectPath: z.string() }))
     .query(({ input }) => getAiConfigOps().discoverContextFiles(input.projectPath)),
-  getComputerFiles: publicProcedure.query(() => getAiConfigOps().getComputerFiles()),
-  readContextFile: publicProcedure
+  getComputerFiles: hubDiskProcedure.query(() => getAiConfigOps().getComputerFiles()),
+  readContextFile: hubDiskProcedure
     .input(z.object({ filePath: z.string(), projectPath: z.string() }))
     .query(({ input }) => getAiConfigOps().readContextFile(input.filePath, input.projectPath)),
-  writeContextFile: publicProcedure
+  writeContextFile: hubDiskProcedure
     .input(z.object({ filePath: z.string(), content: z.string(), projectPath: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().writeContextFile(input.filePath, input.content, input.projectPath)
     ),
-  deleteComputerFile: publicProcedure
+  deleteComputerFile: hubDiskProcedure
     .input(z.object({ filePath: z.string() }))
     .mutation(({ input }) => getAiConfigOps().deleteComputerFile(input.filePath)),
-  createComputerFile: publicProcedure.input(anyInput).mutation(({ input }) => {
+  createComputerFile: hubDiskProcedure.input(anyInput).mutation(({ input }) => {
     const i = input as { provider: string; category: 'skill'; slug: string }
     return getAiConfigOps().createComputerFile(i.provider, i.category, i.slug)
   }),
-  writeComputerSkill: publicProcedure.input(anyInput).mutation(({ input }) => {
+  writeComputerSkill: hubDiskProcedure.input(anyInput).mutation(({ input }) => {
     const i = input as { provider: CliProvider; slug: string; content: string }
     return getAiConfigOps().writeComputerSkill(i.provider, i.slug, i.content)
   }),
-  getContextTree: publicProcedure
+  getContextTree: hubDiskProcedure
     .input(z.object({ projectPath: z.string(), projectId: z.string() }))
     .query(({ input }) => getAiConfigOps().getContextTree(input.projectPath, input.projectId)),
 
   // Library
-  loadLibraryItem: publicProcedure
+  loadLibraryItem: hubDiskProcedure
     .input(anyInput)
     .mutation(({ input }) => getAiConfigOps().loadLibraryItem(input as LoadLibraryItemInput)),
 
   // Sync
-  syncLinkedFile: publicProcedure
+  syncLinkedFile: hubDiskProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -117,19 +124,19 @@ export const aiConfigRouter = router({
   unlinkFile: publicProcedure
     .input(z.object({ projectId: z.string(), itemId: z.string() }))
     .mutation(({ input }) => getAiConfigOps().unlinkFile(input.projectId, input.itemId)),
-  renameContextFile: publicProcedure
+  renameContextFile: hubDiskProcedure
     .input(z.object({ oldPath: z.string(), newPath: z.string(), projectPath: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().renameContextFile(input.oldPath, input.newPath, input.projectPath)
     ),
-  deleteContextFile: publicProcedure
+  deleteContextFile: hubDiskProcedure
     .input(z.object({ filePath: z.string(), projectPath: z.string(), projectId: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().deleteContextFile(input.filePath, input.projectPath, input.projectId)
     ),
 
   // Root instructions
-  getRootInstructions: publicProcedure
+  getRootInstructions: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string() }))
     .query(({ input }) => getAiConfigOps().getRootInstructions(input.projectId, input.projectPath)),
   getLibraryInstructions: publicProcedure
@@ -152,31 +159,33 @@ export const aiConfigRouter = router({
         projectPath: z.string().optional()
       })
     )
-    .mutation(({ input }) =>
-      getAiConfigOps().setProjectInstructionVariant(
+    .mutation(({ input, path }) => {
+      // Setting a variant WITH a project path also writes it to the provider files.
+      if (input.projectPath && input.variantItemId !== null) assertHubLocalExecEnabled({ op: path })
+      return getAiConfigOps().setProjectInstructionVariant(
         input.projectId,
         input.variantItemId,
         input.projectPath
       )
-    ),
-  saveInstructionsContent: publicProcedure
+    }),
+  saveInstructionsContent: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string(), content: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().saveInstructionsContent(input.projectId, input.projectPath, input.content)
     ),
-  saveRootInstructions: publicProcedure
+  saveRootInstructions: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string(), content: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().saveRootInstructions(input.projectId, input.projectPath, input.content)
     ),
 
   // Provider instructions/skills
-  readProviderInstructions: publicProcedure
+  readProviderInstructions: hubDiskProcedure
     .input(z.object({ projectPath: z.string(), provider: z.string() }))
     .query(({ input }) =>
       getAiConfigOps().readProviderInstructions(input.projectPath, input.provider as CliProvider)
     ),
-  pushProviderInstructions: publicProcedure
+  pushProviderInstructions: hubDiskProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -193,7 +202,7 @@ export const aiConfigRouter = router({
         input.content
       )
     ),
-  pullProviderInstructions: publicProcedure
+  pullProviderInstructions: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string(), provider: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().pullProviderInstructions(
@@ -202,12 +211,12 @@ export const aiConfigRouter = router({
         input.provider as CliProvider
       )
     ),
-  getProjectSkillsStatus: publicProcedure
+  getProjectSkillsStatus: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string() }))
     .query(({ input }) =>
       getAiConfigOps().getProjectSkillsStatus(input.projectId, input.projectPath)
     ),
-  readProviderSkill: publicProcedure
+  readProviderSkill: hubDiskProcedure
     .input(z.object({ projectPath: z.string(), provider: z.string(), itemId: z.string() }))
     .query(({ input }) =>
       getAiConfigOps().readProviderSkill(
@@ -225,7 +234,7 @@ export const aiConfigRouter = router({
         input.itemId
       )
     ),
-  pullProviderSkill: publicProcedure
+  pullProviderSkill: hubDiskProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -248,7 +257,7 @@ export const aiConfigRouter = router({
   toggleProvider: publicProcedure
     .input(z.object({ id: z.string(), enabled: z.boolean() }))
     .mutation(({ input }) => getAiConfigOps().toggleProvider(input.id, input.enabled)),
-  reconcileProjectSkills: publicProcedure
+  reconcileProjectSkills: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string() }))
     .mutation(({ input }) =>
       getAiConfigOps().reconcileProjectSkills(input.projectId, input.projectPath)
@@ -263,45 +272,45 @@ export const aiConfigRouter = router({
     ),
 
   // Sync status
-  needsSync: publicProcedure
+  needsSync: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string() }))
     .query(({ input }) => getAiConfigOps().needsSync(input.projectId, input.projectPath)),
-  getProjectStaleSkillCount: publicProcedure
+  getProjectStaleSkillCount: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string() }))
     .query(({ input }) =>
       getAiConfigOps().getProjectStaleSkillCount(input.projectId, input.projectPath)
     ),
   // Batch variant of getProjectStaleSkillCount — kept for full IPC parity (ref P15
   // dropped it; we preserve it since the IPC channel is still live for the renderer).
-  getProjectsStaleSkillCounts: publicProcedure
+  getProjectsStaleSkillCounts: hubDiskProcedure
     .input(z.array(z.object({ projectId: z.string(), projectPath: z.string() })))
     .query(({ input }) => getAiConfigOps().getProjectsStaleSkillCounts(input)),
-  syncAll: publicProcedure
+  syncAll: hubDiskProcedure
     .input(anyInput)
     .mutation(({ input }) => getAiConfigOps().syncAll(input as SyncAllInput)),
-  checkSyncStatus: publicProcedure
+  checkSyncStatus: hubDiskProcedure
     .input(z.object({ projectId: z.string(), projectPath: z.string() }))
     .query(({ input }) => getAiConfigOps().checkSyncStatus(input.projectId, input.projectPath)),
 
   // MCP
-  discoverMcpConfigs: publicProcedure
+  discoverMcpConfigs: hubDiskProcedure
     .input(z.object({ projectPath: z.string() }))
     .query(({ input }) => getAiConfigOps().discoverMcpConfigs(input.projectPath)),
-  writeMcpServer: publicProcedure
+  writeMcpServer: hubDiskProcedure
     .input(anyInput)
     .mutation(({ input }) => getAiConfigOps().writeMcpServer(input as WriteMcpServerInput)),
-  removeMcpServer: publicProcedure
+  removeMcpServer: hubDiskProcedure
     .input(anyInput)
     .mutation(({ input }) => getAiConfigOps().removeMcpServer(input as RemoveMcpServerInput)),
-  discoverComputerMcpConfigs: publicProcedure.query(() =>
+  discoverComputerMcpConfigs: hubDiskProcedure.query(() =>
     getAiConfigOps().discoverComputerMcpConfigs()
   ),
-  writeComputerMcpServer: publicProcedure
+  writeComputerMcpServer: hubDiskProcedure
     .input(anyInput)
     .mutation(({ input }) =>
       getAiConfigOps().writeComputerMcpServer(input as WriteComputerMcpServerInput)
     ),
-  removeComputerMcpServer: publicProcedure
+  removeComputerMcpServer: hubDiskProcedure
     .input(anyInput)
     .mutation(({ input }) =>
       getAiConfigOps().removeComputerMcpServer(input as RemoveComputerMcpServerInput)

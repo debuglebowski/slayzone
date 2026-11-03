@@ -2621,6 +2621,8 @@ export function createAiConfigOps(db: SlayzoneDb) {
       removeMcpServerFromSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey)
     },
     checkSlayConfigured: (projectPath: string): boolean => {
+      // Reads the project's instruction files on THIS machine: refused like setupSlay.
+      assertHubLocalExecEnabled({ op: 'slay.check' })
       return checkSlayConfigured(projectPath, homeDir)
     },
     setupSlay: (projectPath: string, projectId?: string): { ok: boolean; error?: string } => {
