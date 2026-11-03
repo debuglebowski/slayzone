@@ -244,6 +244,8 @@ run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
 # listForTask scoping — null taskId (Home/project view) must not leak other projects' processes.
 run_harness packages/domains/processes/src/server/process-manager.test.ts
+# Background processes on a computer: async resolve per spawn, no hub pid work, timer errors become status.
+run_harness packages/domains/processes/src/server/process-routing.test.ts
 # Persistence seam — fake ProcessPersistence records insert/update/remove; loadAll hydration.
 run_harness packages/domains/processes/src/server/process-persistence.test.ts
 # Wave-2 spawn backend seam — fake ProcessBackend streaming/exit/autoRestart/kill.

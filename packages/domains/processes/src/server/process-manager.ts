@@ -35,12 +35,34 @@ export function setProjectCwdResolver(resolver: ProjectCwdResolver | null): void
   projectCwdResolver = resolver
 }
 
+/**
+ * Which computer runs a process: the task's, else the project's (placement). Asked
+ * before EVERY spawn — initial, restart, auto-restart — because a computer can
+ * connect, leave or be re-bound in between. Unset: processes run locally, as they
+ * always did. `null` (or a throw): nothing can run it now; the process shows an
+ * error naming why, it never starts on the hub instead.
+ */
+export type ProcessComputerResolver = (proc: {
+  taskId: string | null
+  projectId: string | null
+}) => Promise<string | null>
+let processComputerResolver: ProcessComputerResolver | null = null
+export function setProcessComputerResolver(resolver: ProcessComputerResolver | null): void {
+  processComputerResolver = resolver
+}
+
 /** What a client may set on a process (create, update); the rest is the manager's. */
 const EDITABLE_FIELDS = ['label', 'command', 'cwd', 'autoRestart', 'taskId', 'projectId'] as const
 type EditableField = (typeof EDITABLE_FIELDS)[number]
 
 interface ManagedProcess extends ProcessInfo {
   handle: ProcHandle | null
+  /**
+   * The computer the current/last spawn runs on; null = this machine. A routed
+   * process's pid belongs to that computer: nothing here signals, polls or
+   * records it (the computer owns its lifecycle).
+   */
+  computerId: string | null
   titlePollTimer: ReturnType<typeof setInterval> | null
   oscTitleSet: boolean
 }
@@ -123,6 +145,7 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       exitCode: null,
       logBuffer: [],
       handle: null,
+      computerId: null,
       startedAt: new Date().toISOString(),
       restartCount: 0,
       spawnedAt: null,
@@ -264,14 +287,43 @@ async function reapSurvivorsAfterUnplannedExit(
   return reapGroup(leaderPid, getProcessBackend())
 }
 
+/** A spawn that could not happen: say why on the process itself. */
+function failSpawn(proc: ManagedProcess, err: unknown): void {
+  proc.handle = null
+  proc.spawnedAt = null
+  pushLog(proc, `[could not start: ${toErrorMessage(err)}]`)
+  setStatus(proc, 'error')
+}
+
+/** For timers (restart, auto-restart): a spawn that fails becomes the process's status. */
+function spawnOrFail(proc: ManagedProcess): void {
+  void doSpawn(proc).catch((err: unknown) => failSpawn(proc, err))
+}
+
+export class NoProcessComputerError extends Error {
+  readonly code = 'NO_COMPUTER_CONNECTED'
+  constructor() {
+    super('No computer is connected to run this process. Connect a computer.')
+    this.name = 'NoProcessComputerError'
+  }
+}
+
 async function doSpawn(proc: ManagedProcess): Promise<void> {
   if (isShuttingDown) return
+  const computerId = processComputerResolver
+    ? await processComputerResolver({ taskId: proc.taskId, projectId: proc.projectId })
+    : null
+  if (processComputerResolver && computerId == null) throw new NoProcessComputerError()
+  if (isShuttingDown || !processes.has(proc.id)) return
+  const routed = computerId != null
   // Project-scoped only (never task-scoped — a task's cwd may be its own
   // worktree, which isn't derivable from project.path): re-resolve the
   // project's CURRENT path so a renamed/moved project folder can't leave this
   // row spawning against a stale, possibly-deleted directory forever. A
   // corrected value is persisted immediately so the DB row self-heals.
-  if (proc.taskId === null && proc.projectId != null && projectCwdResolver) {
+  // A routed project process sends no cwd at all: the computer resolves the
+  // project's own folder on its disk (the hub's stored path names this machine).
+  if (!routed && proc.taskId === null && proc.projectId != null && projectCwdResolver) {
     const liveCwd = await projectCwdResolver(proc.projectId)
     if (liveCwd != null && liveCwd !== proc.cwd) {
       proc.cwd = liveCwd
@@ -287,26 +339,23 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
     }
   }
   proc.spawnedAt = new Date().toISOString()
-  startStatsPolling()
-  // Spawn via the pluggable backend. The default (local) backend keeps the exact
-  // shell/env/detached semantics this used to run inline; a computer backend can
-  // remote the exec. `computerId: null` = run in-process.
-  //
-  // NOT computer-resolved: routing background processes to a remote computer
-  // needs more than the cwd-resolution await added above — see the plan's
-  // phase C (they are project-level dev servers, not agents, so they are low
-  // priority).
+  if (!routed) startStatsPolling()
+  // Spawn via the pluggable backend: the local one keeps the exact
+  // shell/env/detached semantics this used to run inline; the routing one runs it
+  // on `computerId`.
   const handle = getProcessBackend().spawn({
     id: proc.id,
     taskId: proc.taskId,
     projectId: proc.projectId,
-    computerId: null,
+    computerId,
     command: proc.command,
-    cwd: proc.cwd
+    cwd: routed && proc.taskId === null && proc.projectId != null ? '' : proc.cwd
   })
 
   proc.handle = handle
-  proc.pid = handle.pid ?? null
+  proc.computerId = computerId
+  // A routed pid is the computer's: never stored, polled or signalled here.
+  proc.pid = routed ? null : (handle.pid ?? null)
   proc.exitCode = null
   proc.processTitle = null
   proc.oscTitleSet = false
@@ -315,13 +364,15 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
   // instead of it — see reapKnownHistory below for why the overwrite alone
   // let an older spawn attempt's orphan become permanently unreachable.
   if (proc.pid != null) void persistence?.recordPid(proc.id, proc.pid)
-  startTitlePolling(proc)
+  if (!routed) startTitlePolling(proc)
 
   handle.onData((chunk) => handleProcessData(proc, chunk))
 
   handle.onExit(async ({ code, signal }) => {
     if (proc.handle !== handle) return // stale exit from restarted process
     stopTitlePolling(proc)
+    // Routed: `proc.pid` is null, so no local group sweep runs; the computer
+    // reaps its own process group.
     const exitedPid = proc.pid
     proc.pid = null
     void persistence?.updatePid(proc.id, null)
@@ -351,7 +402,7 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
       setStatus(proc, 'running')
       setTimeout(() => {
         if (isShuttingDown) return
-        if (processes.has(proc.id)) void doSpawn(proc)
+        if (processes.has(proc.id)) spawnOrFail(proc)
       }, 1000)
     } else if (groupEmpty) {
       pushLog(proc, `[exited with code ${code ?? '?'}]`)
@@ -543,6 +594,7 @@ function newManagedProcess(
     exitCode: null,
     logBuffer: [],
     handle: null,
+    computerId: null,
     startedAt: new Date().toISOString(),
     restartCount: 0,
     spawnedAt: null,
@@ -696,7 +748,7 @@ export async function restartProcess(id: string): Promise<boolean> {
   // can have older, already-superseded history from earlier this session
   // that reapStaleIfNeeded — keyed only to the current pid — never sees.
   await reapKnownHistory(proc)
-  setTimeout(() => void doSpawn(proc), 500)
+  setTimeout(() => spawnOrFail(proc), 500)
   return true
 }
 
@@ -715,12 +767,12 @@ export function listForTask(taskId: string | null, projectId: string | null): Pr
         (taskId != null && p.taskId === taskId) ||
         (p.taskId === null && p.projectId != null && p.projectId === projectId)
     )
-    .map(({ handle: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
+    .map(({ handle: _, titlePollTimer: _t, oscTitleSet: _o, computerId: _c, ...info }) => info)
 }
 
 export function listAllProcesses(): ProcessInfo[] {
   return Array.from(processes.values()).map(
-    ({ handle: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info
+    ({ handle: _, titlePollTimer: _t, oscTitleSet: _o, computerId: _c, ...info }) => info
   )
 }
 
