@@ -23,6 +23,7 @@
     "@slayzone/hooks": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/computer-transport": "workspace:*",
+    "@slayzone/processes": "workspace:*",
     "node-pty": "^1.1.0",
     "zod": "^4.3.5",
     "@slayzone/ai-config": "workspace:*",

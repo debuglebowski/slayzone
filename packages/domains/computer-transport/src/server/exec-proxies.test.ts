@@ -1596,6 +1596,27 @@ describe('createRoutingProcessBackend', () => {
     expect(gateway.calls).toHaveLength(0)
   })
 
+  it('a background process asks its computer to sweep its group on exit, and reads stats from it', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 555 }))
+    gateway.onMethod('proc.stats', () => ({
+      stats: { 'proc-1': { cpu: 1.5, rss: 2048, title: 'node' } }
+    }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec())
+    expect(requireCall(gateway, 'proc.spawn').params).toMatchObject({ reapGroupOnExit: true })
+    expect(await backend.stats?.(['proc-1', 'unknown'])).toEqual({
+      'proc-1': { cpu: 1.5, rss: 2048, title: 'node' }
+    })
+    expect(requireCall(gateway, 'proc.stats')).toMatchObject({
+      computerId: 'computer-1',
+      params: { sessionIds: ['proc-1'] }
+    })
+  })
+
   it('remote: forwards proc.spawn, delivers proc.data in order, kill frame, exit cleanup', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('proc.spawn', () => ({ pid: 555 }))

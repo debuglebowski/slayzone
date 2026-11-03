@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import {
   initProcessManagerWith,
+  processEvents,
   listAllProcesses,
   restartProcess,
   setProcessComputerResolver,
@@ -113,4 +114,34 @@ describe('background processes on a computer', () => {
     expect(status(id)?.status).toBe('error')
     expect(status(id)?.logBuffer.at(-1)).toMatch(/computer/i)
   })
+})
+
+describe('stats + title of routed processes come from their computer', () => {
+  test('the manager polls the backend for routed processes and emits stats and titles', async () => {
+    const asked: string[][] = []
+    setProcessBackend({
+      spawn: (): ProcHandle => ({
+        pid: 1,
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        kill: () => undefined
+      }),
+      getCommandLine: async () => null,
+      killByPid: () => undefined,
+      stats: async (ids: string[]) => {
+        asked.push(ids)
+        return Object.fromEntries(ids.map((id) => [id, { cpu: 3, rss: 4096, title: 'node' }]))
+      }
+    } as ProcessBackend)
+    setProcessComputerResolver(async () => 'computer-1')
+    const stats: Array<Record<string, unknown>> = []
+    const titles: Array<[string, string | null]> = []
+    processEvents.on('stats', (s) => stats.push(s))
+    processEvents.on('title', (id, t) => titles.push([id, t]))
+    const id = await spawnProcess('proj-1', null, 'dev', 'pnpm dev', '/tmp', false)
+    await sleep(3_300)
+    expect(asked.some((ids) => ids.includes(id))).toBe(true)
+    expect(stats.some((s) => (s[id] as { rss?: number } | undefined)?.rss === 4096)).toBe(true)
+    expect(titles).toContainEqual([id, 'node'])
+  }, 10_000)
 })

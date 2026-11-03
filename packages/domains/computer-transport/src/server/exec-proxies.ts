@@ -67,6 +67,7 @@ import type {
   PtyWriteOptions
 } from '@slayzone/terminal/server'
 import {
+  procStatsResultSchema,
   ptyRelayResultSchema,
   ptyClearBufferResultSchema,
   ptyGetReplayResultSchema,
@@ -2171,7 +2172,10 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           // project's checkout, rather than an empty string travelling as a path.
           ...(spec.cwd ? { cwd: spec.cwd } : {}),
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
-          env: spec.env
+          env: spec.env,
+          // A background process's computer sweeps its group when it exits on
+          // its own (the hub used to, against its own pids).
+          reapGroupOnExit: true
         }),
       // After the override: the idempotency key is the transport's, not the
       // caller's — see `spawnIdField` in frames.ts.
@@ -2233,6 +2237,31 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
         // Nothing to kill: same reasoning as `getCommandLine` above — the pid a
         // routed session reports belongs to the computer's machine, so the hub has
         // no process of its own to signal.
+      },
+      /** cpu/memory + title, asked of each process's own computer. */
+      async stats(ids: string[]) {
+        const byComputer = new Map<string, string[]>()
+        for (const id of ids) {
+          const entry = [...sessions.values()].find((e) => e.sessionId === id && !e.disposed)
+          if (!entry) continue
+          const list = byComputer.get(entry.computerId) ?? []
+          list.push(id)
+          byComputer.set(entry.computerId, list)
+        }
+        const merged: Record<string, { cpu: number; rss: number; title: string | null }> = {}
+        await Promise.all(
+          [...byComputer].map(async ([computerId, sessionIds]) => {
+            try {
+              const res = await gateway.request(computerId, HubToComputerMethods.procStats, {
+                sessionIds
+              })
+              Object.assign(merged, procStatsResultSchema.parse(res).stats)
+            } catch {
+              // Unreachable or older computer: no numbers for its processes this tick.
+            }
+          })
+        )
+        return merged
       }
     }
   }

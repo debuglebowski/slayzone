@@ -2,7 +2,7 @@
 import { execFile, execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { createStatsPoller } from './pid-stats'
+import { createStatsPoller, type PidStats } from './pid-stats'
 import { createDbProcessPersistence } from './process-persistence'
 import type { ProcessPersistence } from './process-persistence'
 import { getProcessBackend } from './process-backend'
@@ -339,7 +339,7 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
     }
   }
   proc.spawnedAt = new Date().toISOString()
-  if (!routed) startStatsPolling()
+  startStatsPolling(routed)
   // Spawn via the pluggable backend: the local one keeps the exact
   // shell/env/detached semantics this used to run inline; the routing one runs it
   // on `computerId`.
@@ -776,6 +776,16 @@ export function listAllProcesses(): ProcessInfo[] {
   )
 }
 
+// The processes panel replaces its stats wholesale on every event, so each emit
+// carries BOTH halves: the local pids' latest numbers and the routed processes'.
+let localStats: Record<string, PidStats> = {}
+let routedStats: Record<string, PidStats> = {}
+function emitStats(): void {
+  const stats = { ...localStats, ...routedStats }
+  win?.webContents.send('processes:stats', stats)
+  processEvents.emit('stats', stats)
+}
+
 const statsPoller = createStatsPoller(
   () => {
     const pidMap = new Map<string, number>()
@@ -785,17 +795,52 @@ const statsPoller = createStatsPoller(
     return pidMap
   },
   (stats) => {
-    win?.webContents.send('processes:stats', stats)
-    processEvents.emit('stats', stats)
+    localStats = stats
+    emitStats()
   }
 )
 
-function startStatsPolling(): void {
-  statsPoller.ensureStarted()
+const ROUTED_STATS_INTERVAL_MS = 3000
+let routedStatsTimer: ReturnType<typeof setInterval> | null = null
+
+/** Routed processes: numbers and title come from their computer (`ProcessBackend.stats`). */
+async function pollRoutedStats(): Promise<void> {
+  const routed = [...processes.values()].filter((p) => p.computerId != null && p.handle)
+  if (routed.length === 0) {
+    if (routedStatsTimer) clearInterval(routedStatsTimer)
+    routedStatsTimer = null
+    routedStats = {}
+    return
+  }
+  const backend = getProcessBackend()
+  if (!backend.stats) return
+  const answer = await backend.stats(routed.map((p) => p.id)).catch(() => null)
+  if (!answer) return
+  const next: Record<string, PidStats> = {}
+  for (const proc of routed) {
+    const s = answer[proc.id]
+    if (!s) continue
+    next[proc.id] = { cpu: s.cpu, rss: s.rss }
+    if (s.title && !proc.oscTitleSet) emitTitle(proc, s.title)
+  }
+  routedStats = next
+  emitStats()
+}
+
+function startStatsPolling(routed = false): void {
+  if (!routed) {
+    statsPoller.ensureStarted()
+    return
+  }
+  if (routedStatsTimer) return
+  routedStatsTimer = setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  routedStatsTimer.unref?.()
 }
 
 export function killAllProcesses(): void {
   statsPoller.stop()
+  if (routedStatsTimer) clearInterval(routedStatsTimer)
+  routedStatsTimer = null
   for (const proc of processes.values()) {
     stopTitlePolling(proc)
     proc.autoRestart = false
@@ -886,6 +931,8 @@ export async function shutdownAllProcesses(
 ): Promise<ProcessShutdownResult> {
   isShuttingDown = true
   statsPoller.stop()
+  if (routedStatsTimer) clearInterval(routedStatsTimer)
+  routedStatsTimer = null
   const opts: Required<ProcessShutdownOptions> = {
     termGraceMs: options.termGraceMs ?? DEFAULT_SHUTDOWN_TERM_GRACE_MS,
     hardTimeoutMs: options.hardTimeoutMs ?? DEFAULT_SHUTDOWN_HARD_TIMEOUT_MS

@@ -798,6 +798,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../../domains/processes
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal

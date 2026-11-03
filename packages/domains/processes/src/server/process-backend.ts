@@ -41,6 +41,11 @@ export interface ProcHandle {
 export interface ProcessBackend {
   spawn(spec: ProcSpawnSpec): ProcHandle
   /**
+   * cpu/memory + title of processes the backend runs ELSEWHERE (a computer), by
+   * process id. Absent on the local backend: the manager reads local pids itself.
+   */
+  stats?(ids: string[]): Promise<Record<string, { cpu: number; rss: number; title: string | null }>>
+  /**
    * Command line of a still-running process, or `null` if `pid` isn't alive.
    * POSIX only (via `ps`) — mirrors the existing precedent in `pid-stats.ts`,
    * which is also `ps`/`pgrep`-only with no Windows branch. Used to verify a

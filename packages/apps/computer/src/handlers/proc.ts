@@ -54,6 +54,8 @@ import {
   ProcRefusalReasons,
   type ProcSpawnParams,
   procSpawnParamsSchema,
+  procStatsParamsSchema,
+  type ProcStatsResult,
   type ProcWriteResult,
   procWriteParamsSchema,
   ComputerNotificationMethods,
@@ -63,6 +65,7 @@ import {
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '@slayzone/terminal/pty-detection'
+import { collectProcessStats, collectProcessTitles } from '@slayzone/processes/pid-stats'
 import {
   createSpawnAdmission,
   type AdmissionSlot,
@@ -82,13 +85,17 @@ export const ProcMethods = {
   procKill: HubToComputerMethods.procKill,
   procWrite: HubToComputerMethods.procWrite,
   procGetBufferSince: HubToComputerMethods.procGetBufferSince,
-  procList: HubToComputerMethods.procList
+  procList: HubToComputerMethods.procList,
+  procStats: HubToComputerMethods.procStats
 } as const
 
 export const ProcNotifications = {
   procData: ComputerNotificationMethods.procData,
   procExit: ComputerNotificationMethods.procExit
 } as const
+
+/** After an exit sweep's SIGTERM, how long survivors get before SIGKILL. */
+const REAP_ESCALATE_MS = 2_000
 
 /** How many recent `writeId`s a session remembers for retry dedupe. */
 const WRITE_ID_MEMORY = 256
@@ -106,6 +113,8 @@ interface ProcSession {
   writeIds: string[]
   /** Agent-start slot held until first output or exit (admitted spawns only). */
   slot: AdmissionSlot | null
+  /** The hub asked it to stop (`proc.kill` / replacement): no exit sweep after. */
+  stopping?: boolean
 }
 
 /** An admitted spawn waiting for its start slot. */
@@ -240,6 +249,7 @@ export function createProcHandlers(
     const existing = procs.get(params.sessionId)
     if (existing) {
       existing.revokeCli?.()
+      existing.stopping = true
       killTree(existing.child)
       procs.delete(params.sessionId)
     }
@@ -374,6 +384,26 @@ export function createProcHandlers(
     child.on('error', (err) => {
       settle({ exitCode: null, signal: null, error: err.message })
     })
+    // A process-domain leader exiting on its own can leave its group running
+    // (the server `pnpm dev` started): sweep it, so a restart does not collide.
+    if (params.reapGroupOnExit && typeof child.pid === 'number') {
+      const leader = child.pid
+      child.on('exit', () => {
+        if (session.stopping) return
+        try {
+          killPidTree(leader, 'SIGTERM')
+        } catch {
+          // Nothing left in the group.
+        }
+        setTimeout(() => {
+          try {
+            killPidTree(leader, 'SIGKILL')
+          } catch {
+            // Already gone.
+          }
+        }, REAP_ESCALATE_MS).unref()
+      })
+    }
 
     ctx.log('proc spawned', {
       sessionId: params.sessionId,
@@ -396,6 +426,7 @@ export function createProcHandlers(
       ctx.log('proc kill for a replaced attempt', { sessionId: params.sessionId })
       return { ok: true }
     }
+    session.stopping = true
     killTree(session.child, (params.signal as NodeJS.Signals | undefined) ?? 'SIGTERM')
     return { ok: true }
   }
@@ -504,12 +535,34 @@ export function createProcHandlers(
     procs.clear()
   }
 
+  /** cpu/memory + title for the asked live sessions (the hub's processes panel). */
+  async function procStats(rawParams: unknown): Promise<ProcStatsResult> {
+    const params = procStatsParamsSchema.parse(rawParams)
+    const pids = new Map<string, number>()
+    for (const id of params.sessionIds) {
+      const pid = procs.get(id)?.child.pid
+      if (typeof pid === 'number') pids.set(id, pid)
+    }
+    if (process.platform === 'win32' || pids.size === 0) return { stats: {} }
+    const [usage, titles] = await Promise.all([
+      collectProcessStats(pids),
+      collectProcessTitles(pids)
+    ])
+    const stats: ProcStatsResult['stats'] = {}
+    for (const id of pids.keys()) {
+      if (!usage[id] && !titles[id]) continue
+      stats[id] = { cpu: usage[id]?.cpu ?? 0, rss: usage[id]?.rss ?? 0, title: titles[id] ?? null }
+    }
+    return { stats }
+  }
+
   const handlers: HubMethodTable = {
     [ProcMethods.procSpawn]: procSpawn,
     [ProcMethods.procKill]: procKill,
     [ProcMethods.procWrite]: procWrite,
     [ProcMethods.procGetBufferSince]: procGetBufferSince,
-    [ProcMethods.procList]: procList
+    [ProcMethods.procList]: procList,
+    [ProcMethods.procStats]: procStats
   }
 
   return { hasWork: () => procs.size > 0 || queued.size > 0, handlers, disposeAll }

@@ -543,6 +543,8 @@ export const HubToComputerMethods = {
   procGetBufferSince: 'proc.getBufferSince',
   /** Live child processes the computer still holds — drives reattach. */
   procList: 'proc.list',
+  /** cpu/memory + current title of background processes (the processes panel). */
+  procStats: 'proc.stats',
   // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
@@ -1582,7 +1584,13 @@ export const procSpawnParamsSchema = z.object({
   cwd: z.string().min(1).optional(),
   env: z.record(z.string(), z.string()).optional(),
   /** Agent-start admission lane (chat agents), as for `pty.spawn`. Absent: start at once. */
-  admission: ptySpawnAdmissionSchema.optional()
+  admission: ptySpawnAdmissionSchema.optional(),
+  /**
+   * When the process exits on its own, sweep its process group (SIGTERM, then
+   * SIGKILL): a `pnpm dev` shell can exit leaving its real server running, holding
+   * the port. Set by the process domain; never for an agent. Absent: left alone.
+   */
+  reapGroupOnExit: z.boolean().optional()
 })
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 
@@ -1666,6 +1674,25 @@ export type ProcGetBufferSinceResult = z.infer<typeof procGetBufferSinceResultSc
  * {@link ptyListResultSchema} — same role in reattach, and the two must not
  * drift.
  */
+export const procStatsParamsSchema = z.object({
+  sessionIds: z.array(z.string().min(1)).max(1000)
+})
+export const procStatsResultSchema = z.object({
+  /** Live sessions only (an unknown or exited id is absent). */
+  stats: z.record(
+    z.string(),
+    z.object({
+      /** % of one core, the shell and its children. */
+      cpu: z.number(),
+      /** Kilobytes, the shell and its children. */
+      rss: z.number(),
+      /** What the leader runs now (`ps -o comm`). */
+      title: z.string().nullable()
+    })
+  )
+})
+export type ProcStatsResult = z.infer<typeof procStatsResultSchema>
+
 export const procListResultSchema = z.object({
   sessions: z.array(
     z.object({
