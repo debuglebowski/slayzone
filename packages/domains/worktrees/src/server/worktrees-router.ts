@@ -69,12 +69,12 @@ const gitTarget = obj({
 function gitQuery<K extends GitOpName>(op: K) {
   return publicProcedure
     .input(gitOpsContract[op].input.extend({ target: gitTarget }))
-    .query(({ input }) => executeGitOp(op, input as never, false))
+    .query(({ ctx, input }) => executeGitOp(op, input as never, false, ctx.db))
 }
 function gitMutation<K extends GitOpName>(op: K) {
   return publicProcedure
     .input(gitOpsContract[op].input.extend({ target: gitTarget }))
-    .mutation(({ input }) => executeGitOp(op, input as never, true))
+    .mutation(({ ctx, input }) => executeGitOp(op, input as never, true, ctx.db))
 }
 
 export const worktreesRouter = router({

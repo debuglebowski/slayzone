@@ -127,7 +127,12 @@ export {
 // `worktrees.*` tRPC router + the host seam it reads. Composed by `@slayzone/api`,
 // which also wires the seam from its workspace/app registries.
 export { worktreesRouter, type WorktreesRouter, type WorktreesMounts } from './worktrees-router'
-export { setGitOpTransport, executeGitOp, type GitOpTransport } from './git-op-routing'
+export {
+  setGitOpTransport,
+  executeGitOp,
+  gitTargetForPath,
+  type GitOpTransport
+} from './git-op-routing'
 export {
   setWorktreesRouterDeps,
   getWorktreesRouterDeps,

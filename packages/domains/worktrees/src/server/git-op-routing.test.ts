@@ -46,7 +46,9 @@ afterEach(() => {
 
 afterAll(() => setGitOpTransport(null))
 
-const caller = worktreesRouter.createCaller({ db: {} as never, dataRoot: '' } as never)
+// A hub that knows no checkout: no path names a target.
+const noCheckouts = { get: async () => undefined, all: async () => [] }
+const caller = worktreesRouter.createCaller({ db: noCheckouts as never, dataRoot: '' } as never)
 
 describe('git panel ops routed to the computer', () => {
   test('a read goes to the resolved computer, its target resolved and not sent on', async () => {
