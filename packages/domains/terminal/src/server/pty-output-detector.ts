@@ -32,6 +32,11 @@ export interface PtyOutputDetectorOptions {
   resuming: boolean
 }
 
+/** How long after a resuming process starts a stale-resume error still counts. */
+export const SESSION_ERROR_WINDOW_MS = 5_000
+/** How long after `/status` is submitted its output is searched for a conversation id. */
+export const CONVERSATION_ID_WATCH_TIMEOUT_MS = 5_000
+
 export function stripAnsiForSessionParse(data: string): string {
   return data
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences

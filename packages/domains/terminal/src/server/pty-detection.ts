@@ -47,6 +47,8 @@ export { shouldHonorDetectedError } from './session-error-gate'
 export {
   PtyOutputDetector,
   stripAnsiForSessionParse,
+  SESSION_ERROR_WINDOW_MS,
+  CONVERSATION_ID_WATCH_TIMEOUT_MS,
   type PtyOutputDetection,
   type PtyOutputDetectorOptions
 } from './pty-output-detector'

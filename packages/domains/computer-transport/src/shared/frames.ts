@@ -295,6 +295,61 @@ export type ComputerEventParams = z.infer<typeof computerEventParamsSchema>
 export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
 
 /**
+ * `ComputerEventParams.name` for what a pty's output SAYS, detected on the computer
+ * (`@slayzone/terminal/pty-detection` `PtyOutputDetector`): activity, an honored
+ * error, a prompt, the OSC title, first-seen dev-server URLs, a conversation id.
+ * Sent only for a session the hub spawned with `detection` and the computer acked
+ * (`detection: true`); the hub's state machine mirrors it instead of parsing output.
+ * A generic `event` rather than a new notification method, so an older hub (which
+ * would drop the connection on an unknown method) is unaffected — it never asks.
+ */
+export const PTY_SIGNAL_EVENT_NAME = 'pty-signal'
+
+/** What the computer needs to run output detection for one pty session. */
+export const ptyDetectionParamsSchema = z.object({
+  /** Terminal mode id (adapter selection, OSC-title policy). */
+  mode: z.string().min(1),
+  /** Adapter type override (custom modes). */
+  type: z.string().min(1).optional(),
+  /** User-defined shell-mode activity patterns. */
+  patterns: z
+    .object({
+      working: z.string().nullable().optional(),
+      error: z.string().nullable().optional()
+    })
+    .optional(),
+  /** Spawned to resume a conversation: opens the stale-resume error window. */
+  resuming: z.boolean()
+})
+export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
+
+export const ptySignalPayloadSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: z.string().min(1).optional(),
+  /** Seq of the output chunk this came from; -1 for a timer-only signal. */
+  seq: z.number().int(),
+  activity: z.enum(['working', 'idle', 'unknown']).nullable(),
+  /** The chunk counts as output for the silence (idle) clock. */
+  refreshIdleClock: z.boolean(),
+  preview: z.string().max(200),
+  error: z
+    .object({ code: z.string().min(1), message: z.string(), recoverable: z.boolean() })
+    .nullable(),
+  suppressOutput: z.boolean(),
+  prompt: z
+    .object({
+      type: z.enum(['permission', 'question', 'input']),
+      text: z.string(),
+      position: z.number()
+    })
+    .nullable(),
+  title: z.string().nullable(),
+  devServerUrls: z.array(z.string().min(1)),
+  conversationId: z.string().min(1).nullable()
+})
+export type PtySignalPayload = z.infer<typeof ptySignalPayloadSchema>
+
+/**
  * Child-process output chunk (proc.spawn stream).
  *
  * SEQUENCED, like `pty.data`: `seq` is a per-session monotonic counter assigned
@@ -516,6 +571,11 @@ export const ptySpawnParamsSchema = z
      * no deadline here (an older hub runs its own).
      */
     startupTimeoutMs: z.number().int().positive().optional(),
+    /**
+     * Run output detection ON THE COMPUTER and report it as `pty-signal` events.
+     * Absent: no detection here (an older hub parses the output itself).
+     */
+    detection: ptyDetectionParamsSchema.optional(),
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
     /** New computers resolve their own login shell; command/args remain for older peers. */
@@ -569,7 +629,10 @@ export const ptySpawnResultSchema = z.object({
   pid: z.number().int(),
   /** The computer armed the requested `startupTimeoutMs`. Absent from a computer
    *  that predates computer-side deadlines — the hub then keeps its own. */
-  startupDeadline: z.literal(true).optional()
+  startupDeadline: z.literal(true).optional(),
+  /** The computer runs the requested `detection`. Absent from a computer (or a
+   *  retained session host) that predates it — the hub then detects itself. */
+  detection: z.literal(true).optional()
 })
 export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 
@@ -675,7 +738,10 @@ export type PtyResizeParams = z.infer<typeof ptyResizeParamsSchema>
 export const ptyWriteParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: spawnIdField,
-  data: z.string()
+  data: z.string(),
+  /** This write submits the mode's session-id command (`/status`): watch the output
+   *  for a conversation id. Ignored for a session without detection. */
+  watchConversationId: z.literal(true).optional()
 })
 export type PtyWriteParams = z.infer<typeof ptyWriteParamsSchema>
 
@@ -727,7 +793,9 @@ export const ptyListResultSchema = z.object({
       spawnId: spawnIdField,
       pid: z.number().int(),
       /** Highest assigned seq; -1 when the session has emitted nothing yet. */
-      seq: z.number().int()
+      seq: z.number().int(),
+      /** The computer runs output detection for it (absent from older computers). */
+      detection: z.literal(true).optional()
     })
   ),
   /** Recently reaped sessions. Absent from older computers, which keep none. */
@@ -778,7 +846,9 @@ export type PtyWarmSpawnResult = z.infer<typeof ptyWarmSpawnResultSchema>
 export const ptyWarmAdoptParamsSchema = z.object({
   warmId: z.string().min(1),
   taskId: z.string().min(1).optional(),
-  sessionId: z.string().min(1)
+  sessionId: z.string().min(1),
+  /** Start output detection for the adopted session (see `pty.spawn`). */
+  detection: ptyDetectionParamsSchema.optional()
 })
 export type PtyWarmAdoptParams = z.infer<typeof ptyWarmAdoptParamsSchema>
 
@@ -790,7 +860,9 @@ export const ptyWarmAdoptResultSchema = z.object({
    * `seq`, so the first post-adopt frame is contiguous with the pre-adopt ones.
    */
   data: z.string(),
-  seq: z.number().int()
+  seq: z.number().int(),
+  /** The computer runs the requested `detection` from here on. */
+  detection: z.literal(true).optional()
 })
 export type PtyWarmAdoptResult = z.infer<typeof ptyWarmAdoptResultSchema>
 

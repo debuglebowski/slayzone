@@ -43,6 +43,8 @@ import {
   ptyWarmKillParamsSchema,
   ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
+  type PtyDetectionParams,
+  PTY_SIGNAL_EVENT_NAME,
   RpcError,
   ComputerNotificationMethods,
   ComputerTransportErrorCodes,
@@ -69,6 +71,7 @@ import {
   type SpawnAdmission
 } from '../spawn-admission'
 import { buildPtySpawnEnv } from './spawn-env'
+import { createPtySessionSignals, type PtySessionSignals } from '../pty-signals'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Matches the terminal domain's per-session buffer cap (750 KiB). */
@@ -85,6 +88,11 @@ interface PtySession {
   revokeCli?: () => void
   proc: pty.IPty
   buffer: RingBuffer
+  /**
+   * Output detection the hub asked for (`detection` on spawn/adopt): what the
+   * output says goes to the hub as `pty-signal` events. Absent: the hub detects.
+   */
+  signals?: PtySessionSignals
   /**
    * The key this session is currently filed under, read by its own onData/onExit.
    *
@@ -129,6 +137,8 @@ interface QueuedSpawn {
   cols?: number
   rows?: number
   writes: string[]
+  /** A queued write submitted `/status`: watch for a conversation id once started. */
+  watchConversationId?: boolean
   /** Starts the process once admitted; returns the reply. */
   run: (slot: AdmissionSlot) => unknown
   promise: Promise<unknown>
@@ -347,6 +357,7 @@ export function createPtyHandlers(
       spawnId?: string
       startupTimeoutMs?: number
       taskId?: string
+      detection?: PtyDetectionParams
     }
   ): PtySession {
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
@@ -383,6 +394,7 @@ export function createPtyHandlers(
       ...(opts.spawnId !== undefined ? { spawnId: opts.spawnId } : {})
     }
     sessions.set(id, session)
+    if (opts.detection && !opts.warm) attachSignals(session, opts.detection)
     if (opts.startupTimeoutMs !== undefined) {
       // Armed at the REAL spawn, on the machine that sees the output — see the
       // module doc. Its verdict reads pending output first (drain-before-verdict).
@@ -431,6 +443,7 @@ export function createPtyHandlers(
         seq,
         data
       })
+      session.signals?.onOutput(data, seq)
     })
 
     proc.onExit(({ exitCode, signal }) => {
@@ -444,6 +457,22 @@ export function createPtyHandlers(
     })
 
     return session
+  }
+
+  /** Start output detection for a session; ids are read live (warm adopt rekeys). */
+  function attachSignals(session: PtySession, detection: PtyDetectionParams): void {
+    session.signals?.dispose()
+    session.signals = createPtySessionSignals(
+      detection,
+      { sessionId: () => session.id, spawnId: () => session.spawnId },
+      (payload) => {
+        if (sessions.get(session.id) !== session) return
+        ctx.dialer.notify(ComputerNotificationMethods.event, {
+          name: PTY_SIGNAL_EVENT_NAME,
+          payload
+        })
+      }
+    )
   }
 
   /**
@@ -472,6 +501,7 @@ export function createPtyHandlers(
     // would tear down the replacement and confuse the hub.
     if (sessions.get(session.id) !== session) return
     sessions.delete(session.id)
+    session.signals?.dispose()
     session.deadline?.cancel()
     releaseAdmission(session)
     if (session.replacing) {
@@ -534,7 +564,7 @@ export function createPtyHandlers(
     slot.release()
   }
 
-  type SpawnReply = { pid: number; startupDeadline?: true }
+  type SpawnReply = { pid: number; startupDeadline?: true; detection?: true }
 
   function startSession(params: PtySpawnParams): SpawnReply {
     const shell = params.computerShell ? resolveUserShell() : params.command
@@ -556,7 +586,8 @@ export function createPtyHandlers(
     })
     return {
       pid: session.proc.pid,
-      ...(session.deadline ? { startupDeadline: true as const } : {})
+      ...(session.deadline ? { startupDeadline: true as const } : {}),
+      ...(session.signals ? { detection: true as const } : {})
     }
   }
 
@@ -649,7 +680,8 @@ export function createPtyHandlers(
         // attempt — answer with it rather than killing it to start a twin.
         return {
           pid: live.proc.pid,
-          ...(live.deadline ? { startupDeadline: true as const } : {})
+          ...(live.deadline ? { startupDeadline: true as const } : {}),
+          ...(live.signals ? { detection: true as const } : {})
         }
       }
       if (tombstones.ran(params.sessionId, params.spawnId)) {
@@ -705,6 +737,7 @@ export function createPtyHandlers(
       // Input the hub sent while this waited, in order — where it would have
       // landed had the spawn been immediate.
       for (const data of item.writes) session.proc.write(data)
+      if (item.watchConversationId) session.signals?.watchConversationId()
       return reply
     })
   }
@@ -817,6 +850,7 @@ export function createPtyHandlers(
     pid: number
     data: string
     seq: number
+    detection?: true
   } {
     const params = ptyWarmAdoptParamsSchema.parse(rawParams)
     if (params.taskId) options.assertTaskActive?.(params.taskId)
@@ -827,7 +861,8 @@ export function createPtyHandlers(
       return {
         pid: adopted.proc.pid,
         data: adopted.buffer.toString(),
-        seq: adopted.buffer.getCurrentSeq()
+        seq: adopted.buffer.getCurrentSeq(),
+        ...(adopted.signals ? { detection: true as const } : {})
       }
     }
     const session = sessions.get(params.warmId)
@@ -857,6 +892,7 @@ export function createPtyHandlers(
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
     releaseAdmission(session)
+    if (params.detection) attachSignals(session, params.detection)
     // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
     // sentinel the hub's gap detector starts from, so an adopt with no output
     // needs no special case.
@@ -867,7 +903,12 @@ export function createPtyHandlers(
       sessionId: params.sessionId,
       pid: session.proc.pid
     })
-    return { pid: session.proc.pid, data, seq }
+    return {
+      pid: session.proc.pid,
+      data,
+      seq,
+      ...(session.signals ? { detection: true as const } : {})
+    }
   }
 
   async function warmKill(rawParams: unknown): Promise<{ ok: true }> {
@@ -979,6 +1020,7 @@ export function createPtyHandlers(
       if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
       // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
       waiting.writes.push(params.data)
+      if (params.watchConversationId) waiting.watchConversationId = true
       return { ok: true }
     }
     const session = sessions.get(params.sessionId)
@@ -989,6 +1031,7 @@ export function createPtyHandlers(
       return { ok: true }
     }
     session.proc.write(params.data)
+    if (params.watchConversationId) session.signals?.watchConversationId()
     return { ok: true }
   }
 
@@ -1014,7 +1057,8 @@ export function createPtyHandlers(
         // -1 on an empty buffer — the same "nothing seen yet" sentinel the hub's
         // gap detector starts from, so a session that has emitted nothing needs
         // no special case on either side.
-        seq: session.buffer.getCurrentSeq()
+        seq: session.buffer.getCurrentSeq(),
+        ...(session.signals ? { detection: true as const } : {})
       })
     }
     return { sessions: live, exited: tombstones.list() }
@@ -1043,6 +1087,7 @@ export function createPtyHandlers(
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
       session.revokeCli?.()
+      session.signals?.dispose()
       session.deadline?.cancel()
       releaseAdmission(session)
       try {

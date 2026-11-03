@@ -77,7 +77,11 @@ import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
 import { filterBufferData } from '../filter-buffer-data'
 import { isInterruptKey, appendInput } from '../stdin-input'
-import { PtyOutputDetector } from '../pty-output-detector'
+import {
+  CONVERSATION_ID_WATCH_TIMEOUT_MS,
+  PtyOutputDetector,
+  SESSION_ERROR_WINDOW_MS
+} from '../pty-output-detector'
 import { resolveSpawnConversation } from '../spawn-conversation'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
@@ -597,7 +601,6 @@ const IDLE_TIMEOUT_MS = 60 * 1000
 const IDLE_CHECK_INTERVAL_MS = 10 * 1000
 const STARTUP_TIMEOUT_MS = 10 * 1000
 const FAST_EXIT_FALLBACK_WINDOW_MS = 2000
-const SESSION_ID_WATCH_TIMEOUT_MS = 5000
 // Delay after first PTY output before auto-sending session detection command
 const SESSION_ID_AUTO_DETECT_DELAY_MS = 3000
 
@@ -2879,7 +2882,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           // (records output but never displays it) until a tab-switch replay.
           session.suppressOutput = false
         }
-      }, 5000)
+      }, SESSION_ERROR_WINDOW_MS)
     }
     if (resuming) {
       if (spawnConfirmation)
@@ -3032,7 +3035,7 @@ export function writePty(sessionId: string, data: string): boolean {
           session.detector.stopWatchingConversationId()
           session.statusWatchTimeout = undefined
         }
-      }, SESSION_ID_WATCH_TIMEOUT_MS)
+      }, CONVERSATION_ID_WATCH_TIMEOUT_MS)
     }
     session.inputBuffer = '' // reset on enter
   }
