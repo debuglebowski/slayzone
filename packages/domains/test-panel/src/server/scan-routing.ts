@@ -1,12 +1,12 @@
 /**
  * Where the test panel's file scan runs: on the project's computer (resolved from
  * the checkout path the client names, else the project). The hub's composition wires
- * {@link setTestScanRouting}; with no computer the scan reads the hub's own disk —
- * refused there on a hub with processes switched off (T-06).
+ * {@link setTestScanRouting}; with no computer (or unwired), "connect a computer" on
+ * every hub — the hub's own disk is never scanned.
  */
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import type { ScanResult } from '../shared/types'
-import { scanTestFiles, type ScanCategory } from './scanner'
+import type { ScanCategory } from './scanner'
 
 export interface TestScanRouting {
   computerFor(target: { projectPath: string; projectId: string }): Promise<string | null>
@@ -31,6 +31,5 @@ export async function scanTestFilesWhereTheyAre(
   if (computerId != null && routing) {
     return routing.scan(computerId, { projectPath: target.projectPath, categories: plain })
   }
-  assertHubLocalExecEnabled({ op: 'testPanel.scanFiles' })
-  return scanTestFiles(target.projectPath, plain)
+  return refuseNoComputer({ op: 'testPanel.scanFiles' })
 }

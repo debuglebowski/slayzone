@@ -1,8 +1,12 @@
 /**
  * The test panel's scan reads the project's files, so it runs on the project's
  * computer (resolved from the checkout path, else the project): the hub sends the
- * category patterns. No computer on a processes-off hub: `NO_COMPUTER_CONNECTED`.
+ * category patterns. No computer, on any hub: `NO_COMPUTER_CONNECTED` — the hub's
+ * own disk is never scanned.
  */
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { TRPCError } from '@trpc/server'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
@@ -47,13 +51,13 @@ describe('test scan on the computer', () => {
     })
   })
 
-  test('no computer on a processes-off hub: NO_COMPUTER_CONNECTED, nothing scanned', async () => {
+  test('no computer, on any hub: NO_COMPUTER_CONNECTED, nothing scanned', async () => {
     route()
     computer = null
-    process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
-    const err = await caller
-      .scanFiles({ projectPath: '/remote/p', projectId })
-      .catch((e: unknown) => e)
+    // A checkout that exists on THIS disk: still not scanned here.
+    const local = mkdtempSync(join(tmpdir(), 'slz-scan-'))
+    writeFileSync(join(local, 'a.test.ts'), '')
+    const err = await caller.scanFiles({ projectPath: local, projectId }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(TRPCError)
     expect((err as TRPCError).code).toBe('FORBIDDEN')
     expect(asked).toHaveLength(0)
