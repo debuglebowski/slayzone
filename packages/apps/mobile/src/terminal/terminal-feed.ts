@@ -34,6 +34,8 @@ export interface AttachResult {
   state: TerminalState | null
   buffer: FeedBuffer | null
   size?: { cols: number; rows: number } | null
+  /** The session exists, but its computer (which holds the scrollback) is offline. */
+  unavailable?: 'computer-offline'
 }
 
 /** The hub calls the feed makes (`pty.attach`, `pty.getBufferSince`). */
@@ -52,7 +54,8 @@ export interface FeedSink {
 }
 
 export interface FeedStatus {
-  phase: 'attaching' | 'ready' | 'error'
+  /** `offline`: the session's computer is unreachable; output resumes when it is back. */
+  phase: 'attaching' | 'ready' | 'offline' | 'error'
   /** A process runs at the session id (`pty.attach` `exists`). */
   exists: boolean
   error: string | null
@@ -66,6 +69,13 @@ export class TerminalFeed {
   /** Bumped by every attach and by dispose: an older answer is ignored. */
   private generation = 0
   private exists = false
+  private offline = false
+  /**
+   * The last catch-up failed: live chunks wait in the queue instead of each one
+   * starting another (a failing hub would otherwise be asked in a tight loop).
+   * Cleared by the next start, restart, or the computer coming back.
+   */
+  private stalled = false
 
   constructor(
     private readonly sessionId: string,
@@ -80,11 +90,13 @@ export class TerminalFeed {
    */
   start(): Promise<void> {
     if (this.syncing) return this.syncing
+    this.stalled = false
     return this.attached ? this.catchUp() : this.attach()
   }
 
   /** Start over from the full buffer (the terminal itself was recreated). */
   restart(): Promise<void> {
+    this.stalled = false
     return this.attach()
   }
 
@@ -95,6 +107,27 @@ export class TerminalFeed {
       return
     }
     if (!this.deliver(seq, data)) this.queue.push({ seq, data })
+  }
+
+  /**
+   * The session's computer went offline (false) or came back (true)
+   * (`pty.onOutputAvailability`). Back: catch up from the last chunk written (or
+   * attach, if nothing was yet) — gap-free.
+   */
+  computerAvailable(available: boolean): Promise<void> {
+    if (!available) {
+      this.setOffline()
+      return Promise.resolve()
+    }
+    if (!this.offline) return Promise.resolve()
+    this.offline = false
+    this.stalled = false
+    return this.attached ? this.catchUp() : this.attach()
+  }
+
+  private setOffline(): void {
+    this.offline = true
+    this.onStatus({ phase: 'offline', exists: this.exists, error: null })
   }
 
   /** The session's size changed (`pty.onResize`). */
@@ -113,6 +146,8 @@ export class TerminalFeed {
    * chunk waits for it (the caller queues it, in order).
    */
   private deliver(seq: number, data: string): boolean {
+    // Offline, or the last catch-up failed: hold it; the next sync delivers it.
+    if (this.offline || this.stalled) return false
     if (seq <= this.lastSeq) {
       // A new process at this id numbers from 0 again: start over.
       if (seq === 0 && this.lastSeq > 0) {
@@ -147,6 +182,12 @@ export class TerminalFeed {
       try {
         const result = await this.client.attach(this.sessionId, -1)
         if (generation !== this.generation) return
+        if (result.unavailable) {
+          // Nothing to show yet: say why; attach again when the computer is back.
+          this.exists = result.exists
+          this.setOffline()
+          return
+        }
         this.sink.reset()
         if (result.size) this.sink.resize(result.size.cols, result.size.rows)
         this.lastSeq = -1
@@ -187,9 +228,12 @@ export class TerminalFeed {
         }
         // Chunks evicted before they could be read are gone: go on from here.
         this.lastSeq = Math.max(this.lastSeq, buffer.currentSeq)
+        this.onStatus({ phase: 'ready', exists: this.exists, error: null })
       } catch (error) {
         if (generation !== this.generation) return
-        this.onStatus({ phase: 'error', exists: this.exists, error: messageOf(error) })
+        this.stalled = true
+        if (isComputerOffline(error)) this.setOffline()
+        else this.onStatus({ phase: 'error', exists: this.exists, error: messageOf(error) })
       } finally {
         if (startOver && generation === this.generation) {
           // Hand over to a fresh attach; it flushes the queue when it is done.
@@ -212,6 +256,10 @@ export class TerminalFeed {
     return tracked
   }
 }
+
+/** The hub's answer for scrollback held by an unreachable computer. */
+const isComputerOffline = (error: unknown): boolean =>
+  (error as { data?: { code?: string } } | null)?.data?.code === 'SERVICE_UNAVAILABLE'
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)

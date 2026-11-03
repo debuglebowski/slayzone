@@ -700,6 +700,9 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     'pty.onBackgroundJobs': (_input, push) => listen('pty.onBackgroundJobs', push as Listener),
     'pty.onHibernated': (_input, push) => listen('pty.onHibernated', push as Listener),
     'pty.onResize': (_input, push) => listen('pty.onResize', push as Listener),
+    // The demo's computer never goes offline: a subscription with nothing to say.
+    'pty.onOutputAvailability': (_input, push) =>
+      listen('pty.onOutputAvailability', push as Listener),
     'pty.onData': (input, push) =>
       listen('pty.onData', (event) => {
         const ids = input?.sessionIds
