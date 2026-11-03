@@ -355,10 +355,18 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.project,
       o.mark
     )
+    // A queued chat message is the computer's; the hub keeps only its route.
     run(
-      `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES (?, ?, 's', 'o', 0)`,
-      o.chatQueueItem,
+      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, 'claude-chat', NULL, 1, 'active')`,
+      `conv-${o.chatQueueItem}`,
+      o.task,
       o.tab
+    )
+    run(
+      `INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES (?, ?, ?)`,
+      o.chatQueueItem,
+      o.tab,
+      `conv-${o.chatQueueItem}`
     )
     run(
       `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES (?, ?, ?, '{}', '[]')`,
@@ -531,6 +539,8 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onResize': (o) => getPtyDeps().events.emit('resize', o.session, 100, 30),
   'pty.onTitleChange': (o) => getPtyDeps().events.emit('title-change', o.session, o.mark),
   'pty.onExit': (o) => getPtyDeps().events.emit('exit', o.session, 0, null),
+  'pty.onOutputAvailability': (o) =>
+    getPtyDeps().events.emit('output-availability', o.session, false),
   'pty.onPrompt': (o) => getPtyDeps().events.emit('prompt', o.session, { mark: o.mark }),
   'pty.onSessionDetected': (o) => getPtyDeps().events.emit('session-detected', o.session, o.mark),
   'pty.onDevServerDetected': (o) =>

@@ -83,8 +83,14 @@ sql(`INSERT INTO tags (id, project_id, name) VALUES ('tagA', 'pA', 'x')`)
 sql(`INSERT INTO task_templates (id, project_id, name) VALUES ('tmA', 'pA', 'x')`)
 sql(`INSERT INTO test_categories (id, project_id, name, pattern) VALUES ('tcA', 'pA', 'x', '*')`)
 sql(`INSERT INTO test_labels (id, project_id, name) VALUES ('tlA', 'pA', 'x')`)
+// A queued chat message is the computer's; the hub keeps only its route (id → tab).
 sql(
-  `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES ('cqA', 'tabA', 's', 'o', 0)`
+  `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES ('convA', 'tA', 'tabA', 'claude-chat', NULL, 1, 'active')`
+)
+sql(`INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES ('cqA', 'tabA', 'convA')`)
+// The hub's legacy queue (kept one release, never read): its ids belong to no one.
+sql(
+  `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES ('cqLegacy', 'tabA', 's', 'o', 0)`
 )
 sql(
   `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES ('auA', 'pA', 'x', '{}', '[]')`
@@ -152,6 +158,12 @@ describe('every kind: the owner, and nobody else', () => {
       expect(await can(null, kind, OF_A[kind])).toBe(false)
     })
   }
+})
+
+describe('legacy chat queue', () => {
+  test("an item only in the hub's legacy queue authorizes no one", async () => {
+    expect(await can(A, 'chatQueueItem', 'cqLegacy')).toBe(false)
+  })
 })
 
 describe('a hub without login (the desktop app): everything, as before', () => {
