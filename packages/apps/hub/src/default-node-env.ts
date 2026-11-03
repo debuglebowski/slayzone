@@ -5,8 +5,9 @@
  * traces in error pages) read it when the hub builds them — so a build-time define
  * cannot reach them. A launcher's value wins: the desktop app's sidecar inherits main's
  * (`production` packaged, `development` in dev), an operator may set their own.
- * Unmanifested, so sanitizeSpawnEnv keeps it out of user terminals and processes.
+ * User terminals and processes get the launcher's value back (overrideNodeEnv records
+ * it, sanitizeSpawnEnv restores it).
  */
-if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production'
+import { overrideNodeEnv } from '@slayzone/platform/env-manifest'
 
-export {}
+if (!process.env.NODE_ENV) overrideNodeEnv(process.env, 'production')

@@ -96,6 +96,9 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // name refuses to boot. Stripping both here keeps a terminal's dial address from
   // ever being mistaken for another process's listen address.
   SLAYZONE_HUB_ADDRESS: 'infra',
+  // The NODE_ENV the launcher handed SlayZone before SlayZone overrode it for its own
+  // processes ('' = the launcher had none). See overrideNodeEnv.
+  SLAYZONE_LAUNCHER_NODE_ENV: 'infra',
   SLAYZONE_CLI_RELAY_ADDRESS: 'infra', // computer loopback; re-added per session
   SLAYZONE_HUB_LISTEN_ADDRESS: 'infra', // hub-only; where the hub listens
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; how other machines reach it, written into join tokens
@@ -244,7 +247,38 @@ export function sanitizeSpawnEnv(base: NodeJS.ProcessEnv): Record<string, string
   for (const [key, value] of Object.entries(base)) {
     if (keptInSpawnEnv(key, value)) out[key] = value
   }
+  restoreLauncherNodeEnv(out, base)
   return out
+}
+
+/** Records the launcher's NODE_ENV once SlayZone overrides it. */
+export const LAUNCHER_NODE_ENV = 'SLAYZONE_LAUNCHER_NODE_ENV'
+
+/**
+ * Set `NODE_ENV` for a SlayZone process (`production` for the packaged app and the
+ * hub) WITHOUT handing it to user terminals and agents: the launcher's value is
+ * recorded in {@link LAUNCHER_NODE_ENV}, and {@link sanitizeSpawnEnv} /
+ * {@link childProcessEnv} put it back. A leaked `production` makes `npm ci` skip
+ * devDependencies and runs Vite/vitest outside dev mode (issue #171).
+ *
+ * Only the FIRST override records: a child that inherited an override (the hub under
+ * the packaged app) and overrides again keeps the original launcher's value.
+ */
+export function overrideNodeEnv(env: NodeJS.ProcessEnv, value: string): void {
+  if (env.NODE_ENV === value) return
+  if (env[LAUNCHER_NODE_ENV] === undefined) env[LAUNCHER_NODE_ENV] = env.NODE_ENV ?? ''
+  env.NODE_ENV = value
+}
+
+/** Give a child's env the NODE_ENV the launcher had, if SlayZone overrode it. */
+function restoreLauncherNodeEnv(
+  env: Record<string, string | undefined>,
+  base: NodeJS.ProcessEnv
+): void {
+  const launcher = base[LAUNCHER_NODE_ENV]
+  if (launcher === undefined) return
+  if (launcher === '') delete env.NODE_ENV
+  else env.NODE_ENV = launcher
 }
 
 /** Whether one entry of a parent env survives into a spawned child's base env. */
@@ -276,8 +310,9 @@ export type EnvOverlay = Readonly<Record<string, string | undefined>>
  *
  * Built as a copy of `base` minus the stripped entries rather than asserted to that
  * type, so it IS a `NodeJS.ProcessEnv` under every typing of it — Node's (a string
- * record) and Expo's (`NODE_ENV` required): `NODE_ENV` is never stripped, so it is
- * present in the child whenever it was in `base`.
+ * record) and Expo's (`NODE_ENV` required): `NODE_ENV` changes only to undo
+ * SlayZone's own override ({@link overrideNodeEnv}), so it is otherwise present in the
+ * child whenever it was in `base`.
  *
  * Pure: never mutates `base` or `overlay`.
  */
@@ -289,5 +324,6 @@ export function childProcessEnv(
   for (const [key, value] of Object.entries(env)) {
     if (!keptInSpawnEnv(key, value)) delete env[key]
   }
+  restoreLauncherNodeEnv(env, base)
   return Object.assign(env, overlay)
 }
