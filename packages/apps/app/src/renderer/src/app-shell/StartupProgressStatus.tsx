@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { StartupProgressCard } from '@slayzone/sidebar'
 import { initQueuedCount, subscribeInitQueued } from '@slayzone/terminal/client'
+import { chatsLoadingCount, subscribeChatsLoading } from '@slayzone/task-terminals'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from '../trpc'
 import { paneHydrator } from './pane-hydration'
@@ -45,9 +46,9 @@ function createStartupStore() {
 }
 
 /**
- * The sidebar's startup card, fed live: tabs loading (`paneHydrator`), hidden
- * terminals waiting for their turn (`terminal-init-scheduler`), and agents starting
- * on the hub (`pty.onAgentStarts`). Its own component, rendered into the sidebar's
+ * The sidebar's startup card, fed live: task pages mounting (`paneHydrator`), hidden
+ * terminals waiting for their turn (`terminal-init-scheduler`), chats loading their
+ * history (`chat-loading`), and agents starting on the hub (`pty.onAgentStarts`). Its own component, rendered into the sidebar's
  * `statusSlot`, so each update re-renders only this — never the app around it,
  * which is exactly what must stay cheap while a workspace restores.
  *
@@ -61,6 +62,7 @@ export function StartupProgressStatus() {
   const over = view.ended
   const panes = useSyncExternalStore(paneHydrator.subscribeProgress, paneHydrator.progress)
   const terminalsQueued = useSyncExternalStore(subscribeInitQueued, initQueuedCount)
+  const chatsLoading = useSyncExternalStore(subscribeChatsLoading, chatsLoadingCount)
 
   useSubscription(
     trpc.pty.onAgentStarts.subscriptionOptions(undefined, {
@@ -72,8 +74,8 @@ export function StartupProgressStatus() {
   )
 
   useEffect(() => {
-    store.setInputs({ agents, panes, terminalsQueued })
-  }, [store, agents, panes, terminalsQueued])
+    store.setInputs({ agents, panes, terminalsQueued, chatsLoading })
+  }, [store, agents, panes, terminalsQueued, chatsLoading])
   useEffect(() => () => store.dispose(), [store])
 
   if (over || !view.visible || !view.progress) return null

@@ -495,6 +495,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       chatApi,
       inFlight,
       hydrating,
+      loadFailed: (loadError ?? hydrateError) != null,
       state,
       resetTimeline,
       // Reset clears the composer: its text and its attached files.

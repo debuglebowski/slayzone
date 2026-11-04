@@ -4,9 +4,10 @@ import type { StartupProgress } from '@slayzone/sidebar'
  * When the sidebar's startup card shows, and what it counts.
  *
  * A restored workspace comes up in stages, each deliberately paced so the tab the
- * user looks at is first: hidden tabs load one per idle slice (`pane-hydration`),
- * their terminals take turns to initialise (`terminal-init-scheduler`), and their
- * agents are admitted a few at a time on the computer (`pty.onAgentStarts`). With
+ * user looks at is first: hidden tabs mount their task page one per idle slice
+ * (`pane-hydration`), their terminals take turns to initialise
+ * (`terminal-init-scheduler`), their chats load their history (`chat-loading`), and
+ * their agents are admitted a few at a time on the computer (`pty.onAgentStarts`). With
  * dozens of tabs that takes a while, and until now it only looked like a freeze.
  *
  * "Startup" is this renderer's first stretch of such work. It ends — for good —
@@ -25,6 +26,8 @@ export interface StartupInputs {
   panes: { hydrated: number; queued: number }
   /** Hidden terminals waiting for their turn to initialise. */
   terminalsQueued: number
+  /** Chats loading their history, their agent not asked to start yet. */
+  chatsLoading: number
 }
 
 export interface StartupView {
@@ -49,7 +52,11 @@ export function createStartupWatch(startedAt: number) {
     if (done) return ENDED
     const agents = inputs.agents ?? []
     for (const a of agents) seen.add(a.sessionId)
-    const inFlight = agents.length > 0 || inputs.panes.queued > 0 || inputs.terminalsQueued > 0
+    const inFlight =
+      agents.length > 0 ||
+      inputs.panes.queued > 0 ||
+      inputs.terminalsQueued > 0 ||
+      inputs.chatsLoading > 0
     // Startup cannot be over before the hub has said which agents are starting.
     const known = inputs.agents !== null
 
@@ -62,15 +69,16 @@ export function createStartupWatch(startedAt: number) {
       }
     }
 
-    const tabsTotal = inputs.panes.hydrated + inputs.panes.queued
     const progress: StartupProgress = {
       settled: !inFlight && known,
       agentsReady: seen.size - agents.length,
       agentsTotal: seen.size,
       agentsBooting: agents.filter((a) => a.phase === 'booting').length,
       agentsQueued: agents.filter((a) => a.phase === 'queued').length,
-      tabsLoaded: inputs.panes.hydrated,
-      tabsTotal
+      pagesLoaded: inputs.panes.hydrated,
+      pagesTotal: inputs.panes.hydrated + inputs.panes.queued,
+      terminalsQueued: inputs.terminalsQueued,
+      chatsLoading: inputs.chatsLoading
     }
     const shown = now - startedAt >= STARTUP_SHOW_AFTER_MS
     // Appears only while work is still in flight once the delay is up — a boot that

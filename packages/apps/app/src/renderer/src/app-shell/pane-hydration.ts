@@ -83,19 +83,27 @@ export interface PaneHydrator {
   isHydrated: (id: string) => boolean
   /** Notified when `id` hydrates. */
   subscribe: (id: string, cb: () => void) => () => void
-  /** Panes hydrated so far, and still waiting. Same object until either changes. */
+  /**
+   * The pane is mounted (its tab is open). Returns its detach (idempotent). Only
+   * mounted panes count toward `progress()`, so a closed tab leaves it.
+   */
+  attach: (id: string) => () => void
+  /** Mounted panes hydrated so far, and still waiting. Same object until either changes. */
   progress: () => HydrationProgress
   /** Notified whenever `progress()` changes. */
   subscribeProgress: (cb: () => void) => () => void
 }
 
 export interface HydrationProgress {
+  /** Mounted panes that are hydrated (closed tabs excluded). */
   hydrated: number
   queued: number
 }
 
 export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrator {
   const hydrated = new Set<string>()
+  /** Mounted panes, with how many mounts each (a pane can attach twice in a row). */
+  const mounted = new Map<string, number>()
   const queue = new Map<string, Entry>()
   const listeners = new Map<string, Set<() => void>>()
   let seq = 0
@@ -104,10 +112,15 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
   let drainMarked = false
   const progressListeners = new Set<() => void>()
   let progressSnapshot: HydrationProgress = { hydrated: 0, queued: 0 }
+  const mountedHydrated = (): number => {
+    let n = 0
+    for (const id of mounted.keys()) if (hydrated.has(id)) n++
+    return n
+  }
   const progressChanged = (): void => {
-    if (progressSnapshot.hydrated === hydrated.size && progressSnapshot.queued === queue.size)
-      return
-    progressSnapshot = { hydrated: hydrated.size, queued: queue.size }
+    const count = mountedHydrated()
+    if (progressSnapshot.hydrated === count && progressSnapshot.queued === queue.size) return
+    progressSnapshot = { hydrated: count, queued: queue.size }
     for (const cb of [...progressListeners]) cb()
   }
 
@@ -196,6 +209,19 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     hydrateNow: hydrate,
     isHydrated: (id) => hydrated.has(id),
     subscribe,
+    attach: (id) => {
+      mounted.set(id, (mounted.get(id) ?? 0) + 1)
+      progressChanged()
+      let attached = true
+      return () => {
+        if (!attached) return
+        attached = false
+        const n = (mounted.get(id) ?? 1) - 1
+        if (n > 0) mounted.set(id, n)
+        else mounted.delete(id)
+        progressChanged()
+      }
+    },
     progress: () => progressSnapshot,
     subscribeProgress: (cb) => {
       progressListeners.add(cb)
