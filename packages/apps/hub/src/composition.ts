@@ -916,6 +916,10 @@ export function composeServer(opts: {
         ptyEvents.emit('state-change', sessionId, state, oldState)
         await notifyGlobalStateListeners(sessionId, state, oldState)
       }
+    },
+    // A chat agent's background commands: the same stream a terminal agent's count is on.
+    onBackgroundJobs: (sessionId, count) => {
+      ptyEvents.emit('background-jobs', sessionId, count)
     }
   })
   setArtifactStorage(

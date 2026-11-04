@@ -85,6 +85,7 @@ export function createComputerChatServices(opts: {
     previous: ChatTerminalState,
     hasUserInput: boolean
   ): void | Promise<void>
+  onBackgroundJobs?(sessionId: string, count: number): void | Promise<void>
 }) {
   const ownership = createChatOwnershipStore(opts.db)
   const providerConfigs = createHubProviderConfigStore(opts.db)
