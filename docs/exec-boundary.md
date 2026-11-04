@@ -105,6 +105,15 @@ through hub-safe entries — `@slayzone/terminal/hub`, `@slayzone/worktrees/hub`
 `@slayzone/file-editor/hub`, `@slayzone/chat-runtime/hub` — never their `./server`
 barrels, which keep the local implementations computers use.
 
+## Direct link
+
+Clients may exchange terminal and chat data straight with a computer
+([direct link](direct-link.md)). This changes nothing above: the hub still decides
+and stores, and runs no project work itself. It issues direct-link capabilities only
+for sessions and tabs a connected computer holds. With zero computers it answers
+`no-computer` and clients use the hub as before, so the zero-computer acceptance
+test above is unaffected.
+
 ## Still undecided
 
 - **A task whose project has no repo** never creates a worktree, so its cwd is a
