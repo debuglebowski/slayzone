@@ -16,7 +16,7 @@ import {
 const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
 
 /** Make sure the tab has a running agent: the main one starts as `task.startMainAgent` does. */
-async function ensureStarted(chat: ChatAccess, target: ChatTarget): Promise<boolean> {
+export async function ensureStarted(chat: ChatAccess, target: ChatTarget): Promise<boolean> {
   const status = await turnStatus(chat, target)
   if (status && status.state !== 'dead' && status.state !== 'not-spawned') return false
   if (target.isMain) await chat.startMain(target.taskId)
