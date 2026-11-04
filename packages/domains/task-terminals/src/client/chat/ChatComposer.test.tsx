@@ -327,6 +327,12 @@ describe('ChatComposer send / stop', () => {
     fireEvent.click(button('Stop generation'))
     expect(props.handleStop).toHaveBeenCalled()
   })
+
+  it('once Stop is pressed, the button says it is stopping until the turn closes', () => {
+    setup({ inFlight: true, stopping: true })
+    expect(queryButton('Stop generation')).toBeNull()
+    expect(button('Stopping').getAttribute('aria-busy')).toBe('true')
+  })
 })
 
 describe('ChatComposer names the provider', () => {

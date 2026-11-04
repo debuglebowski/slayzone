@@ -66,6 +66,7 @@ test.each([false, true])(
         isActive: false,
         sendMessage,
         inFlight: true,
+        turnId: 0,
         sessionEnded: false,
         abortAndPop: async () => ({ popped: false, text: null, id: null, content: null }),
         chatApi: {} as ChatActions,

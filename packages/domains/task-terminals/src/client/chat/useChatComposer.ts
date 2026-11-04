@@ -55,6 +55,8 @@ export interface UseChatComposerOpts {
   /** Text alone as a string; files (and text) as content blocks. */
   sendMessage: (input: string | UserContentBlock[]) => Promise<void>
   inFlight: boolean
+  /** Identifies the open turn (`turnsClosed`): Stop reads as stopping until it moves on. */
+  turnId: number
   sessionEnded: boolean
   /** Stop; a popped message comes back whole (`id`, `content`, `text`). */
   abortAndPop: () => Promise<StopResult>
@@ -117,6 +119,7 @@ export function useChatComposer({
   isActive,
   sendMessage,
   inFlight,
+  turnId,
   sessionEnded,
   abortAndPop,
   chatApi,
@@ -650,9 +653,30 @@ export function useChatComposer({
   // Skips restore when the user has already started typing again (draft
   // non-empty). The result carries the popped message whole (`id`, `content`
   // with its attachment blocks), not only its text.
+  //
+  // Stop shows at once (TUI parity): the turn reads as stopping from the press
+  // until it closes (`turnId` moves on) — the round trip to the agent can take
+  // seconds on a busy machine. Presses while the request runs send nothing more;
+  // one after it settled, with the turn still open, asks again.
+  const [stopTurnId, setStopTurnId] = useState<number | null>(null)
+  const stopRequestRef = useRef(false)
+  const stopping = inFlight && stopTurnId === turnId
   const handleStop = useCallback(async () => {
+    if (stopRequestRef.current) return
+    stopRequestRef.current = true
+    setStopTurnId(turnId)
     void clearQueue()
-    const result = await abortAndPop()
+    const result = await abortAndPop().then(
+      (r) => {
+        stopRequestRef.current = false
+        return r
+      },
+      (err: unknown) => {
+        stopRequestRef.current = false
+        setStopTurnId(null)
+        throw err
+      }
+    )
     if (!result.popped) return
     if (draft.trim() !== '') return
     const snap = lastSentRef.current
@@ -668,7 +692,7 @@ export function useChatComposer({
     }
     lastSentRef.current = null
     textareaRef.current?.focus()
-  }, [abortAndPop, draft, clearQueue, setDraft, setAttachments])
+  }, [abortAndPop, draft, clearQueue, setDraft, setAttachments, turnId])
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -822,6 +846,7 @@ export function useChatComposer({
     autocomplete,
     handleSend,
     handleStop,
+    stopping,
     sendCommand,
     onKeyDown,
     textareaRef,
