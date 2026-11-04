@@ -337,3 +337,24 @@ describe('per-hub registry', () => {
     expect(asked).toEqual(['127.0.0.1:5001'])
   })
 })
+
+describe('status (Diagnostics)', () => {
+  it('reports a computer on the direct link with its address and leases, or on the relay with why and when it retries', async () => {
+    vi.useFakeTimers()
+    const { manager, setProbe, setIssue } = setup()
+    await manager.acquire(pty('s1'))
+    await manager.acquire(pty('s2'))
+    expect(manager.status()).toEqual([
+      { computerId: 'c1', path: 'direct', address: '127.0.0.1:5001', leases: 2 }
+    ])
+    setIssue(() => available({ computerId: 'c2', address: '127.0.0.1:6000' }))
+    setProbe(false)
+    await manager.acquire(pty('s3'))
+    expect(manager.status()).toContainEqual({
+      computerId: 'c2',
+      path: 'relay',
+      reason: 'probe',
+      retryInMs: 60_000
+    })
+  })
+})

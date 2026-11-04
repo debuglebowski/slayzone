@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { directLinkStatus, directUseCounts } from '@slayzone/transport/direct-client'
+import { describeDirectLink } from './direct-link-status'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '../trpc'
 import {
@@ -103,6 +105,7 @@ export function DiagnosticsSettingsTab() {
         title="Diagnostics"
         description="Control debug logging and export diagnostic bundles for troubleshooting."
       />
+      <DirectLinkCard />
       <Card>
         <CardHeader>
           <CardTitle>Logging</CardTitle>
@@ -268,6 +271,46 @@ export function DiagnosticsSettingsTab() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/** How this client reaches each computer (docs/direct-link.md). Polled: it is cheap. */
+function DirectLinkCard() {
+  const read = () => describeDirectLink(directLinkStatus(), directUseCounts())
+  const [view, setView] = useState(read)
+  useEffect(() => {
+    const timer = setInterval(() => setView(read()), 2_000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Direct link</CardTitle>
+        <CardDescription>
+          Terminals and chats reach their computer directly when they can, and through the hub
+          otherwise. {view.summary}
+        </CardDescription>
+      </CardHeader>
+      {view.rows.length > 0 && (
+        <CardContent className="space-y-2">
+          {view.rows.map((row) => (
+            <div
+              key={`${row.hubId ?? ''}:${row.computerId}`}
+              className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4 text-sm"
+            >
+              <span className="truncate font-mono text-xs text-muted-foreground">
+                {row.hubId ? `${row.hubId} / ` : ''}
+                {row.computerId}
+              </span>
+              <span>
+                <span className="font-medium text-foreground">{row.path}</span>
+                <span className="text-muted-foreground"> · {row.detail}</span>
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      )}
+    </Card>
   )
 }
 

@@ -1144,6 +1144,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/ui/src/use-stable-poll.test.ts \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
+  packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \
   packages/domains/projects/src/client/useProjectLockState.test.tsx \
   packages/domains/terminal/src/client/BackgroundJobsBanner.test.tsx \

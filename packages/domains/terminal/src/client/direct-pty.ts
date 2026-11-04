@@ -15,9 +15,10 @@
  */
 import {
   keepDirectLease,
+  noteDirectUse,
   type DirectLease,
   type DirectLinkManager
-} from '@slayzone/transport/client'
+} from '@slayzone/transport/direct-client'
 
 type DirectPtyClient = DirectLease['client']
 
@@ -82,6 +83,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
     sub = null
     if (current && directSessions.get(sessionId) === current.client) {
       directSessions.delete(sessionId)
+      noteDirectUse('pty', sessionId, false)
       changed()
     }
     current = null
@@ -90,6 +92,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
   function link(got: DirectLease): void {
     current = got
     directSessions.set(sessionId, got.client)
+    noteDirectUse('pty', sessionId, true)
     changed()
     // Live chunks wait until the gap since the last delivered seq is filled, so
     // delivery stays in order (a later seq would make the gap's seqs look old).

@@ -90,8 +90,21 @@ export interface DirectLinkManagerOptions {
   log?: (message: string, detail?: Record<string, unknown>) => void
 }
 
+/** One computer's direct-link state, for Diagnostics. */
+export type DirectLinkComputerStatus =
+  | { computerId: string; path: 'direct'; address: string; leases: number }
+  | {
+      computerId: string
+      path: 'relay'
+      /** Why the last attempt failed: no HTTP answer, no socket in time, refused. */
+      reason: 'probe' | 'deadline' | 'refused'
+      retryInMs: number
+    }
+
 export interface DirectLinkManager {
   acquire(target: DirectTarget): Promise<DirectLease | null>
+  /** Computers on the direct link, and those backing off to the relay. */
+  status(): DirectLinkComputerStatus[]
   /** The computer (re)connected to the hub: its address may have moved. */
   computerConnected(computerId: string): void
   /** Told after `computerConnected`: a good moment for relaying holders to try again. */
@@ -186,7 +199,10 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   const open = options.openConnection ?? openDirectConnection
   const log = options.log ?? (() => undefined)
   const sockets = new Map<string, Socket>()
-  const backoff = new Map<string, { until: number; delay: number }>()
+  const backoff = new Map<
+    string,
+    { until: number; delay: number; why: 'probe' | 'deadline' | 'refused' }
+  >()
   /** The computer each target was last found on: a blocked one is not asked again. */
   const lastComputer = new Map<string, string>()
   const targetKey = (t: DirectTarget): string =>
@@ -200,10 +216,10 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     return b !== undefined && Date.now() < b.until
   }
 
-  function fail(computerId: string, why: string): null {
+  function fail(computerId: string, why: 'probe' | 'deadline' | 'refused'): null {
     const prev = backoff.get(computerId)
     const delay = prev ? Math.min(prev.delay * 2, cfg.backoffMaxMs) : cfg.backoffInitialMs
-    backoff.set(computerId, { until: Date.now() + delay, delay })
+    backoff.set(computerId, { until: Date.now() + delay, delay, why })
     log('direct link unavailable, using the hub relay', { computerId, why, retryInMs: delay })
     return null
   }
@@ -368,6 +384,24 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
       }
     },
 
+    status() {
+      const out: DirectLinkComputerStatus[] = []
+      for (const socket of sockets.values()) {
+        out.push({
+          computerId: socket.computerId,
+          path: 'direct',
+          address: socket.address,
+          leases: socket.leases.size
+        })
+      }
+      const now = Date.now()
+      for (const [computerId, b] of backoff) {
+        if (b.until <= now || out.some((o) => o.computerId === computerId)) continue
+        out.push({ computerId, path: 'relay', reason: b.why, retryInMs: b.until - now })
+      }
+      return out
+    },
+
     computerConnected(computerId) {
       backoff.delete(computerId)
       for (const socket of [...sockets.values()]) {
@@ -452,6 +486,27 @@ export function directLinkManagerFor(
   }
   managers.set(hubId, { manager, stop: () => sub?.unsubscribe() })
   return manager
+}
+
+const directUses = { pty: new Set<string>(), chat: new Set<string>() }
+
+/** A terminal session or chat tab went onto (true) or off (false) the direct link. */
+export function noteDirectUse(kind: 'pty' | 'chat', id: string, linked: boolean): void {
+  if (linked) directUses[kind].add(id)
+  else directUses[kind].delete(id)
+}
+
+/** How many terminals and chats are on the direct link now (Diagnostics). */
+export function directUseCounts(): { terminals: number; chats: number } {
+  return { terminals: directUses.pty.size, chats: directUses.chat.size }
+}
+
+/** Every hub's direct-link state (Diagnostics). */
+export function directLinkStatus(): Array<{
+  hubId: string
+  computers: DirectLinkComputerStatus[]
+}> {
+  return [...managers].map(([hubId, { manager }]) => ({ hubId, computers: manager.status() }))
 }
 
 /** Test seam / hub removal. */

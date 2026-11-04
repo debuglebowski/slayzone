@@ -10,7 +10,7 @@
  *
  * @module terminal/client/chat-direct
  */
-import type { DirectLease } from '@slayzone/transport/client'
+import { noteDirectUse, type DirectLease } from '@slayzone/transport/direct-client'
 
 type Query<I, O> = { query(input: I): Promise<O> }
 type Mutation<I, O> = { mutate(input: I): Promise<O> }
@@ -59,6 +59,7 @@ export function directChatStatus(): {
 export function noteDirectChatLink(tabId: string, linked: boolean): void {
   if (linked) linkedTabs.add(tabId)
   else linkedTabs.delete(tabId)
+  noteDirectUse('chat', tabId, linked)
 }
 
 /** One event arrived over the direct link. */
