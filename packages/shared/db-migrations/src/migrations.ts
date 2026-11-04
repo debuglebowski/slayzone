@@ -4648,7 +4648,7 @@ export const migrations: Migration[] = [
     }
   },
   {
-    version: 192,
+    version: 193,
     up(db) {
       // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
       // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
@@ -4673,7 +4673,7 @@ export const migrations: Migration[] = [
     }
   },
   {
-    version: 193,
+    version: 194,
     up(db) {
       // Which computer a legacy (hub-era) chat tab's agent ran on — where its provider
       // session lives, so the migration copies it from there. It was read from the
