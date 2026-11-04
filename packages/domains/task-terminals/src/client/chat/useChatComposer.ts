@@ -16,6 +16,7 @@ import {
   modelLabelForMode,
   modelsForMode,
   userMessageAttachments,
+  userMessageText,
   type ChatAttachment,
   type ChatModelsView,
   type CliCommandList,
@@ -35,7 +36,13 @@ import { createFilesSource } from './autocomplete/sources/files'
 import { cliCommandItems, createCliCommandsSource } from './autocomplete/sources/cli-commands'
 import { usePromptHistory } from './usePromptHistory'
 import { useChatDraftPersistence } from './composer-state/useChatDraftPersistence'
-import { HISTORY_IDLE, historyStep, isBrowsingHistory, type HistoryNav } from './prompt-history'
+import {
+  HISTORY_IDLE,
+  historyStep,
+  historyStepAttachments,
+  isBrowsingHistory,
+  type HistoryNav
+} from './prompt-history'
 import type {
   AutocompleteSource,
   ChatActions,
@@ -93,6 +100,29 @@ export interface UseChatComposerOpts {
 }
 function queueFailureMessage(err: unknown): string {
   return `Could not queue the message: ${err instanceof Error ? err.message : String(err)}`
+}
+
+/** The message `sendMessage(input)` puts on the wire: plain text goes as one text block. */
+function sentContent(input: string | UserContentBlock[]): UserContentBlock[] {
+  return typeof input === 'string' ? [{ type: 'text', text: input }] : input
+}
+
+/** Same message: the same text and the same files, in the same order. */
+function sameMessage(a: UserContentBlock[], b: UserContentBlock[]): boolean {
+  const filesA = userMessageAttachments(a)
+  const filesB = userMessageAttachments(b)
+  return (
+    userMessageText(a) === userMessageText(b) &&
+    filesA.length === filesB.length &&
+    filesA.every((file, i) => file.artifactId === filesB[i].artifactId)
+  )
+}
+
+/** What the composer sent itself: the raw input, and the message that went out for it. */
+interface SentSnapshot {
+  text: string
+  attachments: ChatAttachment[]
+  content: UserContentBlock[]
 }
 
 /**
@@ -156,11 +186,18 @@ export function useChatComposer({
     setDraftState(value)
   })
   // Prompt history (↑/↓ recall, Ctrl+R search) — modes with `promptHistory` only.
-  const { entries: historyEntries, record: recordHistory } = usePromptHistory({
+  const {
+    entries: historyEntries,
+    record: recordHistory,
+    attachmentsOf: historyAttachmentsOf
+  } = usePromptHistory({
     taskId,
     enabled: capabilities.promptHistory
   })
   const [historyNav, setHistoryNav] = useState<HistoryNav>(HISTORY_IDLE)
+  // The files the composer held when ↑ started browsing: back once ↑/↓ leaves
+  // an entry that brought its own (a cleared draft's). Handlers only.
+  const historyStashFiles = useRef<ChatAttachment[]>([])
   const [historySearchOpen, setHistorySearchOpen] = useState(false)
   const browsingHistory = isBrowsingHistory(historyNav, draft, historyEntries)
   // Forward-declared like bumpUsageRef: the autocomplete sends a picked command
@@ -219,6 +256,34 @@ export function useChatComposer({
     setAttachments([])
     setCursorPos(0)
     textareaRef.current?.focus()
+  })
+  // Undo of an Esc Esc clear: the text and files come back exactly. Anything
+  // written since stays — the cleared text goes after it, its files after the new.
+  const restoreDiscardedDraft = useStableCallback((text: string, files: ChatAttachment[]) => {
+    setHistoryNav(HISTORY_IDLE)
+    if (text)
+      setDraft((prev) => (!prev.trim() ? text : prev === text ? prev : `${prev}\n\n${text}`))
+    if (files.length > 0)
+      setAttachments((prev) => [
+        ...prev,
+        ...files.filter((file) => !prev.some((p) => p.artifactId === file.artifactId))
+      ])
+    setCursorPos(draftSnapshot.current.text.length)
+    textareaRef.current?.focus()
+  })
+  // Esc Esc with a nonempty composer (TUI parity) clears it — recoverably: the
+  // text goes into the prompt history with its files (↑ brings both back), and
+  // the toast's Undo restores them. A send's clear (`clearDraft`) keeps neither.
+  const discardDraft = useStableCallback(() => {
+    const { text, attachments: files } = draftSnapshot.current
+    clearDraft()
+    const hasText = text.trim() !== ''
+    if (!hasText && files.length === 0) return
+    if (hasText) recordHistory(text, files)
+    toast(
+      hasText && capabilities.promptHistory ? 'Draft cleared. ↑ brings it back.' : 'Draft cleared.',
+      { action: { label: 'Undo', onClick: () => restoreDiscardedDraft(text, files) } }
+    )
   })
   // "Send now": the agent takes it after its current step; it stays
   // listed ("With agent…") until then. A refusal (the turn just ended…) says why.
@@ -333,12 +398,13 @@ export function useChatComposer({
       setCursorPos(saved.text.length)
     }
   }
-  // Snapshot of the in-flight turn's raw input + attachments. Used by Stop/Esc
-  // to restore the chips + clean text (without inline image markdown) when the
-  // main side pops the turn. Updated only on user submits that go straight to
-  // the wire — queued submits don't overwrite it, so the snapshot stays aligned
-  // with the in-flight turn even when a queue exists.
-  const lastSentRef = useRef<{ text: string; attachments: ChatAttachment[] } | null>(null)
+  // Snapshot of the last message this composer sent straight to the wire: its
+  // raw input + attachments, and the content that went out. Stop/Esc restores
+  // the chips + clean text (no inline image markdown, no expanded template)
+  // from it — but only when the popped message IS that one (same content): the
+  // hub may have sent a queued message, a retry, or another device's since.
+  // Queued submits don't set it.
+  const lastSentRef = useRef<SentSnapshot | null>(null)
 
   // Auto-focus composer when this task tab becomes active (mount-while-active
   // or inactive→active transition). Tab content stays mounted with display:none
@@ -550,8 +616,9 @@ export function useChatComposer({
         setDraft('')
         setAttachments([])
         void scrollToBottom()
-        lastSentRef.current = { text, attachments: [...files] }
-        await sendMessage(files.length > 0 ? content : toSend)
+        const input = files.length > 0 ? content : toSend
+        lastSentRef.current = { text, attachments: [...files], content: sentContent(input) }
+        await sendMessage(input)
         void bumpUsageRef.current(text)
         return
       }
@@ -582,7 +649,11 @@ export function useChatComposer({
       // Capture raw input + attachments BEFORE clearing — used by Stop/Esc to
       // restore them if the turn is popped. Skip when queueing: lastSentRef must
       // remain aligned with the in-flight turn, not the queued one.
-      const snapshot = { text, attachments: [...attachments] }
+      const snapshot: SentSnapshot = {
+        text,
+        attachments: [...attachments],
+        content: sentContent(toSend)
+      }
       if (inFlight || queuedMessages.length > 0 || pendingQueuedMessages.length > 0) {
         await queueDraft(toSend, text, undefined, now && inFlight)
         return
@@ -649,10 +720,10 @@ export function useChatComposer({
   // chat_queue inside chat:abortAndPop too, this client-side clear is a
   // belt-and-suspenders for instant UI feedback before the broadcast lands).
   // Aborts the turn on the main side and — if no progress had arrived —
-  // restores the popped text + attachments to the composer for editing.
-  // Skips restore when the user has already started typing again (draft
-  // non-empty). The result carries the popped message whole (`id`, `content`
-  // with its attachment blocks), not only its text.
+  // restores the popped message (text + attachments) to the composer for
+  // editing. Skips restore when the user has already started typing again
+  // (draft non-empty). The result carries the popped message whole (`id`,
+  // `content` with its attachment blocks), not only its text.
   //
   // Stop shows at once (TUI parity): the turn reads as stopping from the press
   // until it closes (`turnId` moves on) — the round trip to the agent can take
@@ -679,18 +750,27 @@ export function useChatComposer({
     )
     if (!result.popped) return
     if (draft.trim() !== '') return
+    // The popped message is what comes back — the one Stop withdrew, which may
+    // not be the one sent from here (a queued message the hub sent next, a
+    // retry, a timeline button, another device). The local snapshot stands in
+    // only when it IS that message: it keeps the raw input. Spent either way.
     const snap = lastSentRef.current
-    if (snap) {
-      setDraft(snap.text)
-      setAttachments(snap.attachments)
-    } else {
-      // Remounted since it was sent (no local snapshot): the popped message's
-      // own content brings its files back too.
-      const files = userMessageAttachments(result.content ?? [])
-      if (result.text) setDraft(result.text)
-      if (files.length > 0) setAttachments(files)
-    }
     lastSentRef.current = null
+    const content = result.content ?? (result.text ? sentContent(result.text) : [])
+    const restore =
+      snap && sameMessage(snap.content, content)
+        ? snap
+        : {
+            text: result.text ?? userMessageText(content),
+            attachments: userMessageAttachments(content)
+          }
+    if (restore.text) setDraft(restore.text)
+    // Files already in the composer stay; the message's join them.
+    if (restore.attachments.length > 0)
+      setAttachments((prev) => [
+        ...prev,
+        ...restore.attachments.filter((file) => !prev.some((p) => p.artifactId === file.artifactId))
+      ])
     textareaRef.current?.focus()
   }, [abortAndPop, draft, clearQueue, setDraft, setAttachments, turnId])
 
@@ -729,8 +809,17 @@ export function useChatComposer({
         })
         if (step) {
           e.preventDefault()
+          if (!browsingHistory) historyStashFiles.current = attachments
+          const files = historyStepAttachments({
+            leaving: browsingHistory ? historyEntries[historyNav.index] : null,
+            arriving: step.nav.index >= 0 ? step.draft : null,
+            current: attachments,
+            stash: historyStashFiles.current,
+            attachmentsOf: historyAttachmentsOf
+          })
           setHistoryNav(step.nav)
           setDraft(step.draft)
+          if (files !== attachments) setAttachments(files)
           setCursorPos(step.draft.length)
           return
         }
@@ -753,7 +842,11 @@ export function useChatComposer({
       historyNav,
       draft,
       historyEntries,
-      setDraft
+      setDraft,
+      browsingHistory,
+      attachments,
+      historyAttachmentsOf,
+      setAttachments
     ]
   )
 
@@ -766,7 +859,7 @@ export function useChatComposer({
       await pushQueue(text, text)
       return
     }
-    lastSentRef.current = { text, attachments: [] }
+    lastSentRef.current = { text, attachments: [], content: sentContent(text) }
     await sendMessage(text)
   })
 
@@ -808,15 +901,18 @@ export function useChatComposer({
   }
 
   // Ctrl+R search → the picked prompt goes into the composer for editing (not sent).
+  // A cleared draft's entry brings its files back too.
   const pickHistoryPrompt = useCallback(
     (text: string) => {
       setHistorySearchOpen(false)
       setHistoryNav(HISTORY_IDLE)
       setDraft(text)
+      const files = historyAttachmentsOf(text)
+      if (files) setAttachments(files)
       setCursorPos(text.length)
       textareaRef.current?.focus()
     },
-    [setDraft]
+    [setDraft, setAttachments, historyAttachmentsOf]
   )
   const closeHistorySearch = useCallback(() => {
     setHistorySearchOpen(false)
@@ -833,6 +929,7 @@ export function useChatComposer({
     recoverLegacyDraft,
     setDraft,
     clearDraft,
+    discardDraft,
     setCursorPos,
     attachments,
     setAttachments,

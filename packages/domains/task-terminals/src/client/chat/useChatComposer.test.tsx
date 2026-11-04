@@ -45,7 +45,11 @@ const mocks = vi.hoisted(() => {
       calls: [] as Array<{ text: string; paused: boolean; enabled: boolean }>
     },
     queue,
-    history: { entries: [] as string[], record: vi.fn<(text: string) => void>() },
+    history: {
+      entries: [] as string[],
+      record: vi.fn<(text: string, attachments?: ChatAttachment[]) => void>(),
+      attachmentsOf: vi.fn<(text: string) => ChatAttachment[] | null>()
+    },
     useChatQueue: vi.fn((_tabId: string, _onDrained?: (original: string) => void) => queue),
     autocomplete: {
       show: false,
@@ -94,6 +98,7 @@ vi.mock('./autocomplete/useAutocomplete', async (importOriginal) => ({
 }))
 
 import { useChatComposer, type UseChatComposerOpts } from './useChatComposer'
+import { buildPromptHistory, recordedAttachments } from './prompt-history'
 
 const sendMessage = vi.fn<(input: string | UserContentBlock[]) => Promise<void>>()
 const abortAndPop = vi.fn<() => Promise<StopResult>>()
@@ -104,6 +109,19 @@ const popped = (text: string): StopResult => ({
   id: 'popped-id',
   content: [{ type: 'text', text }]
 })
+/** Stop's result for the message the composer last sent itself (as the session sends it). */
+const poppedSent = (): StopResult => {
+  const input = sendMessage.mock.lastCall?.[0]
+  if (input === undefined) throw new Error('nothing was sent')
+  const content: UserContentBlock[] =
+    typeof input === 'string' ? [{ type: 'text', text: input }] : input
+  return {
+    popped: true,
+    text: content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n\n'),
+    id: 'sent-id',
+    content
+  }
+}
 const getArtifactFilePath = vi.fn<(id: string) => Promise<string | null>>()
 const scrollToBottom = vi.fn<() => void>()
 const handleEffortChange = vi.fn<(next: string) => Promise<void>>()
@@ -196,6 +214,7 @@ beforeEach(() => {
   handleModelChange.mockReset().mockResolvedValue(undefined)
   mocks.history.entries = []
   mocks.history.record.mockReset()
+  mocks.history.attachmentsOf.mockReset().mockReturnValue(null)
 })
 
 afterEach(cleanup)
@@ -211,6 +230,149 @@ describe('useChatComposer clearDraft', () => {
     expect(mocks.persistence.calls.at(-1)?.text).toBe('')
     expect(sendMessage).not.toHaveBeenCalled()
     expect(mocks.queue.clear).not.toHaveBeenCalled()
+  })
+})
+
+describe('useChatComposer discardDraft (Esc Esc: clears, recoverably)', () => {
+  /** The prompt history as `usePromptHistory` keeps it: this composer's records, newest first. */
+  const liveHistory = () => {
+    const records: { text: string; attachments: ChatAttachment[] }[] = []
+    mocks.history.record.mockImplementation((text, attachments = []) => {
+      records.unshift({ text, attachments })
+      mocks.history.entries = buildPromptHistory(
+        records.map((r) => r.text),
+        []
+      )
+    })
+    mocks.history.attachmentsOf.mockImplementation((text) => recordedAttachments(records, text))
+  }
+  const undo = () => {
+    const options = mocks.toast.mock.lastCall?.[1] as
+      | { action?: { label: string; onClick: () => void } }
+      | undefined
+    expect(options?.action?.label).toBe('Undo')
+    act(() => options?.action?.onClick())
+  }
+  const key = (k: string) => fireEvent.keyDown(textarea(), { key: k })
+
+  it('clears text and files without sending or changing the queue', () => {
+    setup()
+    type('unfinished message')
+    attach([IMG_A])
+    act(() => composer.discardDraft())
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([])
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(mocks.queue.clear).not.toHaveBeenCalled()
+  })
+
+  it('Undo brings the text and files back exactly', () => {
+    setup()
+    type('unfinished message\n  with a second line ')
+    attach([IMG_A, IMG_B])
+    act(() => composer.discardDraft())
+    undo()
+    expect(composer.draft).toBe('unfinished message\n  with a second line ')
+    expect(composer.attachments).toEqual([IMG_A, IMG_B])
+    expect(mocks.persistence.calls.at(-1)?.text).toBe('unfinished message\n  with a second line ')
+  })
+
+  it('Undo after writing again keeps what was written since', () => {
+    setup()
+    type('cleared')
+    attach([IMG_A])
+    act(() => composer.discardDraft())
+    type('new')
+    attach([IMG_B])
+    undo()
+    expect(composer.draft).toBe('new\n\ncleared')
+    expect(composer.attachments).toEqual([IMG_B, IMG_A])
+  })
+
+  it('files alone can be undone too', () => {
+    setup()
+    attach([IMG_A])
+    act(() => composer.discardDraft())
+    expect(mocks.history.record).not.toHaveBeenCalled()
+    undo()
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([IMG_A])
+  })
+
+  it('a whitespace-only draft is cleared with no Undo and no history entry', () => {
+    setup()
+    type('  \n ')
+    act(() => composer.discardDraft())
+    expect(composer.draft).toBe('')
+    expect(mocks.toast).not.toHaveBeenCalled()
+    expect(mocks.history.record).not.toHaveBeenCalled()
+  })
+
+  it('goes into the prompt history with its files: ↑ brings both back, ↓ the empty composer', () => {
+    liveHistory()
+    setup()
+    type('unfinished')
+    attach([IMG_A])
+    act(() => composer.discardDraft())
+    expect(mocks.history.record).toHaveBeenCalledWith('unfinished', [IMG_A])
+    key('ArrowUp')
+    expect(composer.draft).toBe('unfinished')
+    expect(composer.attachments).toEqual([IMG_A])
+    key('ArrowDown')
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([])
+  })
+
+  it('walking past it to a plain prompt brings back the files the composer held', () => {
+    liveHistory()
+    setup()
+    act(() => mocks.history.record('plain'))
+    type('with files')
+    attach([IMG_A])
+    act(() => composer.discardDraft())
+    attach([IMG_B])
+    key('ArrowUp')
+    expect(composer.draft).toBe('with files')
+    expect(composer.attachments).toEqual([IMG_A])
+    key('ArrowUp')
+    expect(composer.draft).toBe('plain')
+    expect(composer.attachments).toEqual([IMG_B])
+    key('ArrowDown')
+    expect(composer.attachments).toEqual([IMG_A])
+    key('ArrowDown')
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([IMG_B])
+  })
+
+  it('plain prompts recalled with ↑ leave the composer files alone', () => {
+    mocks.history.entries = ['older']
+    setup()
+    attach([IMG_B])
+    key('ArrowUp')
+    expect(composer.draft).toBe('older')
+    expect(composer.attachments).toEqual([IMG_B])
+    key('ArrowDown')
+    expect(composer.draft).toBe('')
+    expect(composer.attachments).toEqual([IMG_B])
+  })
+
+  it('a Ctrl+R pick of it brings its files back too', () => {
+    liveHistory()
+    setup()
+    type('unfinished')
+    attach([IMG_A])
+    act(() => composer.discardDraft())
+    act(() => composer.historySearch.pick('unfinished'))
+    expect(composer.draft).toBe('unfinished')
+    expect(composer.attachments).toEqual([IMG_A])
+  })
+
+  it('a send clears the composer with no Undo (clearDraft stays silent)', async () => {
+    setup({ inFlight: true })
+    type('queued')
+    await send()
+    expect(composer.draft).toBe('')
+    expect(mocks.toast).not.toHaveBeenCalled()
   })
 })
 
@@ -486,14 +648,111 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('a popped turn restores the raw text and attachments that were sent', async () => {
-    abortAndPop.mockResolvedValue(popped('main-side text'))
     setup()
     attach([IMG_A])
     type('fix this')
     await send()
+    abortAndPop.mockResolvedValue(poppedSent())
     await stop()
     expect(composer.draft).toBe('fix this')
     expect(composer.attachments).toEqual([IMG_A])
+  })
+
+  it('the message sent from here comes back as typed, not as its expanded send text', async () => {
+    mocks.autocomplete.transformSubmit.mockReturnValue({ send: 'expanded template' })
+    setup()
+    type('/cmd arg')
+    await send()
+    abortAndPop.mockResolvedValue(poppedSent())
+    await stop()
+    expect(composer.draft).toBe('/cmd arg')
+  })
+
+  it('paths mode: the message sent from here comes back as clean text + chips, not inline image refs', async () => {
+    setup({ mode: 'terminal' })
+    attach([IMG_A])
+    type('fix this')
+    await send()
+    expect(sendMessage).toHaveBeenCalledWith('![a.png](/abs/a.png)\n\nfix this')
+    abortAndPop.mockResolvedValue(poppedSent())
+    await stop()
+    expect(composer.draft).toBe('fix this')
+    expect(composer.attachments).toEqual([IMG_A])
+  })
+
+  it('a queued message the hub sent next comes back — not the earlier one sent from here', async () => {
+    const { rerender } = setup()
+    attach([IMG_A])
+    type('A')
+    await send()
+    rerender({ inFlight: true })
+    attach([IMG_B])
+    type('B')
+    await send()
+    // A finished; the hub sent B; Stop before the CLI read it withdraws B.
+    abortAndPop.mockResolvedValue({
+      popped: true,
+      text: 'B',
+      id: 'b-id',
+      content: [
+        { type: 'attachment', attachment: IMG_B },
+        { type: 'text', text: 'B' }
+      ]
+    })
+    await stop()
+    expect(composer.draft).toBe('B')
+    expect(composer.attachments).toEqual([IMG_B])
+  })
+
+  it('a message sent elsewhere (another device, a retry, a timeline button) comes back as popped', async () => {
+    setup()
+    type('sent from here')
+    await send()
+    abortAndPop.mockResolvedValue(popped('sent elsewhere'))
+    await stop()
+    expect(composer.draft).toBe('sent elsewhere')
+  })
+
+  it('the local snapshot is spent once the stop popped something else', async () => {
+    setup()
+    type('sent from here')
+    await send()
+    abortAndPop.mockResolvedValue(popped('sent elsewhere'))
+    await stop()
+    act(() => composer.clearDraft())
+    abortAndPop.mockResolvedValue(popped('sent from here'))
+    await stop()
+    expect(composer.draft).toBe('sent from here')
+    expect(composer.attachments).toEqual([])
+  })
+
+  it('files only in the composer: the popped message comes back and its files join them', async () => {
+    abortAndPop.mockResolvedValue({
+      popped: true,
+      text: 'B',
+      id: 'b-id',
+      content: [
+        { type: 'attachment', attachment: IMG_B },
+        { type: 'text', text: 'B' }
+      ]
+    })
+    setup()
+    attach([IMG_A])
+    await stop()
+    expect(composer.draft).toBe('B')
+    expect(composer.attachments).toEqual([IMG_A, IMG_B])
+  })
+
+  it('files only in the composer: the restored snapshot files join them too', async () => {
+    setup()
+    attach([IMG_B])
+    type('fix this')
+    await send()
+    abortAndPop.mockResolvedValue(poppedSent())
+    attach([IMG_A])
+    await stop()
+    expect(composer.draft).toBe('fix this')
+    expect(composer.attachments).toEqual([IMG_A, IMG_B])
   })
 
   it('focuses the textarea after restoring', async () => {
@@ -507,16 +766,18 @@ describe('useChatComposer handleStop', () => {
   })
 
   it('a queued submit does not replace the in-flight snapshot', async () => {
-    abortAndPop.mockResolvedValue(popped('main-side text'))
+    mocks.autocomplete.transformSubmit.mockReturnValue({ send: 'expanded template' })
     const { rerender } = setup()
-    type('first')
+    type('/cmd first')
     await send()
     rerender({ inFlight: true })
+    abortAndPop.mockResolvedValue(poppedSent())
+    mocks.autocomplete.transformSubmit.mockReturnValue(null)
     type('second')
     await send()
     expect(mocks.queue.push).toHaveBeenCalledWith('second', 'second')
     await stop()
-    expect(composer.draft).toBe('first')
+    expect(composer.draft).toBe('/cmd first')
   })
 
   it('without a local snapshot, restores the text the main side popped', async () => {
@@ -846,11 +1107,11 @@ describe('useChatComposer attachments as content blocks (Claude)', () => {
   })
 
   it('a popped turn restores its files too', async () => {
-    abortAndPop.mockResolvedValue(popped('x'))
     setup()
     attach([IMG_A])
     type('fix this')
     await send()
+    abortAndPop.mockResolvedValue(poppedSent())
     await stop()
     expect(composer.draft).toBe('fix this')
     expect(composer.attachments).toEqual([IMG_A])

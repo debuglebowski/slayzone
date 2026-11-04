@@ -251,10 +251,10 @@ function resolveSaved(key: string, server: ChatTabState | null, current: ChatDra
   if (
     journal &&
     ((sameOwner && journal.baseRev === rev) ||
-      (!journal.ownership &&
-        journal.baseRev === null &&
-        rev === 0 &&
-        sameDraft(persisted, EMPTY)) ||
+      // Typed before the first read (computer starting, offline): an empty saved
+      // draft holds nothing to lose, whatever its revision. A used tab's draft is
+      // empty at rev > 0 once its last message was sent.
+      (!journal.ownership && journal.baseRev === null && sameDraft(persisted, EMPTY)) ||
       sameDraft(journal, persisted) ||
       // The newer revision is our own save whose reply never arrived (reload,
       // remount): the journal holds the typing made on top of it.

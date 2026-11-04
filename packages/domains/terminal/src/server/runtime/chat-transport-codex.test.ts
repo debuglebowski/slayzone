@@ -362,6 +362,40 @@ test('Stop mid-turn: turn/interrupt in place, the process stays, the turn ends i
   expect(server.reverts).toEqual([])
 })
 
+test('after a Stop, the next turn takes "Send now" (turn/steer) again; while the stop is in flight it does not', async () => {
+  const server = turnServer()
+  const c = await openWithServer(server, 'tab-steer')
+  mgr.dispatchUserMessage('tab-steer', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
+  await until(() => server.turns.length === 1)
+  c.send({ method: 'item/agentMessage/delta', params: { itemId: 'a', delta: 'working' } })
+  await until(() => h.events.some((e) => e.kind === 'stream-block-delta'))
+  await wait(20)
+  expect(mgr.canSteer('tab-steer')).toBe(true)
+
+  const stopping = mgr.stopTurn('tab-steer', stopOpts('tab-steer'))
+  // The turn has not ended yet: it is being stopped, nothing is added to it.
+  expect(mgr.getSessionTerminalState('tab-steer')).toBe('running')
+  expect(mgr.canSteer('tab-steer')).toBe(false)
+  expect(await stopping).toMatchObject({ popped: false, via: 'interrupt' })
+  await until(() => mgr.getSessionTerminalState('tab-steer') === 'idle')
+  expect(h.children).toHaveLength(1)
+
+  mgr.dispatchUserMessage('tab-steer', { id: 'm2', content: [{ type: 'text', text: 'next' }] })
+  await until(() => server.turns.length === 2)
+  await wait(30)
+  expect(mgr.getSessionTerminalState('tab-steer')).toBe('running')
+  expect(mgr.canSteer('tab-steer')).toBe(true)
+  expect(
+    await mgr.steerUserMessage('tab-steer', {
+      id: 's1',
+      content: [{ type: 'text', text: 'also run lint' }]
+    })
+  ).toEqual({ ok: true })
+  expect(c.requests('turn/steer')).toEqual([
+    expect.objectContaining({ expectedTurnId: 'turn-2', clientUserMessageId: 's1' })
+  ])
+})
+
 test('permission change stops the turn before continuing with the new sandbox and holds the queue', async () => {
   const server = turnServer()
   const c = await openWithServer(server, 'tab-permissions')

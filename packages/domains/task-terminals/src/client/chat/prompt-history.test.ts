@@ -3,9 +3,20 @@ import {
   HISTORY_IDLE,
   buildPromptHistory,
   historyStep,
+  historyStepAttachments,
   isBrowsingHistory,
+  recordedAttachments,
   searchPrompts
 } from './prompt-history'
+import type { ChatAttachment } from '@slayzone/terminal-contracts'
+
+const file = (artifactId: string): ChatAttachment => ({
+  artifactId,
+  name: `${artifactId}.png`,
+  kind: 'image',
+  mediaType: 'image/png',
+  size: 10
+})
 
 describe('buildPromptHistory', () => {
   test('newest first: this session’s sends, then stored prompts (stored oldest first)', () => {
@@ -103,5 +114,43 @@ describe('searchPrompts', () => {
     const entries = ['Fix the AUTH bug', 'add tests', 'auth: refresh tokens']
     expect(searchPrompts(entries, 'auth')).toEqual(['Fix the AUTH bug', 'auth: refresh tokens'])
     expect(searchPrompts(entries, '')).toEqual(entries)
+  })
+})
+
+describe('recordedAttachments', () => {
+  test('the files saved with the newest record of that text; none → null', () => {
+    const records = [
+      { text: 'cleared', attachments: [file('new')] },
+      { text: 'sent', attachments: [] },
+      { text: 'cleared', attachments: [file('old')] }
+    ]
+    expect(recordedAttachments(records, 'cleared')).toEqual([file('new')])
+    expect(recordedAttachments(records, 'sent')).toBeNull()
+    expect(recordedAttachments(records, 'never')).toBeNull()
+  })
+})
+
+describe('historyStepAttachments', () => {
+  const saved = { 'with files': [file('a')] } as Record<string, ChatAttachment[]>
+  const attachmentsOf = (text: string) => saved[text] ?? null
+  const current = [file('current')]
+  const stash = [file('stash')]
+  const step = (leaving: string | null, arriving: string | null) =>
+    historyStepAttachments({ leaving, arriving, current, stash, attachmentsOf })
+
+  test('an entry saved with files brings them back', () => {
+    expect(step(null, 'with files')).toEqual([file('a')])
+    expect(step('plain', 'with files')).toEqual([file('a')])
+  })
+
+  test('leaving it brings back the files the composer held when browsing started', () => {
+    expect(step('with files', 'plain')).toEqual(stash)
+    expect(step('with files', null)).toEqual(stash)
+  })
+
+  test('between plain entries the composer files stay as they are', () => {
+    expect(step(null, 'plain')).toBe(current)
+    expect(step('plain', 'older plain')).toBe(current)
+    expect(step('plain', null)).toBe(current)
   })
 })
