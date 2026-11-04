@@ -36,6 +36,7 @@ import {
   getTrpcPort
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
+import { currentOsUser } from '@slayzone/platform/hub-discovery'
 import {
   getDatabasePathFromEnv,
   getServerDiagnosticsDatabasePath,
@@ -340,6 +341,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     root: getSlayzoneHomeDir(),
     pid: process.pid,
     supervised,
+    // Who this hub belongs to, for local callers on a machine several OS users share
+    // (one loopback for all): `slay` keeps to its own user's app by these two.
+    user: currentOsUser(),
+    // Same bit db.ts picks the dev database filename with.
+    dev: process.env.SLAYZONE_DEV === '1',
     // Same bit `hub.describe` reports over /trpc — mirrored on /health so a
     // client can learn "this hub needs a sign-in" without opening a socket. This
     // is where `slay` reads it; `supervised` says nothing about login.

@@ -15,7 +15,8 @@ import net from 'node:net'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
-import { fixedPortForChannel, isCoLocatedHub, probeFixedPort } from './local-hub'
+import { currentOsUser } from '@slayzone/platform/hub-discovery'
+import { fixedPortForChannel, isCoLocatedHub, probeLocalHub } from './local-hub'
 
 /** Run `fn` with the given SLAYZONE_* env, restoring whatever was there before. */
 async function withEnv(
@@ -126,20 +127,31 @@ const hubAt =
     res.end(JSON.stringify({ ok: true, name: 'h', root, pid: 1 }))
   }
 
+/** A loopback port nothing listens on. */
+function deadPort(): Promise<number> {
+  return new Promise((resolve) => {
+    const s = net.createServer().listen(0, '127.0.0.1', () => {
+      const port = (s.address() as net.AddressInfo).port
+      s.close(() => resolve(port))
+    })
+  })
+}
+
+/** Sweep range of exactly one (dead) port, so a test never probes the machine's real hubs. */
+async function emptyRange(): Promise<{ start: number; end: number }> {
+  const p = await deadPort()
+  return { start: p, end: p }
+}
+
 // The decision logic behind "which app does a bare `slay` act on", on ports the
 // test owns — so it never depends on what the developer's machine has bound on the
 // real channel ports (a running prod + dev app hold both).
-describe('probeFixedPort', () => {
+describe('probeLocalHub', () => {
   const ours = path.resolve('/tmp/slz-probe-ours')
 
   test('nothing listening ⇒ absent', async () => {
-    const free = await new Promise<number>((resolve) => {
-      const s = net.createServer().listen(0, '127.0.0.1', () => {
-        const port = (s.address() as net.AddressInfo).port
-        s.close(() => resolve(port))
-      })
-    })
-    expect(await probeFixedPort(free)).toEqual({ kind: 'absent' })
+    const port = await deadPort()
+    expect(await probeLocalHub({ port, range: await emptyRange() })).toEqual({ kind: 'absent' })
   })
 
   test('a non-hub squatter is rejected, not dialled ⇒ absent', async () => {
@@ -149,7 +161,7 @@ describe('probeFixedPort', () => {
         res.end('not a hub')
       },
       async (port) => {
-        expect(await probeFixedPort(port)).toEqual({ kind: 'absent' })
+        expect(await probeLocalHub({ port, range: await emptyRange() })).toEqual({ kind: 'absent' })
       }
     )
   })
@@ -157,7 +169,11 @@ describe('probeFixedPort', () => {
   test('our hub ⇒ found', async () => {
     await withServer(hubAt(ours), async (port) => {
       await withEnv({ SLAYZONE_ROOT: ours }, async () => {
-        expect(await probeFixedPort(port)).toMatchObject({ kind: 'found', port, root: ours })
+        expect(await probeLocalHub({ port, range: await emptyRange() })).toMatchObject({
+          kind: 'found',
+          port,
+          root: ours
+        })
       })
     })
   })
@@ -166,11 +182,128 @@ describe('probeFixedPort', () => {
     const theirs = path.resolve('/tmp/slz-probe-theirs')
     await withServer(hubAt(theirs), async (port) => {
       await withEnv({ SLAYZONE_ROOT: ours }, async () => {
-        expect(await probeFixedPort(port)).toEqual({
+        expect(await probeLocalHub({ port, range: await emptyRange() })).toEqual({
           kind: 'foreign',
           port,
           root: theirs,
           expected: ours
+        })
+      })
+    })
+  })
+
+  // Several macOS users on one Mac share loopback: the first user's app holds the
+  // channel's fixed port, so the second user's app serves on a fallback port in the
+  // hub block (sidecar-server-supervisor.ts). A plain shell has no SLAYZONE_ROOT, so
+  // "ours" is the app `/health` says runs as this OS user, on this channel.
+  describe('plain shell (no SLAYZONE_ROOT) on a Mac shared by several users', () => {
+    const me = currentOsUser() ?? 'me'
+    const OTHER_ROOT = '/Users/someone-else/.slayzone/stable/hub'
+    const MY_ROOT = '/Users/me/.slayzone/stable/hub'
+    const MY_DEV_ROOT = '/Users/me/.slayzone/dev/hub'
+    /** A supervised app hub running as `user`, on the dev channel or not. */
+    const appHub =
+      (root: string, user: string, dev = false): http.RequestListener =>
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, name: 'h', root, pid: 1, supervised: true, user, dev }))
+      }
+    const plainShell = { SLAYZONE_ROOT: undefined, SLAYZONE_DEV: undefined }
+    const one = (port: number): { start: number; end: number } => ({ start: port, end: port })
+
+    test("another user's app on the fixed port ⇒ foreign, not this user's app", async () => {
+      await withServer(appHub(OTHER_ROOT, 'someone-else'), async (port) => {
+        await withEnv(plainShell, async () => {
+          expect(await probeLocalHub({ port, range: await emptyRange() })).toEqual({
+            kind: 'foreign',
+            port,
+            root: OTHER_ROOT,
+            expected: `the SlayZone app of OS user "${me}"`
+          })
+        })
+      })
+    })
+
+    test("another user's app on the fixed port, ours on a fallback port ⇒ ours", async () => {
+      await withServer(appHub(OTHER_ROOT, 'someone-else'), async (fixed) => {
+        await withServer(appHub(MY_ROOT, me), async (fallback) => {
+          await withEnv(plainShell, async () => {
+            expect(await probeLocalHub({ port: fixed, range: one(fallback) })).toMatchObject({
+              kind: 'found',
+              port: fallback,
+              root: MY_ROOT
+            })
+          })
+        })
+      })
+    })
+
+    test('fixed port empty (other user quit), ours still on its fallback port ⇒ ours', async () => {
+      const fixed = await deadPort()
+      await withServer(appHub(MY_ROOT, me), async (fallback) => {
+        await withEnv(plainShell, async () => {
+          expect(await probeLocalHub({ port: fixed, range: one(fallback) })).toMatchObject({
+            kind: 'found',
+            port: fallback,
+            root: MY_ROOT
+          })
+        })
+      })
+    })
+
+    test('the sweep skips our OTHER channel’s app and non-app hubs', async () => {
+      const fixed = await deadPort()
+      await withServer(appHub(MY_DEV_ROOT, me, true), async (devApp) => {
+        await withServer(hubAt(MY_ROOT), async (standalone) => {
+          await withEnv(plainShell, async () => {
+            expect(await probeLocalHub({ port: fixed, range: one(devApp) }), 'dev app').toEqual({
+              kind: 'absent'
+            })
+            expect(
+              await probeLocalHub({ port: fixed, range: one(standalone) }),
+              'not an app hub'
+            ).toEqual({ kind: 'absent' })
+          })
+        })
+      })
+    })
+
+    test('--dev finds our dev app on a fallback port, and only that', async () => {
+      const fixed = await deadPort()
+      await withServer(appHub(MY_ROOT, me), async (stable) => {
+        await withServer(appHub(MY_DEV_ROOT, me, true), async (dev) => {
+          await withEnv({ ...plainShell, SLAYZONE_DEV: '1' }, async () => {
+            expect(await probeLocalHub({ port: fixed, range: one(dev) })).toMatchObject({
+              kind: 'found',
+              port: dev
+            })
+            expect(await probeLocalHub({ port: fixed, range: one(stable) })).toEqual({
+              kind: 'absent'
+            })
+          })
+        })
+      })
+    })
+
+    test('our own app on the fixed port ⇒ found (the normal single-user case)', async () => {
+      await withServer(appHub(MY_ROOT, me), async (port) => {
+        await withEnv(plainShell, async () => {
+          expect(await probeLocalHub({ port, range: await emptyRange() })).toMatchObject({
+            kind: 'found',
+            port,
+            root: MY_ROOT
+          })
+        })
+      })
+    })
+
+    test('a hub too old to report its user is still accepted on the fixed port', async () => {
+      await withServer(hubAt(OTHER_ROOT), async (port) => {
+        await withEnv(plainShell, async () => {
+          expect(await probeLocalHub({ port, range: await emptyRange() })).toMatchObject({
+            kind: 'found',
+            port
+          })
         })
       })
     })

@@ -1,5 +1,5 @@
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
-import { probeFixedPort } from './local-hub'
+import { probeLocalHub } from './local-hub'
 import { isTaskTerminal, resolveTaskCommandTarget } from './hub-config'
 
 interface ApiTarget {
@@ -39,7 +39,7 @@ async function resolveTarget(): Promise<ApiTarget> {
     )
     process.exit(1)
   }
-  const probe = await probeFixedPort()
+  const probe = await probeLocalHub()
   if (probe.kind === 'foreign') {
     // Same rule as the configured-hub case above, applied to the probe: a hub
     // answered, but not ours. Acting on it would write to another install's data.
@@ -57,7 +57,7 @@ async function resolveTarget(): Promise<ApiTarget> {
     process.exit(1)
   }
   // A hub that requires login (`/health` reports `authRequired`) requires a
-  // bearer from every caller — plain loopback is no longer enough. `probeFixedPort`
+  // bearer from every caller — plain loopback is no longer enough. `probeLocalHub`
   // found this hub with no configured target, meaning no env var and no
   // `cli-hub-target.json` — the only remaining credential a co-located `slay` can
   // hold is the hub's own bootstrap owner file. Reading it is additive: a hub with

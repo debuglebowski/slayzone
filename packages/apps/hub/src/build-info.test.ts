@@ -55,6 +55,8 @@ function healthState(overrides: Partial<HealthState>): HealthState {
     root: '/tmp/test-root',
     pid: process.pid,
     supervised: false,
+    user: null,
+    dev: false,
     authRequired: false,
     switches: {
       requireLogin: false,

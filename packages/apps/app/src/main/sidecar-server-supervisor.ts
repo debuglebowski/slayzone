@@ -2,8 +2,9 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import http from 'node:http'
 import net from 'node:net'
 import { readFileSync, watchFile, unwatchFile } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
+import { HUB_DYNAMIC_PORT_RANGE } from '@slayzone/platform/paths'
 import { SUPERVISED_STOP_SIGKILL_GRACE_MS } from '@slayzone/platform/parent-watch'
 import { createChildReaper } from './child-reaper'
 
@@ -100,7 +101,13 @@ export type SidecarServerOpts = {
    * (single-instance-locked app, or a single e2e worker), so a fixed port turns
    * backend discovery from a DB-write race into a known constant, and a stray
    * second instance into a loud EADDRINUSE at bind time instead of silent
-   * ambiguity. Overrides the sticky-port/probe logic entirely — never cleared.
+   * ambiguity.
+   *
+   * "One per environment" holds per OS USER only: another user on the same machine
+   * runs their own app on the same loopback. When a hub with a different root holds
+   * this port, the supervisor binds a fallback in HUB_DYNAMIC_PORT_RANGE instead
+   * (sticky for this run) and never reports the other hub as its own — readiness
+   * requires `/health.pid` to be this child's pid.
    */
   fixedPort?: number
   /**
@@ -191,36 +198,71 @@ function probeFreePort(host: string): Promise<number> {
   })
 }
 
+/** Whether `port` on `host` can be bound right now (bind, then close at once). */
+function canBind(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = net.createServer()
+    srv.once('error', () => resolve(false))
+    srv.listen(port, host, () => srv.close(() => resolve(true)))
+  })
+}
+
+/** First port in `range` that can be bound right now, or null when all are taken. */
+async function firstBindablePort(
+  host: string,
+  range: { start: number; end: number }
+): Promise<number | null> {
+  for (let port = range.start; port <= range.end; port++) {
+    if (await canBind(host, port)) return port
+  }
+  return null
+}
+
+type HealthProbe = {
+  ok: boolean
+  buildId: string | null
+  /** The answering process's pid (a loopback-only `/health` field). Null when absent. */
+  pid: number | null
+  /** The answering hub's SLAYZONE_ROOT (loopback-only). Null when absent. */
+  root: string | null
+}
+
+const NOT_HEALTHY: HealthProbe = { ok: false, buildId: null, pid: null, root: null }
+
 /**
- * Single GET /health probe. Resolves `{ ok }` (HTTP 200) plus the running
- * build's `buildId` from the body when present — so the supervisor can compare
- * the live process against the on-disk build and flag a stale sidecar.
+ * Single GET /health probe. Resolves `{ ok }` (HTTP 200) plus, from the body when
+ * present: the running build's `buildId` (so the supervisor can flag a stale
+ * sidecar), and the answering process's `pid` + `root` — the identity that tells
+ * this supervisor's own child apart from any OTHER hub answering on the same port
+ * (loopback is shared by every OS user on the machine).
  */
-function probeHealth(host: string, port: number): Promise<{ ok: boolean; buildId: string | null }> {
+function probeHealth(host: string, port: number): Promise<HealthProbe> {
   return new Promise((resolve) => {
     const req = http.get({ host, port, path: '/health', timeout: 1_000 }, (res) => {
       if (res.statusCode !== 200) {
         res.resume()
-        resolve({ ok: false, buildId: null })
+        resolve(NOT_HEALTHY)
         return
       }
       let body = ''
       res.on('data', (c) => (body += c))
       res.on('end', () => {
-        let buildId: string | null = null
+        const out: HealthProbe = { ok: true, buildId: null, pid: null, root: null }
         try {
-          const parsed = JSON.parse(body) as { buildId?: unknown }
-          if (typeof parsed.buildId === 'string') buildId = parsed.buildId
+          const parsed = JSON.parse(body) as { buildId?: unknown; pid?: unknown; root?: unknown }
+          if (typeof parsed.buildId === 'string') out.buildId = parsed.buildId
+          if (typeof parsed.pid === 'number') out.pid = parsed.pid
+          if (typeof parsed.root === 'string') out.root = parsed.root
         } catch {
-          /* body may be absent/legacy — treat as unknown build */
+          /* body may be absent/legacy — identity unknown */
         }
-        resolve({ ok: true, buildId })
+        resolve(out)
       })
     })
-    req.on('error', () => resolve({ ok: false, buildId: null }))
+    req.on('error', () => resolve(NOT_HEALTHY))
     req.on('timeout', () => {
       req.destroy()
-      resolve({ ok: false, buildId: null })
+      resolve(NOT_HEALTHY)
     })
   })
 }
@@ -264,6 +306,8 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   let healthyTimer: NodeJS.Timeout | null = null
   let pollTimer: NodeJS.Timeout | null = null
   let bootDeadline = 0
+  /** One "not our child" log line per spawn, not one per 250ms poll. */
+  let foreignAnswerLogged = false
 
   // On-disk build manifest (sibling of the spawned bin). Read fresh on demand so
   // a rebuild after boot is reflected immediately (drives stale-detection).
@@ -313,7 +357,21 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
     if (stopped || !child || port === null) return
     void probeHealth(opts.host, port).then((result) => {
       if (stopped) return
-      if (result.ok) {
+      // Something answered on our port, but it is not our child. Loopback is shared
+      // by every OS user on the machine, so while our child is still booting (or
+      // failing to bind) the answer can come from ANOTHER user's SlayZone hub —
+      // adopting it hands this user's renderer, agents and CLI that user's data.
+      // Never ready on a pid we did not spawn; the child's own exit (bind failure)
+      // or the boot deadline decides what happens next.
+      if (result.ok && result.pid !== child?.pid) {
+        if (!foreignAnswerLogged) {
+          foreignAnswerLogged = true
+          opts.logger(
+            `[supervisor] :${port} answered by pid=${result.pid ?? '?'}, not this child ` +
+              `pid=${child?.pid} — not adopting it`
+          )
+        }
+      } else if (result.ok) {
         health = 'ready'
         readySince = Date.now()
         runningBuildId = result.buildId
@@ -347,16 +405,59 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
     })
   }
 
+  /**
+   * The port to bind when a fixed port is configured: the fixed port itself, unless
+   * someone else holds it.
+   *
+   * The fixed port is per CHANNEL, not per OS user: two macOS users (fast user
+   * switching) each run their own app — the single-instance lock is per user — but
+   * share one loopback. When the other user's hub already holds it, binding it is
+   * impossible and waiting for it is pointless (it is not going away), so take the
+   * first free port in the hub block's dynamic range instead. `slay` finds it there
+   * by its root (cli/src/local-hub.ts).
+   *
+   * One holder is NOT someone else: our own previous hub (same root), still in its
+   * graceful stop after a quick app relaunch. Keep the fixed port for it — the
+   * child's bind fails, and the ordinary backoff retries until the old hub is gone —
+   * so this user's address stays the well-known one and two hubs never serve the
+   * same database.
+   */
+  const choosePortWithFixed = async (fixed: number): Promise<number> => {
+    if (await canBind(opts.host, fixed)) return fixed
+    const holder = await probeHealth(opts.host, fixed)
+    const ownRoot = opts.env.SLAYZONE_ROOT?.trim()
+    if (holder.ok && holder.root && ownRoot && resolvePath(holder.root) === resolvePath(ownRoot)) {
+      opts.logger(
+        `[supervisor] :${fixed} still held by this app's previous hub (pid ${holder.pid ?? '?'}) — waiting for it to exit`
+      )
+      return fixed
+    }
+    const fallback = await firstBindablePort(opts.host, HUB_DYNAMIC_PORT_RANGE)
+    const who = holder.ok
+      ? `another hub (pid ${holder.pid ?? '?'}, root ${holder.root ?? 'unknown'})`
+      : 'another process'
+    if (fallback === null) {
+      opts.logger(
+        `[supervisor] :${fixed} held by ${who} and the hub block is full — trying it anyway`
+      )
+      return fixed
+    }
+    opts.logger(`[supervisor] :${fixed} held by ${who} — using :${fallback}`)
+    return fallback
+  }
+
   function spawnChild(): void {
     if (stopped || restartsSuspended) return
-    // Fixed port wins outright — no probing, no sticky-port bookkeeping needed
-    // (it's already permanently "stuck" to the one configured value). Otherwise
-    // reuse the sticky port if we have one; else probe a fresh free port.
+    // Sticky port first: a respawn after a healthy run keeps the port the renderer's
+    // WS URL already points at. Otherwise the fixed port (or, when someone else
+    // holds it, a fallback — see choosePortWithFixed); else a fresh OS-assigned one.
+    // A spawn that never becomes healthy clears the sticky port (exit handler), so
+    // the next attempt chooses again.
     const portSource =
-      opts.fixedPort !== undefined
-        ? Promise.resolve(opts.fixedPort)
-        : stickyPort !== null
-          ? Promise.resolve(stickyPort)
+      stickyPort !== null
+        ? Promise.resolve(stickyPort)
+        : opts.fixedPort !== undefined
+          ? choosePortWithFixed(opts.fixedPort)
           : probeFreePort(opts.host)
     void portSource
       .then((freePort) => {
@@ -364,6 +465,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         stickyPort = freePort
         port = freePort
         bootDeadline = Date.now() + healthBootTimeoutMs
+        foreignAnswerLogged = false
 
         // Start from a hub-clean env: whatever hub-side config this app inherited
         // (launched from a task terminal, a shell profile) describes ANOTHER hub, and a
