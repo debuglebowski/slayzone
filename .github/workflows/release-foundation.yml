@@ -339,10 +339,17 @@ jobs:
 
       - uses: pnpm/action-setup@v6.1.0
 
+      # No pnpm-store cache in the build jobs: it does not pay off on any of them. Measured
+      # (runs 41841001022 hit / 41852010523 miss): macOS restores its ~850 MB store in 85-97 s
+      # and then installs in 18 s, vs 114 s with no cache, and a miss (any lockfile change)
+      # costs 3-4.5 min in the post-job save; Windows installs in ~110 s either way; the
+      # linux-x64 container never hits (its cache version differs from ubuntu's) and spends
+      # ~1 min saving. The ubuntu jobs above keep theirs (14 s restore, 12 s install).
+      # Dropping these also keeps ~1.8 GB per lockfile out of the repo's 10 GB cache budget
+      # (10.7 GB on 2026-11-04, so GitHub evicts least-recently-used entries).
       - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
 
       - name: Install Python setuptools (needed by node-gyp on macOS)
         if: runner.os == 'macOS'
