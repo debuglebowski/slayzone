@@ -192,10 +192,18 @@ jobs:
             build_args: --linux --x64
             smoke_dir: linux-unpacked
             glibc_gate: true
-          - name: windows
+          # One job per arch, in parallel (one job building both ran them back to back,
+          # the release's long pole). The combined x64+arm64 SlayZone-setup.exe is no
+          # longer built: electron-updater picks the latest.yml entry whose name holds
+          # process.arch, and the website links the per-arch installers. arm64 is
+          # cross-built on x64, so only x64 runs the smoke step.
+          - name: windows-x64
             os: windows-latest
-            build_args: --win --x64 --arm64
+            build_args: --win --x64
             smoke_dir: win-unpacked
+          - name: windows-arm64
+            os: windows-latest
+            build_args: --win --arm64
 
     runs-on: ${{ matrix.os }}
     # Empty for every entry but linux-x64, which then runs on the runner directly.

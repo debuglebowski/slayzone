@@ -1,10 +1,11 @@
 ---
-import { MAC_ARM64_URL, MAC_X64_URL, WIN_URL, LINUX_URL } from '../../data/downloadUrls'
+import { MAC_ARM64_URL, MAC_X64_URL, WIN_X64_URL, WIN_ARM64_URL, LINUX_URL } from '../../data/downloadUrls'
 
 const URLS = {
   macArm64: MAC_ARM64_URL,
   macX64: MAC_X64_URL,
-  win: WIN_URL,
+  winX64: WIN_X64_URL,
+  winArm64: WIN_ARM64_URL,
   linux: LINUX_URL
 }
 ---
@@ -27,9 +28,17 @@ const URLS = {
     return 'arm64';
   }
   var macArch = getMacArch();
+  // x64 unless the browser says ARM: the x64 build also runs on Windows on ARM (emulated).
+  function getWinArch() {
+    try {
+      var uad = navigator.userAgentData;
+      if (uad && uad.architecture && /arm/i.test(uad.architecture)) return 'arm64';
+    } catch(e) {}
+    return 'x64';
+  }
   var urls = {
     mac: macArch === 'x64' ? URLS.macX64 : URLS.macArm64,
-    win: URLS.win,
+    win: getWinArch() === 'arm64' ? URLS.winArm64 : URLS.winX64,
     linux: URLS.linux
   };
   var os, icon, label;
