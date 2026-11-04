@@ -1079,7 +1079,7 @@ export function createChatTransport(
     if (tab.respawning || permissionChanges.has(tab.tabId)) return null
     if (tab.terminalState !== 'running' || tab.pendingPrompts.size > 0) return null
     const proc = liveProcess(tab.tabId)
-    if (!proc || !proc.ready || proc.interruptIssued || !proc.driver.steerUserTurn) return null
+    if (!proc || !proc.ready || proc.stoppingTurn || !proc.driver.steerUserTurn) return null
     return proc
   }
 
@@ -1628,7 +1628,10 @@ export function createChatTransport(
   /** A turn the agent opened (`opensAgentTurn`): running until its result. */
   function markAgentTurnStarted(tab: ChatTab): void {
     tab.turnInterrupted = false
-    if (tab.proc) tab.proc.stoppedTurn = false
+    if (tab.proc) {
+      tab.proc.stoppedTurn = false
+      tab.proc.stoppingTurn = false
+    }
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
     armWatchdog(tab)
@@ -1638,7 +1641,10 @@ export function createChatTransport(
   function markTurnStarted(tab: ChatTab): void {
     tab.turnProgress = false
     tab.turnInterrupted = false
-    if (tab.proc) tab.proc.stoppedTurn = false
+    if (tab.proc) {
+      tab.proc.stoppedTurn = false
+      tab.proc.stoppingTurn = false
+    }
     deps.userInputTracker.mark(stateKey(tab))
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
@@ -2553,8 +2559,10 @@ export function createChatTransport(
       return Promise.reject(new Error('driver has no control channel'))
     }
     // A 0-turn error after an interrupt is the interrupt, not a failed resume.
-    if (request.subtype === 'interrupt' || request.subtype === 'interrupt_and_wait')
+    if (request.subtype === 'interrupt' || request.subtype === 'interrupt_and_wait') {
       proc.interruptIssued = true
+      proc.stoppingTurn = true
+    }
     return proc.driver.applyControl(request, timeoutMs)
   }
 
@@ -2754,7 +2762,10 @@ export function createChatTransport(
     // Pre-spawn skeletons have no live turn to interrupt — skip emission. The
     // hydrate path already emits its own synthetic `interrupted` for unfinished tails.
     if (!tab.proc) return
-    if (tab.proc && !tab.proc.ended) tab.proc.interruptIssued = true
+    if (tab.proc && !tab.proc.ended) {
+      tab.proc.interruptIssued = true
+      tab.proc.stoppingTurn = true
+    }
     routeHostEvent(tab, { kind: 'interrupted' })
   }
 
@@ -2893,6 +2904,7 @@ export function createChatTransport(
     }
 
     proc.interruptIssued = true
+    proc.stoppingTurn = true
     if (popped) {
       if (reach?.sent !== false) proc.discardTurn = true
       if (popped.id && reach?.sent && !reach.started) proc.lateTurnOf = popped.id

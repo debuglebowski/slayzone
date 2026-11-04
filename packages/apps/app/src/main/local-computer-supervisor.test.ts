@@ -86,6 +86,13 @@ if (process.env.FAKE_EXIT_FILE) {
 // Echoed so a test can see WHICH join token this particular spawn was handed —
 // that is how the re-mint on restart is observed from outside.
 process.stdout.write('fake-computer token=' + (process.env.SLAYZONE_HUB_JOIN_TOKEN || '') + '\\n')
+// FAKE_CONNECT_MS: report "connected to the hub" over the IPC channel this long
+// after spawn, the way the real supervised computer does once its dialer is in.
+if (process.env.FAKE_CONNECT_MS && process.send) {
+  setTimeout(function () {
+    process.send({ type: 'connected', hubUrl: 'ws://127.0.0.1:1/computers' })
+  }, Number(process.env.FAKE_CONNECT_MS))
+}
 for (let i = 1; i <= lines; i++) process.stderr.write('computer-line-' + i + '\\n')
 process.stdout.write('fake-computer bye\\n')
 // Dies the way the real computer does when a native will not load: an uncaught
@@ -361,6 +368,76 @@ test('awaitStartup: null for a computer that stays up through the window', async
   } finally {
     await handle.stop()
   }
+})
+
+// --- hub connection (the boot splash waits on it) ---------------------------
+
+test('awaitHubConnected: true once the computer reports connected over IPC', async () => {
+  const { handle } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_CONNECT_MS: '50' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    expect(await handle.awaitHubConnected(10_000), 'connect reported').toBe(true)
+    expect(await handle.awaitHubConnected(1), 'already connected resolves at once').toBe(true)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitHubConnected: false after the window for a computer that never connects', async () => {
+  const { handle } = makeHarness(
+    { FAKE_STAY_ALIVE: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    await waitFor(() => handle.getPid() !== null, 15_000, 'computer spawned')
+    expect(await handle.awaitHubConnected(200), 'timed out, not thrown').toBe(false)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitHubConnected: false as soon as supervision gives up, not at the deadline', async () => {
+  const { handle } = makeHarness(
+    { FAKE_EXIT_CODE: '1' },
+    { backoffMs: [5], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    const started = Date.now()
+    expect(await handle.awaitHubConnected(30_000), 'gave up').toBe(false)
+    expect(Date.now() - started, 'settled on the give-up').toBeLessThan(20_000)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitHubConnected: a computer that dies drops the connection until the next one reports', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_CONNECT_MS: '20' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    expect(await handle.awaitHubConnected(10_000)).toBe(true)
+    const pid = handle.getPid()!
+    process.kill(pid, 'SIGKILL')
+    await waitFor(() => ctx.exits.length >= 1, 15_000, 'exit reported')
+    expect(await handle.awaitHubConnected(50), 'dead computer is not connected').toBe(false)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitHubConnected: false at once after stop()', async () => {
+  const { handle } = makeHarness(
+    { FAKE_STAY_ALIVE: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  await waitFor(() => handle.getPid() !== null, 15_000, 'computer spawned')
+  const pending = handle.awaitHubConnected(30_000)
+  await handle.stop()
+  expect(await pending, 'a pending wait settles on stop').toBe(false)
+  expect(await handle.awaitHubConnected(30_000), 'and later waits do not block').toBe(false)
 })
 
 // --- manual restart (Settings → Computers button) ---------------------------

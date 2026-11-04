@@ -204,3 +204,42 @@ test('a steer the CLI holds past the end of the turn runs as the next turn when 
   emitLine(f, sj.lifecycle('s1', 'completed'))
   await until(() => mgr.__getOutboxStateForTests(TAB, 's1') === 'answered')
 })
+
+test('after a Stop, the next turn takes "Send now" again; while the stop is in flight it does not', async () => {
+  const { f } = await runningTurn()
+  f.answer('interrupt', () => 'ignore')
+
+  const stopping = mgr.stopTurn(TAB, {
+    restorePrompt: false,
+    respawnOpts: async () => ({ ...TAB_OPTS })
+  })
+  const interrupt = await f.written(
+    (m) =>
+      m.type === 'control_request' &&
+      (m.request as Record<string, unknown> | undefined)?.subtype === 'interrupt'
+  )
+  await wait(10)
+  // The interrupt is not acknowledged yet: the turn still runs, but it is being stopped.
+  expect(mgr.getSessionTerminalState(TAB)).toBe('running')
+  expect(mgr.canSteer(TAB)).toBe(false)
+  expect(await mgr.steerUserMessage(TAB, { id: 's0', content: text('x') })).toMatchObject({
+    ok: false
+  })
+
+  emitLine(f, {
+    type: 'control_response',
+    response: { subtype: 'success', request_id: interrupt.request_id, response: {} }
+  })
+  emitLine(f, sj.aborted('aborted_tools'))
+  expect(await stopping).toMatchObject({ via: 'interrupt' })
+  await until(() => mgr.getSessionTerminalState(TAB) === 'idle')
+
+  // The process stayed; its next turn is an ordinary running turn.
+  await sendAndStart(f, 'u2', 'next')
+  expect(mgr.getSessionTerminalState(TAB)).toBe('running')
+  expect(mgr.canSteer(TAB)).toBe(true)
+  expect(await mgr.steerUserMessage(TAB, { id: 's1', content: text('also run lint') })).toEqual({
+    ok: true
+  })
+  await f.written((m) => m.type === 'user' && m.uuid === 's1')
+})

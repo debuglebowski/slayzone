@@ -1,4 +1,4 @@
-import { isSyntheticChatPrompt } from '@slayzone/terminal-contracts'
+import { isSyntheticChatPrompt, type ChatAttachment } from '@slayzone/terminal-contracts'
 
 /**
  * Prompt history for the chat composer (↑/↓ recall, Ctrl+R search). Pure — the
@@ -69,6 +69,44 @@ export function historyStep(args: {
     return { nav: { index: 0, stash: draft }, draft: entries[0] }
   }
   return null
+}
+
+/**
+ * A prompt this composer put into the history: a send (no files kept) or a draft
+ * cleared with Esc Esc (its files kept, so recalling it brings them back).
+ */
+export interface HistoryRecord {
+  text: string
+  attachments: ChatAttachment[]
+}
+
+/** The files saved with the newest record of `text` (records newest first); none → null. */
+export function recordedAttachments(
+  records: HistoryRecord[],
+  text: string
+): ChatAttachment[] | null {
+  const record = records.find((r) => r.text === text)
+  return record && record.attachments.length > 0 ? record.attachments : null
+}
+
+/**
+ * The composer's files after one history step. An entry saved with files (a
+ * cleared draft) brings them back; leaving one brings back `stash`, the files
+ * the composer held when browsing started; any other step keeps `current`.
+ * `leaving` / `arriving`: the entry shown before / after the step (null: none).
+ */
+export function historyStepAttachments(args: {
+  leaving: string | null
+  arriving: string | null
+  current: ChatAttachment[]
+  stash: ChatAttachment[]
+  attachmentsOf: (text: string) => ChatAttachment[] | null
+}): ChatAttachment[] {
+  const { leaving, arriving, current, stash, attachmentsOf } = args
+  const saved = arriving === null ? null : attachmentsOf(arriving)
+  if (saved) return saved
+  if (leaving !== null && attachmentsOf(leaving)) return stash
+  return current
 }
 
 /** Ctrl+R search: case-insensitive substring match, keeping newest-first order. */

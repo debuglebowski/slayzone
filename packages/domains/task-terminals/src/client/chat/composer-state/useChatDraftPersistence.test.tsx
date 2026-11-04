@@ -375,6 +375,52 @@ describe('useChatDraftPersistence', () => {
     expect(h.result.current.conflictAvailable).toBe(false)
   })
 
+  it.each([
+    { name: 'no ownership', mode: undefined, ownership: undefined },
+    { name: 'owned provider store', mode: 'claude-chat', ownership: { id: 'store', epoch: 2 } }
+  ])(
+    'typing before the first read on a used tab with an empty saved draft (rev > 0) is not a conflict ($name)',
+    async ({ mode, ownership }) => {
+      const key = draftJournalKey('tab-1', 'local', mode)
+      // Computer starting / offline: the first read has not answered yet.
+      let finish!: (state: ChatTabState | null) => void
+      server.load = new Promise((resolve) => {
+        finish = resolve
+      })
+      const h = setup({ draft: empty, mode })
+      const partial = { text: 'Please fix the lo', attachments: [] }
+      h.rerender({ draft: partial, mode })
+      expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ ...partial, baseRev: null })
+      // Used before: its last message was sent, so the saved draft is empty at a later revision.
+      const remote: ChatTabState = {
+        draft: { ...empty, rev: 6 },
+        scroll: null,
+        ...(ownership ? { ownership } : {})
+      }
+      server.state = remote
+      server.rev = 6
+      server.load = null
+      await act(async () => {
+        finish(remote)
+      })
+      await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+      await act(() => vi.advanceTimersByTimeAsync(50))
+      expect(h.result.current.conflictAvailable).toBe(false)
+      expect(localStorage.getItem(`${key}:conflicts`)).toBeNull()
+      // Saving continues without any click.
+      const full = { text: 'Please fix the login bug', attachments: [] }
+      h.rerender({ draft: full, mode })
+      await act(() => vi.advanceTimersByTimeAsync(400))
+      expect(server.saves.at(-1)).toMatchObject({
+        draft: full,
+        ...(ownership ? { expectedOwnership: ownership } : {})
+      })
+      expect(server.state?.draft).toMatchObject({ ...full, rev: 7 })
+      await vi.waitFor(() => expect(localStorage.getItem(key)).toBeNull())
+      expect(h.result.current.conflictAvailable).toBe(false)
+    }
+  )
+
   it('dismissing a conflict keeps only the current draft, drops the other copy and resumes saving', async () => {
     const key = draftJournalKey('tab-1')
     localStorage.setItem(

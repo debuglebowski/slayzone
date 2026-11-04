@@ -772,6 +772,13 @@ let localComputerUnspawnedReason: string | null = null
  * ~100ms after its spawn; a healthy one is still booting its dialer at this point.
  */
 const LOCAL_COMPUTER_STARTUP_WINDOW_MS = 2_000
+/**
+ * Longest the boot splash waits for the local computer to connect to the hub,
+ * counted from when its start is dispatched. Past it the app opens anyway — a
+ * computer that cannot connect must not hold the whole app hostage; Settings →
+ * Computers shows why it is down.
+ */
+const LOCAL_COMPUTER_SPLASH_WAIT_MS = 10_000
 // Local cutover (slice 9): the side-car must be spawned with the desktop bridge
 // address in env, but that server starts on its own async path. This promise
 // lets the sidecar-spawn block await the bound port. One listener now carries
@@ -1065,6 +1072,40 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
  * which any cleanup hook tracks.
  */
 let localComputerStartInFlight: Promise<void> | null = null
+/**
+ * Hold the boot splash until the local computer is connected to the hub: agents,
+ * terminals and git all run on computers, so an app that opens before it is in
+ * can do nothing yet. A connected computer also means the hub is up. Bounded by
+ * {@link LOCAL_COMPUTER_SPLASH_WAIT_MS}; any outcome — connected, timed out,
+ * unspawned, failed — releases the gate.
+ */
+async function gateSplashOnLocalComputer(start: Promise<void>): Promise<void> {
+  const deadline = Date.now() + LOCAL_COMPUTER_SPLASH_WAIT_MS
+  let timer: NodeJS.Timeout | undefined
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), LOCAL_COMPUTER_SPLASH_WAIT_MS)
+  })
+  const started = await Promise.race([
+    start.then(
+      () => 'started' as const,
+      () => 'failed' as const
+    ),
+    timedOut
+  ])
+  clearTimeout(timer)
+  let outcome: string = started
+  if (started === 'started') {
+    outcome = !localComputerHandle
+      ? 'unspawned'
+      : (await localComputerHandle.awaitHubConnected(Math.max(0, deadline - Date.now())))
+        ? 'connected'
+        : 'not connected in time'
+  }
+  logBoot(`local computer splash gate released: ${outcome}`)
+  localComputerReady = true
+  tryShowMainWindow()
+}
+
 function ensureLocalComputerStarted(): Promise<void> {
   if (localComputerStartInFlight) return localComputerStartInFlight
   localComputerStartInFlight = startLocalComputerWithAutoEnroll().finally(() => {
@@ -1182,6 +1223,13 @@ const oauthCallbackQueue: OAuthCallbackPayload[] = []
 const oauthCallbackWaiters = new Set<(payload: OAuthCallbackPayload) => void>()
 let mainWindowReady = false
 let rendererDataReady = false
+/**
+ * Boot-level, unlike the two flags above: set once the local computer has
+ * connected to the hub, or there is none to wait for, or the wait gave up (see
+ * {@link gateSplashOnLocalComputer}). Never reset — a window re-created later
+ * (macOS activate) does not wait for it again.
+ */
+let localComputerReady = false
 let rendererReloading = false
 const APP_PROTOCOL_SCHEME = 'slayzone'
 // Avoid stealing the global slayzone:// handler from packaged builds during local dev.
@@ -1332,7 +1380,7 @@ function applyAppZoom(command: AppZoomCommand): number {
 }
 
 function tryShowMainWindow(): void {
-  if (!mainWindowReady || !rendererDataReady) return
+  if (!mainWindowReady || !rendererDataReady || !localComputerReady) return
   if (splashWindow && !splashWindow.isDestroyed()) {
     const bounds = splashWindow.getBounds()
     mainWindow?.setBounds(bounds)
@@ -2810,10 +2858,15 @@ app
     // still enroll remote computers via the UI.
     if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_COMPUTER !== '1') {
       setImmediate(() => {
-        void ensureLocalComputerStarted().catch((err) => {
+        const start = ensureLocalComputerStarted()
+        start.catch((err) => {
           console.error('[local-computer] auto-enroll failed (local computer, non-fatal):', err)
         })
+        void gateSplashOnLocalComputer(start)
       })
+    } else {
+      // No local computer to wait for (remote mode, or a computer-less e2e worker).
+      localComputerReady = true
     }
 
     // Install agent lifecycle hook script + Claude settings.json entries.
