@@ -51,7 +51,9 @@ import {
   DIRECT_ROUTER_PROTOCOL,
   type DirectContext,
   type DirectGrantView,
-  type DirectSocket
+  type DirectRouterServices,
+  type DirectSocket,
+  type DirectTarget
 } from '@slayzone/transport/direct'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { DirectGrantStore, GrantRecord } from './grants'
@@ -97,6 +99,8 @@ export interface DirectListenerOptions {
   log: (message: string, detail?: Record<string, unknown>) => void
   /** One line per refusal (already deduplicated per limit, address and minute). */
   audit?: (refusal: RateLimitRefusal) => void
+  /** What each hub link serves directly (looked up per grant). */
+  services: DirectRouterServices
 }
 
 export interface DirectListener {
@@ -135,6 +139,14 @@ interface SocketState {
   ip: string | null
   grants: Map<string, GrantRecord>
   authenticated: boolean
+  /** Streams to end when the socket loses its last grant on their target. */
+  targetWatchers: Set<{ target: DirectTarget; ended: () => void }>
+}
+
+function covers(resource: GrantRecord['resource'], target: DirectTarget): boolean {
+  return resource.kind === 'pty'
+    ? target.kind === 'pty' && resource.sessionId === target.sessionId
+    : target.kind === 'chat' && resource.tabId === target.tabId
 }
 
 function view(record: GrantRecord, now: number): DirectGrantView {
@@ -165,7 +177,7 @@ export async function createDirectListener(
     })
   }
 
-  const router = createDirectRouter()
+  const router = createDirectRouter(options.services)
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxMessageBytes })
 
   function closeUnauthorized(ws: WebSocket, reason: string): void {
@@ -188,6 +200,23 @@ export async function createDirectListener(
         state.grants.set(record.grantId, record)
         state.authenticated = true
         return view(record, performance.now())
+      },
+      grantFor(target) {
+        for (const record of state.grants.values()) {
+          // Asked of the store, not the socket's copy: an expiry the sweep has not
+          // reached yet still counts as ended.
+          if (covers(record.resource, target) && options.grants.get(record.grantId)) {
+            return { grantId: record.grantId, hubKey: record.hubKey, resource: record.resource }
+          }
+        }
+        return null
+      },
+      onTargetEnded(target, ended) {
+        const watcher = { target, ended }
+        state.targetWatchers.add(watcher)
+        return () => {
+          state.targetWatchers.delete(watcher)
+        }
       }
     }
   }
@@ -213,7 +242,13 @@ export async function createDirectListener(
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const ip = req.socket.remoteAddress ?? null
     const bucket = addressBucket(ip)
-    const state: SocketState = { bucket, ip, grants: new Map(), authenticated: false }
+    const state: SocketState = {
+      bucket,
+      ip,
+      grants: new Map(),
+      authenticated: false,
+      targetWatchers: new Set()
+    }
     sockets.set(ws, state)
     openPerBucket.set(bucket, (openPerBucket.get(bucket) ?? 0) + 1)
     const deadline = setTimeout(() => {
@@ -255,7 +290,13 @@ export async function createDirectListener(
     for (const [ws, state] of sockets) {
       let hit = false
       for (const id of ids) hit = state.grants.delete(id) || hit
-      if (hit && state.grants.size === 0) closeUnauthorized(ws, 'capability ended')
+      if (!hit) continue
+      for (const watcher of [...state.targetWatchers]) {
+        if ([...state.grants.values()].some((g) => covers(g.resource, watcher.target))) continue
+        state.targetWatchers.delete(watcher)
+        watcher.ended()
+      }
+      if (state.grants.size === 0) closeUnauthorized(ws, 'capability ended')
     }
   })
 

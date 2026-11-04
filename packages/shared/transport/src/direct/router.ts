@@ -2,17 +2,19 @@
  * The client ↔ computer direct-link router (docs/direct-link.md).
  *
  * The computer serves it on `/direct/v1`. Desktop and mobile clients call it with
- * the same tRPC client stack they use for the hub (ws link, superjson wire), so a
- * client path can switch between the hub relay and the direct link with no change
- * in data shapes.
+ * the same tRPC client stack they use for the hub (ws link, superjson wire). The
+ * data shapes are the hub's `pty.*` shapes, so a client can switch between the hub
+ * relay and the direct link without translating anything.
  *
- * Pure: no node imports. The computer's listener supplies {@link DirectSocket} per
- * connection, which holds the capabilities that socket presented; every procedure
- * that touches a session or tab first asks it for a live grant on that resource.
+ * Pure: no node imports. The computer's listener supplies a {@link DirectSocket}
+ * per connection, holding the capabilities that socket presented. Every procedure
+ * that touches a session first asks the socket for a live grant on it, and a stream
+ * ends as soon as that grant does.
  *
  * @module transport/direct/router
  */
 import { initTRPC, TRPCError } from '@trpc/server'
+import { observable } from '@trpc/server/observable'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { z } from 'zod'
 
@@ -24,6 +26,9 @@ export type DirectGrantResource =
   | { kind: 'pty'; sessionId: string }
   | { kind: 'chat'; tabId: string; epoch: number }
 
+/** A resource as a procedure names it (a chat tab without its epoch). */
+export type DirectTarget = { kind: 'pty'; sessionId: string } | { kind: 'chat'; tabId: string }
+
 export interface DirectGrantView {
   grantId: string
   resource: DirectGrantResource
@@ -31,19 +36,77 @@ export interface DirectGrantView {
   expiresInMs: number
 }
 
+/** A live grant a socket holds, with the hub link that registered it. */
+export interface DirectHeldGrant {
+  grantId: string
+  hubKey: string
+  resource: DirectGrantResource
+}
+
 /** One authenticated client connection, as the computer's listener holds it. */
 export interface DirectSocket {
   /** Add (or renew with) a capability. Null: unknown or expired token. */
   authorize(token: string): DirectGrantView | null
+  /** A live grant this socket holds on `target`, or null. */
+  grantFor(target: DirectTarget): DirectHeldGrant | null
+  /** Called once when this socket no longer holds any grant on `target`. */
+  onTargetEnded(target: DirectTarget, ended: () => void): () => void
 }
 
 export interface DirectContext {
   socket: DirectSocket
 }
 
+/** Same shape as the hub's `pty.getBufferSince` (terminal-contracts `BufferSinceResult`). */
+export interface DirectBuffer {
+  chunks: Array<{ seq: number; data: string }>
+  currentSeq: number
+  prelude: string
+}
+
+/** One hub's terminals on this computer (the computer's `DirectPtyService`). */
+export interface DirectPtyService {
+  attach(
+    sessionId: string,
+    afterSeq: number
+  ): { exists: boolean; size: { cols: number; rows: number } | null; buffer: DirectBuffer }
+  getBufferSince(sessionId: string, afterSeq: number): DirectBuffer
+  watch(
+    sessionId: string,
+    onData: (chunk: { seq: number; data: string }) => void,
+    onEnd: (reason: 'exit' | 'replaced' | 'disposed') => void
+  ): (() => void) | null
+}
+
+/** What the computer serves, per hub link (a grant names its hub). */
+export interface DirectRouterServices {
+  pty(hubKey: string): DirectPtyService | null
+}
+
+/** One chunk of a session's output, as the hub's `pty.onData` emits it. */
+export interface DirectPtyData {
+  sessionId: string
+  seq: number
+  data: string
+}
+
 const t = initTRPC.context<DirectContext>().create({ transformer: wireSuperjson })
 
-export function createDirectRouter() {
+const sessionId = z.string().min(1).max(200)
+
+function noCapability(): TRPCError {
+  return new TRPCError({ code: 'FORBIDDEN', message: 'no capability for this session' })
+}
+
+export function createDirectRouter(services: DirectRouterServices) {
+  /** The hub's terminals for a session this socket holds a grant on. */
+  function ptyFor(ctx: DirectContext, id: string): DirectPtyService {
+    const grant = ctx.socket.grantFor({ kind: 'pty', sessionId: id })
+    const service = grant ? services.pty(grant.hubKey) : null
+    if (!service) throw noCapability()
+    return service
+  }
+
   return t.router({
     /** Reachability + version, once authenticated. */
     ping: t.procedure.query(() => ({ protocol: DIRECT_ROUTER_PROTOCOL })),
@@ -55,9 +118,50 @@ export function createDirectRouter() {
       .input(z.object({ token: z.string().min(1).max(200) }))
       .mutation(({ ctx, input }): DirectGrantView => {
         const grant = ctx.socket.authorize(input.token)
-        if (!grant) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown or expired capability' })
+        if (!grant)
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown or expired capability' })
         return grant
+      }),
+
+    pty: t.router({
+      /** Like the hub's `pty.attach` minus `state` (the client reads that from the hub). */
+      attach: t.procedure
+        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
+        .query(({ ctx, input }) => ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq)),
+      getBufferSince: t.procedure
+        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
+        .query(({ ctx, input }) =>
+          ptyFor(ctx, input.sessionId).getBufferSince(input.sessionId, input.afterSeq)
+        ),
+      /**
+       * Live output. Completes when the process ends; errors FORBIDDEN when the
+       * socket's grant on the session ends (the client re-issues through the hub).
+       * Subscribe BEFORE `attach`, then drop chunks at or below the attach's
+       * `currentSeq`: gap-free, as with the hub.
+       */
+      onData: t.procedure.input(z.object({ sessionId })).subscription(({ ctx, input }) => {
+        const service = ptyFor(ctx, input.sessionId)
+        return observable<DirectPtyData>((emit) => {
+          const stopWatch = service.watch(
+            input.sessionId,
+            (chunk) => emit.next({ sessionId: input.sessionId, seq: chunk.seq, data: chunk.data }),
+            () => emit.complete()
+          )
+          if (!stopWatch) {
+            emit.complete()
+            return () => undefined
+          }
+          const stopGrant = ctx.socket.onTargetEnded(
+            { kind: 'pty', sessionId: input.sessionId },
+            () => emit.error(noCapability())
+          )
+          return () => {
+            stopWatch()
+            stopGrant()
+          }
+        })
       })
+    })
   })
 }
 

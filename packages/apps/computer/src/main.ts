@@ -1,6 +1,7 @@
 import { securityEvent } from '@slayzone/platform/security-log'
 import { createDirectListener, type DirectListener } from './direct/listener'
 import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
+import type { DirectPtyService } from './handlers/pty'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
@@ -178,6 +179,8 @@ export interface HubRequestDispatch {
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
+  /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
+  directPty: DirectPtyService
 }
 
 /**
@@ -362,6 +365,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       ctx.hookDirectory = directory
     },
     handle: trackedHandle,
+    directPty: pty.direct,
     dispose,
     setAgentHookUrl,
     hubDisconnected,
@@ -475,8 +479,11 @@ export function startComputer(
   // so hubs learn the address from enroll/hello: dialing waits for the bind (a
   // loopback bind takes milliseconds), and a failed bind only costs the direct path.
   let directListener: DirectListener | null = null
+  // Which hub's handlers serve a grant: the hub key a grant is registered under.
+  const dispatchByHub = new Map<string, HubRequestDispatch>()
   const directReady: Promise<void> = createDirectListener({
     grants: directGrants,
+    services: { pty: (hubKey) => dispatchByHub.get(hubKey)?.directPty ?? null },
     listenAddress: config.directListenAddress ?? DEFAULT_DIRECT_LISTEN_ADDRESS,
     ...(config.directPublicAddress ? { publicAddress: config.directPublicAddress } : {}),
     log,
@@ -576,6 +583,7 @@ export function startComputer(
       ...(hubAddress ? { hubAddress } : {}),
       ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
     })
+    dispatchByHub.set(hubHostFromUrl(hubUrl), dispatch)
 
     // Every line carries the hub, because with more than one connection "reconnect
     // scheduled" on its own does not say which peer went away.

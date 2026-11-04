@@ -32,7 +32,35 @@ function grant(store: DirectGrantStore, over: { ttlMs?: number; sessionId?: stri
 }
 
 const logged: string[] = []
+
+/** A stand-in for one hub's terminals: session `s1` and `s2`, live. */
+function fakePty() {
+  const watchers = new Map<string, { onData: (c: { seq: number; data: string }) => void; onEnd: (r: 'exit') => void }>()
+  const service = {
+    attach: (sessionId: string, afterSeq: number) => ({
+      exists: true,
+      size: { cols: 80, rows: 24 },
+      buffer: { chunks: [{ seq: 0, data: `${sessionId}-0` }], prelude: '', currentSeq: 0, afterSeq }
+    }),
+    getBufferSince: (sessionId: string) => ({
+      chunks: [{ seq: 0, data: `${sessionId}-0` }],
+      prelude: '',
+      currentSeq: 0
+    }),
+    watch: (
+      sessionId: string,
+      onData: (c: { seq: number; data: string }) => void,
+      onEnd: (r: 'exit') => void
+    ) => {
+      watchers.set(sessionId, { onData, onEnd })
+      return () => watchers.delete(sessionId)
+    }
+  }
+  return { service, watchers }
+}
+
 async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits']) {
+  const pty = fakePty()
   const store = createDirectGrantStore()
   const audit: Array<Record<string, unknown>> = []
   const listener = await createDirectListener({
@@ -40,11 +68,12 @@ async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits
     listenAddress: '127.0.0.1:0',
     log: (message, detail) => logged.push(JSON.stringify({ message, detail })),
     audit: (line) => audit.push({ ...line }),
+    services: { pty: (hubKey) => (hubKey === 'hub' ? pty.service : null) },
     ...(limits ? { limits } : {})
   })
   cleanups.push(() => listener.close())
   cleanups.push(() => store.close())
-  return { store, listener, audit }
+  return { store, listener, audit, pty }
 }
 
 function client(listener: DirectListener, token: string | null) {
@@ -213,5 +242,65 @@ describe('direct listener: secrecy', () => {
       expect(everything).not.toContain(secret)
     }
     expect(audit.length).toBeGreaterThan(0)
+  })
+})
+
+describe('direct listener: terminals', () => {
+  it('serves attach, backfill and the live stream for the granted session', async () => {
+    const { store, listener, pty } = await setup()
+    const { token } = grant(store)
+    const { trpc } = client(listener, token)
+    expect(await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).toMatchObject({
+      exists: true,
+      size: { cols: 80, rows: 24 },
+      buffer: { currentSeq: 0, chunks: [{ seq: 0, data: 's1-0' }] }
+    })
+    expect(await trpc.pty.getBufferSince.query({ sessionId: 's1', afterSeq: -1 })).toMatchObject({
+      currentSeq: 0
+    })
+    const got: unknown[] = []
+    let completed = false
+    const sub = trpc.pty.onData.subscribe(
+      { sessionId: 's1' },
+      { onData: (d) => got.push(d), onComplete: () => (completed = true) }
+    )
+    await waitFor(() => pty.watchers.has('s1'))
+    pty.watchers.get('s1')?.onData({ seq: 1, data: 'hi' })
+    await waitFor(() => got.length === 1)
+    expect(got).toEqual([{ sessionId: 's1', seq: 1, data: 'hi' }])
+    pty.watchers.get('s1')?.onEnd('exit')
+    await waitFor(() => completed)
+    sub.unsubscribe()
+  })
+
+  it('refuses a session the socket holds no grant for', async () => {
+    const { store, listener } = await setup()
+    const { token } = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, token)
+    await expect(trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).rejects.toThrow(
+      /no capability/
+    )
+    await expect(trpc.pty.getBufferSince.query({ sessionId: 's2', afterSeq: 0 })).rejects.toThrow(
+      /no capability/
+    )
+    const errors: unknown[] = []
+    trpc.pty.onData.subscribe({ sessionId: 's2' }, { onError: (e) => errors.push(e) })
+    await waitFor(() => errors.length === 1)
+  })
+
+  it('ends the stream when that session’s grant is revoked, keeping the socket', async () => {
+    const { store, listener, pty } = await setup()
+    const a = grant(store, { sessionId: 's1' })
+    const b = grant(store, { sessionId: 's2' })
+    const { trpc, closes } = client(listener, a.token)
+    await trpc.authorize.mutate({ token: b.token })
+    const errors: unknown[] = []
+    trpc.pty.onData.subscribe({ sessionId: 's1' }, { onError: (e) => errors.push(e) })
+    await waitFor(() => pty.watchers.has('s1'))
+    store.revoke('hub', { by: 'grant', grantIds: [a.grantId] })
+    await waitFor(() => errors.length === 1)
+    expect(pty.watchers.has('s1')).toBe(false)
+    expect(await trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).toBeTruthy()
+    expect(closes).toEqual([])
   })
 })

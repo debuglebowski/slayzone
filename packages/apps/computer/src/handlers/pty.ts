@@ -71,7 +71,12 @@ import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/sta
 import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
-import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
+import {
+  filterBufferData,
+  RingBuffer,
+  SESSION_ERROR_WINDOW_MS
+} from '@slayzone/terminal/pty-detection'
+import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 import {
   createSpawnAdmission,
   type AdmissionLane,
@@ -93,7 +98,46 @@ const MAX_BUFFER_SIZE = 750 * 1024
  */
 const STARTUP_KILL_REAP_MS = 2_000
 
+/** One direct-link client streaming a session (docs/direct-link.md). */
+interface DirectWatcher {
+  onData(chunk: { seq: number; data: string }): void
+  /** `exit`: the process ended; `replaced`: a new process took the session id. */
+  onEnd(reason: 'exit' | 'replaced' | 'disposed'): void
+}
+
+/**
+ * What a direct-link client reaches on this computer: the session's ONLY
+ * scrollback and its live output, independent of whether the hub relays it.
+ */
+export interface DirectPtyService {
+  /** Cold attach (`afterSeq` -1) or reattach; `size` null when no live process. */
+  attach(
+    sessionId: string,
+    afterSeq: number
+  ): {
+    exists: boolean
+    size: { cols: number; rows: number } | null
+    buffer: BufferSinceResult
+  }
+  /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude). */
+  getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult
+  /** Stream a live session's output; null when there is none. Returns unsubscribe. */
+  watch(
+    sessionId: string,
+    onData: DirectWatcher['onData'],
+    onEnd: DirectWatcher['onEnd']
+  ): (() => void) | null
+}
+
 interface PtySession {
+  /** Direct-link clients streaming this session; independent of {@link relay}. */
+  directWatchers: Set<DirectWatcher>
+  /**
+   * A stale-resume error was detected inside the session-error window: like the
+   * hub (pty-manager's `suppressOutput`), direct watchers do not see the raw
+   * error line before the exit overlay. Released when the window closes.
+   */
+  suppressDirect?: boolean
   revokeCli?: () => void
   proc: pty.IPty
   buffer: RingBuffer
@@ -161,6 +205,8 @@ interface QueuedSpawn {
 }
 
 export interface PtyHandlers {
+  /** What direct-link clients reach (docs/direct-link.md). */
+  direct: DirectPtyService
   hasWork(): boolean
   hasTaskWork(taskId: string): boolean
   stopTask(taskId: string): Promise<void>
@@ -402,6 +448,7 @@ export function createPtyHandlers(
     let resolveExit!: () => void
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
+      directWatchers: new Set(),
       revokeCli: capability?.revoke,
       proc,
       buffer,
@@ -460,6 +507,13 @@ export function createPtyHandlers(
       // What the chunk says goes FIRST: a stale-resume error suppresses this very
       // chunk on the hub, which must know before the bytes arrive.
       if (processed) session.signals?.report(processed.detection, seq)
+      // Direct-link clients first, whatever the hub relays: the same bytes, the same seq.
+      if (processed?.detection?.suppressOutput) session.suppressDirect = true
+      if (session.suppressDirect && Date.now() >= session.startedAt + SESSION_ERROR_WINDOW_MS)
+        session.suppressDirect = false
+      if (!session.suppressDirect) {
+        for (const watcher of session.directWatchers) watcher.onData({ seq, data: out })
+      }
       // Nobody watches it: buffered and detected, not streamed (the hub reads the
       // buffer when someone attaches, and turns relay on).
       if (!session.relay) return
@@ -533,11 +587,18 @@ export function createPtyHandlers(
   }
 
   /** Report a session's exit and remember it. Idempotent per session object. */
+  function endDirectWatchers(session: PtySession, reason: 'exit' | 'replaced' | 'disposed'): void {
+    const watchers = [...session.directWatchers]
+    session.directWatchers.clear()
+    for (const watcher of watchers) watcher.onEnd(reason)
+  }
+
   function reap(session: PtySession, exitCode: number | null, signal: string | null): void {
     // Only the CURRENTLY-active session for this id may clear the map and
     // emit exit — a superseded/disposed pty exiting must stay silent, else it
     // would tear down the replacement and confuse the hub.
     if (sessions.get(session.id) !== session) return
+    endDirectWatchers(session, session.replacing ? 'replaced' : 'exit')
     // A failed resume's cause rides a signal that lands just before the exit frame.
     if (!session.replacing && !session.warm)
       session.signals?.exited(exitCode, session.buffer.toString())
@@ -1146,6 +1207,16 @@ export function createPtyHandlers(
     return undefined
   }
 
+  function replayOf(buffer: RingBuffer | undefined, afterSeq: number): BufferSinceResult {
+    if (!buffer) return { chunks: [], prelude: '', currentSeq: -1 }
+    const { chunks, prelude } = buffer.getReplaySince(afterSeq)
+    return {
+      chunks: chunks.map((c) => ({ seq: c.seq, data: c.data })),
+      prelude,
+      currentSeq: buffer.getCurrentSeq()
+    }
+  }
+
   /** Replay for a hub client (fresh terminal or reattach): this buffer is the only one. */
   function getReplay(rawParams: unknown): PtyGetReplayResult {
     const params = ptyGetReplayParamsSchema.parse(rawParams)
@@ -1199,6 +1270,7 @@ export function createPtyHandlers(
   function disposeAll(): void {
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
+      endDirectWatchers(session, 'disposed')
       session.revokeCli?.()
       session.signals?.dispose()
       session.deadline?.cancel()
@@ -1235,7 +1307,37 @@ export function createPtyHandlers(
 
   const belongsToTask = (id: string, taskId: string, recordedTask?: string) =>
     recordedTask ? recordedTask === taskId : id === taskId || id.startsWith(taskId + ':')
+  const direct: DirectPtyService = {
+    attach(sessionId, afterSeq) {
+      const live = sessions.get(sessionId)
+      const isLive = live !== undefined && !live.warm
+      const buffer = isLive ? live.buffer : tombstones.get(sessionId)?.buffer
+      return {
+        exists: isLive,
+        size: isLive ? { cols: live.proc.cols, rows: live.proc.rows } : null,
+        buffer: replayOf(buffer, afterSeq)
+      }
+    },
+    getBufferSince(sessionId, afterSeq) {
+      const live = sessions.get(sessionId)
+      return replayOf(
+        live && !live.warm ? live.buffer : tombstones.get(sessionId)?.buffer,
+        afterSeq
+      )
+    },
+    watch(sessionId, onData, onEnd) {
+      const session = sessions.get(sessionId)
+      if (!session || session.warm) return null
+      const watcher: DirectWatcher = { onData, onEnd }
+      session.directWatchers.add(watcher)
+      return () => {
+        session.directWatchers.delete(watcher)
+      }
+    }
+  }
+
   return {
+    direct,
     hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
     hasTaskWork: (taskId: string) =>
       [...sessions.values(), ...queued.values()].some((s) =>

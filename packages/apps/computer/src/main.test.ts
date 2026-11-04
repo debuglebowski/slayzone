@@ -301,3 +301,77 @@ describe('startComputer direct link (docs/direct-link.md)', () => {
     }
   })
 })
+
+describe('startComputer direct link: a hub grant reaches that hub’s terminals', () => {
+  it('serves a real session to a client holding the grant the hub registered', async () => {
+    const { createHash } = await import('node:crypto')
+    const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+    const { wireSuperjson } = await import('@slayzone/trpc-server/wire')
+    const WebSocket = (await import('ws')).default
+    let onHubRequest:
+      | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
+      | undefined
+    let identity: { directAddress?: () => string | null } | undefined
+    const handle = startComputer(
+      { ...testConfig, allowedRoots: [realpathSync(tmpdir()), process.cwd()] },
+      {
+        credentialStore: memoryStore(),
+        stateDir: tempState(),
+        createDialer: (options) => {
+          identity = options.identity
+          onHubRequest = options.onHubRequest as typeof onHubRequest
+          return {
+            events: { on: () => undefined },
+            computerId: null,
+            start: () => undefined,
+            stop: async () => undefined,
+            notify: () => true
+          } as never
+        }
+      }
+    )
+    try {
+      await vi.waitFor(() => expect(identity?.directAddress?.()).toBeTruthy())
+      const token = 'k'.repeat(43)
+      await onHubRequest?.(
+        HubToComputerMethods.directGrant,
+        {
+          grantId: 'g-1',
+          tokenHash: createHash('sha256').update(token).digest('hex'),
+          userId: null,
+          resource: { kind: 'pty', sessionId: 'seam-1' },
+          ttlMs: 60_000
+        },
+        ACTOR
+      )
+      await onHubRequest?.(
+        HubToComputerMethods.ptySpawn,
+        { sessionId: 'seam-1', command: 'cat', cwd: process.cwd(), relay: false },
+        ACTOR
+      )
+      await onHubRequest?.(HubToComputerMethods.ptyWrite, { sessionId: 'seam-1', data: 'seam\n' }, ACTOR)
+      const ws = createWSClient({
+        url: `ws://${identity?.directAddress?.()}/direct/v1`,
+        WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+        connectionParams: { token }
+      })
+      try {
+        const trpc = createTRPCClient<import('@slayzone/transport/direct').DirectRouter>({
+          links: [wsLink({ client: ws, transformer: wireSuperjson })]
+        })
+        await vi.waitFor(
+          async () => {
+            const attach = await trpc.pty.attach.query({ sessionId: 'seam-1', afterSeq: -1 })
+            expect(attach.exists).toBe(true)
+            expect(attach.buffer.chunks.map((c) => c.data).join('')).toContain('seam')
+          },
+          { timeout: 5_000 }
+        )
+      } finally {
+        ws.close()
+      }
+    } finally {
+      await handle.stop()
+    }
+  })
+})
