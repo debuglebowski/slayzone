@@ -583,6 +583,7 @@ run_harness packages/domains/automations/src/server/engine-switch.test.ts
 # Terminal — SGR stripping + WebGL renderer lifecycle
 run_harness packages/domains/terminal/src/server/filter-buffer-data.test.ts
 run_harness packages/domains/terminal/src/server/stdin-input.test.ts
+run_harness packages/domains/terminal/src/server/pty-input.test.ts
 # Wave-3 remote-computer per-PTY env (loopback vs hub URL + scoped token).
 run_harness packages/domains/terminal/src/server/mcp-env.test.ts
 run_harness packages/domains/terminal/src/client/webgl-loader.test.ts

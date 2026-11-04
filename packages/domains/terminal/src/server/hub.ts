@@ -65,6 +65,7 @@ export {
   getBuffer,
   getBufferSince,
   getPtyDirectTarget,
+  applyPtyInputFacts,
   getState,
   hasLivePty,
   hasPty,

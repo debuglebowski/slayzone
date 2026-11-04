@@ -150,6 +150,7 @@ export {
   getBuffer,
   getBufferSince,
   getPtyDirectTarget,
+  applyPtyInputFacts,
   writePty,
   submitPty,
   killPty,
