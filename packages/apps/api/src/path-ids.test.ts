@@ -13,8 +13,9 @@
  * absent, still reaches INVALID_ID. Either way the data dir, the DB file, other
  * tasks' artifacts and other projects' icons are byte-identical and nothing appeared
  * outside.
- * Valid ids still work. Also: a folder download cannot write outside the chosen
- * directory, and the blob store cannot name a path outside `blobs/`.
+ * Valid ids still work. Also: the blob store cannot name a path outside `blobs/`.
+ * (A folder download cannot write outside the chosen directory either — that is the
+ * client's writer now: app/src/main/client-save.test.ts.)
  *
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
@@ -28,14 +29,8 @@ import express from 'express'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
 import superjson from 'superjson'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import {
-  configureTaskRuntimeAdapters,
-  downloadArtifactFolder,
-  taskOps,
-  type ArtifactDownloadHost,
-  setTaskDeps
-} from '@slayzone/task/server'
-import { BlobStore, createArtifactStore } from '@slayzone/task-artifacts/server'
+import { configureTaskRuntimeAdapters, taskOps, setTaskDeps } from '@slayzone/task/server'
+import { BlobStore } from '@slayzone/task-artifacts/server'
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
@@ -308,41 +303,6 @@ describe('REST and MCP archive-many', () => {
 })
 
 describe('names that are not ids stay inside their base too', () => {
-  test('a folder download refuses a title that climbs out of the chosen dir', async () => {
-    const store = createArtifactStore(dataRoot)
-    const dest = path.join(h.tmpDir(), 'dest')
-    fs.mkdirSync(dest)
-    const host = {
-      showOpenDialog: async () => ({ canceled: false, filePaths: [dest] })
-    } as unknown as ArtifactDownloadHost
-
-    const ok = await store.createFolder(h.slayDb, { taskId: taskB, name: 'docs' })
-    await store.createArtifact(h.slayDb, {
-      taskId: taskB,
-      folderId: ok!.id,
-      title: 'a.md',
-      content: 'A'
-    })
-    expect(await downloadArtifactFolder(host, h.slayDb, dataRoot, ok!.id)).toBe(true)
-    expect(fs.readFileSync(path.join(dest, 'docs', 'a.md'), 'utf8')).toBe('A')
-
-    const evil = await store.createFolder(h.slayDb, { taskId: taskB, name: 'evil' })
-    await store.createArtifact(h.slayDb, {
-      taskId: taskB,
-      folderId: evil!.id,
-      title: '../../escape.md',
-      content: 'E'
-    })
-    let code: unknown
-    try {
-      await downloadArtifactFolder(host, h.slayDb, dataRoot, evil!.id)
-    } catch (err) {
-      code = (err as { code?: unknown }).code
-    }
-    expect(code).toBe('PATH_OUTSIDE_BASE')
-    expect(fs.existsSync(path.join(path.dirname(dest), 'escape.md'))).toBe(false)
-  })
-
   test('the blob store cannot name a path outside blobs/', () => {
     const blobs = new BlobStore(dataRoot)
     for (const hash of ['../../x', '..', '']) {

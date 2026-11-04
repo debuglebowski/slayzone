@@ -220,6 +220,46 @@ test.describe('web shell — artifact export renders in the browser', () => {
     )
   })
 
+  test('downloads: a file as itself, a folder as one zip', async () => {
+    const file = page.waitForEvent('download')
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as {
+            api: { app: { saveFile: (req: unknown) => Promise<unknown> } }
+          }
+        ).api.app.saveFile({
+          fileName: 'pic.bin',
+          title: 'Download Artifact',
+          data: new Uint8Array([0, 1, 254, 255])
+        })
+      )
+    ).toEqual({ ok: true })
+    const f = await file
+    expect(f.suggestedFilename()).toBe('pic.bin')
+    expect(Array.from(fs.readFileSync(await f.path()))).toEqual([0, 1, 254, 255])
+
+    const folder = page.waitForEvent('download')
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as {
+            api: { app: { saveFiles: (req: unknown) => Promise<unknown> } }
+          }
+        ).api.app.saveFiles({
+          folderName: 'docs',
+          title: 'Download Folder To',
+          files: [{ path: 'docs/a.md', data: new TextEncoder().encode('A') }]
+        })
+      )
+    ).toEqual({ ok: true })
+    const z = await folder
+    expect(z.suggestedFilename()).toBe('docs.zip')
+    const zip = fs.readFileSync(await z.path())
+    expect(zip.subarray(0, 2).toString('latin1')).toBe('PK')
+    expect(zip.toString('latin1')).toContain('docs/a.md')
+  })
+
   test('PDF goes to the browser print dialog', async () => {
     // Headless Chromium returns from print() at once; the frame must have been laid
     // out and printed without error.

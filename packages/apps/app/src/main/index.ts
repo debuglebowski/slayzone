@@ -446,6 +446,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
 import { exportArtifactOnDesktop } from './artifact-export'
+import { saveFileOnDesktop, saveFilesOnDesktop } from './client-save'
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
@@ -3757,6 +3758,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       exportArtifactOnDesktop(BrowserWindow.fromWebContents(event.sender), request, {
         mermaidScriptPath
       })
+    )
+    // Downloads land on THIS machine too: the renderer holds the bytes it read from
+    // the hub, main only asks where and writes.
+    ipcMain.handle('app:save-file', (event, request: unknown) =>
+      saveFileOnDesktop(BrowserWindow.fromWebContents(event.sender), request)
+    )
+    ipcMain.handle('app:save-files', (event, request: unknown) =>
+      saveFilesOnDesktop(BrowserWindow.fromWebContents(event.sender), request)
     )
     if (isPlaywright) {
       ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())

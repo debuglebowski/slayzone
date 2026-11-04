@@ -65,18 +65,7 @@ setMainAgentDeps({
   }
 })
 
-setArtifactsRouterDeps({
-  onTasksChanged,
-  getDownloadHost: () => {
-    const deps = getAppDeps()
-    return {
-      showSaveDialog: deps.dialogShowSaveDialog,
-      showOpenDialog: deps.dialogShowOpenDialog,
-      getDownloadsDir: deps.appGetDownloadsDir,
-      showItemInFolder: deps.shellShowItemInFolder
-    }
-  }
-})
+setArtifactsRouterDeps({ onTasksChanged })
 
 // The `app.*` routers that moved out of api read `AppDeps` (built from their types)
 // through these seams. Each getter reads the registry on every call: unset, it throws

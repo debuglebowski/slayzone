@@ -15,6 +15,7 @@ import {
 } from '@slayzone/task-artifacts/server'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import type { ArtifactVersion, ArtifactSearchReport } from '@slayzone/task-artifacts/shared'
+import { planFolderDownload } from '@slayzone/task-artifacts/download-plan'
 import { createTestHarness, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
@@ -484,19 +485,10 @@ test('third-pass: pruning all versions preserves REST access to a surviving comp
   }
 })
 
-test('third-pass control: REST stream create and mixed-owner folder download preserve bytes and tree names', async () => {
+test('third-pass control: REST stream create and mixed-owner folder download (readBytes) preserve bytes and tree names', async () => {
   const f = await fixture()
   try {
-    const dest = mkdtempSync(join(f.root, 'downloads-'))
-    setArtifactsRouterDeps({
-      onTasksChanged: () => {},
-      getDownloadHost: () => ({
-        getDownloadsDir: async () => dest,
-        showSaveDialog: async () => ({ canceled: false, filePath: join(dest, 'file.png') }),
-        showOpenDialog: async () => ({ canceled: false, filePaths: [dest] }),
-        showItemInFolder: () => {}
-      })
-    })
+    setArtifactsRouterDeps({ onTasksChanged: () => {} })
     const general = (await f.store.createFolder(f.h.slayDb, { taskId: 't', name: 'General' }))!
     const a = await f.upload('a')
     const b = await f.upload('b')
@@ -533,12 +525,23 @@ test('third-pass control: REST stream create and mixed-owner folder download pre
       folderId: general.id,
       content: 'hub'
     })
+    // A folder download as a client makes it: plan from the task's rows, then every
+    // file's bytes over `readBytes` — hub-held and computer-held alike.
     const caller = artifactsRouter.createCaller({ db: f.h.slayDb, dataRoot: f.hubDir })
-    expect(await caller.downloadFolder({ folderId: general.id })).toBe(true)
-    expect(readFileSync(join(dest, 'General', 'hub.txt'), 'utf8')).toBe('hub')
-    expect(readFileSync(join(dest, 'General', 'PC A', 'a.txt'), 'utf8')).toBe('bytes a')
-    expect(readFileSync(join(dest, 'General', 'PC B', 'b.txt'), 'utf8')).toBe('bytes b')
-    expect(readFileSync(join(dest, 'General', 'PC A', 'Nested', 'file.png'))).toEqual(bytes)
+    const plan = planFolderDownload(
+      await f.store.listFoldersByTask(f.h.slayDb, 't'),
+      await f.store.listArtifactsByTask(f.h.slayDb, 't'),
+      general.id
+    )!
+    const got = new Map<string, Buffer>()
+    for (const e of plan.entries) {
+      got.set(e.path, Buffer.from((await caller.readBytes({ id: e.artifactId }))!, 'base64'))
+    }
+    expect(got.get('General/hub.txt')?.toString('utf8')).toBe('hub')
+    expect(got.get('General/PC A/a.txt')?.toString('utf8')).toBe('bytes a')
+    expect(got.get('General/PC B/b.txt')?.toString('utf8')).toBe('bytes b')
+    expect(got.get('General/PC A/Nested/file.png')).toEqual(bytes)
+    expect(await caller.readBytes({ id: 'no-such-artifact' })).toBeNull()
   } finally {
     await f.close()
   }

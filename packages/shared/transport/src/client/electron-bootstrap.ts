@@ -1,7 +1,10 @@
 import type {
   ArtifactExportRequest,
   ArtifactExportResult,
-  ElectronBootstrapAPI
+  ElectronBootstrapAPI,
+  HostSaveResult,
+  SaveFileRequest,
+  SaveFilesRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
@@ -83,6 +86,14 @@ export const electronBootstrap = {
   exportArtifact: (request: ArtifactExportRequest): Promise<ArtifactExportResult> =>
     api().app.exportArtifact?.(request) ??
     Promise.resolve({ ok: false as const, error: 'Export is not supported in this app' }),
+  /** Save bytes as a file on this device (desktop: save dialog; web: download). */
+  saveFile: (request: SaveFileRequest): Promise<HostSaveResult> =>
+    api().app.saveFile?.(request) ??
+    Promise.resolve({ ok: false as const, error: 'Saving files is not supported in this app' }),
+  /** Save files into a picked directory (desktop) or one zip download (web). */
+  saveFiles: (request: SaveFilesRequest): Promise<HostSaveResult> =>
+    api().app.saveFiles?.(request) ??
+    Promise.resolve({ ok: false as const, error: 'Saving files is not supported in this app' }),
   relaunch: () => api().app.relaunch?.() ?? Promise.resolve(),
   restartSidecar: () =>
     api().app.restartSidecar?.() ?? Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),

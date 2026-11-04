@@ -6,12 +6,7 @@ import {
   assertHubLocalExecEnabled,
   hubProcessesEnabled
 } from '@slayzone/platform/hub-switch-refusal'
-import {
-  artifactWatcherEvents,
-  downloadArtifactFile,
-  downloadArtifactFolder,
-  downloadAllArtifactsAsZip
-} from '@slayzone/task/server'
+import { artifactWatcherEvents } from '@slayzone/task/server'
 import type {
   CreateArtifactInput,
   UpdateArtifactInput,
@@ -22,15 +17,14 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 import { type ArtifactStore } from './artifact-store'
 import { getArtifactStorage } from './artifact-storage'
-import { getArtifactsRouterDeps, signalTasksChanged } from './artifacts-router-deps'
+import { signalTasksChanged } from './artifacts-router-deps'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
 // CRUD/version/folder/upload store is electron-free (@slayzone/task/server) and shared
-// with the IPC handlers (coexistence until slice 5). The 6 download procedures need
-// Electron dialogs + export renderers, which reach the host through the AppDeps
-// capability bridge (see `downloadHost` below). Complex inputs pass through unchecked —
-// the IPC path validates by TypeScript only.
+// with the IPC handlers (coexistence until slice 5). Downloads and exports are NOT
+// here: the client reads content/bytes and saves on its own device (useArtifacts).
+// Complex inputs pass through unchecked — the IPC path validates by TypeScript only.
 const createArtifactInput = z.unknown() as unknown as z.ZodType<CreateArtifactInput>
 const updateArtifactInput = z.unknown() as unknown as z.ZodType<
   UpdateArtifactInput & { mutateVersion?: boolean }
@@ -163,41 +157,6 @@ function assertPasteSourcesAreHubStorage(dataRoot: string, sources: unknown): vo
   }
 }
 
-// Host-only steps of a download (save sheet, directory picker, downloads dir, reveal,
-// offscreen PDF/PNG render) come from the host's capability bridge, injected through
-// `setArtifactsRouterDeps` (api wires it from AppDeps). Previously these procedures
-// reached the electron-side download module through a catch-guarded dynamic import,
-// which cannot work in the plain-node side-car the renderer now talks to: the module
-// bundles fine, so the "absent" branch never fired, and its electron binding resolved
-// to a string path. AppDeps is compile-enforced at all three wiring sites, so a missing
-// capability is a build error rather than a silent no-op.
-const downloadHost = () => getArtifactsRouterDeps().getDownloadHost()
-
-function downloadSource(
-  db: SlayzoneDb,
-  dataRoot: string
-): import('@slayzone/task/server').ArtifactDownloadSource {
-  const s = store(dataRoot)
-  return {
-    get: async (id) => {
-      const a = await s.getArtifact(db, id)
-      return a ? { ...a } : undefined
-    },
-    folder: async (id) => {
-      const row = await db.get<{ task_id: string }>(
-        'SELECT task_id FROM artifact_folders WHERE id=?',
-        [id]
-      )
-      if (!row) return undefined
-      const f = (await s.listFoldersByTask(db, row.task_id)).find((f) => f.id === id)
-      return f ? { ...f } : undefined
-    },
-    artifacts: async (taskId) => (await s.listArtifactsByTask(db, taskId)).map((a) => ({ ...a })),
-    folders: async (taskId) => (await s.listFoldersByTask(db, taskId)).map((f) => ({ ...f })),
-    read: (id) => s.readArtifactBytes(db, id)
-  }
-}
-
 export const artifactsRouter = router({
   // --- Artifact CRUD / read ---
   getByTask: publicProcedure
@@ -235,6 +194,18 @@ export const artifactsRouter = router({
   readContent: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactContent(ctx.db, input.id)),
+
+  // Raw bytes for a download the CLIENT saves on its own device (file, folder, zip —
+  // see useArtifacts). Base64: superjson would carry a typed array as a JSON number
+  // array, ~3.6× the size. Null when the artifact or its file is gone.
+  readBytes: publicProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const bytes = await store(ctx.dataRoot)
+      .readArtifactBytes(ctx.db, input.id)
+      .catch(() => null)
+    return bytes
+      ? Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
+      : null
+  }),
 
   getFilePath: publicProcedure
     .input(z.object({ id: z.string() }))
@@ -409,43 +380,6 @@ export const artifactsRouter = router({
       await store(ctx.dataRoot).reorderFolders(ctx.db, input)
       signalTasksChanged(taskIds)
     }),
-
-  // --- Download (needs the Electron host via AppDeps) ---
-  downloadFile: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactFile(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadFolder: publicProcedure
-    .input(z.object({ folderId: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactFolder(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.folderId,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAllAsZip: publicProcedure
-    .input(z.object({ taskId: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadAllArtifactsAsZip(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.taskId,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
 
   // --- Subscription ---
   // Fires when any artifact file changes on disk (fs.watch). Replaces the

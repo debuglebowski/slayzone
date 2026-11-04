@@ -14,6 +14,7 @@
 import type { ElectronAPI, HubEntry } from '@slayzone/types'
 import { resolveServerUrl, resolveWindowId } from './server-url'
 import { exportArtifactInBrowser } from './artifact-export'
+import { saveFileInBrowser, saveFilesInBrowser } from './client-save'
 
 const NOT_SUPPORTED = 'Not supported in the browser'
 
@@ -80,6 +81,9 @@ const webApiTarget: ElectronAPI = {
     probeServerHealth: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // Rendered by this browser (print dialog / canvas / download) — see artifact-export.ts.
     exportArtifact: exportArtifactInBrowser,
+    // Downloads: the browser saves the bytes (a folder as one zip) — see client-save.ts.
+    saveFile: saveFileInBrowser,
+    saveFiles: saveFilesInBrowser,
     restartSidecar: async () => ({ ok: false, error: NOT_SUPPORTED }),
     restartLocalComputer: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // A browser tab supervises no computer.

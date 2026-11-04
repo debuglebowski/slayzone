@@ -660,6 +660,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.update': checked(artifact('id'), folder('folderId')),
   'artifacts.delete': checked(artifact('id')),
   'artifacts.reorder': checked(artifact('[]'), artifact('artifactIds[]'), folder('folderId')),
+  'artifacts.readBytes': checked(artifact('id')),
   'artifacts.readContent': checked(artifact('id')),
   'artifacts.getFilePath': checked(artifact('id')),
   'artifacts.getMtime': checked(artifact('id')),
@@ -687,9 +688,6 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.foldersUpdate': checked(folder('id'), folder('parentId')),
   'artifacts.foldersDelete': checked(folder('id')),
   'artifacts.foldersReorder': checked(folder('parentId'), folder('folderIds[]')),
-  'artifacts.downloadFile': checked(artifact('id')),
-  'artifacts.downloadFolder': checked(folder('folderId')),
-  'artifacts.downloadAllAsZip': checked(task('taskId')),
   'artifacts.onContentChanged': streamed(onValue('artifact')),
 
   // ── chat ──

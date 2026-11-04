@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./export-html": "./src/shared/export-html.ts",
+    "./download-plan": "./src/shared/download-plan.ts",
     "./server": "./src/server/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
@@ -38,6 +39,7 @@
     "@trpc/server": "^11.19.0",
     "better-sqlite3": "^13.0.3",
     "diff": "^9.0.0",
+    "fflate": "^0.8.2",
     "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
     "zod": "^4.3.5"

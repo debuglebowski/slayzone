@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
 import type {
   ArtifactExportRequest,
-  ArtifactExportResult
+  ArtifactExportResult,
+  HostSaveResult,
+  SaveFileRequest,
+  SaveFilesRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 
 // Intentional bootstrap + client-local host surface (ARCHITECTURE.md). Do not add domain
@@ -86,6 +89,10 @@ const api: ElectronAPI = {
     // Client-local host capability, not a domain API: the export renders on THIS device.
     exportArtifact: (request: ArtifactExportRequest) =>
       ipcRenderer.invoke('app:export-artifact', request) as Promise<ArtifactExportResult>,
+    saveFile: (request: SaveFileRequest) =>
+      ipcRenderer.invoke('app:save-file', request) as Promise<HostSaveResult>,
+    saveFiles: (request: SaveFilesRequest) =>
+      ipcRenderer.invoke('app:save-files', request) as Promise<HostSaveResult>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
     restartLocalComputer: () =>

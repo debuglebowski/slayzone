@@ -18,10 +18,16 @@ import type {
 import { useTrack } from '@slayzone/telemetry/client'
 import { toast, useDepsChanged, useStableCallback } from '@slayzone/ui'
 import { exportArtifactOnThisDevice, type ArtifactExportFormat } from './artifact-export'
+import {
+  base64ToBytes,
+  downloadArtifactOnThisDevice,
+  downloadFolderOnThisDevice,
+  downloadTaskZipOnThisDevice
+} from './artifact-downloads'
 
-// Downloads reach the Electron host over the capability bridge, and exports render on
-// this device's host, so both can fail for reasons the user must see (no host
-// capability, render failure, unwritable path).
+// Downloads and exports save on this device's host (desktop dialogs, browser download),
+// so they can fail for reasons the user must see (no host capability, render failure,
+// unwritable path).
 // These mutations were previously fired bare: a rejection became an unhandled promise
 // and the click looked like a no-op — which is how all 6 procedures stayed broken
 // unnoticed after the slice-9 cutover. `false` still means "user cancelled".
@@ -205,15 +211,6 @@ export function useArtifacts(
   const { mutateAsync: deleteMutate } = useMutation(trpc.artifacts.delete.mutationOptions())
   const { mutateAsync: uploadMutate } = useMutation(trpc.artifacts.upload.mutationOptions())
   const { mutateAsync: uploadDirMutate } = useMutation(trpc.artifacts.uploadDir.mutationOptions())
-  const { mutateAsync: downloadFileMutate } = useMutation(
-    trpc.artifacts.downloadFile.mutationOptions()
-  )
-  const { mutateAsync: downloadFolderMutate } = useMutation(
-    trpc.artifacts.downloadFolder.mutationOptions()
-  )
-  const { mutateAsync: downloadAllAsZipMutate } = useMutation(
-    trpc.artifacts.downloadAllAsZip.mutationOptions()
-  )
   const { mutateAsync: versionsCreateMutate } = useMutation(
     trpc.artifacts.versionsCreate.mutationOptions()
   )
@@ -376,16 +373,33 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
+  // Downloads save on THIS device (see artifact-downloads.ts): the hub only serves
+  // the bytes. A fresh read every time, never a cached one.
+  const readBytes = useCallback(
+    async (id: string): Promise<Uint8Array | null> => {
+      const base64 = await queryClient.fetchQuery(
+        trpc.artifacts.readBytes.queryOptions({ id }, { staleTime: 0, gcTime: 0 })
+      )
+      return base64 === null ? null : base64ToBytes(base64)
+    },
+    [queryClient, trpc]
+  )
+
   const downloadFile = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Download', () => downloadFileMutate({ id })),
-    [downloadFileMutate]
+      runDownload('Download', async () => {
+        const artifact = artifacts.find((a) => a.id === id)
+        return artifact ? downloadArtifactOnThisDevice(artifact, readBytes) : false
+      }),
+    [artifacts, readBytes]
   )
 
   const downloadFolder = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Folder download', () => downloadFolderMutate({ folderId: id })),
-    [downloadFolderMutate]
+      runDownload('Folder download', () =>
+        downloadFolderOnThisDevice(folders, artifacts, id, readBytes)
+      ),
+    [folders, artifacts, readBytes]
   )
 
   // PDF/PNG/HTML render on THIS device (see exportArtifactOnThisDevice): the hub
@@ -421,8 +435,10 @@ export function useArtifacts(
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return runDownload('ZIP export', () => downloadAllAsZipMutate({ taskId }))
-  }, [taskId, downloadAllAsZipMutate])
+    return runDownload('ZIP export', () =>
+      downloadTaskZipOnThisDevice(folders, artifacts, readBytes)
+    )
+  }, [taskId, folders, artifacts, readBytes])
 
   const uploadDir = useCallback(
     async (dirPath: string, parentFolderId?: string | null): Promise<void> => {

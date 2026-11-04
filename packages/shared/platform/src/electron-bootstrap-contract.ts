@@ -29,11 +29,36 @@ export interface ArtifactExportRequest {
   title: string
 }
 
-/** `canceled`: the person dismissed the save dialog — not an error. */
-export type ArtifactExportResult =
+/** Saving on this device. `canceled`: the person dismissed the dialog — not an error. */
+export type HostSaveResult =
   | { ok: true }
   | { ok: false; canceled: true }
   | { ok: false; error: string }
+
+export type ArtifactExportResult = HostSaveResult
+
+/** One file to save on this device (see `saveFile`). */
+export interface SaveFileRequest {
+  /** The suggested name (save dialog default / the download's name). */
+  fileName: string
+  data: Uint8Array
+  /** Save dialog title. */
+  title: string
+  /** Show the saved file in the OS file manager afterwards. */
+  reveal?: boolean
+}
+
+/** A set of files kept in their folders (see `saveFiles`). */
+export interface SaveFilesRequest {
+  /** What the set is called where one name is needed (the web shell's `<name>.zip`). */
+  folderName: string
+  /** `/`-separated relative paths. */
+  files: { path: string; data: Uint8Array }[]
+  /** Folders to create even when empty (same form as `files[].path`). */
+  dirs?: string[]
+  /** Directory picker title. */
+  title: string
+}
 
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
@@ -106,6 +131,16 @@ export interface ElectronBootstrapApp {
    * Optional: a host without it reports export as unsupported.
    */
   exportArtifact?: (request: ArtifactExportRequest) => Promise<ArtifactExportResult>
+  /**
+   * Save bytes the client already holds as a file on THIS device (desktop: save
+   * dialog; web: a download). Optional, like `exportArtifact`.
+   */
+  saveFile?: (request: SaveFileRequest) => Promise<HostSaveResult>
+  /**
+   * Save files into a directory the person picks, keeping their relative paths
+   * (desktop); the web shell downloads them as one zip. Optional.
+   */
+  saveFiles?: (request: SaveFilesRequest) => Promise<HostSaveResult>
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */

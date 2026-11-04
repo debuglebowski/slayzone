@@ -446,6 +446,7 @@ run_harness packages/apps/app/src/main/lifecycle/quit-reap-child.test.ts
 run_harness packages/apps/app/src/main/lifecycle/unload-veto.test.ts
 # Background update checks never leave a rejection unhandled (pilot: startup unhandled_rejection).
 run_harness packages/apps/app/src/main/auto-updater.test.ts
+run_harness packages/apps/app/src/main/client-save.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
 # The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).
@@ -726,7 +727,6 @@ run_harness packages/apps/hub/src/computer-artifacts.test.ts
 run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifacts.test.ts
 run_harness packages/domains/task-artifacts/src/server/standalone.test.ts
-run_harness packages/domains/task/src/server/artifact-downloads.test.ts
 run_harness packages/apps/hub/src/computer-chat.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
@@ -1110,6 +1110,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/compactBytes.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
   packages/apps/web-shell/src/artifact-export.test.ts \
+  packages/apps/web-shell/src/client-save.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \

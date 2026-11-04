@@ -1,19 +1,25 @@
-import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
-import type { ElectronApplication, Page } from '@playwright/test'
+import {
+  test,
+  expect,
+  seed,
+  goHome,
+  clickProject,
+  resetApp,
+  TEST_PROJECT_PATH
+} from '../fixtures/electron'
+import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-// Artifact downloads cross three processes: renderer → side-car tRPC → capability
-// bridge → Electron host (save dialog) → side-car writes the file. Every one of the
-// procedures was silently dead after the slice-9 cutover because the router reached
-// for Electron via a catch-guarded dynamic `import()` that cannot work in the
-// plain-node side-car.
+// Artifact downloads and exports never write on the hub. The renderer reads the
+// bytes/content over tRPC (`artifacts.readBytes` / `readContent`), then hands them to
+// its OWN host — `window.api.app.saveFile`/`saveFiles`/`exportArtifact` → preload →
+// main, which shows the dialog and writes (export also renders offscreen) — so they
+// work the same against a remote hub.
 //
-// PDF/PNG/HTML EXPORT is different: it never touches the hub. The renderer reads the
-// content over tRPC, then hands it to its OWN host (`window.api.app.exportArtifact` →
-// preload → main's `app:export-artifact`), which shows the save dialog and renders in
-// an offscreen window — so export works the same against a remote hub.
+// Downloads are driven through the artifact panel's real menus: the folder tree,
+// zip and dialogs all run as they do for a person.
 //
 // These tests stub only the *native dialog* (in the main process, via
 // electronApp.evaluate) and let the whole rest of the chain run for real. A test-only
@@ -59,17 +65,54 @@ async function nextOpenDir(electronApp: ElectronApplication, dir: string | null)
   }, dir)
 }
 
-const download = (page: Page, proc: string, input: unknown) =>
-  page.evaluate(
-    ([p, i]) =>
-      (
-        window.getTrpcVanillaClient().artifacts as unknown as Record<
-          string,
-          { mutate: (arg: unknown) => Promise<boolean> }
-        >
-      )[p as string].mutate(i),
-    [proc, input] as const
+const artifactsPanel = (page: Page) => page.locator('[data-panel-id="artifacts"]:visible')
+const sidebar = (page: Page) => artifactsPanel(page).locator('[data-testid="artifacts-sidebar"]')
+const artifactRow = (page: Page, title: string) =>
+  sidebar(page)
+    .locator(`[data-testid^="artifact-row-"]`)
+    .filter({ has: page.locator('span', { hasText: title }) })
+    .locator('button')
+    .filter({ has: page.locator('span', { hasText: title }) })
+    .first()
+const folderRow = (page: Page, name: string) =>
+  sidebar(page)
+    .locator(`[data-testid^="folder-row-"]`)
+    .filter({ has: page.locator('button', { hasText: name }) })
+    .locator('button')
+    .filter({ hasText: name })
+    .first()
+
+async function openArtifactsPanel(page: Page): Promise<void> {
+  if (
+    await artifactsPanel(page)
+      .isVisible()
+      .catch(() => false)
   )
+    return
+  await page.keyboard.press('Meta+Shift+A')
+  await expect(artifactsPanel(page)).toBeVisible({ timeout: 5_000 })
+}
+
+/** Right-click `target`, then pick the menu item named exactly `item`. */
+async function menu(page: Page, target: Locator, item: string): Promise<void> {
+  await target.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: item, exact: true }).click()
+}
+
+/**
+ * The sidebar's own (root) menu, opened where 93-artifacts-panel opens it. A list
+ * refresh can close a menu mid-open; reopen until the click lands.
+ */
+async function rootMenu(page: Page, item: string): Promise<void> {
+  await expect(async () => {
+    await page.keyboard.press('Escape')
+    await sidebar(page).click({ button: 'right', position: { x: 10, y: 5 } })
+    await page.getByRole('menuitem', { name: item, exact: true }).click({ timeout: 2_000 })
+  }).toPass({ timeout: 15_000 })
+}
+
+const fileAppears = (p: string) =>
+  expect.poll(() => fs.existsSync(p), { timeout: 15_000, message: `${p} written` }).toBe(true)
 
 /**
  * Export the way the renderer does (`exportArtifactOnThisDevice`): content from the hub
@@ -136,53 +179,66 @@ test.describe('Artifact downloads', () => {
       content: 'inner file contents',
       folderId
     })
+    await s.createArtifactFolder({ taskId, name: 'empty-sub', parentId: folderId })
+    await s.refreshData()
+
+    await goHome(mainWindow)
+    await clickProject(mainWindow, 'DO')
+    await mainWindow.getByText('Downloads task').first().click()
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
+    await openArtifactsPanel(mainWindow)
+    await expect(artifactRow(mainWindow, 'report.md')).toBeVisible({ timeout: 5_000 })
   })
 
   test.afterAll(async () => {
     fs.rmSync(DEST_DIR, { recursive: true, force: true })
   })
 
-  test('downloadFile writes the artifact to the chosen path', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('download: a file lands where the person picked', async ({ mainWindow, electronApp }) => {
     const dest = path.join(DEST_DIR, 'report-copy.md')
     await nextSavePath(electronApp, dest)
 
-    const ok = await download(mainWindow, 'downloadFile', { id: mdArtifactId })
+    await menu(mainWindow, artifactRow(mainWindow, 'report.md'), 'Download')
 
-    expect(ok).toBe(true)
-    expect(fs.existsSync(dest)).toBe(true)
+    await fileAppears(dest)
     expect(fs.readFileSync(dest, 'utf-8')).toContain('Some **bold** body text.')
   })
 
-  test('downloadFile returns false when the dialog is cancelled', async ({
+  test('download: a dismissed dialog writes nothing and reports no error', async ({
     mainWindow,
     electronApp
   }) => {
     await nextSavePath(electronApp, null)
-    expect(await download(mainWindow, 'downloadFile', { id: mdArtifactId })).toBe(false)
+    const before = fs.readdirSync(DEST_DIR).length
+
+    await menu(mainWindow, artifactRow(mainWindow, 'report.md'), 'Download')
+
+    await mainWindow.waitForTimeout(500)
+    expect(fs.readdirSync(DEST_DIR)).toHaveLength(before)
+    await expect(mainWindow.getByText('Download failed')).toHaveCount(0)
   })
 
-  test('downloadAllAsZip writes a zip archive', async ({ mainWindow, electronApp }) => {
+  test('download all as ZIP: one archive with every artifact at its folder path', async ({
+    mainWindow,
+    electronApp
+  }) => {
     const dest = path.join(DEST_DIR, 'all.zip')
     await nextSavePath(electronApp, dest)
 
-    const ok = await download(mainWindow, 'downloadAllAsZip', { taskId })
+    await rootMenu(mainWindow, 'Download all as ZIP')
 
-    expect(ok).toBe(true)
-    expect(fs.existsSync(dest)).toBe(true)
+    await fileAppears(dest)
     const bytes = fs.readFileSync(dest)
-    expect(bytes.length).toBeGreaterThan(0)
-    // Local file header magic — proves archiver actually finalized.
+    // Local file header magic — a real zip, not an empty file.
     expect(bytes.subarray(0, 2).toString('latin1')).toBe('PK')
-    // Both artifacts should be named in the central directory.
     const raw = bytes.toString('latin1')
     expect(raw).toContain('report.md')
-    expect(raw).toContain('inner.txt')
+    expect(raw).toContain('nested/inner.txt')
   })
 
-  test('downloadFolder copies the folder tree into the chosen directory', async ({
+  test('download folder: the tree lands in the chosen directory, empty folders too', async ({
     mainWindow,
     electronApp
   }) => {
@@ -190,12 +246,12 @@ test.describe('Artifact downloads', () => {
     fs.mkdirSync(destRoot, { recursive: true })
     await nextOpenDir(electronApp, destRoot)
 
-    const ok = await download(mainWindow, 'downloadFolder', { folderId })
+    await menu(mainWindow, folderRow(mainWindow, 'nested'), 'Download')
 
-    expect(ok).toBe(true)
     const inner = path.join(destRoot, 'nested', 'inner.txt')
-    expect(fs.existsSync(inner)).toBe(true)
+    await fileAppears(inner)
     expect(fs.readFileSync(inner, 'utf-8')).toBe('inner file contents')
+    expect(fs.statSync(path.join(destRoot, 'nested', 'empty-sub')).isDirectory()).toBe(true)
   })
 
   test('export: markdown → standalone HTML file, rendered by the client', async ({

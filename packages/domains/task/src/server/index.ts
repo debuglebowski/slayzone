@@ -50,18 +50,7 @@ export { templateRouter, type TemplateRouter, type TemplateMounts } from './temp
 
 // The artifact store (createArtifactStore / parseArtifact / parseFolder) and its
 // worker txns live in `task-artifacts/server` + `/db`.
-export { buildFolderPathResolver, collectFolderAndDescendants } from './artifact-folder-tree'
 export { artifactsDirOf, artifactTaskDir, artifactFilePathIn } from './artifact-paths'
-
-// Artifact file/folder/zip downloads. Electron-free — the host-only steps (dialogs,
-// reveal) are injected as ArtifactDownloadHost, which the transport layer fills from
-// the AppDeps capability bridge.
-export {
-  downloadArtifactFile,
-  downloadArtifactFolder,
-  downloadAllArtifactsAsZip
-} from './artifact-downloads'
-export type { ArtifactDownloadHost, ArtifactDownloadSource } from './artifact-downloads'
 
 // Pure task ops + conversation ledger. The Electron host injects runtime adapters
 // at boot via configureTaskRuntimeAdapters (kill PTYs, data root, diagnostics…).
