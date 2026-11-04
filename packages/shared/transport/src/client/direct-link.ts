@@ -222,10 +222,13 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   }
 
   function scheduleRenewal(lease: LeaseState, expiresInMs: number): void {
-    lease.renew = setTimeout(() => {
-      lease.renew = null
-      void renew(lease)
-    }, Math.max(1_000, Math.floor(expiresInMs / 2)))
+    lease.renew = setTimeout(
+      () => {
+        lease.renew = null
+        void renew(lease)
+      },
+      Math.max(1_000, Math.floor(expiresInMs / 2))
+    )
   }
 
   async function renew(lease: LeaseState): Promise<void> {

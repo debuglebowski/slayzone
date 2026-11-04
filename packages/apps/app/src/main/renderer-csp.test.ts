@@ -180,7 +180,10 @@ describe('directLinkConnectSources (docs/direct-link.md)', () => {
 
   it('never adds http(s): the health probe runs in the main process', () => {
     const csp = buildRendererCsp(
-      [hubConnectSources({ localHub: true, remoteHubUrls: [] }), ...directLinkConnectSources(['box.example:7443'])].join(' '),
+      [
+        hubConnectSources({ localHub: true, remoteHubUrls: [] }),
+        ...directLinkConnectSources(['box.example:7443'])
+      ].join(' '),
       false
     )
     const connectSrc = csp.split('; ').find((d) => d.startsWith('connect-src')) ?? ''

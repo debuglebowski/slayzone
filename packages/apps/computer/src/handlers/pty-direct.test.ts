@@ -52,7 +52,12 @@ describe('direct pty service', () => {
     )
     expect(stop).not.toBeNull()
     await pty.handlers['pty.write']({ sessionId, data: 'alpha\n' })
-    await waitFor(() => got.map((c) => c.data).join('').includes('alpha'))
+    await waitFor(() =>
+      got
+        .map((c) => c.data)
+        .join('')
+        .includes('alpha')
+    )
     // The hub asked for no relay: nothing went its way.
     expect(notifies.filter((n) => n.method === 'pty.data')).toEqual([])
     got.forEach((c, i) => expect(c.seq).toBe(i))
@@ -80,7 +85,13 @@ describe('direct pty service', () => {
       size: null,
       buffer: { chunks: [], prelude: '', currentSeq: -1 }
     })
-    expect(pty.direct.watch('nope', () => {}, () => {})).toBeNull()
+    expect(
+      pty.direct.watch(
+        'nope',
+        () => {},
+        () => {}
+      )
+    ).toBeNull()
   })
 
   it('keeps a stale-resume error off the live stream, as the hub does', async () => {
@@ -97,7 +108,11 @@ describe('direct pty service', () => {
       detection: { mode: 'claude-code', resuming: true }
     })
     const got: string[] = []
-    pty.direct.watch(sessionId, (c) => got.push(c.data), () => {})
+    pty.direct.watch(
+      sessionId,
+      (c) => got.push(c.data),
+      () => {}
+    )
     await waitFor(() => pty.direct.attach(sessionId, -1).buffer.currentSeq >= 0)
     await waitFor(() =>
       pty.direct
@@ -126,7 +141,11 @@ describe('direct pty input', () => {
     const sessionId = 'd-in'
     await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
     const got: string[] = []
-    pty.direct.watch(sessionId, (c) => got.push(c.data), () => {})
+    pty.direct.watch(
+      sessionId,
+      (c) => got.push(c.data),
+      () => {}
+    )
     expect(pty.direct.write(sessionId, 'hel')).toBe(true)
     expect(pty.direct.write(sessionId, 'lo')).toBe(true)
     expect(inputEvents(notifies)).toEqual([])

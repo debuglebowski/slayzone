@@ -37,7 +37,10 @@ function fakeConnection(opts: { ready?: boolean } = {}) {
     closed: () => boolean
   } = {
     client: {
-      ping: { query: () => (opts.ready === false ? new Promise(() => {}) : Promise.resolve({ protocol: 1 })) },
+      ping: {
+        query: () =>
+          opts.ready === false ? new Promise(() => {}) : Promise.resolve({ protocol: 1 })
+      },
       authorize: {
         mutate: async ({ token }: { token: string }) => {
           authorized.push(token)
@@ -136,7 +139,9 @@ describe('acquire', () => {
     const { manager, issued } = setup({
       issue: async (target) => {
         issued.push(target)
-        throw Object.assign(new Error('No "mutation"-procedure on path'), { data: { code: 'NOT_FOUND' } })
+        throw Object.assign(new Error('No "mutation"-procedure on path'), {
+          data: { code: 'NOT_FOUND' }
+        })
       }
     })
     expect(await manager.acquire(pty())).toBeNull()

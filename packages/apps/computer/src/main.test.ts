@@ -349,7 +349,11 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
         { sessionId: 'seam-1', command: 'cat', cwd: process.cwd(), relay: false },
         ACTOR
       )
-      await onHubRequest?.(HubToComputerMethods.ptyWrite, { sessionId: 'seam-1', data: 'seam\n' }, ACTOR)
+      await onHubRequest?.(
+        HubToComputerMethods.ptyWrite,
+        { sessionId: 'seam-1', data: 'seam\n' },
+        ACTOR
+      )
       const ws = createWSClient({
         url: `ws://${identity?.directAddress?.()}/direct/v1`,
         WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,

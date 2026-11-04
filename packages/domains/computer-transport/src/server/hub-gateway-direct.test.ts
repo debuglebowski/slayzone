@@ -82,7 +82,7 @@ describe('protocol v8: direct-link address', () => {
     const first = connect()
     first.frame(enrollFrame('box.example:7443'))
     await flush()
-    const { apiKey } = first.response(1)?.result as { apiKey: string }
+    const { apiKey } = first.response(1)!.result as { apiKey: string }
     first.close()
     const second = connect()
     second.frame({

@@ -57,7 +57,12 @@ export function createDirectLinkGate(
       applied.set(webContentsId, new Set(connectSrc.split(/\s+/).filter(Boolean)))
     },
     async prepare(webContentsId, address) {
-      if (typeof address !== 'string' || address === '' || /[\s/*]/.test(address) || address.includes('://'))
+      if (
+        typeof address !== 'string' ||
+        address === '' ||
+        /[\s/*]/.test(address) ||
+        address.includes('://')
+      )
         return { ok: false, reason: 'invalid' }
       let host: string
       try {

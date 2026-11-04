@@ -35,7 +35,10 @@ const logged: string[] = []
 
 /** A stand-in for one hub's terminals: session `s1` and `s2`, live. */
 function fakePty() {
-  const watchers = new Map<string, { onData: (c: { seq: number; data: string }) => void; onEnd: (r: 'exit') => void }>()
+  const watchers = new Map<
+    string,
+    { onData: (c: { seq: number; data: string }) => void; onEnd: (r: 'exit') => void }
+  >()
   const service = {
     attach: (sessionId: string, afterSeq: number) => ({
       exists: true,

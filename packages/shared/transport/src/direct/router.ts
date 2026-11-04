@@ -129,7 +129,9 @@ export function createDirectRouter(services: DirectRouterServices) {
       /** Like the hub's `pty.attach` minus `state` (the client reads that from the hub). */
       attach: t.procedure
         .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
-        .query(({ ctx, input }) => ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq)),
+        .query(({ ctx, input }) =>
+          ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq)
+        ),
       getBufferSince: t.procedure
         .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
         .query(({ ctx, input }) =>
@@ -142,7 +144,9 @@ export function createDirectRouter(services: DirectRouterServices) {
        */
       write: t.procedure
         .input(z.object({ sessionId, data: z.string().max(1_000_000) }))
-        .mutation(({ ctx, input }) => ptyFor(ctx, input.sessionId).write(input.sessionId, input.data)),
+        .mutation(({ ctx, input }) =>
+          ptyFor(ctx, input.sessionId).write(input.sessionId, input.data)
+        ),
       /**
        * Live output. Completes when the process ends; errors FORBIDDEN when the
        * socket's grant on the session ends (the client re-issues through the hub).

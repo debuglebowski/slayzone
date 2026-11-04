@@ -26,7 +26,8 @@ interface Computer {
 
 function setup(over: Partial<DirectLinkIssuerDeps> = {}, computers?: Computer[]) {
   setSecurityLogSink((line) => lines.push(JSON.parse(line)))
-  const requests: Array<{ computerId: string; method: string; params: Record<string, unknown> }> = []
+  const requests: Array<{ computerId: string; method: string; params: Record<string, unknown> }> =
+    []
   const gated: Array<{ computerId: string; work: unknown }> = []
   const list = computers ?? [
     { computerId: 'c-local', directAddress: '127.0.0.1:5001', peerLoopback: true },
@@ -202,7 +203,10 @@ describe('direct-link revocation', () => {
   async function issued() {
     const ctx = setup()
     const a = await ctx.issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
-    const b = await ctx.issuer.issue({ kind: 'pty', sessionId: 'other:t' }, { ...local, userId: 'u2' })
+    const b = await ctx.issuer.issue(
+      { kind: 'pty', sessionId: 'other:t' },
+      { ...local, userId: 'u2' }
+    )
     const c = await ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1' }, local)
     const d = await ctx.issuer.issue({ kind: 'pty', sessionId: 'r1' }, remoteClient)
     if (!a.available || !b.available || !c.available || !d.available) throw new Error('unreachable')
@@ -233,7 +237,10 @@ describe('direct-link revocation', () => {
         targetId: 'c-local',
         detail: { reason: 'user_disabled', grants: 2 }
       }),
-      expect.objectContaining({ targetId: 'c-remote', detail: { reason: 'user_disabled', grants: 1 } })
+      expect.objectContaining({
+        targetId: 'c-remote',
+        detail: { reason: 'user_disabled', grants: 1 }
+      })
     ])
   })
 

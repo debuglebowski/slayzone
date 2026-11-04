@@ -1359,7 +1359,10 @@ export function createPtyHandlers(
           esc: facts.esc,
           statusCommand: facts.statusCommand
         }
-        ctx.dialer.notify(ComputerNotificationMethods.event, { name: PTY_INPUT_EVENT_NAME, payload })
+        ctx.dialer.notify(ComputerNotificationMethods.event, {
+          name: PTY_INPUT_EVENT_NAME,
+          payload
+        })
       }
       return true
     },

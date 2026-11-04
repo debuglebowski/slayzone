@@ -9,7 +9,10 @@ import { analyzePtyInput } from './pty-input'
 describe('analyzePtyInput', () => {
   it('accumulates typing and reports nothing until submit-Enter', () => {
     const a = analyzePtyInput('', 'hel')
-    expect(a).toEqual({ buffer: 'hel', facts: { esc: false, submitted: null, statusCommand: false } })
+    expect(a).toEqual({
+      buffer: 'hel',
+      facts: { esc: false, submitted: null, statusCommand: false }
+    })
     const b = analyzePtyInput(a.buffer, 'lo')
     expect(b.buffer).toBe('hello')
     expect(b.facts.submitted).toBeNull()

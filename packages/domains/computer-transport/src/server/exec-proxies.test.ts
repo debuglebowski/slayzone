@@ -777,7 +777,13 @@ describe('createRoutingPtyBackend', () => {
       gateway.emit('event', { computerId: 'computer-1', name: 'pty-input', payload })
     event({ sessionId: 'sess-1', submitted: 'hi\r', esc: false, statusCommand: false })
     event({ sessionId: 'other', submitted: 'x\r', esc: false, statusCommand: false })
-    event({ sessionId: 'sess-1', spawnId: 'stale', submitted: 'y\r', esc: false, statusCommand: false })
+    event({
+      sessionId: 'sess-1',
+      spawnId: 'stale',
+      submitted: 'y\r',
+      esc: false,
+      statusCommand: false
+    })
     event({ sessionId: 'sess-1', submitted: 5 })
     expect(got).toEqual([{ submitted: 'hi\r', esc: false, statusCommand: false }])
   })
