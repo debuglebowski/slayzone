@@ -398,7 +398,16 @@ async function main(): Promise<void> {
     if (fatal) process.exitCode = 1
   })
 
-  if (workerBoot) {
+  // Hub connection reports for the parent. Two parents listen: the upgrade
+  // supervisor (worker boot) and the desktop app's local-computer supervisor
+  // (SUPERVISED, which opens an IPC channel on spawn) — the app's boot splash waits
+  // for `connected` so the app never opens onto a computer that cannot run anything
+  // yet. The desktop parent only listens: unref its channel so it never keeps a
+  // stopping computer's loop alive (a clean supervised stop ends by the loop
+  // draining).
+  const reportsToSupervisor = !workerBoot && supervised && !!process.send
+  if (reportsToSupervisor) process.channel?.unref()
+  if (workerBoot || reportsToSupervisor) {
     for (const dialer of handle.dialers) {
       const hubUrl = effectiveHubUrls(config)[handle.dialers.indexOf(dialer)]
       dialer.events.on('connected', () =>
@@ -407,6 +416,11 @@ async function main(): Promise<void> {
       dialer.events.on('disconnected', () =>
         process.send?.({ type: 'disconnected', hubUrl }, () => undefined)
       )
+    }
+  }
+
+  if (workerBoot) {
+    for (const dialer of handle.dialers) {
       dialer.events.on('error', ({ fatal, error }) => {
         if (fatal) process.send?.({ type: 'fatal', error: error.message }, () => undefined)
       })
