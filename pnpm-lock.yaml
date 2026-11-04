@@ -176,6 +176,7 @@ packageExtensionsChecksum: sha256-yucxjBCEEEleMRdCSterOmma5oliL1xHpkU1vW5QBT0=
 patchedDependencies:
   '@convex-dev/auth@0.0.96': 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
   '@radix-ui/react-menu@2.1.24': 6a6dc122db538601c36071f3299893ad2e0fc741df2ea5dae92787f151f68b71
+  app-builder-lib@26.17.0: d70b9027a5a3624270b534c8e4332fcd9cc15f20269e0e310893add9b6d696f7
   electron-chrome-extensions@4.9.0: 15c38651399e4d63a73a1292fcbfff833ecb404aeb7c2381cad84e4e83089591
   node-pty@1.1.0: ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3
   posix@4.2.0: 804705bb712bef4c375046af1f0be81ebf77c27a9a4c5f9816a3da1289b29ebd
@@ -20967,7 +20968,7 @@ snapshots:
       normalize-path: 3.0.0
       picomatch: 2.3.2
 
-  app-builder-lib@26.17.0(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0):
+  app-builder-lib@26.17.0(patch_hash=d70b9027a5a3624270b534c8e4332fcd9cc15f20269e0e310893add9b6d696f7)(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0):
     dependencies:
       '@electron/asar': 3.4.1
       '@electron/fuses': 1.8.0
@@ -22307,7 +22308,7 @@ snapshots:
 
   dmg-builder@26.17.0(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0):
     dependencies:
-      app-builder-lib: 26.17.0(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0)
+      app-builder-lib: 26.17.0(patch_hash=d70b9027a5a3624270b534c8e4332fcd9cc15f20269e0e310893add9b6d696f7)(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0)
       builder-util: 26.16.0(supports-color@7.2.0)
       fs-extra: 10.1.0
       js-yaml: 4.3.2
@@ -22371,7 +22372,7 @@ snapshots:
 
   electron-builder-squirrel-windows@26.17.0(dmg-builder@26.17.0)(supports-color@7.2.0):
     dependencies:
-      app-builder-lib: 26.17.0(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0)
+      app-builder-lib: 26.17.0(patch_hash=d70b9027a5a3624270b534c8e4332fcd9cc15f20269e0e310893add9b6d696f7)(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0)
       builder-util: 26.16.0(supports-color@7.2.0)
       electron-winstaller: 5.4.0(supports-color@7.2.0)
     transitivePeerDependencies:
@@ -22380,7 +22381,7 @@ snapshots:
 
   electron-builder@26.17.0(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0):
     dependencies:
-      app-builder-lib: 26.17.0(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0)
+      app-builder-lib: 26.17.0(patch_hash=d70b9027a5a3624270b534c8e4332fcd9cc15f20269e0e310893add9b6d696f7)(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@7.2.0)
       builder-util: 26.16.0(supports-color@7.2.0)
       builder-util-runtime: 9.7.0(supports-color@7.2.0)
       chalk: 4.1.2
