@@ -24,6 +24,8 @@ type MockComputer = {
   lastSeenAt: number | null
   createdAt: number
   version?: string | null
+  usable?: boolean
+  upgradeStatus?: Record<string, unknown>
 }
 
 /** What the card sends to `computers.mintJoinToken`. */
@@ -831,6 +833,54 @@ describe('HubCard', () => {
     // leading cell the marker fills there.
     const cells = screen.getByTestId('computer-row').querySelectorAll('td')
     expect(cells.length).toBe(5)
+  })
+
+  it('puts an in-flight upgrade in the status column, not in the meta line', async () => {
+    computersByHub = {
+      local: [
+        makeComputer({
+          usable: true,
+          upgradeStatus: {
+            phase: 'restarting',
+            target: '0.37.0',
+            currentVersion: '0.36.4',
+            hostVersion: '0.37.0',
+            updatedAt: 'x'
+          }
+        })
+      ]
+    }
+    await renderLocal()
+    const cells = screen.getByTestId('computer-row').querySelectorAll('td')
+    expect(cells[2]!.textContent).toBe('UpgradingRestarting into 0.37.0')
+    expect(cells[1]!.textContent).not.toMatch(/Upgrade/)
+  })
+
+  it('says nothing about an upgrade that is done', async () => {
+    computersByHub = {
+      local: [
+        makeComputer({
+          usable: true,
+          capabilities: ['pty', 'git', 'fs', 'proc'],
+          upgradeStatus: {
+            phase: 'connected',
+            currentVersion: '0.37.0',
+            hostVersion: '0.37.0',
+            updatedAt: 'x'
+          }
+        })
+      ]
+    }
+    await renderLocal()
+    const cells = screen.getByTestId('computer-row').querySelectorAll('td')
+    expect(cells[1]!.textContent).toBe('mac-studiodarwin-arm64')
+    expect(cells[2]!.textContent).toBe('Connected')
+  })
+
+  it('lists capabilities only where they differ from the standard set', async () => {
+    computersByHub = { local: [makeComputer({ capabilities: ['pty', 'git'] })] }
+    await renderLocal()
+    expect(screen.getByTestId('computer-capabilities').textContent).toBe('no fs, proc')
   })
 
   it('still names an unreachable one-computer hub, with no heading to hang it on', async () => {

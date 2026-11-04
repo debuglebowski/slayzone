@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  capabilityNote,
   computerName,
+  computerRowStatus,
   computerStatus,
+  computerUpgradeTitle,
   inheritComputerLabel,
   NO_COMPUTERS_NOTE,
   OFFLINE_MARK,
   outdatedComputerNote,
-  runsOnLabel
+  runsOnLabel,
+  STANDARD_COMPUTER_CAPABILITIES
 } from './computer-labels'
 
 describe('computerStatus', () => {
@@ -88,5 +92,107 @@ describe('outdatedComputerNote', () => {
     for (const version of [null, undefined, '', 'dev', 'x.y.z']) {
       expect(outdatedComputerNote({ name: 'a', version })).toBeNull()
     }
+  })
+})
+
+describe('computerRowStatus', () => {
+  const live = { connected: true, usable: true, lastSeenAt: 1 }
+  const upgrade = (phase: string, extra: Record<string, unknown> = {}) =>
+    ({ phase, currentVersion: '0.36.4', hostVersion: '0.37.0', updatedAt: 'x', ...extra }) as never
+
+  it('is the plain connection status when no upgrade is in flight', () => {
+    expect(computerRowStatus({ ...live })).toEqual({ label: 'Connected', tone: 'ok' })
+    expect(computerRowStatus({ ...live, upgradeStatus: upgrade('connected') })).toEqual({
+      label: 'Connected',
+      tone: 'ok'
+    })
+    expect(computerRowStatus({ ...live, upgradeStatus: upgrade('checking') })).toEqual({
+      label: 'Connected',
+      tone: 'ok'
+    })
+  })
+
+  it('names the step and target while an upgrade runs', () => {
+    expect(
+      computerRowStatus({ ...live, upgradeStatus: upgrade('installing', { target: '0.37.0' }) })
+    ).toEqual({ label: 'Upgrading', detail: 'Installing 0.37.0', tone: 'ok' })
+    expect(
+      computerRowStatus({
+        ...live,
+        upgradeStatus: upgrade('waiting-for-idle', { target: '0.37.0' })
+      })
+    ).toEqual({ label: 'Upgrading', detail: '0.37.0 · waiting for idle', tone: 'ok' })
+    expect(
+      computerRowStatus({ ...live, upgradeStatus: upgrade('restarting', { target: '0.37.0' }) })
+    ).toEqual({ label: 'Upgrading', detail: 'Restarting into 0.37.0', tone: 'ok' })
+    expect(
+      computerRowStatus({ ...live, upgradeStatus: upgrade('probation', { target: '0.37.0' }) })
+    ).toEqual({ label: 'Upgrading', detail: 'Verifying 0.37.0', tone: 'ok' })
+  })
+
+  it('flags a failed, rolled-back or blocked upgrade', () => {
+    const at = Date.UTC(2026, 10, 4, 14, 32)
+    expect(
+      computerRowStatus({
+        ...live,
+        upgradeStatus: upgrade('failed', { target: '0.37.0', retryAt: at, error: 'EACCES' })
+      })
+    ).toEqual({
+      label: 'Upgrade failed',
+      detail: `0.37.0 · retry ${new Date(at).toLocaleTimeString()}`,
+      tone: 'bad'
+    })
+    expect(
+      computerRowStatus({ ...live, upgradeStatus: upgrade('failed', { target: 'discovery' }) })
+    ).toEqual({ label: 'Update check failed', tone: 'bad' })
+    expect(
+      computerRowStatus({ ...live, upgradeStatus: upgrade('rollback', { target: '0.36.4' }) })
+    ).toEqual({ label: 'Rolling back', detail: 'to 0.36.4', tone: 'bad' })
+    expect(
+      computerRowStatus({
+        ...live,
+        upgradeStatus: upgrade('maintenance-required', { target: '0.37.0' })
+      })
+    ).toEqual({ label: 'Upgrade blocked', detail: 'host maintenance pending', tone: 'bad' })
+  })
+
+  it('lets connection trouble outrank a stale upgrade report', () => {
+    const failed = upgrade('failed', { target: '0.37.0' })
+    expect(
+      computerRowStatus({ connected: false, lastSeenAt: null, upgradeStatus: failed })
+    ).toEqual({ label: 'Never connected', tone: 'idle' })
+    expect(
+      computerRowStatus({ ...live, revokedAt: 5, upgradeStatus: upgrade('installing') })
+    ).toEqual({ label: 'Revoked', tone: 'bad' })
+  })
+})
+
+describe('computerUpgradeTitle', () => {
+  it('prefers the error, else the versions', () => {
+    const base = {
+      phase: 'failed',
+      currentVersion: '0.36.4',
+      hostVersion: '0.37.0',
+      updatedAt: 'x'
+    }
+    expect(computerUpgradeTitle({ ...base, error: 'EACCES' } as never)).toBe('EACCES')
+    expect(computerUpgradeTitle({ ...base, maintenanceReason: 'disk full' } as never)).toBe(
+      'disk full'
+    )
+    expect(computerUpgradeTitle(base as never)).toBe('Connector 0.36.4 · host 0.37.0')
+  })
+})
+
+describe('capabilityNote', () => {
+  it('says nothing for the standard set, in any order', () => {
+    expect(capabilityNote([...STANDARD_COMPUTER_CAPABILITIES])).toBeNull()
+    expect(capabilityNote(['proc', 'fs', 'git', 'pty'])).toBeNull()
+  })
+
+  it('names what is missing and what is extra', () => {
+    expect(capabilityNote(['git', 'fs', 'proc'])).toBe('no pty')
+    expect(capabilityNote(['pty', 'git', 'fs', 'proc', 'gpu'])).toBe('+gpu')
+    expect(capabilityNote(['git', 'gpu'])).toBe('no pty, fs, proc · +gpu')
+    expect(capabilityNote([])).toBe('no capabilities')
   })
 })
