@@ -15,6 +15,7 @@ export {
 } from './migration'
 export { createLegacyChatSource, type LegacyChatDiagnostics } from './legacy-source'
 export { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
+export { legacySessionAmbiguous } from './legacy-session-authority'
 export { createHubChatRelay } from './hub-relay'
 export { createHubProviderConfigStore } from './hub-provider-config'
 

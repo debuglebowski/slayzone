@@ -226,3 +226,145 @@ test('a pending task pause/delete still fences native commands', async () => {
     await f.close()
   }
 })
+
+/**
+ * Issue #172 (v0.37.0). A task with recorded agent prompts gets a storage-only
+ * `task-content:` owner. Its legacy session election skipped that owner (no
+ * terminal tab), found zero candidates, and persisted NULL — the same marker
+ * as a genuine cross-computer ambiguity. Every terminal-mode Claude resume in
+ * such a task then failed with "…historical provider session is ambiguous…",
+ * even on a single-computer install.
+ */
+function seedTerminalClaudeTask(f: Awaited<ReturnType<typeof fixture>>) {
+  f.db
+    .prepare(
+      "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-code',0)"
+    )
+    .run()
+  f.db
+    .prepare(
+      "INSERT INTO agent_prompts(id,task_id,agent_id,cli_session_id,text,created_at) VALUES('p1','task','claude-code','session-1','hello',1)"
+    )
+    .run()
+  f.db
+    .prepare(
+      "INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES('c1','task','claude-code','session-1','slay-spawned-fresh',1)"
+    )
+    .run()
+}
+
+const authorityRows = (f: Awaited<ReturnType<typeof fixture>>) =>
+  f.db
+    .prepare(
+      "SELECT conversation_id FROM chat_legacy_session_authority WHERE task_id='task' AND provider_session_id='session-1'"
+    )
+    .all()
+
+test('#172: terminal Claude session in a task with only storage-only chat history resumes after migration', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    const owners = await s.ownership.forTask('task')
+    expect(owners.map((o) => o.tabId)).toEqual(['task-content:task'])
+    // No chat owner competes for the session, so nothing is ambiguous.
+    expect(authorityRows(f)).toEqual([])
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+  } finally {
+    await f.close()
+  }
+})
+
+test('#172: a NULL authority row persisted by v0.37.0 with no competing owner self-heals', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    // What v0.37.0 left on disk.
+    f.db
+      .prepare(
+        "INSERT OR REPLACE INTO chat_legacy_session_authority VALUES('task','claude-code','session-1',NULL)"
+      )
+      .run()
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+    expect(authorityRows(f)).toEqual([])
+  } finally {
+    await f.close()
+  }
+})
+
+test('#172: a stale NULL row is re-elected once a single-computer chat owner exists', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    f.db
+      .prepare(
+        "INSERT OR REPLACE INTO chat_legacy_session_authority VALUES('task','claude-code','session-1',NULL)"
+      )
+      .run()
+    // User opened a chat tab in the task after the bad election.
+    f.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('chat','task','claude-chat',1)"
+      )
+      .run()
+    await s.ownership.register({
+      id: 'chat-owner',
+      taskId: 'task',
+      tabId: 'chat',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+    expect(authorityRows(f)).toEqual([{ conversation_id: 'chat-owner' }])
+  } finally {
+    await f.close()
+  }
+})
+
+test('#172: a genuine cross-computer ambiguity still fences the terminal resume', async () => {
+  const f = await fixture()
+  try {
+    const s = f.services()
+    for (const [tab, pc] of [
+      ['a', 'pc'],
+      ['b', 'pc2']
+    ] as const) {
+      f.db
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES(?,'task','claude-chat',0)"
+        )
+        .run(tab)
+      await s.ownership.register({
+        id: tab,
+        taskId: 'task',
+        tabId: tab,
+        mode: 'claude-chat',
+        computerId: pc,
+        epoch: 1
+      })
+    }
+    f.db
+      .prepare(
+        "INSERT INTO chat_legacy_session_authority VALUES('task','claude-code','session-1',NULL)"
+      )
+      .run()
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).rejects.toThrow(/historical provider session is ambiguous/)
+    expect(authorityRows(f)).toEqual([{ conversation_id: null }])
+  } finally {
+    await f.close()
+  }
+})

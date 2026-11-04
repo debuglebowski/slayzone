@@ -28,6 +28,7 @@ import {
   createLegacyChatSource,
   legacyChatTabContentSql,
   legacyChatTaskContentSql,
+  legacySessionAmbiguous,
   createHubChatRelay,
   createHubProviderConfigStore,
   terminalStorageAgentId,
@@ -306,6 +307,16 @@ export function createComputerChatServices(opts: {
         : 0
     }
   }
+  /** Computer a legacy owner's provider session ran on. One definition for the
+   * migration, its session election, and the terminal-resume ambiguity fence:
+   * if they disagreed, a session could be elected in one and fenced in another. */
+  const sessionComputer = async (owner: HubChatOwnership) => {
+    const recorded = await opts.db.get<{ computer_id: string }>(
+      'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+      [owner.tabId]
+    )
+    return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
+  }
   const source = createLegacyChatSource({
     diagnostics: opts.diagnostics,
     freezeMetadata: (owner, migrationId, candidate) =>
@@ -326,13 +337,7 @@ export function createComputerChatServices(opts: {
     readAttachment: (_owner, ref) => opts.attachments.read(ref),
     readPinnedAttachment: opts.attachments.readForMigration,
     collectReleasedAttachments: opts.attachments.readForMigration?.collectGarbage,
-    resolveSessionComputer: async (owner) => {
-      const recorded = await opts.db.get<{ computer_id: string }>(
-        'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
-        [owner.tabId]
-      )
-      return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
-    },
+    resolveSessionComputer: sessionComputer,
     quiesce: async (owner) => {
       if (await opts.hasLiveTask(owner.taskId))
         throw new ChatMigrationDeferredError(
@@ -507,13 +512,7 @@ export function createComputerChatServices(opts: {
       opts.diagnostics?.hasTask
         ? opts.diagnostics.hasTask(taskId)
         : ((await opts.diagnostics?.tasks()) ?? []).includes(taskId),
-    resolveMigrationComputer: async (owner) => {
-      const recorded = await opts.db.get<{ computer_id: string }>(
-        'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
-        [owner.tabId]
-      )
-      return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
-    },
+    resolveMigrationComputer: sessionComputer,
     recoverComputer,
     bootstrap,
     migrate: migration.ensure,
@@ -881,10 +880,7 @@ export function createComputerChatServices(opts: {
         !owner &&
         native &&
         context?.mode &&
-        (await opts.db.get(
-          'SELECT 1 FROM chat_legacy_session_authority WHERE task_id=? AND mode=? AND provider_session_id=? AND conversation_id IS NULL',
-          [taskId, terminalStorageAgentId(context.mode), native]
-        ))
+        (await legacySessionAmbiguous(opts.db, taskId, context.mode, native, sessionComputer))
       )
         throw new Error(
           'Original computer for this historical provider session is ambiguous. Open its original chat before continuing.'
