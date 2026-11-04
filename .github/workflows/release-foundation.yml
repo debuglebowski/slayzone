@@ -269,7 +269,10 @@ jobs:
 
   build:
     name: Build (${{ matrix.name }})
-    needs: [resolve, preflight]
+    # Not preflight: each build runs the same frozen install itself, so waiting on it only
+    # delayed the long poles. Every ship/deploy gate (deploy-convex, bundle, publish-channel,
+    # draft-upload) still needs preflight.
+    needs: [resolve]
     strategy:
       fail-fast: false
       matrix:
@@ -499,7 +502,7 @@ jobs:
   # not a build step, so it too waits for typecheck (a build step cannot `needs:` it).
   draft-upload:
     runs-on: ubuntu-latest
-    needs: [resolve, build, typecheck]
+    needs: [resolve, preflight, build, typecheck]
     if: needs.resolve.outputs.mode == 'dry-run'
     permissions:
       contents: write
@@ -528,7 +531,7 @@ jobs:
 
   bundle:
     runs-on: ubuntu-latest
-    needs: [resolve, build, typecheck, deploy-convex]
+    needs: [resolve, preflight, build, typecheck, deploy-convex]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -592,7 +595,7 @@ jobs:
   publish-channel:
     name: Publish (${{ matrix.channel }})
     runs-on: ubuntu-latest
-    needs: [resolve, bundle, typecheck]
+    needs: [resolve, preflight, bundle, typecheck]
     permissions:
       contents: write
     strategy:
