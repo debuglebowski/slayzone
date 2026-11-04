@@ -714,6 +714,7 @@ run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
 run_harness packages/apps/hub/src/recovery-second-pass.test.ts
 run_harness packages/apps/hub/src/computer-chat-isolation.test.ts
+run_harness packages/apps/hub/src/shared-session-ownership.test.ts
 run_harness packages/apps/hub/src/computer-chat-live-task-fallback.test.ts
 run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
 run_harness packages/apps/hub/src/content-third-pass.test.ts

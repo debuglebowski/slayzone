@@ -31,6 +31,7 @@ import {
   legacySessionAmbiguous,
   createHubChatRelay,
   createHubProviderConfigStore,
+  isStorageOnlyChatOwner,
   terminalStorageAgentId,
   type ChatComputerRequest,
   type HubChatOwnership,
@@ -224,7 +225,7 @@ export function createComputerChatServices(opts: {
       [owner.taskId]
     )
     if (!task) throw new Error('Chat task no longer exists')
-    if (owner.tabId.startsWith('artifact-store:') || owner.tabId === `task-content:${owner.taskId}`)
+    if (isStorageOnlyChatOwner(owner))
       return {
         identity: {
           id: owner.id,
@@ -846,13 +847,15 @@ export function createComputerChatServices(opts: {
       taskId: string,
       context?: { mode?: string; conversationId?: string | null }
     ) {
+      // Storage-only owners never fence agent starts (see the migration fence
+      // below): an agent neither resumes from nor writes into their history, so
+      // their missing history surfaces where it is read, not here.
       const assertTaskHistory = async () => {
-        const missing = await opts.db.get<{ reason: string }>(
-          `SELECT u.reason FROM chat_unavailable_owners u JOIN chat_ownership o ON o.id=u.conversation_id
-          WHERE o.task_id=? AND o.state='active' AND o.computer_id=u.computer_id AND o.epoch=u.epoch LIMIT 1`,
-          [taskId]
-        )
-        if (missing) throw new Error(missing.reason)
+        for (const o of await ownership.forTask(taskId)) {
+          if (o.state !== 'active' || isStorageOnlyChatOwner(o)) continue
+          const missing = await ownership.unavailable(o.id)
+          if (missing) throw new Error(missing.reason)
+        }
       }
       const lifecycleState = await opts.db.get<{ state: string }>(
         'SELECT state FROM chat_task_lifecycle WHERE task_id=?',
@@ -860,15 +863,46 @@ export function createComputerChatServices(opts: {
       )
       if (lifecycleState && lifecycleState.state !== 'active')
         throw new Error('This task is paused or deleted. Restore it before starting an agent.')
-      if (
-        await opts.db.get(
-          "SELECT 1 FROM chat_ownership WHERE task_id=? AND (state IN ('copying','verified') OR cleanup_pending=1) LIMIT 1",
-          [taskId]
-        )
+      // A storage-only owner has no tab to reopen and no provider session for an
+      // agent to resume: its pending migration fences nothing an agent touches
+      // (terminal prompts land in the computer's own store, v187 triggers refuse
+      // legacy writes once a migration starts, cleanup removes only copied rows)
+      // and retries when the task is idle. Chat-tab owners fence.
+      const chatOwners = (await ownership.forTask(taskId)).filter((o) => !isStorageOnlyChatOwner(o))
+      const chatLabel = async (o: HubChatOwnership) =>
+        (
+          await opts.db.get<{ label: string | null }>(
+            'SELECT label FROM terminal_tabs WHERE id=? AND task_id=?',
+            [o.tabId, taskId]
+          )
+        )?.label?.trim() || null
+      // Copy/verify, or an active owner whose legacy cleanup is still owed:
+      // opening that chat runs the migration to completion.
+      const migrating = chatOwners.find(
+        (o) =>
+          o.state === 'copying' ||
+          o.state === 'verified' ||
+          (o.state !== 'deleted' && o.cleanupPending)
       )
+      if (migrating) {
+        const label = await chatLabel(migrating)
         throw new Error(
-          'Chat history migration is pending. Reopen chat before starting this agent.'
+          label
+            ? `Chat history migration is pending for "${label}". Open that chat to finish it, then start this agent.`
+            : 'Chat history migration is pending for a chat in this task. Open that chat to finish it, then start this agent.'
         )
+      }
+      // A deleted chat stays pending until every computer that held it
+      // acknowledges the deletion, which happens when that computer connects.
+      const deleting = chatOwners.find((o) => o.state === 'deleted' && o.cleanupPending)
+      if (deleting) {
+        const label = await chatLabel(deleting)
+        throw new Error(
+          label
+            ? `Deleted chat "${label}" is still being removed from its computer. Reconnect that computer, then start this agent.`
+            : 'A deleted chat is still being removed from its computer. Reconnect that computer, then start this agent.'
+        )
+      }
       const native =
         context?.conversationId ??
         (context?.mode

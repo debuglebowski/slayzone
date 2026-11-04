@@ -3,6 +3,7 @@ import type { ChatOwnership, ChatTabTransition, ConversationIdentity } from '../
 import { createChatOwnershipStore } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 import { legacyChatTabContentSql } from './legacy-census'
+import { isStorageOnlyChatOwner } from './storage-mode'
 
 export interface ComputerChatInventory extends ChatOwnership {
   inbox?: boolean
@@ -104,7 +105,7 @@ export function createChatRecovery(opts: {
       // implying a resumable backend or materializing an invented chat tab.
       const storageOnly =
         artifactRoot || promptRoot || !['claude-chat', 'codex-chat'].includes(i.mode)
-      if (entry.inbox && !artifactRoot && i.tabId !== `task-content:${i.taskId}`) continue
+      if (entry.inbox && !isStorageOnlyChatOwner(i)) continue
       if (entry.state === 'deleted') {
         const exact = await owners.get(i.id)
         if (exact) {

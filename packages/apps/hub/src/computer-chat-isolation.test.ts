@@ -40,6 +40,9 @@ async function fixture() {
     }
   } as never)
   let chatBroken = false
+  let live = false
+  let intercept: ((raw: { kind?: string }) => Promise<void> | undefined) | null = null
+  const sent: unknown[] = []
   const services = () =>
     createComputerChatServices({
       db: h.slayDb,
@@ -49,19 +52,44 @@ async function fixture() {
       },
       attachments: { read: async () => new Uint8Array() },
       request: async (_id: string, raw: unknown) => {
+        sent.push(raw)
+        await intercept?.(raw as { kind?: string })
         if (chatBroken)
           throw new Error('Chat storage is unavailable (database disk image is malformed)')
         return pc.request(JSON.parse(JSON.stringify(raw)))
       },
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
-      hasLiveTask: async () => false
+      hasLiveTask: async () => live
     } as never)
   return {
     ...h,
     services,
     breakChat: () => {
       chatBroken = true
+    },
+    /** Every request the hub sent the computer, in order. */
+    sent,
+    setLive: (value: boolean) => {
+      live = value
+    },
+    /** Holds the next computer request of `kind` until `release()`. */
+    pauseAt: (kind: string) => {
+      let reached!: () => void
+      let release!: () => void
+      const arrived = new Promise<void>((r) => {
+        reached = r
+      })
+      const gate = new Promise<void>((r) => {
+        release = r
+      })
+      intercept = (raw) => {
+        if (raw.kind !== kind) return undefined
+        intercept = null
+        reached()
+        return gate
+      }
+      return { arrived, release }
     },
     storage: () => openChatStorage({ stateDir: dir, hubScope: 'hub' }),
     close: async () => {
@@ -333,6 +361,95 @@ test('#172: a stale NULL row is re-elected once a single-computer chat owner exi
   }
 })
 
+/**
+ * A storage-only `task-content:` owner holds task history, never a provider
+ * session, and has no tab — so "reopen chat" cannot run its migration. If its
+ * copy keeps failing (damaged legacy row), a terminal-only user must still be
+ * able to start agents. Chat-tab owners keep fencing.
+ */
+const seedDamagedTaskContent = (f: Awaited<ReturnType<typeof fixture>>) =>
+  f.db
+    .prepare(
+      "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','m1','{not json')"
+    )
+    .run()
+
+test('a stuck storage-only task-content migration does not fence terminal agent starts', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    seedDamagedTaskContent(f)
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    const owners = await s.ownership.forTask('task')
+    expect(owners.map((o) => [o.tabId, o.state])).toEqual([['task-content:task', 'copying']])
+    await expect(s.resolvePtyComputer('task', { mode: 'terminal' })).resolves.toBe('pc')
+    await expect(s.resolvePtyComputer('task', { mode: 'claude-code' })).resolves.toBe('pc')
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+    // Still pending: the copy is retried, never abandoned.
+    expect((await s.ownership.forTab('task-content:task'))?.state).toBe('copying')
+  } finally {
+    await f.close()
+  }
+})
+
+test('a pending chat-tab migration still fences agent starts alongside a stuck task-content owner', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    seedDamagedTaskContent(f)
+    f.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('chat','task','claude-chat',1)"
+      )
+      .run()
+    f.db.prepare("INSERT INTO chat_events(tab_id,seq,event) VALUES('chat',1,'{not json')").run()
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    // A task migrates its owners in id order and stops at the first failure,
+    // so the other damaged owner may not have started yet. Start it.
+    for (const o of await s.ownership.forTask('task'))
+      if (o.state === 'legacy')
+        await s.ownership.beginMigration(o.id, {
+          expectedComputerId: null,
+          expectedEpoch: o.epoch,
+          migrationId: `m-${o.id}`,
+          destinationComputerId: 'pc'
+        })
+    expect((await s.ownership.forTask('task')).map((o) => [o.tabId, o.state]).sort()).toEqual([
+      ['chat', 'copying'],
+      ['task-content:task', 'copying']
+    ])
+    for (const mode of ['terminal', 'claude-code'])
+      await expect(s.resolvePtyComputer('task', { mode })).rejects.toThrow(/migration is pending/i)
+  } finally {
+    await f.close()
+  }
+})
+
+test('a pending chat-tab migration still fences agent starts on its own', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    f.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position,label) VALUES('chat','task','claude-chat',1,'Planning')"
+      )
+      .run()
+    f.db.prepare("INSERT INTO chat_events(tab_id,seq,event) VALUES('chat',1,'{not json')").run()
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    expect((await s.ownership.forTab('chat'))?.state).toBe('copying')
+    await expect(s.resolvePtyComputer('task', { mode: 'claude-code' })).rejects.toThrow(
+      'Chat history migration is pending for "Planning". Open that chat to finish it, then start this agent.'
+    )
+  } finally {
+    await f.close()
+  }
+})
+
 test('#172: a genuine cross-computer ambiguity still fences the terminal resume', async () => {
   const f = await fixture()
   try {
@@ -364,6 +481,159 @@ test('#172: a genuine cross-computer ambiguity still fences the terminal resume'
       s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
     ).rejects.toThrow(/historical provider session is ambiguous/)
     expect(authorityRows(f)).toEqual([{ conversation_id: null }])
+  } finally {
+    await f.close()
+  }
+})
+
+const insertTurn = (f: Awaited<ReturnType<typeof fixture>>, id: string, preview: string) =>
+  f.db
+    .prepare(
+      "INSERT INTO agent_turns(id,worktree_path,task_id,terminal_tab_id,snapshot_sha,prompt_preview,created_at) VALUES(?,'/w','task','tab','sha',?,?)"
+    )
+    .run(id, preview, Date.now())
+const turnPreviews = (f: Awaited<ReturnType<typeof fixture>>) =>
+  f.db.prepare("SELECT id,prompt_preview FROM agent_turns WHERE task_id='task' ORDER BY id").all()
+const killRequests = (f: Awaited<ReturnType<typeof fixture>>) =>
+  f.sent.filter((r) => /"(kill|pty\.kill|stop[A-Za-z]*|release[A-Za-z]*)"/.test(JSON.stringify(r)))
+
+test('a terminal agent starting during a healthy task-content copy leaves the migration intact', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    insertTurn(f, 'turn-before', 'before copy')
+    const s = f.services()
+    const pause = f.pauseAt('transfer.begin')
+    const migrating = s.migrateIdleComputer('pc')
+    await pause.arrived
+    expect((await s.ownership.forTab('task-content:task'))?.state).toBe('copying')
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+    f.setLive(true)
+    pause.release()
+    await migrating
+    const owner = await s.ownership.forTab('task-content:task')
+    expect(owner).toMatchObject({ state: 'active', computerId: 'pc', cleanupPending: false })
+    // Every copied legacy row reached the computer before the hub dropped it.
+    const local = f.storage()
+    try {
+      expect(local.records(owner!.id, 'prompt').map((r) => r.id)).toEqual(['p1'])
+      expect(
+        local
+          .records(owner!.id, 'settings')
+          .filter((r) => r.id.startsWith('legacy-turn-preview:'))
+          .map((r) => [r.id, (r.value as { promptPreview: string }).promptPreview])
+      ).toEqual([['legacy-turn-preview:turn-before', 'before copy']])
+    } finally {
+      local.close()
+    }
+    expect(f.db.prepare("SELECT id FROM agent_prompts WHERE task_id='task'").all()).toEqual([])
+    expect(turnPreviews(f)).toEqual([{ id: 'turn-before', prompt_preview: '' }])
+    // The running agent was never stopped by the migration.
+    expect(killRequests(f)).toEqual([])
+    expect((await s.prompts('task')).map((p) => [p.id, p.text])).toEqual([['p1', 'hello']])
+  } finally {
+    await f.close()
+  }
+})
+
+test('a terminal turn cannot write a legacy prompt preview during the copy, same as after activation', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    const s = f.services()
+    const pause = f.pauseAt('transfer.begin')
+    const migrating = s.migrateIdleComputer('pc')
+    await pause.arrived
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+    f.setLive(true)
+    // The hub refuses legacy preview text once any owner of the task left
+    // `legacy` (migration v187 trigger): nothing can slip in behind the frozen
+    // copy. The turn boundary itself still records.
+    expect(() => insertTurn(f, 'turn-during', 'during copy')).toThrow(
+      /Prompt previews are computer-owned/
+    )
+    insertTurn(f, 'turn-during', '')
+    pause.release()
+    await migrating
+    expect((await s.ownership.forTab('task-content:task'))?.state).toBe('active')
+    expect(() => insertTurn(f, 'turn-after', 'after activation')).toThrow(
+      /Prompt previews are computer-owned/
+    )
+    expect(turnPreviews(f)).toEqual([{ id: 'turn-during', prompt_preview: '' }])
+    expect(killRequests(f)).toEqual([])
+    expect((await s.prompts('task')).map((p) => p.text)).toEqual(['hello'])
+  } finally {
+    await f.close()
+  }
+})
+
+test('an unavailable storage-only owner does not fence terminal agent starts', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    const artifacts = await s.artifactOwner('task')
+    for (const o of await s.ownership.forTask('task'))
+      await s.ownership.markUnavailable(o.id, 'pc', o.epoch)
+    expect((await s.ownership.forTask('task')).map((o) => o.tabId.split(':')[0]).sort()).toEqual([
+      'artifact-store',
+      'task-content'
+    ])
+    expect(await s.ownership.unavailable(artifacts.id)).toBeTruthy()
+    await expect(s.resolvePtyComputer('task', { mode: 'terminal' })).resolves.toBe('pc')
+    await expect(
+      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).resolves.toBe('pc')
+  } finally {
+    await f.close()
+  }
+})
+
+test('an unavailable chat-tab owner still fences agent starts', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    f.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('chat','task','claude-chat',1)"
+      )
+      .run()
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    const chat = (await s.ownership.forTab('chat'))!
+    expect(chat.state).toBe('active')
+    await s.ownership.markUnavailable(chat.id, 'pc', chat.epoch)
+    await expect(s.resolvePtyComputer('task', { mode: 'claude-code' })).rejects.toThrow(
+      /Chat history unavailable/
+    )
+  } finally {
+    await f.close()
+  }
+})
+
+test('a chat deletion awaiting its computer fences agent starts with its own message', async () => {
+  const f = await fixture()
+  try {
+    seedTerminalClaudeTask(f)
+    f.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('chat','task','claude-chat',1)"
+      )
+      .run()
+    const s = f.services()
+    await s.migrateIdleComputer('pc')
+    const chat = (await s.ownership.forTab('chat'))!
+    expect(chat.state).toBe('active')
+    await s.ownership.deleteConversation(chat.id)
+    expect(await s.ownership.get(chat.id)).toMatchObject({ state: 'deleted', cleanupPending: true })
+    await expect(s.resolvePtyComputer('task', { mode: 'claude-code' })).rejects.toThrow(
+      'A deleted chat is still being removed from its computer. Reconnect that computer, then start this agent.'
+    )
   } finally {
     await f.close()
   }
