@@ -90,6 +90,9 @@ export const SECURITY_EVENTS = [
   'computer.gh',
   'computer.allowed_roots.set',
   'computer.shutdown',
+  /** A direct-link capability issued to a client (hub `direct-link.ts`). `detail`: the
+   *  grant id, resource kind and id, TTL — never the token. */
+  'computer.direct_grant',
   /** `denied`: a boot rule refused to start the hub (hub `boot-rules.ts`). `success`: a
    *  hub that requires login started; `detail.methods` = how it can be signed in to (T-10). */
   'hub.boot',

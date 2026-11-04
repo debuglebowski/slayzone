@@ -740,6 +740,8 @@ describe('createRoutingPtyBackend', () => {
     })) as PtyHandle
     await handle.whenSpawned
     expect(handle.ownsOutput).toBe(true)
+    // Direct link: the routed handle names its computer, for issuing a capability.
+    expect(handle.computerId).toBe('computer-1')
     const got: Array<[string, number | undefined]> = []
     handle.onData((d, seq) => got.push([d, seq]))
     gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'a' })

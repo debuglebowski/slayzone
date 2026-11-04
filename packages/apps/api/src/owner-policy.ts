@@ -797,6 +797,20 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
   'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
   'computers.resolveTaskComputer': checked(task('taskId')),
+  // A direct-link capability names one session or one chat tab, by `target.kind`.
+  'computers.issueDirectLink': checked({
+    pick: (raw) => {
+      const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
+      const r =
+        t?.kind === 'pty'
+          ? res('session', t.sessionId)
+          : t?.kind === 'chat'
+            ? res('tab', t.tabId)
+            : null
+      return r ? [r] : []
+    },
+    sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
+  }),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
   'computers.delete': none(COMPUTER),

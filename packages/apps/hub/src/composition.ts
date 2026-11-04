@@ -1,3 +1,4 @@
+import { createDirectLinkIssuer, type DirectLinkIssuer } from './direct-link'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
@@ -130,6 +131,7 @@ import {
   getChatDeps,
   setExecutionContextProbe,
   setTerminalCommandProbe,
+  getPtyDirectTarget,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/hub'
@@ -422,6 +424,8 @@ export function composeServer(opts: {
   // Populated by the async computer init (createHubAuth is async — migrations); a
   // later unit reads these after `computersReady` to mount the gateway in server.ts.
   let computerGatewayRef: HubComputerGateway | null = null
+  // Direct client ↔ computer capabilities (direct-link.ts). Built with the gateway.
+  let directLinkIssuer: DirectLinkIssuer | null = null
   let hubAuthRef: HubAuth | null = null
   // Who a join token is for (T-20), read through the late-bound ref above.
   const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
@@ -1640,6 +1644,11 @@ export function composeServer(opts: {
     // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
     // only on a hub with login. The REST twin reads the same function.
     findAccount: joinTokenAccounts,
+    // Before the gateway is up there is no computer to reach: the client relays.
+    issueDirectLink: (target, caller) =>
+      directLinkIssuer
+        ? directLinkIssuer.issue(target, caller)
+        : Promise.resolve({ available: false, reason: 'no-computer' }),
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and
@@ -1729,6 +1738,19 @@ export function composeServer(opts: {
       ...(opts.floodLimits ? {} : { floodLimits: false as const })
     })
     computerGatewayRef = computerGateway
+    directLinkIssuer = createDirectLinkIssuer({
+      gateway: computerGateway,
+      resolvePty: async (sessionId) => getPtyDirectTarget(sessionId),
+      // An ACTIVE owner only: a tab mid-migration, deleted, or whose computer lost
+      // its history is the relay's to explain.
+      resolveChat: async (tabId) => {
+        const owner = await computerChat.ownership.forTab(tabId)
+        if (!owner || owner.state !== 'active' || !owner.computerId) return null
+        if (await computerChat.ownership.unavailable(owner.id)) return null
+        return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
+      },
+      ...(placement.gate ? { gate: placement.gate } : {})
+    })
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its
     // lifecycle hook to the computer's OWN loopback relay, which forwards the raw

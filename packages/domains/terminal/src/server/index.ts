@@ -149,6 +149,7 @@ export {
   hasLivePty,
   getBuffer,
   getBufferSince,
+  getPtyDirectTarget,
   writePty,
   submitPty,
   killPty,

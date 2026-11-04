@@ -64,6 +64,7 @@ export {
   findSessionByTaskIdAndMode,
   getBuffer,
   getBufferSince,
+  getPtyDirectTarget,
   getState,
   hasLivePty,
   hasPty,

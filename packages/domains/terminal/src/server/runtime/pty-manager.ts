@@ -3497,6 +3497,22 @@ function outputOwner(session: PtySession): PtyHandle | null {
   return handle.ownsOutput === true && handle.getReplay ? handle : null
 }
 
+/**
+ * Where a client can reach this session directly (docs/direct-link.md): the
+ * computer running it, and whether that computer holds its only scrollback. A
+ * session whose output the hub buffers (`direct: false`) has nothing to read there.
+ * Null: no such session, or one this hub runs without a computer.
+ */
+export function getPtyDirectTarget(
+  sessionId: string
+): { computerId: string; direct: boolean } | null {
+  const session = sessions.get(sessionId)
+  if (!session) return null
+  const handle = session.pty as unknown as PtyHandle
+  if (!handle.computerId) return null
+  return { computerId: handle.computerId, direct: outputOwner(session) !== null }
+}
+
 export { PtyOutputUnavailableError }
 
 /** Replay from the owner; unavailable (never a hang or a raw transport error) while away. */

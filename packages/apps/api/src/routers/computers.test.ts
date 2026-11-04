@@ -491,3 +491,30 @@ test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a use
     })
   expect(code).toBe('JOIN_TOKEN_OWNER_UNSUPPORTED')
 })
+
+test('computers.issueDirectLink: relays to the hub issuer with the caller; unsupported without one', async () => {
+  // No issuer wired: the client is told to use the relay, never an error.
+  expect(await caller.issueDirectLink({ target: { kind: 'pty', sessionId: 's1' } })).toEqual({
+    available: false,
+    reason: 'unsupported'
+  })
+  const seen: unknown[] = []
+  setComputersDeps({
+    ...fakeDeps,
+    issueDirectLink: async (target, who) => {
+      seen.push({ target, who })
+      return { available: false, reason: 'no-address' }
+    }
+  })
+  try {
+    expect(await caller.issueDirectLink({ target: { kind: 'chat', tabId: 'tab-1' } })).toEqual({
+      available: false,
+      reason: 'no-address'
+    })
+    expect(seen).toEqual([
+      { target: { kind: 'chat', tabId: 'tab-1' }, who: { userId: null, ip: null } }
+    ])
+  } finally {
+    setComputersDeps(fakeDeps)
+  }
+})

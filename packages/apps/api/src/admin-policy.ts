@@ -467,6 +467,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.threads.onChanged': 'user',
   'computers.claim': 'admin',
   'computers.delete': 'user',
+  'computers.issueDirectLink': 'user',
   'computers.list': 'user',
   'computers.mintJoinToken': 'admin',
   'computers.onStatusChange': 'user',

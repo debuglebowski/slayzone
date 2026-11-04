@@ -1297,6 +1297,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       get ownsOutput(): boolean {
         return entry.ownsOutput
       },
+      computerId,
       onAvailability: (cb: (available: boolean) => void): ExecDisposable => {
         entry.availability.add(cb)
         return { dispose: () => entry.availability.delete(cb) }

@@ -1,10 +1,12 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import {
+  currentSecurityContext,
   securityEvent,
   type SecurityEventName,
   type SecurityOutcome
 } from '@slayzone/platform/security-log'
+import type { DirectLinkIssueResult } from '../shared/direct-link'
 import { TRPCError } from '@trpc/server'
 import {
   router,
@@ -274,6 +276,30 @@ export const computersRouter = router({
     }),
 
   /** Effective computer for a task (task binding → project default → null). */
+  /**
+   * A short-lived capability to reach a terminal session or chat tab directly on the
+   * computer that holds it (docs/direct-link.md). The owner gate has checked the
+   * session/tab before this runs; the hub's issuer adds the placement gate and the
+   * reachability rule. `available: false` means "use the hub relay", never an error.
+   */
+  issueDirectLink: publicProcedure
+    .input(
+      z.object({
+        target: z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('pty'), sessionId: z.string().min(1).max(200) }),
+          z.object({ kind: z.literal('chat'), tabId: z.string().min(1).max(200) })
+        ])
+      })
+    )
+    .mutation(async ({ ctx, input }): Promise<DirectLinkIssueResult> => {
+      const issue = getComputersDepsOrNull()?.issueDirectLink
+      if (!issue) return { available: false, reason: 'unsupported' }
+      return issue(input.target, {
+        userId: ctx.principal?.userId ?? null,
+        ip: currentSecurityContext()?.ip ?? null
+      })
+    }),
+
   resolveTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {

@@ -220,6 +220,11 @@ export interface PtyHandle {
    * ({@link getReplay}). The caller keeps no copy. False/absent: the caller buffers.
    */
   readonly ownsOutput?: boolean
+  /**
+   * The connected computer that runs this session (a routed backend), for clients
+   * that reach it directly (docs/direct-link.md). Absent on a local backend.
+   */
+  readonly computerId?: string
   /** Replay from the owner's buffer (see `BufferSinceResult`). With {@link ownsOutput}. */
   getReplay?(afterSeq: number): Promise<BufferSinceResult>
   /** Clear the owner's buffer. With {@link ownsOutput}. */
