@@ -1477,6 +1477,13 @@ export function createChatTransport(
       return
     }
 
+    // Stop cut this turn (`stoppedTurn`): its last fragments are not drawn; its
+    // saved events and its end still land.
+    if (proc.stoppedTurn) {
+      if (shown.kind === 'result') proc.stoppedTurn = false
+      else if (isStreamFragment(shown.kind)) return
+    }
+
     if (opensAgentTurn(tab, shown)) {
       tab.workspaceTracker?.observeAgentTurn({
         tabId: tab.tabId,
@@ -1620,6 +1627,7 @@ export function createChatTransport(
   /** A turn the agent opened (`opensAgentTurn`): running until its result. */
   function markAgentTurnStarted(tab: ChatTab): void {
     tab.turnInterrupted = false
+    if (tab.proc) tab.proc.stoppedTurn = false
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
     armWatchdog(tab)
@@ -1629,6 +1637,7 @@ export function createChatTransport(
   function markTurnStarted(tab: ChatTab): void {
     tab.turnProgress = false
     tab.turnInterrupted = false
+    if (tab.proc) tab.proc.stoppedTurn = false
     deps.userInputTracker.mark(stateKey(tab))
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
@@ -2886,7 +2895,11 @@ export function createChatTransport(
     if (popped) {
       if (reach?.sent !== false) proc.discardTurn = true
       if (popped.id && reach?.sent && !reach.started) proc.lateTurnOf = popped.id
-    } else tab.turnInterrupted = true
+    } else {
+      tab.turnInterrupted = true
+      // A running turn ends with a result; nothing else would clear the flag.
+      if (tab.terminalState === 'running' || tab.pendingPrompts.size > 0) proc.stoppedTurn = true
+    }
     // Messages the CLI holds queued would run right after the interrupt. A
     // steered one goes back to the queue; one the provider cannot withdraw
     // (Codex) dies with the turn it was added to — the queue sends it again.

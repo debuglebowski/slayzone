@@ -648,6 +648,14 @@ export interface ChatTimelineState {
   /** Such a turn is running now: the chat reads as working until its result. */
   agentTurnOpen: boolean
   /**
+   * The user stopped a turn and the agent has not ended it yet. Stop shows at once
+   * (`interrupted`), but the CLI still writes what it had before it read the
+   * interrupt, then ends the turn (aborted `result`). That output is the stopped
+   * turn's, never a new turn the agent started. Ends at a result, a new user
+   * message, or a process starting or ending (a replaced process sends no result).
+   */
+  stopPending: boolean
+  /**
    * Turns closed so far, user and agent-started alike (result, Stop, a refused
    * or withdrawn message, the process ending). Identifies the open turn: it is
    * `turnsClosed` while it runs, and moves on when it closes.
@@ -734,6 +742,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     freshStartPending: false,
     agentStartedTurns: opts.agentStartedTurns ?? false,
     agentTurnOpen: false,
+    stopPending: false,
     turnTriggers: NO_TRIGGERS,
     turnNotifications: NO_NOTIFICATIONS,
     turnsClosed: 0,
@@ -1357,19 +1366,29 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // userMessagesSent so isInFlight drops, and append a marker so the
       // timeline shows where the turn was cut. Persisted into the buffer so
       // replay reconstructs the boundary even if the renderer was offline.
-      if (!isTurnOpen(state)) return state
+      // A stopped turn stopped again (it ran on before the CLI read the first
+      // Stop) moves its one marker after the work it did meanwhile.
+      const stoppedAgain =
+        !isTurnOpen(state) && event.reason === undefined && workedSinceStop(state)
+      if (!isTurnOpen(state) && !stoppedAgain) return state
       const item: TimelineItem = {
         kind: 'interrupted',
         timestamp: ts,
         ...(event.reason ? { reason: event.reason } : {})
       }
-      const failed = supersedeContinuedInterrupt(failInFlightSubAgents(state, 'interrupted'))
+      const failed = supersedeContinuedInterrupt(
+        failInFlightSubAgents(state, 'interrupted'),
+        stoppedAgain
+      )
       return {
         ...failed,
         timeline: appended(failed.timeline, item),
         // An agent-started turn is closed instead; no user turn's count moves.
-        resultCount: state.agentTurnOpen ? state.resultCount : state.resultCount + 1,
+        resultCount:
+          state.agentTurnOpen || stoppedAgain ? state.resultCount : state.resultCount + 1,
         agentTurnOpen: false,
+        // A Stop: the agent still ends this turn (a message it never ran does not).
+        stopPending: state.agentStartedTurns && event.reason === undefined,
         // Defensive: clear any straggling stream state so the typing indicator
         // can't read "Writing…" off a half-open block once the turn is gone.
         openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
@@ -2948,6 +2967,7 @@ function opensAgentTurn(state: ChatTimelineState, event: AgentEvent): boolean {
     case 'stream-block-delta':
       return !(
         state.agentTurnOpen ||
+        state.stopPending ||
         state.importingHistory ||
         event.parentToolUseId != null ||
         isInFlight(state) ||
@@ -2973,20 +2993,31 @@ function applyAgentTurn(state: ChatTimelineState, event: AgentEvent): ChatTimeli
       return state.importingHistory ? state : { ...state, importingHistory: true }
     case 'user-message': {
       const importing = event.history === true
-      return state.importingHistory === importing
-        ? state
-        : { ...state, importingHistory: importing }
+      const next = importing ? state : endStopPending(state)
+      return next.importingHistory === importing ? next : { ...next, importingHistory: importing }
     }
     case 'turn-init':
-    case 'result':
       return state.importingHistory ? { ...state, importingHistory: false } : state
+    case 'result': {
+      const next = endStopPending(state)
+      return next.importingHistory ? { ...next, importingHistory: false } : next
+    }
+    case 'session-spawn':
+    case 'process-exit':
+      return endStopPending(state)
     default:
       return opensAgentTurn(state, event) ? { ...state, agentTurnOpen: true } : state
   }
 }
 
-/** The process ended mid agent-started turn: close it where it was cut. */
-function endAgentTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
+/** A stopped turn's end (`stopPending`): output opens agent-started turns again. */
+function endStopPending(state: ChatTimelineState): ChatTimelineState {
+  return state.stopPending ? { ...state, stopPending: false } : state
+}
+
+/** The process ended (mid agent-started turn: close it where it was cut). */
+function endAgentTurn(prev: ChatTimelineState, ts: number): ChatTimelineState {
+  const state = endStopPending(prev)
   if (!state.agentTurnOpen) return state
   const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
   const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
@@ -3171,13 +3202,32 @@ function endedCommandStatus(status: string | undefined): CommandTaskStatus | nul
 }
 
 /**
- * An `interrupted` closing an agent-started turn that directly continues a user
- * turn already marked interrupted (a Stop the CLI never saw: the message ran
- * anyway and was stopped again) — one turn, one marker. The earlier marker is
- * superseded in place, so no row moves.
+ * A turn stopped and not yet ended (`stopPending`) showed output after its
+ * marker: the CLI ran on before it read the Stop.
  */
-function supersedeContinuedInterrupt(state: ChatTimelineState): ChatTimelineState {
-  if (!state.agentTurnOpen) return state
+function workedSinceStop(state: ChatTimelineState): boolean {
+  if (!state.stopPending) return false
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const it = state.timeline[i]
+    if (!it) return false
+    if (it.parentToolUseId != null) continue
+    return it.kind !== 'interrupted'
+  }
+  return false
+}
+
+/**
+ * An `interrupted` closing a turn that directly continues a user turn already
+ * marked interrupted (a Stop the CLI never saw: the message ran anyway and was
+ * stopped again) — one turn, one marker. The earlier marker is superseded in
+ * place, so no row moves. `stoppedAgain`: the stopped turn ran on without
+ * reopening (`stopPending`).
+ */
+function supersedeContinuedInterrupt(
+  state: ChatTimelineState,
+  stoppedAgain: boolean
+): ChatTimelineState {
+  if (!state.agentTurnOpen && !stoppedAgain) return state
   for (let i = state.timeline.length - 1; i >= 0; i--) {
     const it = state.timeline[i]
     if (!it) return state

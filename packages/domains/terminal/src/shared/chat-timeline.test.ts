@@ -3130,6 +3130,64 @@ describe('agent-started turn', () => {
     expect(isTurnOpen(s)).toBe(true)
   })
 
+  // Stop is not instant at the CLI: it still writes what it had before it read the
+  // interrupt, then ends the turn with an aborted result. That output must not
+  // read as a NEW turn the agent started (the Stop button and spinner coming back).
+  const lateOutput = (s: ChatTimelineState): ChatTimelineState => {
+    let n = reducer(s, {
+      type: 'event',
+      event: { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: ' more' }
+    })
+    n = reducer(n, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm-late' } })
+    n = reducer(n, { type: 'event', event: ev.text('m-late', 'more') })
+    return reducer(n, { type: 'event', event: ev.call('t-late', 'Bash') })
+  }
+
+  test("Stop: the stopped turn's last output does not reopen it; the next agent turn opens", () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'user-sent', id: 'u2', text: 'write' })
+    s = reducer(s, { type: 'event', event: userMsg('write', 'u2') })
+    s = reducer(s, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm-2' } })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    expect(isTurnOpen(s)).toBe(false)
+    s = lateOutput(s)
+    expect(isTurnOpen(s)).toBe(false)
+    s = reducer(s, { type: 'event', event: abortedResult() })
+    expect(isTurnOpen(s)).toBe(false)
+    // After the stopped turn's end, output again opens a turn the agent started.
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'the loop finished') })
+    expect(isTurnOpen(s)).toBe(true)
+  })
+
+  test('Stop of an agent turn: its last output does not reopen it', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    s = lateOutput(s)
+    expect(isTurnOpen(s)).toBe(false)
+  })
+
+  test('Stop whose process was replaced (no aborted result): the new process opens turns', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
+    s = reducer(s, { type: 'event', event: { kind: 'interrupted' } })
+    s = reducer(s, { type: 'event', event: { kind: 'session-spawn', spawnId: 'sp-2' } })
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'new process speaks') })
+    expect(isTurnOpen(s)).toBe(true)
+  })
+
+  test('a turn that never ran (already in the conversation) holds nothing back', () => {
+    let s = firstTurnDone(claude())
+    s = reducer(s, { type: 'user-sent', id: 'u2', text: 'dup' })
+    s = reducer(s, {
+      type: 'event',
+      event: { kind: 'interrupted', reason: 'already-in-conversation' }
+    })
+    expect(isTurnOpen(s)).toBe(false)
+    s = reducer(s, { type: 'event', event: ev.text('m-3', 'agent turn') })
+    expect(isTurnOpen(s)).toBe(true)
+  })
+
   test('the process ending closes it', () => {
     let s = firstTurnDone(claude())
     s = reducer(s, { type: 'event', event: ev.text('m-2', 'agent turn') })
