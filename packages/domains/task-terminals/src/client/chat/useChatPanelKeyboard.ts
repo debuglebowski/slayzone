@@ -33,7 +33,10 @@ export interface UseChatPanelKeyboardOpts {
   composerRef?: RefObject<HTMLTextAreaElement | null>
   /** The composer holds nothing (no text, no files). */
   draftEmpty?: boolean
-  /** Esc Esc with a nonempty composer clears its text and attachments. */
+  /**
+   * Esc Esc with a nonempty composer clears its text and attachments — the
+   * composer's `discardDraft`, which keeps them recoverable (prompt history + Undo).
+   */
   onClearDraft?: () => void
   /**
    * Esc Esc with no turn running and an empty composer — the TUI's double-Esc,

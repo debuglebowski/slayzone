@@ -542,7 +542,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       ...(sideQuestions.open ? { onDismissSideQuestion: sideQuestions.dismiss } : {}),
       composerRef: composer.textareaRef,
       draftEmpty: composer.draft === '' && composer.attachments.length === 0,
-      onClearDraft: composer.clearDraft,
+      onClearDraft: composer.discardDraft,
       ...(conversation.view.canRewind ? { onDoubleEscape: () => openRewind('edit') } : {}),
       jumpTurn: turnOutline.jump,
       scrollToBottom,

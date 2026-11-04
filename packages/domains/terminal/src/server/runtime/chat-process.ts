@@ -74,8 +74,17 @@ export class ChatProcess implements OutboxProcess {
   ended = false
   /** Being replaced by a newer generation: nothing it says counts any more. */
   replaced = false
-  /** The user interrupted a turn of this process (its 0-turn error is not a failed resume). */
+  /**
+   * The user interrupted a turn of this process (its 0-turn error is not a failed
+   * resume). For the process's lifetime: the resume guard reads it, never reset.
+   */
   interruptIssued = false
+  /**
+   * An interrupt went to the current turn: it is being stopped, nothing is added
+   * to it ("Send now" is refused). Per turn, unlike `interruptIssued`: cleared
+   * when the next turn starts.
+   */
+  stoppingTurn = false
   /**
    * The current turn's message was taken back (Stop before any output): the rest
    * of the turn is dropped at the door, up to and including its end.

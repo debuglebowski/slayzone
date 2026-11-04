@@ -187,6 +187,18 @@ export type LocalComputerHandle = {
    */
   awaitStartup: (windowMs: number) => Promise<LocalComputerExitInfo | null>
   /**
+   * Resolve true once the running computer reports it is connected to the hub
+   * (at once if it already is), false after `windowMs`, or as soon as supervision
+   * can no longer produce a connection (stalled, or `stop()`ped).
+   *
+   * The computer reports over the IPC channel the supervisor opens on spawn (see
+   * computer bin.ts). A spawned process is not yet a usable computer: it still has
+   * to dial and enroll, and until it has, no agent or terminal can start. The boot
+   * splash waits on this so the app does not open onto a machine that cannot run
+   * anything yet.
+   */
+  awaitHubConnected: (windowMs: number) => Promise<boolean>
+  /**
    * Cycle the computer in place (Settings → Computers restart button).
    *
    * Not merely "kill and let supervision respawn": this is the ONLY recovery
@@ -259,6 +271,13 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   let lastExit: (LocalComputerExitInfo & { at: number; seq: number }) | null = null
   /** `awaitStartup` waiters, woken by the next unrequested exit. */
   const exitWaiters = new Set<(info: LocalComputerExitInfo & { seq: number }) => void>()
+  /** Whether the CURRENT child has reported a live hub connection. */
+  let hubConnected = false
+  /** `awaitHubConnected` waiters: true on a connect, false once none can come. */
+  const connectWaiters = new Set<(connected: boolean) => void>()
+  const settleConnectWaiters = (connected: boolean): void => {
+    for (const settle of [...connectWaiters]) settle(connected)
+  }
 
   const clearTimers = (): void => {
     if (backoffTimer) clearTimeout(backoffTimer)
@@ -291,6 +310,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     if (stopped || restartsSuspended) return NO_RESTART
     if (needsReEnrollment) {
       stalled = 'needs-re-enrollment'
+      settleConnectWaiters(false)
       opts.logger(
         '[local-computer] not restarting: this computer must be enrolled again before it can connect'
       )
@@ -300,6 +320,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     if (attempt >= backoffMs.length) {
       opts.logger(`[local-computer] giving up after ${attempt} attempts`)
       stalled = 'backoff-exhausted'
+      settleConnectWaiters(false)
       opts.onPermanentFailure?.({ attempts: attempt, lastError, reason: lastReason })
       return NO_RESTART
     }
@@ -328,9 +349,13 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
         // A re-minted token overrides the (possibly spent) one in `opts.env`.
         ...(currentJoinToken ? { SLAYZONE_HUB_JOIN_TOKEN: currentJoinToken } : {})
       },
-      stdio: ['pipe', 'pipe', 'pipe']
+      // fd 3 = IPC: the computer reports its hub connection over it (see
+      // `awaitHubConnected`). It sends only; it unrefs its end so the channel never
+      // holds a stopping computer's loop open.
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc']
     })
     child = proc
+    hubConnected = false
     const seq = ++spawnSeq
     reaper.track(proc)
     const spawnedAt = Date.now()
@@ -358,6 +383,17 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     }
     proc.stdout?.on('data', pipe)
     proc.stderr?.on('data', pipe)
+    proc.on('message', (message: unknown) => {
+      if (child !== proc) return
+      const type = (message as { type?: unknown } | null)?.type
+      if (type === 'connected') {
+        if (!hubConnected) opts.logger('[local-computer] reported connected to hub')
+        hubConnected = true
+        settleConnectWaiters(true)
+      } else if (type === 'disconnected') {
+        hubConnected = false
+      }
+    })
 
     proc.on('error', (err) => {
       opts.logger(`[local-computer] spawn error: ${String(err)}`)
@@ -369,6 +405,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     })
     proc.on('exit', (code, signal) => {
       if (child !== proc) return
+      hubConnected = false
       // A computer that needs re-enrolling will NEVER reconnect by restarting: the hub
       // has forgotten its identity, and only an operator enrolling it again fixes
       // that. Respawning would burn the backoff budget re-failing identically. Read
@@ -435,6 +472,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     stalled = null
     const proc = child
     child = null
+    hubConnected = false
     if (proc) {
       opts.logger(`[local-computer] restart requested — stopping pid=${proc.pid}`)
       await reaper.kill(proc, restartSigtermGraceMs)
@@ -468,6 +506,20 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     })
   }
 
+  const awaitHubConnected = (windowMs: number): Promise<boolean> => {
+    if (hubConnected && child) return Promise.resolve(true)
+    if (stopped || stalled) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      const settle = (connected: boolean): void => {
+        clearTimeout(timer)
+        connectWaiters.delete(settle)
+        resolve(connected)
+      }
+      const timer = setTimeout(() => settle(false), windowMs)
+      connectWaiters.add(settle)
+    })
+  }
+
   return {
     getPid: () => child?.pid ?? null,
     getStatus: () => ({
@@ -478,6 +530,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
         : null
     }),
     awaitStartup,
+    awaitHubConnected,
     restart: () => {
       if (restartInFlight) return restartInFlight
       restartInFlight = doRestart().finally(() => {
@@ -495,6 +548,8 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       stopped = true
       clearTimers()
       child = null
+      hubConnected = false
+      settleConnectWaiters(false)
       // Reaps the outgoing computer of a mid-flight restart too (it detached it
       // from `child`, not from the reaper); the `stopped` flag cancels its respawn.
       // The restart itself is deliberately NOT awaited: its re-mint can retry for
