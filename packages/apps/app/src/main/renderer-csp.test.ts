@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildCspFloor, buildRendererCsp, hubConnectSources } from './renderer-csp'
+import {
+  buildCspFloor,
+  buildRendererCsp,
+  directLinkConnectSources,
+  hubConnectSources
+} from './renderer-csp'
 
 describe('buildRendererCsp', () => {
   it('names the tRPC WS origin exactly when one is known', () => {
@@ -152,5 +157,35 @@ describe('hubConnectSources', () => {
     )
     const connectSrc = csp.split('; ').find((d) => d.startsWith('connect-src'))!
     expect(connectSrc).toContain('ws://127.0.0.1:* wss://hub.example.com https://hub.example.com')
+  })
+})
+
+describe('directLinkConnectSources (docs/direct-link.md)', () => {
+  it('names each issued public computer address as its exact wss origin, nothing wider', () => {
+    expect(directLinkConnectSources(['box.example:7443', 'other.example'])).toEqual([
+      'wss://box.example:7443',
+      'wss://other.example'
+    ])
+  })
+
+  it('adds nothing for loopback (the local hub entry already covers ws://127.0.0.1:*)', () => {
+    expect(directLinkConnectSources(['127.0.0.1:5001', 'localhost:9', '[::1]:7'])).toEqual([])
+  })
+
+  it('drops anything that is not a bare authority, so a bad value cannot widen the policy', () => {
+    expect(
+      directLinkConnectSources(['wss://box:1', 'box:1/path', '*.example', '*', 'a b', ''])
+    ).toEqual([])
+  })
+
+  it('never adds http(s): the health probe runs in the main process', () => {
+    const csp = buildRendererCsp(
+      [hubConnectSources({ localHub: true, remoteHubUrls: [] }), ...directLinkConnectSources(['box.example:7443'])].join(' '),
+      false
+    )
+    const connectSrc = csp.split('; ').find((d) => d.startsWith('connect-src')) ?? ''
+    expect(connectSrc).toContain('wss://box.example:7443')
+    expect(connectSrc).not.toContain('https://box.example')
+    expect(connectSrc).not.toMatch(/(^| )wss:( |$)/)
   })
 })

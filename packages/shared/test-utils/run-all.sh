@@ -1079,6 +1079,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/react-compiler-canary.test.tsx \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
+  packages/apps/app/src/main/direct-link-gate.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \

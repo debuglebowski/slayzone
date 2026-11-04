@@ -104,7 +104,7 @@ describe('acquire', () => {
     const { manager, opened, probes } = setup()
     const lease = await manager.acquire(pty())
     expect(lease?.computerId).toBe('c1')
-    expect(probes).toEqual(['http://127.0.0.1:5001/direct/v1/health'])
+    expect(probes).toEqual(['127.0.0.1:5001'])
     expect(opened).toEqual([{ url: 'ws://127.0.0.1:5001/direct/v1', token: expect.any(String) }])
   })
 
@@ -112,7 +112,7 @@ describe('acquire', () => {
     const { manager, opened, probes, setIssue } = setup()
     setIssue(() => available({ address: 'box.example:7443' }))
     await manager.acquire(pty())
-    expect(probes).toEqual(['https://box.example:7443/direct/v1/health'])
+    expect(probes).toEqual(['box.example:7443'])
     expect(opened[0]?.url).toBe('wss://box.example:7443/direct/v1')
   })
 

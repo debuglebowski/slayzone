@@ -114,6 +114,38 @@ export function hubConnectSources(hubs: {
   return [...sources].join(' ')
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+
+/**
+ * The `connect-src` entries for computers' direct-link listeners the hub has issued
+ * to this renderer (docs/direct-link.md), as exact `wss://host[:port]` origins.
+ *
+ *   - Loopback adds nothing: the hub offers a loopback listener only when hub,
+ *     client and computer share this machine, and then the local hub's
+ *     `ws://127.0.0.1:*` already covers it. No new loopback entry, no widening.
+ *   - A public address gets its exact `wss:` origin — the scheme the hub scheme
+ *     rule derives for a non-loopback host. Never `http(s)`: the reachability
+ *     probe runs in the main process, not the renderer.
+ *   - Anything that is not a bare `host[:port]` authority is dropped, wildcards
+ *     included, so a bad value can never widen the policy.
+ */
+export function directLinkConnectSources(addresses: readonly string[]): string[] {
+  const out = new Set<string>()
+  for (const addr of addresses) {
+    if (addr === '' || /[\s/*]/.test(addr) || addr.includes('://')) continue
+    let url: URL
+    try {
+      url = new URL(`wss://${addr}`)
+    } catch {
+      continue
+    }
+    if (url.host !== addr || url.username !== '' || url.password !== '') continue
+    if (LOOPBACK_HOSTS.has(url.hostname)) continue
+    out.add(url.origin)
+  }
+  return [...out]
+}
+
 /**
  * Builds the runtime CSP string with the tRPC connect sources named exactly
  * (see `hubConnectSources`). When none are known they are omitted — the policy
@@ -134,7 +166,7 @@ export function buildRendererCsp(trpcConnectSrc: string, dev: boolean): string {
  */
 export function attachRendererCsp(
   sess: Electron.Session,
-  getTrpcOrigin: () => Promise<string>,
+  getTrpcOrigin: (webContentsId: number | undefined) => Promise<string>,
   dev: boolean
 ): void {
   sess.webRequest.onHeadersReceived((details, callback) => {
@@ -142,7 +174,7 @@ export function attachRendererCsp(
       callback({})
       return
     }
-    void getTrpcOrigin().then((origin) => {
+    void getTrpcOrigin(details.webContentsId).then((origin) => {
       const headers: Record<string, string[] | string> = { ...details.responseHeaders }
       // Drop any pre-existing CSP header (case-insensitive) before setting ours.
       for (const key of Object.keys(headers)) {

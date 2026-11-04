@@ -70,8 +70,12 @@ export type DirectLeaseLostReason =
 
 export interface DirectLinkManagerOptions {
   issue(target: DirectTarget): Promise<DirectIssueResult>
-  /** Plain-HTTP reachability. Default: `fetch` in `no-cors` mode with a deadline. */
-  probe?: (healthUrl: string) => Promise<boolean>
+  /**
+   * Is the computer's listener at `address` worth a socket now? Default: a plain
+   * HTTP `fetch` of its health path with a deadline (mobile, node). The desktop asks
+   * its main process, which also checks the document's CSP (`prepareDirectLink`).
+   */
+  probe?: (address: string) => Promise<boolean>
   /** Default: a tRPC ws client that never reconnects without the probe saying yes. */
   openConnection?: (opts: {
     url: string
@@ -106,7 +110,8 @@ function isUnsupportedHub(err: unknown): boolean {
   return e?.data?.code === 'NOT_FOUND' || /No "mutation"-procedure/.test(e?.message ?? '')
 }
 
-export async function defaultDirectProbe(healthUrl: string, deadlineMs = 3_000): Promise<boolean> {
+export async function defaultDirectProbe(address: string, deadlineMs = 3_000): Promise<boolean> {
+  const healthUrl = hubUrlFromAddr(address, 'http', DIRECT_LINK_HEALTH_PATH)
   const abort = new AbortController()
   const timer = setTimeout(() => abort.abort(), deadlineMs)
   try {
@@ -266,12 +271,11 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     const key = `${issued.computerId}|${issued.address}`
     const existing = sockets.get(key)
     if (existing) return { socket: existing, fresh: false }
-    const healthUrl = hubUrlFromAddr(issued.address, 'http', DIRECT_LINK_HEALTH_PATH)
-    if (!(await probe(healthUrl))) return fail(issued.computerId, 'probe')
+    if (!(await probe(issued.address))) return fail(issued.computerId, 'probe')
     const connection = open({
       url: hubUrlFromAddr(issued.address, 'ws', DIRECT_LINK_PATH),
       token: issued.token,
-      probe: () => probe(healthUrl)
+      probe: () => probe(issued.address)
     })
     const ready = await withDeadline(connection.client.ping.query()).catch(() => 'failed' as const)
     if (ready === 'timeout' || ready === 'failed') {

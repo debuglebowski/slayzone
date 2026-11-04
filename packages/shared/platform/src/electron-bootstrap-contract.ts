@@ -75,6 +75,14 @@ export interface ElectronBootstrapApp {
     /** How the hub signs people in (`/health` switches). Undefined on an older hub. */
     signIn?: { sso: boolean; password: boolean }
   }>
+  /**
+   * Direct link (docs/direct-link.md): may this document open a socket to a
+   * computer's listener at `address` now — allowed by its CSP, and reached by the
+   * main process's HTTP probe? Optional: an older or non-Electron host has none.
+   */
+  prepareDirectLink?: (
+    address: string
+  ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }>
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */

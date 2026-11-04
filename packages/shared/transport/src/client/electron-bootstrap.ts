@@ -71,6 +71,10 @@ export const electronBootstrap = {
   probeServerHealth: (url: string) =>
     api().app.probeServerHealth?.(url) ??
     Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
+  /** Direct link: may this document open a socket to `address` now (CSP + main's probe)? */
+  prepareDirectLink: (address: string) =>
+    api().app.prepareDirectLink?.(address) ??
+    Promise.resolve({ ok: false as const, reason: 'unsupported' as const }),
   relaunch: () => api().app.relaunch?.() ?? Promise.resolve(),
   restartSidecar: () =>
     api().app.restartSidecar?.() ?? Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
