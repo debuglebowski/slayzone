@@ -1,4 +1,4 @@
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { resolveProjectArg } from '../db'
 import { apiGet, apiPost, apiPatch, apiDelete } from '../api'
 
@@ -14,6 +14,24 @@ interface TemplateRow extends Record<string, unknown> {
   sort_order: number
   created_at: string
   updated_at: string
+}
+
+/** `--terminal-mode`: the flag's old name, kept working but out of the help. */
+function legacyTerminalModeOption(): Option {
+  return new Option('--terminal-mode <mode>').hideHelp()
+}
+
+/** `--agent`, or the legacy `--terminal-mode`; both with different values is an error. */
+function agentOpt(opts: { agent?: string; terminalMode?: string }): string | undefined {
+  if (
+    opts.agent !== undefined &&
+    opts.terminalMode !== undefined &&
+    opts.agent !== opts.terminalMode
+  ) {
+    console.error('Use --agent (--terminal-mode is its old name), not both.')
+    process.exit(1)
+  }
+  return opts.agent ?? opts.terminalMode
 }
 
 export function templatesCommand(): Command {
@@ -97,7 +115,8 @@ export function templatesCommand(): Command {
     .command('create <name>')
     .description('Create a task template')
     .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
-    .option('--terminal-mode <mode>', 'Default terminal mode')
+    .option('--agent <mode>', 'Default agent (claude-code, codex, claude-chat, …)')
+    .addOption(legacyTerminalModeOption())
     .option('--priority <n>', 'Default priority 1-5')
     .option('--status <status>', 'Default status')
     .option('--default', 'Set as project default template')
@@ -118,7 +137,7 @@ export function templatesCommand(): Command {
         project,
         name,
         description: opts.description,
-        terminalMode: opts.terminalMode,
+        terminalMode: agentOpt(opts),
         status: opts.status,
         priority: opts.priority ? parseInt(opts.priority, 10) : undefined,
         isDefault: opts.default === true
@@ -133,7 +152,8 @@ export function templatesCommand(): Command {
     .command('update <id>')
     .description('Update a template (id prefix supported)')
     .option('--name <name>', 'New name')
-    .option('--terminal-mode <mode>', 'Default terminal mode')
+    .option('--agent <mode>', 'Default agent (claude-code, codex, claude-chat, …)')
+    .addOption(legacyTerminalModeOption())
     .option('--priority <n>', 'Default priority 1-5')
     .option('--status <status>', 'Default status')
     .option('--default', 'Set as project default')
@@ -142,7 +162,7 @@ export function templatesCommand(): Command {
     .action(async (idPrefix: string, opts) => {
       if (
         opts.name === undefined &&
-        opts.terminalMode === undefined &&
+        agentOpt(opts) === undefined &&
         opts.priority === undefined &&
         opts.status === undefined &&
         opts.description === undefined &&
@@ -163,7 +183,8 @@ export function templatesCommand(): Command {
       const body: Record<string, unknown> = {}
       if (opts.name !== undefined) body.name = opts.name
       if (opts.description !== undefined) body.description = opts.description || null
-      if (opts.terminalMode !== undefined) body.terminalMode = opts.terminalMode
+      const agent = agentOpt(opts)
+      if (agent !== undefined) body.terminalMode = agent
       if (opts.status !== undefined) body.status = opts.status
       if (opts.priority !== undefined) body.priority = parseInt(opts.priority, 10)
       if (opts.default !== undefined) body.isDefault = opts.default

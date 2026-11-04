@@ -45,6 +45,7 @@ vi.mock('../trpc', () => ({ useTRPCClient: () => m.client }))
 vi.mock('@slayzone/ui', () => ({ toast: m.toast }))
 
 import { useChatLifecycle, type UseChatLifecycleOpts } from './useChatLifecycle'
+import { chatsLoadingCount } from './chat-loading'
 
 const TARGET = {
   tabId: 'tab1',
@@ -380,6 +381,53 @@ describe('useChatLifecycle startup (main tab)', () => {
     })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useChatLifecycle loading (startup card)', () => {
+  it('counts as loading until its agent is asked to start', async () => {
+    const { chatApi, update } = setup({ agentState: 'running', hydrating: true })
+    expect(chatsLoadingCount()).toBe(1)
+    update({ hydrating: false })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+    expect(chatsLoadingCount()).toBe(0)
+  })
+
+  it('stops counting once it decides not to start', async () => {
+    setup({ agentState: 'stopped' })
+    expect(chatsLoadingCount()).toBe(1)
+    await flush()
+    expect(chatsLoadingCount()).toBe(0)
+  })
+
+  it('stops counting once it decides to wait until shown', async () => {
+    m.settingsGet.mockResolvedValue('instant')
+    setup({ isMain: true, agentState: 'stopped', shown: false })
+    await flush()
+    expect(chatsLoadingCount()).toBe(0)
+  })
+
+  it('stops counting when the setting read fails', async () => {
+    m.settingsGet.mockRejectedValue(new Error('hub down'))
+    setup({ agentState: 'running' })
+    await flush()
+    expect(chatsLoadingCount()).toBe(0)
+  })
+
+  it('does not count while its history failed to load', () => {
+    const { update } = setup({ agentState: 'running', hydrating: true, loadFailed: true })
+    expect(chatsLoadingCount()).toBe(0)
+    // A retry loads it again.
+    update({ loadFailed: false })
+    expect(chatsLoadingCount()).toBe(1)
+  })
+
+  it('stops counting when the chat unmounts (tab closed)', () => {
+    const { unmount } = setup({ agentState: 'running', hydrating: true })
+    expect(chatsLoadingCount()).toBe(1)
+    unmount()
+    expect(chatsLoadingCount()).toBe(0)
   })
 })
 

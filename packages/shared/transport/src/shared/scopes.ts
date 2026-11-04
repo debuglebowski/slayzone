@@ -780,6 +780,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.setBrowserTabLocked': 'tasks',
   'task.startMainAgent': 'never',
   'task.switchConversation': 'tasks',
+  // Stops the live main agent (as pty.kill / chat.kill do).
+  'task.switchMode': 'never',
   'task.testRecordPendingSpawn': 'never',
   'task.unarchive': 'tasks',
   'task.update': 'tasks',

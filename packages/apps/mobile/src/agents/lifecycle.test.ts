@@ -26,6 +26,7 @@ function hub(answers: Record<string, (input: unknown) => unknown> = {}) {
     'task.startMainAgent',
     'task.resetConversation',
     'task.update',
+    'task.switchMode',
     'pty.kill',
     'pty.write',
     'pty.interrupt',
@@ -127,38 +128,12 @@ describe('agent lifecycle', () => {
     ])
   })
 
-  it('switches mode as desktop does: stop, new mode with every conversation id cleared, start', async () => {
+  it('switches mode on the hub (stop + conversations cleared there), then starts', async () => {
     const { client, calls } = hub()
-    await switchAgentMode(
-      client,
-      {
-        id: 't',
-        terminal_mode: 'claude-code',
-        provider_config: { 'claude-code': { conversationId: 'c1', flags: '--x' } }
-      },
-      'codex'
-    )
+    await switchAgentMode(client, 't', 'codex')
     expect(calls).toEqual([
-      ['pty.kill', { sessionId: 't:t' }],
-      [
-        'task.update',
-        {
-          id: 't',
-          terminalMode: 'codex',
-          providerConfig: { 'claude-code': { conversationId: null } }
-        }
-      ],
+      ['task.switchMode', { taskId: 't', mode: 'codex' }],
       ['task.startMainAgent', { taskId: 't' }]
     ])
-  })
-
-  it('switching away from a chat mode stops the chat agent', async () => {
-    const { client, calls } = hub()
-    await switchAgentMode(
-      client,
-      { id: 't', terminal_mode: 'claude-chat', provider_config: {} },
-      'claude-code'
-    )
-    expect(calls[0]).toEqual(['chat.kill', { tabId: 't' }])
   })
 })

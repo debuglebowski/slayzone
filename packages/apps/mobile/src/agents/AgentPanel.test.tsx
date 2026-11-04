@@ -107,6 +107,7 @@ function backend(tabs: unknown[] = [tab('t', 'claude-code', true)]) {
         tab('t', 'claude-code', true)
       ),
       'task.update': record('task.update'),
+      'task.switchMode': record('task.switchMode'),
       'task.startMainAgent': record('task.startMainAgent', () => started),
       'task.resetConversation': record('task.resetConversation'),
       'pty.kill': record('pty.kill', () => true),
@@ -284,15 +285,7 @@ describe('AgentPanel', () => {
     await user.press(picker.getByText('Codex'))
     await waitFor(() =>
       expect(b.calls).toEqual([
-        ['pty.kill', { sessionId: 't:t' }],
-        [
-          'task.update',
-          {
-            id: 't',
-            terminalMode: 'codex',
-            providerConfig: { 'claude-code': { conversationId: null } }
-          }
-        ],
+        ['task.switchMode', { taskId: 't', mode: 'codex' }],
         ['task.startMainAgent', { taskId: 't' }]
       ])
     )

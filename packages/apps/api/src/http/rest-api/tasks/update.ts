@@ -1,6 +1,7 @@
 import type { Express } from 'express'
-import { updateTaskInputSchema, type UpdateTaskInput } from '@slayzone/task-contracts'
-import { updateTaskOp } from '@slayzone/task/server'
+import { TRPCError } from '@trpc/server'
+import { updateTaskInputSchema, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
+import { getTaskOp, switchMainAgentMode, updateTaskOp } from '@slayzone/task/server'
 import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
@@ -25,6 +26,11 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
  * - `appendDescription` appends to the STORED description (read here, inside the
  *   request, instead of the CLI pre-reading it) — the CLI's
  *   `--append-description`. Mutually exclusive with `description`.
+ *
+ * - `terminalMode` (`slay tasks update --agent`) is a mode SWITCH, not a field
+ *   write: `switchMainAgentMode` stops the live main agent and clears every
+ *   conversation id, exactly as the desktop's mode picker (`task.switchMode`).
+ *   Unknown/disabled mode = 400. Runs after the other fields validate.
  *
  * `appendDescription` is resolved to a concrete `description` before the domain
  * schema parses, so the strict `updateTaskInputSchema` stays free of
@@ -93,16 +99,48 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
         delete body.appendDescription
       }
 
+      const mode = body.terminalMode
+      delete body.terminalMode
+      if (mode !== undefined && typeof mode !== 'string') {
+        res.status(400).json({ ok: false, error: 'terminalMode must be a string' })
+        return
+      }
+
       const parsed = updateTaskInputSchema.safeParse(body)
       if (!parsed.success) {
         res.status(400).json({ ok: false, error: parsed.error.message })
         return
       }
 
-      const updated = await updateTaskOp(deps.db, parsed.data as UpdateTaskInput, {
-        ipcMain: deps.taskBus ?? NOOP_TASK_BUS,
-        onMutation: deps.notifyRenderer
-      })
+      const opDeps = { ipcMain: deps.taskBus ?? NOOP_TASK_BUS, onMutation: deps.notifyRenderer }
+      const update = (input: UpdateTaskInput): Promise<Task | null> =>
+        updateTaskOp(deps.db, input, opDeps)
+
+      let updated: Task | null = null
+      if (mode !== undefined) {
+        try {
+          updated = await switchMainAgentMode(
+            deps.db,
+            { taskId: task.id, mode },
+            { getTask: (id) => getTaskOp(deps.db, id), update }
+          )
+        } catch (err) {
+          if (
+            err instanceof TRPCError &&
+            (err.code === 'BAD_REQUEST' || err.code === 'NOT_FOUND')
+          ) {
+            res
+              .status(err.code === 'BAD_REQUEST' ? 400 : 404)
+              .json({ ok: false, error: err.message })
+            return
+          }
+          throw err
+        }
+      }
+      // Fields besides the id (and the mode, already applied).
+      if (Object.keys(parsed.data).length > 1) {
+        updated = await update(parsed.data as UpdateTaskInput)
+      }
       if (!updated) {
         res.status(404).json({ ok: false, error: `Task not found: ${req.params.id}` })
         return

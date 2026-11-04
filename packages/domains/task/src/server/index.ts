@@ -20,6 +20,8 @@ export {
   setMainAgentDeps,
   resolveMainAgentLaunch,
   startMainAgent,
+  switchMainAgentMode,
+  type SwitchMainAgentModeInput,
   type MainAgentLaunch,
   type MainAgentDeps,
   type StartMainAgentInput,

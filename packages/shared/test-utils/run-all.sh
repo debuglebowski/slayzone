@@ -1329,6 +1329,8 @@ run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
   packages/apps/app/src/renderer/src/app-shell/startup-progress.test.ts \
   packages/apps/app/src/renderer/src/app-shell/computer-connect-refetch.test.ts \
+  packages/domains/sidebar/src/startup-progress-text.test.ts \
+  packages/domains/task-terminals/src/client/chat/chat-loading.test.ts \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts

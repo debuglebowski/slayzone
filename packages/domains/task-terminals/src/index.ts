@@ -7,6 +7,8 @@ export {
   isChatSupported,
   CHAT_SUPPORTED_MODES,
   markForceStart,
-  requestAgentStart
+  requestAgentStart,
+  chatsLoadingCount,
+  subscribeChatsLoading
 } from './client'
 export type { TerminalContainerHandle } from './client'
