@@ -73,10 +73,7 @@ setArtifactsRouterDeps({
       showSaveDialog: deps.dialogShowSaveDialog,
       showOpenDialog: deps.dialogShowOpenDialog,
       getDownloadsDir: deps.appGetDownloadsDir,
-      showItemInFolder: deps.shellShowItemInFolder,
-      buildExportHtml: deps.artifactBuildExportHtml,
-      renderPdfToFile: deps.artifactRenderPdfToFile,
-      renderPngToFile: deps.artifactRenderPngToFile
+      showItemInFolder: deps.shellShowItemInFolder
     }
   }
 })

@@ -689,9 +689,6 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.foldersReorder': checked(folder('parentId'), folder('folderIds[]')),
   'artifacts.downloadFile': checked(artifact('id')),
   'artifacts.downloadFolder': checked(folder('folderId')),
-  'artifacts.downloadAsPdf': checked(artifact('id')),
-  'artifacts.downloadAsPng': checked(artifact('id')),
-  'artifacts.downloadAsHtml': checked(artifact('id')),
   'artifacts.downloadAllAsZip': checked(task('taskId')),
   'artifacts.onContentChanged': streamed(onValue('artifact')),
 

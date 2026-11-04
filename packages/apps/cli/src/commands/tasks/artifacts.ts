@@ -26,6 +26,7 @@ import {
   apiPutStream
 } from '../../api'
 import { cliAuthor, resolveId } from './_shared'
+import type { ArtifactExportFormat } from '@slayzone/task-artifacts/export-html'
 
 /*
  * Hub/computer split (Wave 3.5): the subcommands below route through api.ts — the
@@ -41,7 +42,6 @@ import { cliAuthor, resolveId } from './_shared'
  *   upload      → POST   /api/tasks/:id/artifacts?title=                    (raw body)
  *   delete      → DELETE /api/artifacts/:id
  *   download    → GET    /api/artifacts/:id (metadata) + /api/artifacts/:id/content
- *                 POST   /api/artifacts/:id/export/{pdf,png,html}
  *   search      → GET    /api/artifacts/search?q=…
  *   write       → PUT    /api/artifacts/:id/content   (raw body)
  *   append      → POST   /api/artifacts/:id/content   (raw body)
@@ -77,10 +77,11 @@ import { cliAuthor, resolveId } from './_shared'
  *
  * `download --type zip` still ASSEMBLES the archive locally (streaming each
  * member's bytes in over the content route) — a hub-side zip endpoint would be a
- * new capability, not a wiring change. `--type pdf|png|html` post to the existing
- * export routes; the CAPABILITY check stays client-side so its wording and its
- * "available types for <mode>" hint survive (an export route only knows its own
- * single type).
+ * new capability, not a wiring change. `--type pdf|png|html` are RENDERED HERE, on
+ * the machine the CLI runs on: the content streams in over the content route, the
+ * shared export document is built from it, and pdf/png rasterise in a local headless
+ * browser (see ../../export/export-artifact.ts). The hub writing the file to its OWN
+ * disk was wrong for a remote hub and impossible for a standalone one.
  *
  *   path        → GET    /api/artifacts/:id  (reads the `filePath` field)
  *
@@ -788,6 +789,11 @@ export function artifactsSubcommand(): Command {
     .option('--type <type>', 'Export type: raw, pdf, png, html, zip', 'raw')
     .option('--output <path>', 'Output file path (default: ./<filename>)')
     .option('--task <id>', 'Task ID for zip (or $SLAYZONE_TASK_ID)')
+    .option('--browser <path>', 'pdf/png: Chrome/Chromium/Edge executable to render with')
+    .option(
+      '--install-browser',
+      'pdf/png: if no browser is found, download headless Chromium (~100 MB, once)'
+    )
     .option('--json', 'Output as JSON')
     .addHelpText(
       'after',
@@ -799,7 +805,9 @@ Download Types by Render Mode:
   html  — markdown, code, mermaid
   zip   — all artifacts in task (no artifactId needed)
 
-pdf/png/html require the SlayZone app to be running.
+pdf/png/html are rendered on this machine. html needs nothing else; pdf/png use a
+local headless browser: --browser <path>, else an installed Chrome, Chromium, Edge
+or Brave, else Chromium from an earlier --install-browser (kept in the user cache).
 `
     )
     .action(async (artifactId: string | undefined, opts) => {
@@ -882,17 +890,15 @@ pdf/png/html require the SlayZone app to be running.
         process.exit(1)
       }
 
-      // The artifact row (title + render_mode) drives both the default output
-      // filename and the export-capability check. GET /api/artifacts/:id resolves
-      // the id prefix and returns the raw row — added for exactly this, since the
-      // capability check has to stay client-side to keep its wording + the
-      // "available types" hint (the export routes only know their own one type).
+      // The artifact row (title + render_mode) drives the default output filename,
+      // the export-capability check (with its "available types" hint) and which
+      // export document is built. GET /api/artifacts/:id resolves the id prefix and
+      // returns the raw row.
       const { data: artifact } = await apiGet<{ ok: true; data: ArtifactRow }>(
         `/api/artifacts/${encodeURIComponent(artifactId)}`
       )
 
       const mode = getEffectiveRenderMode(artifact.title, artifact.render_mode as RenderMode | null)
-      const baseName = artifact.title.replace(/\.[^.]+$/, '') || artifact.title
 
       // --- RAW ---
       if (opts.type === 'raw') {
@@ -916,7 +922,7 @@ pdf/png/html require the SlayZone app to be running.
         return
       }
 
-      // --- PDF / PNG / HTML (requires app) ---
+      // --- PDF / PNG / HTML: rendered locally ---
       const available = getAvailableExportTypes(mode)
       if (!available.includes(opts.type)) {
         console.error(
@@ -925,11 +931,36 @@ pdf/png/html require the SlayZone app to be running.
         process.exit(1)
       }
 
+      const { body } = await apiGetStream(
+        `/api/artifacts/${encodeURIComponent(artifact.id)}/content`
+      )
+      // Every exportable mode is a text format; decode as the editor does (utf-8).
+      const content = Buffer.from(await new Response(body).arrayBuffer()).toString('utf8')
+
+      // Loaded on demand: the export path (marked, the inlined mermaid build, the
+      // browser driver) costs every other `slay` command nothing at startup.
+      const { exportArtifact, exportBaseName } = await import('../../export/export-artifact')
+      let bytes: Buffer
+      try {
+        bytes = await exportArtifact({
+          type: opts.type as ArtifactExportFormat,
+          content,
+          mode,
+          title: artifact.title,
+          browser: opts.browser,
+          installBrowser: opts.installBrowser === true
+        })
+      } catch (err) {
+        console.error((err as Error).message)
+        process.exit(1)
+      }
+
       const ext = opts.type
       const outputPath = opts.output
         ? path.resolve(opts.output)
-        : path.resolve(`${baseName}.${ext}`)
-      await apiPost(`/api/artifacts/${artifact.id}/export/${opts.type}`, { outputPath })
+        : path.resolve(`${exportBaseName(artifact.title)}.${ext}`)
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true })
+      fs.writeFileSync(outputPath, bytes)
 
       if (opts.json) {
         console.log(JSON.stringify({ path: outputPath, type: opts.type, artifactId: artifact.id }))

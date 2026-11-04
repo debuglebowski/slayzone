@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
+    "./export-html": "./src/shared/export-html.ts",
     "./server": "./src/server/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
@@ -20,7 +21,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
     "@codemirror/view": "^6.43.13",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
@@ -36,8 +36,10 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "@trpc/server": "^11.19.0",
+    "better-sqlite3": "^13.0.3",
     "diff": "^9.0.0",
     "lucide-react": "^1.48.0",
+    "marked": "^18.0.14",
     "zod": "^4.3.5"
   },
   "peerDependencies": {

@@ -4,8 +4,10 @@
  * page in `DocumentWebView`), image (`ZoomableImage`), PDF — with desktop's controls
  * that fit a phone: Preview / Source for SVG and mermaid, the HTML colour scheme
  * (System → Dark → Light, saved on the artifact as on desktop), History (its versions;
- * picking one shows that version), and Share (the iOS share sheet: save to Files, open
- * in another app, AirDrop…).
+ * picking one shows that version), Share (the iOS share sheet: save to Files, open
+ * in another app, AirDrop…), and Export: the text on screen as PDF / PNG / HTML, the
+ * formats desktop offers for its render mode, made on the phone (`export/`) and handed
+ * to the share sheet.
  *
  * Must render inside the artifact's hub scope; everything it reads or writes goes to
  * that hub.
@@ -13,15 +15,28 @@
 import { nextHtmlTheme } from '@slayzone/platform/forced-html-theme'
 import type { ArtifactVersion } from '@slayzone/task-artifacts/shared'
 import { dbTimestampToIso, formatRelativeDate } from '@slayzone/task-artifacts/shared'
-import type { TaskArtifact } from '@slayzone/task-contracts/types'
+import { getEffectiveRenderMode, type TaskArtifact } from '@slayzone/task-contracts/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native'
+import {
+  ActionSheetIOS,
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View
+} from 'react-native'
 import { type ChromeColors, useTheme, useThemeVariant } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { DocumentWebView, type DocumentPage } from './DocumentWebView'
+import { exportArtifact } from './export/export-artifact'
+import { exportFormatsOf } from './export/export-formats'
+import { useExportRenderer } from './export/use-export-renderer'
 import { downloadArtifactFile } from './files'
 import type { HubTarget } from './hub-rest'
+import { loadMermaidScript } from './page-assets'
 import { codePage } from './pages/code-page'
 import { htmlReportPage } from './pages/html-report-page'
 import { markdownNeedsMermaid, markdownPage } from './pages/markdown-page'
@@ -112,6 +127,13 @@ function LoadedArtifact({
     busy: false,
     error: null
   })
+  const [exportState, setExportState] = useState<{ busy: boolean; error: string | null }>({
+    busy: false,
+    error: null
+  })
+  const exportRenderer = useExportRenderer()
+  const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
+  const exportFormats = fileKind ? [] : exportFormatsOf(renderMode)
 
   const versions = useArtifactVersions(artifact.id, showHistory || version !== null)
   const selected: ArtifactVersion | null =
@@ -191,6 +213,37 @@ function LoadedArtifact({
       )
   }
 
+  // What is on screen: the working copy's text or the version's.
+  const exportContent = isText ? text.data : undefined
+  const chooseExport = () => {
+    if (exportContent === undefined) return
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: 'Export',
+        options: [...exportFormats.map((f) => f.label), 'Cancel'],
+        cancelButtonIndex: exportFormats.length
+      },
+      (index) => {
+        const choice = exportFormats[index]
+        if (!choice) return
+        setExportState({ busy: true, error: null })
+        exportArtifact(
+          {
+            content: exportContent,
+            mode: renderMode,
+            title: artifact.title,
+            format: choice.format
+          },
+          { render: exportRenderer.render, mermaidScript: loadMermaidScript }
+        )
+          .then(() => setExportState({ busy: false, error: null }))
+          .catch((err: unknown) =>
+            setExportState({ busy: false, error: err instanceof Error ? err.message : String(err) })
+          )
+      }
+    )
+  }
+
   const htmlTheme = artifact.html_theme_override ?? 'system'
   const cycleHtmlTheme = () => {
     const next = nextHtmlTheme(htmlTheme)
@@ -238,6 +291,13 @@ function LoadedArtifact({
         disabled={shareState.busy}
         onPress={share}
       />
+      {exportFormats.length > 0 ? (
+        <HeaderButton
+          label={exportState.busy ? 'Exporting…' : 'Export'}
+          disabled={exportState.busy || exportContent === undefined}
+          onPress={chooseExport}
+        />
+      ) : null}
     </>
   )
 
@@ -265,6 +325,7 @@ function LoadedArtifact({
         </View>
       ) : null}
       {shareState.error ? <Text style={styles.error}>{shareState.error}</Text> : null}
+      {exportState.error ? <Text style={styles.error}>{exportState.error}</Text> : null}
       <View style={styles.body}>
         <ArtifactBody body={body} onOpenArtifact={onOpenArtifact} onShare={share} kind={kind} />
         {showHistory ? (
@@ -279,6 +340,7 @@ function LoadedArtifact({
           />
         ) : null}
       </View>
+      {exportRenderer.view}
     </View>
   )
 }

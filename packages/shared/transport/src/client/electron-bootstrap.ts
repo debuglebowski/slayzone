@@ -1,4 +1,8 @@
-import type { ElectronBootstrapAPI } from '@slayzone/platform/electron-bootstrap-contract'
+import type {
+  ArtifactExportRequest,
+  ArtifactExportResult,
+  ElectronBootstrapAPI
+} from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 
@@ -75,6 +79,10 @@ export const electronBootstrap = {
   prepareDirectLink: (address: string) =>
     api().app.prepareDirectLink?.(address) ??
     Promise.resolve({ ok: false as const, reason: 'unsupported' as const }),
+  /** Render + save an artifact export on this device (desktop: Electron, web: browser). */
+  exportArtifact: (request: ArtifactExportRequest): Promise<ArtifactExportResult> =>
+    api().app.exportArtifact?.(request) ??
+    Promise.resolve({ ok: false as const, error: 'Export is not supported in this app' }),
   relaunch: () => api().app.relaunch?.() ?? Promise.resolve(),
   restartSidecar: () =>
     api().app.restartSidecar?.() ?? Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),

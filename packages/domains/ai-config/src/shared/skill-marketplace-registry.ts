@@ -421,7 +421,7 @@ Every artifact has immutable, content-addressed version history. Writes via \`wr
 
 Download artifacts in various formats. Default type is \`raw\` (original file).
 
-- \`slay tasks artifacts download <artifactId> [--type raw|pdf|png|html] [--output <path>] [--json]\` — download a single artifact.
+- \`slay tasks artifacts download <artifactId> [--type raw|pdf|png|html] [--output <path>] [--browser <path>] [--install-browser] [--json]\` — download a single artifact.
 - \`slay tasks artifacts download --type zip [--task <id>] [--output <path>] [--json]\` — download all task artifacts as a ZIP archive (no artifactId needed).
 
 **Available types by render mode:**
@@ -433,7 +433,7 @@ Download artifacts in various formats. Default type is \`raw\` (original file).
 | html | markdown, code, mermaid |
 | zip  | all (task-level) |
 
-\`pdf\`, \`png\`, and \`html\` exports require the SlayZone app to be running. \`--output\` defaults to the current directory with an auto-generated filename.
+\`pdf\`, \`png\` and \`html\` are rendered on the machine running \`slay\` (from the hub's copy of the artifact). \`html\` needs nothing else. \`pdf\` and \`png\` use a local headless browser: \`--browser <path>\`, else an installed Chrome, Chromium, Edge or Brave, else Chromium from an earlier \`--install-browser\`. With none found the command exits 1; rerun with \`--install-browser\` (downloads headless Chromium, ~100 MB, once, into the user cache) or use \`--type html\`. \`--output\` defaults to the current directory with an auto-generated filename.
 
 ## Piping examples
 

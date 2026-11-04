@@ -28,10 +28,7 @@ test('download streams owner bytes to user-selected destination without a hub wo
       showOpenDialog: unused,
       showItemInFolder: () => {
         throw new Error('Unexpected download host operation')
-      },
-      buildExportHtml: unused,
-      renderPdfToFile: unused,
-      renderPngToFile: unused
+      }
     }
     await expect(
       downloadArtifactFile(host, h.slayDb, join(dir, 'no-hub-copy'), 'a', source)

@@ -50,6 +50,9 @@
         "tailwindcss",
         "tw-animate-css"
       ]
+    },
+    "packages/apps/cli": {
+      "ignoreDependencies": ["mermaid"]
     }
   },
   "ignoreWorkspaces": ["packages/shared/test-utils"]

@@ -10,9 +10,6 @@ import {
   artifactWatcherEvents,
   downloadArtifactFile,
   downloadArtifactFolder,
-  downloadArtifactAsPdf,
-  downloadArtifactAsPng,
-  downloadArtifactAsHtml,
   downloadAllArtifactsAsZip
 } from '@slayzone/task/server'
 import type {
@@ -434,42 +431,6 @@ export const artifactsRouter = router({
         ctx.db,
         ctx.dataRoot,
         input.folderId,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAsPdf: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactAsPdf(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAsPng: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactAsPng(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAsHtml: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactAsHtml(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
         downloadSource(ctx.db, ctx.dataRoot)
       )
     ),

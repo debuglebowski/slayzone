@@ -53,15 +53,12 @@ export { templateRouter, type TemplateRouter, type TemplateMounts } from './temp
 export { buildFolderPathResolver, collectFolderAndDescendants } from './artifact-folder-tree'
 export { artifactsDirOf, artifactTaskDir, artifactFilePathIn } from './artifact-paths'
 
-// Artifact downloads. Electron-free — the host-only steps (dialogs, reveal,
-// offscreen PDF/PNG render) are injected as ArtifactDownloadHost, which the
-// transport layer fills from the AppDeps capability bridge.
+// Artifact file/folder/zip downloads. Electron-free — the host-only steps (dialogs,
+// reveal) are injected as ArtifactDownloadHost, which the transport layer fills from
+// the AppDeps capability bridge.
 export {
   downloadArtifactFile,
   downloadArtifactFolder,
-  downloadArtifactAsPdf,
-  downloadArtifactAsPng,
-  downloadArtifactAsHtml,
   downloadAllArtifactsAsZip
 } from './artifact-downloads'
 export type { ArtifactDownloadHost, ArtifactDownloadSource } from './artifact-downloads'

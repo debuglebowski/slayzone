@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
-import { Image, Linking, Share } from 'react-native'
+import { ActionSheetIOS, Image, Linking, Share } from 'react-native'
 import { hubEntryOf } from '../hub-session'
 import { trpcTest } from '../testing'
 import { ArtifactViewer, type ArtifactViewerProps } from './ArtifactViewer'
 import { artifactRow, fakeArtifactsHub, versionRow } from './fake-artifacts-hub'
+import { exportArtifact } from './export/export-artifact'
 import { downloadArtifactFile } from './files'
 import { hubTarget } from './hub-rest'
 import { loadMermaidScript } from './page-assets'
@@ -14,7 +15,10 @@ jest.mock('./page-assets', () => ({
   loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}')
 }))
 
+jest.mock('./export/export-artifact', () => ({ exportArtifact: jest.fn() }))
+
 const download = jest.mocked(downloadArtifactFile)
+const runExport = jest.mocked(exportArtifact)
 const target = hubTarget({ entry: hubEntryOf('home.example'), token: 'h' })
 
 async function view(
@@ -48,6 +52,7 @@ const pageOf = (testID: string) =>
 
 beforeEach(() => {
   download.mockReset()
+  runExport.mockReset()
   jest.mocked(loadMermaidScript).mockClear()
   // `getSize` is overloaded (promise / callbacks): the promise form, which the image uses.
   jest
@@ -271,5 +276,92 @@ describe('ArtifactViewer, live and interactive', () => {
     await waitFor(() =>
       expect(pageOf('artifact-page-html').source.html).toContain('color-scheme:dark !important')
     )
+  })
+})
+
+describe('ArtifactViewer, Export', () => {
+  /** Opens Export and picks `choice` (by label); the sheet's options. */
+  async function pickExport(choice: string | null): Promise<string[]> {
+    let options: string[] = []
+    jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((o, pick) => {
+      options = o.options
+      pick(choice === null ? (o.cancelButtonIndex ?? options.length - 1) : options.indexOf(choice))
+    })
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Export' }))
+    return options
+  }
+
+  it.each([
+    ['plan.md', '# Plan', 'markdown', ['PDF', 'HTML', 'Cancel']],
+    ['main.ts', 'const a = 1', 'code', ['PDF', 'HTML', 'Cancel']],
+    ['report.html', '<h1>R</h1>', 'html', ['PDF', 'Cancel']],
+    ['logo.svg', '<svg/>', 'svg', ['PDF', 'PNG', 'Cancel']],
+    ['flow.mmd', 'graph TD; A-->B', 'mermaid', ['PDF', 'PNG', 'HTML', 'Cancel']]
+  ])('%s offers the formats desktop does', async (title, content, kind, expected) => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', title)],
+      content: { a1: content }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId(`artifact-page-${kind}`)
+    expect(await pickExport(null)).toEqual(expected)
+    expect(runExport).not.toHaveBeenCalled()
+  })
+
+  it('images and PDFs have no export', async () => {
+    download.mockResolvedValue('file:///cache/a1/spec.pdf')
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'spec.pdf')] })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-pdf')
+    expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+  })
+
+  it('exports the text on screen in the picked format, with the hidden renderer', async () => {
+    runExport.mockResolvedValue('file:///cache/slayzone-exports/flow.png')
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'flow.mmd')],
+      content: { a1: 'graph TD; A-->B' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-mermaid')
+    await pickExport('PNG')
+    await waitFor(() =>
+      expect(runExport).toHaveBeenCalledWith(
+        { content: 'graph TD; A-->B', mode: 'mermaid-preview', title: 'flow.mmd', format: 'png' },
+        { render: expect.any(Function), mermaidScript: loadMermaidScript }
+      )
+    )
+    await screen.findByRole('button', { name: 'Export' })
+  })
+
+  it('exports the version on screen', async () => {
+    runExport.mockResolvedValue('file:///cache/slayzone-exports/plan.pdf')
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' },
+      versions: { a1: [versionRow('a1', 2), versionRow('a1', 1)] }
+    })
+    await view(hub, { artifactId: 'a1', version: 1 })
+    await waitFor(() => expect(pageOf('artifact-page-markdown').source.html).toContain('(v1)'))
+    await pickExport('PDF')
+    await waitFor(() =>
+      expect(runExport).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('(v1)'), format: 'pdf' }),
+        expect.anything()
+      )
+    )
+  })
+
+  it('a failed export says why, under the toolbar', async () => {
+    runExport.mockRejectedValue(new Error("Couldn't draw the diagram: Parse error"))
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'flow.mmd')],
+      content: { a1: 'nope' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-mermaid')
+    await pickExport('PDF')
+    await screen.findByText("Couldn't draw the diagram: Parse error")
+    expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
   })
 })

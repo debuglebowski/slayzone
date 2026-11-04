@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
+import type {
+  ArtifactExportRequest,
+  ArtifactExportResult
+} from '@slayzone/platform/electron-bootstrap-contract'
 
-// Intentional bootstrap-only preload surface. Do not add domain APIs here.
+// Intentional bootstrap + client-local host surface (ARCHITECTURE.md). Do not add domain
+// APIs here.
 // Renderer/backend traffic uses tRPC over WebSocket after boot.
 
 let lastDropPaths: string[] = []
@@ -78,6 +83,9 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:direct-link-prepare', address) as Promise<
         { ok: true } | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }
       >,
+    // Client-local host capability, not a domain API: the export renders on THIS device.
+    exportArtifact: (request: ArtifactExportRequest) =>
+      ipcRenderer.invoke('app:export-artifact', request) as Promise<ArtifactExportResult>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
     restartLocalComputer: () =>

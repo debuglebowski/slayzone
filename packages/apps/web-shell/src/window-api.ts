@@ -13,6 +13,7 @@
 // beyond it is silently stubbed — see the Proxy at the bottom.
 import type { ElectronAPI, HubEntry } from '@slayzone/types'
 import { resolveServerUrl, resolveWindowId } from './server-url'
+import { exportArtifactInBrowser } from './artifact-export'
 
 const NOT_SUPPORTED = 'Not supported in the browser'
 
@@ -77,6 +78,8 @@ const webApiTarget: ElectronAPI = {
     },
     setBootSettings: async () => ({ ok: true }),
     probeServerHealth: async () => ({ ok: false, error: NOT_SUPPORTED }),
+    // Rendered by this browser (print dialog / canvas / download) — see artifact-export.ts.
+    exportArtifact: exportArtifactInBrowser,
     restartSidecar: async () => ({ ok: false, error: NOT_SUPPORTED }),
     restartLocalComputer: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // A browser tab supervises no computer.

@@ -1271,11 +1271,6 @@ export function composeServer(opts: {
       dialogShowOpenDialog: stub('dialogShowOpenDialog'),
       dialogShowSaveDialog: stub('dialogShowSaveDialog'),
 
-      // Artifact export needs an offscreen BrowserWindow — there is no Electron host
-      // to forward to here, so these fail loud rather than silently producing nothing.
-      artifactBuildExportHtml: stub('artifactBuildExportHtml'),
-      artifactRenderPdfToFile: stub('artifactRenderPdfToFile'),
-      artifactRenderPngToFile: stub('artifactRenderPngToFile'),
       // No OS window owns this process — nothing to close.
       windowClose: noop,
 
@@ -1561,24 +1556,6 @@ export function composeServer(opts: {
     // bus → renderer); only the window raise is bridged to the Electron host.
     windowActions: bridge
       ? { raiseMainWindow: () => void bridge.appDeps.appRaiseMainWindow() }
-      : undefined,
-    // Artifact export runs HERE — the `task_artifacts` row it needs is in THIS
-    // process's DB. Only the offscreen render crosses to the Electron host, via
-    // the same three AppDeps slots the tRPC download path already uses. That is
-    // the inversion: previously the whole handler was reverse-proxied to the
-    // desktop, which then needed its own connection to the shared DB purely to
-    // answer a request this process had just forwarded to it.
-    //
-    // Absent when standalone (no host to render on) → the routes 501, unchanged.
-    artifactExport: bridge
-      ? {
-          buildExportHtml: (content, mode, title) =>
-            bridge.appDeps.artifactBuildExportHtml(content, mode, title),
-          renderPdfToFile: (content, mode, title, destPath) =>
-            bridge.appDeps.artifactRenderPdfToFile(content, mode, title, destPath),
-          renderPngToFile: (content, mode, title, destPath) =>
-            bridge.appDeps.artifactRenderPngToFile(content, mode, title, destPath)
-        }
       : undefined,
     // Browser routes also run HERE now: they read and write `tasks.browser_tabs`,
     // which is in THIS process's DB, and reach the host only for operations on the

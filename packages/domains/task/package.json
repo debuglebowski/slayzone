@@ -10,7 +10,6 @@
     "./server": "./src/server/index.ts",
     "./server/artifact-paths": "./src/server/artifact-paths.ts",
     "./electron": "./src/electron/index.ts",
-    "./electron/artifact-export": "./src/electron/artifact-export.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",
@@ -69,7 +68,6 @@
     "archiver": "^8.0.0",
     "date-fns": "^4.4.0",
     "lucide-react": "^1.48.0",
-    "marked": "^18.0.14",
     "react-hook-form": "^7.89.0",
     "zod": "^4.3.5"
   },

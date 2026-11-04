@@ -494,10 +494,7 @@ test('third-pass control: REST stream create and mixed-owner folder download pre
         getDownloadsDir: async () => dest,
         showSaveDialog: async () => ({ canceled: false, filePath: join(dest, 'file.png') }),
         showOpenDialog: async () => ({ canceled: false, filePaths: [dest] }),
-        showItemInFolder: () => {},
-        buildExportHtml: async (content) => content,
-        renderPdfToFile: async () => {},
-        renderPngToFile: async () => false
+        showItemInFolder: () => {}
       })
     })
     const general = (await f.store.createFolder(f.h.slayDb, { taskId: 't', name: 'General' }))!

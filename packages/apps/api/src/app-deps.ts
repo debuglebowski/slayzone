@@ -139,27 +139,6 @@ export type AppDeps = HostCapabilities &
     // never needs a window handle. Backs every artifact download.
     dialogShowSaveDialog: (options: unknown) => Promise<{ canceled: boolean; filePath?: string }>
 
-    // Artifact export — offscreen BrowserWindow rendering, unavailable off the
-    // Electron host. HTML building lives here too (not side-car side) because
-    // buildMermaidPdfHtml reads the mermaid bundle only the host's build ships and silently falls
-    // back to plain-code rendering when it misses; from the side-car bundle it
-    // would miss every time and quietly downgrade mermaid exports. The renderers
-    // write straight to destPath so multi-MB buffers never cross the bridge.
-    artifactBuildExportHtml: (content: string, mode: string, title: string) => Promise<string>
-    artifactRenderPdfToFile: (
-      content: string,
-      mode: string,
-      title: string,
-      destPath: string
-    ) => Promise<void>
-    /** False when the mode has no PNG representation (buildPngHtml declined). */
-    artifactRenderPngToFile: (
-      content: string,
-      mode: string,
-      title: string,
-      destPath: string
-    ) => Promise<boolean>
-
     /**
      * The task/tab browser REGISTRY — distinct from `browser` below, which is the
      * view-id-keyed WebContentsView manager.
@@ -172,7 +151,7 @@ export type AppDeps = HostCapabilities &
      * cross the bridge; `(taskId, tabId)` can.
      *
      * `capturePageToFile` writes the PNG on the host so a full-page image never
-     * travels as a buffer, matching the `artifactRender*ToFile` slots.
+     * travels as a buffer.
      */
     browserTabs: {
       getResolvedTabId: (taskId: string, tabId?: string) => Promise<string | null>

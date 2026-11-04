@@ -189,38 +189,6 @@ export interface BrowserAccess {
   capturePageToFile: (taskId: string, tabId: string | null, destPath: string) => Promise<boolean>
 }
 
-/**
- * Renderer-backed artifact export (pdf/png/html). Needs an offscreen renderer —
- * Electron host only. Absent → export routes 501.
- *
- * Mirrors the `artifact*` AppDeps slots exactly, because that is now how it is
- * wired: the ROUTE runs on the hub (where the `task_artifacts` row lives) and
- * these three methods cross the capability bridge to the desktop. The previous
- * five-primitive shape forced the opposite — the whole handler ran on the
- * desktop, which therefore needed a live connection to the shared DB purely to
- * answer a request the hub had just forwarded to it.
- *
- * Two properties are load-bearing and neither survives a "just expose the
- * primitives" refactor:
- *  - the `*ToFile` methods write straight to destPath, so multi-MB buffers never
- *    cross the bridge;
- *  - HTML building stays on the desktop side of the bridge, because
- *    `buildMermaidPdfHtml` reads the mermaid bundle only the host's build ships and silently
- *    downgrades to plain-code rendering on a miss — from the side-car bundle it
- *    would miss every time and quietly degrade every mermaid export.
- */
-export interface ArtifactExportAccess {
-  buildExportHtml: (content: string, mode: string, title: string) => Promise<string>
-  renderPdfToFile: (content: string, mode: string, title: string, destPath: string) => Promise<void>
-  /** False when the mode has no PNG representation (buildPngHtml declined). */
-  renderPngToFile: (
-    content: string,
-    mode: string,
-    title: string,
-    destPath: string
-  ) => Promise<boolean>
-}
-
 export interface RestApiDeps {
   captureAgentPrompt?: (
     hook: import('@slayzone/terminal-contracts').ResolvedAgentHook,
@@ -249,7 +217,6 @@ export interface RestApiDeps {
   browser?: BrowserAccess
   /** Raise/show+focus the main window (open-task foreground path). */
   windowActions?: { raiseMainWindow: () => void }
-  artifactExport?: ArtifactExportAccess
   /**
    * Computer listener info accessors (hub/computer split, Wave3.5-D3). Set ONLY under
    * the composition root wires it, closed over the same late-bound refs the

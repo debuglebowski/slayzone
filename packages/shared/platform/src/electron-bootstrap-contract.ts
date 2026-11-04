@@ -19,6 +19,22 @@
 import type { HubEntry } from './hub-registry'
 import type { LocalComputerStatus } from './local-computer-status'
 
+/** One artifact export, rendered by the host the user is on (see `exportArtifact`). */
+export interface ArtifactExportRequest {
+  format: 'pdf' | 'png' | 'html'
+  /** The artifact's text, already read by the client. */
+  content: string
+  /** Its effective render mode (`getEffectiveRenderMode`). */
+  mode: string
+  title: string
+}
+
+/** `canceled`: the person dismissed the save dialog — not an error. */
+export type ArtifactExportResult =
+  | { ok: true }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
   /** Pre-boot config the renderer can't get from the settings DB (multi-hub), plus
@@ -83,6 +99,13 @@ export interface ElectronBootstrapApp {
   prepareDirectLink?: (
     address: string
   ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }>
+  /**
+   * Render an artifact to PDF/PNG/HTML and save it where the person picks — on THIS
+   * device, never the hub's, so it works the same against a local or a remote hub.
+   * Desktop renders in an offscreen window; the web shell prints through the browser.
+   * Optional: a host without it reports export as unsupported.
+   */
+  exportArtifact?: (request: ArtifactExportRequest) => Promise<ArtifactExportResult>
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */

@@ -237,9 +237,6 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'PUT /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   // `outputPath` is a hub-host path the render is WRITTEN to: someone else's worktree
   // or artifact directory, or the hub's own state directory, is refused (access.ts `path`).
-  'POST /api/artifacts/:id/export/html': checked(artifact('params.id'), path('body.outputPath')),
-  'POST /api/artifacts/:id/export/pdf': checked(artifact('params.id'), path('body.outputPath')),
-  'POST /api/artifacts/:id/export/png': checked(artifact('params.id'), path('body.outputPath')),
   'GET /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),

@@ -153,7 +153,7 @@ test('auth OFF: every path allows, even the full-power ones', () => {
     '/api/pty/abc/submit',
     '/api/browser/task-1/eval',
     '/mcp',
-    '/api/artifacts/t1/export/pdf'
+    '/api/artifacts/t1/content'
   ]) {
     expect(restAuthAction({ hubAuthRequired: false, url }), `gate off → allow ${url}`).toBe('allow')
   }

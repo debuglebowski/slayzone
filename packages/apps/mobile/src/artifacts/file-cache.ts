@@ -55,7 +55,7 @@ const segment = (value: string): string => {
 }
 
 /** A file name from a title, keeping what is legal on iOS (only `/` and `:` are not). */
-const fileName = (title: string): string => segment(title.replace(/[/:]/g, '_'))
+export const fileName = (title: string): string => segment(title.replace(/[/:]/g, '_'))
 
 export function artifactFileStamp(source: ArtifactFileSource): string {
   if (source.version) return `v-${segment(source.version.contentHash)}`

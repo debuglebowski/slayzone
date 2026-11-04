@@ -107,8 +107,7 @@ export type {
   TaskOpsBus,
   PtyAccess,
   ProcessesAccess,
-  BrowserAccess,
-  ArtifactExportAccess
+  BrowserAccess
 } from './http/rest-api/types'
 // Owner checks (T-17): the ONE access function, the tRPC classification and its gate.
 export {

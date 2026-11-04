@@ -132,6 +132,11 @@ minimumReleaseAgeExclude:
   # (bundledNativeModules.json of expo 58.0.21) and its own dependency.
   - expo-image-loader@58.0.3 # 2026-10-31
   - expo-image-picker@58.0.10 # 2026-10-31
+  # Mobile artifact export (2026-11-04): PDF via the OS print renderer, the share sheet
+  # for the exported file — the versions SDK 58 pins (bundledNativeModules.json of expo
+  # 58.0.21).
+  - expo-print@58.0.8 # 2026-11-27
+  - expo-sharing@58.0.21 # 2026-11-27
 
 # Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
 nodeLinker: hoisted

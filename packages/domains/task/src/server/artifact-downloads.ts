@@ -1,29 +1,16 @@
 import path from 'path'
-import {
-  existsSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  copyFileSync,
-  createWriteStream
-} from 'fs'
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, createWriteStream } from 'fs'
 import { ZipArchive } from 'archiver'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { containedPath } from '@slayzone/platform/safe-path'
-import {
-  getEffectiveRenderMode,
-  canExportAsPdf,
-  canExportAsPng,
-  canExportAsHtml,
-  type RenderMode
-} from '@slayzone/task-contracts'
 import { buildFolderPathResolver, collectFolderAndDescendants } from './artifact-folder-tree'
 import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
 
-// Artifact download/export flows. Electron-free by construction: the host-only
-// steps (save sheet, directory picker, downloads dir, reveal, offscreen PDF/PNG
-// render) arrive as `ArtifactDownloadHost`, which the transport layer fills from
-// the AppDeps capability bridge.
+// Artifact file/folder/zip downloads. Electron-free by construction: the host-only
+// steps (save sheet, directory picker, downloads dir, reveal) arrive as
+// `ArtifactDownloadHost`, which the transport layer fills from the AppDeps capability
+// bridge. PDF/PNG/HTML export is NOT here: the client renders those on its own device
+// (`exportArtifactOnThisDevice` in @slayzone/task-artifacts/client).
 //
 // This file used to pull those in from the electron module directly and live
 // under src/electron/. After the slice-9 cutover the tRPC `artifacts` router
@@ -32,11 +19,6 @@ import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
 // every download died silently. Living under src/server/ puts it under the
 // boundary guard (scripts/check-server-electron-free.sh), so re-introducing that
 // dependency here fails lint instead of shipping.
-//
-// HTML building is a host capability rather than local work on purpose:
-// buildMermaidPdfHtml reads the mermaid bundle only the host's build ships and silently falls
-// back to plain-code rendering on a miss, which from the side-car bundle would
-// quietly downgrade every mermaid export.
 //
 // `dataDir` is the app data root.
 
@@ -47,15 +29,6 @@ export type ArtifactDownloadHost = {
   // call is a round trip even when the underlying host function is synchronous.
   getDownloadsDir: () => Promise<string>
   showItemInFolder: (absPath: string) => void
-  buildExportHtml: (content: string, mode: string, title: string) => Promise<string>
-  renderPdfToFile: (content: string, mode: string, title: string, destPath: string) => Promise<void>
-  /** False when the mode has no PNG representation. */
-  renderPngToFile: (
-    content: string,
-    mode: string,
-    title: string,
-    destPath: string
-  ) => Promise<boolean>
 }
 
 export interface ArtifactDownloadSource {
@@ -185,98 +158,6 @@ export async function downloadArtifactFolder(
     else copyFileSync(srcPath, destination)
   }
 
-  return true
-}
-
-/** Shared prologue for the 3 render-mode exports: content + mode + names. */
-async function resolveExportable(
-  db: SlayzoneDb,
-  dataDir: string,
-  id: string,
-  canExport: (mode: RenderMode) => boolean,
-  source?: ArtifactDownloadSource
-): Promise<{ content: string; mode: RenderMode; title: string; baseName: string } | null> {
-  const src = await resolveSource(db, dataDir, id, source)
-  if (!src) return null
-
-  const title = src.row.title as string
-  const mode = getEffectiveRenderMode(title, src.row.render_mode as RenderMode | null)
-  if (!canExport(mode)) return null
-
-  return {
-    content: src.bytes
-      ? Buffer.from(src.bytes).toString('utf8')
-      : readFileSync(src.srcPath!, 'utf-8'),
-    mode,
-    title,
-    baseName: title.replace(/\.[^.]+$/, '') || title
-  }
-}
-
-export async function downloadArtifactAsPdf(
-  host: ArtifactDownloadHost,
-  db: SlayzoneDb,
-  dataDir: string,
-  id: string,
-  source?: ArtifactDownloadSource
-): Promise<boolean> {
-  const ex = await resolveExportable(db, dataDir, id, canExportAsPdf, source)
-  if (!ex) return false
-
-  const result = await host.showSaveDialog({
-    title: 'Download as PDF',
-    defaultPath: path.join(await host.getDownloadsDir(), `${ex.baseName}.pdf`),
-    filters: [{ name: 'PDF', extensions: ['pdf'] }]
-  })
-  if (result.canceled || !result.filePath) return false
-
-  await host.renderPdfToFile(ex.content, ex.mode, ex.title, result.filePath)
-  host.showItemInFolder(result.filePath)
-  return true
-}
-
-export async function downloadArtifactAsPng(
-  host: ArtifactDownloadHost,
-  db: SlayzoneDb,
-  dataDir: string,
-  id: string,
-  source?: ArtifactDownloadSource
-): Promise<boolean> {
-  const ex = await resolveExportable(db, dataDir, id, canExportAsPng, source)
-  if (!ex) return false
-
-  const result = await host.showSaveDialog({
-    title: 'Download as PNG',
-    defaultPath: path.join(await host.getDownloadsDir(), `${ex.baseName}.png`),
-    filters: [{ name: 'PNG', extensions: ['png'] }]
-  })
-  if (result.canceled || !result.filePath) return false
-
-  const rendered = await host.renderPngToFile(ex.content, ex.mode, ex.title, result.filePath)
-  if (!rendered) return false
-  host.showItemInFolder(result.filePath)
-  return true
-}
-
-export async function downloadArtifactAsHtml(
-  host: ArtifactDownloadHost,
-  db: SlayzoneDb,
-  dataDir: string,
-  id: string,
-  source?: ArtifactDownloadSource
-): Promise<boolean> {
-  const ex = await resolveExportable(db, dataDir, id, canExportAsHtml, source)
-  if (!ex) return false
-
-  const result = await host.showSaveDialog({
-    title: 'Download as HTML',
-    defaultPath: path.join(await host.getDownloadsDir(), `${ex.baseName}.html`),
-    filters: [{ name: 'HTML', extensions: ['html'] }]
-  })
-  if (result.canceled || !result.filePath) return false
-
-  writeFileSync(result.filePath, await host.buildExportHtml(ex.content, ex.mode, ex.title), 'utf-8')
-  host.showItemInFolder(result.filePath)
   return true
 }
 

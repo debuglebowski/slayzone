@@ -83,9 +83,6 @@ run_harness packages/domains/terminal/src/server/runtime/chat-attachment-guard.t
 run_harness packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_harness packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_harness packages/domains/task/src/server/ops/exec-boundary.test.ts
-# Artifact export routes after the inversion: served by the HUB against ctx.db,
-# reaching the desktop over AppDeps for the offscreen render alone.
-run_harness packages/apps/api/src/http/rest-api/artifacts/export.test.ts
 # GHSA-27r3-jxmh-p828: compressed request bodies are refused 415 on /mcp and /api/*
 # (one compressed frame + trailing bytes crashed the process); one way to build a parser.
 run_harness packages/apps/api/src/http/json-body.test.ts
@@ -373,6 +370,16 @@ run_harness packages/shared/platform/src/dirs.test.ts
 run_harness packages/shared/platform/src/config-prompt.test.ts
 # CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
 run_harness packages/apps/cli/src/commands/tasks/cli-author.test.ts
+# `slay tasks artifacts download --type pdf|png|html` renders on the CLI's machine:
+# browser discovery per OS, the Chrome for Testing install (fake fetch) + its zip
+# reader, the missing-library hint, the export branching (all pure), then real
+# renders in a locally installed Chrome (skipped when the machine has none).
+run_harness packages/apps/cli/src/export/browser.test.ts
+run_harness packages/apps/cli/src/export/browser-install.test.ts
+run_harness packages/apps/cli/src/export/zip-extract.test.ts
+run_harness packages/apps/cli/src/export/missing-libs.test.ts
+run_harness packages/apps/cli/src/export/export-artifact.test.ts
+run_harness packages/apps/cli/src/export/render.integration.test.ts
 # Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
 run_harness packages/apps/api/src/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
@@ -1102,6 +1109,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/runtime.test.ts \
   packages/shared/transport/src/client/compactBytes.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
+  packages/apps/web-shell/src/artifact-export.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \

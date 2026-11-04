@@ -17,9 +17,11 @@ import type {
 } from '@slayzone/task-artifacts/shared'
 import { useTrack } from '@slayzone/telemetry/client'
 import { toast, useDepsChanged, useStableCallback } from '@slayzone/ui'
+import { exportArtifactOnThisDevice, type ArtifactExportFormat } from './artifact-export'
 
-// Downloads reach the Electron host over the capability bridge, so they can fail for
-// reasons the user must see (no host capability, render failure, unwritable path).
+// Downloads reach the Electron host over the capability bridge, and exports render on
+// this device's host, so both can fail for reasons the user must see (no host
+// capability, render failure, unwritable path).
 // These mutations were previously fired bare: a rejection became an unhandled promise
 // and the click looked like a no-op — which is how all 6 procedures stayed broken
 // unnoticed after the slice-9 cutover. `false` still means "user cancelled".
@@ -209,15 +211,6 @@ export function useArtifacts(
   const { mutateAsync: downloadFolderMutate } = useMutation(
     trpc.artifacts.downloadFolder.mutationOptions()
   )
-  const { mutateAsync: downloadAsPdfMutate } = useMutation(
-    trpc.artifacts.downloadAsPdf.mutationOptions()
-  )
-  const { mutateAsync: downloadAsPngMutate } = useMutation(
-    trpc.artifacts.downloadAsPng.mutationOptions()
-  )
-  const { mutateAsync: downloadAsHtmlMutate } = useMutation(
-    trpc.artifacts.downloadAsHtml.mutationOptions()
-  )
   const { mutateAsync: downloadAllAsZipMutate } = useMutation(
     trpc.artifacts.downloadAllAsZip.mutationOptions()
   )
@@ -395,22 +388,35 @@ export function useArtifacts(
     [downloadFolderMutate]
   )
 
+  // PDF/PNG/HTML render on THIS device (see exportArtifactOnThisDevice): the hub
+  // only serves the content.
+  const exportOnThisDevice = useCallback(
+    async (id: string, format: ArtifactExportFormat): Promise<boolean> => {
+      const artifact = artifacts.find((a) => a.id === id)
+      if (!artifact) return false
+      const content = await readContent(id)
+      if (content === null) throw new Error('Artifact file not found')
+      return exportArtifactOnThisDevice(artifact, content, format)
+    },
+    [artifacts, readContent]
+  )
+
   const downloadAsPdf = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('PDF export', () => downloadAsPdfMutate({ id })),
-    [downloadAsPdfMutate]
+      runDownload('PDF export', () => exportOnThisDevice(id, 'pdf')),
+    [exportOnThisDevice]
   )
 
   const downloadAsPng = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('PNG export', () => downloadAsPngMutate({ id })),
-    [downloadAsPngMutate]
+      runDownload('PNG export', () => exportOnThisDevice(id, 'png')),
+    [exportOnThisDevice]
   )
 
   const downloadAsHtml = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('HTML export', () => downloadAsHtmlMutate({ id })),
-    [downloadAsHtmlMutate]
+      runDownload('HTML export', () => exportOnThisDevice(id, 'html')),
+    [exportOnThisDevice]
   )
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {

@@ -526,25 +526,6 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
     expect(ownB.text).toBe('B_OWN_FILE_BYTES')
   })
 
-  test('REST: an export cannot be written into A’s artifact dir or the hub’s state', async () => {
-    for (const outputPath of [
-      join(hub.root, 'artifacts', A.task, 'planted.html'),
-      join(A.path, 'planted.html'),
-      join(hub.root, 'slayzone.data.sqlite')
-    ]) {
-      const before = lines.length
-      const r = await rest(hub, b.token, {
-        method: 'POST',
-        path: '/api/artifacts/:id/export/html',
-        params: { id: B.artifact },
-        query: {},
-        body: { outputPath }
-      })
-      expect(r.status, `${outputPath}: ${r.status} ${r.text}`).toBe(404)
-      expect(denials(before), outputPath).toHaveLength(1)
-    }
-  })
-
   // ── MCP ──
   test('MCP: B and the admin get "Not found" + one audit line on every id A owns; A passes', async () => {
     const callB = await mcpClient(hub, b.token)

@@ -28,7 +28,7 @@ import { pathToFileURL } from 'url'
 import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
+import { readFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
 
@@ -432,9 +432,9 @@ function packagedNativeModuleEnv(): { NODE_PATH?: string } {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-// The standalone mermaid browser bundle the offscreen artifact exporter injects. An
-// asset import copies just this file into out/main, so the packaged app need not ship
-// the mermaid package (the renderer bundles its own mermaid).
+// The standalone mermaid browser bundle the offscreen artifact exporter injects
+// (`./artifact-export`). An asset import copies just this file into out/main, so the
+// packaged app need not ship the mermaid package (the renderer bundles its own mermaid).
 import mermaidScriptPath from 'mermaid/dist/mermaid.min.js?asset'
 import {
   initDatabases,
@@ -444,15 +444,8 @@ import {
 } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
-import {
-  filesPathExists,
-  filesSaveTempImage,
-  buildPdfHtml,
-  buildMermaidPdfHtml,
-  buildPngHtml,
-  renderToPdf,
-  renderToPng
-} from '@slayzone/task/electron'
+import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
+import { exportArtifactOnDesktop } from './artifact-export'
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
@@ -2413,24 +2406,6 @@ app
               },
               appGetVersion: () => app.getVersion(),
               appGetDownloadsDir: async () => app.getPath('downloads'),
-              // Offscreen renderers, reached from the hub over the capability bridge.
-              artifactBuildExportHtml: async (content, mode, title) =>
-                mode === 'mermaid-preview'
-                  ? buildMermaidPdfHtml(content, title, mermaidScriptPath)
-                  : buildPdfHtml(content, mode, title),
-              artifactRenderPdfToFile: async (content, mode, title, destPath) => {
-                const isMermaid = mode === 'mermaid-preview'
-                const html = isMermaid
-                  ? buildMermaidPdfHtml(content, title, mermaidScriptPath)
-                  : buildPdfHtml(content, mode, title)
-                writeFileSync(destPath, await renderToPdf(html, isMermaid))
-              },
-              artifactRenderPngToFile: async (content, mode, title, destPath) => {
-                const html = buildPngHtml(content, mode, title, mermaidScriptPath)
-                if (!html) return false
-                writeFileSync(destPath, await renderToPng(html))
-                return true
-              },
               // Task/tab browser registry, reached from the hub over the capability
               // injects into the REST browser routes. One implementation, two
               // bridge. Sole injection point since the REST proxy was deleted.
@@ -3775,6 +3750,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // May this document open a direct-link socket to a computer now (CSP + main's probe)?
     ipcMain.handle('app:direct-link-prepare', (event, address: unknown) =>
       directLinkGate.prepare(event.sender.id, typeof address === 'string' ? address : '')
+    )
+    // Artifact export renders HERE, on the device the person is using — never on the
+    // hub, so it works the same against a local or a remote hub.
+    ipcMain.handle('app:export-artifact', (event, request: unknown) =>
+      exportArtifactOnDesktop(BrowserWindow.fromWebContents(event.sender), request, {
+        mermaidScriptPath
+      })
     )
     if (isPlaywright) {
       ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())

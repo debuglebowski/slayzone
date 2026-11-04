@@ -47,9 +47,6 @@ import { registerArtifactsCrudRoutes } from './artifacts/crud'
 import { registerArtifactsSearchRoute } from './artifacts/search'
 import { registerArtifactsVersionsRoutes } from './artifacts/versions'
 import { registerOpenArtifactRoute } from './artifacts/open'
-import { registerArtifactsExportPdfRoute } from './artifacts/export-pdf'
-import { registerArtifactsExportPngRoute } from './artifacts/export-png'
-import { registerArtifactsExportHtmlRoute } from './artifacts/export-html'
 import { registerAutomationsRunRoute } from './automations/run'
 import { registerPtyListRoute } from './pty/list'
 import { registerPtyBufferRoute } from './pty/buffer'
@@ -158,9 +155,6 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerArtifactsContentRoutes(app, deps)
   registerArtifactsVersionsRoutes(app, deps)
   registerArtifactsCrudRoutes(app, deps)
-  registerArtifactsExportPdfRoute(app, deps)
-  registerArtifactsExportPngRoute(app, deps)
-  registerArtifactsExportHtmlRoute(app, deps)
 
   // Automations
   registerAutomationsRunRoute(app, deps)

@@ -15,8 +15,8 @@
  *   create   → POST   /api/artifacts?taskId&title[&folderId&renderMode]  (streamed body)
  *   upload   → POST   /api/tasks/:id/artifacts?title=                    (streamed body)
  *   delete   → DELETE /api/artifacts/:id
- *   download → GET    /api/artifacts/:id/content  (raw + zip)
- *              POST   /api/artifacts/:id/export/{pdf,png,html}
+ *   download → GET    /api/artifacts/:id/content  (raw + zip, and the source of the
+ *                     pdf/png/html exports, which the CLI renders itself)
  *
  * The `CLI artifact commands work without a local database` suite below is the
  * regression guard: it runs with SLAYZONE_ROOT pointed at an EMPTY dir, which is
@@ -36,6 +36,7 @@ import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../apps/api/src/http/rest-api/index.js'
+import { defaultBrowserEnv, findBrowser } from '../src/export/browser.js'
 
 /**
  * The storage dir a process anchored at `root` resolves — derived by running the
@@ -54,6 +55,9 @@ function storageDirFor(root: string): string {
     else process.env.SLAYZONE_ROOT = prev
   }
 }
+
+// A Chrome-family browser the CLI's own discovery finds here (pdf/png render tests).
+const LOCAL_BROWSER = findBrowser(defaultBrowserEnv())
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 // Without the bundle there is nothing to spawn: every suite below is skipped (the old
@@ -509,13 +513,93 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(fs.readFileSync(out).subarray(0, 4).toString('hex')).toBe('504b0304')
   })
 
-  test('download --type pdf reports the host cannot export (no artifactExport dep)', async () => {
-    // This harness registers the routes WITHOUT an `artifactExport` slot, i.e. the
-    // standalone-hub shape → 501. The CLI must surface that, not crash.
-    const r = await runCli(['tasks', 'artifacts', 'download', short(artifactId), '--type', 'pdf'])
-    expect(r.exitCode).toBe(1)
-    expect(r.stderr.includes('not available in standalone server')).toBe(true)
+  // pdf/png/html are rendered BY THE CLI from the content route — this harness's hub
+  // has no exporter at all (the standalone-hub shape), and the exports still work.
+  test('download --type html renders locally, no browser involved', async () => {
+    const out = path.join(tmpDir, 'notes-export.html')
+    // An unusable --browser proves html never looks for one.
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(artifactId),
+      '--type',
+      'html',
+      '--output',
+      out,
+      '--browser',
+      path.join(tmpDir, 'no-such-browser')
+    ])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.trim()).toBe(out)
+    const html = fs.readFileSync(out, 'utf8')
+    expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(html).toContain('<title>notes.md</title>')
+    expect(html).toContain('<h1>hello</h1>')
   })
+
+  test('download --type html of a mermaid artifact embeds the bundled mermaid build', async () => {
+    const c = await runCli(
+      ['tasks', 'artifacts', 'create', 'flow.mmd', '--task', short(taskId), '--json'],
+      { input: 'graph TD\n  A --> B\n' }
+    )
+    expect(c.exitCode).toBe(0)
+    const id = (JSON.parse(c.stdout) as { id: string }).id
+    const out = path.join(tmpDir, 'flow-export.html')
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(id),
+      '--type',
+      'html',
+      '--output',
+      out
+    ])
+    expect(r.exitCode).toBe(0)
+    const html = fs.readFileSync(out, 'utf8')
+    // The inlined (compressed) payload decoded to the real browser build, not the
+    // code-block fallback a missing mermaid degrades to.
+    expect(html).toContain('<pre class="mermaid">')
+    expect(html).toContain('mermaid.initialize(')
+    expect(html.length).toBeGreaterThan(1_000_000)
+  })
+
+  test('download --type pdf with a --browser that does not exist is refused', async () => {
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(artifactId),
+      '--type',
+      'pdf',
+      '--browser',
+      path.join(tmpDir, 'no-such-browser')
+    ])
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr).toContain('Browser not found or not executable:')
+  })
+
+  test.skipIf(!LOCAL_BROWSER)(
+    'download --type pdf renders in the local browser',
+    { timeout: 60_000 },
+    async () => {
+      const out = path.join(tmpDir, 'notes-export.pdf')
+      const r = await runCli([
+        'tasks',
+        'artifacts',
+        'download',
+        short(artifactId),
+        '--type',
+        'pdf',
+        '--output',
+        out
+      ])
+      expect(r.exitCode).toBe(0)
+      expect(r.stdout.trim()).toBe(out)
+      expect(fs.readFileSync(out).subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    }
+  )
 
   test('download --type png on a markdown artifact is rejected client-side', async () => {
     // Capability check stays in the CLI (it knows the render mode from the row it
