@@ -1138,6 +1138,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/diff-view/src/DiffView.line-action.test.tsx \
   packages/domains/task-terminals/src/client/chat/diff-comments/diff-comments.test.tsx \
   packages/domains/task-terminals/src/client/chat/RewindPicker.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ComposerSubAgents.test.tsx \
   packages/domains/worktrees/src/client/ConflictFileView.test.tsx \
   packages/shared/layout/src/SplitDivider.test.tsx \
   packages/domains/file-editor/src/client/SearchableCodeView.test.tsx \
