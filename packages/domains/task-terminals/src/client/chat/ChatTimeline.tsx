@@ -73,6 +73,8 @@ export interface ChatTimelineProps {
   hydrating: boolean
   isEmpty: boolean
   inFlight: boolean
+  /** Stop was pressed and the turn has not closed yet: the indicator says so. */
+  stopping?: boolean
   /** The agent is waiting on the user (a prompt) — no "working" indicator then. */
   awaitingUser: boolean
   appearance: AppearanceSettings
@@ -116,6 +118,7 @@ export function ChatTimeline({
   hydrating,
   isEmpty,
   inFlight,
+  stopping = false,
   awaitingUser,
   appearance,
   items,
@@ -149,7 +152,7 @@ export function ChatTimeline({
   const tailStreaming =
     (tail?.kind === 'text' || (tail?.kind === 'thinking' && appearance.chatShowThinking)) &&
     tail.stream === 'open'
-  const loadingLabel = deriveLoadingLabel(state) ?? 'Waiting for agent…'
+  const loadingLabel = stopping ? 'Stopping…' : (deriveLoadingLabel(state) ?? 'Waiting for agent…')
   const activityAppearance = useMemo(
     () => ({
       chatShowActivities: appearance.chatShowActivities,

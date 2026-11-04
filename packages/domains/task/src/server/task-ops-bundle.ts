@@ -1,6 +1,7 @@
 import {
   getAllTasksOp,
   getByProjectOp,
+  getSiblingBrowserUrlOp,
   getDeletedTasksOp,
   getTaskOp,
   createTaskOp,
@@ -34,6 +35,7 @@ import {
 export const taskOps = {
   getAllTasksOp,
   getByProjectOp,
+  getSiblingBrowserUrlOp,
   getDeletedTasksOp,
   getTaskOp,
   createTaskOp,

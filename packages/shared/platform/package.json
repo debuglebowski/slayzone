@@ -29,6 +29,8 @@
     "./local-computer-status": "./src/local-computer-status.ts",
     "./electron-bootstrap-contract": "./src/electron-bootstrap-contract.ts",
     "./paths": "./src/paths.ts",
+    "./sqlite-worker": "./src/sqlite-worker.ts",
+    "./sqlite-worker-host": "./src/sqlite-worker-host.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
     "./security-log": "./src/security-log.ts",
@@ -42,7 +44,8 @@
     "./event-loop-stall": "./src/event-loop-stall.ts",
     "./parent-watch": "./src/parent-watch.ts",
     "./node-pty-install": "./src/node-pty-install.ts",
-    "./computer-launcher": "./src/computer-launcher.ts"
+    "./computer-launcher": "./src/computer-launcher.ts",
+    "./suspend-clock": "./src/suspend-clock.ts"
   },
   "scripts": {
     "test": "vitest run",

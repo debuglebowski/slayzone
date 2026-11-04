@@ -12,6 +12,7 @@
     "./record": "./src/server/diagnostics-store.ts",
     "./electron": "./src/electron/index.ts",
     "./self-heal": "./src/server/self-heal.ts",
+    "./schema": "./src/server/schema.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {

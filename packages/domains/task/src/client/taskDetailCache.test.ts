@@ -42,7 +42,8 @@ const trpcClientMock = {
     get: { query: vi.fn() },
     getSubTasks: { query: vi.fn() },
     getAll: { query: vi.fn() },
-    getByProject: { query: vi.fn() }
+    getByProject: { query: vi.fn() },
+    getSiblingBrowserUrl: { query: vi.fn() }
   },
   tags: {
     list: { query: vi.fn() },
@@ -67,7 +68,8 @@ const remoteHubClientMock = {
     get: { query: vi.fn() },
     getSubTasks: { query: vi.fn() },
     getAll: { query: vi.fn() },
-    getByProject: { query: vi.fn() }
+    getByProject: { query: vi.fn() },
+    getSiblingBrowserUrl: { query: vi.fn() }
   },
   tags: { list: { query: vi.fn() }, getForTask: { query: vi.fn() } },
   projects: { list: { query: vi.fn() } },
@@ -84,9 +86,13 @@ vi.mock('@slayzone/transport/client', () => ({
     id === 'remote-b' ? { id, url: '', client: remoteHubClientMock, wsClient: {} } : null
 }))
 
-const { fetchTaskDetail, buildTaskDetailSnapshot, TASK_DETAIL_FETCH_TIMEOUT_MS } = await import(
-  './taskDetailCache'
-)
+const {
+  fetchTaskDetail,
+  buildTaskDetailSnapshot,
+  isTaskDetailTimeoutError,
+  TASK_DETAIL_FETCH_TIMEOUT_MS,
+  PATH_PROBE_TIMEOUT_MS
+} = await import('./taskDetailCache')
 const { hubAllows } = await import('@slayzone/transport/client')
 
 beforeEach(() => {
@@ -96,6 +102,8 @@ beforeEach(() => {
   trpcClientMock.task.getSubTasks.query.mockResolvedValue([])
   trpcClientMock.task.getAll.query.mockResolvedValue([])
   trpcClientMock.task.getByProject.query.mockResolvedValue([])
+  trpcClientMock.task.getSiblingBrowserUrl.query.mockResolvedValue({ url: null })
+  remoteHubClientMock.task.getSiblingBrowserUrl.query.mockResolvedValue({ url: null })
   trpcClientMock.tags.list.query.mockResolvedValue([makeTag()])
   trpcClientMock.tags.getForTask.query.mockResolvedValue([makeTag()])
   trpcClientMock.projects.list.query.mockResolvedValue([makeProject()])
@@ -206,8 +214,27 @@ describe('fetchTaskDetail', () => {
     expect(trpcClientMock.task.getByProject.query).not.toHaveBeenCalled()
   })
 
-  it('falls back to first URL from same-project tasks when browser_tabs is null', async () => {
+  it('falls back to the hub-computed sibling URL when browser_tabs is null', async () => {
     trpcClientMock.task.get.query.mockResolvedValue(makeTask({ id: 'task-1', browser_tabs: null }))
+    trpcClientMock.task.getSiblingBrowserUrl.query.mockResolvedValue({ url: 'http://example.com' })
+
+    const result = await fetchTaskDetail('task-1')
+    expect(result!.browserTabs.tabs[0].url).toBe('http://example.com')
+    expect(trpcClientMock.task.getSiblingBrowserUrl.query).toHaveBeenCalledWith({
+      projectId: 'proj-1',
+      excludeTaskId: 'task-1'
+    })
+    // Never ships the whole project (≈1.5 MB per tab) to find one URL, and never
+    // consults tasks outside the project — cross-project URL leak.
+    expect(trpcClientMock.task.getByProject.query).not.toHaveBeenCalled()
+    expect(trpcClientMock.task.getAll.query).not.toHaveBeenCalled()
+  })
+
+  it('scans same-project tasks on a hub that predates getSiblingBrowserUrl', async () => {
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ id: 'task-1', browser_tabs: null }))
+    trpcClientMock.task.getSiblingBrowserUrl.query.mockRejectedValue({
+      data: { code: 'NOT_FOUND' }
+    })
     trpcClientMock.task.getByProject.query.mockResolvedValue([
       makeTask({ id: 'task-1', browser_tabs: null }),
       makeTask({
@@ -222,15 +249,11 @@ describe('fetchTaskDetail', () => {
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs.tabs[0].url).toBe('http://example.com')
     expect(trpcClientMock.task.getByProject.query).toHaveBeenCalledWith({ projectId: 'proj-1' })
-    // Must never consult tasks outside the project — cross-project URL leak
     expect(trpcClientMock.task.getAll.query).not.toHaveBeenCalled()
   })
 
   it('falls back to about:blank when no same-project tasks have URLs', async () => {
     trpcClientMock.task.get.query.mockResolvedValue(makeTask({ browser_tabs: null }))
-    trpcClientMock.task.getByProject.query.mockResolvedValue([
-      makeTask({ id: 'task-1', browser_tabs: null })
-    ])
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs.tabs[0].url).toBe('about:blank')
@@ -280,7 +303,6 @@ describe('fetchTaskDetail', () => {
   it('routes to the OWNING hub client when a hubId is passed (multi-hub)', async () => {
     remoteHubClientMock.task.get.query.mockResolvedValue(makeTask({ id: 'task-1' }))
     remoteHubClientMock.task.getSubTasks.query.mockResolvedValue([])
-    remoteHubClientMock.task.getByProject.query.mockResolvedValue([])
     remoteHubClientMock.tags.list.query.mockResolvedValue([])
     remoteHubClientMock.tags.getForTask.query.mockResolvedValue([])
     remoteHubClientMock.projects.list.query.mockResolvedValue([])
@@ -315,10 +337,30 @@ describe('fetchTaskDetail — hang timeout', () => {
     trpcClientMock.task.get.query.mockReturnValue(new Promise(() => {}))
 
     const result = fetchTaskDetail('task-1')
-    const assertion = expect(result).rejects.toThrow()
+    // A recognisable timeout: the task pane retries these on its own instead of
+    // parking the tab on a dead-end error screen.
+    const assertion = expect(result).rejects.toSatisfy(isTaskDetailTimeoutError)
 
     await vi.advanceTimersByTimeAsync(TASK_DETAIL_FETCH_TIMEOUT_MS)
     await assertion
+  })
+
+  it('other failures are not timeouts', () => {
+    expect(isTaskDetailTimeoutError(new Error('hub unavailable'))).toBe(false)
+    expect(isTaskDetailTimeoutError(null)).toBe(false)
+  })
+
+  it('an unanswered path probe degrades to "not missing" instead of failing the load', async () => {
+    // The probe routes to the task's computer; the hub's own request deadline
+    // for it (30s) is longer than this whole load's, so a busy computer used to
+    // take every task tab down with it.
+    trpcClientMock.workspace.pathExists.query.mockReturnValue(new Promise(() => {}))
+
+    const result = fetchTaskDetail('task-1')
+    await vi.advanceTimersByTimeAsync(PATH_PROBE_TIMEOUT_MS)
+    const detail = await result
+    expect(detail!.projectPathMissing).toBe(false)
+    expect(PATH_PROBE_TIMEOUT_MS).toBeLessThan(TASK_DETAIL_FETCH_TIMEOUT_MS / 2)
   })
 
   it('does not wait the full timeout when the fetch settles quickly', async () => {
@@ -353,7 +395,7 @@ describe('buildTaskDetailSnapshot', () => {
       Promise.resolve(id === 'parent' ? parent : task)
     )
     trpcClientMock.task.getSubTasks.query.mockResolvedValue([sub])
-    trpcClientMock.task.getByProject.query.mockResolvedValue([parent, task, sub, sibling])
+    trpcClientMock.task.getSiblingBrowserUrl.query.mockResolvedValue({ url: 'http://same.project' })
     trpcClientMock.tags.list.query.mockResolvedValue(tags)
     trpcClientMock.tags.getForTask.query.mockResolvedValue([tags[0]])
 

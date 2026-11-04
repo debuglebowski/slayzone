@@ -69,6 +69,13 @@ export const taskRouter = router({
     .input(z.object({ projectId: z.string() }))
     .query(({ ctx, input }) => ops().getByProjectOp(ctx.db, input.projectId)),
 
+  /** Fallback browser URL for a task with none of its own (see the op). */
+  getSiblingBrowserUrl: publicProcedure
+    .input(z.object({ projectId: z.string(), excludeTaskId: z.string() }))
+    .query(({ ctx, input }) =>
+      ops().getSiblingBrowserUrlOp(ctx.db, input.projectId, input.excludeTaskId)
+    ),
+
   get: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => ops().getTaskOp(ctx.db, input.id)),

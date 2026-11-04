@@ -89,6 +89,47 @@ test('Stop mid-turn sends a live interrupt and keeps the process', async () => {
   expect(h.states).not.toContain('error')
 })
 
+test('Stop mid-turn: what the CLI still streams before it reads the interrupt is not drawn; the next turn streams', async () => {
+  const h = transportHarness()
+  await startTab()
+  const f = h.fakes[0]
+  const se = (event: unknown) => ({ type: 'stream_event', event, parent_tool_use_id: null })
+  const delta = (text: string) =>
+    se({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })
+  f.answer('interrupt', () => {
+    // The CLI wrote more of the reply before it read the interrupt, then ends the turn.
+    setImmediate(() => {
+      emitLine(f, delta(' and more'))
+      emitLine(f, se({ type: 'message_start', message: { id: 'msg_late' } }))
+      emitLine(f, se({ type: 'content_block_start', index: 0, content_block: { type: 'text' } }))
+      emitLine(f, delta('a new block'))
+      emitLine(f, sj.aborted())
+    })
+    return { success: { still_queued: [] } }
+  })
+  await sendAndStart(f, 'u1')
+  emitLine(f, se({ type: 'message_start', message: { id: 'msg_1' } }))
+  emitLine(f, se({ type: 'content_block_start', index: 0, content_block: { type: 'text' } }))
+  emitLine(f, delta('working'))
+  await until(() => h.broadcasts.some((b) => b.event.kind === 'stream-block-delta'))
+
+  await stop(true)
+  await until(() => mgr.getSessionTerminalState(TAB_OPTS.tabId) === 'idle')
+  await wait(20)
+
+  const kinds = h.broadcasts.map((b) => b.event.kind)
+  const after = kinds.slice(kinds.indexOf('interrupted'))
+  expect(after.filter((k) => k.startsWith('stream-'))).toEqual([])
+  expect(after).toContain('result')
+
+  // The next turn streams as before.
+  await sendAndStart(f, 'u2')
+  emitLine(f, se({ type: 'message_start', message: { id: 'msg_2' } }))
+  emitLine(f, se({ type: 'content_block_start', index: 0, content_block: { type: 'text' } }))
+  emitLine(f, delta('next answer'))
+  await until(() => h.broadcasts.some((b) => JSON.stringify(b.event).includes('next answer')))
+})
+
 test('Stop before any output: the message comes back, leaves the conversation, and the turn says nothing more', async () => {
   const h = transportHarness()
   await startTab()

@@ -26,9 +26,14 @@
  * @module cli/local-hub
  */
 import path from 'node:path'
-import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
+import { HUB_DYNAMIC_PORT_RANGE, SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
 import { LOOPBACK_HOSTS } from '@slayzone/platform/hub-addr'
-import { findHub } from '@slayzone/platform/hub-discovery'
+import {
+  currentOsUser,
+  findFirstHub,
+  findHub,
+  type DiscoveredHub
+} from '@slayzone/platform/hub-discovery'
 import { resolveTaskCommandTarget } from './hub-config'
 
 /**
@@ -41,66 +46,133 @@ import { resolveTaskCommandTarget } from './hub-config'
  * of by file. The app sets it from `app.isPackaged` when it spawns the sidecar, and
  * it is `global`-scoped in the env manifest, so a task terminal inherits it.
  */
-export function fixedPortForChannel(): number {
-  return process.env.SLAYZONE_DEV === '1' ? SIDECAR_FIXED_PORT.dev : SIDECAR_FIXED_PORT.prod
+export function fixedPortForChannel(dev: boolean = isDevChannel()): number {
+  return dev ? SIDECAR_FIXED_PORT.dev : SIDECAR_FIXED_PORT.prod
+}
+
+/** `slay --dev`, or a terminal the dev app spawned — see {@link fixedPortForChannel}. */
+function isDevChannel(): boolean {
+  return process.env.SLAYZONE_DEV === '1'
 }
 
 /**
- * The root THIS invocation belongs to, when it can be known.
+ * What makes a local hub OURS on a channel — or null when nothing can tell, in which
+ * case whatever answers the fixed port is accepted, as it always was.
  *
- * `SLAYZONE_ROOT` is `global`-scoped in the env manifest, so — unlike
- * `SLAYZONE_HUB_ADDRESS`, which is `infra` and therefore stripped by
- * `sanitizeSpawnEnv` at every pty boundary — it survives into a task terminal.
- * That makes it the one identity signal a `slay` running inside an app-spawned
- * terminal still holds, and the only thing that can tell the app it belongs to
- * apart from a DIFFERENT app answering the same fixed port.
- *
- * Null for a plain user shell that was never spawned by an app. There is no
- * expectation to violate there, so the probe is accepted: the failure this
- * guards is a shell that belongs to app A silently acting on app B.
+ *   - `root`: `SLAYZONE_ROOT` is set and names the app this invocation belongs to.
+ *     It is `global`-scoped in the env manifest, so — unlike `SLAYZONE_HUB_ADDRESS`,
+ *     which is `infra` and therefore stripped by `sanitizeSpawnEnv` at every pty
+ *     boundary — it survives into a task terminal. It belongs to the CURRENT channel
+ *     only, so for the other channel (the "is the app running with/without --dev?"
+ *     hint) it says nothing.
+ *   - `user`: a plain user shell (no `SLAYZONE_ROOT`) — this OS user's app on the
+ *     channel. Every user on the machine shares one loopback, so whoever started first
+ *     holds the channel's fixed port; `/health` reports the OS user a hub runs as and
+ *     whether it is the dev build, which tells this user's app from theirs without
+ *     the CLI deriving the app's on-disk layout.
  */
-function expectedRoot(): string | null {
-  const root = process.env.SLAYZONE_ROOT?.trim()
-  return root ? path.resolve(root) : null
+type HubIdentity = { kind: 'root'; root: string } | { kind: 'user'; user: string; dev: boolean }
+
+function identityFor(dev: boolean): HubIdentity | null {
+  const own = process.env.SLAYZONE_ROOT?.trim()
+  if (own) return dev === isDevChannel() ? { kind: 'root', root: path.resolve(own) } : null
+  const user = currentOsUser()
+  return user ? { kind: 'user', user, dev } : null
 }
 
-/** Outcome of probing this channel's fixed port. */
-export type FixedPortProbe =
+/** Human-readable "what we were looking for", for the refusal message. */
+function describeIdentity(id: HubIdentity): string {
+  return id.kind === 'root'
+    ? id.root
+    : `the SlayZone ${id.dev ? 'dev ' : ''}app of OS user "${id.user}"`
+}
+
+/**
+ * Is the hub on the channel's FIXED port ours? A hub too old to report its user is
+ * given the benefit of the doubt — the pre-existing behaviour — since nothing in its
+ * answer can tell.
+ */
+function ownsFixedPort(hub: DiscoveredHub, id: HubIdentity): boolean {
+  if (id.kind === 'root') return path.resolve(hub.root) === id.root
+  return hub.user === null || hub.user === id.user
+}
+
+/** Is a hub found ELSEWHERE in the block ours? Strict: every bit must match, since a
+ *  sweep sees every hub on the machine (standalone ones, the other channel's app). */
+function isOursElsewhere(hub: DiscoveredHub, id: HubIdentity): boolean {
+  if (id.kind === 'root') return path.resolve(hub.root) === id.root
+  return hub.supervised && hub.dev === id.dev && hub.user === id.user
+}
+
+/** Outcome of looking for this invocation's local app hub. */
+export type LocalHubProbe =
   /** A hub answered and it is ours (or we had no expectation to check). `root` +
    *  `authRequired` let a caller decide whether to fall back to the on-box owner
    *  credential (`hub.owner.json`) — only meaningful for a hub that requires login. */
   | { kind: 'found'; port: number; root: string; authRequired: boolean }
   /** Nothing hub-shaped answered. */
   | { kind: 'absent' }
-  /** A hub answered, but it serves a different root — refuse, never downgrade. */
+  /** A hub answered on the fixed port, but it is not ours, and ours is nowhere in the
+   *  fallback range — refuse, never downgrade. `expected` describes what ours is. */
   | { kind: 'foreign'; port: number; root: string; expected: string }
 
+export interface LocalHubProbeOptions {
+  /** Channel to look for. Default: this invocation's (`SLAYZONE_DEV`). */
+  dev?: boolean
+  /** The channel's fixed port. Tests pass a port they own. */
+  port?: number
+  /** Where a displaced app hub may be. Default {@link HUB_DYNAMIC_PORT_RANGE}, the
+   *  range the app's supervisor falls back to. Tests pass a range they own. */
+  range?: { start: number; end: number }
+}
+
 /**
- * Probe this channel's fixed port, returning it when OUR hub answers there.
+ * Find this invocation's local app hub, returning it only when it is OURS.
  *
- * `findHub` with an all-digits argument probes that port DIRECTLY (no sweep) and
- * validates the `/health` body is hub-shaped — but hub-shaped only proves it is
- * *a* hub, not *the* hub. A fixed port is a well-known address, so anything on
- * this machine that binds it answers: most sharply, an e2e worker's `slay` (whose
- * own address was stripped at the spawn boundary) probes this port and reaches the
- * developer's live app, then mutates its real data.
+ * First the channel's fixed port. `findHub` with an all-digits argument probes that
+ * port DIRECTLY (no sweep) and validates the `/health` body is hub-shaped — but
+ * hub-shaped only proves it is *a* hub, not *the* hub. A fixed port is a well-known
+ * address, so anything on this machine that binds it answers: an e2e worker's `slay`
+ * (whose own address was stripped at the spawn boundary) reaching the developer's
+ * live app, or — on a Mac several people use — another user's app. So the identity
+ * is verified against what `/health` reports over loopback (see {@link identityFor}).
  *
- * So the identity is verified too. `/health` already reports `root` over loopback;
- * a mismatch is reported rather than silently dialled, for the same reason
- * `resolveTarget` refuses to downgrade a configured-but-unreachable hub to the
- * local app: quietly acting on a different target applies the command to the
- * wrong data.
+ * Not ours there (or nothing there) ⇒ sweep the supervisor's fallback range for our
+ * hub: when another user's app already held the fixed port, this user's app serves
+ * on the first free port of that range (sidecar-server-supervisor.ts). The sweep
+ * settles on the first match; closed ports refuse at once, so it costs milliseconds.
  *
- * `port` defaults to this channel's; tests pass a port they own so the decision
- * logic is pinned without depending on what the machine has bound on the real one.
+ * Still nothing ⇒ a mismatch on the fixed port is reported rather than silently
+ * dialled, for the same reason `resolveTarget` refuses to downgrade a
+ * configured-but-unreachable hub to the local app: quietly acting on a different
+ * target applies the command to the wrong data.
  */
-export async function probeFixedPort(port = fixedPortForChannel()): Promise<FixedPortProbe> {
-  const hub = await findHub(String(port))
-  if (!hub) return { kind: 'absent' }
-  const expected = expectedRoot()
-  if (expected && path.resolve(hub.root) !== expected) {
-    return { kind: 'foreign', port: hub.port, root: hub.root, expected }
+export async function probeLocalHub(opts: LocalHubProbeOptions = {}): Promise<LocalHubProbe> {
+  const dev = opts.dev ?? isDevChannel()
+  const port = opts.port ?? fixedPortForChannel(dev)
+  const id = identityFor(dev)
+
+  const atFixed = await findHub(String(port))
+  if (atFixed && (id === null || ownsFixedPort(atFixed, id))) return found(atFixed)
+  if (id === null) return { kind: 'absent' }
+
+  const elsewhere = await findFirstHub((h) => isOursElsewhere(h, id), {
+    range: opts.range ?? HUB_DYNAMIC_PORT_RANGE
+  })
+  if (elsewhere) return found(elsewhere)
+
+  if (atFixed) {
+    return {
+      kind: 'foreign',
+      port: atFixed.port,
+      root: atFixed.root,
+      expected: describeIdentity(id)
+    }
   }
+  return { kind: 'absent' }
+}
+
+function found(hub: DiscoveredHub): LocalHubProbe {
   return { kind: 'found', port: hub.port, root: hub.root, authRequired: hub.authRequired }
 }
 

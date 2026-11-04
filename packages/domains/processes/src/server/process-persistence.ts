@@ -61,8 +61,9 @@ export interface ProcessPersistence {
 /**
  * Default local-DB impl — identical SQL to the pre-seam inline statements.
  *
- * Methods are deliberately NOT `async`: `db.prepare()` can throw synchronously
- * (the sidecar's SyncSlayzoneDb wraps better-sqlite3's sync prepare), and the
+ * Methods are deliberately NOT `async`: a `SlayzoneDb`'s `prepare()` may throw
+ * synchronously (the hub's used to wrap better-sqlite3's sync prepare; its
+ * worker-backed one now rejects at run instead), and the
  * pre-seam inline `void db?.prepare(...).run(...)` surfaced that throw
  * synchronously to the caller. An `async` wrapper would turn it into a floating
  * unhandled rejection instead — a behavior change this seam must not make.

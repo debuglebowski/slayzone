@@ -7,6 +7,7 @@ import { placementOn, workComputerId, type Project } from '@slayzone/projects-co
 import type { PanelVisibility, PanelSizes } from '@slayzone/task-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import { normalizeOverrides } from './usePanelSizes'
+import { firstRealBrowserUrl } from '../shared/browser-tabs'
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibility = {
   terminal: true,
@@ -34,6 +35,15 @@ export interface TaskDetailData {
 }
 
 /**
+ * How long the project-path probe may take before it counts as unanswered. The
+ * probe routes to the task's computer, and the hub's own deadline for that hop
+ * (30s) is longer than this whole load's — so a busy or unresponsive computer
+ * used to hold every task tab until the load timed out. Unanswered = "not known
+ * to be missing", same as unreachable; TaskDetailPage re-probes on mount.
+ */
+export const PATH_PROBE_TIMEOUT_MS = 5_000
+
+/**
  * Does the project's directory exist on the machine that owns it?
  *
  * Routed to the task's computer, not to whichever hub answered the rest of this
@@ -42,22 +52,26 @@ export interface TaskDetailData {
  * panel rendered "No repository path configured" for a path that was fine.
  *
  * A computer we cannot reach is NOT missing: `reachable: false` means the question
- * went unanswered, and claiming the path is gone would be a guess. Any throw is
- * read the same way — this runs inside the Suspense load, and an unreachable
- * computer must not take the whole Task Detail page down with it.
+ * went unanswered, and claiming the path is gone would be a guess. Any throw — or
+ * no answer within PATH_PROBE_TIMEOUT_MS — is read the same way: this runs inside
+ * the Suspense load, and an unreachable computer must not take the whole Task
+ * Detail page down with it.
  */
 async function checkProjectPathMissing(
   client: TaskTrpcClient,
   taskId: string,
   path: string
 ): Promise<boolean> {
-  try {
+  const probe = async (): Promise<boolean> => {
     if (!(await hubAllows(client, 'workspace.pathExists'))) return false
     const res = await client.workspace.pathExists.query({ taskId, path })
     return res.reachable && !res.exists
-  } catch {
-    return false
   }
+  return withTimeout(
+    probe(),
+    PATH_PROBE_TIMEOUT_MS,
+    () => new Error('path probe unanswered')
+  ).catch(() => false)
 }
 
 /**
@@ -73,9 +87,32 @@ async function checkProjectPathMissing(
  */
 export const TASK_DETAIL_FETCH_TIMEOUT_MS = 20_000
 
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+/**
+ * The task-detail load ran out of time. Not a verdict on the task: it almost
+ * always means the hub was too busy to answer in time, so the task pane retries
+ * these on its own (see TabPanes' error boundary) rather than parking the tab on
+ * a dead-end error screen.
+ */
+export class TaskDetailTimeoutError extends Error {
+  readonly taskId: string
+  constructor(taskId: string, ms: number) {
+    super(`Loading task ${taskId} timed out after ${String(ms)}ms`)
+    this.name = 'TaskDetailTimeoutError'
+    this.taskId = taskId
+  }
+}
+
+/** By name as well as class, so a copy from a second module instance still counts. */
+export function isTaskDetailTimeoutError(error: unknown): error is TaskDetailTimeoutError {
+  return (
+    error instanceof TaskDetailTimeoutError ||
+    (error instanceof Error && error.name === 'TaskDetailTimeoutError')
+  )
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, makeError: () => Error): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms)
+    const timer = setTimeout(() => reject(makeError()), ms)
     promise.then(
       (value) => {
         clearTimeout(timer)
@@ -103,7 +140,7 @@ export async function fetchTaskDetail(
   return withTimeout(
     fetchTaskDetailUncapped(taskId, hubId),
     TASK_DETAIL_FETCH_TIMEOUT_MS,
-    `Loading task ${taskId} timed out after ${String(TASK_DETAIL_FETCH_TIMEOUT_MS)}ms`
+    () => new TaskDetailTimeoutError(taskId, TASK_DETAIL_FETCH_TIMEOUT_MS)
   )
 }
 
@@ -142,14 +179,9 @@ async function fetchTaskDetailUncapped(
 
   // Browser tabs. Fallback URLs come from sibling tasks in the SAME project
   // only — browser state must never leak across projects.
-  const browserTabs = loadedTask.browser_tabs
-    ? loadedTask.browser_tabs
-    : resolveBrowserTabs(
-        loadedTask,
-        await trpc.task.getByProject
-          .query({ projectId: loadedTask.project_id })
-          .catch(() => [] as Task[])
-      )
+  const browserTabs =
+    loadedTask.browser_tabs ??
+    browserTabsAt(await siblingBrowserUrl(trpc, loadedTask.project_id, loadedTask.id))
 
   return {
     task: loadedTask,
@@ -197,20 +229,39 @@ function resolvePanelVisibility(task: Task): PanelVisibility {
 }
 
 /**
- * The task's saved browser tabs, else one tab on the first real URL found among
- * `projectTasks` — which the caller must restrict to the task's own project.
+ * The first real browser URL among the project's other live tasks. The hub
+ * answers it directly (`task.getSiblingBrowserUrl`); a hub that predates that
+ * procedure is asked for the whole project instead, the way every load used to
+ * — megabytes per tab on a big project, so only as the fallback.
  */
-function resolveBrowserTabs(task: Task, projectTasks: readonly Task[]): BrowserTabsState {
-  if (task.browser_tabs) return task.browser_tabs
-  let firstUrl = 'about:blank'
-  for (const t of projectTasks) {
-    if (t.id === task.id || t.archived_at) continue
-    const url = t.browser_tabs?.tabs?.find((tab) => tab.url && tab.url !== 'about:blank')?.url
-    if (url) {
-      firstUrl = url
-      break
-    }
+async function siblingBrowserUrl(
+  client: TaskTrpcClient,
+  projectId: string,
+  taskId: string
+): Promise<string | null> {
+  try {
+    return (await client.task.getSiblingBrowserUrl.query({ projectId, excludeTaskId: taskId })).url
+  } catch {
+    const projectTasks = await client.task.getByProject
+      .query({ projectId })
+      .catch(() => [] as Task[])
+    return firstSiblingBrowserUrl(taskId, projectTasks)
   }
+}
+
+/** Board-order scan of `projectTasks` (the caller restricts them to one project). */
+function firstSiblingBrowserUrl(taskId: string, projectTasks: readonly Task[]): string | null {
+  for (const t of projectTasks) {
+    if (t.id === taskId || t.archived_at) continue
+    const url = firstRealBrowserUrl(t.browser_tabs)
+    if (url) return url
+  }
+  return null
+}
+
+/** One tab on `url`, or a blank new tab. */
+function browserTabsAt(url: string | null): BrowserTabsState {
+  const firstUrl = url ?? 'about:blank'
   return {
     tabs: [
       { id: 'default', url: firstUrl, title: firstUrl === 'about:blank' ? 'New Tab' : firstUrl }
@@ -260,7 +311,7 @@ export function buildTaskDetailSnapshot(
     projectPathMissing: input.projectPathMissing,
     panelVisibility: resolvePanelVisibility(task),
     panelSizes: normalizeOverrides(task.panel_sizes),
-    browserTabs: resolveBrowserTabs(task, projectTasks)
+    browserTabs: task.browser_tabs ?? browserTabsAt(firstSiblingBrowserUrl(task.id, projectTasks))
   }
 }
 

@@ -20,9 +20,16 @@
  *  - Inbound notifications carry `method` and no `id`.
  *  - A response for an unknown/expired id is silently ignored (a reply racing
  *    its own timeout is expected, not a protocol error).
+ *  - Request timeouts count awake time only (`@slayzone/platform/suspend-clock`).
  *
  * @module computer/shared/rpc
  */
+
+import {
+  createAwakeTimeouts,
+  type AwakeTimeouts,
+  type DisposableSuspendClock
+} from '@slayzone/platform/suspend-clock'
 
 export type JsonRpcId = string | number
 
@@ -83,8 +90,14 @@ export interface DuplexRpcOptions {
   onNotification?: (method: string, params: unknown) => void
   /** Diagnostic hook for unparseable / malformed inbound frames. */
   onParseError?: (line: string, err: unknown) => void
-  /** Default per-request timeout; `<= 0` disables. Defaults to 30s. */
+  /**
+   * Default per-request timeout; `<= 0` disables. Defaults to 30s. Counted in
+   * awake time: a host sleep or event-loop freeze does not use it up — both peers
+   * of a local computer sleep together, so neither could have answered.
+   */
   defaultRequestTimeoutMs?: number
+  /** Test seam: the awake-time source for request timeouts. */
+  suspendClock?: () => DisposableSuspendClock
   /** Short name used in error messages (e.g. 'computer-hub'). */
   label?: string
 }
@@ -92,7 +105,8 @@ export interface DuplexRpcOptions {
 interface PendingRequest {
   resolve: (result: unknown) => void
   reject: (err: Error) => void
-  timer: ReturnType<typeof setTimeout> | null
+  /** Cancels the timeout; null when the request has none. */
+  cancelTimeout: (() => void) | null
 }
 
 export const JSON_RPC_METHOD_NOT_FOUND = -32601
@@ -106,10 +120,12 @@ export class DuplexRpc {
   private nextId = 1
   private readonly pending = new Map<JsonRpcId, PendingRequest>()
   private disposed = false
+  private readonly timeouts: AwakeTimeouts
 
   constructor(opts: DuplexRpcOptions) {
     this.opts = opts
     this.label = opts.label ?? 'computer-rpc'
+    this.timeouts = createAwakeTimeouts(opts.suspendClock ? { clock: opts.suspendClock } : {})
   }
 
   get isDisposed(): boolean {
@@ -149,9 +165,9 @@ export class DuplexRpc {
       ...(actor === undefined ? {} : { actor })
     })
     return new Promise<T>((resolve, reject) => {
-      const timer =
+      const cancelTimeout =
         effectiveTimeout > 0
-          ? setTimeout(() => {
+          ? this.timeouts.set(() => {
               this.pending.delete(id)
               reject(new RpcTimeoutError(method, effectiveTimeout, this.label))
             }, effectiveTimeout)
@@ -159,13 +175,13 @@ export class DuplexRpc {
       this.pending.set(id, {
         resolve: resolve as (r: unknown) => void,
         reject,
-        timer
+        cancelTimeout
       })
       try {
         this.opts.write(envelope)
       } catch (err) {
         this.pending.delete(id)
-        if (timer) clearTimeout(timer)
+        cancelTimeout?.()
         reject(err instanceof Error ? err : new Error(String(err)))
       }
     })
@@ -257,7 +273,7 @@ export class DuplexRpc {
     if (this.disposed) return
     this.disposed = true
     for (const [id, pending] of this.pending) {
-      if (pending.timer) clearTimeout(pending.timer)
+      pending.cancelTimeout?.()
       pending.reject(new RpcDisposedError(this.label, reason))
       this.pending.delete(id)
     }
@@ -267,7 +283,7 @@ export class DuplexRpc {
     const pending = this.pending.get(id)
     if (!pending) return // late reply after timeout/disposal — expected, not an error
     this.pending.delete(id)
-    if (pending.timer) clearTimeout(pending.timer)
+    pending.cancelTimeout?.()
     if ('error' in msg && msg.error) {
       const e = msg.error as JsonRpcErrorShape
       pending.reject(

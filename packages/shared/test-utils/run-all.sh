@@ -109,6 +109,10 @@ run_harness packages/apps/hub/src/bootstrap-schema.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_harness packages/apps/hub/src/supervised-bootstrap.test.ts
+# The hub's data + diagnostics DBs run on worker threads: a long query never freezes
+# the hub event loop, and every SlayzoneDb op (errors + codes, Buffers, txns, backup,
+# close) behaves as it did in-process.
+run_harness packages/apps/hub/src/db.test.ts
 # Diagnostics retention ownership: an unsupervised hub prunes its own diagnostics
 # (rows + blobs; only the desktop host used to, so standalone hubs grew forever);
 # a supervised hub leaves the shared file to its host.
@@ -420,6 +424,7 @@ run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.tes
 run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
 run_harness packages/shared/db-migrations/src/v182-chat-attachment-messages-migration.test.ts
 run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migration.test.ts
+run_harness packages/shared/db-migrations/src/v193-agent-sessions-conversation-index-migration.test.ts
 # v192: terminal_modes → agents, *.terminal_mode → agent_id, default_terminal_mode → default_agent_id.
 run_harness packages/shared/db-migrations/src/v192-agent-id-rename-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
@@ -767,7 +772,6 @@ run_harness packages/domains/terminal/src/server/chat-tab-state-store.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
-run_harness packages/domains/terminal/src/server/runtime/host-suspend-clock.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts

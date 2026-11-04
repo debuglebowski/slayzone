@@ -21,6 +21,14 @@ export type HealthState = {
    *  owns its own sidecar's lifecycle. Says nothing about login — read
    *  `authRequired` for that. */
   supervised: boolean
+  /** The OS user this hub runs as (`os.userInfo().username`), null when it cannot be
+   *  read. Loopback is shared by every user on the machine, so this is how a local
+   *  caller tells its own user's hub from another user's on the same port. */
+  user: string | null
+  /** `SLAYZONE_DEV=1`: the dev build's hub. The channel bit `slay --dev` keys on —
+   *  how a block sweep tells the dev app's hub from the stable app's when one is
+   *  not on its channel's fixed port (another user holds it). */
+  dev: boolean
   /** Whether this hub gates its client API (`/trpc` + REST) on a bearer token —
    *  the `SLAYZONE_HUB_REQUIRE_LOGIN` switch. This is where `slay` learns whether
    *  it needs a credential. */
@@ -122,8 +130,8 @@ function mayReadHostFields(state: HealthState, req: IncomingMessage): boolean {
  *     unauthenticated request learns it anyway from the 401. The switches are
  *     booleans only — never the SSO tenant, client id or secret.
  *   - LOCAL ONLY ({@link mayReadHostFields}): everything that describes the host —
- *     the hub name, its SLAYZONE_ROOT, the db path, the pid, the supervised flag and
- *     the computer count. These exist for local discovery (`slay hub ls` probes
+ *     the hub name, its SLAYZONE_ROOT, the db path, the pid, the supervised flag, the
+ *     OS user, the dev flag and the computer count. These exist for local discovery (`slay hub ls` probes
  *     127.0.0.1), so restricting them to this machine costs discovery nothing while
  *     keeping absolute filesystem paths and a signalable pid off the public surface.
  */
@@ -159,6 +167,8 @@ export function handleHealth(
     payload.dbPath = state.dbPath
     payload.pid = state.pid
     payload.supervised = state.supervised
+    payload.user = state.user
+    payload.dev = state.dev
     // Resolved per-request on purpose (see the field's note). A throwing getter
     // must not take /health down — liveness is the one thing this endpoint owes
     // its callers.

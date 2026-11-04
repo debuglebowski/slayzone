@@ -203,7 +203,7 @@ test('the diagnostics DB keeps its own name (not slayzone.data.diagnostics.sqlit
   ] as const) {
     await withDevFlag(dev, () =>
       withEmptyStore(async (dir) => {
-        const diag = openServerDiagnosticsDatabase()
+        const diag = await openServerDiagnosticsDatabase()
         await diag.close()
         const files = readdirSync(dir)
         expect(files).toContain(expected)

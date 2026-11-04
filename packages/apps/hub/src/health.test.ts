@@ -26,6 +26,8 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
   root: '/tmp/slz-test-root',
   pid: 4321,
   supervised: false,
+  user: 'tester',
+  dev: false,
   authRequired: false,
   switches: {
     requireLogin: false,
@@ -141,6 +143,17 @@ test('computersConnected reflects the live gateway, not a boot snapshot', async 
   }
 })
 
+test('user + dev are reported to loopback callers (slay keeps to its own user’s app)', async () => {
+  const srv = await startHealthServer({ user: 'alice', dev: true })
+  try {
+    const { body } = await getHealth(srv.port)
+    expect(body.user, 'user').toBe('alice')
+    expect(body.dev, 'dev').toBe(true)
+  } finally {
+    await srv.close()
+  }
+})
+
 test('supervised=true is reported (hub ls tags it, hub stop refuses it)', async () => {
   const srv = await startHealthServer({ supervised: true })
   try {
@@ -195,7 +208,16 @@ test('reachable hub: a loopback peer with proxy headers gets no host fields', as
       expect(body.ok, `${which}: ok=true`).toBe(true)
       expect(body.authRequired, `${which}: authRequired stays public`).toBe(false)
       expect('switches' in body, `${which}: switches stay public`).toBeTruthy()
-      for (const field of ['name', 'root', 'dbPath', 'pid', 'supervised', 'computersConnected']) {
+      for (const field of [
+        'name',
+        'root',
+        'dbPath',
+        'pid',
+        'supervised',
+        'user',
+        'dev',
+        'computersConnected'
+      ]) {
         expect(field in body, `${which}: ${field} withheld from a forwarded request`).toBeFalsy()
       }
     }

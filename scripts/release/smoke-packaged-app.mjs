@@ -81,7 +81,14 @@ console.log(`resources: ${resources}\nexecutable: ${exe}`)
 
 // 1. The bundles the app spawns, where it looks for them.
 console.log('\n1. bundles on disk')
-for (const rel of ['hub/bin.cjs', 'computer/bin.cjs', 'dist/web/index.html', 'bin/slay.js']) {
+for (const rel of [
+  'hub/bin.cjs',
+  'hub/db-worker.cjs',
+  'hub/diag-worker.cjs',
+  'computer/bin.cjs',
+  'dist/web/index.html',
+  'bin/slay.js'
+]) {
   existsSync(path.join(resources, rel)) ? pass(rel) : fail(`${rel} is missing from Resources`)
 }
 if (!existsSync(exe)) {

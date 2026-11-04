@@ -5,7 +5,10 @@ import { createTrpcTest } from '@slayzone/transport/testing'
 import { TooltipProvider } from '@slayzone/ui'
 
 const fetchTaskDetail = vi.hoisted(() => vi.fn())
-vi.mock('@slayzone/task/client/taskDetailCache', () => ({ fetchTaskDetail }))
+vi.mock('@slayzone/task/client/taskDetailCache', () => ({
+  fetchTaskDetail,
+  isTaskDetailTimeoutError: (e: unknown) => (e as Error | null)?.name === 'TaskDetailTimeoutError'
+}))
 vi.mock('@slayzone/task/client/TaskShell', () => ({
   TaskShell: () => <div data-testid="shell" />
 }))
@@ -23,6 +26,7 @@ vi.mock('@/components/usage/useUsage', () => ({
 }))
 
 import { SecondaryTaskWindow } from './SecondaryTaskWindow'
+import { AUTO_RETRY_DELAYS_MS } from './ErrorBoundary'
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -52,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
 })
 
 describe('SecondaryTaskWindow load', () => {
@@ -78,5 +83,28 @@ describe('SecondaryTaskWindow load', () => {
     renderWindow()
     await flush()
     expect(screen.getByText('Error: boom')).toBeTruthy()
+  })
+
+  it('a timed-out load keeps the shell and retries on its own', async () => {
+    vi.useFakeTimers()
+    const timeout = Object.assign(new Error('Loading task t1 timed out after 20000ms'), {
+      name: 'TaskDetailTimeoutError'
+    })
+    fetchTaskDetail
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValue({ task: { title: 'Fix bug' }, project: null })
+    renderWindow()
+    const advance = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+    await advance(0)
+    // Not a dead-end error text: still loading.
+    expect(screen.queryByText(/timed out/)).toBeNull()
+    expect(screen.getByTestId('shell')).toBeTruthy()
+    expect(fetchTaskDetail).toHaveBeenCalledTimes(1)
+    await advance(AUTO_RETRY_DELAYS_MS[0])
+    expect(fetchTaskDetail).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('page').textContent).toBe('t1:Fix bug')
   })
 })

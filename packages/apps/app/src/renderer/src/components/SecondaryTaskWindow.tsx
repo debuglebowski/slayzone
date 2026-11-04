@@ -8,7 +8,12 @@ import { TaskShell } from '@slayzone/task/client/TaskShell'
 const TaskDetailPage = lazy(() =>
   import('@slayzone/task/client/TaskDetailPage').then((m) => ({ default: m.TaskDetailPage }))
 )
-import { fetchTaskDetail, type TaskDetailData } from '@slayzone/task/client/taskDetailCache'
+import {
+  fetchTaskDetail,
+  isTaskDetailTimeoutError,
+  type TaskDetailData
+} from '@slayzone/task/client/taskDetailCache'
+import { AUTO_RETRY_DELAYS_MS } from './ErrorBoundary'
 import { useTaskScopedQueriesFreshOnTasksChanged } from '@slayzone/task/client/taskScopedQueries'
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from '@slayzone/ui'
 import { BoostPill } from '@/components/usage/BoostPill'
@@ -40,6 +45,12 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [followPrimary, setFollowPrimary] = useState(false)
   const [panelVis, setPanelVis] = useState<PanelVisibility>(DEFAULT_PANEL_VIS)
+  // Loads of `taskId` in a row that timed out (hub too busy to answer). Each one
+  // keeps the shell up and re-runs the load after the matching backoff delay, the
+  // same policy as the main window's task panes — a timeout is not a dead end.
+  // Keyed by task so following another task starts the count over.
+  const [timedOut, setTimedOut] = useState({ taskId, count: 0 })
+  const timeouts = timedOut.taskId === taskId ? timedOut.count : 0
   const { data: usageData, refresh: refreshUsage } = useUsage()
 
   useEffect(() => {
@@ -73,11 +84,17 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
             return
           }
           setError(null)
+          setTimedOut({ taskId, count: 0 })
           setData(detail)
           document.title = `${detail.task.title} — SlayZone`
         },
         (e: unknown) => {
-          setError(String(e))
+          if (isTaskDetailTimeoutError(e))
+            setTimedOut((prev) => ({
+              taskId,
+              count: prev.taskId === taskId ? prev.count + 1 : 1
+            }))
+          else setError(String(e))
         }
       ),
     [taskId]
@@ -86,6 +103,15 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   useEffect(() => {
     loadTask()
   }, [loadTask])
+
+  useEffect(() => {
+    if (timeouts === 0) return
+    const timer = setTimeout(
+      () => void loadTask(),
+      AUTO_RETRY_DELAYS_MS[Math.min(timeouts, AUTO_RETRY_DELAYS_MS.length) - 1]
+    )
+    return () => clearTimeout(timer)
+  }, [timeouts, loadTask])
 
   const handleTaskUpdated = useCallback((updated: Task) => {
     setData((prev) => (prev ? { ...prev, task: updated } : prev))

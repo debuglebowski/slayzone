@@ -26,9 +26,9 @@ function dbUpTo(maxVersion: number): Database.Database {
   return db
 }
 
-function runFrom(db: Database.Database, fromExclusive: number): void {
+function runFrom(db: Database.Database, fromExclusive: number, toInclusive: number): void {
   for (const m of migrations) {
-    if (m.version <= fromExclusive) continue
+    if (m.version <= fromExclusive || m.version > toInclusive) continue
     db.transaction(() => {
       m.up(db)
       db.pragma(`user_version = ${m.version}`)
@@ -71,7 +71,8 @@ describe('v175 conversation origins: handoff + slay-spawned-fork', () => {
     const convIndexes = indexes(db, 'task_conversations')
     const sessionIndexes = indexes(db, 'agent_sessions')
 
-    runFrom(db, 174)
+    // Only v175: a later migration may add its own indexes; this checks v175's rebuild.
+    runFrom(db, 174, 175)
 
     insertConversation(db, 'h1', 'handoff')
     insertConversation(db, 'f1', 'slay-spawned-fork')

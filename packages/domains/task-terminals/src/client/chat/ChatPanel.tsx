@@ -279,6 +279,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       isActive,
       sendMessage,
       inFlight,
+      turnId: state.turnsClosed,
       sessionEnded: state.sessionEnded,
       abortAndPop,
       chatApi,
@@ -884,6 +885,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         hydrating={hydrating}
                         isEmpty={isEmpty}
                         inFlight={inFlight}
+                        stopping={composer.stopping}
                         awaitingUser={
                           promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
                         }
@@ -1067,6 +1069,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           onKeyDown={composer.onKeyDown}
                           handleSend={composer.handleSend}
                           handleStop={composer.handleStop}
+                          stopping={composer.stopping}
                           historySearch={composer.historySearch}
                           usage={selectUsageSummary(state)}
                           displaySessionEnded={displaySessionEnded}
