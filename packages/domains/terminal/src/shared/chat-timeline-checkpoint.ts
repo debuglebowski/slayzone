@@ -38,6 +38,7 @@ export const REDUCER_SOURCES = [
   './timeline-rows.ts',
   './chat-timeline-checkpoint.ts',
   './timeline-summary.ts',
+  './sub-agent-lifecycle.ts',
   '../../../terminal-contracts/src/agent-events.ts',
   '../../../terminal-contracts/src/bg-shell-helpers.ts',
   '../../../terminal-contracts/src/chat-attachments.ts',
