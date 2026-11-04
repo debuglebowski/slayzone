@@ -133,6 +133,10 @@ export interface ComputerConfig {
   hubUrls?: string[]
   /** Filesystem roots the computer may operate under. Locally-declared, never pushed from the hub. Defaults to `[<ROOT>]` when absent. */
   allowedRoots?: string[]
+  /** Where the direct-link listener binds (`host:port`, authority only). Default `127.0.0.1:0`. */
+  directListenAddress?: string
+  /** The authority clients dial for the direct link (opt-in; a front end terminates TLS). */
+  directPublicAddress?: string
 }
 
 /**
@@ -272,6 +276,9 @@ function coerceComputerConfig(raw: Record<string, unknown>): ComputerConfig {
     const roots = raw.allowedRoots.filter((r): r is string => typeof r === 'string' && r.length > 0)
     if (roots.length > 0) cfg.allowedRoots = roots
   }
+  // Coerced as-is; the computer's schema refuses anything but a bare authority.
+  if (typeof raw.directListenAddress === 'string') cfg.directListenAddress = raw.directListenAddress
+  if (typeof raw.directPublicAddress === 'string') cfg.directPublicAddress = raw.directPublicAddress
   return cfg
 }
 

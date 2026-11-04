@@ -100,6 +100,12 @@ describe('manifest shape', () => {
     expect(ENV_MANIFEST.SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR).toBe('infra')
   })
 
+  // Computer-only: where its direct-link listener binds and what clients dial.
+  test('the direct-link listener addresses are infra', () => {
+    expect(ENV_MANIFEST.SLAYZONE_COMPUTER_LISTEN_ADDRESS).toBe('infra')
+    expect(ENV_MANIFEST.SLAYZONE_COMPUTER_PUBLIC_ADDRESS).toBe('infra')
+  })
+
   test('SLAYZONE_TASK_ID is identity', () => {
     expect(ENV_MANIFEST.SLAYZONE_TASK_ID).toBe('identity')
   })

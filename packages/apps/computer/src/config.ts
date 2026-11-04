@@ -23,7 +23,7 @@ import {
   readComputerConfigSnapshot,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
-import { hubUrlFromAddr, isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
+import { hubUrlFromAddr, isBareAuthority, isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
 import { decodeJoinToken, joinTokenCarriesCertPin } from '@slayzone/platform/join-token'
 
 export const computerConfigSchema = z.object({
@@ -82,6 +82,27 @@ export const computerConfigSchema = z.object({
     .string()
     .min(1)
     .refine((dir) => isAbsolute(dir), { message: 'must be an absolute path' })
+    .optional(),
+  /**
+   * Where the direct-link listener binds (docs/direct-link.md): `host:port`,
+   * authority only. Default {@link DEFAULT_DIRECT_LISTEN_ADDRESS} (loadComputerConfig
+   * always sets it) — loopback, ephemeral port — so only a
+   * client on this machine can ever reach it unless an operator says otherwise.
+   * The listener never terminates TLS; a front end does.
+   */
+  directListenAddress: z
+    .string()
+    .refine(isBareAuthority, { message: 'must be host:port with no scheme or path' })
+    .optional(),
+  /**
+   * The authority clients dial for the direct link — what the computer advertises
+   * to its hubs. OPT-IN: absent, only a loopback listener is advertised, and the
+   * hub offers that to same-machine clients only. The scheme is derived from the
+   * host (`hubUrlFromAddr`): any non-loopback host means wss/https at a front end.
+   */
+  directPublicAddress: z
+    .string()
+    .refine(isBareAuthority, { message: 'must be host[:port] with no scheme or path' })
     .optional()
 })
 export type ComputerConfig = z.infer<typeof computerConfigSchema>
@@ -106,7 +127,11 @@ export const ENV_VARS = {
   // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/computers/join-token).
   joinToken: 'SLAYZONE_HUB_JOIN_TOKEN',
   // Read only by the computer (rule 2), a directory (rule 3). See `binOverrideDir`.
-  binOverrideDir: 'SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR'
+  binOverrideDir: 'SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR',
+  // Read only by the computer (rule 2), authority only (rule 5); LISTEN vs PUBLIC
+  // are two concepts (rule 4), mirroring SLAYZONE_HUB_LISTEN/PUBLIC_ADDRESS.
+  directListenAddress: 'SLAYZONE_COMPUTER_LISTEN_ADDRESS',
+  directPublicAddress: 'SLAYZONE_COMPUTER_PUBLIC_ADDRESS'
   // No alias for the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN`: it never shipped.
   // The published computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, and
   // the name it was renamed FROM only ever existed on unreleased main, so there is
@@ -123,6 +148,9 @@ export const ENV_VARS = {
 } as const
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
+
+/** The direct-link listener's default bind: loopback, ephemeral port. */
+export const DEFAULT_DIRECT_LISTEN_ADDRESS = '127.0.0.1:0'
 
 /**
  * Resolve `target` to an absolute canonical path, tolerating a
@@ -283,6 +311,8 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
   if (shared.computerName !== undefined) out.name = shared.computerName
   // The FS path-jail — locally-declared only, never sourced from hub-pushed data.
   if (shared.allowedRoots !== undefined) out.allowedRoots = shared.allowedRoots
+  if (shared.directListenAddress !== undefined) out.directListenAddress = shared.directListenAddress
+  if (shared.directPublicAddress !== undefined) out.directPublicAddress = shared.directPublicAddress
   return out
 }
 
@@ -347,6 +377,7 @@ export function loadComputerConfig(
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
     autoUpgrade: env.SLAYZONE_SUPERVISED !== '1',
+    directListenAddress: DEFAULT_DIRECT_LISTEN_ADDRESS,
     ...(fromToken ? { hubUrl: fromToken.hubUrl } : {}),
     // <ROOT>/computer.config.json — base under env (spread after). The single config file.
     ...fromShared,
@@ -364,6 +395,12 @@ export function loadComputerConfig(
       : {}),
     ...(env[ENV_VARS.binOverrideDir] !== undefined
       ? { binOverrideDir: env[ENV_VARS.binOverrideDir] }
+      : {}),
+    ...(env[ENV_VARS.directListenAddress] !== undefined
+      ? { directListenAddress: env[ENV_VARS.directListenAddress] }
+      : {}),
+    ...(env[ENV_VARS.directPublicAddress] !== undefined
+      ? { directPublicAddress: env[ENV_VARS.directPublicAddress] }
       : {})
   }
 
