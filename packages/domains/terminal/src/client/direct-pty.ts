@@ -20,6 +20,17 @@ type DirectPtyClient = DirectLease['client']
 /** Sessions with a live direct lease, for the read/write helpers below. */
 const directSessions = new Map<string, DirectPtyClient>()
 
+const changeListeners = new Set<() => void>()
+function changed(): void {
+  for (const cb of [...changeListeners]) cb()
+}
+
+/** Told whenever a session joins or leaves the direct link (the hub relay set follows). */
+export function onDirectPtySessionsChanged(cb: () => void): () => void {
+  changeListeners.add(cb)
+  return () => changeListeners.delete(cb)
+}
+
 /** The direct client for a session, or null (use the hub). */
 export function directPtyFor(sessionId: string): DirectPtyClient | null {
   return directSessions.get(sessionId) ?? null
@@ -77,7 +88,10 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
   }
 
   function teardown(retryAfterMs: number | null): void {
-    if (directSessions.get(sessionId) === lease?.client) directSessions.delete(sessionId)
+    if (lease && directSessions.get(sessionId) === lease.client) {
+      directSessions.delete(sessionId)
+      changed()
+    }
     offLost?.()
     offLost = null
     sub?.unsubscribe()
@@ -102,6 +116,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
     }
     lease = got
     directSessions.set(sessionId, got.client)
+    changed()
     offLost = got.onLost(() => teardown(lostRetryMs))
 
     // Live chunks wait until the gap since the last delivered seq is filled, so

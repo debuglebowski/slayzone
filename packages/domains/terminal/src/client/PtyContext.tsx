@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useRef,
   useCallback,
   useMemo,
@@ -12,6 +13,9 @@ import { useTRPC, useTRPCClient } from './trpc'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal-contracts'
 import { useStableCallback } from '@slayzone/ui'
 import { disposeTerminal } from './terminal-cache'
+import { directPtyStatus, onDirectPtySessionsChanged, ptyBufferSince } from './direct-pty'
+import { createPtyDelivery, type PtyBackfill, type PtyDelivery } from './pty-delivery'
+import { createRelaySubscription } from './relay-subscription'
 import { useTerminalStateStore, useWireTerminalStateStore } from './useTerminalStateStore'
 
 // Per-task state - no buffer (backend is source of truth)
@@ -38,14 +42,18 @@ type TitleChangeCallback = (title: string) => void
 type AvailabilityCallback = (available: boolean) => void
 
 interface PtyContextValue {
-  subscribe: (sessionId: string, cb: DataCallback) => () => void
+  /**
+   * `rendered`: the last seq this terminal wrote by itself (attach, replay). Output
+   * continues after it, and a gap after it is read back (pty-delivery.ts).
+   */
+  subscribe: (sessionId: string, cb: DataCallback, rendered?: () => number) => () => void
   /**
    * Deliver one chunk of a session's output, in seq order: what the hub stream
    * does, and what a direct link (direct-pty.ts) does for chunks it receives
    * straight from the computer. A seq already delivered is dropped, so the two
    * streams may overlap.
    */
-  deliver: (sessionId: string, data: string, seq: number) => void
+  deliver: (sessionId: string, data: string, seq: number, backfill: PtyBackfill) => void
   subscribeExit: (sessionId: string, cb: ExitCallback) => () => void
   subscribeState: (sessionId: string, cb: StateChangeCallback) => () => void
   subscribePrompt: (sessionId: string, cb: PromptCallback) => () => void
@@ -67,7 +75,10 @@ const PtyContext = createContext<PtyContextValue | null>(null)
  *  globally unique (`${taskId}:${taskId}`, tasks unique per hub), so ONE shared
  *  set of maps is correct even when N hubs' streams fan into it. */
 interface PtyStreamSinks {
-  deliver: (sessionId: string, data: string, seq: number) => void
+  deliver: (sessionId: string, data: string, seq: number, backfill: PtyBackfill) => void
+  /** The sessions this hub must relay: mounted here and not on a direct link. */
+  relaySessionIds: () => string[]
+  onRelaySetChanged: (cb: () => void) => () => void
   statesRef: MutableRefObject<Map<string, PtyState>>
   dataSubsRef: MutableRefObject<Map<string, Set<DataCallback>>>
   exitSubsRef: MutableRefObject<Map<string, Set<ExitCallback>>>
@@ -92,6 +103,8 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   const trpcClient = useTRPCClient()
   const {
     deliver,
+    relaySessionIds,
+    onRelaySetChanged,
     statesRef,
     dataSubsRef,
     exitSubsRef,
@@ -117,9 +130,31 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   // ensure-state-before-onData guard).
   const handleData = useStableCallback(
     ({ sessionId, data, seq }: { sessionId: string; data: string; seq: number }) =>
-      deliver(sessionId, data, seq)
+      deliver(sessionId, data, seq, (afterSeq) =>
+        ptyBufferSince(trpcClient, sessionId, afterSeq).then((b) => b?.chunks ?? [])
+      )
   )
-  useSubscription(trpc.pty.onData.subscriptionOptions(undefined, { onData: handleData }))
+  // Output relayed through the hub, for exactly the sessions that need it: those
+  // mounted here and not on a direct link to their computer (docs/direct-link.md).
+  // The hub has a session's computer stream through it only while someone watches
+  // it, so a direct terminal takes the hub out of its data path.
+  useEffect(() => {
+    const relay = createRelaySubscription({
+      open: (sessionIds, onStarted) => {
+        const sub = trpcClient.pty.onData.subscribe(
+          { sessionIds },
+          { onStarted, onData: handleData }
+        )
+        return { close: () => sub.unsubscribe() }
+      }
+    })
+    relay.set(relaySessionIds())
+    const off = onRelaySetChanged(() => relay.set(relaySessionIds()))
+    return () => {
+      off()
+      relay.close()
+    }
+  }, [trpcClient, handleData, relaySessionIds, onRelaySetChanged])
 
   const handleExit = useStableCallback(
     async ({
@@ -256,20 +291,52 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // sinks above. Single-hub / no federation → exactly one instance on the
   // default hub = byte-identical to the former root-only wiring.
   const fed = useFederationOrNull()
-  const deliver = useCallback((sessionId: string, data: string, seq: number): void => {
-    const state = statesRef.current.get(sessionId)
-    if (!state) return
-    // Drop what was already delivered: seqs are monotonic, and the hub stream and a
-    // direct link may both carry the same chunk.
-    if (seq <= state.lastSeq) return
-    state.lastSeq = seq
-    const subs = dataSubsRef.current.get(sessionId)
-    if (subs) {
-      subs.forEach((cb) => cb(data, seq))
-    }
+  // Seq-ordered, gap-aware delivery shared by the hub stream and the direct link
+  // (pty-delivery.ts): duplicates dropped, a gap read back before going on.
+  const renderedRef = useRef(new Map<string, Set<() => number>>())
+  const deliveryRef = useRef<PtyDelivery | null>(null)
+  if (deliveryRef.current === null) {
+    deliveryRef.current = createPtyDelivery({
+      emit: (sessionId, data, seq) => {
+        const state = statesRef.current.get(sessionId)
+        if (state) state.lastSeq = seq
+        dataSubsRef.current.get(sessionId)?.forEach((cb) => cb(data, seq))
+      }
+    })
+  }
+  const delivery = deliveryRef.current
+  const deliver = useCallback(
+    (sessionId: string, data: string, seq: number, backfill: PtyBackfill): void => {
+      // Only sessions a terminal subscribed to (state exists) take output.
+      if (!statesRef.current.has(sessionId)) return
+      // What the terminal already wrote itself (attach / replay) counts as delivered.
+      let rendered = -1
+      for (const get of renderedRef.current.get(sessionId) ?? [])
+        rendered = Math.max(rendered, get())
+      delivery.advance(sessionId, rendered)
+      delivery.deliver(sessionId, data, seq, backfill)
+    },
+    [delivery]
+  )
+  const relayListenersRef = useRef(new Set<() => void>())
+  const relaySetChanged = useCallback(() => {
+    for (const cb of relayListenersRef.current) cb()
   }, [])
+  const relaySessionIds = useCallback((): string[] => {
+    const direct = new Set(directPtyStatus().sessionIds)
+    const ids: string[] = []
+    for (const [id, subs] of dataSubsRef.current) if (subs.size > 0 && !direct.has(id)) ids.push(id)
+    return ids
+  }, [])
+  const onRelaySetChanged = useCallback((cb: () => void): (() => void) => {
+    relayListenersRef.current.add(cb)
+    return () => relayListenersRef.current.delete(cb)
+  }, [])
+  useEffect(() => onDirectPtySessionsChanged(relaySetChanged), [relaySetChanged])
   const sinks: PtyStreamSinks = {
     deliver,
+    relaySessionIds,
+    onRelaySetChanged,
     statesRef,
     dataSubsRef,
     exitSubsRef,
@@ -294,17 +361,24 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // tracking) lives in the reactive store (useTerminalStateStore). PtyContext
   // owns only the event streams (data/exit/prompt/title/...) + their metadata.
 
-  const getOrCreateState = useCallback((sessionId: string): PtyState => {
-    let state = statesRef.current.get(sessionId)
-    if (!state) {
-      state = { lastSeq: -1 }
-      statesRef.current.set(sessionId, state)
-    }
-    return state
-  }, [])
+  const getOrCreateState = useCallback(
+    (sessionId: string): PtyState => {
+      let state = statesRef.current.get(sessionId)
+      if (!state) {
+        state = { lastSeq: -1 }
+        statesRef.current.set(sessionId, state)
+        // A new state is a new start (first mount, or after an exit / mode switch
+        // removed the old one): the delivery position starts over with it.
+        delivery.reset(sessionId)
+        delivery.open(sessionId)
+      }
+      return state
+    },
+    [delivery]
+  )
 
   const subscribe = useCallback(
-    (sessionId: string, cb: DataCallback): (() => void) => {
+    (sessionId: string, cb: DataCallback, rendered?: () => number): (() => void) => {
       // Ensure state exists so onData doesn't drop data
       getOrCreateState(sessionId)
 
@@ -314,11 +388,22 @@ export function PtyProvider({ children }: { children: ReactNode }) {
         dataSubsRef.current.set(sessionId, subs)
       }
       subs.add(cb)
+      let positions = renderedRef.current.get(sessionId)
+      if (rendered) {
+        if (!positions) {
+          positions = new Set()
+          renderedRef.current.set(sessionId, positions)
+        }
+        positions.add(rendered)
+      }
+      relaySetChanged()
       return () => {
         subs!.delete(cb)
+        if (rendered) positions?.delete(rendered)
+        relaySetChanged()
       }
     },
-    [getOrCreateState]
+    [getOrCreateState, relaySetChanged]
   )
 
   const subscribeExit = useCallback((sessionId: string, cb: ExitCallback): (() => void) => {
@@ -411,9 +496,11 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     []
   )
 
-  const getLastSeq = useCallback((sessionId: string): number => {
-    return statesRef.current.get(sessionId)?.lastSeq ?? -1
-  }, [])
+  const getLastSeq = useCallback(
+    (sessionId: string): number =>
+      statesRef.current.has(sessionId) ? delivery.lastSeq(sessionId) : -1,
+    [delivery]
+  )
 
   const getCrashOutput = useCallback((sessionId: string): string | undefined => {
     return statesRef.current.get(sessionId)?.crashOutput

@@ -9,6 +9,31 @@ import { act, cleanup, render } from '@testing-library/react'
 // test can emit the way the server fan-out would.
 const handlers = new Map<string, (payload: unknown) => unknown>()
 const getBuffer = vi.fn()
+// The hub output stream is a vanilla subscription narrowed to the sessions the hub
+// must relay (relay-subscription.ts): record each one's input and liveness.
+const dataSubs: Array<{ sessionIds: string[]; closed: boolean }> = []
+const client = {
+  pty: {
+    getBuffer: { query: getBuffer },
+    getBufferSince: { query: vi.fn(async () => null) },
+    onData: {
+      subscribe: (
+        input: { sessionIds: string[] },
+        opts: { onStarted: () => void; onData: (payload: unknown) => unknown }
+      ) => {
+        const sub = { sessionIds: input.sessionIds, closed: false }
+        dataSubs.push(sub)
+        handlers.set('onData', opts.onData)
+        queueMicrotask(opts.onStarted)
+        return {
+          unsubscribe: () => {
+            sub.closed = true
+          }
+        }
+      }
+    }
+  }
+}
 const procs = [
   'onData',
   'onExit',
@@ -35,7 +60,7 @@ vi.mock('@slayzone/transport/client', () => ({
       ])
     )
   }),
-  useTRPCClient: () => ({ pty: { getBuffer: { query: getBuffer } } }),
+  useTRPCClient: () => client,
   useSubscription: (opts: { proc: string; onData: (payload: unknown) => unknown }) => {
     handlers.set(opts.proc, opts.onData)
   },
@@ -54,6 +79,7 @@ vi.mock('./useTerminalStateStore', () => ({
 }))
 
 const { PtyProvider, usePty } = await import('./PtyContext')
+const { __resetDirectPtyForTest, startDirectPtyLink } = await import('./direct-pty')
 type Ctx = ReturnType<typeof usePty>
 
 function mount(): { ctx: () => Ctx } {
@@ -83,8 +109,13 @@ async function emit(proc: (typeof procs)[number], payload: unknown): Promise<voi
   })
 }
 
+const liveDataSubs = () => dataSubs.filter((d) => !d.closed).map((d) => d.sessionIds)
+const settle = () => act(async () => await new Promise((r) => setTimeout(r, 0)))
+
 afterEach(() => {
   cleanup()
+  dataSubs.length = 0
+  __resetDirectPtyForTest()
   handlers.clear()
   vi.clearAllMocks()
 })
@@ -94,6 +125,7 @@ describe('PtyProvider event streams', () => {
     const { ctx } = mount()
     const cb = vi.fn()
     ctx().subscribe('s1', cb)
+    await settle()
 
     await emit('onData', { sessionId: 's1', data: 'a', seq: 1 })
     await emit('onData', { sessionId: 's1', data: 'dup', seq: 1 })
@@ -191,5 +223,52 @@ describe('PtyProvider event streams', () => {
     await emit('onOutputAvailability', { sessionId: 's2', available: false })
     await emit('onOutputAvailability', { sessionId: 's1', available: true })
     expect(seen.mock.calls).toEqual([[false], [true]])
+  })
+
+  it('asks the hub to relay only the sessions mounted here (no watch-all)', async () => {
+    const { ctx } = mount()
+    await settle()
+    expect(liveDataSubs()).toEqual([])
+    const off = ctx().subscribe('s2', vi.fn())
+    ctx().subscribe('s1', vi.fn())
+    await settle()
+    expect(liveDataSubs()).toEqual([['s1', 's2']])
+    off()
+    await settle()
+    expect(liveDataSubs()).toEqual([['s1']])
+  })
+
+  it('takes a session on the direct link out of the hub relay, and puts it back when the link ends', async () => {
+    const { ctx } = mount()
+    ctx().subscribe('s1', vi.fn())
+    ctx().subscribe('s2', vi.fn())
+    await settle()
+    let lose: (() => void) | undefined
+    const lease = {
+      computerId: 'c1',
+      client: {
+        pty: {
+          onData: { subscribe: () => ({ unsubscribe: () => undefined }) },
+          getBufferSince: { query: async () => null }
+        }
+      },
+      onLost: (cb: () => void) => {
+        lose = cb
+        return () => undefined
+      },
+      release: () => undefined
+    }
+    const stop = startDirectPtyLink({
+      sessionId: 's1',
+      manager: { acquire: async () => lease as never, onComputerConnected: () => () => undefined },
+      deliver: () => undefined,
+      lastSeq: () => -1
+    })
+    await settle()
+    expect(liveDataSubs()).toEqual([['s2']])
+    act(() => lose?.())
+    await settle()
+    expect(liveDataSubs()).toEqual([['s1', 's2']])
+    stop()
   })
 })

@@ -703,31 +703,38 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       flush()
     }
 
-    const unsubData = subscribe(sessionId, (data, seq) => {
-      const cutoff = clearedSeqRef.current
-      if (cutoff !== null && seq <= cutoff) return
-      // Skip chunks already covered by the initial archive snapshot replay.
-      // Archive writes are sync-mirrored to disk before pty:data fires, so any
-      // chunk with seq <= lastRenderedSeqRef is guaranteed to be in the tail
-      // we just wrote — re-writing here would duplicate output.
-      if (seq <= lastRenderedSeqRef.current) return
-      if (!terminalRef.current) return
-      // First live output of a resume → the boot gap is over; drop the overlay.
-      if (isResumingRef.current) {
-        isResumingRef.current = false
-        if (resumeCapTimerRef.current) {
-          clearTimeout(resumeCapTimerRef.current)
-          resumeCapTimerRef.current = null
+    // What attach and replay wrote count as delivered: a live chunk past it is
+    // backfilled first (pty-delivery.ts), whichever path — hub or direct — carries it.
+    const renderedSeq = (): number => lastRenderedSeqRef.current
+    const unsubData = subscribe(
+      sessionId,
+      (data, seq) => {
+        const cutoff = clearedSeqRef.current
+        if (cutoff !== null && seq <= cutoff) return
+        // Skip chunks already covered by the initial archive snapshot replay.
+        // Archive writes are sync-mirrored to disk before pty:data fires, so any
+        // chunk with seq <= lastRenderedSeqRef is guaranteed to be in the tail
+        // we just wrote — re-writing here would duplicate output.
+        if (seq <= lastRenderedSeqRef.current) return
+        if (!terminalRef.current) return
+        // First live output of a resume → the boot gap is over; drop the overlay.
+        if (isResumingRef.current) {
+          isResumingRef.current = false
+          if (resumeCapTimerRef.current) {
+            clearTimeout(resumeCapTimerRef.current)
+            resumeCapTimerRef.current = null
+          }
+          setIsResuming(false)
         }
-        setIsResuming(false)
-      }
-      lastActivityTimeRef.current = performance.now()
-      pendingChunks.push(data)
-      pendingSeq = seq
-      if (rafId === null) {
-        rafId = requestAnimationFrame(flush)
-      }
-    })
+        lastActivityTimeRef.current = performance.now()
+        pendingChunks.push(data)
+        pendingSeq = seq
+        if (rafId === null) {
+          rafId = requestAnimationFrame(flush)
+        }
+      },
+      renderedSeq
+    )
 
     const unsubExit = subscribeExit(sessionId, (exitCode, reason, exitReason, exitDetail) => {
       // Resume died before any output — stop the overlay so the dead overlay shows.

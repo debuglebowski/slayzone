@@ -10,7 +10,7 @@ import {
   useHubId,
   type DirectLinkHubClient
 } from '@slayzone/transport/client'
-import { startDirectPtyLink } from './direct-pty'
+import { ptyBufferSince, startDirectPtyLink } from './direct-pty'
 import { usePty } from './PtyContext'
 import { useTerminalStateStore } from './useTerminalStateStore'
 import { useTRPCClient } from './trpc'
@@ -29,7 +29,11 @@ export function useDirectPtyLink(sessionId: string): void {
     return startDirectPtyLink({
       sessionId,
       manager,
-      deliver: (data, seq) => deliver(sessionId, data, seq),
+      // A gap is read back from wherever the session is now (direct, else the hub).
+      deliver: (data, seq) =>
+        deliver(sessionId, data, seq, (afterSeq) =>
+          ptyBufferSince(trpcClient, sessionId, afterSeq).then((b) => b?.chunks ?? [])
+        ),
       lastSeq: () => getLastSeq(sessionId),
       // Retry when the session's state moves (it started, restarted): a terminal
       // mounts before its process exists.
