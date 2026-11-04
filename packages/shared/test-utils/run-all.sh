@@ -337,6 +337,7 @@ run_harness packages/apps/cli/src/commands/computer-mint.test.ts
 # `slay computer roots` edit rules (T-27: folder limits are set on the device). Pure.
 run_harness packages/apps/cli/src/commands/computer-roots.test.ts
 run_harness packages/apps/cli/src/local-hub.test.ts
+run_harness packages/apps/cli/src/hub-config-relay.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_harness packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
