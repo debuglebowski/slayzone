@@ -2,6 +2,8 @@ import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { listPromptsForTask } from '@slayzone/agent-turns/server'
+import { legacySessionPromptSummaries } from '@slayzone/task/server'
 import {
   defaultChatModeSettingKey,
   defaultChatModelSettingKey,
@@ -41,6 +43,21 @@ import {
   type ChatAttachmentReader,
   type ChatTerminalState
 } from '@slayzone/terminal/runtime'
+
+/** `quiesce` refused: the task's agents run, so its history migration waits. */
+class ChatMigrationDeferredError extends Error {}
+
+/**
+ * Owner states whose hub source rows are still the conversation's history: not
+ * migrated ('legacy') or copied but not yet activated ('copying', 'verified').
+ * An 'active' owner's history is on its computer; hub rows left by a pending
+ * cleanup are already superseded.
+ */
+const HUB_HISTORY_STATES: ReadonlySet<HubChatOwnership['state']> = new Set([
+  'legacy',
+  'copying',
+  'verified'
+])
 
 export function createComputerChatServices(opts: {
   db: SlayzoneDb
@@ -317,7 +334,7 @@ export function createComputerChatServices(opts: {
     },
     quiesce: async (owner) => {
       if (await opts.hasLiveTask(owner.taskId))
-        throw new Error(
+        throw new ChatMigrationDeferredError(
           'Chat migration waits for this task’s agents to stop. Stop agents, then reopen chat.'
         )
     }
@@ -377,6 +394,108 @@ export function createComputerChatServices(opts: {
     }
   }
   const migration = createChatMigration({ ownership, source, request })
+  /**
+   * Is the hub still the source of this task's prompt history? Prompts and
+   * task-wide content migrate with the task's `chat_legacy_task_authority`
+   * owner; until that owner activates, its `agent_prompts` rows are the only
+   * copy. Without an authority owner the task has no legacy prompt content.
+   */
+  async function hubHoldsTaskHistory(taskId: string) {
+    const authority = await opts.db.get<{ conversation_id: string }>(
+      'SELECT conversation_id FROM chat_legacy_task_authority WHERE task_id=?',
+      [taskId]
+    )
+    if (!authority) return true
+    const owner = await ownership.get(authority.conversation_id)
+    return !!owner && HUB_HISTORY_STATES.has(owner.state)
+  }
+  /**
+   * History reads of a task whose migration is deferred (its agents run, often
+   * for days after an upgrade restarts them) serve the hub's legacy rows
+   * read-only instead of failing. Migration itself is unchanged: every read
+   * still tries it first, and once the task's history is activated on its
+   * computer, reads go there. Never both sources at once: when the task's
+   * prompts already moved but another conversation still waits, the deferral
+   * error stands.
+   */
+  async function readHistory<T>(
+    taskId: string,
+    computer: () => Promise<T>,
+    hub: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await computer()
+    } catch (error) {
+      if (!(error instanceof ChatMigrationDeferredError) || !(await hubHoldsTaskHistory(taskId)))
+        throw error
+      return hub()
+    }
+  }
+  async function computerPromptSummaries(taskId: string, conversationIds: string[]) {
+    const owners = await relay.ensurePromptTask(taskId)
+    type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
+    const result = new Map<string, Summary>()
+    for (const computerId of new Set(owners.map((o) => o.computerId!))) {
+      await opts.gate?.(computerId, taskId)
+      for (let offset = 0; offset < conversationIds.length; offset += 500) {
+        const summaries = (await request(computerId, {
+          kind: 'prompt.summaries',
+          taskId,
+          conversationIds: conversationIds.slice(offset, offset + 500)
+        })) as Summary[]
+        for (const summary of summaries) {
+          const prior = result.get(summary.conversationId)
+          if (!prior) result.set(summary.conversationId, summary)
+          else
+            result.set(summary.conversationId, {
+              ...(prior.firstAt <= summary.firstAt ? prior : summary),
+              count: prior.count + summary.count
+            })
+        }
+      }
+    }
+    return [...result.values()]
+  }
+  async function computerPrompts(taskId: string, agentId?: string) {
+    const owners = await relay.ensurePromptTask(taskId)
+    const excluded = (
+      await opts.db.all<{ mode: string; conversation_id: string }>(
+        'SELECT mode,conversation_id FROM session_deletions WHERE task_id=?',
+        [taskId]
+      )
+    ).map((r) => ({ mode: r.mode, conversationId: r.conversation_id }))
+    const result = new Map<
+      string,
+      {
+        id: string
+        task_id: string
+        agent_id: string
+        cli_session_id: string | null
+        text: string
+        created_at: number
+      }
+    >()
+    for (const computerId of new Set(owners.map((o) => o.computerId!))) {
+      await opts.gate?.(computerId, taskId)
+      const prompts = (await request(computerId, {
+        kind: 'prompts',
+        taskId,
+        agentId,
+        excluded
+      })) as Array<{
+        id: string
+        task_id: string
+        agent_id: string
+        cli_session_id: string | null
+        text: string
+        created_at: number
+      }>
+      for (const prompt of prompts) result.set(prompt.id, prompt)
+    }
+    return [...result.values()].sort(
+      (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)
+    )
+  }
   const relay = createHubChatRelay({
     ...opts,
     recordConversation: (input) => opts.legacyData.recordConversation(input),
@@ -803,70 +922,23 @@ export function createComputerChatServices(opts: {
       }
       return computerId
     },
-    async promptSummaries(taskId: string, conversationIds: string[]) {
+    async promptSummaries(
+      taskId: string,
+      conversationIds: string[]
+    ): Promise<Array<{ conversationId: string; count: number; firstPrompt: string }>> {
       if (!conversationIds.length) return []
-      const owners = await relay.ensurePromptTask(taskId)
-      type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
-      const result = new Map<string, Summary>()
-      for (const computerId of new Set(owners.map((o) => o.computerId!))) {
-        await opts.gate?.(computerId, taskId)
-        for (let offset = 0; offset < conversationIds.length; offset += 500) {
-          const summaries = (await request(computerId, {
-            kind: 'prompt.summaries',
-            taskId,
-            conversationIds: conversationIds.slice(offset, offset + 500)
-          })) as Summary[]
-          for (const summary of summaries) {
-            const prior = result.get(summary.conversationId)
-            if (!prior) result.set(summary.conversationId, summary)
-            else
-              result.set(summary.conversationId, {
-                ...(prior.firstAt <= summary.firstAt ? prior : summary),
-                count: prior.count + summary.count
-              })
-          }
-        }
-      }
-      return [...result.values()]
+      return readHistory(
+        taskId,
+        () => computerPromptSummaries(taskId, conversationIds),
+        () =>
+          legacySessionPromptSummaries(opts.db, taskId, conversationIds, { codexChatEvents: true })
+      )
     },
     async prompts(taskId: string, agentId?: string) {
-      const owners = await relay.ensurePromptTask(taskId)
-      const excluded = (
-        await opts.db.all<{ mode: string; conversation_id: string }>(
-          'SELECT mode,conversation_id FROM session_deletions WHERE task_id=?',
-          [taskId]
-        )
-      ).map((r) => ({ mode: r.mode, conversationId: r.conversation_id }))
-      const result = new Map<
-        string,
-        {
-          id: string
-          task_id: string
-          agent_id: string
-          cli_session_id: string | null
-          text: string
-          created_at: number
-        }
-      >()
-      for (const computerId of new Set(owners.map((o) => o.computerId!))) {
-        await opts.gate?.(computerId, taskId)
-        const prompts = (await request(computerId, {
-          kind: 'prompts',
-          taskId,
-          agentId,
-          excluded
-        })) as Array<{
-          id: string
-          task_id: string
-          agent_id: string
-          cli_session_id: string | null
-          text: string
-          created_at: number
-        }>
-        for (const prompt of prompts) result.set(prompt.id, prompt)
-      }
-      return [...result.values()].sort(
-        (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)
+      return readHistory(
+        taskId,
+        () => computerPrompts(taskId, agentId),
+        () => listPromptsForTask(opts.db, taskId, agentId)
       )
     }
   }

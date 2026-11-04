@@ -438,14 +438,11 @@ export async function listTaskSessions(
   mode: string
 ): Promise<TaskSessionSummary[]> {
   const current = await getCurrentConversationId(db, taskId, mode)
-  const reader = sessionPromptReader
   const rows = await db.all<{
     conversation_id: string
     origin: ConversationOrigin
     started_at: number
     last_active_at: number
-    message_count: number
-    first_prompt: string | null
   }>(
     `SELECT
        s.conversation_id                         AS conversation_id,
@@ -455,16 +452,7 @@ export async function listTaskSessions(
             AND o.origin IN (${HONORED_ORIGINS_SQL})
           ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
        min(s.created_at)                         AS started_at,
-       max(s.created_at)                         AS last_active_at,
-       ${
-         reader
-           ? '0 AS message_count, NULL AS first_prompt'
-           : `(SELECT count(*) FROM agent_prompts p
-          WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id) AS message_count,
-       (SELECT p.text FROM agent_prompts p
-          WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id
-          ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1) AS first_prompt`
-       }
+       max(s.created_at)                         AS last_active_at
      FROM agent_sessions s
      WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
        AND s.origin IN (${HONORED_ORIGINS_SQL})
@@ -473,36 +461,65 @@ export async function listTaskSessions(
      ORDER BY started_at DESC`,
     [taskId, mode]
   )
-  const savedChatPrompts =
-    !reader && mode === 'codex-chat' ? await codexChatEventPrompts(db, taskId) : null
+  const ids = rows.map((r) => r.conversation_id)
   const summaries = new Map(
-    reader
-      ? (
-          await reader(
-            db,
-            taskId,
-            rows.map((r) => r.conversation_id)
-          )
-        ).map((s) => [s.conversationId, s])
-      : []
+    (sessionPromptReader
+      ? await sessionPromptReader(db, taskId, ids)
+      : await legacySessionPromptSummaries(db, taskId, ids, {
+          codexChatEvents: mode === 'codex-chat'
+        })
+    ).map((s) => [s.conversationId, s])
   )
   return rows.map((r) => {
-    const saved = summaries.get(r.conversation_id) ?? savedChatPrompts?.get(r.conversation_id)
+    const saved = summaries.get(r.conversation_id)
     return {
       conversationId: r.conversation_id,
       origin: r.origin,
       startedAt: r.started_at,
       lastActiveAt: r.last_active_at,
-      messageCount:
-        r.message_count > 0 || saved?.count
-          ? Math.max(r.message_count, saved?.count ?? 0)
-          : mode === 'codex-chat'
-            ? null
-            : 0,
-      firstPrompt: saved && saved.count > r.message_count ? saved.firstPrompt : r.first_prompt,
+      messageCount: saved?.count ? saved.count : mode === 'codex-chat' ? null : 0,
+      firstPrompt: saved?.count ? saved.firstPrompt : null,
       isCurrent: r.conversation_id === current
     }
   })
+}
+
+/**
+ * Per-conversation prompt summaries from the hub's own legacy rows: captured
+ * `agent_prompts` (joined on `cli_session_id = conversation_id`) and, with
+ * `codexChatEvents`, Codex chat prompts recovered from the task's saved tab
+ * events. Read-only. The source before a task's history moves to its computer
+ * (`setTaskSessionPromptReader`), and while that move waits.
+ */
+export async function legacySessionPromptSummaries(
+  db: SlayzoneDb,
+  taskId: string,
+  conversationIds: string[],
+  opts: { codexChatEvents: boolean }
+): Promise<Array<{ conversationId: string; count: number; firstPrompt: string }>> {
+  if (!conversationIds.length) return []
+  const captured = await db.all<{ conversation_id: string; count: number; first_prompt: string }>(
+    `SELECT p.cli_session_id AS conversation_id, count(*) AS count,
+       (SELECT f.text FROM agent_prompts f
+          WHERE f.task_id = p.task_id AND f.cli_session_id = p.cli_session_id
+          ORDER BY f.created_at ASC, f.rowid ASC LIMIT 1) AS first_prompt
+     FROM agent_prompts p
+     WHERE p.task_id = ? AND p.cli_session_id IN (SELECT value FROM json_each(?))
+     GROUP BY p.cli_session_id`,
+    [taskId, JSON.stringify(conversationIds)]
+  )
+  const events = opts.codexChatEvents ? await codexChatEventPrompts(db, taskId) : null
+  const prompts = new Map(captured.map((r) => [r.conversation_id, r]))
+  const result: Array<{ conversationId: string; count: number; firstPrompt: string }> = []
+  for (const id of new Set(conversationIds)) {
+    const a = prompts.get(id),
+      b = events?.get(id)
+    if (!a && !b) continue
+    const count = Math.max(a?.count ?? 0, b?.count ?? 0)
+    const firstPrompt = b && b.count > (a?.count ?? 0) ? b.firstPrompt : a?.first_prompt
+    result.push({ conversationId: id, count, firstPrompt: firstPrompt ?? '' })
+  }
+  return result
 }
 
 /**
