@@ -1,6 +1,44 @@
 # Changelog
 
 
+## v0.37.2
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.37.1...v0.37.2)
+
+### 🚀 Enhancements
+
+- **settings:** Fold upgrade into computer row status ([56df62c61](https://github.com/debuglebowski/slayzone/commit/56df62c61))
+
+### 🔥 Performance
+
+- **release:** Build Windows x64/arm64 in parallel jobs, drop combined installer ([e49413325](https://github.com/debuglebowski/slayzone/commit/e49413325))
+- **release:** Use node-pty prebuilds on Windows, smoke pty spawn ([1474c41a9](https://github.com/debuglebowski/slayzone/commit/1474c41a9))
+- **release:** Memoize readdir in electron-builder module scan ([23747fe6a](https://github.com/debuglebowski/slayzone/commit/23747fe6a))
+- **release:** Typecheck beside builds, cancel run on failure ([f9f1f65d8](https://github.com/debuglebowski/slayzone/commit/f9f1f65d8))
+- **release:** Deploy Convex beside builds ([bf07eac89](https://github.com/debuglebowski/slayzone/commit/bf07eac89))
+- **release:** Build JS once, builds wait for its artifact ([70b6e7af7](https://github.com/debuglebowski/slayzone/commit/70b6e7af7))
+- **release:** Drop pnpm cache from build jobs ([904813c45](https://github.com/debuglebowski/slayzone/commit/904813c45))
+- **release:** Start builds without preflight ([7ab00d2aa](https://github.com/debuglebowski/slayzone/commit/7ab00d2aa))
+
+### 🩹 Fixes
+
+- **test:** Register ComposerSubAgents suite ([0f4e2fcf5](https://github.com/debuglebowski/slayzone/commit/0f4e2fcf5))
+- **release:** Ship LF line endings for shell scripts ([4e021bde6](https://github.com/debuglebowski/slayzone/commit/4e021bde6))
+- **release:** Unpack JS build from stdin on Windows ([44c8aad4b](https://github.com/debuglebowski/slayzone/commit/44c8aad4b))
+- **browser:** Parked background-task views stuck at 1x1 ([ac094f97e](https://github.com/debuglebowski/slayzone/commit/ac094f97e))
+- **test:** Register browser-view-park suite ([fcc7a149e](https://github.com/debuglebowski/slayzone/commit/fcc7a149e))
+- **chat:** One task per provider session ([692c7aa90](https://github.com/debuglebowski/slayzone/commit/692c7aa90))
+- **hub:** App sign-in confirm page could not submit ([f4968a355](https://github.com/debuglebowski/slayzone/commit/f4968a355))
+- **cli:** Use computer relay without task id ([a85a272d0](https://github.com/debuglebowski/slayzone/commit/a85a272d0))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.37.1 ([839a71054](https://github.com/debuglebowski/slayzone/commit/839a71054))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.37.1
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.37.0...v0.37.1)

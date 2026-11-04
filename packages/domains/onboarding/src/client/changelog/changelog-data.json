@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.37.2",
+    "date": "2026-11-04",
+    "tagline": "Sessions stay put",
+    "items": [
+      {
+        "category": "fix",
+        "title": "Agents no longer fenced by a shared session",
+        "description": "When two tasks claimed the same Claude session, the second task now starts fresh instead of its agent being blocked."
+      },
+      {
+        "category": "fix",
+        "title": "Background browser views render",
+        "description": "Browser panels in background tasks no longer get stuck at a tiny size or behind the loading cover."
+      }
+    ]
+  },
+  {
     "version": "0.37.1",
     "date": "2026-11-04",
     "tagline": "Stop stray sub-agents",
