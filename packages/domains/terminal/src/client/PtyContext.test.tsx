@@ -46,7 +46,13 @@ const procs = [
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
 vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('@slayzone/transport/client', async () => ({
+  // The real lease keeper (React-free): the direct-link test drives it.
+  keepDirectLease: (
+    await vi.importActual<typeof import('@slayzone/transport/direct-client')>(
+      '@slayzone/transport/direct-client'
+    )
+  ).keepDirectLease,
   useTRPC: () => ({
     pty: Object.fromEntries(
       procs.map((p) => [

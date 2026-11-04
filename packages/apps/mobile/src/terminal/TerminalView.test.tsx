@@ -40,9 +40,21 @@ jest.mock('./TerminalDom', () => {
   return { __esModule: true, default: FakeTerminalDom }
 })
 
+/** The direct link `useDirectLease` hands the view (null: the hub relays). */
+const mockDirect = {
+  lease: null as null | { client: unknown },
+  lost: jest.fn()
+}
+jest.mock('@slayzone/transport/client', () => ({
+  ...jest.requireActual('@slayzone/transport/client'),
+  useDirectLease: () => ({ lease: mockDirect.lease, lost: mockDirect.lost })
+}))
+
 beforeEach(() => {
   mockDom.ops = []
   mockDom.props = null
+  mockDirect.lease = null
+  mockDirect.lost.mockReset()
 })
 
 const SID = 't:t'
@@ -205,5 +217,77 @@ describe('TerminalView', () => {
     await act(async () => undefined)
     expect(h.of('pty.write')).toEqual([])
     expect(h.of('pty.interrupt')).toEqual([])
+  })
+})
+
+describe('TerminalView: direct link', () => {
+  function directLease() {
+    const writes: unknown[] = []
+    let emit: ((e: { sessionId: string; seq: number; data: string }) => void) | undefined
+    let started: (() => void) | undefined
+    let end: (() => void) | undefined
+    const client = {
+      pty: {
+        onData: {
+          subscribe: (
+            _input: unknown,
+            h: { onStarted: () => void; onData: typeof emit; onComplete: () => void }
+          ) => {
+            emit = h.onData
+            started = h.onStarted
+            end = h.onComplete
+            return { unsubscribe: () => undefined }
+          }
+        },
+        attach: {
+          query: async () => ({
+            exists: true,
+            size: { cols: 80, rows: 24 },
+            buffer: { chunks: [{ seq: 0, data: 'direct ' }], currentSeq: 0, prelude: '' }
+          })
+        },
+        getBufferSince: { query: async () => ({ chunks: [], currentSeq: 0, prelude: '' }) },
+        write: {
+          mutate: async (input: unknown) => {
+            writes.push(input)
+            return true
+          }
+        }
+      }
+    }
+    return {
+      lease: { client },
+      writes,
+      start: () => act(async () => started?.()),
+      emit: (seq: number, data: string) => act(async () => emit?.({ sessionId: SID, seq, data })),
+      end: () => act(async () => end?.())
+    }
+  }
+
+  it('streams from the computer, not the hub, and types to it; submit stays a hub call', async () => {
+    const d = directLease()
+    mockDirect.lease = d.lease
+    const h = hub()
+    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await d.start()
+    await waitFor(() => expect(written()).toContain('direct '))
+    // The hub was never asked to relay this session.
+    expect(h.dataInputs).toEqual([])
+    await d.emit(1, 'live')
+    await waitFor(() => expect(written()).toBe('direct live'))
+
+    const user = userEvent.setup()
+    await user.press(screen.getByLabelText('Arrow up'))
+    await waitFor(() => expect(d.writes).toEqual([{ sessionId: SID, data: '\x1b[A' }]))
+    expect(h.of('pty.write')).toEqual([])
+  })
+
+  it('reports the link lost when its stream ends (the process exited, the grant ended)', async () => {
+    const d = directLease()
+    mockDirect.lease = d.lease
+    const h = hub()
+    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await d.end()
+    expect(mockDirect.lost).toHaveBeenCalled()
   })
 })

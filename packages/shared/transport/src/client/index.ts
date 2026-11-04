@@ -36,6 +36,12 @@ export {
   type DirectLinkManagerOptions
 } from './direct-link'
 export {
+  keepDirectLease,
+  type DirectLeaseKeeper,
+  type DirectLeaseKeeperOptions
+} from './direct-lease-keeper'
+export { useDirectLease } from './useDirectLease'
+export {
   FederationProvider,
   useFederation,
   useFederationOrNull,

@@ -462,3 +462,9 @@ export function disposeDirectLinkManagers(): void {
   }
   managers.clear()
 }
+
+export {
+  keepDirectLease,
+  type DirectLeaseKeeper,
+  type DirectLeaseKeeperOptions
+} from './direct-lease-keeper'

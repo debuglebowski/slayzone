@@ -8,7 +8,11 @@
  *   subscription start (a reconnect) catches up; a reloaded web view gets the
  *   session replayed.
  * - Report the user's presence (`pty.touch`) at most every 4s, desktop's throttle.
+ * - Read (attach, catch-up) and type over the direct link to the session's computer
+ *   while there is one (docs/direct-link.md), the hub otherwise. A keystroke the
+ *   computer refused (its grant ended) was not written, so it goes to the hub.
  */
+import type { DirectLease } from '@slayzone/transport/client'
 import type { HubClient } from '../hub-board'
 import { createDomSink, type DomTerminal } from './dom-sink'
 import { type FeedClient, type FeedStatus, TerminalFeed } from './terminal-feed'
@@ -24,6 +28,7 @@ export class TerminalController {
   private subscribed = false
   private domReady = false
   private lastTouch = 0
+  private direct: DirectLease['client'] | null = null
 
   constructor(
     private readonly sessionId: string,
@@ -32,11 +37,36 @@ export class TerminalController {
     schedule: (run: () => void) => void = (run) => requestAnimationFrame(run)
   ) {
     const feedClient: FeedClient = {
-      attach: (sid, afterSeq) => client.pty.attach.query({ sessionId: sid, afterSeq }),
-      bufferSince: (sid, afterSeq) => client.pty.getBufferSince.query({ sessionId: sid, afterSeq })
+      attach: async (sid, afterSeq) =>
+        this.direct
+          ? { ...(await this.direct.pty.attach.query({ sessionId: sid, afterSeq })), state: null }
+          : client.pty.attach.query({ sessionId: sid, afterSeq }),
+      bufferSince: (sid, afterSeq) =>
+        this.direct
+          ? this.direct.pty.getBufferSince.query({ sessionId: sid, afterSeq })
+          : client.pty.getBufferSince.query({ sessionId: sid, afterSeq })
     }
     this.sink = createDomSink(() => this.terminal?.current ?? null, schedule)
     this.feed = new TerminalFeed(sessionId, feedClient, this.sink, onStatus)
+  }
+
+  /** Read and type over this direct link from now on (null: the hub). */
+  setDirect(direct: DirectLease['client'] | null): void {
+    this.direct = direct
+  }
+
+  /** Keystrokes: direct while there is a link, else the hub. */
+  async write(data: string): Promise<unknown> {
+    const direct = this.direct
+    if (direct) {
+      try {
+        return await direct.pty.write.mutate({ sessionId: this.sessionId, data })
+      } catch (err) {
+        const code = (err as { data?: { code?: string } } | null)?.data?.code
+        if (code !== 'FORBIDDEN' && code !== 'UNAUTHORIZED') throw err
+      }
+    }
+    return this.client.pty.write.mutate({ sessionId: this.sessionId, data })
   }
 
   /** The `ref` the web view's terminal fills with its handle (set after mount). */

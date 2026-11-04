@@ -13,7 +13,11 @@
  *
  * @module terminal/client/direct-pty
  */
-import type { DirectLease, DirectLinkManager } from '@slayzone/transport/client'
+import {
+  keepDirectLease,
+  type DirectLease,
+  type DirectLinkManager
+} from '@slayzone/transport/client'
 
 type DirectPtyClient = DirectLease['client']
 
@@ -70,55 +74,23 @@ export interface DirectPtyLinkOptions {
 
 export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
   const { sessionId } = opts
-  const retryMs = opts.retryMs ?? 60_000
-  const lostRetryMs = opts.lostRetryMs ?? 1_000
-  let stopped = false
-  let connecting = false
-  let lease: DirectLease | null = null
+  let current: DirectLease | null = null
   let sub: { unsubscribe(): void } | null = null
-  let offLost: (() => void) | null = null
-  let timer: ReturnType<typeof setTimeout> | null = null
 
-  function schedule(ms: number): void {
-    if (stopped || timer) return
-    timer = setTimeout(() => {
-      timer = null
-      void connect()
-    }, ms)
-  }
-
-  function teardown(retryAfterMs: number | null): void {
-    if (lease && directSessions.get(sessionId) === lease.client) {
+  function unlink(): void {
+    sub?.unsubscribe()
+    sub = null
+    if (current && directSessions.get(sessionId) === current.client) {
       directSessions.delete(sessionId)
       changed()
     }
-    offLost?.()
-    offLost = null
-    sub?.unsubscribe()
-    sub = null
-    lease?.release()
-    lease = null
-    if (retryAfterMs !== null) schedule(retryAfterMs)
+    current = null
   }
 
-  async function connect(): Promise<void> {
-    if (stopped || connecting || lease) return
-    connecting = true
-    const got = await opts.manager.acquire({ kind: 'pty', sessionId }).catch(() => null)
-    connecting = false
-    if (stopped) {
-      got?.release()
-      return
-    }
-    if (!got) {
-      schedule(retryMs)
-      return
-    }
-    lease = got
+  function link(got: DirectLease): void {
+    current = got
     directSessions.set(sessionId, got.client)
     changed()
-    offLost = got.onLost(() => teardown(lostRetryMs))
-
     // Live chunks wait until the gap since the last delivered seq is filled, so
     // delivery stays in order (a later seq would make the gap's seqs look old).
     let catching = true
@@ -129,7 +101,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
         const missed = await got.client.pty.getBufferSince
           .query({ sessionId, afterSeq: after })
           .catch(() => null)
-        if (lease !== got) return
+        if (current !== got) return
         for (const c of missed?.chunks ?? []) opts.deliver(c.data, c.seq)
       }
       catching = false
@@ -146,32 +118,25 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
         },
         // The grant ended or the process exited (a respawn reuses the id): back to
         // the hub, and try again shortly.
-        onError: () => teardown(lostRetryMs),
-        onComplete: () => teardown(lostRetryMs)
+        onError: () => keeper.lost(),
+        onComplete: () => keeper.lost()
       }
     )
   }
 
-  const retryNow = (): void => {
-    if (lease || stopped) return
-    if (timer) {
-      clearTimeout(timer)
-      timer = null
+  const keeper = keepDirectLease({
+    target: { kind: 'pty', sessionId },
+    manager: opts.manager,
+    ...(opts.wake ? { wake: opts.wake } : {}),
+    ...(opts.retryMs !== undefined ? { retryMs: opts.retryMs } : {}),
+    ...(opts.lostRetryMs !== undefined ? { lostRetryMs: opts.lostRetryMs } : {}),
+    onChange: (lease) => {
+      unlink()
+      if (lease) link(lease)
     }
-    void connect()
-  }
-  const offConnected = opts.manager.onComputerConnected(retryNow)
-  const offWake = opts.wake?.(retryNow) ?? (() => undefined)
-  void connect()
+  })
 
-  return () => {
-    stopped = true
-    if (timer) clearTimeout(timer)
-    timer = null
-    offConnected()
-    offWake()
-    teardown(null)
-  }
+  return () => keeper.stop()
 }
 
 /** The hub client slice the helpers fall back to. */
