@@ -132,11 +132,49 @@ jobs:
         env:
           CI_SKIP_POSTINSTALL: '1'
 
+  # Runs beside the builds instead of in front of them. A failure cancels the whole run at
+  # once; everything that deploys or publishes (deploy-convex, bundle, publish-channel,
+  # draft-upload) also `needs:` this job, so nothing ships even if that cancel races.
+  typecheck:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # `gh run cancel`. The caller must grant it too: a called workflow's jobs get at most
+      # what the calling job allows (release.yml, release-pr-dry-run.yml).
+      actions: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: pnpm/action-setup@v6.1.0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
       - name: Typecheck
         run: pnpm typecheck
 
+      # Stops the builds now rather than letting them run to completion for nothing. Best
+      # effort: a token without actions:write (a fork PR) cannot cancel, and the needs:
+      # gates above still hold everything back.
+      - name: Cancel run on typecheck failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "$GITHUB_REPOSITORY" || echo "::warning::could not cancel run ${{ github.run_id }}"
+
   deploy-convex:
-    needs: [resolve, preflight]
+    needs: [resolve, preflight, typecheck]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -378,23 +416,40 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload to draft release for quick download
-        if: needs.resolve.outputs.mode == 'dry-run'
+  # Dry-run only: the builds' assets on a draft release for quick download. Its own job,
+  # not a build step, so it too waits for typecheck (a build step cannot `needs:` it).
+  draft-upload:
+    runs-on: ubuntu-latest
+    needs: [resolve, build, typecheck]
+    if: needs.resolve.outputs.mode == 'dry-run'
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform build assets
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-build-*
+          path: ${{ runner.temp }}/release-builds
+
+      - name: Upload to draft release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: dry-run-${{ needs.resolve.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
         run: |
           set -euo pipefail
-          TAG="dry-run-${{ needs.resolve.outputs.release_tag }}"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Dry Run ${{ needs.resolve.outputs.release_tag }}" --notes "Test build — not a real release" --draft
-          for file in "$RUNNER_TEMP/release-assets/${{ matrix.name }}"/*; do
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Dry Run $RELEASE_TAG" --notes "Test build — not a real release" --draft
+          # Per-build dirs, as the build steps uploaded them: same-named update manifests
+          # (latest.yml from both Windows arches) clobber each other here, as before.
+          for file in "$RUNNER_TEMP"/release-builds/*/*; do
             [ -f "$file" ] && gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --clobber
           done
 
   bundle:
     runs-on: ubuntu-latest
-    needs: [resolve, build]
+    needs: [resolve, build, typecheck]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -458,7 +513,7 @@ jobs:
   publish-channel:
     name: Publish (${{ matrix.channel }})
     runs-on: ubuntu-latest
-    needs: [resolve, bundle]
+    needs: [resolve, bundle, typecheck]
     permissions:
       contents: write
     strategy:
