@@ -403,7 +403,9 @@ jobs:
 
       - name: Unpack the JS build
         shell: bash
-        run: tar -xf "$RUNNER_TEMP/build-js/build-js.tar"
+        # Archive on stdin, not `-f <path>`: Git-for-Windows GNU tar reads `D:\...` as a
+        # remote `host:path` ("Cannot connect to D: resolve failed"). stdin works for every tar.
+        run: tar -xf - < "$RUNNER_TEMP/build-js/build-js.tar"
 
       - name: Get electron version
         shell: bash
