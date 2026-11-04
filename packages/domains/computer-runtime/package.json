@@ -14,7 +14,7 @@
     "@slayzone/computer-transport": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.19.0",
-    "vitest": "^5.0.2"
+    "@types/node": "^24.19.1",
+    "vitest": "^5.0.3"
   }
 }

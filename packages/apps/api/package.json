@@ -13,7 +13,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@slayzone/agent-panels": "workspace:*",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
@@ -59,6 +59,6 @@
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.18.2"
   }
 }

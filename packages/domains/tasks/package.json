@@ -32,10 +32,10 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@tanstack/react-query": "^5.104.0",
+    "@tanstack/react-query": "^5.104.1",
     "date-fns": "^4.4.0",
     "motion": "^12.43.0",
-    "lucide-react": "^1.48.0",
+    "lucide-react": "^1.52.0",
     "react-hotkeys-hook": "^5.3.3",
     "zustand": "^5.0.15",
     "@slayzone/workflow": "workspace:*"
