@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { ALL_HYDRATED_MARK, createPaneHydrator, HYDRATE_IDLE_TIMEOUT_MS } from './pane-hydration'
+import {
+  ALL_HYDRATED_MARK,
+  createPaneHydrator,
+  HYDRATE_IDLE_TIMEOUT_MS,
+  MAX_CONCURRENT_LOADS
+} from './pane-hydration'
 
 type IdleCb = (d: { didTimeout: boolean; timeRemaining: () => number }) => void
 
@@ -32,7 +37,7 @@ describe('pane hydrator', () => {
     const { h, idle, runIdle, flush } = harness()
     const rank: Record<string, number> = { a: 2, b: 0, c: 1 }
     for (const id of ['a', 'b', 'c'])
-      h.enqueue(id, { rank: () => rank[id], ready: Promise.resolve() })
+      h.enqueue(id, { rank: () => rank[id], load: () => Promise.resolve() })
     await flush()
     expect(idle).toHaveLength(1)
     expect(idle[0].timeout).toBe(HYDRATE_IDLE_TIMEOUT_MS)
@@ -51,7 +56,7 @@ describe('pane hydrator', () => {
     const { h, runIdle, flush } = harness()
     const rank: Record<string, number> = { a: 5, b: 5, c: 5 }
     for (const id of ['a', 'b', 'c'])
-      h.enqueue(id, { rank: () => rank[id], ready: Promise.resolve() })
+      h.enqueue(id, { rank: () => rank[id], load: () => Promise.resolve() })
     await flush()
     runIdle()
     expect(h.isHydrated('a')).toBe(true)
@@ -64,8 +69,8 @@ describe('pane hydrator', () => {
   it('waits for a pane to be ready (data loaded), whatever its rank', async () => {
     const { h, idle, runIdle, flush } = harness()
     let resolveA!: () => void
-    h.enqueue('a', { rank: () => 0, ready: new Promise<void>((r) => (resolveA = r)) })
-    h.enqueue('b', { rank: () => 9, ready: Promise.resolve() })
+    h.enqueue('a', { rank: () => 0, load: () => new Promise<void>((r) => (resolveA = r)) })
+    h.enqueue('b', { rank: () => 9, load: () => Promise.resolve() })
     await flush()
     runIdle()
     expect(h.isHydrated('b')).toBe(true)
@@ -79,7 +84,7 @@ describe('pane hydrator', () => {
 
   it('a failed load still hydrates (the pane shows its error boundary as before)', async () => {
     const { h, runIdle, flush } = harness()
-    h.enqueue('a', { rank: () => 0, ready: Promise.reject(new Error('x')) })
+    h.enqueue('a', { rank: () => 0, load: () => Promise.reject(new Error('x')) })
     await flush()
     runIdle()
     expect(h.isHydrated('a')).toBe(true)
@@ -89,20 +94,20 @@ describe('pane hydrator', () => {
     const { h, idle, flush } = harness()
     const seen: string[] = []
     h.subscribe('a', () => seen.push('a'))
-    h.enqueue('a', { rank: () => 0, ready: new Promise(() => {}) })
+    h.enqueue('a', { rank: () => 0, load: () => new Promise(() => {}) })
     h.hydrateNow('a')
     h.hydrateNow('a')
     expect(h.isHydrated('a')).toBe(true)
     expect(seen).toEqual(['a'])
     // Already hydrated: enqueueing again is a no-op.
-    h.enqueue('a', { rank: () => 0, ready: Promise.resolve() })
+    h.enqueue('a', { rank: () => 0, load: () => Promise.resolve() })
     await flush()
     expect(idle).toHaveLength(0)
   })
 
   it('a cancelled entry (pane unmounted) is never hydrated', async () => {
     const { h, idle, flush } = harness()
-    const cancel = h.enqueue('a', { rank: () => 0, ready: Promise.resolve() })
+    const cancel = h.enqueue('a', { rank: () => 0, load: () => Promise.resolve() })
     cancel()
     await flush()
     expect(idle).toHaveLength(0)
@@ -114,8 +119,8 @@ describe('pane hydrator', () => {
     const seen: string[] = []
     const off = h.subscribe('b', () => seen.push('b'))
     h.subscribe('a', () => seen.push('a'))
-    h.enqueue('a', { rank: () => 0, ready: Promise.resolve() })
-    h.enqueue('b', { rank: () => 1, ready: Promise.resolve() })
+    h.enqueue('a', { rank: () => 0, load: () => Promise.resolve() })
+    h.enqueue('b', { rank: () => 1, load: () => Promise.resolve() })
     await flush()
     runIdle()
     expect(seen).toEqual(['a'])
@@ -128,7 +133,7 @@ describe('pane hydrator', () => {
   it('fills an idle period with room left, and stops when it runs short', async () => {
     const { h, idle, runIdle, flush, flushed } = harness()
     for (const id of ['a', 'b', 'c', 'd'])
-      h.enqueue(id, { rank: () => 0, ready: Promise.resolve() })
+      h.enqueue(id, { rank: () => 0, load: () => Promise.resolve() })
     await flush()
     // 45ms left after the first pane, 30 after the second, 10 after the third.
     runIdle([45, 30, 10])
@@ -141,7 +146,7 @@ describe('pane hydrator', () => {
 
   it('a timed-out idle callback (busy thread) hydrates exactly one pane', async () => {
     const { h, idle, flush } = harness()
-    for (const id of ['a', 'b']) h.enqueue(id, { rank: () => 0, ready: Promise.resolve() })
+    for (const id of ['a', 'b']) h.enqueue(id, { rank: () => 0, load: () => Promise.resolve() })
     await flush()
     idle.shift()!.cb({ didTimeout: true, timeRemaining: () => 49 })
     expect(h.isHydrated('a')).toBe(true)
@@ -153,13 +158,13 @@ describe('pane hydrator', () => {
     const { h, runIdle, flush } = harness()
     h.hydrateNow('active')
     expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(0)
-    for (const id of ['a', 'b']) h.enqueue(id, { rank: () => 0, ready: Promise.resolve() })
+    for (const id of ['a', 'b']) h.enqueue(id, { rank: () => 0, load: () => Promise.resolve() })
     await flush()
     runIdle([0])
     expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(0)
     runIdle([0])
     expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(1)
-    h.enqueue('c', { rank: () => 0, ready: Promise.resolve() })
+    h.enqueue('c', { rank: () => 0, load: () => Promise.resolve() })
     await flush()
     runIdle([0])
     expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(1)
@@ -173,9 +178,9 @@ describe('pane hydrator', () => {
 
     for (const id of ['active', 'a', 'b', 'c']) h.attach(id)
     h.hydrateNow('active')
-    const cancelC = h.enqueue('c', { rank: () => 2, ready: new Promise(() => {}) })
-    h.enqueue('a', { rank: () => 0, ready: Promise.resolve() })
-    h.enqueue('b', { rank: () => 1, ready: Promise.resolve() })
+    const cancelC = h.enqueue('c', { rank: () => 2, load: () => new Promise(() => {}) })
+    h.enqueue('a', { rank: () => 0, load: () => Promise.resolve() })
+    h.enqueue('b', { rank: () => 1, load: () => Promise.resolve() })
     expect(h.progress()).toEqual({ hydrated: 1, queued: 3 })
     // Stable snapshot between changes (useSyncExternalStore needs that).
     expect(h.progress()).toBe(h.progress())
@@ -201,7 +206,7 @@ describe('pane hydrator', () => {
     const detachA = h.attach('a')
     h.attach('b')
     h.hydrateNow('a')
-    h.enqueue('b', { rank: () => 0, ready: Promise.resolve() })
+    h.enqueue('b', { rank: () => 0, load: () => Promise.resolve() })
     expect(h.progress()).toEqual({ hydrated: 1, queued: 1 })
     detachA()
     expect(h.progress()).toEqual({ hydrated: 0, queued: 1 })
@@ -228,5 +233,74 @@ describe('pane hydrator', () => {
     expect(h.progress().hydrated).toBe(1)
     second()
     expect(h.progress().hydrated).toBe(0)
+  })
+
+  describe('load queue', () => {
+    // A renderer boot restores every open tab at once. Their data loads used to
+    // start together, all racing the visible tab for the one hub thread; now the
+    // queue starts them a few at a time, likeliest-to-open first.
+    function deferred() {
+      let resolve!: () => void
+      const promise = new Promise<void>((r) => (resolve = r))
+      return { promise, resolve }
+    }
+
+    it('starts at most MAX_CONCURRENT_LOADS loads, best rank first', async () => {
+      const { h, flush } = harness()
+      const started: string[] = []
+      const gates = new Map<string, ReturnType<typeof deferred>>()
+      const ids = Array.from({ length: MAX_CONCURRENT_LOADS + 2 }, (_, i) => `p${i}`)
+      // Enqueued worst rank first: order must follow rank, not arrival.
+      for (const [i, id] of [...ids].reverse().entries())
+        h.enqueue(id, {
+          rank: () => ids.length - 1 - i,
+          load: () => {
+            started.push(id)
+            const d = deferred()
+            gates.set(id, d)
+            return d.promise
+          }
+        })
+      await flush()
+      expect(started).toEqual(ids.slice(0, MAX_CONCURRENT_LOADS))
+      gates.get('p0')!.resolve()
+      await flush()
+      expect(started).toEqual(ids.slice(0, MAX_CONCURRENT_LOADS + 1))
+    })
+
+    it('a failed load frees its slot', async () => {
+      const { h, flush } = harness()
+      const started: string[] = []
+      for (let i = 0; i <= MAX_CONCURRENT_LOADS; i++)
+        h.enqueue(`p${i}`, {
+          rank: () => i,
+          load: () => {
+            started.push(`p${i}`)
+            return i === 0 ? Promise.reject(new Error('x')) : new Promise(() => {})
+          }
+        })
+      await flush()
+      expect(started).toHaveLength(MAX_CONCURRENT_LOADS + 1)
+    })
+
+    it('a pane revealed or closed before its turn never loads through the queue', async () => {
+      const { h, flush } = harness()
+      const started: string[] = []
+      const load = (id: string) => () => {
+        started.push(id)
+        return new Promise<void>(() => {})
+      }
+      for (let i = 0; i < MAX_CONCURRENT_LOADS; i++)
+        h.enqueue(`busy${i}`, { rank: () => 0, load: load(`busy${i}`) })
+      h.enqueue('revealed', { rank: () => 1, load: load('revealed') })
+      const cancel = h.enqueue('closed', { rank: () => 1, load: load('closed') })
+      await flush()
+      // Revealed: its own render fetches. Closed: nothing to show.
+      h.hydrateNow('revealed')
+      cancel()
+      await flush()
+      expect(started).not.toContain('revealed')
+      expect(started).not.toContain('closed')
+    })
   })
 })

@@ -206,3 +206,64 @@ test('compaction and row ID reuse cannot turn new diagnostics into legacy histor
     raw.close()
   }
 })
+
+test('unresolvable legacy rows are attributed once per process, not on every query', async () => {
+  // Every relay lookup (hasTask/tasks/freeze) used to re-run the whole attribution
+  // pass over rows that can never resolve — a long synchronous block on the hub
+  // thread per call, enough to time out every task tab on a renderer reload.
+  const raw = new Database(':memory:')
+  try {
+    raw.exec(
+      'CREATE TABLE diagnostics_events(id TEXT PRIMARY KEY,task_id TEXT,event TEXT,message TEXT,payload_json TEXT,ts_ms INTEGER)'
+    )
+    const insert = raw.prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+    for (let i = 0; i < 300; i++)
+      insert.run(`orphan-${i}`, null, 'renderer.window.error', 'private', '{}', i)
+    insert.run('owned', 't', 'chat.error', 'private', '{}', 1000)
+    let calls = 0
+    const resolveTask = async (evidence: { taskIds: string[] }) => {
+      calls++
+      return evidence.taskIds.length === 1 ? evidence.taskIds[0] : null
+    }
+    const source = createLegacyChatDiagnostics({ db: createSlayzoneDbAdapter(raw), resolveTask })
+    expect(await source.tasks()).toEqual(['t'])
+    expect(calls).toBe(301)
+    expect(await source.hasTask('t')).toBe(true)
+    expect(await source.hasTask('other')).toBe(false)
+    expect(await source.unassigned()).toBe(300)
+    await source.freeze('t')
+    expect(calls).toBe(301)
+    // A new process (hub restart) gets one fresh attempt — owners that appeared
+    // since can still be found.
+    const reopened = createLegacyChatDiagnostics({ db: createSlayzoneDbAdapter(raw), resolveTask })
+    expect(await reopened.unassigned()).toBe(300)
+    expect(calls).toBe(601)
+  } finally {
+    raw.close()
+  }
+})
+
+test('a failed attribution pass is retried by the next caller', async () => {
+  const raw = new Database(':memory:')
+  try {
+    raw.exec(
+      'CREATE TABLE diagnostics_events(id TEXT PRIMARY KEY,task_id TEXT,event TEXT,message TEXT,payload_json TEXT,ts_ms INTEGER)'
+    )
+    raw
+      .prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+      .run('owned', 't', 'chat.error', 'private', '{}', 1)
+    let fail = true
+    const source = createLegacyChatDiagnostics({
+      db: createSlayzoneDbAdapter(raw),
+      resolveTask: async (evidence) => {
+        if (fail) throw new Error('main DB busy')
+        return evidence.taskIds[0] ?? null
+      }
+    })
+    await expect(source.tasks()).rejects.toThrow('main DB busy')
+    fail = false
+    expect(await source.tasks()).toEqual(['t'])
+  } finally {
+    raw.close()
+  }
+})

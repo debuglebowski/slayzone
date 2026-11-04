@@ -310,6 +310,62 @@ test('getByProject: filters by project and excludes archived', async () => {
 })
 
 // ===========================================================================
+// task.getSiblingBrowserUrl — the detail load's fallback browser URL, without
+// shipping every task in the project (task.getByProject) to find one string.
+// ===========================================================================
+test('getSiblingBrowserUrl: first real URL among the other live tasks of the project', async () => {
+  const otherProject = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
+    .run(otherProject, 'Other', '#000', '/tmp/o', JSON.stringify([]))
+  const setTabs = (id: string, urls: string[] | string) =>
+    h.db.prepare('UPDATE tasks SET browser_tabs = ? WHERE id = ?').run(
+      typeof urls === 'string'
+        ? urls
+        : JSON.stringify({
+            tabs: urls.map((url, i) => ({ id: `t${i}`, url, title: url })),
+            activeTabId: 't0'
+          }),
+      id
+    )
+  // Isolated project so earlier tests' tasks can't interfere.
+  const scoped = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
+    .run(scoped, 'Scoped', '#000', '/tmp/s', JSON.stringify([]))
+  const mkIn = (pid: string, title: string) =>
+    caller.create({ projectId: pid, title } as unknown as CreateTaskInput) as Promise<Task>
+  const self = await mkIn(scoped, 'self')
+  expect(await caller.getSiblingBrowserUrl({ projectId: scoped, excludeTaskId: self.id })).toEqual({
+    url: null
+  })
+  const blank = await mkIn(scoped, 'blank')
+  setTabs(blank.id, ['about:blank', ''])
+  const broken = await mkIn(scoped, 'broken')
+  setTabs(broken.id, '{not json')
+  const archived = await mkIn(scoped, 'archived')
+  setTabs(archived.id, ['https://archived.example'])
+  await caller.archive({ id: archived.id })
+  const foreign = await mkIn(otherProject, 'foreign')
+  setTabs(foreign.id, ['https://foreign.example'])
+  setTabs(self.id, ['https://self.example'])
+  expect(await caller.getSiblingBrowserUrl({ projectId: scoped, excludeTaskId: self.id })).toEqual({
+    url: null
+  })
+  const real = await mkIn(scoped, 'real')
+  setTabs(real.id, ['about:blank', 'https://real.example'])
+  expect(await caller.getSiblingBrowserUrl({ projectId: scoped, excludeTaskId: self.id })).toEqual({
+    url: 'https://real.example'
+  })
+  // Same answer the old client-side scan of task.getByProject gave.
+  const scan = (await caller.getByProject({ projectId: scoped }))
+    .filter((t) => t.id !== self.id && !t.archived_at)
+    .map((t) => t.browser_tabs?.tabs?.find((tab) => tab.url && tab.url !== 'about:blank')?.url)
+    .find(Boolean)
+  expect(scan).toBe('https://real.example')
+})
+
+// ===========================================================================
 // db:tasks:getSubTasks
 // ===========================================================================
 test('getSubTasks: returns children', async () => {
