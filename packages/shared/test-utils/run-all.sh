@@ -416,6 +416,7 @@ run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.tes
 run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
 run_harness packages/shared/db-migrations/src/v182-chat-attachment-messages-migration.test.ts
 run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migration.test.ts
+run_harness packages/shared/db-migrations/src/v193-agent-sessions-conversation-index-migration.test.ts
 # v192: terminal_modes → agents, *.terminal_mode → agent_id, default_terminal_mode → default_agent_id.
 run_harness packages/shared/db-migrations/src/v192-agent-id-rename-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.

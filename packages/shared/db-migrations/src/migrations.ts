@@ -4684,6 +4684,15 @@ export const migrations: Migration[] = [
         DELETE FROM user_settings WHERE key = 'default_terminal_mode';
       `)
     }
+  },
+  {
+    version: 193,
+    // Session lookup by provider conversation id (legacy diagnostics attribution at
+    // first boot after the computer-owned chat upgrade, `conversation_id = ?` reads).
+    // Unindexed, each lookup walked every session: a large history blocked the hub
+    // past the desktop's 10s health deadline.
+    up: (db) =>
+      db.exec('CREATE INDEX agent_sessions_conversation ON agent_sessions(conversation_id)')
   }
 ]
 

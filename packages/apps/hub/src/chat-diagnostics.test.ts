@@ -267,3 +267,32 @@ test('a failed attribution pass is retried by the next caller', async () => {
     raw.close()
   }
 })
+
+test('legacy attribution yields to the event loop between pages (hub must answer /health at boot)', async () => {
+  // The DB is synchronous behind promises: without an explicit yield the whole pass is
+  // one microtask chain, so no socket, timer or /health request runs until it ends —
+  // first boot after upgrade blew the desktop's 10s health deadline on large histories.
+  const raw = new Database(':memory:')
+  try {
+    raw.exec(
+      'CREATE TABLE diagnostics_events(id TEXT PRIMARY KEY,task_id TEXT,event TEXT,message TEXT,payload_json TEXT,ts_ms INTEGER)'
+    )
+    const insert = raw.prepare('INSERT INTO diagnostics_events VALUES(?,?,?,?,?,?)')
+    for (let i = 0; i < 600; i++)
+      insert.run(
+        `e${i}`,
+        null,
+        'pty.hook_received',
+        'hook',
+        JSON.stringify({ sessionId: `s${i}` }),
+        i
+      )
+    const source = createLegacyChatDiagnostics({ db: createSlayzoneDbAdapter(raw) })
+    const order: string[] = []
+    setImmediate(() => order.push('event loop ran'))
+    await source.initialize().then(() => order.push('attribution done'))
+    expect(order).toEqual(['event loop ran', 'attribution done'])
+  } finally {
+    raw.close()
+  }
+})
