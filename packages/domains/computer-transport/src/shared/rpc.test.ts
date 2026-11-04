@@ -105,6 +105,54 @@ describe('DuplexRpc timeouts and disposal', () => {
     expect(await settled).toBe('rejected')
   })
 
+  it('a request in flight when the host sleeps is not timed out by the sleep', async () => {
+    // Lid closed 5s after the request went out; 42 minutes later the host wakes.
+    // Electron's node on macOS counts sleep, so the 30s deadline fires on wake: the
+    // peer (asleep too) never had a chance to answer. Seen live as
+    // "computer-hub request 'chat.request' timed out after 30000ms" after a sleep.
+    vi.useFakeTimers()
+    const t0 = Date.now()
+    const wake = t0 + 5_000 + 42 * 60_000
+    const slept = (): number => Math.max(0, Math.min(Date.now(), wake) - (t0 + 5_000))
+    const { rpc, written } = makeRpc({
+      suspendClock: () => ({
+        lastResumeAt: () => (Date.now() >= wake ? wake : 0),
+        awakeNow: () => Date.now() - slept(),
+        dispose: () => undefined
+      })
+    })
+    const p = rpc.request('chat.request', undefined, 30_000)
+    await vi.advanceTimersByTimeAsync(wake - t0 + 1_000)
+    expect(rpc.pendingCount).toBe(1)
+    const id = JSON.parse(written[0]!).id as number
+    rpc.handleLine(JSON.stringify({ id, result: 'answered after wake' }))
+    await expect(p).resolves.toBe('answered after wake')
+  })
+
+  it('a peer still silent after a sleep times out once the window has passed awake', async () => {
+    vi.useFakeTimers()
+    const t0 = Date.now()
+    const wake = t0 + 5_000 + 42 * 60_000
+    const slept = (): number => Math.max(0, Math.min(Date.now(), wake) - (t0 + 5_000))
+    const { rpc } = makeRpc({
+      suspendClock: () => ({
+        lastResumeAt: () => (Date.now() >= wake ? wake : 0),
+        awakeNow: () => Date.now() - slept(),
+        dispose: () => undefined
+      })
+    })
+    const settled = rpc.request('slow', undefined, 30_000).then(
+      () => null,
+      (e: unknown) => e
+    )
+    // 5s awake before the sleep + 24.999s after it: still inside the window.
+    await vi.advanceTimersByTimeAsync(wake - t0 + 24_999)
+    expect(rpc.pendingCount).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await settled).toBeInstanceOf(RpcTimeoutError)
+    expect(rpc.pendingCount).toBe(0)
+  })
+
   it('dispose rejects all pending requests and blocks new ones', async () => {
     const { rpc } = makeRpc()
     const p = rpc.request('m', undefined, 0)

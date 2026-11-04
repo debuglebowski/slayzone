@@ -77,6 +77,8 @@ export interface ChatComposerProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   handleSend: () => void | Promise<void>
   handleStop: () => void | Promise<void>
+  /** Stop was pressed and the turn has not closed yet: the button reads "Stopping…". */
+  stopping?: boolean
   /** Ctrl+R prompt-history search state (see useChatComposer). */
   historySearch: {
     open: boolean
@@ -147,6 +149,7 @@ export function ChatComposer({
   onKeyDown,
   handleSend,
   handleStop,
+  stopping = false,
   historySearch,
   usage,
   displaySessionEnded,
@@ -307,10 +310,15 @@ export function ChatComposer({
               }}
               disabled={displaySessionEnded}
               className="shrink-0 size-8 rounded-full flex items-center justify-center bg-destructive text-white hover:bg-destructive/90 transition-colors disabled:opacity-50"
-              title="Stop generation (Esc)"
-              aria-label="Stop generation"
+              title={stopping ? 'Stopping…' : 'Stop generation (Esc)'}
+              aria-label={stopping ? 'Stopping' : 'Stop generation'}
+              aria-busy={stopping}
             >
-              <Square className="size-3.5 fill-current" />
+              {stopping ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Square className="size-3.5 fill-current" />
+              )}
             </button>
           ) : (
             <button

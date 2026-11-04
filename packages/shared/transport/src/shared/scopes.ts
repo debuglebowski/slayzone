@@ -768,6 +768,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.getBlockers': 'tasks',
   'task.getBlocking': 'tasks',
   'task.getByProject': 'tasks',
+  'task.getSiblingBrowserUrl': 'tasks',
   'task.getDeleted': 'tasks',
   'task.getSubTasks': 'tasks',
   'task.loadBoardData': 'tasks',

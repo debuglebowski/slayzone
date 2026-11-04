@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
-import type { SlayzoneDb } from '@slayzone/platform'
+import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import type { ChatRecord } from '@slayzone/chat-runtime/shared'
 const PRIVATE_EVENT =
   "(event LIKE 'chat.%' OR event LIKE 'renderer.chat.%' OR event IN ('renderer.error-boundary','renderer.window.error','renderer.window.unhandledrejection','main.uncaught_exception','main.unhandled_rejection','pty.hook_received') OR payload_json LIKE '%screenshotDataUrl%')"
@@ -112,55 +112,72 @@ CREATE TABLE IF NOT EXISTS chat_content_locks(task_id TEXT PRIMARY KEY,state TEX
       await db.exec(`CREATE TRIGGER IF NOT EXISTS chat_diagnostic_delete_pending BEFORE DELETE ON diagnostics_events WHEN ${pending} BEGIN SELECT RAISE(ABORT,'Chat diagnostic migration is pending'); END;
 CREATE TRIGGER IF NOT EXISTS chat_diagnostic_update_pending BEFORE UPDATE ON diagnostics_events WHEN ${pending} BEGIN SELECT RAISE(ABORT,'Chat diagnostic migration is pending'); END;`)
     })())
-  let attributing: Promise<void> | null = null
+  // ONE attribution pass per process. Every relay lookup (hasTask/tasks/freeze)
+  // awaits it, and rows whose owner cannot be resolved stay pending forever — so
+  // a pass that reset on completion re-walked every such row on every lookup, a
+  // long block on the hub thread per call (it froze the hub for most of a minute
+  // after a renderer reload and timed out every task tab). The ledger only grows
+  // inside `init()`, so nothing new can need attributing until the next process,
+  // which gets its own fresh attempt. A FAILED pass is forgotten so the next
+  // caller retries it.
+  let attributed: Promise<void> | null = null
   async function initialize() {
     await init()
-    if (attributing) return attributing
-    attributing = (async () => {
-      let after = 0
-      for (;;) {
-        const rows = await db.all<{
-          source_ordinal: number
-          ledger_task_id: string | null
-          id: string
-          task_id: string | null
-          session_id?: string | null
-          payload_json: string | null
-        }>(
-          "SELECT l.ordinal AS source_ordinal,l.task_id AS ledger_task_id,d.* FROM chat_legacy_diagnostics l JOIN diagnostics_events d ON d.id=l.event_id JOIN diagnostic_content_holds h ON h.event_id=d.id WHERE (l.task_id IS NULL OR h.blob_paths='null') AND l.ordinal>? ORDER BY l.ordinal LIMIT 256",
-          [after]
-        )
-        if (!rows.length) break
-        for (const row of rows) {
-          after = row.source_ordinal
-          let paths: string[] = []
-          try {
-            paths = files(JSON.parse(row.payload_json ?? 'null'))
-          } catch {
-            /* Keep the raw record even when legacy JSON is malformed. */
-          }
-          await db.run(
-            'INSERT INTO diagnostic_content_holds(event_id,blob_paths) VALUES(?,?) ON CONFLICT(event_id) DO UPDATE SET blob_paths=excluded.blob_paths',
-            [row.id, JSON.stringify(paths)]
-          )
-          if (row.ledger_task_id) continue
-          const evidence = taskEvidence(row),
-            taskId = opts.resolveTask
-              ? await opts.resolveTask(evidence)
-              : evidence.taskIds.length === 1
-                ? evidence.taskIds[0]
-                : null
-          if (taskId)
-            await db.run(
-              'UPDATE chat_legacy_diagnostics SET task_id=? WHERE event_id=? AND task_id IS NULL',
-              [taskId, row.id]
-            )
-        }
-      }
-    })().finally(() => {
-      attributing = null
+    attributed ??= attribute().catch((err: unknown) => {
+      attributed = null
+      throw err
     })
-    return attributing
+    return attributed
+  }
+  async function attribute() {
+    let after = 0
+    for (;;) {
+      // Let queued requests run between batches: the rest of the hub must not
+      // wait for a whole legacy pass.
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      const rows = await db.all<{
+        source_ordinal: number
+        ledger_task_id: string | null
+        id: string
+        task_id: string | null
+        session_id?: string | null
+        payload_json: string | null
+      }>(
+        "SELECT l.ordinal AS source_ordinal,l.task_id AS ledger_task_id,d.* FROM chat_legacy_diagnostics l JOIN diagnostics_events d ON d.id=l.event_id JOIN diagnostic_content_holds h ON h.event_id=d.id WHERE (l.task_id IS NULL OR h.blob_paths='null') AND l.ordinal>? ORDER BY l.ordinal LIMIT 256",
+        [after]
+      )
+      if (!rows.length) break
+      // One write transaction per batch instead of one or two per row.
+      const writes: BatchOp[] = []
+      for (const row of rows) {
+        after = row.source_ordinal
+        let paths: string[] = []
+        try {
+          paths = files(JSON.parse(row.payload_json ?? 'null'))
+        } catch {
+          /* Keep the raw record even when legacy JSON is malformed. */
+        }
+        writes.push({
+          type: 'run',
+          sql: 'INSERT INTO diagnostic_content_holds(event_id,blob_paths) VALUES(?,?) ON CONFLICT(event_id) DO UPDATE SET blob_paths=excluded.blob_paths',
+          params: [row.id, JSON.stringify(paths)]
+        })
+        if (row.ledger_task_id) continue
+        const evidence = taskEvidence(row),
+          taskId = opts.resolveTask
+            ? await opts.resolveTask(evidence)
+            : evidence.taskIds.length === 1
+              ? evidence.taskIds[0]
+              : null
+        if (taskId)
+          writes.push({
+            type: 'run',
+            sql: 'UPDATE chat_legacy_diagnostics SET task_id=? WHERE event_id=? AND task_id IS NULL',
+            params: [taskId, row.id]
+          })
+      }
+      await db.batchTxn(writes)
+    }
   }
   function safeBlob(path: string): boolean {
     if (!opts.blobDir || !existsSync(path) || !existsSync(opts.blobDir)) return false

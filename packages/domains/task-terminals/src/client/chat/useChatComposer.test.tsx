@@ -157,6 +157,7 @@ const opts = (over: Partial<UseChatComposerOpts> = {}): UseChatComposerOpts => (
   chatModel: 'opus',
   handleModelChange,
   cliCommands: null,
+  turnId: 0,
   ...over
 })
 
@@ -551,6 +552,58 @@ describe('useChatComposer handleStop', () => {
     await stop()
     expect(composer.draft).toBe('typing again')
     expect(composer.attachments).toEqual([])
+  })
+
+  // TUI parity: Stop shows at once, not after the round trip to the agent.
+  const deferredStop = () => {
+    let settle!: { resolve: (r: StopResult) => void; reject: (e: Error) => void }
+    abortAndPop.mockImplementation(
+      () => new Promise<StopResult>((resolve, reject) => (settle = { resolve, reject }))
+    )
+    return () => settle
+  }
+  const notPopped: StopResult = { popped: false, text: null, id: null, content: null }
+
+  it('reads as stopping from the press until the turn closes', async () => {
+    const settle = deferredStop()
+    const { rerender } = setup({ inFlight: true, turnId: 3 })
+    expect(composer.stopping).toBe(false)
+    act(() => void composer.handleStop())
+    expect(composer.stopping).toBe(true)
+    await act(async () => settle().resolve(notPopped))
+    // The request is done; the turn's end (an event) has not arrived yet.
+    expect(composer.stopping).toBe(true)
+    rerender({ inFlight: false, turnId: 4 })
+    expect(composer.stopping).toBe(false)
+    // The next turn is not stopping.
+    rerender({ inFlight: true, turnId: 4 })
+    expect(composer.stopping).toBe(false)
+  })
+
+  it('presses while the stop request runs send nothing more; one after it, with the turn still open, asks again', async () => {
+    const settle = deferredStop()
+    setup({ inFlight: true, turnId: 3 })
+    act(() => void composer.handleStop())
+    act(() => void composer.handleStop())
+    act(() => void composer.handleStop())
+    expect(abortAndPop).toHaveBeenCalledTimes(1)
+    await act(async () => settle().resolve(notPopped))
+    act(() => void composer.handleStop())
+    expect(abortAndPop).toHaveBeenCalledTimes(2)
+  })
+
+  it('a failed stop no longer reads as stopping', async () => {
+    const settle = deferredStop()
+    setup({ inFlight: true, turnId: 3 })
+    let done!: Promise<void>
+    act(() => {
+      done = composer.handleStop()
+    })
+    await act(async () => {
+      settle().reject(new Error('hub gone'))
+      await done.catch(() => undefined)
+    })
+    expect(composer.stopping).toBe(false)
   })
 
   it('restores nothing when the turn was not popped', async () => {

@@ -36,6 +36,7 @@ import {
   getTrpcPort
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
+import { currentOsUser } from '@slayzone/platform/hub-discovery'
 import {
   getDatabasePathFromEnv,
   getServerDiagnosticsDatabasePath,
@@ -156,7 +157,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Separate diagnostics events DB so THIS process's recordDiagnosticEvent calls
   // (pty + agent pool run here) persist + are queryable, instead of buffering +
   // dropping. Always owned here (independent of cfg.db).
-  const diagnosticsDb = openServerDiagnosticsDatabase()
+  const diagnosticsDb = await openServerDiagnosticsDatabase()
 
   // A frozen main thread looks dead to everything talking to this hub: computer
   // heartbeats go unanswered, sockets drop, timers fire late all at once. Record
@@ -340,6 +341,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     root: getSlayzoneHomeDir(),
     pid: process.pid,
     supervised,
+    // Who this hub belongs to, for local callers on a machine several OS users share
+    // (one loopback for all): `slay` keeps to its own user's app by these two.
+    user: currentOsUser(),
+    // Same bit db.ts picks the dev database filename with.
+    dev: process.env.SLAYZONE_DEV === '1',
     // Same bit `hub.describe` reports over /trpc — mirrored on /health so a
     // client can learn "this hub needs a sign-in" without opening a socket. This
     // is where `slay` reads it; `supervised` says nothing about login.
@@ -866,8 +872,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   })
   // Force the batch out now: the boot canary is `info` (not the error level that
   // auto-flushes), and a sidecar that crashes/exits inside the flush window is
-  // exactly the stale/crash-loop case we need it for. The sidecar's diag DB is
-  // synchronous, so this drains immediately.
+  // exactly the stale/crash-loop case we need it for. Awaited: the write lands on
+  // the diagnostics DB worker before boot continues.
   await flushWriteQueue()
 
   let stopped = false

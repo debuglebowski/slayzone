@@ -15,7 +15,7 @@ import type { Project } from '@slayzone/projects-contracts'
 import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { TaskPaneFallback, useTerminalFirstHolding } from '@slayzone/task/client/TerminalFirstShell'
 import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher'
-import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
+import { isTaskDetailTimeoutError, taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { mruRank } from '@slayzone/terminal/client/terminal-mru'
 import { cn } from '@slayzone/ui'
 import type { ExplodeCellRect } from '@slayzone/app-shell/client'
@@ -378,7 +378,12 @@ const TaskPane = memo(function TaskPane({
       onMinimizeExplodeTask={onMinimizeExplodeTask}
       hubId={hubId}
     >
-      <ErrorBoundary onReset={() => taskDetailCache.invalidate('taskDetail', taskId, hubId)}>
+      {/* A load that timed out (hub too busy) retries itself instead of parking
+          the tab on a dead-end error screen. */}
+      <ErrorBoundary
+        autoRetry={isTaskDetailTimeoutError}
+        onReset={() => taskDetailCache.invalidate('taskDetail', taskId, hubId)}
+      >
         <Suspense fallback={<TaskPaneFallback taskId={taskId} />}>
           {hydrated && !holdForTerminal ? (
             <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
@@ -472,7 +477,8 @@ function usePaneHydrated(
       rank: () => paneRank(taskId, browserOpenRef.current),
       // `hubId` matches what TaskDetailDataLoader reads from this pane's HubScope,
       // so this is the very cache entry the page will render from.
-      ready: Promise.all([loadDetailChunk(), taskDetailCache.prefetch('taskDetail', taskId, hubId)])
+      load: () =>
+        Promise.all([loadDetailChunk(), taskDetailCache.prefetch('taskDetail', taskId, hubId)])
     })
   }, [taskId, hubId, onScreen])
   return hydrated || onScreen

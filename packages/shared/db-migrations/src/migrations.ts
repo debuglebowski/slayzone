@@ -4687,6 +4687,21 @@ export const migrations: Migration[] = [
   },
   {
     version: 193,
+    // Session lookup by provider conversation id (legacy diagnostics attribution at
+    // first boot after the computer-owned chat upgrade, `conversation_id = ?` reads).
+    // Unindexed, each lookup walked every session: a large history blocked the hub
+    // past the desktop's 10s health deadline.
+    up: (db) => {
+      // Guarded like v187/v189: chat-runtime fixtures replay the chat migrations on a
+      // skeleton DB without this table. Every real store has it.
+      if (
+        db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions'").get()
+      )
+        db.exec('CREATE INDEX agent_sessions_conversation ON agent_sessions(conversation_id)')
+    }
+  },
+  {
+    version: 194,
     up(db) {
       // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
       // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
@@ -4711,7 +4726,7 @@ export const migrations: Migration[] = [
     }
   },
   {
-    version: 194,
+    version: 195,
     up(db) {
       // Which computer a legacy (hub-era) chat tab's agent ran on — where its provider
       // session lives, so the migration copies it from there. It was read from the

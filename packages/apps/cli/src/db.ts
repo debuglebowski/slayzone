@@ -20,10 +20,8 @@
  * @module cli/db
  */
 import http from 'node:http'
-import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
-import { findHub } from '@slayzone/platform/hub-discovery'
 import { resolveTaskCommandTarget, type HubTarget } from './hub-config'
-import { probeFixedPort } from './local-hub'
+import { probeLocalHub } from './local-hub'
 export { resolveProjectArg } from './db-helpers.mjs'
 
 export function postJson(port: number, path: string, timeoutMs = 3000): Promise<boolean> {
@@ -53,10 +51,10 @@ export function postJson(port: number, path: string, timeoutMs = 3000): Promise<
  * name a process that died, while a `/health` answer proves something is alive.
  */
 async function probeAlternateChannel(): Promise<number | null> {
-  const dev = process.env.SLAYZONE_DEV === '1'
-  const altPort = dev ? SIDECAR_FIXED_PORT.prod : SIDECAR_FIXED_PORT.dev
-  const hub = await findHub(String(altPort))
-  return hub ? hub.port : null
+  // Same identity rule as this channel's lookup, so the hint never names another OS
+  // user's app (or misses this user's, displaced off the fixed port).
+  const probe = await probeLocalHub({ dev: process.env.SLAYZONE_DEV !== '1' })
+  return probe.kind === 'found' ? probe.port : null
 }
 
 async function postHubNotify(hub: HubTarget, timeoutMs = 3000): Promise<boolean> {
@@ -88,7 +86,7 @@ export async function notifyApp(): Promise<void> {
   }
 
   // Same channel as api.ts's resolveTarget: this channel's fixed port.
-  const probe = await probeFixedPort()
+  const probe = await probeLocalHub()
   if (probe.kind === 'foreign') {
     // A different install answered. Notifying it would pop someone else's UI about
     // a change they do not have; staying silent is the correct failure here.

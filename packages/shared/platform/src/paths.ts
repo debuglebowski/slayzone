@@ -106,6 +106,11 @@ const HUB_PORT_BLOCK_START = resolveHubPortBlockStart(process.env[TEST_HUB_PORT_
  * (unlike a lock FILE, a bound TCP port can't go stale — a dead process can't
  * hold it, so bind failure always means something else is genuinely alive).
  * The head of the hub block: 51100 / 51101 / 51102 shipped.
+ *
+ * "One per environment" holds per OS USER: the single-instance lock is per user,
+ * while loopback is shared by every user on the machine. When another user's app
+ * already holds the port, the supervisor binds a fallback in
+ * {@link HUB_DYNAMIC_PORT_RANGE} and `slay` finds it there by this user's hub root.
  */
 export const SIDECAR_FIXED_PORT = {
   prod: HUB_PORT_BLOCK_START,

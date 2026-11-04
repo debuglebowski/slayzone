@@ -27,6 +27,7 @@ export type {
 
 export { getAllTasksOp } from './get-all.js'
 export { getByProjectOp, getDeletedTasksOp } from './get-by-project.js'
+export { getSiblingBrowserUrlOp } from './get-sibling-browser-url.js'
 export { getTaskOp } from './get.js'
 export { createTaskOp } from './create.js'
 export { createImportedTaskOp, type CreateImportedTaskInput } from './create-imported.js'

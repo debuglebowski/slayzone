@@ -17,6 +17,12 @@ import { flushSync } from 'react-dom'
  * pane's data has loaded — so each hydration renders synchronously from cache
  * instead of suspending and piling into one burst when the fetches land.
  *
+ * The data loads are queued too: at most MAX_CONCURRENT_LOADS run at once, best
+ * rank first. Started all together they were ~50 task-detail loads (several hub
+ * round-trips each) in front of the on-screen tab's own, on a hub that serves
+ * requests one at a time — enough, on a busy hub, to time out every tab. An
+ * on-screen pane never waits here: it loads through its own render.
+ *
  * Hydration is permanent: a hydrated pane never goes back to the skeleton, so
  * after the boot queue drains a switch costs exactly what it did before. A pane
  * revealed before its turn hydrates in the reveal render itself.
@@ -30,6 +36,12 @@ export const HYDRATE_IDLE_TIMEOUT_MS = 200
  * and layout pass that follows it, inside the idle period.
  */
 export const MIN_REMAINING_FOR_NEXT_MS = 20
+/**
+ * Hidden panes' data loads in flight at once. Enough to keep the hub busy (each
+ * load is several sequential round-trips), few enough that the on-screen pane's
+ * own load — which never queues — is not stuck behind dozens of others.
+ */
+export const MAX_CONCURRENT_LOADS = 4
 
 interface IdleDeadlineLike {
   didTimeout: boolean
@@ -43,17 +55,26 @@ export interface HydrationEnv {
 }
 
 export interface EnqueueOptions {
-  /** Lower hydrates first. Read at pick time, so it can follow live state (MRU). */
+  /**
+   * Lower loads and hydrates first. Read at pick time, so it can follow live
+   * state (MRU).
+   */
   rank: () => number
-  /** Settles when the pane can render without suspending (its data has loaded). */
-  ready: Promise<unknown>
+  /**
+   * Loads what the pane needs to render without suspending; settles when done
+   * (either way — a failed load still hydrates, showing the pane's error
+   * boundary). Called by the queue when this pane's turn to load comes, at most
+   * once, and never if the pane hydrates or is cancelled first.
+   */
+  load: () => Promise<unknown>
 }
 
 interface Entry {
   id: string
   seq: number
   rank: () => number
-  ready: boolean
+  load: () => Promise<unknown>
+  state: 'waiting' | 'loading' | 'ready'
 }
 
 const noop = (): void => undefined
@@ -137,11 +158,11 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     }
   }
 
-  const takeBest = (): Entry | undefined => {
+  const best = (state: Entry['state']): Entry | undefined => {
     let best: Entry | undefined
     let bestRank = 0
     for (const e of queue.values()) {
-      if (!e.ready) continue
+      if (e.state !== state) continue
       const r = e.rank()
       if (!best || r < bestRank || (r === bestRank && e.seq < best.seq)) {
         best = e
@@ -151,9 +172,41 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     return best
   }
 
+  const takeBest = (): Entry | undefined => best('ready')
+
   const hasReady = (): boolean => {
-    for (const e of queue.values()) if (e.ready) return true
+    for (const e of queue.values()) if (e.state === 'ready') return true
     return false
+  }
+
+  /**
+   * Loads started and not yet settled — counted by settle, not by queue
+   * membership, so a pane hydrated or closed mid-load still holds its slot until
+   * its requests are done.
+   */
+  let loading = 0
+  const startLoads = (): void => {
+    while (loading < MAX_CONCURRENT_LOADS) {
+      const next = best('waiting')
+      if (!next) return
+      next.state = 'loading'
+      loading++
+      const settled = (): void => {
+        loading--
+        if (queue.get(next.id) === next) {
+          next.state = 'ready'
+          pump()
+        }
+        startLoads()
+      }
+      let started: Promise<unknown>
+      try {
+        started = next.load()
+      } catch (err) {
+        started = Promise.reject(err)
+      }
+      started.then(settled, settled)
+    }
   }
 
   // Each pane renders synchronously inside the idle callback (its external-store
@@ -178,16 +231,13 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
 
   const enqueue = (id: string, opts: EnqueueOptions): (() => void) => {
     if (hydrated.has(id)) return noop
-    const entry: Entry = { id, seq: seq++, rank: opts.rank, ready: false }
+    const entry: Entry = { id, seq: seq++, rank: opts.rank, load: opts.load, state: 'waiting' }
     queue.set(id, entry)
     everQueued = true
     progressChanged()
-    const markReady = (): void => {
-      if (queue.get(id) !== entry) return
-      entry.ready = true
-      pump()
-    }
-    opts.ready.then(markReady, markReady)
+    // Next microtask, not now: panes mount in one commit, and ranks must all be
+    // in the queue before the first slots are handed out.
+    queueMicrotask(startLoads)
     return () => {
       if (queue.get(id) === entry) queue.delete(id)
       progressChanged()

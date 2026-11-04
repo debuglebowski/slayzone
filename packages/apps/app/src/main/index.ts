@@ -2661,6 +2661,12 @@ app
               // now fails loud with EADDRINUSE instead of silently coexisting
               // against the same DB.
               //
+              // Per OS USER, not per machine: another macOS user's app (fast user
+              // switching) shares this loopback and may already hold the port. The
+              // supervisor then binds a fallback in HUB_DYNAMIC_PORT_RANGE and never
+              // adopts the other user's hub (readiness requires its own child's pid);
+              // `slay` finds the fallback by this user's hub root (cli local-hub.ts).
+              //
               // NOT under Playwright: `e2e-parallel.sh` runs the full suite as one
               // process PER e2e/ SUBDIRECTORY — six concurrent Electron apps — so a
               // single fixed test port would EADDRINUSE five of them. (SIDECAR_FIXED_PORT

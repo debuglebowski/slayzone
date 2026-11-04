@@ -28,6 +28,7 @@ import http from 'node:http'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
+import { HUB_DYNAMIC_PORT_RANGE } from '@slayzone/platform/paths'
 import { SUPERVISED_STOP_DEADLINE_MS } from '@slayzone/platform/parent-watch'
 import { QUIT_CHILD_REAP_MS, reapChildForQuit } from './lifecycle/quit-reap-child.js'
 import {
@@ -121,7 +122,11 @@ const server = http.createServer(function (req, res) {
   if (req.method === 'GET' && req.url === '/health') {
     if (ready && !nohealth) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify(bootBuildId ? { ok: true, buildId: bootBuildId } : { ok: true }))
+      // pid + root: the loopback identity fields the real hub reports, which the
+      // supervisor uses to tell its own child from another hub on the same port.
+      const body = { ok: true, pid: process.pid, root: process.env.SLAYZONE_ROOT || '' }
+      if (bootBuildId) body.buildId = bootBuildId
+      res.end(JSON.stringify(body))
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' })
       res.end('{"ok":false}')
@@ -875,5 +880,156 @@ test('fixedPort: binds the given port instead of probing, and keeps it across a 
     expect(handle.getPort(), 'fixed port unchanged after crash respawn').toBe(fixedPort)
   } finally {
     await handle.stop()
+  }
+})
+
+// --- another hub on the fixed port (several OS users on one machine) ------
+
+/** A free loopback port, found by binding 0 and closing again. */
+async function freePort(): Promise<number> {
+  const net = await import('node:net')
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address()
+      const p = typeof addr === 'object' && addr ? addr.port : 0
+      srv.close(() => resolve(p))
+    })
+  })
+}
+
+/**
+ * Another hub on `port`: answers a hub-shaped `/health` with its own pid and root —
+ * what a different macOS user's SlayZone (same loopback, same fixed port) answers.
+ */
+async function startOtherHub(port: number, root: string): Promise<http.Server> {
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, pid: process.pid, root, name: 'other', supervised: true }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((resolve, reject) => {
+    srv.once('error', reject)
+    srv.listen(port, '127.0.0.1', () => resolve())
+  })
+  return srv
+}
+
+function closeServer(srv: http.Server): Promise<void> {
+  return new Promise((r) => srv.close(() => r()))
+}
+
+/** The pid a `/health` answer on `port` reports, or null. */
+function healthPid(port: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/health', timeout: 1_000 }, (res) => {
+      let body = ''
+      res.on('data', (c) => (body += c))
+      res.on('end', () => {
+        try {
+          const pid = (JSON.parse(body) as { pid?: unknown }).pid
+          resolve(typeof pid === 'number' ? pid : null)
+        } catch {
+          resolve(null)
+        }
+      })
+    })
+    req.on('error', () => resolve(null))
+    req.on('timeout', () => {
+      req.destroy()
+      resolve(null)
+    })
+  })
+}
+
+const OTHER_USER_ROOT = '/Users/someone-else/.slayzone/stable/hub'
+
+test("fixedPort held by ANOTHER user's hub: never adopts it, serves on a fallback port", async () => {
+  const dir = mkTmp()
+  const fixedPort = await freePort()
+  const other = await startOtherHub(fixedPort, OTHER_USER_ROOT)
+  const { handle, ctx } = makeHarness(
+    dir,
+    { SLAYZONE_ROOT: path.join(dir, 'hub') },
+    { healthPollIntervalMs: 40, backoffMs: [50, 50, 50] },
+    { fixedPort }
+  )
+  try {
+    await handle.waitForReady()
+    const port = handle.getPort()
+    expect(port, 'never reports the other hub’s port as its own').not.toBe(fixedPort)
+    expect(port!, 'fallback is in the hub block’s dynamic range').toBeGreaterThanOrEqual(
+      HUB_DYNAMIC_PORT_RANGE.start
+    )
+    expect(port!, 'fallback is in the hub block’s dynamic range').toBeLessThanOrEqual(
+      HUB_DYNAMIC_PORT_RANGE.end
+    )
+    expect(await healthPid(port!), 'the reported port serves our own child').toBe(
+      handle.getStatus().pid
+    )
+    expect(
+      ctx.logs.some((l) => l.line.includes('held by another hub')),
+      'logs why it left the fixed port'
+    ).toBe(true)
+  } finally {
+    await handle.stop()
+    await closeServer(other)
+  }
+})
+
+test('fallback port is sticky: a crash respawn keeps it while the fixed port is still taken', async () => {
+  const dir = mkTmp()
+  const fixedPort = await freePort()
+  const other = await startOtherHub(fixedPort, OTHER_USER_ROOT)
+  const { handle } = makeHarness(
+    dir,
+    {
+      SLAYZONE_ROOT: path.join(dir, 'hub'),
+      FAKE_COUNTER_FILE: path.join(dir, 'counter'),
+      FAKE_CRASH_AFTER_READY_MS: '150'
+    },
+    { healthPollIntervalMs: 40, backoffMs: [50, 50, 50] },
+    { fixedPort }
+  )
+  try {
+    await handle.waitForReady()
+    const first = handle.getPort()
+    expect(first, 'started on a fallback port').not.toBe(fixedPort)
+    await waitFor(() => handle.getStatus().totalRespawns >= 1, 8_000, 'respawn after crash')
+    await handle.waitForReady()
+    expect(handle.getPort(), 'same fallback port after the crash respawn').toBe(first)
+  } finally {
+    await handle.stop()
+    await closeServer(other)
+  }
+})
+
+test('fixedPort held by our OWN previous hub (same root, still stopping): waits, then binds the fixed port', async () => {
+  const dir = mkTmp()
+  const root = path.join(dir, 'hub')
+  const fixedPort = await freePort()
+  const previous = await startOtherHub(fixedPort, root)
+  // The previous app run's hub finishes its graceful stop shortly after this boot.
+  const closed = delay(300).then(() => closeServer(previous))
+  const { handle } = makeHarness(
+    dir,
+    { SLAYZONE_ROOT: root },
+    { healthPollIntervalMs: 40, backoffMs: [100, 200, 400, 800, 1600] },
+    { fixedPort }
+  )
+  try {
+    await handle.waitForReady()
+    expect(handle.getPort(), 'keeps the fixed port for its own data').toBe(fixedPort)
+    expect(await healthPid(fixedPort), 'the fixed port serves our child, not the old hub').toBe(
+      handle.getStatus().pid
+    )
+  } finally {
+    await handle.stop()
+    await closed
   }
 })

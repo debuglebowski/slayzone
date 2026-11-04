@@ -27,6 +27,7 @@
  */
 
 import http from 'node:http'
+import os from 'node:os'
 import { HUB_PORT_BLOCK } from './paths'
 import { HUB_SWITCH_DEFAULTS, HUB_SWITCH_ENV, type HubSwitches } from './hub-switches'
 
@@ -43,6 +44,22 @@ const DEFAULT_TIMEOUT_MS = 3_000
 /** Default in-flight probe count. Keeps a 100-port sweep sub-second without
  *  opening a socket per port at once. */
 const DEFAULT_CONCURRENCY = 32
+
+/**
+ * The OS user this process runs as, or null when it cannot be read (`os.userInfo()`
+ * throws for a uid with no passwd entry, e.g. some containers).
+ *
+ * One reader for both ends: a hub reports it on `/health` (`user`) and a local
+ * caller compares it with its own. Loopback is shared by every user on the machine,
+ * so this is what tells "my hub" from "another user's hub on the same port".
+ */
+export function currentOsUser(): string | null {
+  try {
+    return os.userInfo().username || null
+  } catch {
+    return null
+  }
+}
 
 /** A live hub found on this machine. Mirrors the loopback fields of `/health`. */
 export interface DiscoveredHub {
@@ -66,6 +83,12 @@ export interface DiscoveredHub {
   /** True for the desktop app's sidecar. `slay hub stop` refuses these — the app
    *  owns its own lifecycle. */
   supervised: boolean
+  /** The OS user the hub runs as; null for an older hub that does not report it
+   *  (or one that could not read it). */
+  user: string | null
+  /** The dev build's hub (`SLAYZONE_DEV=1`). An older hub that does not report it
+   *  reads as false. */
+  dev: boolean
   computersConnected: number
   uptimeMs: number
   commit: string
@@ -90,7 +113,7 @@ export interface DiscoverOptions {
    * address from on-disk state is what made `slay` depend on the app's layout.
    */
   extraPorts?: number[]
-  /** Per-port probe timeout in ms. Default 300. */
+  /** Per-port probe timeout in ms. Default {@link DEFAULT_TIMEOUT_MS} (3s). */
   timeoutMs?: number
   /** Max concurrent probes. Default 32. */
   concurrency?: number
@@ -174,6 +197,8 @@ function parseHub(body: string, port: number): DiscoveredHub | null {
     authRequired: b.authRequired === true,
     switches: parseSwitches(b.switches),
     supervised: b.supervised === true,
+    user: typeof b.user === 'string' && b.user.length > 0 ? b.user : null,
+    dev: b.dev === true,
     computersConnected: typeof b.computersConnected === 'number' ? b.computersConnected : 0,
     uptimeMs: typeof b.uptimeMs === 'number' ? b.uptimeMs : 0,
     commit: typeof b.commit === 'string' ? b.commit : 'unknown',
@@ -235,6 +260,62 @@ export async function discoverHubs(opts: DiscoverOptions = {}): Promise<Discover
 
   // Deterministic order — the worker pool finishes out of order.
   return found.sort((a, b) => a.port - b.port)
+}
+
+/**
+ * The first live hub that satisfies `match`, or null when none does.
+ *
+ * Same bounded sweep as {@link discoverHubs}, but it settles the moment a match
+ * answers instead of waiting for every port: a silent non-hub listener in the block
+ * costs a full probe timeout, which a caller that knows exactly which hub it wants
+ * (one identity, one hub) should not pay. With several matches, which one wins is
+ * whichever answers first — so `match` should name a single hub.
+ */
+export async function findFirstHub(
+  match: (hub: DiscoveredHub) => boolean,
+  opts: DiscoverOptions = {}
+): Promise<DiscoveredHub | null> {
+  const range = opts.range ?? HUB_PORT_BLOCK
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const host = opts.host ?? '127.0.0.1'
+  const concurrency = Math.max(1, opts.concurrency ?? DEFAULT_CONCURRENCY)
+
+  const ports: number[] = []
+  for (let p = range.start; p <= range.end; p++) ports.push(p)
+  for (const extra of opts.extraPorts ?? []) {
+    if (extra >= 1 && extra <= 65535 && (extra < range.start || extra > range.end)) {
+      ports.push(extra)
+    }
+  }
+
+  return new Promise((resolve) => {
+    let next = 0
+    let settled = false
+    let running = 0
+    const pump = (): void => {
+      while (!settled && running < concurrency && next < ports.length) {
+        const port = ports[next++]!
+        running += 1
+        void probe(host, port, timeoutMs).then((hub) => {
+          running -= 1
+          if (settled) return
+          if (hub && match(hub)) {
+            settled = true
+            resolve(hub)
+            return
+          }
+          if (next >= ports.length && running === 0) {
+            settled = true
+            resolve(null)
+            return
+          }
+          pump()
+        })
+      }
+    }
+    if (ports.length === 0) resolve(null)
+    else pump()
+  })
 }
 
 /**

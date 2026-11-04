@@ -17,7 +17,7 @@ import { afterAll, describe, expect, test } from 'vitest'
 import http from 'node:http'
 import net from 'node:net'
 import type { AddressInfo } from 'node:net'
-import { discoverHubs, findHub } from './hub-discovery'
+import { discoverHubs, findFirstHub, findHub } from './hub-discovery'
 
 type Closer = () => Promise<void>
 const cleanups: Closer[] = []
@@ -366,6 +366,41 @@ describe('hub discovery', () => {
     const port = await fakeHub({ ...HUB_A, name: 'out-of-block' })
     const found = await findHub(String(port), { range: { start: 1, end: 1 } })
     expect(found?.name, 'direct port probe, no range dependency').toBe('out-of-block')
+  })
+
+  test('user + dev are mapped; an older hub without them reads as null / false', async () => {
+    const newer = await fakeHub({ ...HUB_A, user: 'alice', dev: true })
+    const older = await fakeHub(HUB_A)
+    expect(await findHub(String(newer)), 'newer hub').toMatchObject({ user: 'alice', dev: true })
+    expect(await findHub(String(older)), 'older hub').toMatchObject({ user: null, dev: false })
+  })
+
+  test('findFirstHub returns the hub that matches, not the first that answers', async () => {
+    const range = await serveAdjacent([
+      hubHandler(HUB_A),
+      hubHandler({ ...HUB_A, name: 'beta', root: '/tmp/hubs/beta' })
+    ])
+    const hub = await findFirstHub((h) => h.root === '/tmp/hubs/beta', { range })
+    expect(hub?.port, 'the matching hub').toBe(range.end)
+  })
+
+  test('findFirstHub is null when nothing matches', async () => {
+    const port = await fakeHub(HUB_A)
+    expect(await findFirstHub(() => false, { range: { start: port, end: port } })).toBeNull()
+  })
+
+  test('findFirstHub settles on a match without waiting out a silent listener', async () => {
+    const hubPort = await fakeHub(HUB_A)
+    const hole = await fakeBlackHole()
+    const started = Date.now()
+    const hub = await findFirstHub((h) => h.name === 'alpha', {
+      range: { start: hubPort, end: hubPort },
+      extraPorts: [hole],
+      timeoutMs: 5_000
+    })
+    const elapsed = Date.now() - started
+    expect(hub?.port, 'found the hub').toBe(hubPort)
+    expect(elapsed, `did not wait for the black hole (took ${elapsed}ms)`).toBeLessThan(2_000)
   })
 
   test('a large range completes promptly (concurrency, not serial)', async () => {

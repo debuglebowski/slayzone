@@ -82,6 +82,12 @@ export class ChatProcess implements OutboxProcess {
    */
   discardTurn = false
   /**
+   * Stop cut the running turn; it has not ended yet. What the CLI still streams
+   * before it reads the interrupt is not drawn (the panel shows the turn stopped,
+   * as the TUI does); its saved events still land. Cleared by the turn's result.
+   */
+  stoppedTurn = false
+  /**
    * A message Stop took back after it was written but before the CLI started
    * its turn: the interrupt found nothing to stop, so when the CLI picks the
    * message up anyway it is withdrawn (still queued) or interrupted (started).
