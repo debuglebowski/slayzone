@@ -62,8 +62,9 @@ const chat: ChatAccess = {
       providerFlagsOverride: null,
       resolveCwd: async () => '/repo'
     }) as Awaited<ReturnType<ChatAccess['launch']>>,
-  startMain: async () => {
-    throw new Error('not used')
+  startMain: async (taskId) => {
+    calls.push(['chat.startMain', taskId])
+    return {} as Awaited<ReturnType<ChatAccess['startMain']>>
   }
 }
 const pty = {
@@ -71,6 +72,7 @@ const pty = {
   hasPty: () => ptyLive,
   getState: () => ptyState,
   getBuffer: () => 'line 1\nline 2\nline 3',
+  requestEnsureAlive: async (taskId: string) => (calls.push(['pty.ensureAlive', taskId]), 'ok'),
   submitPty: (id: string, text: string) => (calls.push(['pty.submit', id, text]), true),
   writePty: (id: string, data: string) => (calls.push(['pty.write', id, data]), true),
   subscribeToStateChange: (_id: string, cb: (s: TerminalState) => void) => {
@@ -114,6 +116,27 @@ describe('a chat task', () => {
     expect(waited.body.data.outcome).toBe('prompt')
   })
 
+  test('start spawns a cold chat without sending anything', async () => {
+    chatStatus = null
+    const res = await rest.request<Ok<{ kind: string; started: boolean }>>(
+      'POST',
+      `/api/agent/${chatTask}/start`,
+      {}
+    )
+    expect(res.body.data).toMatchObject({ kind: 'chat', started: true })
+    expect(calls).toEqual([['chat.startMain', chatTask]])
+  })
+
+  test('start is a no-op on a running chat', async () => {
+    const res = await rest.request<Ok<{ started: boolean }>>(
+      'POST',
+      `/api/agent/${chatTask}/start`,
+      {}
+    )
+    expect(res.body.data.started).toBe(false)
+    expect(calls).toEqual([])
+  })
+
   test('interrupt stops an open turn', async () => {
     chatStatus = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
     await rest.request('POST', `/api/agent/${chatTask}/interrupt`, {})
@@ -128,6 +151,27 @@ describe('a terminal task', () => {
     })
     expect(res.body.data.kind).toBe('pty')
     expect(calls).toContainEqual(['pty.submit', ptySession, 'ls'])
+  })
+
+  test('start spawns a cold main terminal without submitting anything', async () => {
+    ptyLive = false
+    const res = await rest.request<Ok<{ kind: string; started: boolean }>>(
+      'POST',
+      `/api/agent/${ptyTask}/start`,
+      {}
+    )
+    expect(res.body.data).toMatchObject({ kind: 'pty', started: true })
+    expect(calls).toEqual([['pty.ensureAlive', ptyTask]])
+  })
+
+  test('start is a no-op on a live terminal', async () => {
+    const res = await rest.request<Ok<{ started: boolean }>>(
+      'POST',
+      `/api/agent/${ptyTask}/start`,
+      {}
+    )
+    expect(res.body.data.started).toBe(false)
+    expect(calls).toEqual([])
   })
 
   test('wait resolves when the terminal goes idle', async () => {

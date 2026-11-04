@@ -6,11 +6,11 @@ import type { Task } from '@slayzone/task-contracts'
 import { getProviderFlags } from '@slayzone/task-contracts/types'
 
 import {
-  chatModeForTerminal,
+  chatAgentIdForTerminal,
   isChatSupported,
   SESSION_ID_COMMANDS,
   SESSION_ID_UNAVAILABLE,
-  terminalModeForChat
+  terminalAgentIdForChat
 } from '@slayzone/terminal-contracts'
 import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
@@ -76,21 +76,21 @@ export function useTaskTerminalSession({
   const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
 
   // Session ID discovery: providers that don't support --session-id at creation
-  const sessionIdCommand = task ? SESSION_ID_COMMANDS[task.terminal_mode] : undefined
+  const sessionIdCommand = task ? SESSION_ID_COMMANDS[task.agent_id] : undefined
   const showSessionBanner =
     !!sessionIdCommand &&
     !!task &&
-    !readCurrentConversationId(task, task.terminal_mode) &&
+    !readCurrentConversationId(task, task.agent_id) &&
     !detectedSessionId
 
   // Providers where session ID detection is not possible
-  const sessionIdUnavailable = !!task && SESSION_ID_UNAVAILABLE.includes(task.terminal_mode)
+  const sessionIdUnavailable = !!task && SESSION_ID_UNAVAILABLE.includes(task.agent_id)
   const [sessionUnavailableDismissed, setSessionUnavailableDismissed] = useState<string | null>(
     null
   )
   const showUnavailableBanner =
     sessionIdUnavailable &&
-    !readCurrentConversationId(task, task?.terminal_mode) &&
+    !readCurrentConversationId(task, task?.agent_id) &&
     sessionUnavailableDismissed !== task?.id
 
   const handleDetectSessionId = useCallback(async () => {
@@ -102,7 +102,7 @@ export function useTaskTerminalSession({
   }, [task, sessionIdCommand, getMainSessionId, trpcClient])
 
   const getConversationIdForMode = useCallback((t: Task): string | null => {
-    return readCurrentConversationId(t, t.terminal_mode)
+    return readCurrentConversationId(t, t.agent_id)
   }, [])
 
   // Subscribe to session detected events
@@ -121,7 +121,7 @@ export function useTaskTerminalSession({
     if (!task || !detectedSessionId) return
     const updated = await updateTask({
       id: task.id,
-      providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
+      providerConfig: { [task.agent_id]: { conversationId: detectedSessionId } }
     })
     onTaskUpdated(updated)
     setDetectedSessionId(null)
@@ -174,7 +174,7 @@ export function useTaskTerminalSession({
       try {
         const updated = await updateTask({
           id: task.id,
-          providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
+          providerConfig: { [task.agent_id]: { conversationId: detectedSessionId } }
         })
         onTaskUpdated(updated)
       } catch {
@@ -200,13 +200,13 @@ export function useTaskTerminalSession({
   // Chat restart preserves its conversation/history without a PTY or remount.
   const handleRestartTerminal = useCallback(async () => {
     if (!task) return
-    if (isChatSupported(task.terminal_mode)) {
+    if (isChatSupported(task.agent_id)) {
       await trpcClient.chat.restart.mutate({
         tabId: task.id,
         taskId: task.id,
-        mode: task.terminal_mode,
+        mode: task.agent_id,
         cwd: agentCwd,
-        providerFlagsOverride: getProviderFlags(task.provider_config, task.terminal_mode)
+        providerFlagsOverride: getProviderFlags(task.provider_config, task.agent_id)
       })
       return
     }
@@ -247,7 +247,7 @@ export function useTaskTerminalSession({
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
     const updated = await trpcClient.task.resetConversation.mutate({
       id: task.id,
-      mode: task.terminal_mode
+      mode: task.agent_id
     })
     onTaskUpdated(updated)
     await new Promise((r) => setTimeout(r, 100))
@@ -265,13 +265,13 @@ export function useTaskTerminalSession({
   const handleSwitchSession = useCallback(
     async (conversationId: string, fromMode: string) => {
       if (!task) return
-      if (isChatSupported(task.terminal_mode)) {
+      if (isChatSupported(task.agent_id)) {
         // Chat (its resume picker): the chat tab stops its agent, shows the picked
         // conversation's history and resumes it — one server op, no remount.
         await trpcClient.chat.switchConversation.mutate({
           tabId: task.id,
           taskId: task.id,
-          mode: task.terminal_mode,
+          mode: task.agent_id,
           cwd: agentCwd,
           conversationId,
           sourceMode: fromMode
@@ -286,7 +286,7 @@ export function useTaskTerminalSession({
       await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
       const updated = await trpcClient.task.switchConversation.mutate({
         id: task.id,
-        mode: task.terminal_mode,
+        mode: task.agent_id,
         conversationId,
         // A chat conversation picked here moves over (a hand-off).
         sourceMode: fromMode
@@ -305,18 +305,18 @@ export function useTaskTerminalSession({
   // mode WITHOUT clearing conversation ids (a mode switch starts fresh), and
   // the remounted agent resumes it.
   const handoffMode = task
-    ? isChatSupported(task.terminal_mode)
-      ? terminalModeForChat(task.terminal_mode)
-      : chatModeForTerminal(task.terminal_mode)
+    ? isChatSupported(task.agent_id)
+      ? terminalAgentIdForChat(task.agent_id)
+      : chatAgentIdForTerminal(task.agent_id)
     : null
   const handleHandoff = useCallback(async () => {
     if (!task || !handoffMode) return
     const mainSessionId = getMainSessionId(task.id)
-    if (isChatSupported(task.terminal_mode)) {
+    if (isChatSupported(task.agent_id)) {
       await trpcClient.chat.continueInTerminal.mutate({
         tabId: task.id,
         taskId: task.id,
-        mode: task.terminal_mode,
+        mode: task.agent_id,
         cwd: agentCwd
       })
       // The terminal starts at once (no Start gate) and resumes it.
@@ -331,7 +331,7 @@ export function useTaskTerminalSession({
         cwd: agentCwd
       })
     }
-    const updated = await updateTask({ id: task.id, terminalMode: handoffMode })
+    const updated = await updateTask({ id: task.id, agentId: handoffMode })
     if (updated) onTaskUpdated(updated)
     markSkipCache(mainSessionId)
     setTerminalKey((k) => k + 1)
@@ -374,7 +374,7 @@ export function useTaskTerminalSession({
   const handleRespawnSuggested = useStableCallback(async ({ taskId }: { taskId: string }) => {
     if (!task) return
     if (taskId !== task.id) return
-    if (task.terminal_mode === 'terminal') return
+    if (task.agent_id === 'terminal') return
     const sid = getMainSessionId(task.id)
     // Idempotent: if a PTY is already alive, another listener (or the user) beat
     // us to it — skip to avoid a double-spawn.

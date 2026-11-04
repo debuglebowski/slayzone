@@ -1,6 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal, switchTerminalMode } from '../fixtures/terminal'
+import { openTaskTerminal, switchAgent } from '../fixtures/terminal'
 import type { ElectronApplication, Page } from '@playwright/test'
 
 // Simulate a native menu accelerator by invoking the real menu item from the
@@ -24,7 +24,7 @@ async function clickMenuItem(electronApp: ElectronApplication, labels: string[])
 }
 
 // `seed().createTask` narrows its input to the common fields and drops both
-// `isTemporary` and `terminalMode`, which these specs need — go straight at
+// `isTemporary` and `agentId`, which these specs need — go straight at
 // task.create.
 function createTempTask(page: Page, projectId: string, title: string) {
   return page.evaluate((d) => window.getTrpcVanillaClient().task.create.mutate(d), {
@@ -32,11 +32,11 @@ function createTempTask(page: Page, projectId: string, title: string) {
     title,
     status: 'in_progress',
     isTemporary: true,
-    terminalMode: 'claude-code'
+    agentId: 'claude-code'
   })
 }
 
-test.describe('Terminal mode switching', () => {
+test.describe('Agent switching', () => {
   let projectAbbrev: string
   let projectId: string
   let taskId: string
@@ -58,9 +58,9 @@ test.describe('Terminal mode switching', () => {
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Mode switch task' })
   })
 
-  /** Find the terminal mode select trigger in the bottom bar */
+  /** Find the agent select trigger in the bottom bar */
   const modeTrigger = (page: import('@playwright/test').Page) =>
-    page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    page.locator('[data-testid="agent-trigger"]:visible').first()
 
   test('default mode is Claude Code', async ({ mainWindow }) => {
     await expect(modeTrigger(mainWindow)).toHaveText(/Claude( Code)?/)
@@ -86,7 +86,7 @@ test.describe('Terminal mode switching', () => {
   // Tests that asserted its presence/absence have been dropped.
 
   test('switch to Codex mode', async ({ mainWindow }) => {
-    await switchTerminalMode(mainWindow, 'codex')
+    await switchAgent(mainWindow, 'codex')
 
     await expect(modeTrigger(mainWindow)).toHaveText(/Codex/)
   })
@@ -96,7 +96,7 @@ test.describe('Terminal mode switching', () => {
     // is what handleModeChange does under the hood. UI persistence is the
     // assertion here, not menu interaction.
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'codex' }),
       taskId
     )
     const s = seed(mainWindow)
@@ -115,11 +115,11 @@ test.describe('Terminal mode switching', () => {
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    expect(task?.terminal_mode).toBe('codex')
+    expect(task?.agent_id).toBe('codex')
   })
 
   test('switch back to Claude Code', async ({ mainWindow }) => {
-    await switchTerminalMode(mainWindow, 'claude-code')
+    await switchAgent(mainWindow, 'claude-code')
 
     await expect(modeTrigger(mainWindow)).toHaveText(/Claude( Code)?/)
     // "Sync name" menu item was removed (commit 5d0ba505); just verify the
@@ -139,7 +139,7 @@ test.describe('Terminal mode switching', () => {
         }),
       taskId
     )
-    await switchTerminalMode(mainWindow, 'codex')
+    await switchAgent(mainWindow, 'codex')
     const task = await mainWindow.evaluate(
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
@@ -157,14 +157,14 @@ test.describe('Terminal mode switching', () => {
     )
 
     // Switch to codex then back
-    await switchTerminalMode(mainWindow, 'codex')
+    await switchAgent(mainWindow, 'codex')
     await expect(modeTrigger(mainWindow)).toHaveText(/Codex/)
 
-    await switchTerminalMode(mainWindow, 'claude-code')
+    await switchAgent(mainWindow, 'claude-code')
     await expect(modeTrigger(mainWindow)).toHaveText(/Claude( Code)?/)
 
     const claudeMode = await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().pty.modesGet.query({ id: 'claude-code' })
+      window.getTrpcVanillaClient().pty.agentsGet.query({ id: 'claude-code' })
     )
     const expectedDefaultFlags = claudeMode?.defaultFlags ?? ''
 
@@ -176,7 +176,7 @@ test.describe('Terminal mode switching', () => {
     expect(task?.claude_flags).toBe(expectedDefaultFlags)
   })
 
-  test('temporary tasks can switch terminal mode', async ({ mainWindow }) => {
+  test('temporary tasks can switch agent', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const temp = await createTempTask(mainWindow, projectId, 'Mode switch temporary task')
     await s.refreshData()
@@ -190,7 +190,7 @@ test.describe('Terminal mode switching', () => {
     await mainWindow.evaluate(async (id) => {
       await window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: `${id}:${id}` })
       await new Promise((r) => setTimeout(r, 100))
-      await window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' })
+      await window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'codex' })
     }, temp.id)
 
     await expect
@@ -201,7 +201,7 @@ test.describe('Terminal mode switching', () => {
               (id) => window.getTrpcVanillaClient().task.get.query({ id }),
               temp.id
             )
-          )?.terminal_mode,
+          )?.agent_id,
         { timeout: 5_000 }
       )
       .toBe('codex')
@@ -210,7 +210,7 @@ test.describe('Terminal mode switching', () => {
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       temp.id
     )
-    expect(updated?.terminal_mode).toBe('codex')
+    expect(updated?.agent_id).toBe('codex')
   })
 
   test('scratch terminal stays in saved tasks when tab is closed', async ({

@@ -186,7 +186,7 @@ test.describe
             .waitForFunction(
               () => {
                 return (
-                  document.querySelector('[data-testid="terminal-mode-trigger"]') !== null ||
+                  document.querySelector('[data-testid="agent-trigger"]') !== null ||
                   document.querySelector('[data-task-shell]') !== null
                 )
               },

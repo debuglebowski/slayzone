@@ -25,9 +25,7 @@ test.describe('Chat queue persistence', () => {
 
     await mainWindow.evaluate(
       async (id) =>
-        window
-          .getTrpcVanillaClient()
-          .task.update.mutate({ id, terminalMode: 'claude-code' } as never),
+        window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'claude-code' } as never),
       taskId
     )
     await s.refreshData()

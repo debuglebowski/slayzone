@@ -27,10 +27,10 @@ test.describe('OpenCode CLI integration', () => {
       status: 'in_progress'
     })
     taskId = t.id
-    // Set task.terminal_mode='opencode' via DB instead of UI — ContextMenu
+    // Set task.agent_id='opencode' via DB instead of UI — ContextMenu
     // switcher is flaky in Playwright for non-'terminal' modes (see 22).
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'opencode' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'opencode' }),
       taskId
     )
     await s.refreshData()

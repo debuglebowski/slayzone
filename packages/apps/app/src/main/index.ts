@@ -1834,7 +1834,7 @@ app
     // Initialize databases. The worker thread owns the only better-sqlite3
     // connection and runs the entire bring-up sequence — legacy file migration,
     // pragmas, pre-migration backup, schema migrations, status normalization and
-    // terminal-mode sync — before initDatabases() resolves. No query can race
+    // agent sync — before initDatabases() resolves. No query can race
     // ahead of migrations, so nothing here needs to re-run those steps.
     logBoot('database init start')
     const { diagDb } = await initDatabases()

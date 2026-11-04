@@ -136,7 +136,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     order: 0,
     due_date: null,
     archived_at: null,
-    terminal_mode: 'terminal',
+    agent_id: 'terminal',
     provider_config: {},
     terminal_shell: null,
     claude_conversation_id: null,

@@ -94,6 +94,8 @@ export class ChatProcess implements OutboxProcess {
   fork: { fromSessionId: string; atMessageUuid: string } | null = null
   /** The host asked it to stop (kill, stop, watchdog): its exit is not the CLI refusing. */
   stopRequested = false
+  /** The watchdog killed it as stuck and its exit restarts the agent. */
+  watchdogRestart = false
   /** The CLI refused the fork (it exits at startup): the tab went back to the original. */
   forkFailed = false
   /** Open tool calls (id → bound), for the watchdog. */

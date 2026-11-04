@@ -215,7 +215,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
   }
   const modeOfTab = (taskId: string, tabId: string): string =>
     tabs.find((t) => t.taskId === taskId && t.id === tabId)?.mode ??
-    tasks.get(taskId)?.terminal_mode ??
+    tasks.get(taskId)?.agent_id ??
     'claude-chat'
 
   /** A chat tab's session as `chat.getInfo` answers it. */
@@ -246,7 +246,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     const mode = modeOfTab(taskId, taskId)
     const kind = isChatSupported(mode) ? 'chat' : 'pty'
     const alive = states.has(sessionId)
-    if (!tabs.some((t) => t.id === taskId)) ensureMainTab(taskId, task.terminal_mode)
+    if (!tabs.some((t) => t.id === taskId)) ensureMainTab(taskId, task.agent_id)
     hibernated.delete(sessionId)
     if (kind === 'chat' && !chats.has(taskId)) seedChat(taskId, [])
     if (!alive) {
@@ -365,7 +365,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       if (input.dueDate !== undefined) fields.due_date = input.dueDate
       if (input.projectId !== undefined) fields.project_id = input.projectId
       if (input.parentId !== undefined) fields.parent_id = input.parentId
-      if (input.terminalMode !== undefined) fields.terminal_mode = input.terminalMode
+      if (input.agentId !== undefined) fields.agent_id = input.agentId
       if (input.providerConfig !== undefined) fields.provider_config = input.providerConfig
       if (input.needsAttention !== undefined) fields.needs_attention = input.needsAttention
       if (input.isBlocked !== undefined) fields.is_blocked = input.isBlocked
@@ -373,10 +373,10 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       if (input.snoozedUntil !== undefined) fields.snoozed_until = input.snoozedUntil
       if (input.assignee !== undefined) fields.assignee = input.assignee
       if (input.pinned !== undefined) fields.pinned = input.pinned
-      if (input.terminalMode !== undefined) {
+      if (input.agentId !== undefined) {
         const main = tabs.find((t) => t.taskId === task.id && t.isMain)
         if (main) {
-          main.mode = input.terminalMode
+          main.mode = input.agentId
           emit('taskTerminals.onChanged', { taskId: task.id })
         }
       }
@@ -400,7 +400,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
         status: input.status ?? 'inbox',
         priority: input.priority ?? 3,
         due_date: input.dueDate ?? null,
-        terminal_mode: input.terminalMode ?? 'claude-chat',
+        agent_id: input.agentId ?? 'claude-chat',
         order: siblings.length,
         created_at: hubTime(Date.now()),
         updated_at: hubTime(Date.now())
@@ -511,7 +511,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     // Terminals + agents
     'taskTerminals.list': ({ taskId }) => tabs.filter((t) => t.taskId === taskId),
     'taskTerminals.ensureMain': ({ taskId, mode }) => {
-      ensureMainTab(taskId, mode ?? taskOrThrow(taskId).terminal_mode)
+      ensureMainTab(taskId, mode ?? taskOrThrow(taskId).agent_id)
       const main = tabs.find((t) => t.taskId === taskId && t.isMain)
       if (!main) throw new Error(`No task ${taskId}`)
       return main
@@ -526,7 +526,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
           kind: isChatSupported(modeOfTab(taskId, tabId)) ? ('chat' as const) : ('pty' as const)
         }
       }),
-    'pty.modesList': () => DEMO_MODES,
+    'pty.agentsList': () => DEMO_AGENTS,
     'pty.attach': ({ sessionId }) => {
       const buffer = ptys.get(sessionId)
       return {
@@ -831,8 +831,8 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
   }
 }
 
-/** The agent modes the demo offers (the provider picker). */
-const DEMO_MODES: ProcOut<'pty.modesList'> = [
+/** The agents the demo offers (the provider picker). */
+const DEMO_AGENTS: ProcOut<'pty.agentsList'> = [
   { id: 'claude-chat', label: 'Claude Code (chat)', type: 'claude-chat', order: 0 },
   { id: 'claude-code', label: 'Claude Code', type: 'claude-code', order: 1 },
   { id: 'codex-chat', label: 'Codex (chat)', type: 'codex-chat', order: 2 },

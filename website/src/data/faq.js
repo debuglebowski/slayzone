@@ -42,7 +42,7 @@ export const faqGroups = [
       {
         question: 'Can I run local AI models like Ollama?',
         answer:
-          'Absolutely. By using the <code>opencode</code> terminal mode, SlayZone is optimized to work with local-first agents. Since everything is a local terminal session, you can run any AI that has a CLI interface without any data leaving your machine.'
+          'Absolutely. By using the <code>opencode</code> agent, SlayZone is optimized to work with local-first agents. Since everything is a local terminal session, you can run any AI that has a CLI interface without any data leaving your machine.'
       }
     ]
   },

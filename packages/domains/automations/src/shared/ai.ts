@@ -2,7 +2,7 @@ import type { AiActionParams } from './types'
 
 /**
  * Provider info needed to build a headless command. Sourced from the
- * `terminal_modes` row — engine looks it up by id.
+ * `agents` row — engine looks it up by id.
  */
 export interface ProviderInfo {
   id: string

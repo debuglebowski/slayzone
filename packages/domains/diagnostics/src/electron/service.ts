@@ -44,7 +44,7 @@ const IPC_PAYLOAD_SKIP_CHANNELS = new Set(['pty:write', 'pty:getBufferSince', 'p
 const CRITICAL_SETTINGS_KEYS = new Set([
   'theme',
   'shell',
-  'default_terminal_mode',
+  'default_agent_id',
   CONFIG_KEYS.enabled,
   CONFIG_KEYS.verbose,
   CONFIG_KEYS.includePtyOutput,

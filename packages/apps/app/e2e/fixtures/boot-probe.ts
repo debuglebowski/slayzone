@@ -12,7 +12,7 @@ import { getMainSessionId, waitForPtySession } from './terminal'
 export const BOOT_TABS = 40
 
 /** Present once a task tab's detail page has mounted. */
-export const BOOT_DETAIL = '[data-testid="terminal-mode-trigger"]'
+export const BOOT_DETAIL = '[data-testid="agent-trigger"]'
 
 export interface BootProbe {
   longTasks: Array<{ start: number; duration: number }>
@@ -115,7 +115,7 @@ export async function seedBootTasks(page: Page, projectName: string): Promise<st
       projectId: p.id,
       title: `${projectName} ${i}`,
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     ids.push(t.id)
   }

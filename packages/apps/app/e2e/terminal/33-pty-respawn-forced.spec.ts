@@ -8,7 +8,7 @@ import { getMainSessionId, openTaskTerminal, waitForPtySession } from '../fixtur
  *   3. Restart the PTY unconditionally (regardless of mode or liveness)
  *
  * Distinct from `pty:respawn-suggested` — forced path skips the
- * `terminal_mode === 'terminal'` and "PTY already alive" guards.
+ * `agent_id === 'terminal'` and "PTY already alive" guards.
  */
 // Renderer-side `fetch('http://127.0.0.1:...')` is blocked by the CSP in dev
 // mode, so POST via Node http from the main-process eval context instead.
@@ -70,7 +70,7 @@ test.describe('Forced PTY respawn via REST', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -116,7 +116,7 @@ test.describe('Forced PTY respawn via REST', () => {
     expect(res.status).toBe(400)
   })
 
-  test('Force respawn restarts existing PTY (terminal mode)', async ({
+  test('Force respawn restarts existing PTY (terminal agent)', async ({
     electronApp,
     mainWindow
   }) => {
@@ -127,7 +127,7 @@ test.describe('Forced PTY respawn via REST', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       task.id
     )
     await s.refreshData()

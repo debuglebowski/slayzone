@@ -42,7 +42,7 @@ const rest = await mountRestApp(app)
 let killed: string[] = []
 setPtyDeps({
   ops: {
-    terminalModesList: async () => [
+    agentsList: async () => [
       { id: 'claude-code', enabled: true },
       { id: 'codex', enabled: true },
       { id: 'gemini', enabled: false }
@@ -277,19 +277,19 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.ok).toBe(false)
   })
 
-  test('terminalMode: a mode switch — stops the main agent, clears conversations', async () => {
+  test('agentId: a mode switch — stops the main agent, clears conversations', async () => {
     const id = seedTask()
     h.db
-      .prepare('UPDATE tasks SET terminal_mode = ?, provider_config = ? WHERE id = ?')
+      .prepare('UPDATE tasks SET agent_id = ?, provider_config = ? WHERE id = ?')
       .run('claude-code', JSON.stringify({ 'claude-code': { conversationId: 'c1' } }), id)
     killed = []
-    const res = await rest.request<{ ok: boolean; data: { terminal_mode: string; title: string } }>(
+    const res = await rest.request<{ ok: boolean; data: { agent_id: string; title: string } }>(
       'PATCH',
       `/api/tasks/${id.slice(0, 8)}`,
-      { terminalMode: 'codex', title: 'Both' }
+      { agentId: 'codex', title: 'Both' }
     )
     expect(res.status).toBe(200)
-    expect(res.body.data).toMatchObject({ terminal_mode: 'codex', title: 'Both' })
+    expect(res.body.data).toMatchObject({ agent_id: 'codex', title: 'Both' })
     expect(killed).toEqual([`pty:${id}:${id}`])
     const row = h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
       provider_config: string
@@ -297,7 +297,41 @@ describe('PATCH /api/tasks/:id', () => {
     expect(JSON.parse(row.provider_config)['claude-code'].conversationId).toBeNull()
   })
 
-  test('400: unknown or disabled terminalMode names the enabled ones; nothing stopped', async () => {
+  test('terminalMode: deprecated alias of agentId still switches the agent', async () => {
+    const id = seedTask()
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    killed = []
+    const res = await rest.request<{ ok: boolean; data: { agent_id: string } }>(
+      'PATCH',
+      `/api/tasks/${id}`,
+      { terminalMode: 'codex' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.agent_id).toBe('codex')
+    expect(killed).toEqual([`pty:${id}:${id}`])
+  })
+
+  test('agentId + terminalMode: same value is fine, different values are a 400', async () => {
+    const id = seedTask()
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    killed = []
+    const bad = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
+      agentId: 'codex',
+      terminalMode: 'claude-code'
+    })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error).toMatch(/agentId.*terminalMode/)
+    expect(killed).toEqual([])
+    const same = await rest.request<{ ok: boolean; data: { agent_id: string } }>(
+      'PATCH',
+      `/api/tasks/${id}`,
+      { agentId: 'codex', terminalMode: 'codex' }
+    )
+    expect(same.status).toBe(200)
+    expect(same.body.data.agent_id).toBe('codex')
+  })
+
+  test('400: unknown or disabled agentId names the enabled ones; nothing stopped', async () => {
     const id = seedTask()
     killed = []
     for (const [mode, word] of [
@@ -305,7 +339,7 @@ describe('PATCH /api/tasks/:id', () => {
       ['gemini', 'Disabled']
     ]) {
       const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
-        terminalMode: mode
+        agentId: mode
       })
       expect(res.status).toBe(400)
       expect(res.body.error).toBe(`${word} agent "${mode}". Enabled: claude-code, codex`)
@@ -313,12 +347,12 @@ describe('PATCH /api/tasks/:id', () => {
     expect(killed).toEqual([])
   })
 
-  test('400: an invalid field next to terminalMode stops nothing', async () => {
+  test('400: an invalid field next to agentId stops nothing', async () => {
     const id = seedTask()
-    h.db.prepare('UPDATE tasks SET terminal_mode = ? WHERE id = ?').run('claude-code', id)
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
     killed = []
     const res = await rest.request('PATCH', `/api/tasks/${id}`, {
-      terminalMode: 'codex',
+      agentId: 'codex',
       priority: 9
     })
     expect(res.status).toBe(400)

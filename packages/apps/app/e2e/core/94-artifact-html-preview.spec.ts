@@ -99,9 +99,9 @@ test.describe('HTML artifact preview executes scripts', () => {
     await clickProject(mainWindow, projectAbbrev)
     await expect(mainWindow.getByText('HTML preview task').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('HTML preview task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
   })
 
   test.afterAll(async ({ electronApp }) => {

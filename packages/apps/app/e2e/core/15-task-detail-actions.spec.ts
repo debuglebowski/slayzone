@@ -59,24 +59,24 @@ test.describe('Task detail actions', () => {
       ]
     })
 
-    // Use plain terminal mode — these tests don't need AI PTY, avoids slow claude-code spawn
+    // Use the plain terminal agent — these tests don't need AI PTY, avoids slow claude-code spawn
     await s.createTask({
       projectId: p.id,
       title: 'Archive me from detail',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.createTask({
       projectId: p.id,
       title: 'Delete me from detail',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.createTask({
       projectId: p.id,
       title: 'Complete me task',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
 
@@ -136,9 +136,7 @@ test.describe('Task detail actions', () => {
 
   test('Cmd+Shift+D opens complete task confirmation', async ({ mainWindow }) => {
     await openTaskFromBoard(mainWindow, 'Complete me task')
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible()
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible()
 
     await mainWindow.keyboard.press('Meta+Shift+d')
 

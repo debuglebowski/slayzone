@@ -28,7 +28,7 @@
 
 import type { TerminalHostRemote, TerminalObserverCallbackRouter } from '@slayzone/mojo-bindings'
 import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal-contracts'
-import { terminalModesShim } from './terminalModes'
+import { agentsShim } from './agents'
 
 type DataCb = (sessionId: string, data: string, seq: number) => void
 type ExitCb = (sessionId: string, exitCode: number) => void
@@ -339,8 +339,8 @@ async function createSession(opts: CreateOptions): Promise<{ success: boolean; e
 
   const rawCwd = typeof opts.cwd === 'string' ? opts.cwd : ''
   const mode = typeof opts.mode === 'string' ? opts.mode : ''
-  // Custom-mode lookup: if mode is not a recognized CLI binary, fetch the
-  // mode record from the in-shim terminalModes store so we can surface its
+  // Custom-agent lookup: if mode is not a recognized CLI binary, fetch the
+  // agent record from the in-shim agents store so we can surface its
   // initialCommand template to the sidecar. Mirrors the pty-manager.ts
   // branch that picks template = resumeCommand ?? initialCommand; only the
   // initial (non-resume) path is covered here — resume semantics require
@@ -349,7 +349,7 @@ async function createSession(opts: CreateOptions): Promise<{ success: boolean; e
   let recoveryLabel = ''
   if (mode && !CLI_MODES.has(mode)) {
     try {
-      const info = await terminalModesShim.get(mode)
+      const info = await agentsShim.get(mode)
       if (
         info?.type === 'custom' &&
         typeof info.initialCommand === 'string' &&
@@ -359,7 +359,7 @@ async function createSession(opts: CreateOptions): Promise<{ success: boolean; e
         recoveryLabel = info.label || mode
       }
     } catch {
-      // terminalModes lookup failed; fall through to plain $SHELL spawn.
+      // agents lookup failed; fall through to plain $SHELL spawn.
     }
   }
   const cwd = encodeStartSentinels(rawCwd, mode, initialCommand, recoveryLabel)

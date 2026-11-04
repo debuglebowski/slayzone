@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Shift+Tab cycles the permission modes of the panel's CURRENT terminal mode. A
+// Shift+Tab cycles the permission modes of the panel's CURRENT agent. A
 // chat tab keeps its panel mounted across a provider switch (keyed by tab id),
 // so a `mode` change alone must reach the listener.
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 describe('useChatPanelKeyboard Shift+Tab', () => {
-  it('cycles the modes of the current terminal mode', () => {
+  it('cycles the modes of the current agent', () => {
     const root = document.createElement('div')
     const input = document.createElement('input')
     root.appendChild(input)

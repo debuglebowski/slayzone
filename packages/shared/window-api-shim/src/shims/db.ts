@@ -29,27 +29,27 @@
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import type { Task, CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
+import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import { projectsRemote, tasklistRemote, tagsRemote } from '../transport/mojo'
-import { terminalModesShim } from './terminalModes'
+import { agentsShim } from './agents'
 
 // Resolve a mode's default flags string — mirrors the Electron main-DB
-// helper used in handleModeChange. Read from DEFAULT_TERMINAL_MODES so the
-// shim doesn't couple to the in-memory terminalModes shim module state.
+// helper used in handleModeChange. Read from DEFAULT_AGENTS so the
+// shim doesn't couple to the in-memory agents shim module state.
 function defaultFlagsForMode(modeId: string): string {
-  const mode = DEFAULT_TERMINAL_MODES.find((m) => m.id === modeId)
+  const mode = DEFAULT_AGENTS.find((m) => m.id === modeId)
   return mode?.defaultFlags ?? ''
 }
 
-// cap-migrate-all-tests (git-providers batch) — read the *live* terminalModes
-// shim state so a `terminalModes.update(mode, { defaultFlags })` taken before
+// cap-migrate-all-tests (git-providers batch) — read the *live* agents
+// shim state so a `agents.update(mode, { defaultFlags })` taken before
 // a `createTask` propagates into the new task's flags (matches Electron
-// main's db-read path). Falls back to the static DEFAULT_TERMINAL_MODES on
+// main's db-read path). Falls back to the static DEFAULT_AGENTS on
 // any resolution miss.
 async function liveDefaultFlagsForMode(modeId: string): Promise<string> {
   try {
-    const mode = await terminalModesShim.get(modeId)
+    const mode = await agentsShim.get(modeId)
     if (mode?.defaultFlags !== undefined && mode.defaultFlags !== null) return mode.defaultFlags
   } catch {
     // fall through
@@ -66,7 +66,7 @@ const MODE_TO_FLAT_FLAGS: Record<string, string> = {
 }
 
 // Renderer-side cache for task fields the sidecar's `tasks` table does not
-// carry yet (terminal_mode, conversation IDs, flags, isTemporary). Now that
+// carry yet (agent_id, conversation IDs, flags, isTemporary). Now that
 // project/task listing has no live server counterpart at all (see file
 // header), this cache is the ONLY place these fields persist across calls
 // within a session — a create/update writes it, a later read (still local,
@@ -75,7 +75,7 @@ const MODE_TO_FLAT_FLAGS: Record<string, string> = {
 // this was already true before this cleanup, since the cache never had a
 // working server-side counterpart to reload from).
 interface TerminalRowExtras {
-  terminal_mode?: Task['terminal_mode']
+  agent_id?: Task['agent_id']
   claude_conversation_id?: string | null
   codex_conversation_id?: string | null
   cursor_conversation_id?: string | null
@@ -253,7 +253,7 @@ function synthTask(
     // renderer-side `terminalExtras` cache defined at top of this file —
     // there is no live server row to source them from at all now (see file
     // header). Default mode is 'claude-code' to match the Electron baseline.
-    terminal_mode: (extras.terminal_mode ?? 'claude-code') as Task['terminal_mode'],
+    agent_id: (extras.agent_id ?? 'claude-code') as Task['agent_id'],
     provider_config: (extras.provider_config ?? {}) as Task['provider_config'],
     terminal_shell: extras.terminal_shell ?? null,
     claude_conversation_id: extras.claude_conversation_id ?? null,
@@ -370,16 +370,16 @@ export const dbShim = {
     const id = localId('task')
     // cap-migrate-all-tests (terminal-core batch) — carry terminal fields from
     // CreateTaskInput into the renderer-side extras cache so tests can seed
-    // `isTemporary` / `terminalMode` at create time.
+    // `isTemporary` / `agentId` at create time.
     const createExtras: TerminalRowExtras = {}
     const createExt = data as CreateTaskInput & {
-      terminalMode?: TerminalMode
+      agentId?: AgentId
       isTemporary?: boolean
     }
     // cap-migrate-all-tests (git-providers batch) — populate per-mode default
-    // flags from DEFAULT_TERMINAL_MODES so new tasks carry truthy
+    // flags from DEFAULT_AGENTS so new tasks carry truthy
     // claude_flags / codex_flags etc. (matches Electron main DB handler
-    // which pulls defaults from the terminal_modes table on insert). Explicit
+    // which pulls defaults from the agents table on insert). Explicit
     // caller overrides win.
     createExtras.claude_flags =
       createExt.claudeFlags ?? (await liveDefaultFlagsForMode('claude-code'))
@@ -389,7 +389,7 @@ export const dbShim = {
     createExtras.gemini_flags = createExt.geminiFlags ?? (await liveDefaultFlagsForMode('gemini'))
     createExtras.opencode_flags =
       createExt.opencodeFlags ?? (await liveDefaultFlagsForMode('opencode'))
-    if (createExt.terminalMode !== undefined) createExtras.terminal_mode = createExt.terminalMode
+    if (createExt.agentId !== undefined) createExtras.agent_id = createExt.agentId
     if (createExt.isTemporary !== undefined) createExtras.is_temporary = createExt.isTemporary
     setExtras(id, createExtras)
     return synthTask(
@@ -406,12 +406,12 @@ export const dbShim = {
   },
   updateTask: async (data: UpdateTaskInput): Promise<Task> => {
     // cap-migrate-all-tests (terminal-core batch) — terminal-related fields
-    // (terminal_mode, conversation IDs, flags, is_temporary) land in the
+    // (agent_id, conversation IDs, flags, is_temporary) land in the
     // renderer-side `terminalExtras` cache, which `synthTask` below reads
     // back — this cache IS the storage now, not a pre-read before a network
     // round-trip (there is none left for these fields).
     const terminalPatch: TerminalRowExtras = {}
-    if (data.terminalMode !== undefined) terminalPatch.terminal_mode = data.terminalMode
+    if (data.agentId !== undefined) terminalPatch.agent_id = data.agentId
     if (data.terminalShell !== undefined) terminalPatch.terminal_shell = data.terminalShell
     if (data.claudeConversationId !== undefined)
       terminalPatch.claude_conversation_id = data.claudeConversationId
@@ -437,9 +437,9 @@ export const dbShim = {
     if (linearLike.linearUrl !== undefined) terminalPatch.linear_url = linearLike.linearUrl
     if (Object.keys(terminalPatch).length > 0) setExtras(data.id, terminalPatch)
     syncProviderAndFlatConversationIds(data)
-    // Mode-switch invariant: on terminalMode changes the renderer drops all
+    // Agent-switch invariant: on agentId changes the renderer drops all
     // other conversation IDs (Electron's main handler mirrors this).
-    if (data.terminalMode !== undefined) {
+    if (data.agentId !== undefined) {
       const explicitFlat: Record<string, boolean> = {
         'claude-code': data.claudeConversationId !== undefined,
         codex: data.codexConversationId !== undefined,

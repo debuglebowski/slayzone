@@ -77,7 +77,7 @@ import {
 import {
   chatCapabilitiesForMode,
   modeSupportsFastMode,
-  terminalModeForChat
+  terminalAgentIdForChat
 } from '@slayzone/terminal-contracts'
 import type { AgentEvent as ChatAgentEvent } from '@slayzone/terminal-contracts'
 import { claudeSessionHistory } from '../agents/claude-session-import'
@@ -269,7 +269,7 @@ async function buildHydrateOpts(
   //   1. per-call override (`providerFlagsOverride`)
   //   2. per-task explicit flags (`providerCfg.flags`)
   //   3. chatMode (override > DB-cached > default)
-  // terminal_modes default_flags is intentionally NOT consulted for chat — chat owns
+  // agents default_flags is intentionally NOT consulted for chat — chat owns
   // its own permission UX through chatMode. Terminal still uses default_flags.
   let providerFlags: string[]
   let resolvedChatMode: string | null = null
@@ -1192,7 +1192,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     ): Promise<ChatSessionInfo> => {
       assertCapability(o.mode, 'sessions')
       const sameMode = o.sourceMode === o.mode
-      if (!sameMode && o.sourceMode !== terminalModeForChat(o.mode)) {
+      if (!sameMode && o.sourceMode !== terminalAgentIdForChat(o.mode)) {
         throw new Error(`Cannot switch ${o.mode} to a ${o.sourceMode} conversation`)
       }
       if (!(await data.isHonoredConversation(o.taskId, o.sourceMode, o.conversationId))) {
@@ -1237,20 +1237,20 @@ export function createChatOps(opts: ChatHandlerOpts) {
     /**
      * "Continue in terminal" (plan 3.10): the chat's conversation moves to the
      * terminal agent. The chat process stops and its exit is awaited (the tab
-     * goes; its history stays saved), then the terminal mode's ledger names the
+     * goes; its history stays saved), then the terminal agent's ledger names the
      * conversation (`handoff`), so the terminal's next start resumes it. The
      * caller switches the task's mode.
      */
     continueInTerminal: async (o: ChatCreateOpts): Promise<{ conversationId: string }> => {
       assertCapability(o.mode, 'handoff')
-      const terminalMode = terminalModeForChat(o.mode)!
+      const terminalAgentId = terminalAgentIdForChat(o.mode)!
       const conversationId =
         confirmedConversation(o.tabId) ?? (await data.getCurrentConversationId(o.taskId, o.mode))
       if (!conversationId) throw new Error('This chat has no conversation to continue yet.')
       await releaseChatConversation(o.taskId, conversationId)
       await data.recordConversation({
         taskId: o.taskId,
-        mode: terminalMode,
+        mode: terminalAgentId,
         conversationId,
         origin: 'handoff'
       })
@@ -1273,8 +1273,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
      */
     continueInChat: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
       assertCapability(o.mode, 'handoff')
-      const terminalMode = terminalModeForChat(o.mode)!
-      const conversationId = await data.getCurrentConversationId(o.taskId, terminalMode)
+      const terminalAgentId = terminalAgentIdForChat(o.mode)!
+      const conversationId = await data.getCurrentConversationId(o.taskId, terminalAgentId)
       if (!conversationId) throw new Error('The terminal has no conversation to continue yet.')
       await releaseConversation('terminal', o.taskId, conversationId)
       const loaded = await loadConversationHistory(data, o, conversationId, opts.sessionReader)
@@ -1426,7 +1426,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     setMode: async (
       o: ChatCreateOpts & { chatMode: string; stopAndResume?: boolean }
     ): Promise<ChatSessionInfo> => {
-      // Reject a mode that isn't valid for this terminal mode's vocabulary.
+      // Reject a mode that isn't valid for this agent's vocabulary.
       if (!isValidChatModeForMode(o.mode, o.chatMode)) {
         throw new Error(`Invalid chat mode for mode ${o.mode}: ${String(o.chatMode)}`)
       }

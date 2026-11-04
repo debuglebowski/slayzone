@@ -279,7 +279,7 @@ describe('initPtyTurnSubscriber', () => {
     expect(list[0].terminal_tab_id).toBe(tabId)
   })
 
-  test('plain terminal-mode tab is ignored', async () => {
+  test('plain terminal agent tab is ignored', async () => {
     const repo = mkRepo()
     repos.push(repo)
     const taskId = crypto.randomUUID()

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { useSessionState } from '@slayzone/terminal/client'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
@@ -11,7 +11,7 @@ import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPane
 interface FloatingSession {
   sessionId: string
   cwd: string
-  mode: TerminalMode
+  mode: AgentId
 }
 
 // Shapes returned by the floatingAgent.get* queries + onState subscription.
@@ -51,7 +51,7 @@ export function FloatingGlobalAgentPanel() {
       trpcClient.app.floatingAgent.getSession.query().then((rawSession) => {
         const data = rawSession as FloatingSessionPayload | null
         if (data)
-          setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
+          setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as AgentId })
         return trpcClient.app.floatingAgent.getConfig.query().then((rawConfig) => {
           const config = rawConfig as FloatingConfigPayload | null
           if (config) setStyle(config.style as 'widget' | 'icon')

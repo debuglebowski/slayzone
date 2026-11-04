@@ -198,9 +198,7 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
     const task = await s.createTask({ projectId: p.id, title: 'Chat cards task', status: 'todo' })
     await mainWindow.evaluate(
       (id) =>
-        window
-          .getTrpcVanillaClient()
-          .task.update.mutate({ id, terminalMode: 'claude-chat' } as never),
+        window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'claude-chat' } as never),
       task.id
     )
     const tabId = await mainWindow.evaluate(async (id) => {

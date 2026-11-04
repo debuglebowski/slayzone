@@ -55,7 +55,7 @@ export interface UseChatPanelKeyboardOpts {
  *   - Cmd/Ctrl+↑ / ↓ → jump timeline to top / bottom
  *   - Cmd+Alt+↑ / ↓ (macOS) or Alt+PgUp / PgDn → previous / next user turn
  *     (Ctrl+Alt+arrows is the desktop's workspace switch on Windows / Linux)
- *   - Shift+Tab → cycle agent permission mode (terminal-mode parity; skipped
+ *   - Shift+Tab → cycle agent permission mode (parity with the terminal; skipped
  *     while in flight or while autocomplete owns Tab)
  *   - Esc → close an open side question (`/btw`), else stop the in-flight turn
  *     (defers to autocomplete's own Esc)
@@ -173,7 +173,7 @@ export function useChatPanelKeyboard({
         return
       }
       // Shift+Tab cycles agent permission mode whenever the chat panel owns
-      // focus — terminal-mode parity. Skipped while a turn is in flight (mode
+      // focus — parity with the terminal. Skipped while a turn is in flight (mode
       // change kills + respawns the subprocess) or while autocomplete consumes
       // Tab to accept the current selection.
       if (e.key === 'Tab' && e.shiftKey && !mod && !e.altKey) {

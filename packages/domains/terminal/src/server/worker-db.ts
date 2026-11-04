@@ -6,5 +6,5 @@
  * narrow entry re-exports only the pure (better-sqlite3 + shared types)
  * DB-startup and transaction logic the worker needs.
  */
-export { syncTerminalModes } from './startup-sync'
+export { syncAgents } from './startup-sync'
 export { chatQueueTxns } from './chat-queue-txns'

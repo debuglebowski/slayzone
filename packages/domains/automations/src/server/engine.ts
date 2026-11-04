@@ -500,9 +500,7 @@ export class AutomationEngine {
         type: string
         default_flags: string | null
         headless_command: string | null
-      }>('SELECT id, type, default_flags, headless_command FROM terminal_modes WHERE id = ?', [
-        providerId
-      ])
+      }>('SELECT id, type, default_flags, headless_command FROM agents WHERE id = ?', [providerId])
       if (!row) throw new Error(`AI action references unknown provider "${providerId}"`)
 
       const resolvedPrompt = resolveTemplate(params.prompt, ctx)
@@ -630,16 +628,16 @@ export class AutomationEngine {
         priority: number
         worktree_path: string | null
         branch: string | null
-        terminal_mode: string | null
+        agent_id: string | null
         project_id: string
       }>(
-        'SELECT id, title AS name, status, priority, worktree_path, worktree_parent_branch AS branch, terminal_mode, project_id FROM tasks WHERE id = ?',
+        'SELECT id, title AS name, status, priority, worktree_path, worktree_parent_branch AS branch, agent_id, project_id FROM tasks WHERE id = ?',
         [event.taskId]
       )
       if (task) {
         // Read flags from provider_config JSON
-        let terminalModeFlags: string | null = null
-        if (task.terminal_mode) {
+        let agentFlags: string | null = null
+        if (task.agent_id) {
           const raw = await this.db.get<{ provider_config: string | null }>(
             'SELECT provider_config FROM tasks WHERE id = ?',
             [event.taskId]
@@ -647,7 +645,7 @@ export class AutomationEngine {
           if (raw?.provider_config) {
             try {
               const config = JSON.parse(raw.provider_config)
-              terminalModeFlags = config[task.terminal_mode]?.flags ?? null
+              agentFlags = config[task.agent_id]?.flags ?? null
             } catch {
               /* ignore */
             }
@@ -660,8 +658,8 @@ export class AutomationEngine {
           priority: task.priority,
           worktree_path: task.worktree_path,
           branch: task.branch,
-          terminal_mode: task.terminal_mode,
-          terminal_mode_flags: terminalModeFlags
+          agent_id: task.agent_id,
+          agent_flags: agentFlags
         }
       }
     }

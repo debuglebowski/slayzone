@@ -41,8 +41,8 @@ test.describe('Terminal session isolation', () => {
     await mainWindow.evaluate(
       (ids) => {
         return Promise.all([
-          window.getTrpcVanillaClient().task.update.mutate({ id: ids.a, terminalMode: 'terminal' }),
-          window.getTrpcVanillaClient().task.update.mutate({ id: ids.b, terminalMode: 'terminal' })
+          window.getTrpcVanillaClient().task.update.mutate({ id: ids.a, agentId: 'terminal' }),
+          window.getTrpcVanillaClient().task.update.mutate({ id: ids.b, agentId: 'terminal' })
         ])
       },
       { a: taskAId, b: taskBId }

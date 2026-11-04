@@ -184,9 +184,7 @@ test.describe('Web panel handoff routing', () => {
       timeout: 5_000
     })
     await mainWindow.getByText('Handoff routing task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
       timeout: 5_000
     })
 

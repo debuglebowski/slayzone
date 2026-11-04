@@ -23,11 +23,11 @@ test.describe('Terminal tab keyboard isolation', () => {
     taskIdB = b.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskIdA
     )
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskIdB
     )
     await s.refreshData()

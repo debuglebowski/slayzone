@@ -96,7 +96,7 @@ const sessionCalls = (method: 'recordSessionSpawn' | 'markSessionDead') =>
 let dbRunCalls: Array<{ sql: string; params: unknown[] }> = []
 const db = {
   get: async (sql: string) =>
-    /terminal_modes/.test(sql)
+    /\bFROM agents\b/.test(sql)
       ? { initial_command: 'claude --session-id {id} {flags}', default_flags: '--dangerously' }
       : undefined,
   run: async (sql: string, params: unknown[] = []) => {

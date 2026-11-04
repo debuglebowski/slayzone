@@ -101,11 +101,11 @@ test('settings router: viewState is per user, and never falls back to the global
 })
 
 test('settings router: hub keys are shared by every user and the global table', async () => {
-  await callerA.set({ key: 'default_terminal_mode', value: 'codex' })
-  expect(await callerB.get({ key: 'default_terminal_mode' })).toBe('codex')
-  expect(await caller.get({ key: 'default_terminal_mode' })).toBe('codex')
+  await callerA.set({ key: 'default_agent_id', value: 'codex' })
+  expect(await callerB.get({ key: 'default_agent_id' })).toBe('codex')
+  expect(await caller.get({ key: 'default_agent_id' })).toBe('codex')
   const n = h.db
-    .prepare(`SELECT count(*) AS n FROM user_settings WHERE key = 'default_terminal_mode'`)
+    .prepare(`SELECT count(*) AS n FROM user_settings WHERE key = 'default_agent_id'`)
     .get() as { n: number }
   expect(n.n).toBe(0)
   // Write-through still reaches the warmed sync readers from a user's request.
@@ -117,7 +117,7 @@ test("settings router: getAll for a user = hub keys + their own keys, never anot
   await callerA.set({ key: 'panel_config', value: 'a-panels' })
   const all = (await callerB.getAll()) as Record<string, string>
   expect(all['viewState']).toBe('b-tabs')
-  expect(all['default_terminal_mode']).toBe('codex')
+  expect(all['default_agent_id']).toBe('codex')
   expect('panel_config' in all).toBe(false)
   // Global per-user rows (the pre-login state) are not served to users either.
   expect('foo' in all).toBe(false)

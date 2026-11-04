@@ -1,4 +1,4 @@
-import type { TerminalMode, LoopConfig } from '@slayzone/terminal-contracts'
+import type { AgentId, LoopConfig } from '@slayzone/terminal-contracts'
 import type { BrowserTabsState } from './browser-tabs'
 import type { EditorOpenFilesState } from './editor-open-files'
 import type { ArtifactsSidebarState } from './artifacts-sidebar'
@@ -32,7 +32,7 @@ export interface MergeContext {
 
 // --- Provider config (JSON column on tasks table) ---
 
-/** Per-provider config stored as JSON in the provider_config column. Key = TerminalMode value. */
+/** Per-provider config stored as JSON in the provider_config column. Key = AgentId value. */
 export interface ProviderConfig {
   [mode: string]: {
     conversationId?: string | null
@@ -715,7 +715,7 @@ export interface Task {
   /** Soft-deletion timestamp; task.get can return Trash rows omitted from the board. */
   deleted_at?: string | null
   // Terminal configuration
-  terminal_mode: TerminalMode
+  agent_id: AgentId
   provider_config: ProviderConfig
   terminal_shell: string | null
   /**
@@ -838,7 +838,7 @@ export interface CreateTaskInput {
   status?: string
   priority?: number
   dueDate?: string
-  terminalMode?: TerminalMode
+  agentId?: AgentId
   claudeFlags?: string
   codexFlags?: string
   cursorFlags?: string
@@ -877,7 +877,7 @@ export interface UpdateTaskInput {
   dueDate?: string | null
   projectId?: string
   // Terminal config
-  terminalMode?: TerminalMode
+  agentId?: AgentId
   providerConfig?: ProviderConfig
   terminalShell?: string | null
   // @deprecated — use providerConfig

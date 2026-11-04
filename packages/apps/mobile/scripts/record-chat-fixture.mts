@@ -87,7 +87,7 @@ try {
   const task = await client.task.create.mutate({
     projectId: project.id,
     title: 'Chat on the phone',
-    terminalMode: 'claude-chat'
+    agentId: 'claude-chat'
   })
   const tab = await client.taskTerminals.ensureMain.mutate({ taskId: task.id, mode: 'claude-chat' })
   const tabId = tab.id

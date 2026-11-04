@@ -8,7 +8,7 @@ import { ptyShim } from './pty'
 import { dialogShim } from './dialog'
 import { browserShim } from './browser'
 import { webviewShim } from './webview'
-import { terminalModesShim } from './terminalModes'
+import { agentsShim } from './agents'
 import { tabsShim } from './tabs'
 import { makeStubNamespace } from './stub-factory'
 
@@ -78,7 +78,7 @@ export function buildApi(): ElectronAPI {
   api.dialog = dialogShim
   api.browser = browserShim
   api.webview = webviewShim
-  api.terminalModes = terminalModesShim
+  api.agents = agentsShim
   api.tabs = tabsShim
   return api as unknown as ElectronAPI
 }

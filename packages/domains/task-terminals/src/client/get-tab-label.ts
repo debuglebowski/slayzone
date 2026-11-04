@@ -1,8 +1,8 @@
 import type { TerminalTab } from '../shared/types'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 
-/** Human label for a terminal mode (provider name). */
-export function getModeLabel(mode: TerminalMode): string {
+/** Human label for an agent (provider name). */
+export function getModeLabel(mode: AgentId): string {
   switch (mode) {
     case 'claude-code':
       return 'Claude Code'

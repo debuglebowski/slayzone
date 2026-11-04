@@ -6,6 +6,7 @@ import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contract
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { resolveAgentIdAlias } from '../../agent-id-alias'
 
 /**
  * PATCH /api/tasks/:id — update a task (CLI `slay tasks update`, plus the
@@ -27,10 +28,11 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
  *   request, instead of the CLI pre-reading it) — the CLI's
  *   `--append-description`. Mutually exclusive with `description`.
  *
- * - `terminalMode` (`slay tasks update --agent`) is a mode SWITCH, not a field
+ * - `agentId` (`slay tasks update --agent`) is an agent SWITCH, not a field
  *   write: `switchMainAgentMode` stops the live main agent and clears every
- *   conversation id, exactly as the desktop's mode picker (`task.switchMode`).
- *   Unknown/disabled mode = 400. Runs after the other fields validate.
+ *   conversation id, exactly as the desktop's agent picker (`task.switchMode`).
+ *   Unknown/disabled agent = 400. Runs after the other fields validate.
+ *   `terminalMode` is accepted as its deprecated old name (`resolveAgentIdAlias`).
  *
  * `appendDescription` is resolved to a concrete `description` before the domain
  * schema parses, so the strict `updateTaskInputSchema` stays free of
@@ -39,6 +41,12 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
   app.patch('/api/tasks/:id', async (req, res) => {
     const body = { ...((req.body ?? {}) as Record<string, unknown>) }
+
+    const alias = resolveAgentIdAlias(body)
+    if (!alias.ok) {
+      res.status(400).json({ ok: false, error: alias.error })
+      return
+    }
 
     // CLI parity: the two description writers contradict each other.
     if (body.description !== undefined && body.appendDescription !== undefined) {
@@ -99,10 +107,10 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
         delete body.appendDescription
       }
 
-      const mode = body.terminalMode
-      delete body.terminalMode
+      const mode = body.agentId
+      delete body.agentId
       if (mode !== undefined && typeof mode !== 'string') {
-        res.status(400).json({ ok: false, error: 'terminalMode must be a string' })
+        res.status(400).json({ ok: false, error: 'agentId must be a string' })
         return
       }
 
@@ -137,7 +145,7 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
           throw err
         }
       }
-      // Fields besides the id (and the mode, already applied).
+      // Fields besides the id (and the agent, already applied).
       if (Object.keys(parsed.data).length > 1) {
         updated = await update(parsed.data as UpdateTaskInput)
       }

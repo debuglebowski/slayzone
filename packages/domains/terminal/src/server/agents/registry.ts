@@ -4,7 +4,7 @@ import { codexChatBackend } from './codex/codex-chat-session'
 import { CHAT_SUPPORTED_MODES, type ChatSupportedMode } from '@slayzone/terminal-contracts'
 
 /**
- * TerminalMode → AgentBackend mapping. Keys must match `CHAT_SUPPORTED_MODES`
+ * AgentId → AgentBackend mapping. Keys must match `CHAT_SUPPORTED_MODES`
  * exactly — TS enforces it, and the boot-time loop below fails fast on drift.
  * `'claude-code'`/`'codex'` are intentionally absent: those are PTY-only
  * modes; chat lives in `'claude-chat'` / `'codex-chat'`.

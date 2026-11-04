@@ -662,7 +662,7 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks create works without a local database'
   // the earlier suites never see this template.
   beforeAll(() => {
     db.prepare(
-      `INSERT INTO task_templates (id, project_id, name, terminal_mode, default_status, default_priority)
+      `INSERT INTO task_templates (id, project_id, name, agent_id, default_status, default_priority)
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(tplId, projectId, 'Hotfix', 'codex', 'in_progress', 2)
   })
@@ -759,11 +759,11 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks create works without a local database'
     )
     expect(r.exitCode).toBe(0)
     const row = db
-      .prepare('SELECT status, priority, terminal_mode FROM tasks WHERE title = ?')
-      .get('NoDbTpl') as { status: string; priority: number; terminal_mode: string }
+      .prepare('SELECT status, priority, agent_id FROM tasks WHERE title = ?')
+      .get('NoDbTpl') as { status: string; priority: number; agent_id: string }
     expect(row.status).toBe('in_progress')
     expect(row.priority).toBe(2)
-    expect(row.terminal_mode).toBe('codex')
+    expect(row.agent_id).toBe('codex')
   })
 
   test('--template by id PREFIX applies the same template', async () => {
@@ -877,7 +877,7 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks open → REST /api/open-task', () => {
   beforeAll(() => {
     const now = new Date().toISOString()
     db.prepare(
-      `INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, "order", created_at, updated_at)
+      `INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, "order", created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     ).run(openTaskId, projectId, 'OpenMe', 'todo', 3, 'claude-code', '{}', now, now)
   })

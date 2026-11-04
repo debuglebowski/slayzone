@@ -76,9 +76,9 @@ test.describe('Web panels', () => {
     await expect(input).toBeVisible()
     await input.fill(title)
     await page.keyboard.press('Enter')
-    await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible(
-      { timeout: 5_000 }
-    )
+    await expect(page.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
   }
 
   const runCli = (...args: string[]) =>

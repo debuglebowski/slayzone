@@ -394,7 +394,7 @@ describe('tRPC CONDITIONAL_ADMIN: refused to a non-admin only for the listed inp
       }) as unknown as TrpcContext['db']
     for (const key of [
       'hub_label',
-      'default_terminal_mode',
+      'default_agent_id',
       'ai_providers:p1',
       'integration:credential:linear'
     ]) {

@@ -16,7 +16,7 @@
  * - `agents/hub-agents.ts` `mergeHubAgents` over each hub's session state, kept by the
  *   shared rules (`@slayzone/terminal/terminal-state`) as `use-hub-agent-sessions.ts`
  *   keeps it: one row per hub, tagged with its hub; a stop moves only that hub's row.
- * Agents are plain shells (terminal mode `terminal`): no agent CLI needed.
+ * Agents are plain shells (agent `terminal`): no agent CLI needed.
  */
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
@@ -70,7 +70,7 @@ try {
     const task = await phone.client.task.create.mutate({
       projectId: project.id,
       title: `${name.toUpperCase()}: first task`,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     hubs.push({ phone, taskId: task.id })
   }

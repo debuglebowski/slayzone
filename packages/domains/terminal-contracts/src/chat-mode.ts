@@ -1,6 +1,6 @@
 /**
  * Chat permission/operating mode shared by main + client. Stored in
- * `provider_config.<terminalMode>.chatMode`. Maps onto `claude --permission-mode`
+ * `provider_config.<agentId>.chatMode`. Maps onto `claude --permission-mode`
  * (verified against Claude Code 2.1.312). `ask` is the CLI's `default` mode:
  * chat answers its prompts with approval cards. `dontAsk` (deny anything that
  * would prompt) is not exposed.
@@ -115,7 +115,7 @@ export function chatModeToCliPermissionMode(mode: string): string | null {
 /**
  * True when the chat pills (mode, model, effort) own those spawn flags: the
  * flag-driven chat provider (Claude). A task's own flags for such a mode are
- * extras appended after them, and terminal-mode default flags are never
+ * extras appended after them, and the agent's default flags are never
  * seeded into its provider_config.
  */
 export function chatOwnsSpawnFlags(mode: string): boolean {

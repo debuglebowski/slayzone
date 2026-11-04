@@ -94,7 +94,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC fresh codex',
       status: 'in_progress',
-      terminalMode: 'codex'
+      agentId: 'codex'
     })
     await s.refreshData()
 
@@ -147,7 +147,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC resume codex',
       status: 'in_progress',
-      terminalMode: 'codex'
+      agentId: 'codex'
     })
     await mainWindow.evaluate(
       ({ id, cid }) =>
@@ -176,7 +176,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC resume cursor',
       status: 'in_progress',
-      terminalMode: 'cursor-agent'
+      agentId: 'cursor-agent'
     })
     await mainWindow.evaluate(
       ({ id, cid }) =>
@@ -205,7 +205,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC resume opencode',
       status: 'in_progress',
-      terminalMode: 'opencode'
+      agentId: 'opencode'
     })
     await mainWindow.evaluate(
       ({ id, cid }) =>
@@ -234,7 +234,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC resume qwen',
       status: 'in_progress',
-      terminalMode: 'qwen-code'
+      agentId: 'qwen-code'
     })
     await mainWindow.evaluate(
       ({ id, cid }) =>
@@ -263,7 +263,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC resume copilot',
       status: 'in_progress',
-      terminalMode: 'copilot'
+      agentId: 'copilot'
     })
     await mainWindow.evaluate(
       ({ id, cid }) =>
@@ -293,7 +293,7 @@ test.describe('Resume command opts', () => {
       projectId,
       title: 'RC cfg path',
       status: 'in_progress',
-      terminalMode: 'codex'
+      agentId: 'codex'
     })
     // Use providerConfig field (not legacy codexConversationId)
     await mainWindow.evaluate(

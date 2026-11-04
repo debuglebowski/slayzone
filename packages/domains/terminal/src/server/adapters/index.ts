@@ -1,5 +1,5 @@
 export type {
-  TerminalMode,
+  AgentId,
   TerminalAdapter,
   SpawnShellConfig,
   SpawnConfig,
@@ -49,7 +49,7 @@ export const HOOK_DRIVEN_MODES: ReadonlySet<string> = new Set(
     .map(([mode]) => mode)
 )
 
-/** True when a terminal mode's state is fully hook-driven (see `HOOK_DRIVEN_MODES`). */
+/** True when an agent's state is fully hook-driven (see `HOOK_DRIVEN_MODES`). */
 export function isHookDrivenMode(mode: string): boolean {
   return HOOK_DRIVEN_MODES.has(mode)
 }
@@ -64,7 +64,7 @@ export interface GetAdapterOptions {
 }
 
 /**
- * Get the adapter for a terminal mode.
+ * Get the adapter for an agent.
  */
 export function getAdapter(opts: GetAdapterOptions): TerminalAdapter {
   const adapterType = opts.type || opts.mode

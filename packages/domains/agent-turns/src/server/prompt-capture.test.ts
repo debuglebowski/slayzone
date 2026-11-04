@@ -37,7 +37,7 @@ describe('isUserPromptSubmitEvent', () => {
 })
 
 describe('isPromptCaptureMode', () => {
-  test('only capture-capable terminal modes', () => {
+  test('only capture-capable agents', () => {
     expect(isPromptCaptureMode('claude-code')).toBe(true)
     expect(isPromptCaptureMode('codex')).toBe(true)
     expect(isPromptCaptureMode('cursor-agent')).toBe(false)

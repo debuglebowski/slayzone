@@ -236,7 +236,7 @@ const openWebPanel = async (
   await openTaskViaSearch(mainWindow, taskTitle)
 
   await mainWindow
-    .locator('[data-testid="terminal-mode-trigger"]:visible')
+    .locator('[data-testid="agent-trigger"]:visible')
     .first()
     .waitFor({ timeout: 5_000 })
 

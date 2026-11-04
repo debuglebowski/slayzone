@@ -161,14 +161,14 @@ test.describe('Antigravity agent hooks', () => {
       path: TEST_PROJECT_PATH
     })
     // `seed().createTask` narrows its input to the common fields and drops
-    // `terminalMode`, which this spec needs — go straight at task.create.
+    // `agentId`, which this spec needs — go straight at task.create.
     const task = await mainWindow.evaluate(
       (d) => window.getTrpcVanillaClient().task.create.mutate(d),
       {
         projectId: project.id,
         title: 'AG sid capture',
         status: 'in_progress',
-        terminalMode: 'antigravity'
+        agentId: 'antigravity'
       }
     )
 

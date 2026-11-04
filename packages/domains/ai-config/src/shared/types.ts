@@ -100,7 +100,7 @@ export interface CliProviderInfo {
   kind: string
   enabled: boolean
   status: CliProviderStatus
-  /** True when this provider matches the default terminal mode — cannot be disabled */
+  /** True when this provider matches the default agent — cannot be disabled */
   isDefault?: boolean
 }
 

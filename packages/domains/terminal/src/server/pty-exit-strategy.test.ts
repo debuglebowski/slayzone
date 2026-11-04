@@ -11,7 +11,7 @@ import {
 
 const base = {
   exitCode: 1,
-  terminalMode: 'codex',
+  agentId: 'codex',
   hasPostSpawnCommand: true,
   resuming: false,
   usedShellFallback: false,
@@ -38,7 +38,7 @@ describe('shouldShellFallback', () => {
   })
 
   test('true for claude-code mode', () => {
-    expect(shouldShellFallback({ ...base, terminalMode: 'claude-code' })).toBe(true)
+    expect(shouldShellFallback({ ...base, agentId: 'claude-code' })).toBe(true)
   })
 
   test('true for any exit code > 0', () => {

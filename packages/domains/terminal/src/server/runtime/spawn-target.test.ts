@@ -10,7 +10,7 @@ import type { PtySpawnLookups } from './pty-data-ops'
 import { resolveAgentFolder, resolveSpawnTarget } from './spawn-target'
 
 const lookups = (over: Partial<PtySpawnLookups> = {}): PtySpawnLookups => ({
-  getTerminalMode: async () => null,
+  getAgent: async () => null,
   getTaskProjectId: async (taskId) => (taskId === 't1' ? 'p1' : null),
   resolveComputerId: async (taskId) => (taskId === 't1' ? 'c-task' : null),
   resolveProjectComputerId: async (projectId) => (projectId === 'p1' ? 'c-project' : null),

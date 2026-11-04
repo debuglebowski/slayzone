@@ -2,15 +2,15 @@
  * Who a chat talks to, for the chat UI's wording: "Ask Codex anything…",
  * "Claude is waiting for your answer", the project memory file `/memory` opens,
  * where `/bug` files an issue. The product name and a mode's provider come from
- * the existing tables (`DETECTION_ENGINES`, `DEFAULT_TERMINAL_MODES`); this adds
+ * the existing tables (`DETECTION_ENGINES`, `DEFAULT_AGENTS`); this adds
  * only what they don't carry.
  *
  * @module shared/chat-provider
  */
-import { DEFAULT_TERMINAL_MODES, DETECTION_ENGINES } from './types'
+import { DEFAULT_AGENTS, DETECTION_ENGINES } from './types'
 
 export interface ChatProviderInfo {
-  /** The provider's detection type (`DETECTION_ENGINES` / `TerminalModeInfo.type`). */
+  /** The provider's detection type (`DETECTION_ENGINES` / `AgentDefinition.type`). */
   type: string
   /** The CLI's product name: `Claude Code`, `Codex`. */
   product: string
@@ -59,7 +59,7 @@ function infoForType(type: string): ChatProviderInfo | null {
 
 /** The provider of a terminal / chat mode (`claude-chat` → Claude Code, `codex-chat` → Codex). */
 export function chatProviderForMode(mode: string): ChatProviderInfo {
-  const type = DEFAULT_TERMINAL_MODES.find((m) => m.id === mode)?.type
+  const type = DEFAULT_AGENTS.find((m) => m.id === mode)?.type
   return (type ? infoForType(type) : null) ?? (infoForType(DEFAULT_TYPE) as ChatProviderInfo)
 }
 

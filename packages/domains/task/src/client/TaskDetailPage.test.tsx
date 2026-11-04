@@ -13,7 +13,7 @@ vi.mock('@slayzone/terminal', () => ({
     subscribeSessionDetected: () => vi.fn(),
     subscribeDevServer: () => vi.fn()
   }),
-  useTerminalModes: () => ({ modes: [] }),
+  useAgents: () => ({ modes: [] }),
   useLoopMode: () => ({
     status: 'idle',
     iteration: 0,
@@ -25,7 +25,7 @@ vi.mock('@slayzone/terminal', () => ({
   markSkipCache: vi.fn(),
   getVisibleModes: () => [],
   getModeLabel: () => '',
-  groupTerminalModes: () => ({ builtin: [], custom: [] }),
+  groupAgents: () => ({ builtin: [], custom: [] }),
   stripAnsi: (s: string) => s,
   serializeTerminalHistory: () => '',
   LoopModeBanner: () => null,
@@ -354,7 +354,7 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       description_format: 'markdown',
       status: 'todo',
       priority: 3,
-      terminal_mode: 'claude-code',
+      agent_id: 'claude-code',
       panel_visibility: null,
       browser_tabs: null,
       web_panel_urls: null,

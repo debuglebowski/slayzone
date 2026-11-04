@@ -24,7 +24,7 @@ test.describe('Terminal theme environment variables', () => {
       projectId: p.id,
       title: 'Theme env task',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     taskId = t.id
     await s.refreshData()

@@ -40,7 +40,7 @@ import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
   isHookDrivenMode,
-  type TerminalMode,
+  type AgentId,
   type TerminalAdapter,
   type SpawnConfig,
   type ActivityState,
@@ -246,7 +246,7 @@ const HIBERNATE_GRACE_MS = 10_000
  *  session id) plus copilot, whose `--resume={id}` lacks a fresh/resume
  *  distinction (pending real-world validation). */
 const HIBERNATE_EXCLUDED_MODES = new Set<string>(['copilot'])
-function isResumeEligibleMode(mode: TerminalMode): boolean {
+function isResumeEligibleMode(mode: AgentId): boolean {
   return !SESSION_ID_UNAVAILABLE.includes(mode) && !HIBERNATE_EXCLUDED_MODES.has(mode)
 }
 
@@ -288,7 +288,7 @@ interface PtySession {
   pty: pty.IPty
   sessionId: string
   taskId: string
-  mode: TerminalMode
+  mode: AgentId
   adapter: TerminalAdapter
   // Everything derived from raw output (activity, errors, prompts, OSC title,
   // dev-server URLs, conversation id), plus its per-session memory: the
@@ -703,7 +703,7 @@ let idleCheckerInterval: NodeJS.Timeout | null = null
  *  No-op when unset. See plans/conv-id-robustness-v2.md. */
 export interface ConversationHealRequest {
   taskId: string
-  mode: TerminalMode
+  mode: AgentId
   cwd: string
   storedId: string
   /** Where the agent runs: transcripts are looked up on THAT computer's disk. */
@@ -730,7 +730,7 @@ export function setConversationHealer(handler: ConversationHealer | null): void 
  *  dependency reason as the healer. No-op when unset. */
 export type ConversationResolver = (req: {
   taskId: string
-  mode: TerminalMode
+  mode: AgentId
 }) => Promise<string | null>
 
 let conversationResolver: ConversationResolver | null = null
@@ -1302,7 +1302,7 @@ export interface CreatePtyOptions {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
-  mode?: TerminalMode
+  mode?: AgentId
   initialPrompt?: string | null
   providerArgs?: string[]
   executionContext?: ExecutionContext | null
@@ -1478,9 +1478,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
   }
 
   try {
-    const terminalMode = mode || 'claude-code'
+    const agentId = mode || 'claude-code'
     const adapter = getAdapter({
-      mode: terminalMode,
+      mode: agentId,
       type,
       patterns: { working: patternWorking, error: patternError }
     })
@@ -1507,7 +1507,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         try {
           ledgerConversationId = await conversationResolver({
             taskId,
-            mode: terminalMode
+            mode: agentId
           })
         } catch {
           ledgerConversationId = null
@@ -1554,7 +1554,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       try {
         const healed = await conversationHealer({
           taskId,
-          mode: terminalMode,
+          mode: agentId,
           cwd,
           storedId: resolvedExistingId,
           computerId,
@@ -1577,7 +1577,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // worktree's project dir). `undefined` = not looked up (other providers,
     // docker/ssh, a pre-warmed agent); null = the computer could not answer.
     let resumeLocated: ClaudeTranscriptLocated | null | undefined
-    if (terminalMode === 'claude-code' && !executionContext && !opts.adoptPty?.preWarmedAgent) {
+    if (agentId === 'claude-code' && !executionContext && !opts.adoptPty?.preWarmedAgent) {
       const freshId =
         neverWrittenId ??
         (!resolvedExistingId && conversationId && supportsFreshPreMint(initialCommand)
@@ -1696,7 +1696,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // Gated on the AGENT the mode runs, so a user-defined provider wrapping a
     // hook-driven agent is healed too (it relies on the same notify.sh).
     if (!opts.adoptPty?.preWarmedAgent) {
-      maybeReinstallHooksForSpawn(modeAgentId(terminalMode, type))
+      maybeReinstallHooksForSpawn(modeAgentId(agentId, type))
     }
 
     // Hub/computer split (wave 3): when this session spawns on a computer, resolve
@@ -1707,7 +1707,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     const remoteMcpEnv = await resolveRemoteMcpEnv(remoteMcpEnvProvider, {
       taskId,
       computerId,
-      mode: terminalMode
+      mode: agentId
     })
 
     // A pre-warmed agent already has its env baked in from spawn time (warm pool)
@@ -1720,8 +1720,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     const mcpEnv = opts.adoptPty?.preWarmedAgent
       ? {}
       : ledger
-        ? await ledger.buildMcpEnv(taskId, terminalMode, remoteMcpEnv)
-        : await buildMcpEnv(null, taskId, terminalMode, undefined, remoteMcpEnv)
+        ? await ledger.buildMcpEnv(taskId, agentId, remoteMcpEnv)
+        : await buildMcpEnv(null, taskId, agentId, undefined, remoteMcpEnv)
 
     // Bind the pending-spawn ledger row to this exact launch. Codex may wait
     // minutes for its first prompt before emitting SessionStart; a timestamp
@@ -1859,7 +1859,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       try {
         await ledger.recordPendingSpawn({
           taskId,
-          mode: terminalMode,
+          mode: agentId,
           expectedSessionId: effectiveConversationId || null,
           usedResume: resuming,
           spawnToken
@@ -1889,7 +1889,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // Output detection runs where the output is when the owner can (a computer);
     // the hub then mirrors its signals instead of parsing a copy.
     const detection: PtyDetectionSpec = {
-      mode: terminalMode,
+      mode: agentId,
       ...(type ? { type } : {}),
       patterns: { working: patternWorking ?? null, error: patternError ?? null },
       resuming,
@@ -1991,7 +1991,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // workspace would otherwise start every tab's agent at once. A plain shell
       // starts at once, as does every recovery shell below.
       const admission: PtySpawnAdmission | undefined =
-        terminalMode === 'terminal' ? undefined : opts.foreground ? 'foreground' : 'background'
+        agentId === 'terminal' ? undefined : opts.foreground ? 'foreground' : 'background'
       ptyProcess = await spawnRemote(spawnFile, initialArgs, startupTimeoutMs, admission)
     } else {
       try {
@@ -2041,10 +2041,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       pty: ptyProcess,
       sessionId,
       taskId,
-      mode: terminalMode,
+      mode: agentId,
       adapter,
       // Only checks for session errors if we're trying to resume
-      detector: new PtyOutputDetector({ adapter, mode: terminalMode, resuming }),
+      detector: new PtyOutputDetector({ adapter, mode: agentId, resuming }),
       buffer: new RingBuffer(MAX_BUFFER_SIZE),
       cols: spawnOptions.cols,
       rows: spawnOptions.rows,
@@ -2116,7 +2116,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // An AGENT's start is tracked for the startup card: `queued` until its owner
     // confirms the launch (after any wait for an admission slot), then `booting`
     // until its first output. A plain shell starts at once — not tracked.
-    if (terminalMode !== 'terminal') {
+    if (agentId !== 'terminal') {
       agentStarts.mark(sessionId, spawnConfirmation ? 'queued' : 'booting')
     }
     let firstOutputTs: number | null = null
@@ -2163,7 +2163,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // isn't pruned here cannot match a later launch's token, but explicit
       // pruning keeps the ledger small and avoids stale lookup candidates.
       if (ledger) {
-        void ledger.prunePendingSpawns({ taskId, mode: terminalMode }).catch(() => {
+        void ledger.prunePendingSpawns({ taskId, mode: agentId }).catch(() => {
           // Best-effort — a leaked token-bearing row cannot claim a later spawn.
         })
       }
@@ -2845,7 +2845,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           // and reported the cause (`exitError`) before this exit arrived.
           if (resuming && !session.error && !(target as unknown as PtyHandle).detectsOutput) {
             const transcriptGone =
-              terminalMode === 'claude-code' &&
+              agentId === 'claude-code' &&
               exitCode !== 0 &&
               !!resolvedExistingId &&
               // The spawn-time lookup on the agent's computer (any project dir);
@@ -2870,7 +2870,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
 
           const exitCtx = {
             exitCode,
-            terminalMode,
+            agentId,
             hasPostSpawnCommand: !!spawnConfig.postSpawnCommand,
             resuming,
             usedShellFallback,
@@ -2910,7 +2910,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
               usedArgs = shellOnlyArgs
               usedFallback = true
 
-              const infoLine = buildRecoveryMessage(terminalMode, exitCode)
+              const infoLine = buildRecoveryMessage(agentId, exitCode)
               // An owner-buffered session got this line in the owner's buffer
               // (`carryOutput.preamble`); it shows on the next replay.
               if (!outputOwner(session)) session.buffer.append(infoLine)
@@ -2933,10 +2933,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
                 event: 'pty.shell_fallback',
                 sessionId,
                 taskId: taskIdFromSessionId(sessionId),
-                message: `${terminalMode} exited with code ${String(exitCode)}; falling back to interactive shell`,
+                message: `${agentId} exited with code ${String(exitCode)}; falling back to interactive shell`,
                 payload: {
                   exitCode,
-                  mode: terminalMode,
+                  mode: agentId,
                   previousArgs,
                   fallbackArgs: shellOnlyArgs,
                   computerId
@@ -2972,7 +2972,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
               // The owner keeps ONE scrollback across the process change: the
               // agent's output, this line, then the recovery shell's.
               void spawnRemote(spawnFile, shellOnlyArgs, recoveryDeadlineMs, undefined, {
-                preamble: buildRecoveryMessage(terminalMode, exitCode)
+                preamble: buildRecoveryMessage(agentId, exitCode)
               }).then(
                 (fallbackShellPty) => {
                   // The session can be torn down (tab closed, task killed, app
@@ -3473,7 +3473,7 @@ export function hasLivePty(sessionId: string): boolean {
  *  resolve `{ taskId, agentId }` → sessionId so hook events can drive state
  *  transitions. Prefers the main session (`sessionId === taskId`) when multiple
  *  panes share a mode. Returns null if no session matches. */
-export function findSessionByTaskIdAndMode(taskId: string, mode: TerminalMode): string | null {
+export function findSessionByTaskIdAndMode(taskId: string, mode: AgentId): string | null {
   let fallback: string | null = null
   for (const [sessionId, session] of sessions) {
     if (session.taskId !== taskId || session.mode !== mode) continue

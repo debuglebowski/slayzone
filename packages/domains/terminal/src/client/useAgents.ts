@@ -3,15 +3,15 @@ import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useDepsChanged } from '@slayzone/ui'
 import type {
-  TerminalModeInfo,
-  CreateTerminalModeInput,
-  UpdateTerminalModeInput
+  AgentDefinition,
+  CreateAgentDefinitionInput,
+  UpdateAgentDefinitionInput
 } from '@slayzone/terminal-contracts'
 
-export function useTerminalModes() {
+export function useAgents() {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const [modes, setModes] = useState<TerminalModeInfo[]>([])
+  const [modes, setModes] = useState<AgentDefinition[]>([])
   const [loading, setLoading] = useState(true)
 
   // Imperative refetch into local state (preserves the previous explicit
@@ -20,7 +20,7 @@ export function useTerminalModes() {
   // `load` is the fetch alone; whoever starts one marks `loading` first.
   const load = useCallback(async () => {
     try {
-      const list = await trpcClient.pty.modesList.query()
+      const list = await trpcClient.pty.agentsList.query()
       setModes(list)
     } finally {
       setLoading(false)
@@ -39,21 +39,21 @@ export function useTerminalModes() {
     void load()
   }, [load])
 
-  const createMutation = useMutation(trpc.pty.modesCreate.mutationOptions())
-  const updateMutation = useMutation(trpc.pty.modesUpdate.mutationOptions())
-  const deleteMutation = useMutation(trpc.pty.modesDelete.mutationOptions())
-  const restoreDefaultsMutation = useMutation(trpc.pty.modesRestoreDefaults.mutationOptions())
+  const createMutation = useMutation(trpc.pty.agentsCreate.mutationOptions())
+  const updateMutation = useMutation(trpc.pty.agentsUpdate.mutationOptions())
+  const deleteMutation = useMutation(trpc.pty.agentsDelete.mutationOptions())
+  const restoreDefaultsMutation = useMutation(trpc.pty.agentsRestoreDefaults.mutationOptions())
   const resetToDefaultStateMutation = useMutation(
-    trpc.pty.modesResetToDefaultState.mutationOptions()
+    trpc.pty.agentsResetToDefaultState.mutationOptions()
   )
 
-  const createMode = async (input: CreateTerminalModeInput) => {
+  const createMode = async (input: CreateAgentDefinitionInput) => {
     const newMode = await createMutation.mutateAsync(input)
     await refresh()
     return newMode
   }
 
-  const updateMode = async (id: string, updates: UpdateTerminalModeInput) => {
+  const updateMode = async (id: string, updates: UpdateAgentDefinitionInput) => {
     const updated = await updateMutation.mutateAsync({ id, updates })
     await refresh()
     return updated
@@ -66,7 +66,7 @@ export function useTerminalModes() {
   }
 
   const testMode = async (command: string) => {
-    return await trpcClient.pty.modesTest.query({ command })
+    return await trpcClient.pty.agentsTest.query({ command })
   }
 
   const restoreDefaults = async () => {

@@ -1,7 +1,7 @@
 /**
  * The chat spawn seam — the ONE piece a remote computer replaces.
  *
- * Mirrors the role `PtyBackend`/`PtyHandle` play for terminal mode
+ * Mirrors the role `PtyBackend`/`PtyHandle` play for terminal (PTY) tabs
  * (`runtime/pty-backend.ts`): the transport owns every bit of session logic
  * (buffering, persistence, broadcast, the state machine, and the protocol
  * driver), and the backend owns only "start this OS process and move bytes".

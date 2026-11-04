@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 /**
- * Pins how the settings dialog seeds the shared default-terminal-mode it hands to
+ * Pins how the settings dialog seeds the shared default agent it hands to
  * the Providers / Panels tabs, and which tab it shows when (re)opened.
  */
 
@@ -50,7 +50,7 @@ vi.mock('@slayzone/ui', async () => ({
   )
 }))
 vi.mock('@slayzone/terminal', () => ({
-  useTerminalModes: () => ({
+  useAgents: () => ({
     modes: [],
     createMode: vi.fn(),
     updateMode: vi.fn(),
@@ -89,22 +89,22 @@ vi.mock('./tabs/LabsSettingsTab', () => ({ LabsSettingsTab: tab('labs') }))
 vi.mock('./tabs/ConnectionsSettingsTab', () => ({ ConnectionsSettingsTab: tab('connections') }))
 vi.mock('./tabs/SettingsTabIntro', () => ({ SettingsTabIntro: () => null }))
 vi.mock('./tabs/PanelsSettingsTab', () => ({
-  PanelsSettingsTab: ({ defaultTerminalMode }: { defaultTerminalMode: string }) => (
-    <div data-testid="tab-panels" data-mode={defaultTerminalMode} />
+  PanelsSettingsTab: ({ defaultAgentId }: { defaultAgentId: string }) => (
+    <div data-testid="tab-panels" data-mode={defaultAgentId} />
   )
 }))
 vi.mock('./tabs/AiProvidersSettingsTab', () => ({
   AiProvidersSettingsTab: function MockAiProvidersTab({
-    defaultTerminalMode,
-    onDefaultTerminalModeChange
+    defaultAgentId,
+    onDefaultAgentIdChange
   }: {
-    defaultTerminalMode: string
-    onDefaultTerminalModeChange: (m: string) => void
+    defaultAgentId: string
+    onDefaultAgentIdChange: (m: string) => void
   }) {
     useMountLog('ai-providers')
     return (
-      <div data-testid="tab-ai-providers" data-mode={defaultTerminalMode}>
-        <button onClick={() => onDefaultTerminalModeChange('gemini')}>pick-gemini</button>
+      <div data-testid="tab-ai-providers" data-mode={defaultAgentId}>
+        <button onClick={() => onDefaultAgentIdChange('gemini')}>pick-gemini</button>
       </div>
     )
   }
@@ -141,7 +141,7 @@ afterEach(() => {
   queryClient.clear()
 })
 
-describe('UserSettingsDialog default terminal mode', () => {
+describe('UserSettingsDialog default agent', () => {
   it('seeds from the stored setting once open, keeps a local pick until new data', async () => {
     const { rerender } = renderDialog({ open: true, initialTab: 'ai-providers' })
     expect(mode()).toBe('claude-code')
@@ -153,7 +153,7 @@ describe('UserSettingsDialog default terminal mode', () => {
     await flush()
     expect(mode()).toBe('gemini')
     expect(mutations).toEqual([
-      { path: 'settings.set', input: { key: 'default_terminal_mode', value: 'gemini' } }
+      { path: 'settings.set', input: { key: 'default_agent_id', value: 'gemini' } }
     ])
 
     // Close + reopen: stored value (still 'codex' in this fake) re-seeds on open.

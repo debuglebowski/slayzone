@@ -28,7 +28,8 @@ const LATEST = migrations[migrations.length - 1].version
  * Adding to this list is a statement that a rename/retirement is intended — say why.
  */
 const SUCCESSOR: Record<string, string> = {
-  runners: 'computers' // v163: runner → computer rename
+  runners: 'computers', // v163: runner → computer rename
+  terminal_modes: 'agents' // v192: "terminal mode" → "agent" rename
 }
 
 /** Columns a synthesized value cannot satisfy (CHECK on an enum): fixed by hand. */

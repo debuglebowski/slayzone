@@ -271,7 +271,9 @@ export const LAUNCHER_NODE_ENV = 'SLAYZONE_LAUNCHER_NODE_ENV'
  */
 export function overrideNodeEnv(
   env: NodeJS.ProcessEnv,
-  value: 'development' | 'production' | 'test'
+  // What `NODE_ENV` may hold under the consumer's typings: `string` for Node, the
+  // 'development' | 'production' | 'test' union where Expo/React Native narrow it.
+  value: NonNullable<NodeJS.ProcessEnv['NODE_ENV']>
 ): void {
   if (env.NODE_ENV === value) return
   if (env[LAUNCHER_NODE_ENV] === undefined) env[LAUNCHER_NODE_ENV] = env.NODE_ENV ?? ''

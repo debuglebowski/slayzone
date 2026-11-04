@@ -73,7 +73,7 @@ const ptyOps = {
     livePtys.delete(sid)
     return true
   },
-  terminalModesList: async () => MODES,
+  agentsList: async () => MODES,
   ptyExists: (sid: string) => livePtys.has(sid),
   ptyGetState: (sid: string) => livePtys.get(sid) ?? null,
   sessionGetState: (sid: string) => livePtys.get(sid) ?? liveChats.get(sid) ?? null,
@@ -152,7 +152,7 @@ function seedTask(
   const mode = extra.mode ?? 'claude-code'
   h.db
     .prepare(
-      `INSERT INTO tasks (id, project_id, title, status, priority, "order", terminal_mode,
+      `INSERT INTO tasks (id, project_id, title, status, priority, "order", agent_id,
          provider_config, worktree_path, base_dir, repo_name)
        VALUES (?, ?, 'T', 'inbox', 3, 0, ?, ?, ?, ?, ?)`
     )
@@ -354,7 +354,7 @@ describe('task.switchMode', () => {
 
     const updated = await caller.switchMode({ taskId, mode: 'codex' })
 
-    expect(updated.terminal_mode).toBe('codex')
+    expect(updated.agent_id).toBe('codex')
     expect(killed).toEqual([`pty:${taskId}:${taskId}`])
     // Flags survive (deep merge); the conversation is gone.
     expect((await providerConfig(taskId))['claude-code']).toMatchObject({
@@ -374,7 +374,7 @@ describe('task.switchMode', () => {
   test('same mode: no-op, nothing stopped', async () => {
     const taskId = seedTask(seedProject('/p'))
     const r = await caller.switchMode({ taskId, mode: 'claude-code' })
-    expect(r.terminal_mode).toBe('claude-code')
+    expect(r.agent_id).toBe('claude-code')
     expect(killed).toEqual([])
   })
 

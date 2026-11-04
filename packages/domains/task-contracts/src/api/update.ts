@@ -18,7 +18,7 @@ export const updateTaskInputSchema = z
     projectId: z.string().optional(),
 
     // Terminal config
-    terminalMode: z.string().optional(),
+    agentId: z.string().optional(),
     providerConfig: z.unknown().optional(),
     terminalShell: z.string().nullable().optional(),
 

@@ -17,7 +17,7 @@ export interface TaskRowData {
   status: string
   priority: number
   dueDate: string | null
-  terminalMode: string
+  agentId: string
   providerConfig: ProviderConfig
   isTemporary: boolean
   repoName: string | null
@@ -45,7 +45,7 @@ export interface TaskRowData {
 const INSERT_SQL = `
   INSERT INTO tasks (
     id, project_id, parent_id, title, description, description_format, assignee,
-    status, priority, due_date, terminal_mode, provider_config,
+    status, priority, due_date, agent_id, provider_config,
     claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
     is_temporary, repo_name,
     dangerously_skip_permissions, panel_visibility, panel_sizes, browser_tabs, web_panel_urls,
@@ -76,7 +76,7 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
     row.status,
     row.priority,
     row.dueDate,
-    row.terminalMode,
+    row.agentId,
     JSON.stringify(row.providerConfig),
     row.providerConfig['claude-code']?.flags ?? '',
     row.providerConfig['codex']?.flags ?? '',
@@ -112,7 +112,7 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
   // The main tab row, marked `new`: an agent that has never run. In the `auto`
   // startup mode that is what makes a new task start when opened, while an older
   // task (whose row is created lazily on open, as `stopped`) waits for Start.
-  await ensureMainTab(db, row.id, row.terminalMode, 'new')
+  await ensureMainTab(db, row.id, row.agentId, 'new')
 
   const fetched = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
     row.id

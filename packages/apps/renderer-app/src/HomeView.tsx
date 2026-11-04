@@ -48,7 +48,7 @@ import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/client'
 import { useTRPCClient, getClientForHub } from './trpc'
 import { TerminalStatusButton } from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
 import { getDefaultStatus, defaultProjectRoot } from '@slayzone/projects-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
@@ -537,12 +537,12 @@ export function HomeView({
     { enableOnFormTags: true, enabled: !isRecording }
   )
 
-  // Default the agent mode from the user's `default_terminal_mode` setting until
+  // Default the agent mode from the user's `default_agent_id` setting until
   // they pick one explicitly (mirrors the Electron App.tsx bootstrap).
   const agentMode = globalAgentPanelState.mode ?? 'claude-code'
   useEffect(() => {
     if (globalAgentPanelState.mode) return
-    void trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then((m) => {
+    void trpcClient.settings.get.query({ key: 'default_agent_id' }).then((m) => {
       if (m) setGlobalAgentPanelState({ mode: m })
     })
   }, [globalAgentPanelState.mode, setGlobalAgentPanelState, trpcClient])
@@ -875,7 +875,7 @@ export function HomeView({
               width={globalAgentPanelState.panelWidth}
               sessionId={agentSessionId}
               cwd={currentProjectPath}
-              mode={agentMode as TerminalMode}
+              mode={agentMode as AgentId}
               isActive={globalAgentPanelState.isOpen}
               isResizing={isSidePanelResizing}
               onNewSession={handleAgentNewSession}

@@ -15,7 +15,7 @@ import { getProviderFlags } from '@slayzone/task-contracts/types'
 import type { DetectedRepo, Project } from '@slayzone/projects-contracts'
 import { taskProjectRoot } from '@slayzone/projects-contracts/placements'
 import { resolveRepoPath } from '@slayzone/projects-contracts/resolve-repo'
-import type { ExecutionContext, TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
+import type { ExecutionContext, AgentId, AgentDefinition } from '@slayzone/terminal-contracts'
 
 /**
  * Renderer-side conversation id read. Reads the server-computed
@@ -36,7 +36,7 @@ export function readCurrentConversationId(
 
 /** What the task's MAIN terminal spawns with, apart from its cwd. */
 export interface MainTerminalProps {
-  mode: TerminalMode
+  mode: AgentId
   conversationId: string | undefined
   existingConversationId: string | undefined
   /** `currentConversationByMode` is set only by parseAndColorTasks; false = the
@@ -55,17 +55,17 @@ export interface MainTerminalProps {
 export function mainTerminalProps(
   task: Task,
   project: Pick<Project, 'execution_context'> | null | undefined,
-  modes: readonly Pick<TerminalModeInfo, 'id' | 'initialCommand'>[]
+  modes: readonly Pick<AgentDefinition, 'id' | 'initialCommand'>[]
 ): MainTerminalProps {
-  const conversationId = readCurrentConversationId(task, task.terminal_mode) || undefined
+  const conversationId = readCurrentConversationId(task, task.agent_id) || undefined
   return {
-    mode: task.terminal_mode,
+    mode: task.agent_id,
     conversationId,
     existingConversationId: conversationId,
     conversationHydrated: task.currentConversationByMode !== undefined,
     supportsSessionId:
-      modes.find((m) => m.id === task.terminal_mode)?.initialCommand?.includes('{id}') ?? false,
-    providerFlags: getProviderFlags(task.provider_config, task.terminal_mode),
+      modes.find((m) => m.id === task.agent_id)?.initialCommand?.includes('{id}') ?? false,
+    providerFlags: getProviderFlags(task.provider_config, task.agent_id),
     executionContext: project?.execution_context
   }
 }

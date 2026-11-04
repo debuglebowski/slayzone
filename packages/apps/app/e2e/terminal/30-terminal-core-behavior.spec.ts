@@ -10,7 +10,7 @@ import {
   openTaskTerminal,
   readFullBuffer,
   runCommand,
-  switchTerminalMode,
+  switchAgent,
   waitForBufferContains,
   waitForNoPtySession,
   waitForPtySession,
@@ -41,7 +41,7 @@ test.describe('Terminal buffer restore', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -60,9 +60,7 @@ test.describe('Terminal buffer restore', () => {
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
     await mainWindow.getByText('Buffer restore task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible()
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible()
 
     await waitForPtySession(mainWindow, sessionId)
     const restoredBuffer = await readFullBuffer(mainWindow, sessionId)
@@ -93,7 +91,7 @@ test.describe('Terminal state transitions', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -133,7 +131,7 @@ test.describe('Terminal state transitions', () => {
 
 // ── Mode switch teardown ────────────────────────────────────────────────────
 
-test.describe('Terminal mode switch teardown', () => {
+test.describe('Agent switch teardown', () => {
   let projectAbbrev: string
   let taskId: string
 
@@ -154,7 +152,7 @@ test.describe('Terminal mode switch teardown', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     // AI-mode terminals are idle-gated (TerminalStarter): after the switch to
@@ -188,19 +186,19 @@ test.describe('Terminal mode switch teardown', () => {
     await runCommand(mainWindow, sessionId, `echo ${marker}`)
     await waitForBufferContains(mainWindow, sessionId, marker)
 
-    await switchTerminalMode(mainWindow, 'codex')
+    await switchAgent(mainWindow, 'codex')
 
     const task = await mainWindow.evaluate(
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    expect(task?.terminal_mode).toBe('codex')
+    expect(task?.agent_id).toBe('codex')
 
     await waitForPtySession(mainWindow, sessionId)
     const postSwitchBuffer = await readFullBuffer(mainWindow, sessionId)
     expect(postSwitchBuffer).not.toContain(marker)
 
-    await switchTerminalMode(mainWindow, 'terminal')
+    await switchAgent(mainWindow, 'terminal')
     await waitForPtySession(mainWindow, sessionId)
   })
 })
@@ -224,7 +222,7 @@ test.describe('Terminal tab rename persistence', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -314,7 +312,7 @@ test.describe('Terminal clear buffer', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -393,7 +391,7 @@ test.describe('Terminal restart shortcut', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -456,7 +454,7 @@ test.describe('Trailing PTY output on exit', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()

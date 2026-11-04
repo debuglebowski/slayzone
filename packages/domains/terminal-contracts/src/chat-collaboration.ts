@@ -9,7 +9,7 @@
  *
  * Codex is currently the only provider with a collaboration-mode lever
  * (`turn/start.collaborationMode`); the dropdown is hidden for other modes.
- * Stored in `provider_config.<terminalMode>.chatCollaboration`.
+ * Stored in `provider_config.<agentId>.chatCollaboration`.
  *
  * @module shared/chat-collaboration
  */

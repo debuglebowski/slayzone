@@ -7,7 +7,7 @@ interface TemplateRow extends Record<string, unknown> {
   project_id: string
   name: string
   description: string | null
-  terminal_mode: string | null
+  agent_id: string | null
   default_status: string | null
   default_priority: number | null
   is_default: boolean | number
@@ -68,7 +68,7 @@ export function templatesCommand(): Command {
       const nameW = 20
       const statusW = 12
       console.log(
-        `${'ID'.padEnd(idW)}  ${'NAME'.padEnd(nameW)}  DEF  ${'STATUS'.padEnd(statusW)}  PRI  MODE`
+        `${'ID'.padEnd(idW)}  ${'NAME'.padEnd(nameW)}  DEF  ${'STATUS'.padEnd(statusW)}  PRI  AGENT`
       )
       console.log(
         `${'-'.repeat(idW)}  ${'-'.repeat(nameW)}  ---  ${'-'.repeat(statusW)}  ---  ${'-'.repeat(14)}`
@@ -79,8 +79,8 @@ export function templatesCommand(): Command {
         const def = t.is_default ? ' * ' : '   '
         const status = (t.default_status ?? '-').slice(0, statusW).padEnd(statusW)
         const pri = t.default_priority != null ? String(t.default_priority).padStart(3) : '  -'
-        const mode = t.terminal_mode ?? '-'
-        console.log(`${id}  ${name}  ${def}  ${status}  ${pri}  ${mode}`)
+        const agent = t.agent_id ?? '-'
+        console.log(`${id}  ${name}  ${def}  ${status}  ${pri}  ${agent}`)
       }
     })
 
@@ -104,7 +104,7 @@ export function templatesCommand(): Command {
       console.log(`Name:        ${t.name}`)
       console.log(`Default:     ${t.is_default ? 'yes' : 'no'}`)
       if (t.description) console.log(`Description: ${t.description}`)
-      if (t.terminal_mode) console.log(`Mode:        ${t.terminal_mode}`)
+      if (t.agent_id) console.log(`Agent:       ${t.agent_id}`)
       if (t.default_status) console.log(`Status:      ${t.default_status}`)
       if (t.default_priority != null) console.log(`Priority:    ${t.default_priority}`)
       console.log(`Created:     ${t.created_at}`)
@@ -137,7 +137,7 @@ export function templatesCommand(): Command {
         project,
         name,
         description: opts.description,
-        terminalMode: agentOpt(opts),
+        agentId: agentOpt(opts),
         status: opts.status,
         priority: opts.priority ? parseInt(opts.priority, 10) : undefined,
         isDefault: opts.default === true
@@ -184,7 +184,7 @@ export function templatesCommand(): Command {
       if (opts.name !== undefined) body.name = opts.name
       if (opts.description !== undefined) body.description = opts.description || null
       const agent = agentOpt(opts)
-      if (agent !== undefined) body.terminalMode = agent
+      if (agent !== undefined) body.agentId = agent
       if (opts.status !== undefined) body.status = opts.status
       if (opts.priority !== undefined) body.priority = parseInt(opts.priority, 10)
       if (opts.default !== undefined) body.isDefault = opts.default

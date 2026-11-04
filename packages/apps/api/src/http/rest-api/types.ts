@@ -2,8 +2,8 @@ import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type {
+  AgentId,
   BufferSinceResult,
-  TerminalMode,
   TerminalState,
   PtyInfo
 } from '@slayzone/terminal-contracts'
@@ -49,7 +49,7 @@ export interface HubUserListRow {
  * diagnostics but skips state transitions.
  */
 export interface TerminalStateBridge {
-  findSession: (taskId: string, mode: TerminalMode) => string | null
+  findSession: (taskId: string, mode: AgentId) => string | null
   transition: (sessionId: string, state: TerminalState, hookEvent: string) => boolean
   /** Refresh the silence-timer clock without changing state. Called for hook
    *  events that prove activity but don't transition (PostToolUse, etc.). */

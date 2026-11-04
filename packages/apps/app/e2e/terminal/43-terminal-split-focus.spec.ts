@@ -18,7 +18,7 @@ test.describe('Terminal split focus', () => {
     const t = await s.createTask({ projectId: p.id, title: 'SplitTask', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()

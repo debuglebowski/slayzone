@@ -16,7 +16,7 @@ const task = (id: string, title: string, needsAttention = false): BoardTask =>
     project_id: 'p1',
     parent_id: null,
     needs_attention: needsAttention,
-    terminal_mode: 'claude-code'
+    agent_id: 'claude-code'
   }) as unknown as BoardTask
 
 const board = (...tasks: BoardTask[]): BoardData =>

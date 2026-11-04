@@ -37,7 +37,7 @@ test.describe('Terminal panel toggle continuity', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()

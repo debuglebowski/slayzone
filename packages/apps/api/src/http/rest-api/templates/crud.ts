@@ -7,9 +7,10 @@ import {
   updateTemplate
 } from '@slayzone/task/server'
 import type { UpdateTaskTemplateInput } from '@slayzone/task-contracts'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix, resolveProjectRef } from '../resolve'
+import { resolveAgentIdAlias } from '../../agent-id-alias'
 
 /**
  * Task-template CRUD. Mirrors `slay templates` (cli/src/commands/templates.ts),
@@ -18,9 +19,12 @@ import { isResolveFailure, queryString, resolveByIdPrefix, resolveProjectRef } f
  *
  * - GET    /api/templates?project=<id|name>
  * - GET    /api/templates/:id          (id prefix supported)
- * - POST   /api/templates   { project, name, description?, terminalMode?, status?, priority?, isDefault? }
+ * - POST   /api/templates   { project, name, description?, agentId?, status?, priority?, isDefault? }
  * - PATCH  /api/templates/:id  (same optional fields as POST minus project)
  * - DELETE /api/templates/:id
+ *
+ * `agentId` also accepts its deprecated old name `terminalMode`
+ * (`resolveAgentIdAlias`; both with different values = 400).
  */
 
 /** CLI parity: priority must be an integer 1-5. Writes the 400 itself. */
@@ -73,14 +77,19 @@ export function registerTemplatesCrudRoutes(app: Express, deps: RestApiDeps): vo
   })
 
   app.post('/api/templates', async (req, res) => {
-    const body = (req.body ?? {}) as {
+    const body = { ...((req.body ?? {}) as Record<string, unknown>) } as {
       project?: unknown
       name?: unknown
       description?: unknown
-      terminalMode?: unknown
+      agentId?: unknown
       status?: unknown
       priority?: unknown
       isDefault?: unknown
+    }
+    const alias = resolveAgentIdAlias(body)
+    if (!alias.ok) {
+      res.status(400).json({ ok: false, error: alias.error })
+      return
     }
     if (typeof body.project !== 'string' || !body.project) {
       res.status(400).json({ ok: false, error: 'project required' })
@@ -102,8 +111,7 @@ export function registerTemplatesCrudRoutes(app: Express, deps: RestApiDeps): vo
         projectId: resolved.row.id,
         name: body.name,
         description: typeof body.description === 'string' ? body.description : null,
-        terminalMode:
-          typeof body.terminalMode === 'string' ? (body.terminalMode as TerminalMode) : null,
+        agentId: typeof body.agentId === 'string' ? (body.agentId as AgentId) : null,
         defaultStatus: typeof body.status === 'string' ? body.status : null,
         defaultPriority: priority ?? null,
         isDefault: body.isDefault === true
@@ -116,18 +124,23 @@ export function registerTemplatesCrudRoutes(app: Express, deps: RestApiDeps): vo
   })
 
   app.patch('/api/templates/:id', async (req, res) => {
-    const body = (req.body ?? {}) as {
+    const body = { ...((req.body ?? {}) as Record<string, unknown>) } as {
       name?: unknown
       description?: unknown
-      terminalMode?: unknown
+      agentId?: unknown
       status?: unknown
       priority?: unknown
       isDefault?: unknown
     }
+    const alias = resolveAgentIdAlias(body)
+    if (!alias.ok) {
+      res.status(400).json({ ok: false, error: alias.error })
+      return
+    }
     if (
       body.name === undefined &&
       body.description === undefined &&
-      body.terminalMode === undefined &&
+      body.agentId === undefined &&
       body.status === undefined &&
       body.priority === undefined &&
       body.isDefault === undefined
@@ -156,8 +169,8 @@ export function registerTemplatesCrudRoutes(app: Express, deps: RestApiDeps): vo
       if (body.description !== undefined) {
         input.description = typeof body.description === 'string' ? body.description : null
       }
-      if (typeof body.terminalMode === 'string') {
-        input.terminalMode = body.terminalMode as TerminalMode
+      if (typeof body.agentId === 'string') {
+        input.agentId = body.agentId as AgentId
       }
       if (typeof body.status === 'string') input.defaultStatus = body.status
       if (priority !== undefined) input.defaultPriority = priority

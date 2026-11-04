@@ -1,12 +1,7 @@
 import { useEffect } from 'react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
-import {
-  useTerminalModes,
-  getVisibleModes,
-  getModeLabel,
-  groupTerminalModes
-} from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import { useAgents, getVisibleModes, getModeLabel, groupAgents } from '@slayzone/terminal'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { useTRPCClient } from '../trpc'
 import {
   Button,
@@ -34,11 +29,11 @@ interface GlobalAgentSidePanelProps {
   width: number
   sessionId: string
   cwd: string
-  mode: TerminalMode
+  mode: AgentId
   isActive: boolean
   isResizing?: boolean
   onNewSession?: () => void
-  onModeChange?: (mode: TerminalMode) => void
+  onModeChange?: (mode: AgentId) => void
   floatingEnabled?: boolean
   onToggleFloating?: () => void
   floatingState?: FloatingStateKind
@@ -62,9 +57,9 @@ export function GlobalAgentSidePanel({
   onReattach
 }: GlobalAgentSidePanelProps) {
   const trpcClient = useTRPCClient()
-  const { modes } = useTerminalModes()
+  const { modes } = useAgents()
   const visibleModes = getVisibleModes(modes, mode)
-  const { builtin, custom } = groupTerminalModes(visibleModes)
+  const { builtin, custom } = groupAgents(visibleModes)
 
   // Multi-window: claim PTY routing when this window becomes active or regains focus.
   // Without this, secondary window mounts GlobalAgentSidePanel but PTY output keeps flowing to
@@ -93,7 +88,7 @@ export function GlobalAgentSidePanel({
             <Select
               value={mode}
               onValueChange={(value) => {
-                if (modes.some((m) => m.id === value)) onModeChange(value as TerminalMode)
+                if (modes.some((m) => m.id === value)) onModeChange(value as AgentId)
               }}
             >
               <SelectTrigger

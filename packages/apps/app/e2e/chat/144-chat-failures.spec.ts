@@ -45,19 +45,30 @@ test.describe('Chat failures', () => {
     await expect(t.panel.getByText('panic: fake-claude crashed on purpose')).toBeVisible()
   })
 
-  test('the watchdog still ends a turn that has truly stalled', async ({ chat }) => {
+  test('the watchdog ends a turn that has truly stalled, then restarts the agent', async ({
+    chat
+  }) => {
     await chat.setWatchdogTimings(FAST_WATCHDOG)
     const t = await chat.openTask({
       title: 'Chat stall',
       scenario: {
-        processes: [{ turns: [[step.emit(ev.init(), ev.text('then silence')), step.hang()]] }]
+        processes: [
+          { turns: [[step.emit(ev.init(), ev.text('then silence')), step.hang()]] },
+          // The restart: resumes the conversation and waits for the user.
+          { turns: [] }
+        ]
       }
     })
     await t.send('go quiet')
     await expect(t.panel.getByText('then silence')).toBeVisible()
-    // No tool is open, nothing arrives: after the stall bound the agent is stopped.
+    // No tool is open, nothing arrives: after the stall bound the agent is stopped…
     await t.run(0, (r) => r.signals().includes('SIGTERM'), 10_000)
     await expect(t.stopButton).toBeHidden({ timeout: 10_000 })
+    // …and started again on its own, resuming the same conversation.
+    const restarted = await t.run(1, undefined, 10_000)
+    expect(restarted.resumed).toBe(true)
+    await expect(t.panel.getByText(/stopped responding, so it was restarted/)).toBeVisible()
+    await expect(t.composer).toBeEnabled()
   })
 
   test('a long, silent tool is not killed by the watchdog', async ({ chat }) => {

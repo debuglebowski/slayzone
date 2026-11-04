@@ -66,7 +66,7 @@ test.describe('Codex chat — real codex app-server', () => {
       projectId: project.id,
       title: 'Codex real CLI',
       status: 'todo',
-      terminalMode: 'codex-chat'
+      agentId: 'codex-chat'
     })
     const tabId = await page.evaluate(async (id) => {
       const tab = await window

@@ -10,7 +10,7 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     description: null,
     status: 'todo',
     priority: 3,
-    terminal_mode: 'claude-code',
+    agent_id: 'claude-code',
     panel_visibility: null,
     browser_tabs: null,
     is_temporary: false,

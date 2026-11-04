@@ -32,7 +32,7 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
     );
     CREATE TABLE terminal_tabs (id TEXT PRIMARY KEY, task_id TEXT);
     CREATE TABLE chat_attachment_messages (task_id TEXT, message_id TEXT, attachments TEXT, PRIMARY KEY(task_id, message_id));
-    CREATE TABLE terminal_modes (
+    CREATE TABLE agents (
       id TEXT PRIMARY KEY,
       default_flags TEXT
     );

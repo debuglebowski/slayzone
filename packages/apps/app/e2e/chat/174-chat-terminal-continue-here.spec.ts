@@ -26,10 +26,10 @@ async function fakeTerminalAgent(
       run: (sql: string, params?: unknown[]) => Promise<unknown>
     }
     const prev = await db.get(
-      `SELECT initial_command AS i, resume_command AS r FROM terminal_modes WHERE id = 'claude-code'`
+      `SELECT initial_command AS i, resume_command AS r FROM agents WHERE id = 'claude-code'`
     )
     await db.run(
-      `UPDATE terminal_modes SET initial_command = ?, resume_command = ? WHERE id = 'claude-code'`,
+      `UPDATE agents SET initial_command = ?, resume_command = ? WHERE id = 'claude-code'`,
       [`${bin} --session-id {id} {flags}`, `${bin} --resume {id} {flags}`]
     )
     return prev
@@ -40,7 +40,7 @@ async function fakeTerminalAgent(
         run: (sql: string, params?: unknown[]) => Promise<unknown>
       }
       await db.run(
-        `UPDATE terminal_modes SET initial_command = ?, resume_command = ? WHERE id = 'claude-code'`,
+        `UPDATE agents SET initial_command = ?, resume_command = ? WHERE id = 'claude-code'`,
         [b?.i ?? null, b?.r ?? null]
       )
     }, before)

@@ -116,7 +116,7 @@ test.describe('macOS Option as Meta (issue #103)', () => {
       projectId: p.id,
       title: 'Option meta task',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     taskId = t.id
     await setOptionAsMeta(mainWindow, '')

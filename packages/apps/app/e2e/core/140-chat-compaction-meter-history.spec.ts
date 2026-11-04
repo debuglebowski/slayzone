@@ -121,9 +121,7 @@ test.describe('Claude chat: compaction, context meter, slash commands, prompt hi
     taskId = task.id
     await mainWindow.evaluate(
       (id) =>
-        window
-          .getTrpcVanillaClient()
-          .task.update.mutate({ id, terminalMode: 'claude-chat' } as never),
+        window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'claude-chat' } as never),
       taskId
     )
     const tabId = await mainWindow.evaluate(async (id) => {

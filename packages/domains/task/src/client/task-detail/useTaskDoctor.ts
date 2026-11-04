@@ -11,7 +11,7 @@ export interface UseTaskDoctorResult {
   handleDoctor: () => Promise<void>
 }
 
-/** Doctor dialog: validate the CLI binary and dependencies for the task's terminal mode. */
+/** Doctor dialog: validate the CLI binary and dependencies for the task's agent. */
 export function useTaskDoctor(task: Task | null): UseTaskDoctorResult {
   const trpcClient = useTRPCClient()
   const [doctorDialogOpen, setDoctorDialogOpen] = useState(false)
@@ -25,7 +25,7 @@ export function useTaskDoctor(task: Task | null): UseTaskDoctorResult {
     setDoctorDialogOpen(true)
     try {
       const results = await trpcClient.pty.validate.query({
-        mode: task.terminal_mode,
+        mode: task.agent_id,
         taskId: task.id
       })
       setDoctorResults(results)

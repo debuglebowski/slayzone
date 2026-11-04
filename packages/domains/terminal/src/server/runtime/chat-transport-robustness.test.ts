@@ -112,6 +112,8 @@ interface Harness {
   rows: Array<{ seq: number; event: AgentEvent }>
   clashes: number
   exits: number
+  /** Each spawn's CLI args, in spawn order. */
+  spawnArgs: string[][]
 }
 
 function harness(
@@ -119,16 +121,18 @@ function harness(
     exitOnKill?: boolean
     timings?: { startingBoundMs: number; runningStallMs: number; killGraceMs: number }
     alive?: () => boolean
+    suspendClock?: { lastResumeAt(): number }
   } = {}
 ): Harness {
   mgr.__resetForTests()
-  const h: Harness = { fakes: [], broadcasts: [], rows: [], clashes: 0, exits: 0 }
+  const h: Harness = { fakes: [], broadcasts: [], rows: [], clashes: 0, exits: 0, spawnArgs: [] }
   const seen = new Set<number>()
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
-    spawn: () => {
+    spawn: (_binary, args) => {
       const f = fake({ exitOnKill: opts.exitOnKill })
       h.fakes.push(f)
+      h.spawnArgs.push([...args])
       setImmediate(() => f.emitter.emit('spawn'))
       return f.child
     },
@@ -153,7 +157,8 @@ function harness(
         h.rows.filter((r) => r.seq > after && r.seq < before).sort((a, b) => a.seq - b.seq)
     },
     ...(opts.alive ? { isProcessAlive: opts.alive } : {}),
-    ...(opts.timings ? { watchdogTimings: opts.timings } : {})
+    ...(opts.timings ? { watchdogTimings: opts.timings } : {}),
+    ...(opts.suspendClock ? { suspendClock: opts.suspendClock } : {})
   })
   return h
 }
@@ -422,6 +427,74 @@ test('a silent tool call within its own timeout is not killed; a silent turn wit
   await wait(400)
   expect(f.kills[0]).toBe('SIGTERM')
   expect(saved(h).some((e) => e.kind === 'notice' && e.code === 'watchdog-killed')).toBe(true)
+})
+
+test('a turn frozen by host sleep is not judged on wake: it gets a fresh silence window', async () => {
+  let resumeAt = 0
+  const h = harness({
+    timings: { startingBoundMs: 5000, runningStallMs: 300, killGraceMs: 50 },
+    alive: () => true,
+    suspendClock: { lastResumeAt: () => resumeAt }
+  })
+  await start()
+  const f = h.fakes[0]
+  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'build' }] })
+  await wait(200)
+  // The host slept through most of the window and just woke: the silence before
+  // now was never observed, so it is not the agent's.
+  resumeAt = Date.now()
+  await wait(250)
+  expect(f.kills).toEqual([])
+  expect(mgr.getSessionTerminalState(OPTS.tabId)).toBe('running')
+  // Silent for a whole window this process WAS awake for: stuck.
+  await wait(300)
+  expect(f.kills[0]).toBe('SIGTERM')
+})
+
+test('a watchdog-killed agent restarts by itself, resuming its conversation', async () => {
+  const h = harness({
+    exitOnKill: true,
+    timings: { startingBoundMs: 5000, runningStallMs: 150, killGraceMs: 50 },
+    alive: () => true
+  })
+  await start()
+  // The CLI confirms the conversation it was started with.
+  const sessionId = h.spawnArgs[0][h.spawnArgs[0].indexOf('--session-id') + 1]
+  line(h.fakes[0], init(sessionId))
+  await wait(30)
+  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'build' }] })
+  await wait(450)
+  expect(h.fakes[0].kills[0]).toBe('SIGTERM')
+  expect(h.fakes).toHaveLength(2)
+  const resumeAt = h.spawnArgs[1].indexOf('--resume')
+  expect(resumeAt).toBeGreaterThan(-1)
+  expect(h.spawnArgs[1][resumeAt + 1]).toBe(sessionId)
+  const notice = saved(h).find((e) => e.kind === 'notice' && e.code === 'watchdog-killed')
+  expect(notice && 'text' in notice ? notice.text : '').toMatch(/restarted/)
+  expect(mgr.getSessionTerminalState(OPTS.tabId)).toBe('idle')
+})
+
+test('an agent that keeps stalling is restarted at most twice in a row, then stays stopped', async () => {
+  const h = harness({
+    exitOnKill: true,
+    timings: { startingBoundMs: 5000, runningStallMs: 150, killGraceMs: 50 },
+    alive: () => true
+  })
+  await start()
+  for (let i = 0; i < 3; i++) {
+    line(h.fakes[i], init('s1'))
+    await wait(30)
+    mgr.dispatchUserMessage(OPTS.tabId, {
+      id: `m${i}`,
+      content: [{ type: 'text', text: 'build' }]
+    })
+    await wait(450)
+  }
+  expect(h.fakes).toHaveLength(3)
+  expect(mgr.getSessionTerminalState(OPTS.tabId)).toBe('dead')
+  const notices = saved(h).filter((e) => e.kind === 'notice' && e.code === 'watchdog-killed')
+  expect(notices).toHaveLength(3)
+  expect(notices[2] && 'text' in notices[2] ? notices[2].text : '').not.toMatch(/restarted/)
 })
 
 test('routed process that never confirms its kill still reaches dead (no endless loop)', async () => {

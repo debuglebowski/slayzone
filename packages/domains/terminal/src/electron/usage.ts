@@ -544,7 +544,7 @@ function fetchProvider(
 // ── Handler ──────────────────────────────────────────────────────────
 
 /**
- * The provider rows this needs from `terminal_modes`, resolved by the CALLER.
+ * The provider rows this needs from `agents`, resolved by the CALLER.
  *
  * Split out because usage is genuinely two things wedged together: an Electron
  * `net.fetch` (which can only run on the host) and a database read (which can only

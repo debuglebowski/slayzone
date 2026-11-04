@@ -193,13 +193,13 @@ export function chatCapabilitiesForMode(mode: string): ChatCapabilities {
  */
 const HANDOFF_PARTNER: Record<string, string> = { 'claude-chat': 'claude-code' }
 
-export function terminalModeForChat(chatMode: string): string | null {
+export function terminalAgentIdForChat(chatMode: string): string | null {
   return chatCapabilitiesForMode(chatMode).handoff ? (HANDOFF_PARTNER[chatMode] ?? null) : null
 }
 
-export function chatModeForTerminal(terminalMode: string): string | null {
+export function chatAgentIdForTerminal(terminalAgentId: string): string | null {
   for (const [chat, terminal] of Object.entries(HANDOFF_PARTNER)) {
-    if (terminal === terminalMode && chatCapabilitiesForMode(chat).handoff) return chat
+    if (terminal === terminalAgentId && chatCapabilitiesForMode(chat).handoff) return chat
   }
   return null
 }

@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { updateTaskOp } from '@slayzone/task/server'
-import { isChatSupported, terminalModeForChat } from '@slayzone/terminal-contracts'
+import { isChatSupported, terminalAgentIdForChat } from '@slayzone/terminal-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { chatHandler, chatOpts, ChatRouteError } from './_chat'
@@ -153,22 +153,24 @@ export function registerChatManageRoutes(app: Express, deps: RestApiDeps): void 
     '/api/chat/:id/handoff',
     chatHandler(deps, async ({ chat, target, res }) => {
       if (!target.isMain) throw new ChatRouteError(409, 'Only the main chat tab can hand off')
-      const terminalMode = isChatSupported(target.mode) ? terminalModeForChat(target.mode) : null
-      if (!terminalMode)
+      const terminalAgentId = isChatSupported(target.mode)
+        ? terminalAgentIdForChat(target.mode)
+        : null
+      if (!terminalAgentId)
         throw new ChatRouteError(409, `${target.mode} has no terminal partner to hand off to`)
       const { conversationId } = await chat
         .deps()
         .ops.continueInTerminal(await chatOpts(chat, target))
       const updated = await updateTaskOp(
         deps.db,
-        { id: target.taskId, terminalMode },
+        { id: target.taskId, agentId: terminalAgentId },
         { ipcMain: deps.taskBus ?? NOOP_TASK_BUS, onMutation: deps.notifyRenderer }
       )
       if (!updated) throw new ChatRouteError(404, `Task not found: ${target.taskId}`)
       const started = await chat.startMain(target.taskId)
       res.json({
         ok: true,
-        data: { conversationId, mode: terminalMode, sessionId: started.sessionId }
+        data: { conversationId, mode: terminalAgentId, sessionId: started.sessionId }
       })
     })
   )

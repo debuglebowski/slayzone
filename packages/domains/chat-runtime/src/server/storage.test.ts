@@ -154,3 +154,46 @@ test('an offline deletion creates a tombstone before history arrives and fences 
   next.createConversation({ ...identity, id: 'other', taskId: 'another-task', tabId: 'other' })
   expect(next.conversation('other')).toMatchObject({ state: 'active' })
 })
+
+test('task state version moves on every hub-facing write, never on local content', () => {
+  const { store } = open()
+  store.createConversation(identity)
+  const version = () => store.stateVersion(identity.taskId)
+  expect(version()).toBe(0)
+  const put = (kind: Parameters<typeof store.putRecord>[2]['kind'], id: string) =>
+    store.putRecord(identity.id, 1, { kind, id, value: { v: Math.random() }, at: 1 })
+  // Conversation content and the metadata pipeline's own bookkeeping stay local.
+  for (const kind of ['draft', 'prompt', 'workspace', 'attachment', 'timeline'] as const)
+    put(kind, 'local')
+  put('settings', 'metadata-counter')
+  put('settings', 'metadata:operation')
+  store.append(identity.id, 1, event)
+  expect(version()).toBe(0)
+  // Anything else counts, including writes that send no metadata update
+  // (bootstrap provider and session records) and kinds added later.
+  let previous = version()
+  for (const [kind, id] of [
+    ['settings', 'provider'],
+    ['settings', 'session:abc'],
+    ['settings', 'some-future-setting'],
+    ['queue', 'item'],
+    ['thread', 'tab-a']
+  ] as const) {
+    put(kind, id)
+    expect(version()).toBeGreaterThan(previous)
+    previous = version()
+  }
+  store.removeRecord(identity.id, 1, 'queue', 'item')
+  expect(version()).toBeGreaterThan(previous)
+  previous = version()
+  store.compose((db) =>
+    db.prepare("INSERT INTO provider_configs VALUES(?,'claude-chat',1,'{}')").run(identity.taskId)
+  )
+  expect(version()).toBeGreaterThan(previous)
+  // Per task: another task's writes do not move it.
+  previous = version()
+  store.createConversation({ ...identity, id: 'conversation-b', taskId: 'task-b', tabId: 'b' })
+  store.putRecord('conversation-b', 1, { kind: 'settings', id: 'provider', value: {}, at: 1 })
+  expect(version()).toBe(previous)
+  expect(store.stateVersion('task-b')).toBeGreaterThan(0)
+})

@@ -120,7 +120,7 @@ test.describe('Closed menus cost nothing per keystroke', () => {
           projectId: p.id,
           title: `Menu task ${i}`,
           status: 'in_progress',
-          terminalMode: 'terminal'
+          agentId: 'terminal'
         })
         ids.push(t.id)
       }
@@ -152,7 +152,7 @@ test.describe('Closed menus cost nothing per keystroke', () => {
       for (const id of all) st.openTaskInBackground(id)
     }, ids)
     await expect
-      .poll(() => mainWindow.locator('[data-testid="terminal-mode-trigger"]').count(), {
+      .poll(() => mainWindow.locator('[data-testid="agent-trigger"]').count(), {
         timeout: 90_000,
         intervals: [500, 1_000]
       })
@@ -200,7 +200,7 @@ test.describe('Closed menus cost nothing per keystroke', () => {
       projectId: p.id,
       title: 'Menu task 1',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
 

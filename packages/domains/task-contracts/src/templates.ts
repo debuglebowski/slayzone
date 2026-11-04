@@ -1,4 +1,4 @@
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import type { ProviderConfig, PanelVisibility, WebPanelUrls } from './types'
 import type { BrowserTabsState } from './browser-tabs'
 
@@ -7,7 +7,7 @@ export interface TaskTemplate {
   project_id: string
   name: string
   description: string | null
-  terminal_mode: TerminalMode | null
+  agent_id: AgentId | null
   provider_config: ProviderConfig | null
   panel_visibility: PanelVisibility | null
   browser_tabs: BrowserTabsState | null
@@ -25,7 +25,7 @@ export interface CreateTaskTemplateInput {
   projectId: string
   name: string
   description?: string | null
-  terminalMode?: TerminalMode | null
+  agentId?: AgentId | null
   providerConfig?: ProviderConfig | null
   panelVisibility?: PanelVisibility | null
   browserTabs?: BrowserTabsState | null
@@ -40,7 +40,7 @@ export interface UpdateTaskTemplateInput {
   id: string
   name?: string
   description?: string | null
-  terminalMode?: TerminalMode | null
+  agentId?: AgentId | null
   providerConfig?: ProviderConfig | null
   panelVisibility?: PanelVisibility | null
   browserTabs?: BrowserTabsState | null

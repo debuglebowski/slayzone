@@ -166,7 +166,7 @@ async function openAllInBackground(page: Page, ids: string[]): Promise<void> {
     .toBe(ids.length)
   // Every background tab mounts its detail page (hidden) — wait until each has one.
   await expect
-    .poll(() => page.locator('[data-testid="terminal-mode-trigger"]').count(), {
+    .poll(() => page.locator('[data-testid="agent-trigger"]').count(), {
       timeout: 60_000,
       intervals: [500, 1_000]
     })
@@ -192,7 +192,7 @@ test.describe('Tab switch cost does not scale with open tabs', () => {
         projectId: p.id,
         title: `Scaling task ${i}`,
         status: 'in_progress',
-        terminalMode: 'terminal'
+        agentId: 'terminal'
       })
       taskIds.push(t.id)
     }

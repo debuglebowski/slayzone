@@ -1,7 +1,7 @@
 import type { CliProvider, McpTarget, McpServerConfig, ProviderPathMapping } from './types'
 
-/** Maps terminal mode IDs to their corresponding Context Manager provider kind */
-export const TERMINAL_MODE_TO_PROVIDER: Partial<Record<string, CliProvider>> = {
+/** Maps agent IDs to their corresponding Context Manager provider kind */
+export const AGENT_ID_TO_PROVIDER: Partial<Record<string, CliProvider>> = {
   'claude-code': 'claude',
   'claude-chat': 'claude',
   codex: 'codex',
@@ -13,10 +13,10 @@ export const TERMINAL_MODE_TO_PROVIDER: Partial<Record<string, CliProvider>> = {
   copilot: 'copilot'
 }
 
-/** Resolve a terminal mode setting to a provider kind; falls back to 'claude'. */
+/** Resolve an agent id setting to a provider kind; falls back to 'claude'. */
 export function defaultProviderFromMode(mode: string | null | undefined): CliProvider {
   if (mode) {
-    const provider = TERMINAL_MODE_TO_PROVIDER[mode]
+    const provider = AGENT_ID_TO_PROVIDER[mode]
     if (provider) return provider
   }
   return 'claude'

@@ -44,7 +44,7 @@ import type {
 } from '@slayzone/feedback/shared'
 import type { AgentTurnRange } from '@slayzone/agent-turns/shared'
 import type {
-  TerminalMode,
+  AgentId,
   TerminalState,
   PtyInfo,
   SessionInfo,
@@ -54,9 +54,9 @@ import type {
   UsageWindow,
   UsageProviderConfig,
   ValidationResult,
-  TerminalModeInfo,
-  CreateTerminalModeInput,
-  UpdateTerminalModeInput,
+  AgentDefinition,
+  CreateAgentDefinitionInput,
+  UpdateAgentDefinitionInput,
   AgentEvent,
   AgentLifecycleEvent as AgentLifecycleEventPayload,
   SkillInfo,
@@ -324,7 +324,7 @@ export interface PtyCreateOptions {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
-  mode?: TerminalMode
+  mode?: AgentId
   initialPrompt?: string | null
   providerFlags?: string | null
   executionContext?: ExecutionContext | null
@@ -803,7 +803,7 @@ export interface _LegacyElectronAPI {
     onResizeNeeded: (callback: (sessionId: string) => void) => () => void
     onStats: (cb: (stats: Record<string, ProcessStats>) => void) => () => void
     getState: (sessionId: string) => Promise<TerminalState | null>
-    validate: (mode: TerminalMode) => Promise<ValidationResult[]>
+    validate: (mode: AgentId) => Promise<ValidationResult[]>
     setTheme: (theme: {
       foreground: string
       background: string
@@ -1023,11 +1023,11 @@ export interface _LegacyElectronAPI {
      */
     onDrained: (callback: (tabId: string, original: string) => void) => () => void
   }
-  terminalModes: {
-    list: () => Promise<TerminalModeInfo[]>
-    get: (id: string) => Promise<TerminalModeInfo | null>
-    create: (input: CreateTerminalModeInput) => Promise<TerminalModeInfo>
-    update: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
+  agents: {
+    list: () => Promise<AgentDefinition[]>
+    get: (id: string) => Promise<AgentDefinition | null>
+    create: (input: CreateAgentDefinitionInput) => Promise<AgentDefinition>
+    update: (id: string, updates: UpdateAgentDefinitionInput) => Promise<AgentDefinition | null>
     delete: (id: string) => Promise<boolean>
     test: (command: string) => Promise<{ ok: boolean; error?: string; detail?: string }>
     restoreDefaults: () => Promise<void>
@@ -1198,7 +1198,7 @@ export interface _LegacyElectronAPI {
     create: (input: CreateTerminalTabInput) => Promise<TerminalTab>
     update: (input: UpdateTerminalTabInput) => Promise<TerminalTab | null>
     delete: (tabId: string) => Promise<boolean>
-    ensureMain: (taskId: string, mode: TerminalMode) => Promise<TerminalTab>
+    ensureMain: (taskId: string, mode: AgentId) => Promise<TerminalTab>
     split: (tabId: string) => Promise<TerminalTab | null>
     moveToGroup: (tabId: string, targetGroupId: string | null) => Promise<TerminalTab | null>
     onChanged: (cb: (payload: { taskId: string; focusTabId?: string | null }) => void) => () => void

@@ -38,9 +38,9 @@ test.describe('Tag input field responsive overflow', () => {
 
     // Open the task detail
     await mainWindow.getByText('Many tags task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // Dismiss alert dialog if present
     const dialog = mainWindow.getByRole('alertdialog')

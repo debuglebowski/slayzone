@@ -38,7 +38,7 @@ export interface RunCommandActionParams {
 
 /**
  * AI action — run a configured AI provider in headless mode w/ a prompt.
- * `provider` is a terminal-mode id (e.g. 'claude-code'); engine reads that
+ * `provider` is an agent id (e.g. 'claude-code'); engine reads that
  * row's `headless_command` template to build the non-interactive invocation.
  */
 export interface AiActionParams {

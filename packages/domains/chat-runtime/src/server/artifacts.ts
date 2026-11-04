@@ -19,7 +19,7 @@ import {
 } from '@slayzone/task-artifacts/storage'
 import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import { chatAttachmentSchema, chatRouteSchema } from '../shared'
-import type { ChatStorage } from './storage'
+import { bumpTaskStateVersion, type ChatStorage } from './storage'
 import type { createLocalChatData } from './local-data'
 import type { createLocalAttachments } from './attachments'
 
@@ -229,6 +229,18 @@ export function createLocalArtifacts(
     CREATE TRIGGER IF NOT EXISTS chat_folder_owner AFTER INSERT ON artifact_folders BEGIN INSERT INTO artifact_owners VALUES(NEW.id,'folder',computer_chat_artifact_owner()); END;
     CREATE TRIGGER IF NOT EXISTS chat_artifact_owner_delete AFTER DELETE ON task_artifacts BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END;
     CREATE TRIGGER IF NOT EXISTS chat_folder_owner_delete AFTER DELETE ON artifact_folders BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END;
+    ${['INSERT', 'UPDATE', 'DELETE']
+      .map((op) => {
+        const r = op === 'DELETE' ? 'OLD' : 'NEW'
+        return `
+    CREATE TRIGGER IF NOT EXISTS task_artifacts_state_version_${op.toLowerCase()} AFTER ${op} ON task_artifacts
+    BEGIN ${bumpTaskStateVersion(`${r}.task_id`)} END;
+    CREATE TRIGGER IF NOT EXISTS artifact_folders_state_version_${op.toLowerCase()} AFTER ${op} ON artifact_folders
+    BEGIN ${bumpTaskStateVersion(`${r}.task_id`)} END;
+    CREATE TRIGGER IF NOT EXISTS artifact_owners_state_version_${op.toLowerCase()} AFTER ${op} ON artifact_owners
+    BEGIN ${bumpTaskStateVersion(`(SELECT task_id FROM conversations WHERE id=${r}.conversation_id)`)} END;`
+      })
+      .join('')}
    `)
   })
   const blobs = new BlobStore(storage.dir)

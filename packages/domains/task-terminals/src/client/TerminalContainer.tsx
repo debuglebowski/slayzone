@@ -12,7 +12,7 @@ import { usePty } from '@slayzone/terminal'
 import {
   chatCapabilitiesForMode,
   isPromptCaptureMode,
-  type TerminalMode
+  type AgentId
 } from '@slayzone/terminal-contracts'
 import {
   matchesShortcut,
@@ -45,7 +45,7 @@ export interface TerminalContainerHandle {
 interface TerminalContainerProps {
   taskId: string
   cwd: string
-  defaultMode: TerminalMode
+  defaultMode: AgentId
   conversationId?: string | null
   existingConversationId?: string | null
   /** True once the task's conversation id is hydrated (currentConversationByMode

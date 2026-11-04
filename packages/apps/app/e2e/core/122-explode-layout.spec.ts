@@ -68,7 +68,7 @@ test.describe('explode mode layout control', () => {
     for (let i = 0; i < 3; i++) {
       const t = await s.createTask({ projectId: p.id, title: `Explode ${i + 1}`, status: 'todo' })
       await mainWindow.evaluate(
-        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
         t.id
       )
       taskIds.push(t.id)

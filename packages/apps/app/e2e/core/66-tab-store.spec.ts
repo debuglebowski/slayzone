@@ -86,7 +86,7 @@ const openTaskViaSearch = async (page: Page, title: string) => {
     await input.fill(title)
     await page.getByRole('dialog').last().getByText(title).first().click()
   }
-  await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible({
+  await expect(page.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
     timeout: 5_000
   })
 }
@@ -150,9 +150,9 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     }).toPass({ timeout: 3_000 })
 
     // Wait for the reopened task's content to become visible
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
   })
 
   // ── 2. Tab auto-closes when task deleted ───────────────────────────────

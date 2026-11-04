@@ -67,7 +67,7 @@ test.describe('Settings', () => {
     await expect(mainWindow.locator('html')).not.toHaveClass(/dark/)
   })
 
-  test('default terminal mode setting saves from UI', async ({ mainWindow }) => {
+  test('default agent setting saves from UI', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     await mainWindow.keyboard.press('Escape')
     await expect(settingsDialog(mainWindow)).not.toBeVisible({ timeout: 3_000 })
@@ -82,10 +82,10 @@ test.describe('Settings', () => {
     await modeTrigger.click()
     await mainWindow.getByRole('option', { name: 'Codex', exact: true }).click()
     await expect(modeTrigger).toHaveText(/Codex/)
-    await expect.poll(async () => s.getSetting('default_terminal_mode')).toBe('codex')
+    await expect.poll(async () => s.getSetting('default_agent_id')).toBe('codex')
 
     // Restore default to claude-code so subsequent tests get the real default
-    await s.setSetting('default_terminal_mode', 'claude-code')
+    await s.setSetting('default_agent_id', 'claude-code')
   })
 
   test('close settings dialog', async ({ mainWindow }) => {

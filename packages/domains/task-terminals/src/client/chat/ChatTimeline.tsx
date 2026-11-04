@@ -45,7 +45,7 @@ import { ToolAutoOpenContext } from './tool-cards/card-shell'
 import { ChatSearchBar } from './ChatSearchBar'
 import { renderTimelineItem } from './renderers'
 import { useChatProvider } from './ChatViewContext'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { MODE_ICONS } from '../mode-icons'
 import {
   TimelineRowKeyContext,
@@ -409,7 +409,7 @@ function HydratingState() {
 
 export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   const provider = useChatProvider()
-  const ProviderIcon = MODE_ICONS[provider.type as TerminalMode]
+  const ProviderIcon = MODE_ICONS[provider.type as AgentId]
   return (
     <div className="absolute inset-0 flex flex-col items-center px-6 text-center">
       <div className="h-[30%] shrink-0" />

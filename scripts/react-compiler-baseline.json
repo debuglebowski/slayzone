@@ -67,7 +67,7 @@
   "packages/domains/task/src/client/TemplatesSettingsTab.tsx": ["TemplateFormDialog"],
   "packages/domains/task/src/client/WebPanelView.tsx": ["WebPanelView"],
   "packages/domains/terminal/src/client/PtyContext.tsx": ["PtyEventStreams"],
-  "packages/domains/terminal/src/client/useTerminalModes.ts": ["useTerminalModes"],
+  "packages/domains/terminal/src/client/useAgents.ts": ["useAgents"],
   "packages/domains/usage-analytics/src/client/useUsageAnalytics.ts": ["useUsageAnalytics"],
   "packages/domains/worktrees/src/client/CommitGraph.tsx": ["CommitGraphImpl"],
   "packages/domains/worktrees/src/client/ConflictFileView.tsx": ["ConflictFileView"],

@@ -49,7 +49,7 @@ const summary = {
 // One stable tRPC-react-query-shaped proxy.
 const trpc = {
   pty: {
-    modesList: {
+    agentsList: {
       queryOptions: () => ({
         queryKey: ['modes'],
         queryFn: async () => {

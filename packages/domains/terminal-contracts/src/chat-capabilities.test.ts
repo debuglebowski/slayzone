@@ -2,8 +2,8 @@ import { expect, test } from 'vitest'
 import { CHAT_SUPPORTED_MODES } from './types'
 import {
   chatCapabilitiesForMode,
-  chatModeForTerminal,
-  terminalModeForChat
+  chatAgentIdForTerminal,
+  terminalAgentIdForChat
 } from './chat-capabilities'
 
 test('Claude Code chat: every capability', () => {
@@ -100,8 +100,8 @@ test('every chat-capable mode supports task prompt history', () => {
 })
 
 test('hand-off partners: Claude chat <-> the Claude Code terminal; nothing for others', () => {
-  expect(terminalModeForChat('claude-chat')).toBe('claude-code')
-  expect(chatModeForTerminal('claude-code')).toBe('claude-chat')
-  expect(terminalModeForChat('codex-chat')).toBeNull()
-  expect(chatModeForTerminal('codex')).toBeNull()
+  expect(terminalAgentIdForChat('claude-chat')).toBe('claude-code')
+  expect(chatAgentIdForTerminal('claude-code')).toBe('claude-chat')
+  expect(terminalAgentIdForChat('codex-chat')).toBeNull()
+  expect(chatAgentIdForTerminal('codex')).toBeNull()
 })

@@ -90,31 +90,31 @@ export function useChatSettings(
 ): ChatSettings {
   const trpc = useTRPC()
   const client = useTRPCClient()
-  const { tabId, taskId, mode: terminalMode } = target
-  const info = useQuery(trpc.chat.getInfo.queryOptions({ tabId, mode: terminalMode }))
+  const { tabId, taskId, mode: agentId } = target
+  const info = useQuery(trpc.chat.getInfo.queryOptions({ tabId, mode: agentId }))
   const live = (info.data ?? null) as SessionInfoLite | null
   const storedMode = useQuery(
     trpc.chat.getMode.queryOptions(
-      { taskId, mode: terminalMode },
+      { taskId, mode: agentId },
       { enabled: info.isSuccess && !live?.chatMode }
     )
   )
   const storedModel = useQuery(
     trpc.chat.getModel.queryOptions(
-      { taskId, mode: terminalMode },
+      { taskId, mode: agentId },
       { enabled: info.isSuccess && !live?.chatModel }
     )
   )
   const storedEffort = useQuery(
     trpc.chat.getEffort.queryOptions(
-      { taskId, mode: terminalMode },
+      { taskId, mode: agentId },
       { enabled: info.isSuccess && !live?.chatEffort }
     )
   )
   const storedCollaboration = useQuery(
     trpc.chat.getCollaboration.queryOptions(
-      { taskId, mode: terminalMode },
-      { enabled: terminalMode === 'codex-chat' && info.isSuccess && !live?.chatCollaboration }
+      { taskId, mode: agentId },
+      { enabled: agentId === 'codex-chat' && info.isSuccess && !live?.chatCollaboration }
     )
   )
   const auto = useQuery(trpc.chat.getAutoEligibility.queryOptions({ taskId }))

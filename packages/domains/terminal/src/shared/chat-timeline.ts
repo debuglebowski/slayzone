@@ -2133,9 +2133,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         subAgentIndex: nextIdx,
         childIndex,
         inFlightSubAgents:
-          phase === 'in-flight'
-            ? withRowIn(state.inFlightSubAgents, at)
-            : state.inFlightSubAgents
+          phase === 'in-flight' ? withRowIn(state.inFlightSubAgents, at) : state.inFlightSubAgents
       }
     }
     case 'agent-plan': {

@@ -15,10 +15,10 @@ import {
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode,
   type AgentStartupMode,
-  type TerminalMode,
-  type TerminalModeInfo
+  type AgentId,
+  type AgentDefinition
 } from '@slayzone/terminal-contracts'
-import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
+import { getVisibleModes, getModeLabel, groupAgents } from '@slayzone/terminal'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'
 import type { PanelSettingsState } from './usePanelSettings'
@@ -86,13 +86,13 @@ const OPTION_AS_META_OPTIONS: Array<{
 export function TerminalPanelSettings({
   state,
   modes,
-  defaultTerminalMode,
-  onDefaultTerminalModeChange
+  defaultAgentId,
+  onDefaultAgentIdChange
 }: {
   state: PanelSettingsState
-  modes: TerminalModeInfo[]
-  defaultTerminalMode: TerminalMode
-  onDefaultTerminalModeChange: (mode: TerminalMode) => void
+  modes: AgentDefinition[]
+  defaultAgentId: AgentId
+  onDefaultAgentIdChange: (mode: AgentId) => void
 }) {
   const {
     panelConfig,
@@ -122,8 +122,8 @@ export function TerminalPanelSettings({
         <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
           <span className="text-sm text-muted-foreground">Default agent provider</span>
           <Select
-            value={defaultTerminalMode}
-            onValueChange={(v) => onDefaultTerminalModeChange(v as TerminalMode)}
+            value={defaultAgentId}
+            onValueChange={(v) => onDefaultAgentIdChange(v as AgentId)}
           >
             <SelectTrigger className="max-w-sm">
               <SelectValue />
@@ -134,8 +134,8 @@ export function TerminalPanelSettings({
               className="min-w-[var(--radix-select-trigger-width)] max-h-none"
             >
               {(() => {
-                const visibleModes = getVisibleModes(modes, defaultTerminalMode)
-                const { builtin, custom } = groupTerminalModes(visibleModes)
+                const visibleModes = getVisibleModes(modes, defaultAgentId)
+                const { builtin, custom } = groupAgents(visibleModes)
                 return (
                   <>
                     {builtin.map((m) => (

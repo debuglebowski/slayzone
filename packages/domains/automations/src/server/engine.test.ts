@@ -1045,36 +1045,38 @@ describe('cronMatches', () => {
   })
 })
 
-// --- TEMPLATE CONTEXT: TERMINAL_MODE_FLAGS ---
+// --- TEMPLATE CONTEXT: AGENT_FLAGS ---
 
-describe('template context: terminal_mode_flags', () => {
-  test('resolved from provider_config JSON', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    h.db.prepare('DELETE FROM automation_runs').run()
-    h.db
-      .prepare('UPDATE tasks SET terminal_mode = ?, provider_config = ? WHERE id = ?')
-      .run('claude-code', JSON.stringify({ 'claude-code': { flags: '--verbose' } }), taskId)
-    createAutomation({
-      actions: [
-        {
-          type: 'run_command',
-          params: { command: 'test "{{task.terminal_mode_flags}}" = "--verbose"', cwd: '/tmp' }
-        }
-      ]
-    })
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await new Promise((r) => setTimeout(r, 500))
-    const runs = h.db
-      .prepare('SELECT * FROM automation_runs ORDER BY started_at DESC LIMIT 1')
-      .all() as AutomationRun[]
-    expect(runs[0].status).toBe('success')
-    h.db
-      .prepare(
-        'UPDATE tasks SET status = ?, terminal_mode = NULL, provider_config = ? WHERE id = ?'
-      )
-      .run('todo', '{}', taskId)
-  })
+describe('template context: agent_flags', () => {
+  // `task.terminal_mode_flags` = retired name, kept as an alias for stored automations.
+  test.each(['task.agent_flags', 'task.terminal_mode_flags'])(
+    '{{%s}} resolved from provider_config JSON',
+    async (variable) => {
+      h.db.prepare('DELETE FROM automations').run()
+      h.db.prepare('DELETE FROM automation_runs').run()
+      h.db
+        .prepare('UPDATE tasks SET agent_id = ?, provider_config = ? WHERE id = ?')
+        .run('claude-code', JSON.stringify({ 'claude-code': { flags: '--verbose' } }), taskId)
+      createAutomation({
+        actions: [
+          {
+            type: 'run_command',
+            params: { command: `test "{{${variable}}}" = "--verbose"`, cwd: '/tmp' }
+          }
+        ]
+      })
+      h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
+      taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
+      await new Promise((r) => setTimeout(r, 500))
+      const runs = h.db
+        .prepare('SELECT * FROM automation_runs ORDER BY started_at DESC LIMIT 1')
+        .all() as AutomationRun[]
+      expect(runs[0].status).toBe('success')
+      h.db
+        .prepare('UPDATE tasks SET status = ?, agent_id = NULL, provider_config = ? WHERE id = ?')
+        .run('todo', '{}', taskId)
+    }
+  )
 })
 
 // --- STDERR HANDLING ---

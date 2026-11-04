@@ -226,7 +226,7 @@ export type NoticeCode =
    * not exist" (timeout, network, crash): it is kept, and Retry resumes it.
    */
   | 'resume-failed-kept'
-  /** The agent stopped responding and was stopped by the watchdog. */
+  /** The watchdog stopped a stuck agent (and restarted it, unless it kept hanging). */
   | 'watchdog-killed'
   /** The agent's CLI version has not been tested with chat. */
   | 'cli-version-untested'
