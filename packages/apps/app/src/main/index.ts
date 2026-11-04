@@ -257,7 +257,7 @@ import {
   fileUrlToSlzFileUrl,
   injectForcedHtmlTheme
 } from '@slayzone/platform'
-import { initStorageDir, getStorageDir } from './data-paths'
+import { initStorageDir, getStorageDir, resolveLegacyStateDir } from './data-paths'
 import { StorageImportError } from './copy-utils'
 if (process.platform === 'linux') {
   const result = migrateXdgIfNeeded()
@@ -295,8 +295,13 @@ function fileDialog() {
 }
 
 // The legacy state location = userData BEFORE any dev/e2e profile swap below.
-// This is the migration source (our DB/artifacts historically lived here).
-const legacyStateDir = app.getPath('userData')
+// This is the migration source (our DB/artifacts historically lived here). A
+// Playwright worker reads its own sandbox instead — never the developer's real
+// userData (see resolveLegacyStateDir).
+const legacyStateDir = resolveLegacyStateDir(app.getPath('userData'), {
+  isPlaywright,
+  sandboxDir: process.env.SLAYZONE_USER_DATA_DIR
+})
 
 if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Playwright runs alongside the user's dev app, so isolate the entire
