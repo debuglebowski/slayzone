@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, assert, expect, test } from 'vitest'
-import { ENTRA_AUTHORITY } from '@slayzone/hub-auth/server'
+import { ENTRA_AUTHORITY, sendHubPage } from '@slayzone/hub-auth/server'
 import {
   API_CSP,
   ENTRA_SIGN_IN_ORIGIN,
@@ -54,6 +54,8 @@ async function serve(
   }
 }
 
+const HUB_PAGE_FORM_ACTION = "'self' slayzone:"
+
 /** Routes that write their headers every way a hub handler does. */
 const routes: Handler = (req, res) => {
   const path = (req.url ?? '/').split('?')[0]
@@ -87,6 +89,22 @@ const routes: Handler = (req, res) => {
       'unsafe-url'
     ])
     res.end('ok')
+    return
+  }
+  if (path === '/api/auth/app-sso' || path === '/device') {
+    // A hub page (hub-auth `sendHubPage`): its own CSP names where its forms post.
+    sendHubPage(res, {
+      status: 200,
+      title: 't',
+      body: '<form></form>',
+      formAction: HUB_PAGE_FORM_ACTION
+    })
+    return
+  }
+  if (path === '/api/own-csp') {
+    // Any other API route that sets a CSP of its own: the API policy still wins.
+    res.writeHead(200, { 'content-type': 'text/html', 'content-security-policy': 'form-action *' })
+    res.end('<form></form>')
     return
   }
   if (path === '/api/stream') {
@@ -200,7 +218,8 @@ writeFileSync(join(webRoot, 'index.html'), '<!doctype html><body>shell</body>')
 writeFileSync(join(webRoot, 'assets', 'index-abc123.js'), 'console.log(1)')
 // The test routes first (the SPA fallback would claim any GET), then the shell.
 const withShell: Handler = (req, res) => {
-  if (req.url?.startsWith('/shell-') || req.url?.startsWith('/api/stream')) routes(req, res)
+  if (req.url?.startsWith('/shell-') || req.url?.startsWith('/api/') || req.url === '/device')
+    routes(req, res)
   else if (!handleWebAssets(webRoot, req, res)) routes(req, res)
 }
 
@@ -270,6 +289,30 @@ test('API paths: no-store wins, API CSP, also on 404s and odd spellings', async 
   }
   const head = await fetch(`${loop.base}/api/nope`, { method: 'HEAD' })
   expect(head.headers.get('cache-control'), 'HEAD too').toBe('no-store')
+})
+
+test("a hub page keeps its own CSP (its forms' form-action), on an API path and off it", async () => {
+  // The app sign-in confirm page lives under /api/auth/app-sso: the API policy's
+  // `form-action 'none'` blocked its Continue/Cancel forms (iOS: "Refused to load …").
+  for (const path of ['/api/auth/app-sso', '/device']) {
+    for (const hub of [loop, pub]) {
+      const r = await fetch(`${hub.base}${path}`)
+      const csp = r.headers.get('content-security-policy') ?? ''
+      expect(directive(csp, 'form-action'), `${path} form-action`).toEqual(["'self'", 'slayzone:'])
+      expect(directive(csp, 'default-src'), `${path} default-src`).toEqual(["'none'"])
+      expect(directive(csp, 'frame-ancestors'), `${path} frame-ancestors`).toEqual(["'none'"])
+      expect(r.headers.get('x-frame-options'), `${path} xfo`).toBe('DENY')
+      expect(r.headers.get('x-content-type-options'), `${path} nosniff`).toBe('nosniff')
+      expect(r.headers.get('referrer-policy'), `${path} referrer`).toBe('same-origin')
+      expect(r.headers.get('cache-control'), `${path} cache`).toBe('no-store')
+      expect(r.headers.get('strict-transport-security'), `${path} hsts`).toBe(
+        strictTransportSecurity(hub === pub ? 'hub.example.com' : undefined)
+      )
+    }
+  }
+  // Only a hub page: another API route's own CSP is still replaced.
+  const other = await fetch(`${loop.base}/api/own-csp`)
+  expect(other.headers.get('content-security-policy'), 'other route').toEqual(API_CSP)
 })
 
 test('a 404 outside the API: shell CSP and no-store', async () => {
