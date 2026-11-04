@@ -10,7 +10,8 @@
     "./client/use-stable-callback": "./src/client/useStableCallback.ts",
     "./scopes": "./src/shared/scopes.ts",
     "./testing": "./src/testing/index.tsx",
-    "./direct": "./src/direct/index.ts"
+    "./direct": "./src/direct/index.ts",
+    "./direct-client": "./src/client/direct-link.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

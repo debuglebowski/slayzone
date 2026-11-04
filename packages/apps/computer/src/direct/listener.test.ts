@@ -322,3 +322,56 @@ describe('direct listener: terminal input', () => {
     expect(pty.service.writes).toEqual([['s1', 'ls\r']])
   })
 })
+
+describe('client manager against the real listener (computer restart)', () => {
+  it('never reopens a socket to a computer that went away, and redials the new address', async () => {
+    const { createDirectLinkManager } = await import('@slayzone/transport/direct-client')
+    const RealWebSocket = globalThis.WebSocket
+    let constructed = 0
+    globalThis.WebSocket = class extends RealWebSocket {
+      constructor(...args: ConstructorParameters<typeof RealWebSocket>) {
+        super(...args)
+        constructed++
+      }
+    } as typeof RealWebSocket
+    try {
+      const first = await setup()
+      let current = first
+      const manager = createDirectLinkManager({
+        issue: async () => {
+          const { token } = grant(current.store)
+          return {
+            available: true,
+            computerId: 'c1',
+            address: current.listener.boundAddress,
+            token,
+            grantId: 'g',
+            expiresInMs: 60_000,
+            protocol: 1
+          }
+        },
+        backoffInitialMs: 50
+      })
+      cleanups.push(() => manager.dispose())
+      const lease = await manager.acquire({ kind: 'pty', sessionId: 's1' })
+      expect(lease).not.toBeNull()
+      const lost: string[] = []
+      lease?.onLost((r) => lost.push(r))
+      expect(constructed).toBe(1)
+      // The computer restarts: its listener goes, a new one binds another port.
+      await first.listener.close()
+      await waitFor(() => lost.length === 1)
+      expect(lost).toEqual(['closed'])
+      await new Promise((r) => setTimeout(r, 300))
+      // No blind reconnect to the dead port.
+      expect(constructed).toBe(1)
+      current = await setup()
+      const again = await manager.acquire({ kind: 'pty', sessionId: 's1' })
+      expect(again).not.toBeNull()
+      expect(constructed).toBe(2)
+      expect(await again?.client.ping.query()).toEqual({ protocol: 1 })
+    } finally {
+      globalThis.WebSocket = RealWebSocket
+    }
+  })
+})

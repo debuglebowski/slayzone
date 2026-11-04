@@ -22,6 +22,14 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  createDirectLinkManager,
+  type DirectIssueResult,
+  type DirectLease,
+  type DirectLeaseLostReason,
+  type DirectLinkManager,
+  type DirectLinkManagerOptions
+} from './direct-link'
+export {
   FederationProvider,
   useFederation,
   useFederationOrNull,
