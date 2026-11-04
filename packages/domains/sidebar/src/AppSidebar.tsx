@@ -34,10 +34,13 @@ interface AppSidebarProps {
   onSettings: () => void
   onUsageAnalytics: () => void
   onLeaderboard: () => void
-  onTaskClick?: (taskId: string) => void
-  onCloseTab?: (taskId: string) => void
-  onOpenTaskInBackground?: (taskId: string) => void
-  onCreateTemporaryTask?: (projectId: string) => void
+  // Task navigation is required, not optional: every host must wire it. An
+  // unwired handler fails silently (the row still takes the selection outline
+  // but nothing opens) — how the web shell once shipped with dead task rows.
+  onTaskClick: (taskId: string) => void
+  onCloseTab: (taskId: string) => void
+  onOpenTaskInBackground: (taskId: string) => void
+  onCreateTemporaryTask: (projectId: string) => void
   zenMode?: boolean
   /** Null: no Getting Started entry (a host without onboarding, the web shell). */
   onboardingChecklist: OnboardingChecklistState | null
