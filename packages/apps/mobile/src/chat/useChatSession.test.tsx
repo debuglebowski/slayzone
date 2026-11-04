@@ -3,6 +3,17 @@ import { trpcTest } from '../testing'
 import { fakeHub } from './fake-hub'
 import { useChatSession } from './useChatSession'
 
+/** The direct link `useDirectLease` hands the hook (null: the hub relays). */
+const mockDirect = { lease: null as null | { client: unknown }, lost: jest.fn() }
+jest.mock('@slayzone/transport/client', () => ({
+  ...jest.requireActual('@slayzone/transport/client'),
+  useDirectLease: () => ({ lease: mockDirect.lease, lost: mockDirect.lost })
+}))
+beforeEach(() => {
+  mockDirect.lease = null
+  mockDirect.lost.mockReset()
+})
+
 const target = {
   tabId: 'tab-1',
   taskId: 'task-1',
@@ -75,5 +86,66 @@ describe('useChatSession', () => {
     await waitFor(() => expect(result.current.hydrating).toBe(false))
     expect(result.current.state.agentStartedTurns).toBe(true)
     expect(result.current.inFlight).toBe(true)
+  })
+
+  it('on the direct link: replays, streams and answers prompts through the computer; the hub relays nothing', async () => {
+    const calls: string[] = []
+    let emit: ((e: unknown) => void) | undefined
+    let started: (() => void) | undefined
+    mockDirect.lease = {
+      client: {
+        chat: {
+          getReplay: {
+            query: async (input: { afterSeq: number }) => {
+              calls.push(`replay ${input.afterSeq}`)
+              return {
+                events: [
+                  { seq: 0, event: { kind: 'user-message', id: 'u1', text: 'from computer' } }
+                ],
+                live: { afterSeq: 0, liveSeq: 0, events: [] }
+              }
+            }
+          },
+          respondPermission: {
+            mutate: async () => {
+              calls.push('respondPermission')
+              return true
+            }
+          },
+          onEvent: {
+            subscribe: (
+              _input: unknown,
+              h: { onStarted: () => void; onData: (e: unknown) => void }
+            ) => {
+              started = h.onStarted
+              emit = h.onData
+              return { unsubscribe: () => undefined }
+            }
+          }
+        }
+      }
+    }
+    const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
+    const { wrapper } = trpcTest(hub.backend)
+    const { result } = await renderHook(() => useChatSession(target), { wrapper })
+    await act(async () => started?.())
+    await waitFor(() => expect(result.current.hydrating).toBe(false))
+    expect(calls).toEqual(['replay -1'])
+    expect(hub.subscribed['chat.onEvent']).toBeUndefined()
+    await act(async () =>
+      emit?.({
+        tabId: target.tabId,
+        seq: 1,
+        event: { kind: 'assistant-text', messageId: 'm1', text: 'direct reply' }
+      })
+    )
+    await waitFor(() =>
+      expect(result.current.state.timeline.map((i) => i?.kind)).toEqual(['user-text', 'text'])
+    )
+    await act(async () => {
+      await result.current.respondPermission({ requestId: 'r', decision: { behavior: 'allow' } })
+    })
+    expect(calls).toEqual(['replay -1', 'respondPermission'])
+    expect(hub.callsTo('chat.respondPermission')).toHaveLength(0)
   })
 })

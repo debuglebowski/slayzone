@@ -70,7 +70,9 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => client,
   useSubscription: (o: { name: string; enabled: boolean; onData: (d: unknown) => void }) => {
     subs[o.name] = o.enabled ? o.onData : null
-  }
+  },
+  // No direct link in these tests: everything goes through the hub client.
+  useDirectLease: () => ({ lease: null, lost: () => undefined })
 }))
 const client = {
   chat: {

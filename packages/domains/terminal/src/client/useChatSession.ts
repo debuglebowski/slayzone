@@ -8,7 +8,8 @@ import {
   type Dispatch,
   type RefObject
 } from 'react'
-import { useSubscription } from '@slayzone/transport/client'
+import { useDirectLease, useSubscription } from '@slayzone/transport/client'
+import { chatViaDirect, noteDirectChatEvent, noteDirectChatLink } from './chat-direct'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
@@ -182,8 +183,12 @@ export interface UseChatSessionOpts {
   providerFlagsOverride?: string | null
 }
 
+type ChatIo = ReturnType<typeof chatViaDirect<ReturnType<typeof useTRPCClient>>>
+
 interface HydrateChatCtx {
   trpcClient: ReturnType<typeof useTRPCClient>
+  /** History reads: over the direct link when the tab has one, else the hub. */
+  reads: Pick<ChatIo, 'openTimeline' | 'getReplay'>
   target: {
     tabId: string
     taskId: string
@@ -231,6 +236,7 @@ interface HydrateChatCtx {
  */
 async function hydrateAndReplay({
   trpcClient,
+  reads,
   target,
   gen,
   genRef,
@@ -265,7 +271,7 @@ async function hydrateAndReplay({
     // events saved since and what streams. `full`: replay every event (below).
     let opened: Awaited<ReturnType<typeof trpcClient.chat.openTimeline.query>> = { kind: 'full' }
     try {
-      opened = await trpcClient.chat.openTimeline.query({
+      opened = await reads.openTimeline({
         tabId: target.tabId,
         version: TIMELINE_PROJECTION_VERSION
       })
@@ -286,7 +292,7 @@ async function hydrateAndReplay({
       return
     }
     // Saved history + what is streaming right now, in one snapshot.
-    const replay = await trpcClient.chat.getReplay.query({
+    const replay = await reads.getReplay({
       tabId: target.tabId,
       afterSeq: -1
     })
@@ -361,6 +367,13 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
+  // The tab's direct link to the computer holding its history (docs/direct-link.md):
+  // reads, the event stream and simple commands go there; the hub otherwise.
+  const { lease: directChat, lost: directChatLost } = useDirectLease(
+    trpcClient,
+    opts.tabId ? { kind: 'chat', tabId: opts.tabId } : null
+  )
+  const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
     initialState({ agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns })
@@ -541,31 +554,29 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      trpcClient.chat.timelinePages
-        .query({ tabId: opts.tabId, pages: wanted, asOfSeq, epoch })
-        .then(
-          (res) => {
-            for (const page of wanted) loadingPagesRef.current.delete(page)
-            if (gen !== genRef.current) return
-            if (res.expired) {
-              setReopenToken((t) => t + 1)
-              return
-            }
-            for (const page of res.pages) {
-              dispatch({
-                type: 'rows-loaded',
-                from: page.from,
-                rows: page.rows as TimelineItem[],
-                epoch
-              })
-            }
-          },
-          () => {
-            for (const page of wanted) loadingPagesRef.current.delete(page)
-            // Without those rows the reducer can't go on: open again.
-            if (gen === genRef.current) setReopenToken((t) => t + 1)
+      chatIo.timelinePages({ tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
+        (res) => {
+          for (const page of wanted) loadingPagesRef.current.delete(page)
+          if (gen !== genRef.current) return
+          if (res.expired) {
+            setReopenToken((t) => t + 1)
+            return
           }
-        )
+          for (const page of res.pages) {
+            dispatch({
+              type: 'rows-loaded',
+              from: page.from,
+              rows: page.rows as TimelineItem[],
+              epoch
+            })
+          }
+        },
+        () => {
+          for (const page of wanted) loadingPagesRef.current.delete(page)
+          // Without those rows the reducer can't go on: open again.
+          if (gen === genRef.current) setReopenToken((t) => t + 1)
+        }
+      )
     }
   )
   const loadPages = useStableCallback((pages: readonly number[]): void => {
@@ -591,7 +602,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const searchPages = useStableCallback(
     (query: string): Promise<number[]> =>
       paging
-        ? trpcClient.chat.searchTimeline.query({ tabId: opts.tabId, query }).catch(() => [])
+        ? chatIo.searchTimeline({ tabId: opts.tabId, query }).catch(() => [])
         : Promise.resolve([])
   )
   const unloadPages = useStableCallback((pages: readonly number[]): void => {
@@ -679,6 +690,28 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       onData: handleEvent
     })
   )
+  // The same events straight from the computer while linked. The seq / live
+  // counters drop what the hub stream also delivers.
+  useEffect(() => {
+    if (!directChat || !opts.tabId) return
+    const tabId = opts.tabId
+    noteDirectChatLink(tabId, true)
+    const sub = directChat.client.chat.onEvent.subscribe(
+      { tabId },
+      {
+        onData: (event) => {
+          noteDirectChatEvent()
+          handleEvent(event)
+        },
+        onError: directChatLost,
+        onComplete: directChatLost
+      }
+    )
+    return () => {
+      noteDirectChatLink(tabId, false)
+      sub.unsubscribe()
+    }
+  }, [directChat, directChatLost, handleEvent, opts.tabId])
 
   // Stable (reads refs: fragments still waiting for their frame go first).
   const handleExit = useStableCallback(
@@ -767,6 +800,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
     void hydrateAndReplay({
       trpcClient,
+      reads: chatIo,
       target: {
         tabId: opts.tabId,
         taskId: opts.taskId,
@@ -899,7 +933,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     content: string
     isError?: boolean
   }): Promise<boolean> => {
-    return trpcClient.chat.sendToolResult.mutate({ tabId: opts.tabId, args })
+    return chatIo.sendToolResult({ tabId: opts.tabId, args })
   }
 
   const respondPermission = async (args: {
@@ -918,7 +952,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     // The prompt flips to answered when the server's `permission-resolved`
     // event lands — no optimistic state to undo. A refusal means the request
     // is no longer pending server-side.
-    return trpcClient.chat.respondPermission.mutate({ tabId: opts.tabId, args }).then(
+    return chatIo.respondPermission({ tabId: opts.tabId, args }).then(
       (ok) => {
         settle()
         if (!ok) dispatch({ type: 'prompt-refused', requestId })

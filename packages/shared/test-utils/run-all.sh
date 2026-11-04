@@ -609,6 +609,7 @@ run_harness packages/domains/terminal/src/client/paint-throttle.test.ts
 run_harness packages/domains/terminal/src/client/direct-pty.test.ts
 run_harness packages/domains/terminal/src/client/pty-delivery.test.ts
 run_harness packages/domains/terminal/src/client/relay-subscription.test.ts
+run_harness packages/domains/terminal/src/client/chat-direct.test.ts
 run_harness packages/domains/terminal/src/client/terminal-identity.test.ts
 # Terminal — boot renderer economy: WebGL only for on-screen terminals under an MRU
 # budget, parked (no DOM-renderer stylesheet) otherwise; plus the hidden-terminal
