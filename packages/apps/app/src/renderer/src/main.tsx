@@ -12,6 +12,7 @@ import {
   HubScope,
   electronBootstrap,
   setHubConnectProbe,
+  setDirectLinkProbe,
   useHubRegistryStore
 } from '@slayzone/transport/client'
 import { getTrpcClient, initTrpcClient } from './trpc'
@@ -82,6 +83,11 @@ function withWindowId(serverUrl: string, windowId: number | null | undefined): s
 // federated hub was delaying the default hub's handshake on reload by ~2.4s.
 // Main-side probes don't touch that counter. See transport connectPacing.ts.
 setHubConnectProbe(async (url) => (await electronBootstrap.probeServerHealth(url)).ok)
+
+// Direct links to computers (docs/direct-link.md): main checks this document's CSP
+// and probes the computer over HTTP, so a socket that would fail is never opened —
+// a failed WebSocket here would also slow the hub's (see above).
+setDirectLinkProbe(async (address) => (await electronBootstrap.prepareDirectLink(address)).ok)
 
 window.addEventListener('error', (event) => {
   recordClientError({

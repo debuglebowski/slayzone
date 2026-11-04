@@ -39,6 +39,13 @@ type AvailabilityCallback = (available: boolean) => void
 
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
+  /**
+   * Deliver one chunk of a session's output, in seq order: what the hub stream
+   * does, and what a direct link (direct-pty.ts) does for chunks it receives
+   * straight from the computer. A seq already delivered is dropped, so the two
+   * streams may overlap.
+   */
+  deliver: (sessionId: string, data: string, seq: number) => void
   subscribeExit: (sessionId: string, cb: ExitCallback) => () => void
   subscribeState: (sessionId: string, cb: StateChangeCallback) => () => void
   subscribePrompt: (sessionId: string, cb: PromptCallback) => () => void
@@ -60,6 +67,7 @@ const PtyContext = createContext<PtyContextValue | null>(null)
  *  globally unique (`${taskId}:${taskId}`, tasks unique per hub), so ONE shared
  *  set of maps is correct even when N hubs' streams fan into it. */
 interface PtyStreamSinks {
+  deliver: (sessionId: string, data: string, seq: number) => void
   statesRef: MutableRefObject<Map<string, PtyState>>
   dataSubsRef: MutableRefObject<Map<string, Set<DataCallback>>>
   exitSubsRef: MutableRefObject<Map<string, Set<ExitCallback>>>
@@ -83,6 +91,7 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const {
+    deliver,
     statesRef,
     dataSubsRef,
     exitSubsRef,
@@ -107,20 +116,8 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   // state is created when the Terminal component subscribes (the
   // ensure-state-before-onData guard).
   const handleData = useStableCallback(
-    ({ sessionId, data, seq }: { sessionId: string; data: string; seq: number }) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return
-
-      // Drop out-of-order data (seq should be monotonically increasing)
-      if (seq <= state.lastSeq) return
-      state.lastSeq = seq
-
-      // Notify subscribers
-      const subs = dataSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(data, seq))
-      }
-    }
+    ({ sessionId, data, seq }: { sessionId: string; data: string; seq: number }) =>
+      deliver(sessionId, data, seq)
   )
   useSubscription(trpc.pty.onData.subscriptionOptions(undefined, { onData: handleData }))
 
@@ -259,7 +256,20 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // sinks above. Single-hub / no federation → exactly one instance on the
   // default hub = byte-identical to the former root-only wiring.
   const fed = useFederationOrNull()
+  const deliver = useCallback((sessionId: string, data: string, seq: number): void => {
+    const state = statesRef.current.get(sessionId)
+    if (!state) return
+    // Drop what was already delivered: seqs are monotonic, and the hub stream and a
+    // direct link may both carry the same chunk.
+    if (seq <= state.lastSeq) return
+    state.lastSeq = seq
+    const subs = dataSubsRef.current.get(sessionId)
+    if (subs) {
+      subs.forEach((cb) => cb(data, seq))
+    }
+  }, [])
   const sinks: PtyStreamSinks = {
+    deliver,
     statesRef,
     dataSubsRef,
     exitSubsRef,
@@ -435,6 +445,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   const value = useMemo<PtyContextValue>(
     () => ({
       subscribe,
+      deliver,
       subscribeExit,
       subscribeState,
       subscribePrompt,
@@ -451,6 +462,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     [
       subscribeAvailability,
       subscribe,
+      deliver,
       subscribeExit,
       subscribeState,
       subscribePrompt,

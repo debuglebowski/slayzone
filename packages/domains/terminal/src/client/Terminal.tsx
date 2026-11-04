@@ -4,6 +4,8 @@
 // Direct imports from `./Terminal` will land xterm back in the main renderer
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
+import { ptyBufferSince, ptyWrite } from './direct-pty'
+import { useDirectPtyLink } from './useDirectPtyLink'
 import {
   useEffect,
   useInsertionEffect,
@@ -225,6 +227,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const trpcClient = useTRPCClient()
   const trpc = useTRPC()
+  // Output, keystrokes and backfill straight from the session's computer when it
+  // can be reached (docs/direct-link.md); the hub relay otherwise.
+  useDirectPtyLink(sessionId)
   const {
     subscribe,
     subscribeExit,
@@ -398,10 +403,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         if (e.type === 'keydown') {
-          void trpcClient.pty.write.mutate({
-            sessionId,
-            data: KITTY_SHIFT_ENTER
-          })
+          void ptyWrite(trpcClient, sessionId, KITTY_SHIFT_ENTER)
         }
         return false
       }
@@ -438,11 +440,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.type === 'keydown'
       ) {
         if (e.key === 'ArrowLeft') {
-          void trpcClient.pty.write.mutate({ sessionId, data: '\x1bb' })
+          void ptyWrite(trpcClient, sessionId, '\x1bb')
           return false
         }
         if (e.key === 'ArrowRight') {
-          void trpcClient.pty.write.mutate({ sessionId, data: '\x1bf' })
+          void ptyWrite(trpcClient, sessionId, '\x1bf')
           return false
         }
       }
@@ -470,7 +472,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // array and get double-written.
     forceFlushRef.current?.()
     const afterSeq = lastRenderedSeqRef.current
-    const missed = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq })
+    const missed = await ptyBufferSince(trpcClient, sessionId, afterSeq)
     if (isCancelled() || !missed || missed.chunks.length === 0) return
     // Only show overlay when there's actually data to write
     setIsReplaying(true)
@@ -1178,7 +1180,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         void safeClipboardReadText().then((text) => {
-          if (text) void trpcClient.pty.write.mutate({ sessionId, data: text })
+          if (text) void ptyWrite(trpcClient, sessionId, text)
         })
       }
     }

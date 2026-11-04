@@ -605,6 +605,7 @@ run_harness packages/domains/terminal/src/client/xterm-ed3-scrollback.test.ts
 # passed but were never registered here, so nothing ran them.
 run_harness packages/domains/terminal/src/client/scramble-detector.test.ts
 run_harness packages/domains/terminal/src/client/paint-throttle.test.ts
+run_harness packages/domains/terminal/src/client/direct-pty.test.ts
 run_harness packages/domains/terminal/src/client/terminal-identity.test.ts
 # Terminal — boot renderer economy: WebGL only for on-screen terminals under an MRU
 # budget, parked (no DOM-renderer stylesheet) otherwise; plus the hidden-terminal

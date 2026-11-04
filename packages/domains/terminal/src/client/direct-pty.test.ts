@@ -1,0 +1,245 @@
+/**
+ * A terminal's direct link (docs/direct-link.md): stream output straight from the
+ * computer into the same seq-ordered delivery the hub stream uses, catch up the
+ * gap first, route reads and keystrokes direct while the lease lives, and go back
+ * to the hub — then try again — when it ends.
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  __resetDirectPtyForTest,
+  directPtyFor,
+  ptyBufferSince,
+  ptyWrite,
+  startDirectPtyLink
+} from './direct-pty'
+
+afterEach(() => {
+  __resetDirectPtyForTest()
+  vi.useRealTimers()
+})
+
+type Chunk = { sessionId: string; seq: number; data: string }
+
+function fakeLease() {
+  const writes: string[] = []
+  let handlers:
+    | {
+        onStarted?: () => void
+        onData: (c: Chunk) => void
+        onError?: (e: unknown) => void
+        onComplete?: () => void
+      }
+    | undefined
+  const lost = new Set<(r: string) => void>()
+  let released = false
+  const lease = {
+    computerId: 'c1',
+    client: {
+      pty: {
+        onData: {
+          subscribe: (_input: unknown, h: NonNullable<typeof handlers>) => {
+            handlers = h
+            return { unsubscribe: () => undefined }
+          }
+        },
+        getBufferSince: {
+          query: async ({ afterSeq }: { afterSeq: number }) => ({
+            chunks: [
+              { seq: afterSeq + 1, data: 'gap1' },
+              { seq: afterSeq + 2, data: 'gap2' }
+            ].filter((c) => c.seq <= 6),
+            currentSeq: 6,
+            prelude: ''
+          })
+        },
+        write: {
+          mutate: async ({ data }: { data: string }) => {
+            writes.push(data)
+            return true
+          }
+        },
+        attach: {
+          query: async () => ({
+            exists: true,
+            size: null,
+            buffer: { chunks: [], currentSeq: 6, prelude: '' }
+          })
+        }
+      }
+    },
+    onLost: (cb: (r: string) => void) => {
+      lost.add(cb)
+      return () => lost.delete(cb)
+    },
+    release: () => {
+      released = true
+    }
+  }
+  return {
+    lease,
+    writes,
+    start: () => handlers?.onStarted?.(),
+    data: (seq: number, data: string) => handlers?.onData({ sessionId: 's1', seq, data }),
+    error: () => handlers?.onError?.(new Error('FORBIDDEN')),
+    lose: (r = 'closed') => {
+      for (const cb of [...lost]) cb(r)
+    },
+    released: () => released
+  }
+}
+
+function setup(leases: Array<ReturnType<typeof fakeLease> | null>) {
+  let wakeCb: (() => void) | undefined
+  const delivered: Array<[number, string]> = []
+  let lastSeq = 4
+  const acquired: number[] = []
+  let connectedCb: ((id: string) => void) | undefined
+  const manager = {
+    acquire: async () => {
+      acquired.push(Date.now())
+      const next = leases.shift()
+      return next ? (next.lease as never) : null
+    },
+    onComputerConnected: (cb: (id: string) => void) => {
+      connectedCb = cb
+      return () => undefined
+    }
+  }
+  const stop = startDirectPtyLink({
+    sessionId: 's1',
+    manager,
+    deliver: (data, seq) => {
+      if (seq <= lastSeq) return
+      lastSeq = seq
+      delivered.push([seq, data])
+    },
+    lastSeq: () => lastSeq,
+    wake: (cb) => {
+      wakeCb = cb
+      return () => undefined
+    },
+    retryMs: 60_000,
+    lostRetryMs: 1_000
+  })
+  return {
+    delivered,
+    acquired,
+    stop,
+    computerConnected: () => connectedCb?.('c1'),
+    wake: () => wakeCb?.()
+  }
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0))
+
+describe('startDirectPtyLink', () => {
+  it('catches up the gap before live chunks, in seq order, then streams', async () => {
+    const l = fakeLease()
+    const { delivered } = setup([l])
+    await flush()
+    // A live chunk racing the catch-up waits for it.
+    l.data(7, 'live7')
+    l.start()
+    await flush()
+    l.data(8, 'live8')
+    expect(delivered).toEqual([
+      [5, 'gap1'],
+      [6, 'gap2'],
+      [7, 'live7'],
+      [8, 'live8']
+    ])
+  })
+
+  it('routes keystrokes and backfill direct while the lease lives, the hub otherwise', async () => {
+    const l = fakeLease()
+    setup([l])
+    const hubWrites: string[] = []
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ data }: { data: string }) => {
+            hubWrites.push(data)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => ({ chunks: [], currentSeq: 0, prelude: 'hub' }) }
+      }
+    }
+    await ptyWrite(hub, 's1', 'before')
+    await flush()
+    expect(directPtyFor('s1')).not.toBeNull()
+    await ptyWrite(hub, 's1', 'ls\r')
+    expect(l.writes).toEqual(['ls\r'])
+    expect(hubWrites).toEqual(['before'])
+    expect((await ptyBufferSince(hub, 's1', 0))?.currentSeq).toBe(6)
+    l.lose()
+    expect(directPtyFor('s1')).toBeNull()
+    await ptyWrite(hub, 's1', 'after')
+    expect(hubWrites).toEqual(['before', 'after'])
+  })
+
+  it('a refused direct write (grant gone) goes to the hub instead of being lost', async () => {
+    const l = fakeLease()
+    l.lease.client.pty.write.mutate = async () => {
+      throw Object.assign(new Error('no capability'), { data: { code: 'FORBIDDEN' } })
+    }
+    setup([l])
+    await flush()
+    const hubWrites: string[] = []
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ data }: { data: string }) => {
+            hubWrites.push(data)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    await ptyWrite(hub, 's1', 'x')
+    expect(hubWrites).toEqual(['x'])
+  })
+
+  it('re-acquires after the lease is lost; at once when the computer reconnects', async () => {
+    vi.useFakeTimers()
+    const first = fakeLease()
+    const second = fakeLease()
+    const { acquired, computerConnected } = setup([first, null, second])
+    await vi.advanceTimersByTimeAsync(0)
+    first.lose()
+    expect(first.released()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(acquired.length).toBe(2) // relay answer: wait the long retry …
+    computerConnected() // … unless the computer reconnects
+    await vi.advanceTimersByTimeAsync(0)
+    expect(acquired.length).toBe(3)
+    expect(directPtyFor('s1')).not.toBeNull()
+  })
+
+  it('stops cleanly: releases the lease and never re-acquires', async () => {
+    vi.useFakeTimers()
+    const l = fakeLease()
+    const { stop, acquired } = setup([l])
+    await vi.advanceTimersByTimeAsync(0)
+    stop()
+    expect(l.released()).toBe(true)
+    expect(directPtyFor('s1')).toBeNull()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(acquired.length).toBe(1)
+  })
+})
+
+describe('a session that starts after its terminal mounted', () => {
+  it('is retried as soon as the session wakes (it started), not after the long retry', async () => {
+    vi.useFakeTimers()
+    const later = fakeLease()
+    const { acquired, wake } = setup([null, later])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(acquired.length).toBe(1) // the pty did not exist yet: relay answer
+    wake()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(acquired.length).toBe(2)
+    expect(directPtyFor('s1')).not.toBeNull()
+  })
+})

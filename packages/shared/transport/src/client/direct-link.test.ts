@@ -6,6 +6,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createDirectLinkManager,
+  directLinkManagerFor,
+  disposeDirectLinkManagers,
+  setDirectLinkProbe,
   type DirectConnection,
   type DirectIssueResult,
   type DirectLinkManagerOptions
@@ -279,5 +282,58 @@ describe('renewal', () => {
     expect(issued.length).toBe(1)
     await vi.advanceTimersByTimeAsync(20_000)
     expect(connections[0]?.closed()).toBe(true)
+  })
+})
+
+describe('per-hub registry', () => {
+  afterEach(() => {
+    disposeDirectLinkManagers()
+    setDirectLinkProbe(null)
+  })
+
+  function hubClient() {
+    let onStatus: ((c: { computerId: string; connected: boolean }) => void) | undefined
+    const client = {
+      computers: {
+        issueDirectLink: {
+          mutate: async () => ({ available: false as const, reason: 'no-address' })
+        },
+        onStatusChange: {
+          subscribe: (_: undefined, opts: { onData: typeof onStatus }) => {
+            onStatus = opts.onData
+            return { unsubscribe: () => undefined }
+          }
+        }
+      }
+    }
+    return { client, status: (c: { computerId: string; connected: boolean }) => onStatus?.(c) }
+  }
+
+  it('keeps one manager per hub, and turns a computer reconnect into computerConnected', () => {
+    const { client, status } = hubClient()
+    const a = directLinkManagerFor('hub-a', client)
+    expect(directLinkManagerFor('hub-a', client)).toBe(a)
+    expect(directLinkManagerFor('hub-b', hubClient().client)).not.toBe(a)
+    const told: string[] = []
+    a.onComputerConnected((id) => told.push(id))
+    status({ computerId: 'c1', connected: false })
+    status({ computerId: 'c1', connected: true })
+    expect(told).toEqual(['c1'])
+  })
+
+  it('probes through the installed probe (the desktop asks its main process)', async () => {
+    const asked: string[] = []
+    setDirectLinkProbe(async (address) => {
+      asked.push(address)
+      return false
+    })
+    const client = {
+      computers: {
+        issueDirectLink: { mutate: async () => available() },
+        onStatusChange: { subscribe: () => ({ unsubscribe: () => undefined }) }
+      }
+    }
+    expect(await directLinkManagerFor('hub-p', client).acquire(pty())).toBeNull()
+    expect(asked).toEqual(['127.0.0.1:5001'])
   })
 })

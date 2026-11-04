@@ -94,6 +94,8 @@ export interface DirectLinkManager {
   acquire(target: DirectTarget): Promise<DirectLease | null>
   /** The computer (re)connected to the hub: its address may have moved. */
   computerConnected(computerId: string): void
+  /** Told after `computerConnected`: a good moment for relaying holders to try again. */
+  onComputerConnected(cb: (computerId: string) => void): () => void
   dispose(): void
 }
 
@@ -191,6 +193,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     t.kind === 'pty' ? `pty:${t.sessionId}` : `chat:${t.tabId}`
   let hubUnsupported = false
   let disposed = false
+  const connectedListeners = new Set<(computerId: string) => void>()
 
   function blocked(computerId: string): boolean {
     const b = backoff.get(computerId)
@@ -370,6 +373,12 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
       for (const socket of [...sockets.values()]) {
         if (socket.computerId === computerId) dropSocket(socket, 'computer-reconnected')
       }
+      for (const cb of [...connectedListeners]) cb(computerId)
+    },
+
+    onComputerConnected(cb) {
+      connectedListeners.add(cb)
+      return () => connectedListeners.delete(cb)
     },
 
     dispose() {
@@ -377,4 +386,79 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
       for (const socket of [...sockets.values()]) dropSocket(socket, 'disposed')
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// One manager per hub, shared by every consumer in this client
+// ---------------------------------------------------------------------------
+
+/** The slice of a hub's tRPC client the registry uses. */
+export interface DirectLinkHubClient {
+  computers: {
+    issueDirectLink: {
+      mutate(input: { target: DirectTarget }): Promise<DirectIssueResult>
+    }
+    onStatusChange: {
+      subscribe(
+        input: undefined,
+        opts: { onData: (change: { computerId: string; connected: boolean }) => void }
+      ): { unsubscribe(): void }
+    }
+  }
+}
+
+let installedProbe: ((address: string) => Promise<boolean>) | null = null
+
+/**
+ * Install (or clear) the process-wide direct-link probe — which also ENABLES the
+ * direct link in this client: a host that installs none (the web shell, the
+ * Chromium fork) stays on the hub relay. The desktop installs one that asks its
+ * main process (CSP check + an HTTP probe that never touches the renderer's
+ * WebSocket stack); mobile installs `defaultDirectProbe` (a plain fetch).
+ */
+export function setDirectLinkProbe(probe: ((address: string) => Promise<boolean>) | null): void {
+  installedProbe = probe
+}
+
+/** Whether this client uses direct links at all (a probe is installed). */
+export function isDirectLinkEnabled(): boolean {
+  return installedProbe !== null
+}
+
+const managers = new Map<string, { manager: DirectLinkManager; stop: () => void }>()
+
+/** The direct-link manager for one hub (created on first use). */
+export function directLinkManagerFor(
+  hubId: string,
+  client: DirectLinkHubClient
+): DirectLinkManager {
+  const existing = managers.get(hubId)
+  if (existing) return existing.manager
+  const manager = createDirectLinkManager({
+    issue: (target) => client.computers.issueDirectLink.mutate({ target }),
+    probe: (address) => (installedProbe ? installedProbe(address) : Promise.resolve(false))
+  })
+  // A computer that (re)connects may have moved its port: drop sockets to the old
+  // address and clear its backoff, so holders re-acquire at once.
+  let sub: { unsubscribe(): void } | null = null
+  try {
+    sub = client.computers.onStatusChange.subscribe(undefined, {
+      onData: (change) => {
+        if (change.connected) manager.computerConnected(change.computerId)
+      }
+    })
+  } catch {
+    // An older hub without the subscription: holders still re-acquire on close.
+  }
+  managers.set(hubId, { manager, stop: () => sub?.unsubscribe() })
+  return manager
+}
+
+/** Test seam / hub removal. */
+export function disposeDirectLinkManagers(): void {
+  for (const { manager, stop } of managers.values()) {
+    stop()
+    manager.dispose()
+  }
+  managers.clear()
 }

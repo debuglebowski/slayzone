@@ -23,6 +23,12 @@ export {
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
   createDirectLinkManager,
+  directLinkManagerFor,
+  defaultDirectProbe,
+  disposeDirectLinkManagers,
+  isDirectLinkEnabled,
+  setDirectLinkProbe,
+  type DirectLinkHubClient,
   type DirectIssueResult,
   type DirectLease,
   type DirectLeaseLostReason,
