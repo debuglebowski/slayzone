@@ -37,6 +37,32 @@ import { createProcHandlers } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
+import { createDirectChatFanout, type DirectChatEvent } from '../direct/chat-fanout'
+
+/** History reads a direct-link client may make (docs/direct-link.md). */
+export const DIRECT_CHAT_READS = new Set([
+  'getReplay',
+  'openTimeline',
+  'timelinePages',
+  'searchTimeline'
+] as const)
+export type DirectChatRead = typeof DIRECT_CHAT_READS extends Set<infer M> ? M : never
+
+/** One hub's chat, as direct-link clients reach it on this computer. */
+export interface DirectChatService {
+  /**
+   * A history read for `tabId`, under the epoch the hub granted. The computer's own
+   * ownership check refuses a stale epoch, exactly as for a relayed read.
+   */
+  read(tabId: string, epoch: number, method: DirectChatRead, args: unknown[]): Promise<unknown>
+  /** The tab's events while its epoch is still the granted one; null when it is not. */
+  watch(
+    tabId: string,
+    epoch: number,
+    onEvent: (event: DirectChatEvent) => void,
+    onEnd: (reason: 'epoch' | 'deleted' | 'disposed') => void
+  ): (() => void) | null
+}
 import type { ProjectPathStore } from '../project-paths'
 import type { SpawnAdmission } from '../spawn-admission'
 
@@ -228,6 +254,7 @@ export function createChatRuntimeHandlers(opts: {
     resetting = false
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
+  const directFanout = createDirectChatFanout()
   function runtime() {
     if (closed || resetting) throw new Error('Chat runtime is shutting down')
     if (instance) return instance
@@ -284,6 +311,13 @@ export function createChatRuntimeHandlers(opts: {
             : null
       const owner = tabId ? instance?.storage.forTab(tabId) : null
       if (type !== 'metadata' && !owner) return
+      // Direct-link clients get the tab's events from here, not through the hub.
+      if (type === 'event' && owner) {
+        directFanout.publish(
+          { tabId: owner.identity.tabId, epoch: owner.identity.epoch },
+          data as { event: unknown; seq: number; live?: number; at?: number }
+        )
+      }
       opts.ctx.dialer.notify(ComputerNotificationMethods.event, {
         name: 'chat-runtime',
         payload: {
@@ -382,6 +416,7 @@ export function createChatRuntimeHandlers(opts: {
     switch (req.kind) {
       case 'conversation.delete':
         await r.deleteConversation(req.identity)
+        directFanout.end(req.identity.tabId, 'deleted')
         return { ok: true }
       case 'conversation.transition':
         return r.transitionTab(req.value)
@@ -652,8 +687,31 @@ export function createChatRuntimeHandlers(opts: {
       }
     }
   }
+  const direct: DirectChatService = {
+    async read(tabId, epoch, method, args) {
+      if (!DIRECT_CHAT_READS.has(method)) throw new Error(`not a direct chat read: ${method}`)
+      const r = runtime()
+      const owner = r.storage.forTab(tabId)
+      if (!owner) throw new Error('No chat conversation for this tab')
+      return r.invoke(
+        parseChatInvocation({
+          route: { id: owner.identity.id, epoch },
+          target: 'ops',
+          method,
+          args
+        })
+      )
+    },
+    watch(tabId, epoch, onEvent, onEnd) {
+      const owner = instance?.storage.forTab(tabId)
+      if (!owner || owner.state !== 'active' || owner.identity.epoch !== epoch) return null
+      return directFanout.watch(tabId, epoch, onEvent, onEnd)
+    }
+  }
+
   return {
     request,
+    direct,
     assertTaskActive(taskId: string) {
       const r = runtime()
       if (r.storage.taskLifecycle(taskId).state !== 'active')
@@ -665,6 +723,7 @@ export function createChatRuntimeHandlers(opts: {
     async close() {
       if (closed) return
       closed = true
+      directFanout.endAll()
       if (instance) await instance.close()
       localProcs?.disposeAll()
       instance = null

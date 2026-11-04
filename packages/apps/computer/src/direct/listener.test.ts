@@ -19,13 +19,18 @@ afterEach(async () => {
 
 const hashOf = (token: string) => createHash('sha256').update(token).digest('hex')
 let n = 0
-function grant(store: DirectGrantStore, over: { ttlMs?: number; sessionId?: string } = {}) {
+function grant(
+  store: DirectGrantStore,
+  over: { ttlMs?: number; sessionId?: string; chat?: { tabId: string; epoch: number } } = {}
+) {
   const token = `tok-${++n}-${'x'.repeat(40)}`
   store.grant('hub', {
     grantId: `g${n}`,
     tokenHash: hashOf(token),
     userId: 'u1',
-    resource: { kind: 'pty', sessionId: over.sessionId ?? 's1' },
+    resource: over.chat
+      ? { kind: 'chat', ...over.chat }
+      : { kind: 'pty', sessionId: over.sessionId ?? 's1' },
     ttlMs: over.ttlMs ?? 60_000
   })
   return { token, grantId: `g${n}` }
@@ -67,8 +72,34 @@ function fakePty() {
   return { service, watchers }
 }
 
+/** A stand-in for one hub's chat. */
+function fakeChat() {
+  const reads: unknown[] = []
+  const watchers = new Map<
+    string,
+    { onEvent: (e: unknown) => void; onEnd: (r: 'epoch') => void; epoch: number }
+  >()
+  const service = {
+    read: async (tabId: string, epoch: number, method: string, args: unknown[]) => {
+      reads.push({ tabId, epoch, method, args })
+      return { ok: method }
+    },
+    watch: (
+      tabId: string,
+      epoch: number,
+      onEvent: (e: { tabId: string; event: unknown; seq: number }) => void,
+      onEnd: (r: 'epoch') => void
+    ) => {
+      watchers.set(tabId, { onEvent: onEvent as (e: unknown) => void, onEnd, epoch })
+      return () => watchers.delete(tabId)
+    }
+  }
+  return { service, reads, watchers }
+}
+
 async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits']) {
   const pty = fakePty()
+  const chat = fakeChat()
   const store = createDirectGrantStore()
   const audit: Array<Record<string, unknown>> = []
   const listener = await createDirectListener({
@@ -76,12 +107,15 @@ async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits
     listenAddress: '127.0.0.1:0',
     log: (message, detail) => logged.push(JSON.stringify({ message, detail })),
     audit: (line) => audit.push({ ...line }),
-    services: { pty: (hubKey) => (hubKey === 'hub' ? pty.service : null) },
+    services: {
+      pty: (hubKey) => (hubKey === 'hub' ? pty.service : null),
+      chat: (hubKey) => (hubKey === 'hub' ? chat.service : null)
+    },
     ...(limits ? { limits } : {})
   })
   cleanups.push(() => listener.close())
   cleanups.push(() => store.close())
-  return { store, listener, audit, pty }
+  return { store, listener, audit, pty, chat }
 }
 
 function client(listener: DirectListener, token: string | null) {
@@ -376,5 +410,48 @@ describe('client manager against the real listener (computer restart)', () => {
     } finally {
       globalThis.WebSocket = RealWebSocket
     }
+  })
+})
+
+describe('direct listener: chat', () => {
+  it('reads under the granted epoch, only for the granted tab', async () => {
+    const { store, listener, chat } = await setup()
+    const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    expect(await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })).toEqual({
+      ok: 'getReplay'
+    })
+    await trpc.chat.timelinePages.query({ tabId: 't1', pages: [0], asOfSeq: 9, epoch: 3 })
+    expect(chat.reads).toEqual([
+      { tabId: 't1', epoch: 3, method: 'getReplay', args: ['t1', -1] },
+      { tabId: 't1', epoch: 3, method: 'timelinePages', args: ['t1', [0], 9, 3] }
+    ])
+    await expect(trpc.chat.getReplay.query({ tabId: 't2', afterSeq: -1 })).rejects.toThrow(
+      /no capability/
+    )
+    // A pty grant does not reach chat.
+    const p = grant(store, { sessionId: 't1' })
+    await expect(
+      client(listener, p.token).trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    ).rejects.toThrow(/no capability/)
+  })
+
+  it('streams the tab’s events and errors when the conversation moves (epoch)', async () => {
+    const { store, listener, chat } = await setup()
+    const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    const got: unknown[] = []
+    const errors: unknown[] = []
+    trpc.chat.onEvent.subscribe(
+      { tabId: 't1' },
+      { onData: (e) => got.push(e), onError: (e) => errors.push(e) }
+    )
+    await waitFor(() => chat.watchers.has('t1'))
+    expect(chat.watchers.get('t1')?.epoch).toBe(3)
+    chat.watchers.get('t1')?.onEvent({ tabId: 't1', event: { kind: 'x' }, seq: 1, at: 5 })
+    await waitFor(() => got.length === 1)
+    expect(got).toEqual([{ tabId: 't1', event: { kind: 'x' }, seq: 1, at: 5 }])
+    chat.watchers.get('t1')?.onEnd('epoch')
+    await waitFor(() => errors.length === 1)
   })
 })

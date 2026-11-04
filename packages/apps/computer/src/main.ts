@@ -2,6 +2,7 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { createDirectListener, type DirectListener } from './direct/listener'
 import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
 import type { DirectPtyService } from './handlers/pty'
+import type { DirectChatService } from './handlers/chat-runtime'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
@@ -181,6 +182,8 @@ export interface HubRequestDispatch {
   hubDisconnected(reason: string): void
   /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
   directPty: DirectPtyService
+  /** This hub's chat, as direct-link clients reach it. */
+  directChat: DirectChatService
 }
 
 /**
@@ -366,6 +369,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     },
     handle: trackedHandle,
     directPty: pty.direct,
+    directChat: chat.direct,
     dispose,
     setAgentHookUrl,
     hubDisconnected,
@@ -483,7 +487,10 @@ export function startComputer(
   const dispatchByHub = new Map<string, HubRequestDispatch>()
   const directReady: Promise<void> = createDirectListener({
     grants: directGrants,
-    services: { pty: (hubKey) => dispatchByHub.get(hubKey)?.directPty ?? null },
+    services: {
+      pty: (hubKey) => dispatchByHub.get(hubKey)?.directPty ?? null,
+      chat: (hubKey) => dispatchByHub.get(hubKey)?.directChat ?? null
+    },
     listenAddress: config.directListenAddress ?? DEFAULT_DIRECT_LISTEN_ADDRESS,
     ...(config.directPublicAddress ? { publicAddress: config.directPublicAddress } : {}),
     log,

@@ -80,9 +80,35 @@ export interface DirectPtyService {
   ): (() => void) | null
 }
 
+/** One hub's chat on this computer (the computer's `DirectChatService`). */
+export interface DirectChatService {
+  read(
+    tabId: string,
+    epoch: number,
+    method: 'getReplay' | 'openTimeline' | 'timelinePages' | 'searchTimeline',
+    args: unknown[]
+  ): Promise<unknown>
+  watch(
+    tabId: string,
+    epoch: number,
+    onEvent: (event: DirectChatEvent) => void,
+    onEnd: (reason: 'epoch' | 'deleted' | 'disposed') => void
+  ): (() => void) | null
+}
+
+/** One chat event, in the hub's `chat.onEvent` shape. */
+export interface DirectChatEvent {
+  tabId: string
+  event: unknown
+  seq: number
+  live?: number
+  at?: number
+}
+
 /** What the computer serves, per hub link (a grant names its hub). */
 export interface DirectRouterServices {
   pty(hubKey: string): DirectPtyService | null
+  chat?(hubKey: string): DirectChatService | null
 }
 
 /** One chunk of a session's output, as the hub's `pty.onData` emits it. */
@@ -100,6 +126,8 @@ function noCapability(): TRPCError {
   return new TRPCError({ code: 'FORBIDDEN', message: 'no capability for this session' })
 }
 
+const tabId = z.string().min(1).max(200)
+
 export function createDirectRouter(services: DirectRouterServices) {
   /** The hub's terminals for a session this socket holds a grant on. */
   function ptyFor(ctx: DirectContext, id: string): DirectPtyService {
@@ -107,6 +135,14 @@ export function createDirectRouter(services: DirectRouterServices) {
     const service = grant ? services.pty(grant.hubKey) : null
     if (!service) throw noCapability()
     return service
+  }
+
+  /** The hub's chat for a tab this socket holds a grant on, and the granted epoch. */
+  function chatFor(ctx: DirectContext, id: string): { service: DirectChatService; epoch: number } {
+    const grant = ctx.socket.grantFor({ kind: 'chat', tabId: id })
+    const service = grant ? services.chat?.(grant.hubKey) : null
+    if (!grant || grant.resource.kind !== 'chat' || !service) throw noCapability()
+    return { service, epoch: grant.resource.epoch }
   }
 
   return t.router({
@@ -168,6 +204,77 @@ export function createDirectRouter(services: DirectRouterServices) {
           const stopGrant = ctx.socket.onTargetEnded(
             { kind: 'pty', sessionId: input.sessionId },
             () => emit.error(noCapability())
+          )
+          return () => {
+            stopWatch()
+            stopGrant()
+          }
+        })
+      })
+    }),
+
+    /**
+     * Chat history reads and the live event stream (the hub's `chat.*` shapes). The
+     * computer checks the granted ownership epoch on every read, as for a relayed
+     * one. Commands that need the hub's coordination (send, queue, rewind, …) stay
+     * hub calls.
+     */
+    chat: t.router({
+      getReplay: t.procedure
+        .input(z.object({ tabId, afterSeq: z.number() }))
+        .query(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.read(input.tabId, epoch, 'getReplay', [input.tabId, input.afterSeq])
+        }),
+      openTimeline: t.procedure
+        .input(z.object({ tabId, version: z.string().max(200) }))
+        .query(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.read(input.tabId, epoch, 'openTimeline', [input.tabId, input.version])
+        }),
+      timelinePages: t.procedure
+        .input(
+          z.object({
+            tabId,
+            pages: z.array(z.number().int().nonnegative()).max(512),
+            asOfSeq: z.number().int(),
+            epoch: z.number().int()
+          })
+        )
+        .query(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.read(input.tabId, epoch, 'timelinePages', [
+            input.tabId,
+            input.pages,
+            input.asOfSeq,
+            input.epoch
+          ])
+        }),
+      searchTimeline: t.procedure
+        .input(z.object({ tabId, query: z.string().max(1000) }))
+        .query(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.read(input.tabId, epoch, 'searchTimeline', [input.tabId, input.query])
+        }),
+      /**
+       * The tab's events. Errors FORBIDDEN when the grant ends or the conversation
+       * moves (its epoch changed) or is deleted: the client goes back to the hub.
+       */
+      onEvent: t.procedure.input(z.object({ tabId })).subscription(({ ctx, input }) => {
+        const { service, epoch } = chatFor(ctx, input.tabId)
+        return observable<DirectChatEvent>((emit) => {
+          const stopWatch = service.watch(
+            input.tabId,
+            epoch,
+            (event) => emit.next(event),
+            () => emit.error(noCapability())
+          )
+          if (!stopWatch) {
+            emit.error(noCapability())
+            return () => undefined
+          }
+          const stopGrant = ctx.socket.onTargetEnded({ kind: 'chat', tabId: input.tabId }, () =>
+            emit.error(noCapability())
           )
           return () => {
             stopWatch()
