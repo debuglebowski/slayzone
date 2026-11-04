@@ -61,6 +61,7 @@ import type {
   PtyBackend,
   PtyDetectionSpec,
   PtyHandle,
+  PtyInputFacts,
   PtySignal,
   PtySpawnConfirmation,
   PtySpawnSpec,
@@ -73,6 +74,8 @@ import {
   ptyGetReplayResultSchema,
   type PtyDetectedSnapshot,
   PTY_SIGNAL_EVENT_NAME,
+  PTY_INPUT_EVENT_NAME,
+  ptyInputPayloadSchema,
   ptySignalPayloadSchema,
   ComputerTransportErrorCodes,
   fsCopyInResultSchema,
@@ -956,6 +959,8 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
    */
   detectFromSeq: number
   signalEmitter: BufferingEmitter<PtySignal>
+  /** What writes a client sent straight to the computer meant (`pty-input`). */
+  inputEmitter: BufferingEmitter<PtyInputFacts>
   /** See `ackDetection`: the computer's buffer is the session's only one. */
   ownsOutput: boolean
   /**
@@ -1130,6 +1135,18 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     for (const signal of early)
       if (signal.seq > entry.detectFromSeq) entry.signalEmitter.emit(signal)
   }
+  // A client wrote to the computer directly (docs/direct-link.md): the hub applies
+  // what the write meant, as it would for a write it relayed.
+  gateway.events.on('event', (event) => {
+    if (event.name !== PTY_INPUT_EVENT_NAME) return
+    const parsed = ptyInputPayloadSchema.safeParse(event.payload)
+    if (!parsed.success) return
+    const { sessionId, spawnId, ...facts } = parsed.data
+    const entry = sessions.get(sessionKey(event.computerId, sessionId))
+    if (!entry || entry.disposed) return
+    if (spawnId && entry.spawnId && spawnId !== entry.spawnId) return
+    entry.inputEmitter.emit(facts)
+  })
   gateway.events.on('event', (event) => {
     if (event.name !== PTY_SIGNAL_EVENT_NAME) return
     const parsed = ptySignalPayloadSchema.safeParse(event.payload)
@@ -1236,6 +1253,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     const dataEmitter = new BufferingEmitter<{ data: string; seq: number }>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
     const signalEmitter = new BufferingEmitter<PtySignal>()
+    const inputEmitter = new BufferingEmitter<PtyInputFacts>()
     const entry: PtyEntry = {
       key,
       computerId,
@@ -1249,6 +1267,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       detectsOutput: false,
       detectFromSeq: -1,
       signalEmitter,
+      inputEmitter,
       ownsOutput: false,
       preAckSignals: null,
       availability: new Set()
@@ -1340,6 +1359,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           })
         ),
       onSignal: (cb: (signal: PtySignal) => void): ExecDisposable => signalEmitter.on(cb),
+      onInput: (cb: (facts: PtyInputFacts) => void): ExecDisposable => inputEmitter.on(cb),
       resize: (cols: number, rows: number): void => {
         void send(HubToComputerMethods.ptyResize, {
           sessionId,

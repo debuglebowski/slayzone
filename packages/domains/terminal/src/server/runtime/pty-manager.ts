@@ -2645,6 +2645,15 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           ptyEvents.emit('output-availability', sessionId, available)
         })
       )
+      // A client wrote to the computer directly (docs/direct-link.md): the same
+      // input effects as a write relayed through writePty.
+      ;(target as unknown as PtyHandle).onInput?.(
+        guardPtyCallback(sessionId, taskId, 'onInput', (facts: PtyInputFacts) => {
+          const session = sessions.get(sessionId)
+          if (!session || session.pty !== target) return
+          applyPtyInputFacts(sessionId, facts, facts.submitted?.length ?? 1)
+        })
+      )
       // Owner-detected output (see `PtySpawnSpec.detection`): same effects, for a
       // chunk this side delivered but did not detect.
       ;(target as unknown as PtyHandle).onSignal?.(

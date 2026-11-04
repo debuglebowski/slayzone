@@ -18,9 +18,12 @@ import {
   getBufferSince,
   getState,
   killPty,
+  onPtyInputSubmit,
   setDatabase,
   writePty
 } from './pty-manager'
+import type { PtyInputFacts } from '../pty-input'
+import { hasSessionUserInput } from '../user-input-tracker'
 import { setPtyBackend, type PtyBackend, type PtySignal, type PtySpawnSpec } from './pty-backend'
 import { ptyEvents } from './pty-events'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
@@ -59,6 +62,7 @@ function routedBackend(detectsOutput: boolean) {
   const relays: boolean[] = []
   let dataCb: ((d: string) => void) | undefined
   let signalCb: ((s: PtySignal) => void) | undefined
+  let inputCb: ((f: PtyInputFacts) => void) | undefined
   let exitCb: ((e: { exitCode: number }) => void) | undefined
   setPtyBackend({
     spawn: (spec: PtySpawnSpec) => {
@@ -73,6 +77,10 @@ function routedBackend(detectsOutput: boolean) {
         },
         onSignal: (cb: (s: PtySignal) => void) => {
           signalCb = cb
+          return { dispose: () => undefined }
+        },
+        onInput: (cb: (f: PtyInputFacts) => void) => {
+          inputCb = cb
           return { dispose: () => undefined }
         },
         onExit: (cb: (e: { exitCode: number }) => void) => {
@@ -91,6 +99,7 @@ function routedBackend(detectsOutput: boolean) {
     writes,
     output: (d: string) => dataCb?.(d),
     signal: (s: PtySignal) => signalCb?.(s),
+    input: (f: PtyInputFacts) => inputCb?.(f),
     exit: (exitCode: number) => exitCb?.({ exitCode }),
     relays
   }
@@ -354,4 +363,23 @@ test("owner's computer away: scrollback reads fail fast as unavailable, and reco
     prelude: '',
     currentSeq: 3
   })
+})
+
+test('a write the client sent straight to the computer has the effects of a relayed one', async () => {
+  const b = routedBackend(true)
+  const submitted: string[] = []
+  const stop = onPtyInputSubmit((sessionId, _taskId, line) => {
+    if (sessionId === 'mirror:direct-input') submitted.push(line)
+  })
+  await open('mirror:direct-input')
+  b.input({ submitted: 'fix the bug\r', esc: false, statusCommand: false })
+  expect(submitted).toEqual(['fix the bug\r'])
+  // The attention mark a relayed submit sets (needs_attention on running → idle).
+  expect(hasSessionUserInput('mirror:direct-input')).toBe(true)
+  // Nothing was written by the hub: the computer already wrote it.
+  expect(b.writes).toEqual([])
+  // A blank submit marks nothing, as on the relayed path.
+  b.input({ submitted: '  \r', esc: false, statusCommand: false })
+  expect(submitted).toEqual(['fix the bug\r'])
+  stop()
 })

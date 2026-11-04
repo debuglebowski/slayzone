@@ -71,6 +71,8 @@ export interface DirectPtyService {
     afterSeq: number
   ): { exists: boolean; size: { cols: number; rows: number } | null; buffer: DirectBuffer }
   getBufferSince(sessionId: string, afterSeq: number): DirectBuffer
+  /** False when the session has no live process. */
+  write(sessionId: string, data: string): boolean
   watch(
     sessionId: string,
     onData: (chunk: { seq: number; data: string }) => void,
@@ -133,6 +135,14 @@ export function createDirectRouter(services: DirectRouterServices) {
         .query(({ ctx, input }) =>
           ptyFor(ctx, input.sessionId).getBufferSince(input.sessionId, input.afterSeq)
         ),
+      /**
+       * Keystrokes and pastes. The computer writes them and reports submits and Esc
+       * to the hub (`pty-input`), so attention and turn tracking match a relayed
+       * write. Resize, interrupt and touch stay hub calls (it owns those records).
+       */
+      write: t.procedure
+        .input(z.object({ sessionId, data: z.string().max(1_000_000) }))
+        .mutation(({ ctx, input }) => ptyFor(ctx, input.sessionId).write(input.sessionId, input.data)),
       /**
        * Live output. Completes when the process ends; errors FORBIDDEN when the
        * socket's grant on the session ends (the client re-issues through the hub).

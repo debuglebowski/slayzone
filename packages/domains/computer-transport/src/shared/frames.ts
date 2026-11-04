@@ -315,6 +315,25 @@ export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
  */
 export const PTY_SIGNAL_EVENT_NAME = 'pty-signal'
 
+/**
+ * `ComputerEventParams.name` for what a stdin write a client sent STRAIGHT to the
+ * computer meant (v8, docs/direct-link.md): `analyzePtyInput`'s facts, so the hub
+ * applies the same effects it applies to a write it relayed itself — the turn
+ * tracker's submitted prompt, the attention mark, a TUI's flip to running. Only
+ * writes that submit or press Esc are reported; plain typing is not.
+ */
+export const PTY_INPUT_EVENT_NAME = 'pty-input'
+
+export const ptyInputPayloadSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: z.string().min(1).optional(),
+  /** The submitted line (Enter bytes included), or null when nothing was submitted. */
+  submitted: z.string().max(70_000).nullable(),
+  esc: z.boolean(),
+  statusCommand: z.boolean()
+})
+export type PtyInputPayload = z.infer<typeof ptyInputPayloadSchema>
+
 /** The hub's terminal theme: what the computer answers OSC colour queries with. */
 export const ptyThemeSchema = z.object({
   foreground: z.string().min(1).max(64),

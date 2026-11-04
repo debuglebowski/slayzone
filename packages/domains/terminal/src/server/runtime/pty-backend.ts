@@ -1,5 +1,6 @@
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
+import type { PtyInputFacts } from '../pty-input'
 import type { TerminalTheme } from '../sync-query-response'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 
@@ -212,6 +213,11 @@ export interface PtyHandle {
    * Absent/false until acknowledged, and always on a backend that cannot.
    */
   readonly detectsOutput?: boolean
+  /**
+   * What writes a client sent straight to the owner meant (docs/direct-link.md):
+   * the caller applies them as it applies a write of its own.
+   */
+  onInput?(cb: (facts: PtyInputFacts) => void): { dispose(): void }
   /** Detections reported by the owner, for output the caller did not detect itself. */
   onSignal?(cb: (signal: PtySignal) => void): { dispose(): void }
   /**

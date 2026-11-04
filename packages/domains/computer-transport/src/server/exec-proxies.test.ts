@@ -758,6 +758,30 @@ describe('createRoutingPtyBackend', () => {
     expect(await handle.clearOutput?.()).toEqual({ clearedSeq: 0 })
   })
 
+  it('relays what a direct write meant (pty-input) to its session, only for that session and spawn', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const got: unknown[] = []
+    handle.onInput?.((facts) => got.push(facts))
+    const event = (payload: Record<string, unknown>) =>
+      gateway.emit('event', { computerId: 'computer-1', name: 'pty-input', payload })
+    event({ sessionId: 'sess-1', submitted: 'hi\r', esc: false, statusCommand: false })
+    event({ sessionId: 'other', submitted: 'x\r', esc: false, statusCommand: false })
+    event({ sessionId: 'sess-1', spawnId: 'stale', submitted: 'y\r', esc: false, statusCommand: false })
+    event({ sessionId: 'sess-1', submitted: 5 })
+    expect(got).toEqual([{ submitted: 'hi\r', esc: false, statusCommand: false }])
+  })
+
   it('relay on demand: spawned unrelayed, turned on at the seq the computer reached, no backfill of the gap', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))

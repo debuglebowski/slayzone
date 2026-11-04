@@ -53,6 +53,8 @@ import {
   ptyRelayParamsSchema,
   type PtyRelayResult,
   PTY_SIGNAL_EVENT_NAME,
+  PTY_INPUT_EVENT_NAME,
+  type PtyInputPayload,
   RpcError,
   ComputerNotificationMethods,
   ComputerTransportErrorCodes,
@@ -72,6 +74,8 @@ import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
 import {
+  analyzePtyInput,
+  DEFAULT_SESSION_ID_COMMAND,
   filterBufferData,
   RingBuffer,
   SESSION_ERROR_WINDOW_MS
@@ -121,6 +125,13 @@ export interface DirectPtyService {
   }
   /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude). */
   getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult
+  /**
+   * A client's keystrokes, written to the process. Submits and Esc presses are
+   * reported to the hub as a journaled `pty-input` event, so the hub's input
+   * effects (attention, turn tracking, running) match a write it relayed. False
+   * when there is no live session.
+   */
+  write(sessionId: string, data: string): boolean
   /** Stream a live session's output; null when there is none. Returns unsubscribe. */
   watch(
     sessionId: string,
@@ -130,6 +141,8 @@ export interface DirectPtyService {
 }
 
 interface PtySession {
+  /** What direct writes typed since their last submit (see `analyzePtyInput`). */
+  directInput: string
   /** Direct-link clients streaming this session; independent of {@link relay}. */
   directWatchers: Set<DirectWatcher>
   /**
@@ -448,6 +461,7 @@ export function createPtyHandlers(
     let resolveExit!: () => void
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
+      directInput: '',
       directWatchers: new Set(),
       revokeCli: capability?.revoke,
       proc,
@@ -1324,6 +1338,30 @@ export function createPtyHandlers(
         live && !live.warm ? live.buffer : tombstones.get(sessionId)?.buffer,
         afterSeq
       )
+    },
+    write(sessionId, data) {
+      const session = sessions.get(sessionId)
+      if (!session || session.warm) return false
+      const { buffer, facts } = analyzePtyInput(
+        session.directInput,
+        data,
+        session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
+      )
+      session.directInput = buffer
+      session.proc.write(data)
+      // What a relayed write tells this computer with `watchConversationId`.
+      if (facts.statusCommand) session.signals?.watchConversationId()
+      if (facts.esc || facts.submitted !== null) {
+        const payload: PtyInputPayload = {
+          sessionId: session.id,
+          ...(session.spawnId ? { spawnId: session.spawnId } : {}),
+          submitted: facts.submitted,
+          esc: facts.esc,
+          statusCommand: facts.statusCommand
+        }
+        ctx.dialer.notify(ComputerNotificationMethods.event, { name: PTY_INPUT_EVENT_NAME, payload })
+      }
+      return true
     },
     watch(sessionId, onData, onEnd) {
       const session = sessions.get(sessionId)

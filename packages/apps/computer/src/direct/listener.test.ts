@@ -42,6 +42,11 @@ function fakePty() {
       size: { cols: 80, rows: 24 },
       buffer: { chunks: [{ seq: 0, data: `${sessionId}-0` }], prelude: '', currentSeq: 0, afterSeq }
     }),
+    writes: [] as Array<[string, string]>,
+    write(sessionId: string, data: string) {
+      this.writes.push([sessionId, data])
+      return sessionId === 's1'
+    },
     getBufferSince: (sessionId: string) => ({
       chunks: [{ seq: 0, data: `${sessionId}-0` }],
       prelude: '',
@@ -302,5 +307,18 @@ describe('direct listener: terminals', () => {
     expect(pty.watchers.has('s1')).toBe(false)
     expect(await trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).toBeTruthy()
     expect(closes).toEqual([])
+  })
+})
+
+describe('direct listener: terminal input', () => {
+  it('writes to a granted session only', async () => {
+    const { store, listener, pty } = await setup()
+    const { token } = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, token)
+    expect(await trpc.pty.write.mutate({ sessionId: 's1', data: 'ls\r' })).toBe(true)
+    await expect(trpc.pty.write.mutate({ sessionId: 's2', data: 'rm -rf /\r' })).rejects.toThrow(
+      /no capability/
+    )
+    expect(pty.service.writes).toEqual([['s1', 'ls\r']])
   })
 })

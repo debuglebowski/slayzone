@@ -111,3 +111,53 @@ describe('direct pty service', () => {
     pty.disposeAll()
   })
 })
+
+describe('direct pty input', () => {
+  const inputEvents = (notifies: Array<{ method: string; params: Record<string, unknown> }>) =>
+    notifies
+      .filter((n) => n.method === 'computer.event' || n.method === 'event')
+      .map((n) => n.params)
+      .filter((p) => p.name === 'pty-input')
+      .map((p) => p.payload)
+
+  it('writes to the process and reports submit and Esc to the hub — never plain typing', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'd-in'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    const got: string[] = []
+    pty.direct.watch(sessionId, (c) => got.push(c.data), () => {})
+    expect(pty.direct.write(sessionId, 'hel')).toBe(true)
+    expect(pty.direct.write(sessionId, 'lo')).toBe(true)
+    expect(inputEvents(notifies)).toEqual([])
+    pty.direct.write(sessionId, '\r')
+    await waitFor(() => got.join('').includes('hello'))
+    pty.direct.write(sessionId, '\x1b')
+    expect(inputEvents(notifies)).toEqual([
+      { sessionId, submitted: 'hello\r', esc: false, statusCommand: false },
+      { sessionId, submitted: null, esc: true, statusCommand: false }
+    ])
+    expect(pty.direct.write('nope', 'x')).toBe(false)
+    await pty.handlers['pty.kill']({ sessionId })
+    pty.disposeAll()
+  })
+
+  it('watches for the conversation id itself when /status is submitted directly', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'd-status'
+    await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'cat',
+      cwd: process.cwd(),
+      relay: false,
+      detection: { mode: 'claude-code', resuming: false }
+    })
+    pty.direct.write(sessionId, '/status\r')
+    expect(inputEvents(notifies)).toEqual([
+      { sessionId, submitted: '/status\r', esc: false, statusCommand: true }
+    ])
+    await pty.handlers['pty.kill']({ sessionId })
+    pty.disposeAll()
+  })
+})

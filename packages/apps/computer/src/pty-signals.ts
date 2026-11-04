@@ -75,6 +75,8 @@ export interface PtySessionSignals {
   absorb(text: string): void
   /** `/status` was submitted: look for a conversation id in the next output. */
   watchConversationId(): void
+  /** The command that makes this mode's agent print its conversation id, if any. */
+  sessionIdCommand(): string | undefined
   /** The hub's terminal theme changed (OSC colour query answers). */
   setTheme(theme: TerminalTheme): void
   /**
@@ -320,6 +322,9 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
       if (!cause) return
       reportedError = true
       send(lastSeq, EMPTY, cause)
+    },
+    sessionIdCommand() {
+      return detector.adapter.sessionIdCommand
     },
     watchConversationId() {
       detector.watchConversationId()

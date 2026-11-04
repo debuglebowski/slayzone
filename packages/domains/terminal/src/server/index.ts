@@ -319,3 +319,4 @@ export { setChatSessionSource } from './runtime/session-registry'
 
 export { localPtyBackend, spawnLocalPty } from './runtime/pty-backend-local'
 export { NodePtyUnavailableError } from './runtime/pty-backend'
+export { analyzePtyInput, type PtyInputFacts } from './pty-input'
