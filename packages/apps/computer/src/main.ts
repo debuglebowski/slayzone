@@ -1,3 +1,5 @@
+import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
+import { createDirectGrantHandlers } from './direct/handlers'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
@@ -148,6 +150,12 @@ export interface HubRequestHandlerDeps {
    * builds its own — so terminals restore without waiting on the probe.
    */
   pathReady?: Promise<unknown>
+  /**
+   * The computer-wide direct-link grant table (docs/direct-link.md), shared by every
+   * hub; this dispatch registers into it under `hubScope`. Absent: `direct.*` is
+   * unimplemented (tests).
+   */
+  directGrants?: DirectGrantStore
 }
 
 export interface HubRequestDispatch {
@@ -244,8 +252,18 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
 
+  const directGrantHandlers = deps.directGrants
+    ? createDirectGrantHandlers(
+        deps.directGrants,
+        deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? ''
+      )
+    : {}
+  Object.assign(table, directGrantHandlers)
+
   const hub = deps.hubHost ?? 'unknown'
-  const ptyMethods = new Set(Object.keys(pty.handlers))
+  // Neither terminals nor grant bookkeeping look tools up on PATH, so neither waits
+  // for the login-shell probe; a client waits on a grant before it can attach.
+  const ptyMethods = new Set([...Object.keys(pty.handlers), ...Object.keys(directGrantHandlers)])
 
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
@@ -447,6 +465,9 @@ export function startComputer(
   // ONE admission queue for every hub connection: agent starts contend for this
   // machine, whichever hub asked for them.
   const admission = createSpawnAdmission()
+  // ONE direct-link grant table: one listener serves every hub, and each hub's
+  // grants stay keyed by the link that registered them.
+  const directGrants = createDirectGrantStore()
 
   /**
    * Everything that belongs to ONE hub.
@@ -515,6 +536,7 @@ export function startComputer(
       getProjectPaths: () => projectPaths,
       admission,
       requestLog,
+      directGrants,
       hubHost: hubHostFromUrl(hubUrl),
       // Per hub, like the hook relay: a pty THIS hub asked for belongs to it.
       ...(hubAddress ? { hubAddress } : {}),
@@ -622,6 +644,7 @@ export function startComputer(
       hostIdStop?.()
       if (watchLocalRoots) unwatchFile(configFile)
       await Promise.all(connections.map((c) => c.dispose()))
+      directGrants.close()
     }
   }
   return handle
