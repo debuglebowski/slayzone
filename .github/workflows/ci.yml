@@ -199,6 +199,12 @@ jobs:
       - name: Test platform (shell primitives)
         run: pnpm --filter @slayzone/platform test
 
+      # Artifact saves on a real Windows filesystem: FlushFileBuffers needs a writable
+      # handle, so a read-only flush made every save EPERM (fixed in 6ae14aeec). macOS
+      # and Linux accept read-only fsync, so only this runner can catch a regression.
+      - name: Test artifact saves (Windows flush semantics)
+        run: pnpm --filter @slayzone/task-artifacts exec vitest run src/server/working-copy.test.ts -t "Windows flush semantics"
+
       - name: Test agent-hooks
         run: pnpm --filter @slayzone/app test:agent-hooks
 
