@@ -17,8 +17,8 @@ import {
   toast
 } from '@slayzone/ui'
 import type {
-  TerminalModeInfo,
-  UpdateTerminalModeInput,
+  AgentDefinition,
+  UpdateAgentDefinitionInput,
   UsageProviderConfig,
   UsageWindow
 } from '@slayzone/terminal-contracts'
@@ -58,8 +58,8 @@ export function UsageConfigSection({
   mode,
   onUpdate
 }: {
-  mode: TerminalModeInfo
-  onUpdate: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
+  mode: AgentDefinition
+  onUpdate: (id: string, updates: UpdateAgentDefinitionInput) => Promise<AgentDefinition | null>
 }) {
   const trpc = useTRPC()
   const usageTestMutation = useMutation(trpc.app.usage.test.mutationOptions())

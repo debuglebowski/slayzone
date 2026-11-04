@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { createTabRow, tabsEvents } from '@slayzone/task-terminals/server'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import type { RestApiDeps } from '../types'
 
 export function registerTabsCreateRoute(app: Express, deps: RestApiDeps): void {
@@ -16,7 +16,7 @@ export function registerTabsCreateRoute(app: Express, deps: RestApiDeps): void {
       res.status(404).json({ error: `Task not found: ${taskId}` })
       return
     }
-    const mode = typeof body.mode === 'string' ? (body.mode as TerminalMode) : undefined
+    const mode = typeof body.mode === 'string' ? (body.mode as AgentId) : undefined
     const label = typeof body.label === 'string' ? body.label : undefined
     const tab = await createTabRow(deps.db, { taskId, mode, label })
 

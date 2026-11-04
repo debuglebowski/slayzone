@@ -66,7 +66,7 @@ const seedProject = (h: Harness, pid: string): void => {
 const seedTask = (h: Harness, id: string, pid: string): void => {
   h.db
     .prepare(
-      `INSERT INTO tasks (id, project_id, title, status, terminal_mode, created_at, updated_at)
+      `INSERT INTO tasks (id, project_id, title, status, agent_id, created_at, updated_at)
        VALUES (?, ?, 'T', 'in_progress', 'claude-code', datetime('now'), datetime('now'))`
     )
     .run(id, pid)

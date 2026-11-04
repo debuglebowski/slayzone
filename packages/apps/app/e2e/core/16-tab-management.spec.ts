@@ -89,23 +89,23 @@ test.describe('Tab management & keyboard shortcuts', () => {
 
   test('open multiple tasks as tabs', async ({ mainWindow }) => {
     await mainWindow.getByText('Tab task A').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     await goHome(mainWindow)
     await expect(mainWindow.getByText('Tab task A').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('Tab task B').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     await goHome(mainWindow)
     await expect(mainWindow.getByText('Tab task B').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('Tab task C').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // All tasks should be in DOM (tab bar + content)
     await expect(mainWindow.getByText('Tab task A').first()).toBeAttached()
@@ -119,9 +119,9 @@ test.describe('Tab management & keyboard shortcuts', () => {
     await expect(mainWindow.getByText('Tab task A').first()).toBeVisible({ timeout: 5_000 })
 
     await mainWindow.keyboard.press('Meta+1')
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // Should be on a task tab (visible input with a title)
     const value = await getVisibleInputValue(mainWindow)
@@ -130,9 +130,9 @@ test.describe('Tab management & keyboard shortcuts', () => {
 
   test('Cmd+2 switches to second task tab', async ({ mainWindow }) => {
     await mainWindow.keyboard.press('Meta+2')
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     const value = await getVisibleInputValue(mainWindow)
     expect(value).toBeTruthy()
@@ -143,9 +143,9 @@ test.describe('Tab management & keyboard shortcuts', () => {
     await expect(mainWindow.getByText('Tab task A').first()).toBeVisible({ timeout: 5_000 })
 
     await mainWindow.keyboard.press('Control+Tab')
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // Should be on a task tab (visible input with a title)
     const value = await getVisibleInputValue(mainWindow)
@@ -166,9 +166,9 @@ test.describe('Tab management & keyboard shortcuts', () => {
     await goHome(mainWindow)
     await expect(mainWindow.getByText('Tab task C').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('Tab task C').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     const closedTitle = await getVisibleInputValue(mainWindow)
     expect(closedTitle).toBeTruthy()
@@ -195,9 +195,9 @@ test.describe('Tab management & keyboard shortcuts', () => {
     await mainWindow.evaluate(() => {
       ;(window as unknown as TabStoreWindow).__slayzone_tabStore.getState().reopenClosedTab()
     })
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     const reopenedTitle = await getVisibleInputValue(mainWindow)
     expect(reopenedTitle).toBe(closedTitle)
@@ -208,16 +208,16 @@ test.describe('Tab management & keyboard shortcuts', () => {
     await expect(mainWindow.getByText('Tab task A').first()).toBeVisible({ timeout: 5_000 })
 
     await mainWindow.getByText('Tab task A').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     await goHome(mainWindow)
     await expect(mainWindow.getByText('Tab task A').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('Tab task A').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     const value = await getVisibleInputValue(mainWindow)
     expect(value).toBe('Tab task A')
@@ -292,7 +292,7 @@ test.describe('Tab management & keyboard shortcuts', () => {
       title: 'Tab scratch',
       status: 'in_progress',
       isTemporary: true,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await seed(mainWindow).refreshData()
     for (const id of taskIds) await openTaskById(mainWindow, id)

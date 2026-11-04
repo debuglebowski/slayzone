@@ -11,7 +11,7 @@ import {
 const task = (extra: Partial<Task> = {}): Task =>
   ({
     id: 't',
-    terminal_mode: 'claude-code',
+    agent_id: 'claude-code',
     provider_config: { 'claude-code': { flags: '--x' } },
     worktree_path: null,
     base_dir: null,

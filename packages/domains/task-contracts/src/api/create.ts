@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import type { CreateTaskInput } from '../types'
 
-const terminalModeSchema = z.string().min(1) as unknown as z.ZodType<TerminalMode>
+const agentIdSchema = z.string().min(1) as unknown as z.ZodType<AgentId>
 
 export const CreateTaskInputSchema = z.object({
   projectId: z.string().min(1),
@@ -12,7 +12,7 @@ export const CreateTaskInputSchema = z.object({
   status: z.string().optional(),
   priority: z.number().int().min(1).max(5).optional(),
   dueDate: z.string().optional(),
-  terminalMode: terminalModeSchema.optional(),
+  agentId: agentIdSchema.optional(),
   claudeFlags: z.string().optional(),
   codexFlags: z.string().optional(),
   cursorFlags: z.string().optional(),

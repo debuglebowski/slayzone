@@ -10,6 +10,7 @@ import type {
   ChatTransferManifest,
   ChatOwnership,
   ChatRecord,
+  ChatRecordKind,
   CommandReceipt,
   ConversationIdentity,
   StoredChatEvent,
@@ -49,6 +50,21 @@ interface OwnerRow {
 export const CHAT_STORAGE_SCHEMA_VERSION = 5
 
 /** One database per authenticated hub namespace. Never accepts a caller-supplied disk path. */
+
+/** Record kinds that never reach the hub's metadata (conversation content only). */
+const LOCAL_ONLY_RECORD_KINDS = [
+  'draft',
+  'prompt',
+  'workspace',
+  'attachment',
+  'timeline'
+] as const satisfies readonly ChatRecordKind[]
+/** Trigger body: bump `task_state_versions` for the task named by SQL expression `task`. */
+export function bumpTaskStateVersion(task: string): string {
+  return `INSERT INTO task_state_versions(task_id,version) SELECT ${task},1 WHERE ${task} IS NOT NULL
+    ON CONFLICT(task_id) DO UPDATE SET version=version+1;`
+}
+
 export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   if (!opts.hubScope.trim()) throw new Error('Hub storage scope is required')
   const dir = join(opts.stateDir, 'computer-runtime', digest(opts.hubScope))
@@ -111,6 +127,30 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         value TEXT NOT NULL,PRIMARY KEY(task_id,id)
       );
+    `)
+    // Version of the hub-facing metadata state, per task. Triggers are the one
+    // choke point, so every writer (bootstrap, retention, migration, future code)
+    // bumps it. Fail safe: a record kind counts unless it is known to stay local.
+    // Recovery re-reads a conversation's metadata only when this moved past what
+    // the hub last applied.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_state_versions (
+        task_id TEXT PRIMARY KEY, version INTEGER NOT NULL
+      );
+      ${['INSERT', 'UPDATE', 'DELETE']
+        .map((op) => {
+          const r = op === 'DELETE' ? 'OLD' : 'NEW'
+          return `
+      CREATE TRIGGER IF NOT EXISTS records_state_version_${op.toLowerCase()} AFTER ${op} ON records
+      WHEN NOT (${r}.kind IN (${LOCAL_ONLY_RECORD_KINDS.map((k) => `'${k}'`).join(',')})
+        OR (${r}.kind='settings' AND (${r}.id='metadata-counter' OR ${r}.id GLOB 'metadata:*')))
+      BEGIN ${bumpTaskStateVersion(`(SELECT task_id FROM conversations WHERE id=${r}.conversation_id)`)} END;
+      CREATE TRIGGER IF NOT EXISTS provider_configs_state_version_${op.toLowerCase()} AFTER ${op} ON provider_configs
+      BEGIN ${bumpTaskStateVersion(`${r}.task_id`)} END;`
+        })
+        .join('')}
+      CREATE TRIGGER IF NOT EXISTS conversations_state_version AFTER UPDATE ON conversations
+      BEGIN ${bumpTaskStateVersion('NEW.task_id')} END;
     `)
     if (schema < 3) {
       db.exec(
@@ -675,6 +715,16 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     read,
     records,
     nextSeq,
+    /** See `task_state_versions`. 0 = nothing written since this table existed. */
+    stateVersion(taskId: string): number {
+      return (
+        (
+          db.prepare('SELECT version FROM task_state_versions WHERE task_id=?').get(taskId) as
+            | { version: number }
+            | undefined
+        )?.version ?? 0
+      )
+    },
     repairAttachmentPins() {
       if (db.prepare("SELECT 1 FROM storage_maintenance WHERE id='attachment-pins-v4'").get())
         return { unresolved: 0 }

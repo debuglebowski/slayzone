@@ -10,7 +10,7 @@ import {
 } from '../fixtures/electron'
 import {
   openTaskTerminal,
-  switchTerminalMode,
+  switchAgent,
   getMainSessionId,
   waitForPtySession,
   runCommand,
@@ -446,7 +446,7 @@ test.describe('MCP Server', () => {
 
     // Open the task terminal
     await openTaskTerminal(mainWindow, { projectAbbrev: 'MC', taskTitle: 'MCP env test' })
-    await switchTerminalMode(mainWindow, 'terminal')
+    await switchAgent(mainWindow, 'terminal')
 
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(mainWindow, sessionId)

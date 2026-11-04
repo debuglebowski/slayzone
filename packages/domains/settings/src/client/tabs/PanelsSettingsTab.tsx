@@ -16,8 +16,8 @@ export function PanelsSettingsTab({
   activeTab,
   navigateTo,
   modes,
-  defaultTerminalMode,
-  onDefaultTerminalModeChange
+  defaultAgentId,
+  onDefaultAgentIdChange
 }: PanelsSettingsTabProps) {
   const s = usePanelSettings(activeTab, navigateTo)
   const { panelDetailId } = s
@@ -39,8 +39,8 @@ export function PanelsSettingsTab({
         <TerminalPanelSettings
           state={s}
           modes={modes}
-          defaultTerminalMode={defaultTerminalMode}
-          onDefaultTerminalModeChange={onDefaultTerminalModeChange}
+          defaultAgentId={defaultAgentId}
+          onDefaultAgentIdChange={onDefaultAgentIdChange}
         />
       )}
 

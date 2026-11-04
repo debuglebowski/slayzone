@@ -119,9 +119,7 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
                         <span className="pointer-events-none block size-3.5 rounded-full bg-background shadow-sm translate-x-[18px]" />
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      Cannot disable — this is your default terminal mode
-                    </TooltipContent>
+                    <TooltipContent>Cannot disable — this is your default agent</TooltipContent>
                   </Tooltip>
                 ) : (
                   <button

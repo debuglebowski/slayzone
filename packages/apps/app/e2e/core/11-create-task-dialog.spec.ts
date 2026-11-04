@@ -58,9 +58,9 @@ test.describe('Create task dialog & metadata editing', () => {
   test('change status in task detail metadata sidebar', async ({ mainWindow }) => {
     // Open task detail — click the kanban card (button) to avoid hitting a leftover toast.
     await mainWindow.getByRole('button', { name: 'Dialog created task' }).click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // Dismiss "Move to In Progress?" dialog if terminal input triggered it
     const dialog = mainWindow.getByRole('alertdialog')

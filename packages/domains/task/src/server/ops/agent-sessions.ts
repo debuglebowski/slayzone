@@ -1,11 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { type ConversationOrigin, HONORED_ORIGINS_SQL } from '@slayzone/task-contracts'
-import {
-  isBuiltinTerminalMode,
-  isSyntheticChatPrompt,
-  modeAgentId
-} from '@slayzone/terminal-contracts'
+import { isBuiltinAgentId, isSyntheticChatPrompt, modeAgentId } from '@slayzone/terminal-contracts'
 import { agentSessionsEvents } from '../events'
 
 type SessionPromptReader = (
@@ -140,15 +136,15 @@ export const TURN_TRACKED_AGENTS: ReadonlySet<string> = new Set(['claude-code'])
  * resumable — i.e. whether the AGENT the mode runs is turn-tracked.
  *
  * Testing the raw mode id classified every user-defined provider (own id, wrapping
- * e.g. claude-code via `terminal_modes.type`) as "turns unobservable", so its
+ * e.g. claude-code via `agents.type`) as "turns unobservable", so its
  * fresh sessions were proven at spawn, before any transcript existed. The next
  * restart then resumed an id `--resume` cannot find. A built-in never reads the DB
  * (it is its own agent — see `modeAgentId`).
  */
 export async function isTurnTrackedMode(db: SlayzoneDb, mode: string): Promise<boolean> {
-  const declaredType = isBuiltinTerminalMode(mode)
+  const declaredType = isBuiltinAgentId(mode)
     ? null
-    : (await db.get<{ type: string }>('SELECT type FROM terminal_modes WHERE id = ?', [mode]))?.type
+    : (await db.get<{ type: string }>('SELECT type FROM agents WHERE id = ?', [mode]))?.type
   return TURN_TRACKED_AGENTS.has(modeAgentId(mode, declaredType))
 }
 

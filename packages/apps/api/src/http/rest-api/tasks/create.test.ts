@@ -45,7 +45,7 @@ h.db
 const templateId = crypto.randomUUID()
 h.db
   .prepare(
-    `INSERT INTO task_templates (id, project_id, name, terminal_mode, default_status, default_priority)
+    `INSERT INTO task_templates (id, project_id, name, agent_id, default_status, default_priority)
      VALUES (?, ?, ?, ?, ?, ?)`
   )
   .run(templateId, projectId, 'Bugfix', 'codex', 'in_progress', 2)
@@ -207,6 +207,39 @@ describe('POST /api/tasks — project reference', () => {
   })
 })
 
+describe('POST /api/tasks — agentId + its deprecated terminalMode alias', () => {
+  test('agentId sets the agent', async () => {
+    const res = await rest.request<{ ok: boolean; data: { agent_id: string } }>(
+      'POST',
+      '/api/tasks',
+      { projectId, title: 'ByAgentId', agentId: 'codex' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.agent_id).toBe('codex')
+  })
+
+  test('terminalMode (old name) still sets the agent', async () => {
+    const res = await rest.request<{ ok: boolean; data: { agent_id: string } }>(
+      'POST',
+      '/api/tasks',
+      { projectId, title: 'ByTerminalMode', terminalMode: 'codex' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.agent_id).toBe('codex')
+  })
+
+  test('400: agentId and terminalMode with different values', async () => {
+    const res = await rest.request<{ ok: boolean; error: string }>('POST', '/api/tasks', {
+      projectId,
+      title: 'Contradiction',
+      agentId: 'codex',
+      terminalMode: 'claude-code'
+    })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/agentId.*terminalMode/)
+  })
+})
+
 describe('POST /api/tasks — status alias resolved hub-side', () => {
   test('a LABEL resolves against the project columns', async () => {
     const res = await rest.request<{ ok: boolean; data: { status: string } }>(
@@ -253,12 +286,12 @@ describe('POST /api/tasks — template reference resolved hub-side', () => {
   test('`template` by NAME applies the template defaults', async () => {
     const res = await rest.request<{
       ok: boolean
-      data: { id: string; status: string; priority: number; terminal_mode: string }
+      data: { id: string; status: string; priority: number; agent_id: string }
     }>('POST', '/api/tasks', { project: 'P', title: 'TplByName', template: 'Bugfix' })
     expect(res.status).toBe(200)
     expect(res.body.data.status).toBe('in_progress')
     expect(res.body.data.priority).toBe(2)
-    expect(res.body.data.terminal_mode).toBe('codex')
+    expect(res.body.data.agent_id).toBe('codex')
   })
 
   test('`template` by id PREFIX applies the same template', async () => {

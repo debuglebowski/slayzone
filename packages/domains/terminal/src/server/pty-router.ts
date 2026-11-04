@@ -19,7 +19,7 @@ import { stopTaskAgents } from './task-events'
 import { agentStarts, type AgentStartEntry } from './runtime/agent-starts'
 
 // PTY router (IPC → tRPC migration, slice 3 / P17). Mirrors the `pty:*` /
-// `terminalModes:*` / `session:*` / `chat:list` IPC handlers 1:1 plus the
+// `agents*` / `session:*` / `chat:list` IPC handlers 1:1 plus the
 // `webContents.send('pty:*')` event surface as subscriptions. Ops + the event
 // emitter are injected via `setPtyDeps()` (electron + node-pty coupled). The
 // renderer is still on IPC until slice 5; the same ops/emitter back both
@@ -28,27 +28,25 @@ const anyInput = z.unknown()
 const ops = (): ReturnType<typeof getPtyDeps>['ops'] => getPtyDeps().ops
 
 export const ptyRouter = router({
-  // Terminal modes CRUD
-  modesList: publicProcedure.query(() => ops().terminalModesList()),
-  modesTest: publicProcedure
+  // Agent definitions CRUD
+  agentsList: publicProcedure.query(() => ops().agentsList()),
+  agentsTest: publicProcedure
     .input(z.object({ command: z.string() }))
-    .query(({ input }) => ops().terminalModesTest(input.command)),
-  modesGet: publicProcedure
+    .query(({ input }) => ops().agentsTest(input.command)),
+  agentsGet: publicProcedure
     .input(z.object({ id: z.string() }))
-    .query(({ input }) => ops().terminalModesGet(input.id)),
-  modesCreate: publicProcedure
+    .query(({ input }) => ops().agentsGet(input.id)),
+  agentsCreate: publicProcedure
     .input(anyInput)
-    .mutation(({ input }) => ops().terminalModesCreate(input as never)),
-  modesUpdate: publicProcedure
+    .mutation(({ input }) => ops().agentsCreate(input as never)),
+  agentsUpdate: publicProcedure
     .input(z.object({ id: z.string(), updates: anyInput }))
-    .mutation(({ input }) => ops().terminalModesUpdate(input.id, input.updates as never)),
-  modesDelete: publicProcedure
+    .mutation(({ input }) => ops().agentsUpdate(input.id, input.updates as never)),
+  agentsDelete: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(({ input }) => ops().terminalModesDelete(input.id)),
-  modesRestoreDefaults: publicProcedure.mutation(() => ops().terminalModesRestoreDefaults()),
-  modesResetToDefaultState: publicProcedure.mutation(() =>
-    ops().terminalModesResetToDefaultState()
-  ),
+    .mutation(({ input }) => ops().agentsDelete(input.id)),
+  agentsRestoreDefaults: publicProcedure.mutation(() => ops().agentsRestoreDefaults()),
+  agentsResetToDefaultState: publicProcedure.mutation(() => ops().agentsResetToDefaultState()),
 
   // PTY ops
   create: publicProcedure.input(anyInput).mutation(({ input }) => ops().ptyCreate(input as never)),

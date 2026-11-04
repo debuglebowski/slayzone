@@ -227,7 +227,7 @@ export function ConflictPhaseContent({
               key={selectedFile}
               repoPath={projectPath}
               filePath={selectedFile}
-              terminalMode={task.terminal_mode}
+              agentId={task.agent_id}
               onResolved={() => handleFileResolved(selectedFile)}
               branchContext={fallbackContext}
             />

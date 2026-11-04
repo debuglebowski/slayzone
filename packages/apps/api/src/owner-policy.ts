@@ -709,7 +709,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.archives.attachment': checked(computer('computerId')),
   'chat.archives.file': checked(computer('computerId')),
   'chat.availability': checked(tab('tabId')),
-  'chat.supports': none('a terminal mode id'),
+  'chat.supports': none('an agent id'),
   'chat.workspaceChanges.get': checked(tab('tabId')),
   'chat.workspaceChanges.getFileDiff': checked(tab('tabId')),
   'chat.testSetWatchdogTimings': none(TEST),
@@ -1086,14 +1086,14 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   ),
 
   // ── pty ──
-  'pty.modesList': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesTest': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesGet': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesCreate': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesUpdate': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesDelete': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesRestoreDefaults': none(`${HUB_CONFIG}: terminal modes`),
-  'pty.modesResetToDefaultState': none(`${HUB_CONFIG}: terminal modes`),
+  'pty.agentsList': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsTest': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsGet': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsCreate': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsUpdate': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsDelete': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsRestoreDefaults': none(`${HUB_CONFIG}: agents`),
+  'pty.agentsResetToDefaultState': none(`${HUB_CONFIG}: agents`),
   // The key of a new session is `taskId:tabId`: its task decides.
   'pty.create': checked(session('sessionId'), path('cwd')),
   'pty.testSetPtyCreateCapture': none(TEST),
@@ -1206,6 +1206,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.setBrowserTabLocked': checked(task('taskId')),
   // Starts the task's agent where the task's computer is (placement gates that too).
   'task.startMainAgent': checked(task('taskId')),
+  // Stops the task's main agent and stores the new mode.
+  'task.switchMode': checked(task('taskId')),
   // Blockers can cross projects: the other side is filtered too.
   'task.getBlockers': then(checked(task('taskId')), taskRows),
   'task.getAllBlockedTaskIds': listed(ids('task')),

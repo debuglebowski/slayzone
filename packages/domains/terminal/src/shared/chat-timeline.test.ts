@@ -762,7 +762,8 @@ describe('sub-agent: orphan notification after a restart', () => {
     phase: 'in-flight',
     toolUseId,
     status: 'stopped',
-    summary: 'Orphaned by a previous Claude Code process exit and reported in an aggregate summary.',
+    summary:
+      'Orphaned by a previous Claude Code process exit and reported in an aggregate summary.',
     raw: {}
   })
   const apply = (s: ChatTimelineState, events: AgentEvent[]): ChatTimelineState =>

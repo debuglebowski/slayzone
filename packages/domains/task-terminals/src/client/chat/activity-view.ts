@@ -1,5 +1,9 @@
 import type { TimelineItem } from '@slayzone/terminal/client'
-import { turnChangeSources, unifiedChangeRows, workspaceChangesShows } from './files-changed/turn-changes'
+import {
+  turnChangeSources,
+  unifiedChangeRows,
+  workspaceChangesShows
+} from './files-changed/turn-changes'
 
 export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
 export type SubAgentItem = Extract<TimelineItem, { kind: 'sub-agent' }>

@@ -44,9 +44,9 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       }
 
       const parent = (await deps.db
-        .prepare('SELECT id, project_id, terminal_mode FROM tasks WHERE id = ?')
+        .prepare('SELECT id, project_id, agent_id FROM tasks WHERE id = ?')
         .get(parent_task_id)) as
-        | { id: string; project_id: string; terminal_mode: string | null }
+        | { id: string; project_id: string; agent_id: string | null }
         | undefined
 
       if (!parent) {
@@ -62,11 +62,11 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       }
 
       const id = randomUUID()
-      const terminalMode =
-        parent.terminal_mode ??
+      const agentId =
+        parent.agent_id ??
         (
           (await deps.db
-            .prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'")
+            .prepare("SELECT value FROM settings WHERE key = 'default_agent_id'")
             .get()) as { value: string } | undefined
         )?.value ??
         'claude-code'
@@ -98,7 +98,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
         status: initialStatus,
         priority: priority ?? 3,
         dueDate: due_date ?? null,
-        terminalMode,
+        agentId,
         providerConfig,
         isTemporary: false,
         repoName: null,

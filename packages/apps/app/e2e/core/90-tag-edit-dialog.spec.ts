@@ -22,9 +22,9 @@ test.describe('Tag create and edit dialog', () => {
 
   test('open task and navigate to tags popover', async ({ mainWindow }) => {
     await mainWindow.getByText('Tag task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // Dismiss alert dialog if present
     const dialog = mainWindow.getByRole('alertdialog')

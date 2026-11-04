@@ -160,7 +160,7 @@ See [backup and restore](docs/backup-and-restore.md) for retention and operator 
 
 Allowed domain dependencies:
 ```
-task → terminal, worktrees (TerminalMode, GitPanel)
+task → terminal, worktrees (AgentId, GitPanel)
 tasks → task, terminal (types, usePty)
 transport → all renderer clients (tRPC contract)
 ```

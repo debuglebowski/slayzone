@@ -69,7 +69,7 @@ const descInput = () =>
 
 beforeEach(() => {
   onSave = vi.fn()
-  wrapper = createTrpcTest({ procedures: { 'pty.modesList': () => [] } }).wrapper
+  wrapper = createTrpcTest({ procedures: { 'pty.agentsList': () => [] } }).wrapper
 })
 
 afterEach(() => {

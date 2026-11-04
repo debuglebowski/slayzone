@@ -41,7 +41,7 @@ const notify = (): void => {
 export function markTerminalFirst(task: Task, project: Project | null | undefined): boolean {
   // The fallback mounts xterm, not a chat pane. Spawning a shell for a chat tab
   // leaves an idle PTY that masks the chat's state in the session registry.
-  if (isChatSupported(task.terminal_mode)) return false
+  if (isChatSupported(task.agent_id)) return false
   const cwd = plainMainTerminalCwd(task, project)
   if (!cwd || !project) return false
   const prev = entries.get(task.id)

@@ -7,7 +7,7 @@
  * `false` (Normal) omits `serviceTier` so Codex uses its default tier.
  *
  * Only `codex-chat` exposes the lever. Stored in
- * `provider_config.<terminalMode>.chatFastMode`.
+ * `provider_config.<agentId>.chatFastMode`.
  *
  * @module shared/chat-fast-mode
  */

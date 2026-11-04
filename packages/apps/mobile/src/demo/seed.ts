@@ -69,7 +69,7 @@ export function demoTask(
     due_date: null,
     archived_at: null,
     deleted_at: null,
-    terminal_mode: 'claude-chat',
+    agent_id: 'claude-chat',
     provider_config: {},
     terminal_shell: null,
     currentConversationByMode: {},
@@ -347,7 +347,7 @@ export function seedDemo(now: number): DemoSeed {
       order: 0,
       progress: 60,
       description: SEARCH_DESCRIPTION,
-      terminal_mode: 'codex',
+      agent_id: 'codex',
       due_date: dayAfter(now, 3),
       last_interaction_at: now - 2 * 60_000,
       updated_at: hubTime(now, 2)
@@ -377,7 +377,7 @@ export function seedDemo(now: number): DemoSeed {
       priority: 2,
       order: 0,
       description: AUTH_DESCRIPTION,
-      terminal_mode: 'claude-chat',
+      agent_id: 'claude-chat',
       needs_attention: true,
       last_interaction_at: now - 14 * 60_000,
       updated_at: hubTime(now, 14)
@@ -389,7 +389,7 @@ export function seedDemo(now: number): DemoSeed {
       status: 'review',
       priority: 3,
       order: 1,
-      terminal_mode: 'claude-code',
+      agent_id: 'claude-code',
       pr_url: 'https://github.com/example/api-v2/pull/24',
       description: 'Review the cursor encoding and the `nextCursor` contract before merging.',
       updated_at: hubTime(now, 60 * 5)
@@ -457,7 +457,7 @@ export function seedDemo(now: number): DemoSeed {
       priority: 2,
       order: 0,
       description: DARK_MODE_DESCRIPTION,
-      terminal_mode: 'claude-chat',
+      agent_id: 'claude-chat',
       last_interaction_at: now - 50 * 60_000,
       updated_at: hubTime(now, 50)
     }),

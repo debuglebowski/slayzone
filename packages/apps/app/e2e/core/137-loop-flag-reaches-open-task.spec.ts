@@ -37,7 +37,7 @@ test.describe('Loop command lab flag reaches an open task', () => {
       projectId: p.id,
       title: 'Loop labs task',
       status: 'todo',
-      terminalMode: 'claude-code'
+      agentId: 'claude-code'
     })
     taskId = t.id
     await s.refreshData()
@@ -52,7 +52,7 @@ test.describe('Loop command lab flag reaches an open task', () => {
   }) => {
     await openTaskById(mainWindow, taskId)
     const loopButton = mainWindow.locator('button[aria-label="Loop command"]:visible')
-    await expect(mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible')).toBeVisible({
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible')).toBeVisible({
       timeout: 10_000
     })
     await expect(loopButton).toHaveCount(0)

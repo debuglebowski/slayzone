@@ -56,7 +56,7 @@ const { useTaskTerminalSession } = await import('./useTaskTerminalSession')
 const task = (conversationId: string | null = null): Task =>
   ({
     id: 't1',
-    terminal_mode: 'codex',
+    agent_id: 'codex',
     provider_config: {},
     currentConversationByMode: conversationId ? { codex: conversationId } : {}
   }) as unknown as Task
@@ -113,7 +113,7 @@ describe('useTaskTerminalSession — restart routing', () => {
     async (mode) => {
       const initial = {
         ...task(),
-        terminal_mode: mode,
+        agent_id: mode,
         provider_config: { [mode]: { flags: '--verbose' } },
         currentConversationByMode: { [mode]: 'existing-session' }
       } as Task

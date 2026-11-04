@@ -7,7 +7,7 @@
  * - Cmd+K (the app's palette) has the chat's own page: Compact runs /compact
  *   without touching the draft; Model… switches the model.
  * - Cmd+I / Cmd+Shift+I insert the task title / description into the composer
- *   at the caret (terminal-mode parity), without sending.
+ *   at the caret (parity with the PTY terminal), without sending.
  * Against the scripted fake CLI.
  */
 import { resetApp } from '../fixtures/electron'

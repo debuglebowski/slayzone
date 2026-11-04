@@ -420,6 +420,8 @@ run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.tes
 run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
 run_harness packages/shared/db-migrations/src/v182-chat-attachment-messages-migration.test.ts
 run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migration.test.ts
+# v192: terminal_modes → agents, *.terminal_mode → agent_id, default_terminal_mode → default_agent_id.
+run_harness packages/shared/db-migrations/src/v192-agent-id-rename-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -695,6 +697,7 @@ run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-history-progress.test.ts
 run_harness packages/apps/hub/src/chat-compaction.test.ts
 run_harness packages/apps/hub/src/chat-diagnostics.test.ts
 run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts
@@ -764,6 +767,7 @@ run_harness packages/domains/terminal/src/server/chat-tab-state-store.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
+run_harness packages/domains/terminal/src/server/runtime/host-suspend-clock.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts
@@ -1241,7 +1245,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
-  packages/domains/terminal/src/client/useTerminalModes.test.tsx \
+  packages/domains/terminal/src/client/useAgents.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
@@ -1329,6 +1333,8 @@ run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
   packages/apps/app/src/renderer/src/app-shell/startup-progress.test.ts \
   packages/apps/app/src/renderer/src/app-shell/computer-connect-refetch.test.ts \
+  packages/domains/sidebar/src/startup-progress-text.test.ts \
+  packages/domains/task-terminals/src/client/chat/chat-loading.test.ts \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts

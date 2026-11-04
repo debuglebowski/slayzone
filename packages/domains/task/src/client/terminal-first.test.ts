@@ -31,14 +31,14 @@ describe('terminal-first registry', () => {
   it.each(CHAT_SUPPORTED_MODES)('leaves %s to the chat pane without spawning a shell', (mode) => {
     const seen = vi.fn()
     subscribeTerminalFirst(seen)
-    expect(markTerminalFirst(task({ terminal_mode: mode }), project)).toBe(false)
+    expect(markTerminalFirst(task({ agent_id: mode }), project)).toBe(false)
     expect(getTerminalFirst('t1')).toBeNull()
     expect(isTerminalFirstHolding('t1')).toBe(false)
     expect(seen).not.toHaveBeenCalled()
   })
 
   it.each(['terminal', 'codex', 'claude-code'])('still opens %s terminal-first', (mode) => {
-    expect(markTerminalFirst(task({ terminal_mode: mode }), project)).toBe(true)
+    expect(markTerminalFirst(task({ agent_id: mode }), project)).toBe(true)
     expect(isTerminalFirstHolding('t1')).toBe(true)
   })
 

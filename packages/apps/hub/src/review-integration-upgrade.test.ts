@@ -213,6 +213,9 @@ test.each([false, true])(
     const delivered: unknown[] = []
     const catchUps: Promise<void>[] = []
     const recoverySignals: Array<{ tabId: string; generation: string }> = []
+    const requestKinds: string[] = []
+    let olderComputer = false
+    let outOfBandWrite: string | null = null
     const pc = createChatRuntimeHandlers({
       stateDir: dir,
       hubScope: 'hub',
@@ -249,6 +252,16 @@ test.each([false, true])(
           "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
         )
         .run()
+      // A second chat on the same computer, in another task, that stays idle
+      // through the outage. (Chats of one task share its metadata state version.)
+      h.db
+        .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
+        .run('idle-task', 'p', 'Idle', dir)
+      h.db
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('idle','idle-task','claude-chat',0)"
+        )
+        .run()
       services = createComputerChatServices({
         db: h.slayDb,
         legacyData: {
@@ -257,6 +270,12 @@ test.each([false, true])(
         },
         attachments: { read: async () => Buffer.alloc(0) },
         request: async (_id, raw) => {
+          if (raw && typeof raw === 'object' && 'kind' in raw)
+            requestKinds.push(
+              raw.kind === 'metadata.snapshot' && 'id' in raw
+                ? `metadata.snapshot:${String(raw.id)}`
+                : String(raw.kind)
+            )
           if (
             failRecovery &&
             raw &&
@@ -267,7 +286,20 @@ test.each([false, true])(
             failRecovery = false
             throw new Error('injected recovery failure')
           }
-          return wire(await pc.request(wire(raw)))
+          const reply = wire(await pc.request(wire(raw)))
+          if (raw && typeof raw === 'object' && 'kind' in raw && raw.kind === 'inventory')
+            return (reply as Array<Record<string, unknown>>).map((entry) => {
+              const id = (entry.identity as { tabId: string }).tabId
+              if (olderComputer) {
+                const { metadataCounter, stateVersion, historySeq, ...rest } = entry
+                return rest
+              }
+              // A write that sent no metadata update (bootstrap-time records).
+              return id === outOfBandWrite
+                ? { ...entry, stateVersion: Number(entry.stateVersion) + 1 }
+                : entry
+            })
+          return reply
         },
         connected: () => connected,
         resolveComputer: async () => 'pc',
@@ -291,6 +323,14 @@ test.each([false, true])(
         mode: 'claude-chat',
         cwd: dir
       })
+      await services.relay.ensureTab('idle')
+      expect((await services.availability('idle')).state).toBe('ready')
+      // A reconnect since the idle chat exists: the hub has read its metadata.
+      services.invalidateRecovery('pc')
+      await services.recoverComputer('pc')
+      await Promise.all(catchUps.splice(0))
+      recoverySignals.length = 0
+      const idleBefore = (await services.availability('idle')).recoveryGeneration
       expect((await services.availability('tab')).state).toBe('ready')
       const before = (await services.availability('tab')).recoveryGeneration
       expect(before).toBeTruthy()
@@ -323,17 +363,67 @@ test.each([false, true])(
         expect((await services.availability('tab')).recoveryGeneration).toBe(before)
         expect(recoverySignals).toEqual([])
       }
+      requestKinds.length = 0
       await services.recoverComputer('pc')
       await services.relay.refreshSessions('pc')
       await Promise.all(catchUps)
       expect((await services.availability('tab')).state).toBe('ready')
       const after = (await services.availability('tab')).recoveryGeneration
+      expect(JSON.stringify(delivered)).toContain(marker)
+      // The idle chat missed nothing: it never reloads.
+      expect((await services.availability('idle')).recoveryGeneration).toBe(idleBefore)
+      const idleOwner = (await services.ownership.forTab('idle'))!
+      expect(requestKinds).not.toContain(`metadata.snapshot:${idleOwner.id}`)
+      // The chat that ran a turn changed (output and/or metadata): only it reloads.
       expect(after).not.toBe(before)
       expect(recoverySignals).toEqual([{ tabId: 'tab', generation: after }])
-      expect(JSON.stringify(delivered)).toContain(marker)
       await services.recoverComputer('pc')
       expect((await services.availability('tab')).recoveryGeneration).toBe(after)
       expect(recoverySignals).toHaveLength(1)
+      if (!dropped) {
+        // Nothing changed since the last reconnect: nothing is re-read or reloaded.
+        requestKinds.length = 0
+        recoverySignals.length = 0
+        services.invalidateRecovery('pc')
+        await services.recoverComputer('pc')
+        expect(requestKinds.filter((kind) => kind.startsWith('metadata.snapshot'))).toEqual([])
+        expect(recoverySignals).toEqual([])
+        // A write that sent no metadata update moves the state version: re-read.
+        outOfBandWrite = 'idle'
+        services.invalidateRecovery('pc')
+        await services.recoverComputer('pc')
+        await Promise.all(catchUps)
+        outOfBandWrite = null
+        expect(requestKinds).toContain(`metadata.snapshot:${idleOwner.id}`)
+        expect(recoverySignals.map((signal) => signal.tabId)).toEqual(['idle'])
+        // An older computer reports neither number: everything is re-read and reloads.
+        olderComputer = true
+        requestKinds.length = 0
+        recoverySignals.length = 0
+        services.invalidateRecovery('pc')
+        await services.recoverComputer('pc')
+        await Promise.all(catchUps)
+        olderComputer = false
+        expect(requestKinds).toEqual(
+          expect.arrayContaining([
+            `metadata.snapshot:${owner.id}`,
+            `metadata.snapshot:${idleOwner.id}`
+          ])
+        )
+        expect(recoverySignals.map((signal) => signal.tabId).sort()).toEqual(['idle', 'tab'])
+        recoverySignals.length = 0
+        // A hub that lost metadata progress (restored from an older backup)
+        // re-fetches that conversation's snapshot on the next recovery.
+        h.db.prepare('DELETE FROM chat_metadata_progress WHERE conversation_id=?').run(owner.id)
+        requestKinds.length = 0
+        services.invalidateRecovery('pc')
+        await services.recoverComputer('pc')
+        await Promise.all(catchUps)
+        expect(requestKinds).toContain(`metadata.snapshot:${owner.id}`)
+        // Re-read metadata may differ from what the chat shows: only it reloads.
+        expect(recoverySignals.map((signal) => signal.tabId)).toEqual(['tab'])
+        expect(requestKinds).not.toContain(`metadata.snapshot:${idleOwner.id}`)
+      }
     } finally {
       await pc.close()
       h.cleanup()

@@ -5,7 +5,7 @@
 
 export interface ExitContext {
   exitCode: number
-  terminalMode: string
+  agentId: string
   hasPostSpawnCommand: boolean
   resuming: boolean
   usedShellFallback: boolean
@@ -43,8 +43,8 @@ export function shouldArmHubStartupDeadline(confirmation: SpawnConfirmationState
 }
 
 /** Build the recovery message shown in the terminal buffer. */
-export function buildRecoveryMessage(terminalMode: string, exitCode: number): string {
-  return `\r\n[SlayZone] ${terminalMode} exited with code ${String(exitCode)}. Switched to interactive shell for recovery.\r\n`
+export function buildRecoveryMessage(agentId: string, exitCode: number): string {
+  return `\r\n[SlayZone] ${agentId} exited with code ${String(exitCode)}. Switched to interactive shell for recovery.\r\n`
 }
 
 /**

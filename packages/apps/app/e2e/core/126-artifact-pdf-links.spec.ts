@@ -81,9 +81,9 @@ test.describe('PDF artifact links', () => {
     await goHome(mainWindow)
     await clickProject(mainWindow, p.name.slice(0, 2).toUpperCase())
     await mainWindow.getByText('PDF links task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
   })
 
   test.afterAll(async ({ electronApp }) => {

@@ -29,7 +29,7 @@ function makeTask(id: string, projectId: string, title: string): Task {
     order: 0,
     due_date: null,
     archived_at: null,
-    terminal_mode: 'claude-code',
+    agent_id: 'claude-code',
     provider_config: {},
     terminal_shell: null,
     claude_conversation_id: null,
@@ -134,7 +134,7 @@ test('excludes non-idle states', () => {
   expect(buildIdleTasks(ptys, [task], null, NOW).length).toBe(0)
 })
 
-test('excludes plain terminal mode', () => {
+test('excludes the plain terminal agent', () => {
   const task = makeTask('t1', 'p1', 'Task 1')
   const ptys: AgentSessionRow[] = [makePty('shell', 't1', NOW - 5000, 'idle', 'terminal')]
   expect(buildIdleTasks(ptys, [task], null, NOW).length).toBe(0)

@@ -46,7 +46,7 @@ test.describe('Session ID consistency (real CLIs)', () => {
       projectId,
       title: 'SIC codex fresh',
       status: 'in_progress',
-      terminalMode: 'codex'
+      agentId: 'codex'
     })
     await mainWindow.evaluate(
       ({ id }) =>
@@ -92,7 +92,7 @@ test.describe('Session ID consistency (real CLIs)', () => {
       projectId,
       title: 'SIC codex persist',
       status: 'in_progress',
-      terminalMode: 'codex'
+      agentId: 'codex'
     })
     await mainWindow.evaluate(
       ({ id, cid }) =>

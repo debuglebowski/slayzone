@@ -75,7 +75,7 @@ raw.exec(`
     conversation_id TEXT PRIMARY KEY,
     first_turn_at   INTEGER NOT NULL
   );
-  CREATE TABLE terminal_modes (
+  CREATE TABLE agents (
     id         TEXT PRIMARY KEY,
     type       TEXT NOT NULL,
     is_builtin INTEGER NOT NULL
@@ -87,9 +87,7 @@ for (const [id, type, builtin] of [
   ['my-codex', 'codex', 0],
   ['claude-chat', 'claude-code', 1]
 ] as const) {
-  raw
-    .prepare('INSERT INTO terminal_modes (id, type, is_builtin) VALUES (?, ?, ?)')
-    .run(id, type, builtin)
+  raw.prepare('INSERT INTO agents (id, type, is_builtin) VALUES (?, ?, ?)').run(id, type, builtin)
 }
 
 const db: SlayzoneDb = {

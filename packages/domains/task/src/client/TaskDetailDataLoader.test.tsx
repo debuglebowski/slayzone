@@ -18,7 +18,7 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       description: 'A description',
       status: 'todo',
       priority: 3,
-      terminal_mode: 'claude-code',
+      agent_id: 'claude-code',
       panel_visibility: null,
       browser_tabs: null,
       is_temporary: false

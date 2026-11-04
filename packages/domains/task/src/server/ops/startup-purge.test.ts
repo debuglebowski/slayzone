@@ -48,7 +48,7 @@ test('purge: open stale temp survives, orphan stale temp survives, fresh + regul
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'CleanupProj')
   const insertTask = h.db.prepare(`
-    INSERT INTO tasks (id, project_id, title, status, terminal_mode, is_temporary, created_at, updated_at)
+    INSERT INTO tasks (id, project_id, title, status, agent_id, is_temporary, created_at, updated_at)
     VALUES (?, ?, ?, 'in_progress', 'claude-code', ?, datetime('now', ?), datetime('now', ?))
   `)
   insertTask.run(STALE_OPEN_ID, projectId, 'Open Scratch', 1, '-3 days', '-3 days')
@@ -79,7 +79,7 @@ test('purge: corrupt viewState never deletes scratch terminals', async () => {
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'CleanupProj2')
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, status, terminal_mode, is_temporary, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, status, agent_id, is_temporary, created_at, updated_at)
       VALUES (?, ?, ?, 'in_progress', 'claude-code', 1, datetime('now', '-3 days'), datetime('now', '-3 days'))`)
     .run('orphan-corrupt-vs', projectId, 'Orphan')
   h.db
@@ -95,7 +95,7 @@ test('purge: missing viewState never deletes scratch terminals', async () => {
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'CleanupProj3')
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, status, terminal_mode, is_temporary, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, status, agent_id, is_temporary, created_at, updated_at)
       VALUES (?, ?, ?, 'in_progress', 'claude-code', 1, datetime('now', '-3 days'), datetime('now', '-3 days'))`)
     .run('orphan-no-vs', projectId, 'Orphan')
 
@@ -114,7 +114,7 @@ test("purge: user B's open tabs keep B's temp tasks alive when A's viewState doe
   h.db.prepare('UPDATE projects SET owner_user_id = ? WHERE id = ?').run('user-a', projectA)
   h.db.prepare('UPDATE projects SET owner_user_id = ? WHERE id = ?').run('user-b', projectB)
   const insertTemp = h.db.prepare(`
-    INSERT INTO tasks (id, project_id, title, status, terminal_mode, is_temporary, created_at, updated_at)
+    INSERT INTO tasks (id, project_id, title, status, agent_id, is_temporary, created_at, updated_at)
     VALUES (?, ?, ?, 'in_progress', 'claude-code', 1, datetime('now', '-3 days'), datetime('now', '-3 days'))
   `)
   insertTemp.run('a-open', projectA, 'A open scratch')
@@ -148,7 +148,7 @@ test('purge: scratch terminals survive regardless of any user tab state', async 
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'ProjMixed')
   const insertTemp = h.db.prepare(`
-    INSERT INTO tasks (id, project_id, title, status, terminal_mode, is_temporary, created_at, updated_at)
+    INSERT INTO tasks (id, project_id, title, status, agent_id, is_temporary, created_at, updated_at)
     VALUES (?, ?, ?, 'in_progress', 'claude-code', 1, datetime('now', '-3 days'), datetime('now', '-3 days'))
   `)
   insertTemp.run('kept-by-global', projectId, 'Global tab')

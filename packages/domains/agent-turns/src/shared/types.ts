@@ -38,7 +38,7 @@ export interface AgentTurnRange extends AgentTurn {
 export interface AgentPrompt {
   id: string
   task_id: string
-  /** Terminal mode the prompt was sent to (claude-code, codex, ...). */
+  /** Agent the prompt was sent to (claude-code, codex, ...). */
   agent_id: string
   /** Upstream CLI session id from the hook payload, if present. */
   cli_session_id: string | null

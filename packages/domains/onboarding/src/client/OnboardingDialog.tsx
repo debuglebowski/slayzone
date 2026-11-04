@@ -62,7 +62,7 @@ export function OnboardingDialog({
   const handleNext = (): void => {
     if (step === 2) {
       track('onboarding_provider_selected', { provider: selectedProvider })
-      setSetting({ key: 'default_terminal_mode', value: selectedProvider })
+      setSetting({ key: 'default_agent_id', value: selectedProvider })
     }
     if (step < STEP_COUNT - 1) {
       setStep(step + 1)

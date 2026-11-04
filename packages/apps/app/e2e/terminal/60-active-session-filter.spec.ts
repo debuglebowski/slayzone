@@ -68,7 +68,7 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -111,7 +111,7 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       task.id
     )
     await s.refreshData()

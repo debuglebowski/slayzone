@@ -78,7 +78,7 @@ export function tasksCommand(): Command {
     )
     .option(
       '--mode <mode>',
-      'Limit to one terminal mode (e.g. claude-code, codex). Default: every mode with a row for this task.'
+      'Limit to one agent (e.g. claude-code, codex). Default: every agent with a row for this task.'
     )
     .action(resetConversationAction)
 
@@ -99,6 +99,10 @@ export function tasksCommand(): Command {
     .option('--parent <id>', 'Reparent task under <id> (prefix supported, must be in same project)')
     .option('--no-parent', 'Detach task (make top-level)')
     .option('--permanent', 'Convert temporary task to a real task')
+    .option(
+      '--agent <mode>',
+      "Switch the task's agent (claude-code, codex, claude-chat, …): stops the running one; next start is a new conversation"
+    )
     .option(
       '--worktree-path <path>',
       'Link a git worktree to this task (auto-derives parent branch + repo from project layout)'

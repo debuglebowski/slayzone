@@ -182,7 +182,7 @@ test.describe('Codex agent hooks', () => {
       status: 'todo'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'codex' }),
       task.id
     )
 

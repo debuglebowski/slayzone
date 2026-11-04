@@ -16,23 +16,23 @@ import {
   SelectValue,
   Switch
 } from '@slayzone/ui'
-import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
+import { getVisibleModes, getModeLabel, groupAgents } from '@slayzone/terminal'
 import { DETECTION_ENGINES } from '@slayzone/terminal-contracts'
 import type {
-  TerminalMode,
-  TerminalModeInfo,
-  UpdateTerminalModeInput
+  AgentId,
+  AgentDefinition,
+  UpdateAgentDefinitionInput
 } from '@slayzone/terminal-contracts'
 import type { AiProviderForm } from './useAiProviderForm'
 
 interface ProviderListViewProps {
-  modes: TerminalModeInfo[]
+  modes: AgentDefinition[]
   navigateTo: (tab: string) => void
-  updateMode: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
+  updateMode: (id: string, updates: UpdateAgentDefinitionInput) => Promise<AgentDefinition | null>
   restoreDefaults: () => Promise<void>
   resetToDefaultState: () => Promise<void>
-  defaultTerminalMode: TerminalMode
-  onDefaultTerminalModeChange: (mode: TerminalMode) => void
+  defaultAgentId: AgentId
+  onDefaultAgentIdChange: (mode: AgentId) => void
   form: AiProviderForm
 }
 
@@ -42,8 +42,8 @@ export function ProviderListView({
   updateMode,
   restoreDefaults,
   resetToDefaultState,
-  defaultTerminalMode,
-  onDefaultTerminalModeChange,
+  defaultAgentId,
+  onDefaultAgentIdChange,
   form
 }: ProviderListViewProps) {
   const {
@@ -75,10 +75,7 @@ export function ProviderListView({
     <div className="space-y-6">
       <div className="space-y-3">
         <Label className="text-sm font-medium">Default provider</Label>
-        <Select
-          value={defaultTerminalMode}
-          onValueChange={(v) => onDefaultTerminalModeChange(v as TerminalMode)}
-        >
+        <Select value={defaultAgentId} onValueChange={(v) => onDefaultAgentIdChange(v as AgentId)}>
           <SelectTrigger className="max-w-sm">
             <SelectValue />
           </SelectTrigger>
@@ -88,8 +85,8 @@ export function ProviderListView({
             className="min-w-[var(--radix-select-trigger-width)] max-h-none"
           >
             {(() => {
-              const visibleModes = getVisibleModes(modes, defaultTerminalMode)
-              const { builtin, custom } = groupTerminalModes(visibleModes)
+              const visibleModes = getVisibleModes(modes, defaultAgentId)
+              const { builtin, custom } = groupAgents(visibleModes)
               return (
                 <>
                   {builtin.map((m) => (
@@ -129,7 +126,7 @@ export function ProviderListView({
 
       <div className="space-y-6">
         {(() => {
-          const { builtin, custom } = groupTerminalModes(modes)
+          const { builtin, custom } = groupAgents(modes)
           return (
             <>
               {builtin.length > 0 && (

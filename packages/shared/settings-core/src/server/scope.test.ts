@@ -27,7 +27,7 @@ describe('settingScope', () => {
 
   it('hub: keys the hub’s own server code reads', () => {
     for (const key of [
-      'default_terminal_mode',
+      'default_agent_id',
       'auto_create_worktree_on_task_create',
       'worktree_base_path',
       'worktree_copy_behavior',

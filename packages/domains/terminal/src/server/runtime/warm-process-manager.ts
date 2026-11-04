@@ -104,7 +104,7 @@ interface WarmHandle {
  * against the local db; an exec-side computer can inject a remote impl instead.
  */
 export interface WarmPoolDataOps {
-  /** The warmed mode's command template (`terminal_modes` row), or null if unknown. */
+  /** The warmed mode's command template (`agents` row), or null if unknown. */
   getModeSpawnConfig(modeId: string): Promise<{
     initial_command: string | null
     default_flags: string | null
@@ -136,7 +136,7 @@ export function createDbWarmPoolDataOps(
       const row = await db.get<{
         initial_command: string | null
         default_flags: string | null
-      }>(`SELECT initial_command, default_flags FROM terminal_modes WHERE id = ?`, [modeId])
+      }>(`SELECT initial_command, default_flags FROM agents WHERE id = ?`, [modeId])
       return row ?? null
     },
     recordSessionSpawn: (input) => taskStore.recordSessionSpawn(db, input),

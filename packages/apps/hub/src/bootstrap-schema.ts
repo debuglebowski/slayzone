@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { runMigrations } from '@slayzone/db-migrations'
 import { normalizeProjectStatusData } from '@slayzone/projects/db'
-import { syncTerminalModes } from '@slayzone/terminal/db'
+import { syncAgents } from '@slayzone/terminal/db'
 
 /**
  * The schema boot sequence minus host-specific steps (pre-migration backup).
@@ -12,5 +12,5 @@ import { syncTerminalModes } from '@slayzone/terminal/db'
 export function bootstrapSchema(db: Database.Database): void {
   runMigrations(db)
   normalizeProjectStatusData(db)
-  syncTerminalModes(db)
+  syncAgents(db)
 }

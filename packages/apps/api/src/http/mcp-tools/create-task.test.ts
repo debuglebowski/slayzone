@@ -89,6 +89,28 @@ describe('mcp create_task', () => {
     expect(parsed.status).toBe('todo')
     expect(parsed.priority).toBe(1)
   })
+
+  test('agentId, and its deprecated alias terminalMode, set the agent', async () => {
+    for (const input of [{ agentId: 'codex' }, { terminalMode: 'codex' }]) {
+      const res = (await stub.invoke('create_task', { projectId, title: 'Agent', ...input })) as {
+        content: { text: string }[]
+        isError?: boolean
+      }
+      expect(res.isError === true).toBe(false)
+      expect((JSON.parse(res.content[0].text) as { agent_id: string }).agent_id).toBe('codex')
+    }
+  })
+
+  test('error: agentId and terminalMode with different values', async () => {
+    const res = (await stub.invoke('create_task', {
+      projectId,
+      title: 'Contradiction',
+      agentId: 'codex',
+      terminalMode: 'claude-code'
+    })) as { content: { text: string }[]; isError?: boolean }
+    expect(res.isError).toBe(true)
+    expect(res.content[0].text).toMatch(/agentId.*terminalMode/)
+  })
 })
 
 afterAll(() => h.cleanup())

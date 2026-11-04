@@ -39,7 +39,7 @@ function taskOf(fields: Partial<BoardTask> = {}): BoardTask {
     project_id: 'p',
     parent_id: null,
     needs_attention: false,
-    terminal_mode: 'claude-code',
+    agent_id: 'claude-code',
     provider_config: { 'claude-code': { conversationId: 'c1' } },
     ...fields
   } as unknown as BoardTask
@@ -107,13 +107,14 @@ function backend(tabs: unknown[] = [tab('t', 'claude-code', true)]) {
         tab('t', 'claude-code', true)
       ),
       'task.update': record('task.update'),
+      'task.switchMode': record('task.switchMode'),
       'task.startMainAgent': record('task.startMainAgent', () => started),
       'task.resetConversation': record('task.resetConversation'),
       'pty.kill': record('pty.kill', () => true),
       'pty.write': record('pty.write', () => true),
       'pty.interrupt': record('pty.interrupt', () => true),
       'chat.kill': record('chat.kill'),
-      'pty.modesList': () => [
+      'pty.agentsList': () => [
         { id: 'claude-code', label: 'Claude Code', enabled: true, order: 0 },
         { id: 'codex', label: 'Codex', enabled: true, order: 1 },
         { id: 'gemini', label: 'Gemini', enabled: false, order: 2 }
@@ -169,7 +170,7 @@ describe('AgentPanel', () => {
 
   it('shows a chat tab with the chat view, in its hub', async () => {
     const b = backend([tab('t', 'claude-chat', true)])
-    await renderScreen(feedOf(taskOf({ terminal_mode: 'claude-chat' }), { 't:t': 'idle' }), b)
+    await renderScreen(feedOf(taskOf({ agent_id: 'claude-chat' }), { 't:t': 'idle' }), b)
     expect(await screen.findByText(`chat ${hub.id} t t claude-chat`)).toBeOnTheScreen()
   })
 
@@ -284,15 +285,7 @@ describe('AgentPanel', () => {
     await user.press(picker.getByText('Codex'))
     await waitFor(() =>
       expect(b.calls).toEqual([
-        ['pty.kill', { sessionId: 't:t' }],
-        [
-          'task.update',
-          {
-            id: 't',
-            terminalMode: 'codex',
-            providerConfig: { 'claude-code': { conversationId: null } }
-          }
-        ],
+        ['task.switchMode', { taskId: 't', mode: 'codex' }],
         ['task.startMainAgent', { taskId: 't' }]
       ])
     )

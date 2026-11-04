@@ -42,7 +42,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Kill-notify test', status: 'in_progress' })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -91,7 +91,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'claude-code' }),
       task.id
     )
     await s.refreshData()

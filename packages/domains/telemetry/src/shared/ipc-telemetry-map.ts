@@ -25,7 +25,7 @@ export const IPC_TELEMETRY_MAP: Record<string, IpcTelemetryEntry> = {
     props: (_args, result) => {
       const task = result as Record<string, unknown> | null
       return {
-        provider: (task?.terminal_mode as string) ?? 'terminal',
+        provider: (task?.agent_id as string) ?? 'terminal',
         from_template: false
       }
     }

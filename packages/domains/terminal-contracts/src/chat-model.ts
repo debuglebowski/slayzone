@@ -1,6 +1,6 @@
 /**
  * Claude model the chat subprocess targets. Stored in
- * `provider_config.<terminalMode>.chatModel`.
+ * `provider_config.<agentId>.chatModel`.
  *
  * Mirrors the `claude --model` CLI accepted aliases. Full Anthropic ids
  * (`claude-sonnet-4-5-...`) also work but the alias keeps task DB stable

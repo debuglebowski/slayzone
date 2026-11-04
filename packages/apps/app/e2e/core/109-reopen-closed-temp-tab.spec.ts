@@ -83,7 +83,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       title: 'RT scratch',
       status: 'in_progress',
       isTemporary: true,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
     await openTaskById(mainWindow, task.id)
@@ -131,14 +131,14 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       projectId,
       title: 'RT regular',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     const temp = await s.createTask({
       projectId,
       title: 'RT scratch 2',
       status: 'in_progress',
       isTemporary: true,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
 
@@ -168,7 +168,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       projectId,
       title: 'Saved scratch',
       isTemporary: true,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
     await goHome(mainWindow)

@@ -59,7 +59,7 @@ import {
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
 import type { Tag } from '@slayzone/tags/shared'
-import type { TerminalModeInfo } from '@slayzone/terminal-contracts'
+import type { AgentDefinition } from '@slayzone/terminal-contracts'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
 import { priorityOptions, type Task, type TaskTemplate } from '@slayzone/task-contracts'
 import { getSnoozePresets } from './SnoozePicker'
@@ -92,7 +92,7 @@ interface UseTaskPaletteCommandsParams {
   tags: Tag[]
   taskTagIds: string[]
   panels: PalettePanel[]
-  modes: TerminalModeInfo[]
+  modes: AgentDefinition[]
   hasConversationId: boolean
   hasDescription: boolean
   onTaskUpdated: (task: Task) => void
@@ -238,7 +238,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
     trackTask(taskId, 'task_status_changed', { from: task.status, to: status })
     if (isTerminalStatus(status, columnsConfig)) {
       trackTask(taskId, 'task_completed', {
-        provider: task.terminal_mode ?? 'terminal',
+        provider: task.agent_id ?? 'terminal',
         had_worktree: Boolean(task.worktree_path)
       })
     }
@@ -609,14 +609,14 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
           kind: 'list',
           title: 'Agent',
           items: modes
-            .filter((m) => m.enabled || m.id === task.terminal_mode)
+            .filter((m) => m.enabled || m.id === task.agent_id)
             .map((m) => ({
               id: `mode:${m.id}`,
               label: m.label,
               icon: Bot,
-              checked: m.id === task.terminal_mode,
+              checked: m.id === task.agent_id,
               run: () => {
-                if (m.id !== task.terminal_mode) void onModeChange(m.id)
+                if (m.id !== task.agent_id) void onModeChange(m.id)
               }
             }))
         }
@@ -631,7 +631,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
       featured: true,
       run: onRestartAgent
     })
-    if (task.terminal_mode !== 'terminal') {
+    if (task.agent_id !== 'terminal') {
       commands.push({
         id: 'stop-agent',
         label: 'Stop agent',
@@ -661,7 +661,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
       icon: ClipboardCopy,
       run: onCopyHistory
     })
-    if (task.terminal_mode !== 'terminal') {
+    if (task.agent_id !== 'terminal') {
       commands.push({
         id: 'edit-flags',
         label: 'Edit CLI flags…',

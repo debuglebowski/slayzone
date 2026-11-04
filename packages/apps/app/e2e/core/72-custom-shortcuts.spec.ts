@@ -367,7 +367,7 @@ test.describe
         title: 'Shortcut scratch',
         status: 'in_progress',
         isTemporary: true,
-        terminalMode: 'terminal'
+        agentId: 'terminal'
       })
       await s.refreshData()
       await rebindShortcut(mainWindow, 'Next Task Tab', 'Control+PageDown')

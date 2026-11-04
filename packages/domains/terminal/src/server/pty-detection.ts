@@ -20,7 +20,7 @@ export type {
   ErrorInfo,
   PromptInfo,
   TerminalAdapter,
-  TerminalMode
+  AgentId
 } from './adapters/types'
 export {
   StateMachine,

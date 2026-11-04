@@ -1,29 +1,29 @@
-// Minimal terminalModes shim. Returns the built-in default modes so the
-// TaskDetailPage terminal-mode Select can render a non-empty trigger and
-// tests can switch modes. Custom-mode CRUD is stubbed because the shell
-// has no storage for custom modes yet — attempts to create return the
+// Minimal agents shim. Returns the built-in default agents so the
+// TaskDetailPage agent Select can render a non-empty trigger and
+// tests can switch agents. Custom-agent CRUD is stubbed because the shell
+// has no storage for custom agents yet — attempts to create return the
 // input unchanged so the renderer optimistic flow completes. cap-migrate-
 // all-tests (terminal-core batch) added this.
 
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import type {
-  TerminalModeInfo,
-  CreateTerminalModeInput,
-  UpdateTerminalModeInput
+  AgentDefinition,
+  CreateAgentDefinitionInput,
+  UpdateAgentDefinitionInput
 } from '@slayzone/terminal-contracts'
 
-let modes: TerminalModeInfo[] = DEFAULT_TERMINAL_MODES.map((m) => ({ ...m }))
+let modes: AgentDefinition[] = DEFAULT_AGENTS.map((m) => ({ ...m }))
 
-export const terminalModesShim = {
-  list: async (): Promise<TerminalModeInfo[]> => modes.map((m) => ({ ...m })),
+export const agentsShim = {
+  list: async (): Promise<AgentDefinition[]> => modes.map((m) => ({ ...m })),
 
-  get: async (id: string): Promise<TerminalModeInfo | null> => {
+  get: async (id: string): Promise<AgentDefinition | null> => {
     const m = modes.find((x) => x.id === id)
     return m ? { ...m } : null
   },
 
-  create: async (input: CreateTerminalModeInput): Promise<TerminalModeInfo> => {
-    const mode: TerminalModeInfo = {
+  create: async (input: CreateAgentDefinitionInput): Promise<AgentDefinition> => {
+    const mode: AgentDefinition = {
       id: input.id,
       label: input.label,
       type: input.type,
@@ -44,8 +44,8 @@ export const terminalModesShim = {
 
   update: async (
     id: string,
-    updates: UpdateTerminalModeInput
-  ): Promise<TerminalModeInfo | null> => {
+    updates: UpdateAgentDefinitionInput
+  ): Promise<AgentDefinition | null> => {
     const idx = modes.findIndex((m) => m.id === id)
     if (idx === -1) return null
     modes[idx] = { ...modes[idx]!, ...updates }
@@ -66,10 +66,10 @@ export const terminalModesShim = {
   }),
 
   restoreDefaults: async (): Promise<void> => {
-    modes = DEFAULT_TERMINAL_MODES.map((m) => ({ ...m }))
+    modes = DEFAULT_AGENTS.map((m) => ({ ...m }))
   },
 
   resetToDefaultState: async (): Promise<void> => {
-    modes = DEFAULT_TERMINAL_MODES.map((m) => ({ ...m }))
+    modes = DEFAULT_AGENTS.map((m) => ({ ...m }))
   }
 }

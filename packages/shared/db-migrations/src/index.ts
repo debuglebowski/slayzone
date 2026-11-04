@@ -5,7 +5,7 @@
  * (see `frozen/`), never imported live.
  *
  * Runtime boot steps that are NOT migrations (project status normalization,
- * terminal-mode sync) belong to their domains; the DB owner composes them after
+ * agent sync) belong to their domains; the DB owner composes them after
  * `runMigrations` (see the hub's `bootstrapSchema`).
  */
 

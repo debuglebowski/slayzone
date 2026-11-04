@@ -12,7 +12,7 @@ interface Task {
   description: string | null
   status: TaskStatus
   priority: number
-  terminal_mode: TerminalMode
+  agent_id: AgentId
   // ... terminal config, timestamps
 }
 
@@ -54,7 +54,7 @@ DOM-free subpaths): the mobile chat resolves a chat tab's folder with it.
 - `@slayzone/types` - ElectronAPI contract
 - `@slayzone/ui` - UI components
 - `@slayzone/editor` - Rich text description
-- `@slayzone/terminal` - TerminalMode type, Terminal component
+- `@slayzone/terminal` - AgentId type, Terminal component
 - `@slayzone/projects` - Project selector
 - `@slayzone/tags` - Tag selector
 - `@slayzone/worktrees` - GitPanel

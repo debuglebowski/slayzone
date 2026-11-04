@@ -43,9 +43,9 @@ test.describe('File tree rename', () => {
     await clickProject(mainWindow, projectAbbrev)
     await expect(mainWindow.getByText('Rename test task').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('Rename test task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     await mainWindow.keyboard.press('Meta+e')
     await expect(editorPanel(mainWindow).getByText('Files')).toBeVisible({ timeout: 5_000 })

@@ -27,7 +27,7 @@ function createTemplate(name: string, opts: Record<string, unknown> = {}) {
   ).n
   h.db
     .prepare(
-      `INSERT INTO task_templates (id, project_id, name, description, terminal_mode, default_status, default_priority, is_default, sort_order, created_at, updated_at)
+      `INSERT INTO task_templates (id, project_id, name, description, agent_id, default_status, default_priority, is_default, sort_order, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
@@ -35,7 +35,7 @@ function createTemplate(name: string, opts: Record<string, unknown> = {}) {
       projectId,
       name,
       opts.description ?? null,
-      opts.terminal_mode ?? null,
+      opts.agent_id ?? null,
       opts.default_status ?? null,
       opts.default_priority ?? null,
       opts.is_default ? 1 : 0,
@@ -74,14 +74,14 @@ describe('templates create', () => {
     expect(getTemplate(id2).is_default).toBe(1)
   })
 
-  test('stores terminal_mode and priority', () => {
+  test('stores agent_id and priority', () => {
     const id = createTemplate('Full', {
-      terminal_mode: 'codex',
+      agent_id: 'codex',
       default_priority: 1,
       default_status: 'todo'
     })
     const t = getTemplate(id)
-    expect(t.terminal_mode).toBe('codex')
+    expect(t.agent_id).toBe('codex')
     expect(t.default_priority).toBe(1)
     expect(t.default_status).toBe('todo')
   })
@@ -100,11 +100,11 @@ describe('templates update', () => {
     const id = createTemplate('Multi')
     h.db
       .prepare(
-        'UPDATE task_templates SET terminal_mode = ?, default_priority = ?, updated_at = ? WHERE id = ?'
+        'UPDATE task_templates SET agent_id = ?, default_priority = ?, updated_at = ? WHERE id = ?'
       )
       .run('gemini', 2, new Date().toISOString(), id)
     const t = getTemplate(id)
-    expect(t.terminal_mode).toBe('gemini')
+    expect(t.agent_id).toBe('gemini')
     expect(t.default_priority).toBe(2)
   })
 })

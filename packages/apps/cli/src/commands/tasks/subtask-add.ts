@@ -22,7 +22,7 @@ export async function subtaskAddAction(title: string, opts: SubtaskAddOpts): Pro
   }
 
   // POST /api/tasks/:id/subtasks owns parent id-prefix resolution, status-alias
-  // resolution against the parent's columns, terminal-mode + provider-config
+  // resolution against the parent's columns, agent + provider-config
   // snapshotting, and external-id dedupe (returns the existing row with
   // `existing: true` instead of inserting).
   const { data, existing } = await apiPost<{

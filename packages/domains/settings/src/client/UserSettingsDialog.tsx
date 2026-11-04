@@ -3,8 +3,8 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout, useDepsChanged } from '@slayzone/ui'
-import { useTerminalModes } from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import { useAgents } from '@slayzone/terminal'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
 
 // Import autonomous tabs
@@ -63,7 +63,7 @@ export function UserSettingsDialog({
     testMode,
     restoreDefaults,
     resetToDefaultState
-  } = useTerminalModes()
+  } = useAgents()
 
   const trpc = useTRPC()
   const [activeTab, setActiveTab] = useState(initialTab)
@@ -73,10 +73,10 @@ export function UserSettingsDialog({
     activeTab === 'server' || activeTab === 'hubs' || activeTab === 'computer'
       ? 'connections'
       : activeTab
-  const [defaultTerminalMode, setDefaultTerminalMode] = useState<TerminalMode>('claude-code')
+  const [defaultAgentId, setDefaultAgentId] = useState<AgentId>('claude-code')
 
   const defaultModeQuery = useQuery(
-    trpc.settings.get.queryOptions({ key: 'default_terminal_mode' }, { enabled: open })
+    trpc.settings.get.queryOptions({ key: 'default_agent_id' }, { enabled: open })
   )
   // `refetch` keeps one identity (the query result object does not).
   const { refetch: refetchDefaultMode } = defaultModeQuery
@@ -96,7 +96,7 @@ export function UserSettingsDialog({
   ) {
     setSeenModeSource({ open, data: defaultModeQuery.data })
     const m = defaultModeQuery.data
-    if (open && m) setDefaultTerminalMode(m as TerminalMode)
+    if (open && m) setDefaultAgentId(m as AgentId)
   }
 
   useEffect(() => {
@@ -108,10 +108,10 @@ export function UserSettingsDialog({
     return () => window.removeEventListener('sz:settings-changed', onSettingsChanged)
   }, [open, refetchDefaultMode])
 
-  const onDefaultTerminalModeChange = useCallback(
-    (mode: TerminalMode) => {
-      setDefaultTerminalMode(mode)
-      setSetting({ key: 'default_terminal_mode', value: mode })
+  const onDefaultAgentIdChange = useCallback(
+    (mode: AgentId) => {
+      setDefaultAgentId(mode)
+      setSetting({ key: 'default_agent_id', value: mode })
       window.dispatchEvent(new CustomEvent('sz:settings-changed'))
     },
     [setSetting]
@@ -200,8 +200,8 @@ export function UserSettingsDialog({
                 testMode={testMode}
                 restoreDefaults={restoreDefaults}
                 resetToDefaultState={resetToDefaultState}
-                defaultTerminalMode={defaultTerminalMode}
-                onDefaultTerminalModeChange={onDefaultTerminalModeChange}
+                defaultAgentId={defaultAgentId}
+                onDefaultAgentIdChange={onDefaultAgentIdChange}
               />
             )}
 
@@ -210,8 +210,8 @@ export function UserSettingsDialog({
                 activeTab={activeTab}
                 navigateTo={navigateTo}
                 modes={modes}
-                defaultTerminalMode={defaultTerminalMode}
-                onDefaultTerminalModeChange={onDefaultTerminalModeChange}
+                defaultAgentId={defaultAgentId}
+                onDefaultAgentIdChange={onDefaultAgentIdChange}
               />
             )}
 

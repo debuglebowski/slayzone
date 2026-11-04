@@ -25,7 +25,7 @@ import { chromium, test, expect, type Browser, type Page } from '@playwright/tes
  *
  * Both hubs set PLAYWRIGHT=1 for `/api/dev/sql` (seeds `onboarding_completed`, so no
  * onboarding dialog covers the board). The task's terminal is a plain shell
- * (`terminalMode: 'terminal'`) in a temp project dir, never an agent.
+ * (`agentId: 'terminal'`) in a temp project dir, never an AI agent.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -156,7 +156,7 @@ async function seed(hub: Hub): Promise<void> {
   const task = await post('/api/tasks', {
     projectId: project.data?.id,
     title: 'CSP Task',
-    terminalMode: 'terminal'
+    agentId: 'terminal'
   })
   await post('/api/dev/sql', {
     sql: 'UPDATE tasks SET base_dir = ? WHERE id = ?',

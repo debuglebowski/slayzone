@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { terminalStorageMode } from './storage-mode'
+import { terminalStorageAgentId } from './storage-mode'
 
 export interface HubChatOwnership {
   id: string
@@ -49,7 +49,7 @@ const fromRow = (r: Row): HubChatOwnership => ({
   settingsRevision: r.settings_revision,
   settingsHash: r.settings_hash
 })
-const providerMode = terminalStorageMode
+const providerMode = terminalStorageAgentId
 export function createChatOwnershipStore(db: SlayzoneDb) {
   const get = async (id: string) => {
     const row = await db.get<Row>('SELECT * FROM chat_ownership WHERE id=?', [id])

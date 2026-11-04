@@ -275,11 +275,11 @@ describe('processes off, zero computers: every hub-local call refuses (exec laye
     await expectRefused('isGitRepo', () => a.isGitRepo('t', OUTSIDE))
     await expectRefused('pathExists', () => a.pathExists('t', OUTSIDE))
   })
-  test('terminal: shell PATH, which, terminal-mode test, file + autocomplete scans', async () => {
+  test('terminal: shell PATH, which, agent test, file + autocomplete scans', async () => {
     await expectRefused('getEnrichedPath', () => terminal.getEnrichedPath())
     await expectRefused('whichBinary', () => terminal.whichBinary('git'))
-    await expectRefused('modesTest', () =>
-      terminal.createPtyOps(h.slayDb, taskSessionStore).terminalModesTest('git')
+    await expectRefused('agentsTest', () =>
+      terminal.createPtyOps(h.slayDb, taskSessionStore).agentsTest('git')
     )
     await expectRefused('listProjectFiles', () => listProjectFiles(OUTSIDE, ''))
     const chat = terminal.createChatOps({

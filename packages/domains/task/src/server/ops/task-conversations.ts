@@ -6,7 +6,7 @@ import {
   type ConversationOrigin
 } from '@slayzone/task-contracts'
 import { agentSessionsEvents } from '../events'
-import { chatModeForTerminal, isChatSupported } from '@slayzone/terminal-contracts'
+import { chatAgentIdForTerminal, isChatSupported } from '@slayzone/terminal-contracts'
 import { isHonoredConversation, isTurnTrackedMode } from './agent-sessions'
 
 /**
@@ -20,7 +20,7 @@ import { isHonoredConversation, isTurnTrackedMode } from './agent-sessions'
  * is structural.
  */
 
-/** TerminalMode → its legacy `<col>_conversation_id` column prefix. */
+/** AgentId → its legacy `<col>_conversation_id` column prefix. */
 const MODE_LEGACY_COL: Record<string, string> = {
   'claude-code': 'claude',
   codex: 'codex',
@@ -229,7 +229,11 @@ export async function switchConversation(
   const { taskId, mode, conversationId } = args
   const source = args.sourceMode ?? mode
   const handoff = source !== mode
-  if (handoff && chatModeForTerminal(mode) !== source && chatModeForTerminal(source) !== mode) {
+  if (
+    handoff &&
+    chatAgentIdForTerminal(mode) !== source &&
+    chatAgentIdForTerminal(source) !== mode
+  ) {
     return 'not-partner'
   }
   if (!(await isHonoredConversation(db, taskId, source, conversationId))) return 'not-honored'

@@ -7,7 +7,7 @@ import {
   parseColumnsConfig,
   type ColumnConfig
 } from '@slayzone/workflow'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 
 export function toMs(value: string | null | undefined): number {
   if (!value) return 0
@@ -152,13 +152,13 @@ export async function buildDefaultProviderConfig(db: SlayzoneDb): Promise<{
   let rows: Array<{ id: string; default_flags: string | null }> = []
   try {
     rows = (await db
-      .prepare('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1')
+      .prepare('SELECT id, default_flags FROM agents WHERE enabled = 1')
       .all()) as Array<{ id: string; default_flags: string | null }>
   } catch {
     rows = []
   }
   if (rows.length === 0) {
-    rows = DEFAULT_TERMINAL_MODES.filter((mode) => mode.enabled).map((mode) => ({
+    rows = DEFAULT_AGENTS.filter((mode) => mode.enabled).map((mode) => ({
       id: mode.id,
       default_flags: mode.defaultFlags ?? ''
     }))

@@ -12,7 +12,7 @@ import {
   SelectValue,
   Switch
 } from '@slayzone/ui'
-import type { TerminalModeInfo, UpdateTerminalModeInput } from '@slayzone/terminal-contracts'
+import type { AgentDefinition, UpdateAgentDefinitionInput } from '@slayzone/terminal-contracts'
 import {
   chatModesForMode,
   defaultChatModeSettingKey,
@@ -29,9 +29,9 @@ import type { AiProviderForm } from './useAiProviderForm'
 
 interface ProviderDetailViewProps {
   activeTab: string
-  modes: TerminalModeInfo[]
+  modes: AgentDefinition[]
   navigateTo: (tab: string) => void
-  updateMode: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
+  updateMode: (id: string, updates: UpdateAgentDefinitionInput) => Promise<AgentDefinition | null>
   deleteMode: (id: string) => Promise<boolean>
   testResults: AiProviderForm['testResults']
   setTestResults: AiProviderForm['setTestResults']

@@ -38,7 +38,7 @@ export function createComputerProbes(deps: ComputerProbeDeps) {
     /** `command -v` on POSIX, `where` on Windows (the first that answers). */
     async command(bin: string): Promise<{ found: boolean; path?: string; error?: string }> {
       const w = word(bin)
-      const r = await run('terminal_modes.test', {
+      const r = await run('agents.test', {
         command: `command -v ${w} || where ${w}`,
         timeoutMs: WHICH_TIMEOUT_MS
       })

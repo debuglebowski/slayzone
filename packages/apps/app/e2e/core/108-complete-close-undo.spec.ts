@@ -95,7 +95,7 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       projectId,
       title: 'CU regular task',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
     await openTaskById(mainWindow, task.id)
@@ -124,7 +124,7 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       title: 'CU temporary task',
       status: 'in_progress',
       isTemporary: true,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
     await openTaskById(mainWindow, task.id)

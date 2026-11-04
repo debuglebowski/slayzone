@@ -1,6 +1,6 @@
 /**
  * Claude chat's spawn flags are owned by its pills (mode, model, effort), so a
- * task never gets the terminal mode's default flags copied into its
+ * task never gets the agent's default flags copied into its
  * `claude-chat` provider_config entry (bug N2: the seeded
  * `--allow-dangerously-skip-permissions` beat the chat mode, so new chat tasks
  * ran in the CLI's `default` mode while the pill said Auto-accept). Terminal
@@ -23,16 +23,16 @@ async function setup() {
     .run(projectId, 'Proj', '#000', '/tmp/proj', JSON.stringify([]))
   h.db
     .prepare(
-      "INSERT INTO settings (key, value) VALUES ('default_terminal_mode', 'claude-chat') ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      "INSERT INTO settings (key, value) VALUES ('default_agent_id', 'claude-chat') ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     )
     .run()
   return { h, projectId }
 }
 
-test('a new task gets no claude-chat flags; terminal modes keep their default flags', async () => {
+test('a new task gets no claude-chat flags; terminal agents keep their default flags', async () => {
   const { h, projectId } = await setup()
   const task = await createTaskOp(h.slayDb, { projectId, title: 'Chat task' }, {})
-  expect(task?.terminal_mode).toBe('claude-chat')
+  expect(task?.agent_id).toBe('claude-chat')
   expect(task?.provider_config['claude-chat']?.flags).toBeUndefined()
   expect(task?.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
   h.cleanup()
@@ -67,12 +67,12 @@ test('an imported task gets no claude-chat flags', async () => {
   h.cleanup()
 })
 
-test('switching a task to claude-chat does not seed flags; switching to a terminal mode still does', async () => {
+test('switching a task to claude-chat does not seed flags; switching to a terminal agent still does', async () => {
   const { h, projectId } = await setup()
   const task = await createTaskOp(h.slayDb, { projectId, title: 'Switcher' }, {})
-  const toCode = await updateTask(h.slayDb, { id: task!.id, terminalMode: 'claude-code' })
+  const toCode = await updateTask(h.slayDb, { id: task!.id, agentId: 'claude-code' })
   expect(toCode?.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
-  const toChat = await updateTask(h.slayDb, { id: task!.id, terminalMode: 'claude-chat' })
+  const toChat = await updateTask(h.slayDb, { id: task!.id, agentId: 'claude-chat' })
   expect(toChat?.provider_config['claude-chat']?.flags).toBeUndefined()
   h.cleanup()
 })

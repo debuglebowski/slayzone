@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Task } from '@slayzone/task-contracts'
+import { clearAllConversationIds, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { parseProject } from '@slayzone/projects/server'
 import { getRuntimeAdapters } from './ops/shared'
@@ -129,7 +129,7 @@ export async function resolveMainAgentLaunch(
     await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
   )
   const pty = getPtyDeps().ops
-  const props = mainTerminalProps(task, project, await pty.terminalModesList())
+  const props = mainTerminalProps(task, project, await pty.agentsList())
   // The main tab follows the task's mode, as the desktop's `taskTerminals.ensureMain`.
   const tab = await ensureMainTab(db, taskId, props.mode)
   return {
@@ -231,6 +231,57 @@ async function liveState(kind: 'pty' | 'chat', sessionId: string): Promise<Termi
   // `chatList` lists chat tabs with a process (not ended, not a never-started skeleton).
   const chat = (await pty.chatList()).find((c) => c.sessionId === sessionId)
   return chat && chat.state !== 'dead' ? chat.state : null
+}
+
+export interface SwitchMainAgentModeInput {
+  taskId: string
+  /** An `agents` id (`claude-code`, `codex`, `claude-chat`, …). */
+  mode: string
+}
+
+/**
+ * Switch `taskId`'s main agent to another mode — ONE implementation for desktop,
+ * mobile and the CLI (`slay tasks update --agent`). Stops the live main agent (the
+ * chat process for a chat mode, else the pty), then stores the new mode with every
+ * conversation id cleared: a mode switch starts fresh. It does not start the new
+ * agent — the desktop's remounted terminal / `task.startMainAgent` does.
+ *
+ * Same mode = no-op. Unknown or disabled mode = BAD_REQUEST naming the enabled ones.
+ * `update` is the caller's `updateTaskOp` binding (its event bus + mutation hook).
+ */
+export async function switchMainAgentMode(
+  db: SlayzoneDb,
+  { taskId, mode }: SwitchMainAgentModeInput,
+  io: {
+    getTask: (taskId: string) => Promise<Task | null>
+    update: (input: UpdateTaskInput) => Promise<Task | null>
+  }
+): Promise<Task> {
+  const task = await io.getTask(taskId)
+  if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+  if (task.agent_id === mode) return task
+
+  const modes = await getPtyDeps().ops.agentsList()
+  const target = modes.find((m) => m.id === mode)
+  if (!target || !target.enabled) {
+    const enabled = modes.filter((m) => m.enabled).map((m) => m.id)
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `${target ? 'Disabled' : 'Unknown'} agent "${mode}". Enabled: ${enabled.join(', ')}`
+    })
+  }
+
+  const launch = await resolveMainAgentLaunch(db, taskId, io.getTask)
+  if (launch.kind === 'chat') await getChatDeps().ops.kill(launch.tabId)
+  else await getPtyDeps().ops.ptyKill(launch.sessionId)
+
+  const updated = await io.update({
+    id: taskId,
+    agentId: mode,
+    providerConfig: clearAllConversationIds(task.provider_config)
+  })
+  if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+  return updated
 }
 
 async function detectChildRepos(taskId: string, projectPath: string): Promise<DetectedRepo[]> {

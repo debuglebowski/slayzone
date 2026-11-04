@@ -8,7 +8,7 @@ import { safeJsonParse } from './shared.js'
  * `provider_config` / legacy-column knowledge stays owned here.
  */
 
-/** TerminalMode → its legacy `<col>_conversation_id` column. */
+/** AgentId → its legacy `<col>_conversation_id` column. */
 const MODE_LEGACY_COL: Record<string, string> = {
   'claude-code': 'claude',
   codex: 'codex',

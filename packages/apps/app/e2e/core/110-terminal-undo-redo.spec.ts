@@ -71,14 +71,14 @@ test.describe('Undo/redo from a focused terminal (⌘Z / ⌘⇧Z)', () => {
       projectId,
       title: 'TU regular',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     const scratch = await s.createTask({
       projectId,
       title: 'TU scratch',
       status: 'in_progress',
       isTemporary: true,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
 

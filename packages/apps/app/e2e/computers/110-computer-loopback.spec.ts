@@ -283,7 +283,7 @@ base.describe('Computer loopback (computer ON)', () => {
       const sessionId = `${taskId}:${taskId}`
       const marker = `COMPUTER_OK_${Date.now()}`
 
-      // Create the PTY (terminal mode = raw shell) bound to this task.
+      // Create the PTY (terminal agent = raw shell) bound to this task.
       await page.evaluate(
         ({ sId, dir }) =>
           window.getTrpcVanillaClient().pty.create.mutate({

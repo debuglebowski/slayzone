@@ -8,7 +8,6 @@ export * from './api-retry'
 export {
   HOOK_SUPPORTED_AGENT_IDS,
   mapEventType,
-  type AgentId,
   type AgentLifecycleEvent,
   type AgentLifecycleEventType
 } from './agent-event-handler'

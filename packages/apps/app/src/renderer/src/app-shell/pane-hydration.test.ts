@@ -165,12 +165,13 @@ describe('pane hydrator', () => {
     expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(1)
   })
   it('reports progress (hydrated / still queued) and notifies on each change', async () => {
-    // The sidebar's startup card shows "Tabs loaded N/M" from this.
+    // The sidebar's startup card shows "Pages N/M" from this.
     const { h, runIdle, flush } = harness()
     const seen: Array<{ hydrated: number; queued: number }> = []
     const off = h.subscribeProgress(() => seen.push(h.progress()))
     expect(h.progress()).toEqual({ hydrated: 0, queued: 0 })
 
+    for (const id of ['active', 'a', 'b', 'c']) h.attach(id)
     h.hydrateNow('active')
     const cancelC = h.enqueue('c', { rank: () => 2, ready: new Promise(() => {}) })
     h.enqueue('a', { rank: () => 0, ready: Promise.resolve() })
@@ -190,7 +191,42 @@ describe('pane hydrator', () => {
     const count = seen.length
 
     off()
+    h.attach('later')
     h.hydrateNow('later')
     expect(seen.length).toBe(count)
+  })
+
+  it('counts only panes still mounted: a closed tab leaves the progress', async () => {
+    const { h, runIdle, flush } = harness()
+    const detachA = h.attach('a')
+    h.attach('b')
+    h.hydrateNow('a')
+    h.enqueue('b', { rank: () => 0, ready: Promise.resolve() })
+    expect(h.progress()).toEqual({ hydrated: 1, queued: 1 })
+    detachA()
+    expect(h.progress()).toEqual({ hydrated: 0, queued: 1 })
+    // Still hydrated (a reopened tab mounts its page at once) — just not counted.
+    expect(h.isHydrated('a')).toBe(true)
+    await flush()
+    runIdle([0])
+    expect(h.progress()).toEqual({ hydrated: 1, queued: 0 })
+    // Reopened: counted again.
+    const detachA2 = h.attach('a')
+    expect(h.progress()).toEqual({ hydrated: 2, queued: 0 })
+    detachA2()
+    detachA2()
+    expect(h.progress()).toEqual({ hydrated: 1, queued: 0 })
+  })
+
+  it('a pane mounted twice (strict-mode effects) counts once and stays until both detach', () => {
+    const { h } = harness()
+    const first = h.attach('a')
+    const second = h.attach('a')
+    h.hydrateNow('a')
+    expect(h.progress().hydrated).toBe(1)
+    first()
+    expect(h.progress().hydrated).toBe(1)
+    second()
+    expect(h.progress().hydrated).toBe(0)
   })
 })

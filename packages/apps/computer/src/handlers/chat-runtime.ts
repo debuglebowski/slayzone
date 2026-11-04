@@ -403,7 +403,11 @@ export function createChatRuntimeHandlers(opts: {
               .records(o.identity.id, 'settings')
               .filter((record) => record.id.startsWith('tab-transition:'))
               .map((record) => record.value),
-            lifecycle: r.storage.taskLifecycle(o.identity.taskId)
+            lifecycle: r.storage.taskLifecycle(o.identity.taskId),
+            metadataCounter:
+              r.storage.getRecord<number>(o.identity.id, 'settings', 'metadata-counter') ?? 0,
+            historySeq: r.storage.nextSeq(o.identity.id) - 1,
+            stateVersion: r.storage.stateVersion(o.identity.taskId)
           }))
       case 'metadata.snapshot':
         return r.artifacts.metadata(req.id)

@@ -30,7 +30,7 @@ test.describe('Terminal loading recovery', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -71,7 +71,7 @@ test.describe('Terminal loading recovery', () => {
       status: 'todo'
     })
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       t2.id
     )
     await s.refreshData()

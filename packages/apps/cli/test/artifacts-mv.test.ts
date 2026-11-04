@@ -15,7 +15,7 @@ rawDb.exec(`
   CREATE TABLE tasks (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
     title TEXT NOT NULL, status TEXT DEFAULT 'inbox', priority INTEGER DEFAULT 3,
-    terminal_mode TEXT DEFAULT 'claude-code', provider_config TEXT DEFAULT '{}',
+    agent_id TEXT DEFAULT 'claude-code', provider_config TEXT DEFAULT '{}',
     "order" INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   );
   CREATE TABLE artifact_folders (
@@ -46,7 +46,7 @@ function createTask(title: string) {
   const now = new Date().toISOString()
   rawDb
     .prepare(
-      `INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, "order", created_at, updated_at)
+      `INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, "order", created_at, updated_at)
      VALUES (?, ?, ?, 'inbox', 3, 'claude-code', '{}', 0, ?, ?)`
     )
     .run(id, projectId, title, now, now)

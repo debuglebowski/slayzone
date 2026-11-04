@@ -54,7 +54,6 @@ import {
   BUILTIN_PANEL_IDS,
   getProviderFlags,
   setProviderFlags,
-  clearAllConversationIds,
   priorityOptions
 } from '@slayzone/task-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
@@ -70,7 +69,7 @@ import {
   taskProjectRoot,
   workComputerId
 } from '@slayzone/projects-contracts'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { isChatSupported } from '@slayzone/terminal-contracts'
 import {
   Button,
@@ -128,10 +127,10 @@ import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
 import {
   markSkipCache,
   usePty,
-  useTerminalModes,
+  useAgents,
   getVisibleModes,
   getModeLabel,
-  groupTerminalModes,
+  groupAgents,
   useLoopMode,
   isLoopActive,
   stripAnsi,
@@ -298,7 +297,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // mutateAsync is stable; the mutation result object is not (new each render).
   const { mutateAsync: updateTaskAsync } = useMutation(trpc.task.update.mutationOptions())
 
-  const { modes } = useTerminalModes()
+  const { modes } = useAgents()
 
   const { editorThemeId, contentVariant } = useTheme()
   const {
@@ -1156,33 +1155,28 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Cmd+R browser reload is handled globally in App.tsx
 
-  // Handle terminal mode change
+  // Handle agent change
   const handleModeChange = useCallback(
-    async (mode: TerminalMode) => {
+    async (mode: AgentId) => {
       if (!task) return
-      const oldMode = task.terminal_mode
+      const oldMode = task.agent_id
       // Main tab session ID format: ${taskId}:${taskId}
       const mainSessionId = `${task.id}:${task.id}`
       // Reset state FIRST to ignore any in-flight data
       resetTaskState(mainSessionId)
-      // Now kill the PTY (any data it sends will be ignored)
-      await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
+      // The hub stops the main agent and stores the mode with every conversation
+      // id cleared (fresh start) — the same op mobile and `slay tasks update
+      // --agent` call. Data the old agent still sends is ignored.
+      const updated = await trpcClient.task.switchMode.mutate({ taskId: task.id, mode })
       // Small delay to let any remaining PTY data be processed and ignored
       await new Promise((r) => setTimeout(r, 100))
-      // Update mode and clear all conversation IDs (fresh start)
-      const updated = await updateTaskAsync({
-        id: task.id,
-        terminalMode: mode,
-        providerConfig: clearAllConversationIds(task.provider_config)
-      })
-      if (!updated) return
       onTaskUpdated(updated)
       // Remount terminal (mark skip to prevent cleanup from re-caching old content)
       markSkipCache(mainSessionId)
       setTerminalKey((k) => k + 1)
       track('terminal_mode_switched', { from: oldMode, to: mode })
     },
-    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskAsync, track]
+    [task, onTaskUpdated, resetTaskState, trpcClient, track]
   )
 
   const getMainHistory = useCallback(() => {
@@ -1203,7 +1197,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [task, getConversationIdForMode])
 
   const getProviderFlagsForMode = useCallback((currentTask: Task): string => {
-    return getProviderFlags(currentTask.provider_config, currentTask.terminal_mode)
+    return getProviderFlags(currentTask.provider_config, currentTask.agent_id)
   }, [])
 
   const handleFlagsSave = useCallback(
@@ -1214,7 +1208,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
       const update = {
         id: task.id,
-        providerConfig: setProviderFlags(task.provider_config, task.terminal_mode, nextValue)
+        providerConfig: setProviderFlags(task.provider_config, task.agent_id, nextValue)
       }
 
       const updated = await updateTaskAsync(update)
@@ -1231,8 +1225,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
 
   const handleSetDefaultFlags = useCallback(async () => {
-    if (!task || task.terminal_mode === 'terminal') return
-    const modeInfo = modes.find((m) => m.id === task.terminal_mode)
+    if (!task || task.agent_id === 'terminal') return
+    const modeInfo = modes.find((m) => m.id === task.agent_id)
     const defaultFlags = modeInfo?.defaultFlags ?? ''
     setFlagsInputValue(defaultFlags)
     await handleFlagsSave(defaultFlags)
@@ -1562,13 +1556,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     async (template: TaskTemplate) => {
       if (!task) return
       const updates: UpdateTaskInput = { id: task.id }
-      if (template.terminal_mode) updates.terminalMode = template.terminal_mode
+      if (template.agent_id) updates.agentId = template.agent_id
       if (template.provider_config) updates.providerConfig = template.provider_config
       if (template.panel_visibility) updates.panelVisibility = template.panel_visibility
       if (template.browser_tabs) updates.browserTabs = template.browser_tabs
       if (template.web_panel_urls) updates.webPanelUrls = template.web_panel_urls
 
-      const modeChanged = template.terminal_mode && template.terminal_mode !== task.terminal_mode
+      const modeChanged = template.agent_id && template.agent_id !== task.agent_id
       if (modeChanged) {
         const mainSessionId = getMainSessionId(task.id)
         resetTaskState(mainSessionId)
@@ -1832,7 +1826,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         status: getDefaultStatus(project?.columns_config)
       })
     },
-    onModeChange: (mode) => handleModeChange(mode as TerminalMode),
+    onModeChange: (mode) => handleModeChange(mode as AgentId),
     onRestartAgent: handleRestartTerminal,
     onInjectTitle: handleInjectTitle,
     onInjectDescription: handleInjectDescription,
@@ -2524,7 +2518,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             </Popover>
           )}
           <span className="shrink-0 inline-flex items-center rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground">
-            {task.terminal_mode}
+            {task.agent_id}
           </span>
           <PtyStateDot sessionId={getMainSessionId(task.id)} />
         </div>
@@ -2997,13 +2991,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="text-xs text-blue-500 cursor-default">
-                              {task.terminal_mode === 'codex'
+                              {task.agent_id === 'codex'
                                 ? 'Session not saved yet — automatic detection after first prompt'
                                 : "Session not saved — resume won't work until detected"}
                             </span>
                           </TooltipTrigger>
                           <TooltipContent side="bottom" className="max-w-72">
-                            {task.terminal_mode === 'codex' ? (
+                            {task.agent_id === 'codex' ? (
                               <>
                                 Codex creates its saved session after the first prompt. SlayZone
                                 captures it automatically. If this remains after a prompt, use "Run
@@ -3108,18 +3102,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           mainTabContextMenu={
                             <>
                               <ContextMenuRadioGroup
-                                value={task.terminal_mode}
+                                value={task.agent_id}
                                 onValueChange={(value) => {
                                   if (modes.some((m) => m.id === value))
-                                    handleModeChange(value as TerminalMode)
+                                    handleModeChange(value as AgentId)
                                 }}
                               >
                                 {(() => {
-                                  const visibleModes = getVisibleModes(modes, task.terminal_mode)
-                                  const { builtin, custom } = groupTerminalModes(visibleModes)
+                                  const visibleModes = getVisibleModes(modes, task.agent_id)
+                                  const { builtin, custom } = groupAgents(visibleModes)
                                   const renderItem = (mode: (typeof visibleModes)[number]) => {
-                                    const ModeIcon =
-                                      MODE_ICONS[mode.id as TerminalMode] ?? TerminalIcon
+                                    const ModeIcon = MODE_ICONS[mode.id as AgentId] ?? TerminalIcon
                                     return (
                                       <ContextMenuRadioItem key={mode.id} value={mode.id}>
                                         <span className="flex items-center gap-2">
@@ -3148,20 +3141,20 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           }
                           mainTabAccessories={
                             <div
-                              data-testid="terminal-mode-trigger"
+                              data-testid="agent-trigger"
                               className="flex items-center gap-1"
                               onDoubleClick={(e) => e.stopPropagation()}
                             >
                               <span className="truncate text-sm">
                                 {getModeLabel(
-                                  modes.find((m) => m.id === task.terminal_mode) ?? {
-                                    id: task.terminal_mode,
-                                    label: task.terminal_mode
+                                  modes.find((m) => m.id === task.agent_id) ?? {
+                                    id: task.agent_id,
+                                    label: task.agent_id
                                   }
                                 )}
                               </span>
                               <ChevronDown
-                                data-testid="terminal-mode-dropdown"
+                                data-testid="agent-dropdown"
                                 aria-label="Open provider menu"
                                 role="button"
                                 className="size-3 cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
@@ -3201,7 +3194,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                       'opacity-40 pointer-events-none'
                                   )}
                                 >
-                                  {loopModeAvailable && task.terminal_mode !== 'terminal' && (
+                                  {loopModeAvailable && task.agent_id !== 'terminal' && (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <IconButton
@@ -3224,7 +3217,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                     </Tooltip>
                                   )}
 
-                                  {task.terminal_mode !== 'terminal' && (
+                                  {task.agent_id !== 'terminal' && (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <IconButton
@@ -3271,7 +3264,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                       <DropdownMenuItem onClick={handleCopyHistory}>
                                         Copy history
                                       </DropdownMenuItem>
-                                      {task.terminal_mode !== 'terminal' && (
+                                      {task.agent_id !== 'terminal' && (
                                         <DropdownMenuItem
                                           disabled={!getConversationIdForMode(task)}
                                           onClick={handleCopyConversationId}
@@ -3285,7 +3278,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                           disabled={!getConversationIdForMode(task)}
                                           onClick={() => void handleHandoff()}
                                         >
-                                          {isChatSupported(task.terminal_mode)
+                                          {isChatSupported(task.agent_id)
                                             ? 'Continue in terminal'
                                             : 'Continue in chat'}
                                         </DropdownMenuItem>
@@ -3303,7 +3296,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                       <DropdownMenuItem onClick={handleResetTerminal}>
                                         Reset session
                                       </DropdownMenuItem>
-                                      {task.terminal_mode !== 'terminal' && (
+                                      {task.agent_id !== 'terminal' && (
                                         <>
                                           <DropdownMenuSeparator />
                                           <DropdownMenuItem onClick={() => void handleDoctor()}>
@@ -3320,7 +3313,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                     <DialogContent className="max-w-md">
                                       <DialogHeader>
                                         <DialogTitle>
-                                          {`CLI flags for ${task.terminal_mode}`}
+                                          {`CLI flags for ${task.agent_id}`}
                                         </DialogTitle>
                                       </DialogHeader>
                                       {
@@ -3353,7 +3346,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                               onClick={() => {
                                                 void handleSetDefaultFlags()
                                               }}
-                                              disabled={task.terminal_mode === 'terminal'}
+                                              disabled={task.agent_id === 'terminal'}
                                             >
                                               Reset to default
                                             </Button>
@@ -3856,7 +3849,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               Environment check
               {task &&
                 (() => {
-                  const modeLabel = modes.find((m) => m.id === task.terminal_mode)?.label
+                  const modeLabel = modes.find((m) => m.id === task.agent_id)?.label
                   return modeLabel ? (
                     <span className="text-muted-foreground font-normal text-sm">— {modeLabel}</span>
                   ) : null

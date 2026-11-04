@@ -82,7 +82,7 @@ export type ProcedureScope = Scope | 'never'
  * clearBuffer, ackEnsureAlive) and every `on*` subscription.
  * Denied (`never`): `create` (takes `anyInput` — an UNVALIDATED spawn spec, not
  * admitted even narrowed), `kill`, `setShellOverride`, `setTheme`,
- * `validate`, `warmSetProjectTabCounts`, every `modes*` procedure, and every
+ * `validate`, `warmSetProjectTabCounts`, every `agents*` procedure, and every
  * `test*` procedure.
  *
  * WRITTEN DOWN, NOT DISCOVERED LATER: `pty.onData` (and `chat.onEvent`) can now
@@ -141,7 +141,7 @@ export type ProcedureScope = Scope | 'never'
  * project-keyed hub key is cut by the owner policy — what is left is the caller's
  * own state plus hub-wide config any full session of that user reads anyway.
  * `settings.set` → `tasks`, PER KEY: the hub-wide keys include what the hub RUNS
- * (`test_profiles`, `default_terminal_mode`, worktree copy paths), and this gate is
+ * (`test_profiles`, `default_agent_id`, worktree copy paths), and this gate is
  * per procedure, so `settingsWriteProcedure` (`@slayzone/settings-core/server`) refuses a
  * scoped session every key but its own (`user`) ones, whatever its account's role.
  *
@@ -682,6 +682,14 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'projects.update': 'tasks',
   'projects.uploadIcon': 'tasks',
   'pty.ackEnsureAlive': 'agent',
+  'pty.agentsCreate': 'never',
+  'pty.agentsDelete': 'never',
+  'pty.agentsGet': 'never',
+  'pty.agentsList': 'never',
+  'pty.agentsResetToDefaultState': 'never',
+  'pty.agentsRestoreDefaults': 'never',
+  'pty.agentsTest': 'never',
+  'pty.agentsUpdate': 'never',
   'pty.attach': 'agent',
   'pty.chatList': 'agent',
   'pty.clearBuffer': 'agent',
@@ -694,14 +702,6 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.kill': 'never',
   'pty.killTask': 'never',
   'pty.list': 'agent',
-  'pty.modesCreate': 'never',
-  'pty.modesDelete': 'never',
-  'pty.modesGet': 'never',
-  'pty.modesList': 'never',
-  'pty.modesResetToDefaultState': 'never',
-  'pty.modesRestoreDefaults': 'never',
-  'pty.modesTest': 'never',
-  'pty.modesUpdate': 'never',
   'pty.onAgentStarts': 'agent',
   'pty.onBackgroundJobs': 'agent',
   'pty.onResize': 'agent',
@@ -780,6 +780,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.setBrowserTabLocked': 'tasks',
   'task.startMainAgent': 'never',
   'task.switchConversation': 'tasks',
+  // Stops the live main agent (as pty.kill / chat.kill do).
+  'task.switchMode': 'never',
   'task.testRecordPendingSpawn': 'never',
   'task.unarchive': 'tasks',
   'task.update': 'tasks',

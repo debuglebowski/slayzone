@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { Skeleton } from '@slayzone/ui'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
-import { useTerminalModes } from '@slayzone/terminal/client'
+import { useAgents } from '@slayzone/terminal/client'
 import { requestAgentStart } from '@slayzone/task-terminals'
 import { TaskShell } from './TaskShell'
 import { mainTerminalProps } from '../shared/main-terminal'
@@ -43,7 +43,7 @@ export function TaskPaneFallback({ taskId }: { taskId: string }): React.JSX.Elem
 function TerminalFirstShell({ entry }: { entry: TerminalFirstEntry }): React.JSX.Element {
   const { task, project, cwd } = entry
   const sessionId = `${task.id}:${task.id}`
-  const { modes } = useTerminalModes()
+  const { modes } = useAgents()
   const props = mainTerminalProps(task, project, modes)
 
   useEffect(

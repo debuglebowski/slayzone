@@ -14,6 +14,8 @@ import {
 } from '../../../../../../shared/test-utils/mock-electron.js'
 import { taskEvents, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import { tmpdir } from 'node:os'
+import { TypedEmitter } from '@slayzone/platform/events'
+import { setChatDeps, setPtyDeps, type ChatDeps, type PtyDeps } from '@slayzone/terminal/server'
 import { registerUpdateTaskRoute } from './update.js'
 
 const h = await createTestHarness()
@@ -35,6 +37,29 @@ registerUpdateTaskRoute(app, {
   }
 })
 const rest = await mountRestApp(app)
+
+// The agent runtime, faked: which main agents a mode switch stopped.
+let killed: string[] = []
+setPtyDeps({
+  ops: {
+    agentsList: async () => [
+      { id: 'claude-code', enabled: true },
+      { id: 'codex', enabled: true },
+      { id: 'gemini', enabled: false }
+    ],
+    ptyKill: (sid: string) => {
+      killed.push(`pty:${sid}`)
+      return true
+    }
+  } as unknown as PtyDeps['ops'],
+  events: new TypedEmitter()
+} as PtyDeps)
+setChatDeps({
+  ops: { kill: (tabId: string) => void killed.push(`chat:${tabId}`) },
+  queueOps: {},
+  events: new TypedEmitter(),
+  queueEvents: new TypedEmitter()
+} as unknown as ChatDeps)
 
 function seedTask(extra: Record<string, unknown> = {}): string {
   const id = (extra.id as string) ?? crypto.randomUUID()
@@ -250,6 +275,88 @@ describe('PATCH /api/tasks/:id', () => {
     })
     expect(res.status).toBe(404)
     expect(res.body.ok).toBe(false)
+  })
+
+  test('agentId: a mode switch — stops the main agent, clears conversations', async () => {
+    const id = seedTask()
+    h.db
+      .prepare('UPDATE tasks SET agent_id = ?, provider_config = ? WHERE id = ?')
+      .run('claude-code', JSON.stringify({ 'claude-code': { conversationId: 'c1' } }), id)
+    killed = []
+    const res = await rest.request<{ ok: boolean; data: { agent_id: string; title: string } }>(
+      'PATCH',
+      `/api/tasks/${id.slice(0, 8)}`,
+      { agentId: 'codex', title: 'Both' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ agent_id: 'codex', title: 'Both' })
+    expect(killed).toEqual([`pty:${id}:${id}`])
+    const row = h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
+      provider_config: string
+    }
+    expect(JSON.parse(row.provider_config)['claude-code'].conversationId).toBeNull()
+  })
+
+  test('terminalMode: deprecated alias of agentId still switches the agent', async () => {
+    const id = seedTask()
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    killed = []
+    const res = await rest.request<{ ok: boolean; data: { agent_id: string } }>(
+      'PATCH',
+      `/api/tasks/${id}`,
+      { terminalMode: 'codex' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.agent_id).toBe('codex')
+    expect(killed).toEqual([`pty:${id}:${id}`])
+  })
+
+  test('agentId + terminalMode: same value is fine, different values are a 400', async () => {
+    const id = seedTask()
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    killed = []
+    const bad = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
+      agentId: 'codex',
+      terminalMode: 'claude-code'
+    })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error).toMatch(/agentId.*terminalMode/)
+    expect(killed).toEqual([])
+    const same = await rest.request<{ ok: boolean; data: { agent_id: string } }>(
+      'PATCH',
+      `/api/tasks/${id}`,
+      { agentId: 'codex', terminalMode: 'codex' }
+    )
+    expect(same.status).toBe(200)
+    expect(same.body.data.agent_id).toBe('codex')
+  })
+
+  test('400: unknown or disabled agentId names the enabled ones; nothing stopped', async () => {
+    const id = seedTask()
+    killed = []
+    for (const [mode, word] of [
+      ['nope', 'Unknown'],
+      ['gemini', 'Disabled']
+    ]) {
+      const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
+        agentId: mode
+      })
+      expect(res.status).toBe(400)
+      expect(res.body.error).toBe(`${word} agent "${mode}". Enabled: claude-code, codex`)
+    }
+    expect(killed).toEqual([])
+  })
+
+  test('400: an invalid field next to agentId stops nothing', async () => {
+    const id = seedTask()
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    killed = []
+    const res = await rest.request('PATCH', `/api/tasks/${id}`, {
+      agentId: 'codex',
+      priority: 9
+    })
+    expect(res.status).toBe(400)
+    expect(killed).toEqual([])
   })
 
   test('500: invalid reparent throws (cyclic)', async () => {

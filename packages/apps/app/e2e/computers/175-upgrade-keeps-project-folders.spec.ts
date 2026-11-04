@@ -126,7 +126,7 @@ test('upgrade from 0.36.2: every project keeps its folder, agents start in it', 
 
     await page.evaluate(
       (id) =>
-        window.getTrpcVanillaClient().pty.modesCreate.mutate({
+        window.getTrpcVanillaClient().pty.agentsCreate.mutate({
           id,
           label: 'Upgrade Shell E2E',
           type: 'claude-code',
@@ -146,7 +146,7 @@ test('upgrade from 0.36.2: every project keeps its folder, agents start in it', 
     const taskIn = async (p: Seeded, title: string): Promise<string> => {
       const task = await s.createTask({ projectId: p.id, title, status: 'in_progress' })
       await page.evaluate(
-        ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
+        ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: m }),
         { id: task.id, m: modeId }
       )
       return task.id

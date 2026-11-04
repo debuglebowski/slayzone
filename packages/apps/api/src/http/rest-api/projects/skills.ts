@@ -13,7 +13,7 @@ import type {} from '@slayzone/ai-config/db'
  * The provider set `slay init` writes instruction/skill files for. Mirrors the
  * CLI's former `loadProviders` exactly: the per-project `ai_providers:<id>`
  * setting when it holds a non-empty array, else the single provider implied by
- * `default_terminal_mode`.
+ * `default_agent_id`.
  */
 async function loadProjectProviders(
   db: RestApiDeps['db'],
@@ -33,12 +33,12 @@ async function loadProjectProviders(
         if (filtered.length > 0) return filtered
       }
     } catch {
-      /* fall through to the terminal-mode default */
+      /* fall through to the default agent */
     }
   }
 
   const modeRow = await db.get<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'default_terminal_mode' LIMIT 1`
+    `SELECT value FROM settings WHERE key = 'default_agent_id' LIMIT 1`
   )
   return [defaultProviderFromMode(modeRow?.value)]
 }
@@ -54,7 +54,7 @@ async function loadProjectProviders(
  *
  * - `:id` is a project id OR a case-insensitive name substring (shared
  *   `resolveProjectRef`, the CLI's `--project` semantics and messages).
- * - the provider set is read from `ai_providers:<projectId>` / `default_terminal_mode`.
+ * - the provider set is read from `ai_providers:<projectId>` / `default_agent_id`.
  * - the skill rows are written by the `install-builtin-project-skills` named txn,
  *   which owns the `installedVersion` CONTENT-HASH comparison. That comparison
  *   moved with the write on purpose: left in the CLI it would be hashing against

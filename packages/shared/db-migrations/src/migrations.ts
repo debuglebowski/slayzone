@@ -4648,6 +4648,44 @@ export const migrations: Migration[] = [
     }
   },
   {
+    version: 192,
+    up(db) {
+      // "Terminal mode" → "agent": the UI has said Agent for a long time, and
+      // `agent_id` is already the code's word for this value (`agent_prompts.agent_id`,
+      // the agent-hook envelope's `agentId`).
+      //
+      // 1. `terminal_modes` → `agents`. No view, trigger, index or foreign key names
+      //    the table (checked against the v191 schema), so the rename is the whole job.
+      // 2. `tasks.terminal_mode` + `task_templates.terminal_mode` → `agent_id` — the
+      //    only two columns of that name. RENAME COLUMN also rewrites any trigger or
+      //    view that names them (none today), and keeps the `'claude-code'` default.
+      // 3. Setting `default_terminal_mode` → `default_agent_id`, in `settings` and —
+      //    for a hub with login, where a row may have landed before the key was scoped
+      //    hub-wide — `user_settings`. The old key's value wins: until now it was the
+      //    only one any build read.
+      //
+      // No JSON blob in the DB stores the value under a `terminalMode`/`terminal_mode`
+      // key (`provider_config` is keyed BY the agent id, not under that name).
+      // Automation templates still saying `{{task.terminal_mode}}` keep resolving —
+      // the automations engine keeps it as an alias, so their text is not rewritten.
+      db.exec(`
+        ALTER TABLE terminal_modes RENAME TO agents;
+        ALTER TABLE tasks RENAME COLUMN terminal_mode TO agent_id;
+        ALTER TABLE task_templates RENAME COLUMN terminal_mode TO agent_id;
+
+        INSERT INTO settings (key, value)
+          SELECT 'default_agent_id', value FROM settings WHERE key = 'default_terminal_mode'
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+        DELETE FROM settings WHERE key = 'default_terminal_mode';
+
+        INSERT INTO user_settings (user_id, key, value)
+          SELECT user_id, 'default_agent_id', value FROM user_settings WHERE key = 'default_terminal_mode'
+          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value;
+        DELETE FROM user_settings WHERE key = 'default_terminal_mode';
+      `)
+    }
+  },
+  {
     version: 193,
     up(db) {
       // Usage logs are parsed on each computer: a parse cursor belongs to (computer,

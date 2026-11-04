@@ -17,9 +17,7 @@ h.db
 
 const parentId = crypto.randomUUID()
 h.db
-  .prepare(
-    `INSERT INTO tasks (id, project_id, title, terminal_mode, "order") VALUES (?, ?, ?, ?, 1)`
-  )
+  .prepare(`INSERT INTO tasks (id, project_id, title, agent_id, "order") VALUES (?, ?, ?, ?, 1)`)
   .run(parentId, projectId, 'Parent', 'codex')
 const kidVisible = crypto.randomUUID()
 h.db
@@ -71,7 +69,7 @@ describe('GET /api/tasks/:id/subtasks', () => {
 })
 
 describe('POST /api/tasks/:id/subtasks', () => {
-  test('happy: creates subtask inheriting project + terminal mode; notifies', async () => {
+  test('happy: creates subtask inheriting project + agent; notifies', async () => {
     notifyCount = 0
     const res = await rest.request<CreateResponse>('POST', `/api/tasks/${parentId}/subtasks`, {
       title: 'New subtask'
@@ -83,9 +81,9 @@ describe('POST /api/tasks/:id/subtasks', () => {
     expect(res.body.data.status).toBe('inbox') // default status of default columns
     expect(res.body.data.priority).toBe(3)
     const row = h.db
-      .prepare('SELECT terminal_mode, is_temporary FROM tasks WHERE id = ?')
-      .get(res.body.data.id) as { terminal_mode: string; is_temporary: number }
-    expect(row.terminal_mode).toBe('codex') // inherited from parent
+      .prepare('SELECT agent_id, is_temporary FROM tasks WHERE id = ?')
+      .get(res.body.data.id) as { agent_id: string; is_temporary: number }
+    expect(row.agent_id).toBe('codex') // inherited from parent
     expect(row.is_temporary).toBe(0)
     expect(notifyCount).toBe(1)
   })

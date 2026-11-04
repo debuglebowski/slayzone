@@ -10,7 +10,7 @@ import {
   deleteSession
 } from './ops'
 import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
-import { startMainAgent } from './main-agent'
+import { startMainAgent, switchMainAgentMode } from './main-agent'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { releaseConversation } from '@slayzone/terminal/hub'
@@ -305,6 +305,17 @@ export const taskRouter = router({
     )
     .mutation(({ ctx, input }) =>
       startMainAgent(ctx.db, input, (id) => ops().getTaskOp(ctx.db, id))
+    ),
+
+  // Switch the main agent's mode: stop it, store the mode with conversations
+  // cleared. One implementation for desktop, mobile and the CLI — see ./main-agent.ts.
+  switchMode: publicProcedure
+    .input(z.object({ taskId: z.string(), mode: z.string().min(1) }))
+    .mutation(({ ctx, input }) =>
+      switchMainAgentMode(ctx.db, input, {
+        getTask: (id) => ops().getTaskOp(ctx.db, id),
+        update: (u) => asBadRequest(() => ops().updateTaskOp(ctx.db, u, deps()))
+      })
     ),
 
   // --- Dependencies ---

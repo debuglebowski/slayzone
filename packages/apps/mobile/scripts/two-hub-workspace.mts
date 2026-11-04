@@ -106,7 +106,7 @@ try {
     const task = await phone.client.task.create.mutate({
       projectId: project.id,
       title: `${name.toUpperCase()}: first task`,
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     hubs.push({
       phone,

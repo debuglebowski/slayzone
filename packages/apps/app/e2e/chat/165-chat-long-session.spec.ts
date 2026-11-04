@@ -158,7 +158,7 @@ test.describe('Claude chat: a 10,000-event session', () => {
       projectId: project.id,
       title: 'Other task 165',
       status: 'todo',
-      terminalMode: 'claude-chat'
+      agentId: 'claude-chat'
     })
     await s.refreshData()
     await openTaskById(t.page, other.id)

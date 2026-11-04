@@ -145,7 +145,7 @@ test.describe('New temporary task render cost', () => {
         projectId: p.id,
         title: `Cost task ${i}`,
         status: 'in_progress',
-        terminalMode: 'terminal'
+        agentId: 'terminal'
       })
       taskIds.push(t.id)
     }
@@ -157,7 +157,7 @@ test.describe('New temporary task render cost', () => {
     test.setTimeout(180_000)
     for (const id of taskIds) await openTaskById(mainWindow, id)
     await expect
-      .poll(() => mainWindow.locator('[data-testid="terminal-mode-trigger"]').count(), {
+      .poll(() => mainWindow.locator('[data-testid="agent-trigger"]').count(), {
         timeout: 90_000,
         intervals: [500, 1_000]
       })

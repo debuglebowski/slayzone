@@ -10,6 +10,16 @@ export interface ComputerChatInventory extends ChatOwnership {
   lifecycle?: { state: 'active' | 'paused' | 'deleted'; revision: number }
   bootstrapRevision: number
   tabTransitions?: ChatTabTransition[]
+  /**
+   * The conversation's metadata counter, its task's metadata state version and
+   * its newest saved event sequence. Recovery compares them with what the hub
+   * already applied and relayed, so a reconnect re-fetches and reloads only
+   * conversations that changed. Absent from older computers: recovery then
+   * treats the conversation as changed.
+   */
+  metadataCounter?: number
+  stateVersion?: number
+  historySeq?: number
 }
 /** Computer commits and tombstones survive restoring an older hub database. */
 export function createChatRecovery(opts: {
@@ -24,8 +34,8 @@ export function createChatRecovery(opts: {
 }) {
   const { db } = opts,
     owners = createChatOwnershipStore(db),
-    pending = new Map<string, Promise<void>>()
-  async function run(computerId: string) {
+    pending = new Map<string, Promise<ComputerChatInventory[]>>()
+  async function run(computerId: string): Promise<ComputerChatInventory[]> {
     // Capture expectations before the inventory RPC. A bootstrap which commits
     // while inventory is in flight must not be mistaken for missing old data.
     const expected = await db.all<{ id: string; epoch: number; taskId: string }>(
@@ -356,9 +366,11 @@ export function createChatRecovery(opts: {
       await opts.gate?.(computerId, owner.taskId)
       await owners.markUnavailable(owner.id, computerId, owner.epoch)
     }
+    return inventory
   }
   return {
-    reconcile(computerId: string) {
+    /** Resolves with the computer's inventory, as read for this reconciliation. */
+    reconcile(computerId: string): Promise<ComputerChatInventory[]> {
       const current = pending.get(computerId)
       if (current) return current
       const work = run(computerId).finally(() => pending.delete(computerId))

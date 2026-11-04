@@ -136,10 +136,10 @@ test.describe('Session ID banners', () => {
       ({ codex, gemini, cursor, opencode }) => {
         const c = window.getTrpcVanillaClient()
         return Promise.all([
-          c.task.update.mutate({ id: codex, terminalMode: 'codex' }),
-          c.task.update.mutate({ id: gemini, terminalMode: 'gemini' }),
-          c.task.update.mutate({ id: cursor, terminalMode: 'cursor-agent' }),
-          c.task.update.mutate({ id: opencode, terminalMode: 'opencode' })
+          c.task.update.mutate({ id: codex, agentId: 'codex' }),
+          c.task.update.mutate({ id: gemini, agentId: 'gemini' }),
+          c.task.update.mutate({ id: cursor, agentId: 'cursor-agent' }),
+          c.task.update.mutate({ id: opencode, agentId: 'opencode' })
           // claude task stays as default claude-code
         ])
       },

@@ -12,13 +12,12 @@
  *   wipes the tab's history and stored conversation, and leaves a fresh session.
  * - Interrupt (terminal agent): Esc to the agent and `pty.interrupt` (the state flip
  *   desktop sends with Esc / Ctrl+C: claude fires no hook on a user interrupt).
- * - Mode switch: desktop's `TaskDetailPage.handleModeChange` — stop, the new
- *   `terminalMode` with every conversation id cleared, then start.
+ * - Mode switch: `task.switchMode` (the hub stops the agent and stores the new
+ *   mode with every conversation id cleared — desktop's and the CLI's call), then start.
  *
  * Start / restart / reset concern the task's MAIN agent (the hub procedure starts
  * that one); another tab's agent can be stopped and interrupted here.
  */
-import { clearAllConversationIds, type ProviderConfig } from '@slayzone/task-contracts/types'
 import { ESCAPE, isChatSupported } from '@slayzone/terminal-contracts'
 import type { HubClient } from '../hub-board'
 import type { RouterOutputs } from '../trpc'
@@ -78,22 +77,11 @@ export async function interruptAgent(client: HubClient, target: AgentTarget): Pr
   await client.pty.interrupt.mutate({ sessionId })
 }
 
-export interface ModeSwitchTask {
-  id: string
-  terminal_mode: string
-  provider_config: ProviderConfig | null | undefined
-}
-
 export async function switchAgentMode(
   client: HubClient,
-  task: ModeSwitchTask,
+  taskId: string,
   mode: string
 ): Promise<StartedAgent> {
-  await stopAgent(client, { taskId: task.id, tabId: task.id, mode: task.terminal_mode })
-  await client.task.update.mutate({
-    id: task.id,
-    terminalMode: mode,
-    providerConfig: clearAllConversationIds(task.provider_config)
-  })
-  return startAgent(client, task.id)
+  await client.task.switchMode.mutate({ taskId, mode })
+  return startAgent(client, taskId)
 }

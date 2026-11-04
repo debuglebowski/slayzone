@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { chatModeForTerminal, terminalModeForChat } from '@slayzone/terminal-contracts'
+import { chatAgentIdForTerminal, terminalAgentIdForChat } from '@slayzone/terminal-contracts'
 import { useTaskSessions } from './TaskSessionsSource'
 import { mergeFamilySessions, type FamilySessionRow } from './family-sessions'
 
@@ -7,7 +7,7 @@ export type { FamilySessionRow } from './family-sessions'
 
 /** The mode a mode hands conversations to and takes them from (chat ↔ terminal), or null. */
 export function handoffPartner(mode: string): string | null {
-  return terminalModeForChat(mode) ?? chatModeForTerminal(mode)
+  return terminalAgentIdForChat(mode) ?? chatAgentIdForTerminal(mode)
 }
 
 /** Every session of the task's main agent AND of its hand-off partner (`mergeFamilySessions`). */

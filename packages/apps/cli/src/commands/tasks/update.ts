@@ -13,6 +13,7 @@ export interface UpdateOpts {
   due?: string | false
   parent?: string | false
   permanent?: boolean
+  agent?: string
   worktreePath?: string
 }
 
@@ -31,10 +32,11 @@ export async function updateAction(idPrefix: string | undefined, opts: UpdateOpt
     opts.due === undefined &&
     opts.parent === undefined &&
     !opts.permanent &&
+    opts.agent === undefined &&
     opts.worktreePath === undefined
   ) {
     console.error(
-      'Provide at least one of --title, --description, --append-description, --status, --priority, --due, --no-due, --parent, --no-parent, --permanent, --worktree-path'
+      'Provide at least one of --title, --description, --append-description, --status, --priority, --due, --no-due, --parent, --no-parent, --permanent, --agent, --worktree-path'
     )
     process.exit(1)
   }
@@ -64,6 +66,8 @@ export async function updateAction(idPrefix: string | undefined, opts: UpdateOpt
   if (opts.parent === false) body.parentId = null
   else if (typeof opts.parent === 'string') body.parentId = opts.parent
   if (opts.permanent) body.isTemporary = false
+  // An agent switch on the hub: stops the live agent, clears conversations (task.switchMode).
+  if (opts.agent !== undefined) body.agentId = opts.agent
 
   if (opts.worktreePath !== undefined) {
     // Worktree linking stays CLIENT-side: the git checks and the branch read are

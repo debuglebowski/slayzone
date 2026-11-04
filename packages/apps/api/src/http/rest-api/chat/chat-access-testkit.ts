@@ -3,7 +3,7 @@
  * of the `/api/chat/*` + `/api/agent/*` routes and of `slay chat` / `slay agent`
  * against them. Test-only: nothing in production imports it.
  *
- * Tasks listed in `ptyTasks` resolve as terminal-mode (`kind: 'pty'`); every other
+ * Tasks listed in `ptyTasks` resolve as terminal agents (`kind: 'pty'`); every other
  * task as claude-chat on its main tab.
  */
 import { TypedEmitter } from '@slayzone/platform/events'
