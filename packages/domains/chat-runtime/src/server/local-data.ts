@@ -72,12 +72,19 @@ export interface ChatMetadataUpdate {
     | 'folder-changed'
     | 'folder-deleted'
   value: unknown
+  /**
+   * The task's metadata state version once this update's writes are done (see
+   * `task_state_versions`). Absent from older computers.
+   */
+  stateVersion?: number
 }
 
 export interface ChatMetadataSnapshot {
   identity: ConversationIdentity
   counter: number
   updates: ChatMetadataUpdate[]
+  /** Task state version read before the snapshot's content: never newer than it. */
+  stateVersion?: number
 }
 
 /** Content stays local. Only explicitly constructed metadata is forwarded to the hub. */
@@ -123,7 +130,10 @@ export function createLocalChatData(
         operationId = randomUUID()
       const sequence = (get<number>(tabId, 'settings', 'metadata-counter') ?? 0) + 1
       set(tabId, 'settings', 'metadata-counter', sequence)
-      const update = {
+      // State writes first: the update reports the state version they produce.
+      if (kind === 'activity' || kind === 'agent-state' || kind === 'thread-created')
+        set(tabId, 'settings', `metadata-state:${kind}`, value)
+      const update: ChatMetadataUpdate = {
         operationId,
         sequence,
         conversationId: i.id,
@@ -131,12 +141,11 @@ export function createLocalChatData(
         tabId,
         epoch: i.epoch,
         kind,
-        value
+        value,
+        stateVersion: store.stateVersion(i.taskId)
       }
       // Retain until acknowledged: hub disconnect must not lose resume bindings.
       set(tabId, 'settings', `metadata:${operationId}`, update)
-      if (kind === 'activity' || kind === 'agent-state' || kind === 'thread-created')
-        set(tabId, 'settings', `metadata-state:${kind}`, value)
       queueMicrotask(() => {
         try {
           if (get(tabId, 'settings', `metadata:${operationId}`)) notify(update)
@@ -1205,6 +1214,7 @@ export function createLocalChatData(
     return store.transaction(() => {
       const o = store.conversation(id)
       if (!o || o.state !== 'active') throw new Error('Metadata snapshot owner is unavailable')
+      const stateVersion = store.stateVersion(o.identity.taskId)
       const i = o.identity,
         records = store.compose((db) =>
           (
@@ -1224,7 +1234,8 @@ export function createLocalChatData(
         ),
         counter = store.getRecord<number>(id, 'settings', 'metadata-counter') ?? 0
       const updates: ChatMetadataUpdate[] = []
-      if (i.tabId.startsWith('artifact-store:')) return { identity: i, counter, updates }
+      if (i.tabId.startsWith('artifact-store:'))
+        return { identity: i, counter, updates, stateVersion }
       const add = (kind: ChatMetadataUpdate['kind'], key: string, value: unknown) =>
         updates.push({
           operationId: `snapshot:${id}:${key}`,
@@ -1310,7 +1321,7 @@ export function createLocalChatData(
         if (r.kind === 'settings' && r.id === 'metadata-state:agent-state')
           add('agent-state', 'agent-state', r.value)
       }
-      return { identity: i, counter, updates }
+      return { identity: i, counter, updates, stateVersion }
     })
   }
   return {

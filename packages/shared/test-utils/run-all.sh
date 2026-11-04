@@ -672,6 +672,7 @@ run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-history-progress.test.ts
 run_harness packages/apps/hub/src/chat-compaction.test.ts
 run_harness packages/apps/hub/src/chat-diagnostics.test.ts
 run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts

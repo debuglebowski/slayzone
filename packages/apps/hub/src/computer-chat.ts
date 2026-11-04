@@ -17,6 +17,8 @@ import {
 import {
   createChatRecovery,
   createChatAvailability,
+  chatHistoryGeneration,
+  type ComputerChatInventory,
   createChatLifecycle,
   createChatFolderDeletions,
   createChatOwnershipStore,
@@ -82,9 +84,36 @@ export function createComputerChatServices(opts: {
   const recovered = new Map<string, Promise<void>>()
   const recoveryFinished = new Set<string>()
   const recoveryNonce = randomUUID()
-  const recoveryGenerations = new Map<string, number>()
-  const recoveryGeneration = (computerId: string) =>
-    `${recoveryNonce}:${computerId}:${recoveryGenerations.get(computerId) ?? 0}`
+  /** Computers recovered at least once since hub start. Their first recovery is the baseline. */
+  const recoveredOnce = new Set<string>()
+  /** Per conversation: how many recoveries found it changed. Bumping it reloads only its chat. */
+  const historyMarks = new Map<string, number>()
+  const historyGeneration = (computerId: string, conversationId: string, epoch: number) =>
+    chatHistoryGeneration(
+      `${recoveryNonce}:${computerId}:${historyMarks.get(conversationId) ?? 0}`,
+      conversationId,
+      epoch
+    )
+  /**
+   * Conversations a client may hold stale history for: the computer saved events
+   * the hub did not relay without a gap, or the hub re-read their metadata. An
+   * older computer reports no sequence: always changed. Clients reload these, so
+   * afterwards every conversation's history counts as complete.
+   */
+  function changedConversations(
+    inventory: readonly ComputerChatInventory[],
+    restoredMetadata: ReadonlySet<string>
+  ): Set<string> {
+    const changed = new Set<string>()
+    for (const entry of inventory) {
+      if (entry.state !== 'active') continue
+      const id = entry.identity.id,
+        seq = entry.historySeq
+      if (relay.history.behind(id, seq) || restoredMetadata.has(id)) changed.add(id)
+      if (seq !== undefined) relay.history.settle(id, seq)
+    }
+    return changed
+  }
   function invalidateRecovery(computerId: string) {
     recovered.delete(computerId)
     recoveryFinished.delete(computerId)
@@ -106,9 +135,14 @@ export function createComputerChatServices(opts: {
     // reports the error, retried on the next pass) instead of failing recovery
     // for every task on the computer.
     const unfinished = new Set<string>()
+    let inventory: ComputerChatInventory[] = []
+    let restoredMetadata: ReadonlySet<string> = new Set()
     const work = relay
       .resumeProviderTransitions(computerId)
       .then(() => recovery.reconcile(computerId))
+      .then((items) => {
+        inventory = items
+      })
       .then(() => lifecycle.sync(computerId))
       .then(() => relay.resumeInitializations(computerId))
       .then(async () => {
@@ -131,7 +165,10 @@ export function createComputerChatServices(opts: {
           })
       })
       .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
-      .then(() => relay.drainMetadata(computerId, true, unfinished))
+      .then(async () => {
+        const reported = new Map(inventory.map((entry) => [entry.identity.id, entry]))
+        restoredMetadata = await relay.drainMetadata(computerId, true, unfinished, reported)
+      })
       .then(() => lifecycle.sync(computerId))
       .then(async () => {
         await opts.request(computerId, {
@@ -143,11 +180,16 @@ export function createComputerChatServices(opts: {
           days: opts.retentionDays ?? 0
         })
         if (recovered.get(computerId) === work) {
-          const previous = recoveryGenerations.get(computerId)
-          recoveryGenerations.set(computerId, previous === undefined ? 0 : previous + 1)
+          const first = !recoveredOnce.has(computerId)
+          const changed = changedConversations(inventory, restoredMetadata)
+          recoveredOnce.add(computerId)
           recoveryFinished.add(computerId)
-          if (previous !== undefined)
-            await relay.notifyReplayRequired(computerId, recoveryGeneration(computerId))
+          if (!first) {
+            for (const id of changed) historyMarks.set(id, (historyMarks.get(id) ?? 0) + 1)
+            await relay.notifyReplayRequired(computerId, changed, (id, epoch) =>
+              historyGeneration(computerId, id, epoch)
+            )
+          }
         }
       })
       .catch((error) => {
@@ -542,7 +584,7 @@ export function createComputerChatServices(opts: {
     } satisfies NonNullable<ChatDeps['testing']>,
     computers,
     availability: createChatAvailability({
-      recoveryGeneration,
+      historyGeneration,
       db: opts.db,
       ownership,
       resolveComputer: opts.resolveAvailabilityComputer ?? opts.resolveComputer,

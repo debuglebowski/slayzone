@@ -32,13 +32,13 @@ import {
 import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
+import { createHistoryProgress } from './hub-history-progress'
 import { createChatFolderDeletions } from './hub-folders'
 import { createHubProviderConfigStore } from './hub-provider-config'
 import { chatStorageMode } from './storage-mode'
 import { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
 import { legacySessionAuthority } from './legacy-session-authority'
 import { createHubProviderTransitions } from './hub-provider-transition'
-import { chatHistoryGeneration } from './hub-availability'
 
 const trimUnsetArgs = (args: unknown[]) => {
   let end = args.length
@@ -729,6 +729,14 @@ export function createHubChatRelay(opts: {
     if (isFolder) await db.run('DELETE FROM chat_folder_placeholders WHERE folder_id=?', [id])
   }
   const metadataChains = new Map<string, Promise<void>>()
+  /** Per conversation: saved events relayed to clients without a gap. */
+  const history = createHistoryProgress()
+  /**
+   * Per conversation: the task state version of the last metadata snapshot this
+   * hub applied (in memory: a hub restart re-reads every conversation once). Live
+   * updates never set it: one cannot vouch for writes that sent no update.
+   */
+  const appliedStateVersions = new Map<string, number>()
   async function recoverMetadataNow(computerId: string, id: string) {
     const snapshot = (await opts.request(computerId, {
       kind: 'metadata.snapshot',
@@ -789,6 +797,11 @@ export function createHubChatRelay(opts: {
       'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
       [id, snapshot.counter]
     )
+    if (Number.isSafeInteger(snapshot.stateVersion))
+      appliedStateVersions.set(
+        id,
+        Math.max(appliedStateVersions.get(id) ?? 0, snapshot.stateVersion as number)
+      )
   }
   function recoverMetadata(computerId: string, id: string) {
     const previous = metadataChains.get(id) ?? Promise.resolve()
@@ -860,16 +873,41 @@ export function createHubChatRelay(opts: {
   async function drainMetadata(
     computerId: string,
     restore = false,
-    skip: ReadonlySet<string> = new Set()
-  ) {
+    skip: ReadonlySet<string> = new Set(),
+    /**
+     * Restore only: each conversation's metadata counter and task state version
+     * from the computer's inventory. A conversation needs no snapshot when the hub
+     * applied every counted update AND its last snapshot saw this state version.
+     * Missing values (an older computer, or not yet snapshotted by this hub) mean
+     * a snapshot. Returns the re-read conversations: a client may show stale
+     * metadata for those.
+     */
+    inventory?: ReadonlyMap<string, { metadataCounter?: number; stateVersion?: number }>
+  ): Promise<Set<string>> {
+    const restored = new Set<string>()
     if (restore) {
-      const owners = await db.all<{ id: string }>(
-        `SELECT id FROM chat_ownership o WHERE computer_id=? AND state='active' AND NOT EXISTS(
-          SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
+      const owners = await db.all<{ id: string; consumed: number | null }>(
+        `SELECT o.id,p.sequence AS consumed FROM chat_ownership o
+          LEFT JOIN chat_metadata_progress p ON p.conversation_id=o.id
+          WHERE o.computer_id=? AND o.state='active' AND NOT EXISTS(
+          SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY o.id`,
         [computerId]
       )
-      for (const owner of owners)
-        if (!skip.has(owner.id)) await recoverMetadata(computerId, owner.id)
+      for (const owner of owners) {
+        if (skip.has(owner.id)) continue
+        const reported = inventory?.get(owner.id)
+        const applied = appliedStateVersions.get(owner.id)
+        if (
+          reported?.metadataCounter !== undefined &&
+          owner.consumed !== null &&
+          reported.metadataCounter === owner.consumed &&
+          applied !== undefined &&
+          reported.stateVersion === applied
+        )
+          continue
+        await recoverMetadata(computerId, owner.id)
+        restored.add(owner.id)
+      }
     }
     for (;;) {
       const updates = (await opts.request(computerId, {
@@ -879,7 +917,7 @@ export function createHubChatRelay(opts: {
         (a, b) => a.conversationId.localeCompare(b.conversationId) || a.sequence - b.sequence
       )
       for (const update of updates) await reconcileMetadata(computerId, update)
-      if (updates.length < 500) return
+      if (updates.length < 500) return restored
     }
   }
   async function invoke(
@@ -1171,10 +1209,17 @@ export function createHubChatRelay(opts: {
     sessions,
     conversations,
     refreshSessions,
-    async notifyReplayRequired(computerId: string, generation: string) {
-      // History stays on the computer. Signal only current, available bindings;
-      // subscribers fetch their authorized timeline instead of replaying content
-      // through a hub journal. Include idle/finished chats, not only live sessions.
+    /** Relayed-event progress, compared with the computer's at recovery. */
+    history,
+    async notifyReplayRequired(
+      computerId: string,
+      conversations: ReadonlySet<string>,
+      generation: (conversationId: string, epoch: number) => string
+    ) {
+      // History stays on the computer. Signal only current, available bindings of
+      // the conversations that changed; subscribers fetch their authorized timeline
+      // instead of replaying content through a hub journal. Include idle/finished
+      // chats, not only live sessions.
       const tabs = await db.all<{ tab_id: string; conversation_id: string; epoch: number }>(
         `SELECT b.tab_id,b.conversation_id,o.epoch FROM chat_tab_bindings b
           JOIN chat_ownership o ON o.id=b.conversation_id
@@ -1187,16 +1232,15 @@ export function createHubChatRelay(opts: {
         [computerId]
       )
       for (const tab of tabs)
-        events.emit(
-          'replay-required',
-          tab.tab_id,
-          chatHistoryGeneration(generation, tab.conversation_id, tab.epoch)
-        )
+        if (conversations.has(tab.conversation_id))
+          events.emit('replay-required', tab.tab_id, generation(tab.conversation_id, tab.epoch))
     },
     async resetCaches() {
       await Promise.allSettled([...taskMigrations.values(), ...metadataChains.values()])
       sessionMirror.clear()
       taskMigrations.clear()
+      history.clear()
+      appliedStateVersions.clear()
     },
     invoke,
     ensureTab,
@@ -1227,6 +1271,8 @@ export function createHubChatRelay(opts: {
       await opts.gate?.(computerId, owner.taskId)
       switch (p.type) {
         case 'event':
+          // Saved events only: a live fragment repeats the seq of the saved event it follows.
+          if (p.live === undefined) history.observe(owner.id, Number(p.seq))
           events.emit(
             'event',
             owner.tabId,

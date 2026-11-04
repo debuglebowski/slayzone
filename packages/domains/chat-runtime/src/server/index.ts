@@ -20,10 +20,10 @@ export { createHubProviderConfigStore } from './hub-provider-config'
 
 export { createChatLifecycle } from './hub-lifecycle'
 
-export { createChatRecovery } from './hub-recovery'
+export { createChatRecovery, type ComputerChatInventory } from './hub-recovery'
 
 export { computerArtifactRequestSchema } from './artifacts'
 
-export { createChatAvailability } from './hub-availability'
+export { createChatAvailability, chatHistoryGeneration } from './hub-availability'
 export { createChatFolderDeletions } from './hub-folders'
 export { createChatMigrationAttachmentReader } from './migration-attachments'

@@ -2,7 +2,10 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { ChatAvailability } from '@slayzone/terminal-contracts'
 import type { ChatOwnershipStore } from './hub-ownership'
 
-/** Recovery and binding changes both invalidate a client's previously loaded history. */
+/**
+ * A client's loaded history is stale when this changes: a recovery that found
+ * the conversation changed (`recovery` is per conversation), or a new binding.
+ */
 export const chatHistoryGeneration = (recovery: string, id: string, epoch: number): string =>
   JSON.stringify([recovery, id, epoch])
 
@@ -13,7 +16,8 @@ export function createChatAvailability(opts: {
   resolveComputer(taskId: string): Promise<string | null>
   connected(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
-  recoveryGeneration?(computerId: string): string
+  /** The conversation's history generation (see {@link chatHistoryGeneration}). */
+  historyGeneration?(computerId: string, conversationId: string, epoch: number): string
   hasLiveTask(taskId: string): Promise<boolean>
   gate?(computerId: string, taskId: string): Promise<void>
 }) {
@@ -52,13 +56,11 @@ export function createChatAvailability(opts: {
     if (await opts.ownership.bootstrapReservation(owner.id)) return { state: 'preparing', computer }
     if (owner.state !== 'active' || owner.cleanupPending)
       return { state: 'migrating', computer, waitingForAgents: await opts.hasLiveTask(tab.task_id) }
-    const recovery = opts.recoveryGeneration?.(computer.id)
+    const generation = opts.historyGeneration?.(computer.id, owner.id, owner.epoch)
     return {
       state: 'ready',
       computer,
-      ...(recovery
-        ? { recoveryGeneration: chatHistoryGeneration(recovery, owner.id, owner.epoch) }
-        : {})
+      ...(generation ? { recoveryGeneration: generation } : {})
     }
   }
 }
