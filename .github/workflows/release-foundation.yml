@@ -197,13 +197,20 @@ jobs:
           # longer built: electron-updater picks the latest.yml entry whose name holds
           # process.arch, and the website links the per-arch installers. arm64 is
           # cross-built on x64, so only x64 runs the smoke step.
+          # native_rebuild: prebuilt = natives are rebuilt by scripts/release/rebuild-natives.mjs
+          # (node-pty stays on its shipped Node-API prebuild) and electron-builder's own
+          # rebuild is off.
           - name: windows-x64
             os: windows-latest
             build_args: --win --x64
+            arch: x64
+            native_rebuild: prebuilt
             smoke_dir: win-unpacked
           - name: windows-arm64
             os: windows-latest
             build_args: --win --arm64
+            arch: arm64
+            native_rebuild: prebuilt
 
     runs-on: ${{ matrix.os }}
     # Empty for every entry but linux-x64, which then runs on the runner directly.
@@ -290,6 +297,21 @@ jobs:
           find node_modules -name posix -prune -exec rm -rf {} + 2>/dev/null || true
           find packages/apps/app/node_modules -name posix -prune -exec rm -rf {} + 2>/dev/null || true
 
+      # node-pty ships Node-API prebuilds for win32-x64/arm64, but @electron/rebuild does not
+      # recognise them and compiled winpty + conpty from source (~83 s per arch). Same
+      # rebuild electron-builder runs, minus node-pty; the script fails if the prebuild is
+      # incomplete or a build/Release would shadow it. Smoke spawns a pty from the result.
+      - name: Rebuild natives (node-pty on its prebuild)
+        if: matrix.native_rebuild == 'prebuilt'
+        shell: bash
+        run: |
+          node scripts/release/rebuild-natives.mjs \
+            --app-dir packages/apps/app \
+            --workspace-root . \
+            --electron-version "$ELECTRON_VERSION" \
+            --platform win32 \
+            --arch ${{ matrix.arch }}
+
       - name: Package
         shell: bash
         timeout-minutes: 40
@@ -303,7 +325,7 @@ jobs:
           # workspace root. Without it: npm, app-dir-only rebuild, node-pty can't spawn.
           export npm_config_user_agent="pnpm"
           cd packages/apps/app
-          node "$(node -p "require.resolve('electron-builder/cli.js')")" ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} --publish never
+          node "$(node -p "require.resolve('electron-builder/cli.js')")" ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} ${{ matrix.native_rebuild == 'prebuilt' && '-c.npmRebuild=false' || '' }} --publish never
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
