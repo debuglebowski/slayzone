@@ -1099,6 +1099,9 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
+      '@xterm/headless':
+        specifier: 6.1.0-beta.303
+        version: 6.1.0-beta.303
       jest:
         specifier: ^30.5.2
         version: 30.5.2(@types/node@24.19.1)(babel-plugin-macros@3.1.0)(supports-color@7.2.0)
