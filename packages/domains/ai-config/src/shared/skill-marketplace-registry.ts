@@ -726,6 +726,7 @@ An agent may not \`wait\` on its own chat turn (it would never settle) — the C
 ## slay agent (chat or terminal)
 
 - \`slay agent status [--json]\` — kind (\`chat\` | \`pty\`), mode, state, pending prompts
+- \`slay agent start [--json]\` — start (wake) the agent without sending a message; no-op if already running
 - \`slay agent send [text] [--steer] [--wait] [--timeout <ms>]\` — chat: queued; terminal: submitted. Starts the agent if needed
 - \`slay agent wait [--timeout <ms>]\` — same exit codes as \`slay chat wait\`
 - \`slay agent read [--last <n>] [-v]\` — chat transcript, or the terminal buffer

@@ -160,6 +160,19 @@ describe.skipIf(!HAS_SLAY_BIN)('slay chat', () => {
 })
 
 describe.skipIf(!HAS_SLAY_BIN)('slay agent', () => {
+  test('start wakes a cold chat without a message; no-op once running', async () => {
+    fake.status = null
+    const cold = await runCli(['agent', 'start', '--task', task])
+    expect(cold.code, cold.stderr).toBe(0)
+    expect(cold.stdout.trim()).toBe('started')
+    expect(fake.calls).toEqual([['startMain', task]])
+    fake.reset()
+    const warm = await runCli(['agent', 'start', '--task', task])
+    expect(warm.code, warm.stderr).toBe(0)
+    expect(warm.stdout.trim()).toBe('already running')
+    expect(fake.calls).toEqual([])
+  })
+
   test('send --wait on a chat task waits for the turn', async () => {
     const r = await runCli(['agent', 'send', 'go', '--wait', '--task', task])
     expect(r.code, r.stderr).toBe(0)

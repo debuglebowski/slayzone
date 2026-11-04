@@ -340,6 +340,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
 
   // ── agent (a task's main agent, chat or terminal) ──
   'GET /api/agent/:id/status': checked(taskPrefix('params.id')),
+  'POST /api/agent/:id/start': checked(taskPrefix('params.id')),
   'POST /api/agent/:id/send': checked(taskPrefix('params.id')),
   'GET /api/agent/:id/wait': checked(taskPrefix('params.id')),
   'GET /api/agent/:id/read': checked(taskPrefix('params.id')),

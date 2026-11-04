@@ -66,7 +66,9 @@ const withTask = (cmd: Command) =>
 
 export function agentCommand(): Command {
   const cmd = new Command('agent')
-    .description("Drive a task's main agent, chat or terminal alike (send, wait, read, interrupt)")
+    .description(
+      "Drive a task's main agent, chat or terminal alike (start, send, wait, read, interrupt)"
+    )
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
 
@@ -79,6 +81,18 @@ export function agentCommand(): Command {
       )
       if (opts.json) console.log(JSON.stringify(data, null, 2))
       else for (const [k, v] of Object.entries(data)) console.log(`${k.padEnd(16)} ${v}`)
+    })
+
+  withTask(cmd.command('start'))
+    .description('Start the agent without sending a message (no-op if already running)')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: AgentOpts & { json?: boolean }) => {
+      const { data } = await apiPost<{ ok: true; data: { kind: string; started: boolean } }>(
+        await agentPath(opts, 'start'),
+        {}
+      )
+      if (opts.json) console.log(JSON.stringify(data, null, 2))
+      else console.log(data.started ? 'started' : 'already running')
     })
 
   withTask(cmd.command('send [text]'))

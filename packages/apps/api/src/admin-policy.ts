@@ -959,6 +959,7 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'POST /api/chat/:id/rewind': 'user',
   'POST /api/chat/:id/handoff': 'user',
   'GET /api/agent/:id/status': 'user',
+  'POST /api/agent/:id/start': 'user',
   'POST /api/agent/:id/send': 'user',
   'GET /api/agent/:id/wait': 'user',
   'GET /api/agent/:id/read': 'user',

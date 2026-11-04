@@ -5,6 +5,7 @@
  * `slay chat` and `slay pty` make, so an orchestrator never has to know which.
  *
  *   GET  status     { kind, mode, state, … }
+ *   POST start      → { kind, started }: start the agent without a message (no-op if running)
  *   POST send       { text, steer? } → chat: queued like the composer; pty: submitted
  *   GET  wait       ?timeout= → { outcome: idle | prompt | dead | error | timeout }
  *   GET  read       ?last=&verbose= → text: chat transcript / terminal buffer
@@ -24,7 +25,7 @@ import {
   type ChatTarget
 } from '../chat/_chat'
 import { waitForChat } from '../chat/_wait'
-import { sendChatMessage } from '../chat/act'
+import { ensureStarted, sendChatMessage } from '../chat/act'
 import { waitForPtyState } from '../pty/_wait'
 import { startMainPty } from '../pty/_start-main'
 
@@ -125,6 +126,22 @@ export function registerAgentRoutes(app: Express, deps: RestApiDeps): void {
           turnOpen: live && agent.pty.getState(agent.sessionId) === 'running',
           pendingPrompts: 0
         }
+      })
+    })
+  )
+
+  app.post(
+    '/api/agent/:id/start',
+    agentHandler(deps, async (agent, _req, res) => {
+      if (agent.kind === 'chat') {
+        const started = await ensureStarted(agent.chat, agent.target)
+        res.json({ ok: true, data: { kind: 'chat', taskId: agent.target.taskId, started } })
+        return
+      }
+      const started = await ensurePty(deps, agent)
+      res.json({
+        ok: true,
+        data: { kind: 'pty', taskId: agent.taskId, sessionId: agent.sessionId, started }
       })
     })
   )
