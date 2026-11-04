@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { ownedRowsClause } from '../owner-scope'
+import { ownedRowsClause, PROJECT_ID_PREFIX_SQL, projectIdPrefixParam } from '../owner-scope'
 
 /**
  * Shared id-prefix / project-reference resolution for the CLI-parity REST
@@ -9,7 +9,9 @@ import { ownedRowsClause } from '../owner-scope'
  * - entities are addressed by full id OR unique id prefix
  *   (`id LIKE :prefix || '%' LIMIT 2`) — 0 matches → 404, 2+ → 400 ambiguous
  * - projects are addressed by exact id OR case-insensitive name substring
- *   (`id = :ref OR LOWER(name) LIKE '%ref%' LIMIT 10`) — same 404/400 mapping
+ *   (`id = :ref OR LOWER(name) LIKE '%ref%' LIMIT 10`), and — only when neither
+ *   matches — by unique id prefix (the 8 chars `slay projects list` prints), so the
+ *   fallback never changes what a name or full id resolved to — same 404/400 mapping
  *
  * Failures are returned as `{ status, error }` values (not thrown) so routes
  * translate them 1:1 into HTTP responses.
@@ -77,16 +79,25 @@ export interface ResolvedProject {
   name: string
 }
 
-/** Resolve a project by exact id or case-insensitive name substring (CLI `resolveProject`). */
+/**
+ * Resolve a project by exact id or case-insensitive name substring (CLI
+ * `resolveProject`); when neither matches, by unique id prefix.
+ */
 export async function resolveProjectRef(
   db: SlayzoneDb,
   ref: string
 ): Promise<Resolved<ResolvedProject>> {
   const owned = await ownedRowsClause('projects')
-  const rows = await db.all<ResolvedProject & { id: string }>(
+  let rows = await db.all<ResolvedProject & { id: string }>(
     `SELECT id, name FROM projects WHERE (id = ? OR LOWER(name) LIKE ?)${owned.sql} LIMIT 10`,
     [ref, `%${ref.toLowerCase()}%`, ...owned.params]
   )
+  if (rows.length === 0 && ref) {
+    rows = await db.all<ResolvedProject & { id: string }>(
+      `SELECT id, name FROM projects WHERE ${PROJECT_ID_PREFIX_SQL}${owned.sql} LIMIT 10`,
+      [projectIdPrefixParam(ref), ...owned.params]
+    )
+  }
   if (rows.length === 0) {
     // The CLI's resolver printed the available names on a miss ("Available: A, B")
     // and that hint is most of what makes a typo recoverable. Only read on the
@@ -101,7 +112,7 @@ export async function resolveProjectRef(
   if (rows.length > 1) {
     return {
       status: 400,
-      error: `Ambiguous project "${ref}". Matches: ${rows.map((p) => p.name).join(', ')}`
+      error: `Ambiguous project "${ref}". Matches: ${rows.map((p) => `${p.name} (${p.id.slice(0, 8)})`).join(', ')}`
     }
   }
   return { row: rows[0] }

@@ -42,8 +42,8 @@ import type { OwnerMark } from './owner-policy'
  *               matches; the route's own resolver then only ever sees the caller's
  *               rows (`resolve.ts`), so a prefix shared with someone else's row is
  *               neither ambiguous nor theirs.
- *   projectRef  a project's id OR a case-insensitive name substring
- *               (`resolveProjectRef`); same rule.
+ *   projectRef  a project's id OR a case-insensitive name substring, else a unique
+ *               id prefix (`resolveProjectRef`); same rule.
  */
 export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef'
 
