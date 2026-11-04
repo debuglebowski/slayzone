@@ -1,3 +1,5 @@
+import { securityEvent } from '@slayzone/platform/security-log'
+import { createDirectListener, type DirectListener } from './direct/listener'
 import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
@@ -38,6 +40,7 @@ import {
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import {
+  DEFAULT_DIRECT_LISTEN_ADDRESS,
   effectiveHubUrls,
   JailViolationError,
   setProtectedPaths,
@@ -468,6 +471,37 @@ export function startComputer(
   // ONE direct-link grant table: one listener serves every hub, and each hub's
   // grants stay keyed by the link that registered them.
   const directGrants = createDirectGrantStore()
+  // The direct-link listener (docs/direct-link.md). Its port is ephemeral by default,
+  // so hubs learn the address from enroll/hello: dialing waits for the bind (a
+  // loopback bind takes milliseconds), and a failed bind only costs the direct path.
+  let directListener: DirectListener | null = null
+  const directReady: Promise<void> = createDirectListener({
+    grants: directGrants,
+    listenAddress: config.directListenAddress ?? DEFAULT_DIRECT_LISTEN_ADDRESS,
+    ...(config.directPublicAddress ? { publicAddress: config.directPublicAddress } : {}),
+    log,
+    audit: (refusal) =>
+      securityEvent({
+        event: 'computer.rate_limit',
+        outcome: 'denied',
+        actor: null,
+        ip: refusal.address,
+        route: refusal.route,
+        targetKind: 'computer',
+        detail: {
+          limit: refusal.limit,
+          max: refusal.max,
+          ...(refusal.windowSec === undefined ? {} : { windowSec: refusal.windowSec })
+        }
+      })
+  })
+    .then((listener) => {
+      directListener = listener
+    })
+    .catch((err: unknown) => {
+      log('direct link unavailable — clients use the hub relay', { error: String(err) })
+    })
+  identity.directAddress = () => directListener?.advertisedAddress ?? null
 
   /**
    * Everything that belongs to ONE hub.
@@ -593,13 +627,17 @@ export function startComputer(
         return null
       })
 
-    dialer.start()
+    let disposed = false
+    void directReady.then(() => {
+      if (!disposed) dialer.start()
+    })
 
     return {
       dialer,
       isIdle: () => dispatch.isIdle(),
       setHookDirectory: (directory) => dispatch.setHookDirectory(directory),
       dispose: async () => {
+        disposed = true
         // Kill live ptys/processes and close fs watches before the socket drops, so
         // nothing is orphaned and no handle keeps the stopped process alive.
         await dispatch.dispose()
@@ -644,6 +682,8 @@ export function startComputer(
       hostIdStop?.()
       if (watchLocalRoots) unwatchFile(configFile)
       await Promise.all(connections.map((c) => c.dispose()))
+      await directReady
+      await directListener?.close()
       directGrants.close()
     }
   }

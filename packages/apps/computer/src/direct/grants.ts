@@ -45,6 +45,8 @@ export interface DirectGrantStore {
   /** The live grant by id, or null. */
   get(grantId: string): GrantRecord | null
   size(): number
+  /** Also tell `listener` about every drop (the direct listener closes what it opened). */
+  onDropped(listener: (grants: GrantRecord[], reason: GrantDropReason) => void): () => void
   close(): void
 }
 
@@ -92,13 +94,18 @@ export function createDirectGrantStore(options: DirectGrantStoreOptions = {}): D
   const byHash = new Map<string, Entry>()
   let sweepTimer: ReturnType<typeof setTimeout> | null = null
   let closed = false
+  const dropListeners = new Set<(grants: GrantRecord[], reason: GrantDropReason) => void>()
+  if (options.onDropped) dropListeners.add(options.onDropped)
 
   function remove(entries: Entry[], reason: GrantDropReason): number {
     for (const e of entries) {
       byId.delete(e.grantId)
       byHash.delete(e.tokenHash)
     }
-    if (entries.length > 0) options.onDropped?.(entries.map(publicRecord), reason)
+    if (entries.length > 0) {
+      const records = entries.map(publicRecord)
+      for (const listener of dropListeners) listener(records, reason)
+    }
     return entries.length
   }
 
@@ -200,6 +207,11 @@ export function createDirectGrantStore(options: DirectGrantStoreOptions = {}): D
 
     size() {
       return byId.size
+    },
+
+    onDropped(listener) {
+      dropListeners.add(listener)
+      return () => dropListeners.delete(listener)
     },
 
     close() {

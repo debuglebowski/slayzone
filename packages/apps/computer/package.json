@@ -33,7 +33,10 @@
     "@slayzone/worktrees": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "@slayzone/transport": "workspace:*",
+    "@trpc/server": "^11.19.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
@@ -41,6 +44,9 @@
     "@slayzone/test-utils": "workspace:*",
     "@types/node": "^24.19.0",
     "esbuild": "^0.28.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "@trpc/client": "^11.19.0",
+    "@types/ws": "^8.5.13",
+    "@slayzone/trpc-server": "workspace:*"
   }
 }

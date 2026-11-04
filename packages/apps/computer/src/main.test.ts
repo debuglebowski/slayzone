@@ -272,3 +272,32 @@ describe('startComputer multi-hub', () => {
     }
   })
 })
+
+describe('startComputer direct link (docs/direct-link.md)', () => {
+  it('binds the loopback listener, then dials, advertising the bound address', async () => {
+    const seen: Array<{ started: boolean; address: string | null }> = []
+    let identity: { directAddress?: () => string | null } | undefined
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      createDialer: (options) => {
+        identity = options.identity
+        const fake = {
+          events: { on: () => undefined },
+          computerId: null,
+          start: () => seen.push({ started: true, address: identity?.directAddress?.() ?? null }),
+          stop: async () => undefined
+        }
+        return fake as never
+      }
+    })
+    try {
+      await vi.waitFor(() => expect(seen.length).toBe(1))
+      expect(seen[0]?.address).toMatch(/^127\.0\.0\.1:\d+$/)
+      const health = await fetch(`http://${seen[0]?.address}/direct/v1/health`)
+      expect(health.status).toBe(200)
+    } finally {
+      await handle.stop()
+    }
+  })
+})

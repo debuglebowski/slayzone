@@ -9,7 +9,8 @@
     "./client": "./src/client/index.ts",
     "./client/use-stable-callback": "./src/client/useStableCallback.ts",
     "./scopes": "./src/shared/scopes.ts",
-    "./testing": "./src/testing/index.tsx"
+    "./testing": "./src/testing/index.tsx",
+    "./direct": "./src/direct/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -22,6 +23,7 @@
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
     "superjson": "^2.2.1",
+    "zod": "^4.3.5",
     "zustand": "^5.0.15"
   },
   "peerDependencies": {
