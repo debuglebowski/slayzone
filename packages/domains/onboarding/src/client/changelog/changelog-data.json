@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.37.1",
+    "date": "2026-11-04",
+    "tagline": "Stop stray sub-agents",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Stop background sub-agents",
+        "description": "Sub-agents still running after a turn show in a pill above the composer, where you can open or stop each one (Claude and Codex)."
+      },
+      {
+        "category": "fix",
+        "title": "Agents resume after 0.37.0 upgrade",
+        "description": "Terminal Claude sessions resume again, and moved task history no longer blocks agents from starting."
+      },
+      {
+        "category": "fix",
+        "title": "Agents start under bash",
+        "description": "Fixed agents failing to launch when your login shell is bash."
+      }
+    ]
+  },
+  {
     "version": "0.37.0",
     "date": "2026-11-04",
     "tagline": "Steer agents mid-turn",

@@ -1,6 +1,30 @@
 # Changelog
 
 
+## v0.37.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.37.0...v0.37.1)
+
+### 🚀 Enhancements
+
+- **chat:** Composer lists + stops background sub-agents ([955b5cbde](https://github.com/debuglebowski/slayzone/commit/955b5cbde))
+
+### 🩹 Fixes
+
+- **chat:** Hash sub-agent-lifecycle.ts as reducer source; guard local imports ([1c72b7c79](https://github.com/debuglebowski/slayzone/commit/1c72b7c79))
+- **chat:** Unblock terminal Claude resume after 0.37.0 history move ([#172](https://github.com/debuglebowski/slayzone/pull/172))
+- **pty:** Drop double exec in warm agent command ([#173](https://github.com/debuglebowski/slayzone/pull/173))
+- **deps:** Hand-bump dompurify 3.4.17 for critical advisory ([a1e3d0aa9](https://github.com/debuglebowski/slayzone/commit/a1e3d0aa9))
+- **chat:** Storage-only history never blocks agent starts ([950263d3c](https://github.com/debuglebowski/slayzone/commit/950263d3c))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.37.0 ([49a0c09e6](https://github.com/debuglebowski/slayzone/commit/49a0c09e6))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.37.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.4...v0.37.0)
