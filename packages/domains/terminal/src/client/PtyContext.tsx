@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useRef,
+  useState,
   useCallback,
   useMemo,
   type MutableRefObject,
@@ -294,17 +295,12 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Seq-ordered, gap-aware delivery shared by the hub stream and the direct link
   // (pty-delivery.ts): duplicates dropped, a gap read back before going on.
   const renderedRef = useRef(new Map<string, Set<() => number>>())
-  const deliveryRef = useRef<PtyDelivery | null>(null)
-  if (deliveryRef.current === null) {
-    deliveryRef.current = createPtyDelivery({
-      emit: (sessionId, data, seq) => {
-        const state = statesRef.current.get(sessionId)
-        if (state) state.lastSeq = seq
-        dataSubsRef.current.get(sessionId)?.forEach((cb) => cb(data, seq))
-      }
-    })
-  }
-  const delivery = deliveryRef.current
+  const emitData = useStableCallback((sessionId: string, data: string, seq: number): void => {
+    const state = statesRef.current.get(sessionId)
+    if (state) state.lastSeq = seq
+    dataSubsRef.current.get(sessionId)?.forEach((cb) => cb(data, seq))
+  })
+  const [delivery] = useState<PtyDelivery>(() => createPtyDelivery({ emit: emitData }))
   const deliver = useCallback(
     (sessionId: string, data: string, seq: number, backfill: PtyBackfill): void => {
       // Only sessions a terminal subscribed to (state exists) take output.
