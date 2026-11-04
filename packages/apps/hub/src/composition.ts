@@ -575,7 +575,11 @@ export function composeServer(opts: {
     worktrees: hubWorktreeExecAdapters,
     worktreePolicy: defaultWorktreePolicyAdapters,
     removeTaskProcesses,
-    killPtysByTaskId,
+    // A closed task's direct-link grants go with its agents (direct-link.ts).
+    killPtysByTaskId: (taskId: string) => {
+      killPtysByTaskId(taskId)
+      void directLinkIssuer?.revoke({ by: 'task', taskId }, 'task_closed')
+    },
     recordDiagnosticEvent,
     // PTY lifecycle now lives in THIS process (slice 9), so the task-status
     // hooks must run here: status→terminal kills the task's PTYs (→ pty:exit
@@ -1434,7 +1438,9 @@ export function composeServer(opts: {
   const userAccess = createUserAccessRevoker({
     db,
     getGateway: () => computerGatewayRef,
-    connections: trpcConnections
+    connections: trpcConnections,
+    revokeDirectGrants: async (userId) =>
+      directLinkIssuer?.revoke({ by: 'user', userId }, 'user_access_ended')
   })
   // Break-glass (break-glass.ts): off unless login is required; closing its account
   // revokes everything the account holds, like disabling any other (T-12).
@@ -1645,6 +1651,11 @@ export function composeServer(opts: {
     // only on a hub with login. The REST twin reads the same function.
     findAccount: joinTokenAccounts,
     // Before the gateway is up there is no computer to reach: the client relays.
+    onComputerRevoked: async (computerId) => {
+      await directLinkIssuer?.revoke({ by: 'computer', computerId }, 'computer_revoked')
+      // Revoking used to leave a live connection working until it next reconnected.
+      computerGatewayRef?.disconnect(computerId, 'computer revoked')
+    },
     issueDirectLink: (target, caller) =>
       directLinkIssuer
         ? directLinkIssuer.issue(target, caller)
@@ -1750,6 +1761,11 @@ export function composeServer(opts: {
         return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
       },
       ...(placement.gate ? { gate: placement.gate } : {})
+    })
+    // Every (re)connect: the computer keeps exactly the grants this hub still holds
+    // (none after a hub restart), so nothing it granted outlives what the hub knows.
+    computerGateway.events.on('computer-connected', ({ computer }) => {
+      void directLinkIssuer?.computerConnected(computer.computerId)
     })
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its

@@ -67,6 +67,11 @@ export type ComputersDeps = {
    * already run the owner gate. `ip` = the client's address as the hub saw it. Absent:
    * this host issues none, and clients use the relay.
    */
+  /**
+   * After a computer is revoked: drop its direct-link grants and its live connection
+   * (until now a revoked computer kept working until it next reconnected).
+   */
+  onComputerRevoked?: (computerId: string) => Promise<void>
   issueDirectLink?: (
     target: DirectLinkTarget,
     caller: { userId: string | null; ip: string | null }

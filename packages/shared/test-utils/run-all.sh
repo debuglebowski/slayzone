@@ -101,6 +101,7 @@ run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
 run_harness packages/apps/hub/src/direct-link.test.ts
+run_harness packages/apps/hub/src/user-access.test.ts
 # Project folders: the ordered sequence each computer goes through on connect
 # (refresh, legacy paths → pending, widen, deliver, default backfill) and user folder
 # changes, serialized per computer so a refresh can never undo a folder just set.

@@ -45,8 +45,12 @@ function setup(over: Partial<DirectLinkIssuerDeps> = {}, computers?: Computer[])
       sessionId === 'gone'
         ? null
         : sessionId === 'hub-owned'
-          ? { computerId: 'c-local', direct: false }
-          : { computerId: sessionId.startsWith('r') ? 'c-remote' : 'c-local', direct: true },
+          ? { computerId: 'c-local', direct: false, taskId: 'task-1' }
+          : {
+              computerId: sessionId.startsWith('r') ? 'c-remote' : 'c-local',
+              direct: true,
+              taskId: sessionId.startsWith('other') ? 'task-2' : 'task-1'
+            },
     resolveChat: async (tabId) =>
       tabId === 'gone' ? null : { computerId: 'c-local', epoch: 4, taskId: 'task-1' },
     gate: async (computerId, work) => {
@@ -191,5 +195,109 @@ describe('direct-link issuer', () => {
     await issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
     now += DIRECT_GRANT_TTL_MS
     expect(issuer.heldGrantIds('c-local')).toEqual([])
+  })
+})
+
+describe('direct-link revocation', () => {
+  async function issued() {
+    const ctx = setup()
+    const a = await ctx.issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    const b = await ctx.issuer.issue({ kind: 'pty', sessionId: 'other:t' }, { ...local, userId: 'u2' })
+    const c = await ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1' }, local)
+    const d = await ctx.issuer.issue({ kind: 'pty', sessionId: 'r1' }, remoteClient)
+    if (!a.available || !b.available || !c.available || !d.available) throw new Error('unreachable')
+    ctx.requests.length = 0
+    return { ...ctx, ids: { a: a.grantId, b: b.grantId, c: c.grantId, d: d.grantId } }
+  }
+  const revokes = (requests: Array<{ computerId: string; method: string; params: unknown }>) =>
+    requests.filter((r) => r.method === HubToComputerMethods.directRevoke)
+
+  it('revokes a user’s grants on each computer that holds them, by grant id, and forgets them', async () => {
+    const { issuer, requests, ids } = await issued()
+    await issuer.revoke({ by: 'user', userId: 'u1' }, 'user_disabled')
+    expect(revokes(requests)).toEqual([
+      {
+        computerId: 'c-local',
+        method: HubToComputerMethods.directRevoke,
+        params: { by: 'grant', grantIds: [ids.a, ids.c] }
+      },
+      {
+        computerId: 'c-remote',
+        method: HubToComputerMethods.directRevoke,
+        params: { by: 'grant', grantIds: [ids.d] }
+      }
+    ])
+    expect(issuer.heldGrantIds('c-local')).toEqual([ids.b])
+    expect(lines.filter((l) => l.event === 'computer.direct_revoke')).toEqual([
+      expect.objectContaining({
+        targetId: 'c-local',
+        detail: { reason: 'user_disabled', grants: 2 }
+      }),
+      expect.objectContaining({ targetId: 'c-remote', detail: { reason: 'user_disabled', grants: 1 } })
+    ])
+  })
+
+  it('revokes a task’s grants (pty and chat)', async () => {
+    const { issuer, requests, ids } = await issued()
+    await issuer.revoke({ by: 'task', taskId: 'task-1' }, 'task_closed')
+    expect(revokes(requests).map((r) => r.params)).toEqual([
+      { by: 'grant', grantIds: [ids.a, ids.c] },
+      { by: 'grant', grantIds: [ids.d] }
+    ])
+    expect(issuer.heldGrantIds('c-local')).toEqual([ids.b])
+  })
+
+  it('revokes one session or tab', async () => {
+    const { issuer, requests, ids } = await issued()
+    await issuer.revoke({ by: 'target', target: { kind: 'chat', tabId: 'tab-1' } }, 'chat_moved')
+    expect(revokes(requests).map((r) => r.params)).toEqual([{ by: 'grant', grantIds: [ids.c] }])
+  })
+
+  it('revokes everything on a revoked computer', async () => {
+    const { issuer, requests } = await issued()
+    await issuer.revoke({ by: 'computer', computerId: 'c-local' }, 'computer_revoked')
+    expect(revokes(requests)).toEqual([
+      { computerId: 'c-local', method: HubToComputerMethods.directRevoke, params: { by: 'all' } }
+    ])
+    expect(issuer.heldGrantIds('c-local')).toEqual([])
+  })
+
+  it('sends nothing when nothing matches, and survives an offline computer', async () => {
+    const { issuer, requests } = await issued()
+    await issuer.revoke({ by: 'user', userId: 'nobody' }, 'user_disabled')
+    expect(revokes(requests)).toEqual([])
+    const failing = setup({
+      gateway: {
+        listUsableComputers: () => [
+          { computerId: 'c-local', directAddress: '127.0.0.1:1', peerLoopback: true }
+        ],
+        request: async (_c, method) => {
+          if (method === HubToComputerMethods.directRevoke) throw new Error('offline')
+          return { ok: true }
+        }
+      }
+    })
+    await failing.issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    // Forgotten anyway: the reconnect reset drops it on the computer.
+    await failing.issuer.revoke({ by: 'user', userId: 'u1' }, 'user_disabled')
+    expect(failing.issuer.heldGrantIds('c-local')).toEqual([])
+  })
+
+  it('resets a (re)connected computer to exactly the grants this hub still holds', async () => {
+    const { issuer, requests, ids } = await issued()
+    await issuer.computerConnected('c-local')
+    expect(requests).toEqual([
+      {
+        computerId: 'c-local',
+        method: HubToComputerMethods.directReset,
+        params: { keep: [ids.a, ids.b, ids.c] }
+      }
+    ])
+    // A fresh hub holds nothing: the computer drops every grant.
+    const fresh = setup()
+    await fresh.issuer.computerConnected('c-remote')
+    expect(fresh.requests).toEqual([
+      { computerId: 'c-remote', method: HubToComputerMethods.directReset, params: { keep: [] } }
+    ])
   })
 })

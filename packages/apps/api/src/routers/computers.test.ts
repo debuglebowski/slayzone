@@ -518,3 +518,15 @@ test('computers.issueDirectLink: relays to the hub issuer with the caller; unsup
     setComputersDeps(fakeDeps)
   }
 })
+
+test('computers.revokeComputer: tells the hub, which drops its direct-link grants and live connection', async () => {
+  const r = await registerComputer(h.slayDb, { name: 'revoked-live', platform: 'linux-x64', version: '1' })
+  const told: string[] = []
+  setComputersDeps({ ...fakeDeps, onComputerRevoked: async (id) => void told.push(id) })
+  try {
+    await caller.revokeComputer({ computerId: r.id })
+    expect(told).toEqual([r.id])
+  } finally {
+    setComputersDeps(fakeDeps)
+  }
+})

@@ -469,6 +469,7 @@ export const computersRouter = router({
       await requireManager(ctx, path, input.computerId)
       await storeRevokeComputer(ctx.db, input.computerId)
       auditComputer('computer.revoke', input.computerId)
+      await getComputersDepsOrNull()?.onComputerRevoked?.(input.computerId)
       return { ok: true as const }
     })
 })

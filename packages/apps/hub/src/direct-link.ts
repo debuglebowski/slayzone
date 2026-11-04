@@ -16,8 +16,9 @@
  *     computer has acknowledged the grant.
  *
  * Every issue writes one `computer.direct_grant` audit line, with the grant id, never
- * the token. The issuer remembers live grants per computer, so a reconnect can reset
- * the computer to exactly that set and a revocation can name them.
+ * the token; every revocation one `computer.direct_revoke` line per computer. The
+ * issuer remembers live grants per computer, so a reconnect can reset the computer to
+ * exactly that set and a revocation can name them.
  *
  * Unavailable is an answer, never an error: the client then uses the hub relay,
  * which is always correct.
@@ -31,6 +32,7 @@ import {
   DIRECT_LINK_PROTOCOL,
   type DirectGrantParams,
   type DirectResource,
+  type DirectRevokeParams,
   HubToComputerMethods
 } from '@slayzone/computer-transport/shared'
 import type { DirectLinkIssueResult, DirectLinkTarget } from '@slayzone/computers/shared'
@@ -53,7 +55,9 @@ export interface DirectLinkIssuerDeps {
    * The computer holding a terminal session, or null. `direct: false` when the hub,
    * not the computer, holds its output (nothing for a client to read there).
    */
-  resolvePty(sessionId: string): Promise<{ computerId: string; direct: boolean } | null>
+  resolvePty(
+    sessionId: string
+  ): Promise<{ computerId: string; direct: boolean; taskId: string } | null>
   /** The computer holding an ACTIVE chat tab, its ownership epoch and task, or null. */
   resolveChat(tabId: string): Promise<{ computerId: string; epoch: number; taskId: string } | null>
   /** The placement gate (computer-placement.ts). Absent on a hub without login. */
@@ -72,18 +76,34 @@ interface IssuedGrant {
   grantId: string
   computerId: string
   userId: string | null
+  taskId: string
   resource: DirectResource
   expiresAt: number
 }
+
+/** Which grants a revocation drops. */
+export type DirectRevocation =
+  /** Account disabled, or its sessions ended (SSO refusal). */
+  | { by: 'user'; userId: string }
+  /** Task closed (archived, deleted, its agents stopped). */
+  | { by: 'task'; taskId: string }
+  /** One session or tab (chat ownership moved, tab removed). */
+  | { by: 'target'; target: DirectLinkTarget }
+  /** Computer revoked: everything this hub granted on it. */
+  | { by: 'computer'; computerId: string }
 
 export interface DirectLinkIssuer {
   issue(target: DirectLinkTarget, caller: DirectLinkCaller): Promise<DirectLinkIssueResult>
   /** Live grant ids this hub issued on a computer (for `direct.reset`). */
   heldGrantIds(computerId: string): string[]
-  /** Live grants, for revocation by user or resource. */
-  heldGrants(): readonly IssuedGrant[]
-  /** Forget grants the computer has dropped (revoked, or the computer restarted). */
-  forget(predicate: (grant: IssuedGrant) => boolean): IssuedGrant[]
+  /**
+   * Drop grants now: forgotten here first, then revoked on each computer holding
+   * one. Best-effort on the wire — a computer that cannot be told is reset to this
+   * hub's held set when it reconnects, and a grant never outlives its TTL.
+   */
+  revoke(which: DirectRevocation, reason: string): Promise<void>
+  /** A computer (re)connected: reset it to exactly the grants this hub still holds. */
+  computerConnected(computerId: string): Promise<void>
 }
 
 export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIssuer {
@@ -95,10 +115,25 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
     for (const [id, g] of grants) if (g.expiresAt <= t) grants.delete(id)
   }
 
+  function matches(g: IssuedGrant, which: DirectRevocation): boolean {
+    switch (which.by) {
+      case 'user':
+        return g.userId === which.userId
+      case 'task':
+        return g.taskId === which.taskId
+      case 'computer':
+        return g.computerId === which.computerId
+      case 'target':
+        return which.target.kind === 'pty'
+          ? g.resource.kind === 'pty' && g.resource.sessionId === which.target.sessionId
+          : g.resource.kind === 'chat' && g.resource.tabId === which.target.tabId
+    }
+  }
+
   async function locate(
     target: DirectLinkTarget
   ): Promise<
-    | { computerId: string; resource: DirectResource; work: ComputerWork }
+    | { computerId: string; resource: DirectResource; work: ComputerWork; taskId: string }
     | { unavailable: 'no-computer' | 'not-direct' }
   > {
     if (target.kind === 'pty') {
@@ -108,7 +143,8 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       return {
         computerId: held.computerId,
         resource: { kind: 'pty', sessionId: target.sessionId },
-        work: { kind: 'session', id: target.sessionId }
+        work: { kind: 'session', id: target.sessionId },
+        taskId: held.taskId
       }
     }
     const held = await deps.resolveChat(target.tabId)
@@ -116,7 +152,8 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
     return {
       computerId: held.computerId,
       resource: { kind: 'chat', tabId: target.tabId, epoch: held.epoch },
-      work: { kind: 'task', id: held.taskId }
+      work: { kind: 'task', id: held.taskId },
+      taskId: held.taskId
     }
   }
 
@@ -153,6 +190,7 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         grantId: params.grantId,
         computerId: computer.computerId,
         userId: caller.userId,
+        taskId: located.taskId,
         resource: params.resource,
         expiresAt: now() + params.ttlMs
       })
@@ -185,20 +223,45 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       return [...grants.values()].filter((g) => g.computerId === computerId).map((g) => g.grantId)
     },
 
-    heldGrants() {
+    async revoke(which, reason) {
       prune()
-      return [...grants.values()]
+      const byComputer = new Map<string, string[]>()
+      for (const [id, g] of grants) {
+        if (!matches(g, which)) continue
+        grants.delete(id)
+        byComputer.set(g.computerId, [...(byComputer.get(g.computerId) ?? []), id])
+      }
+      // A revoked computer drops everything this hub ever granted there, including
+      // grants this map has already forgotten as expired.
+      if (which.by === 'computer' && !byComputer.has(which.computerId)) {
+        byComputer.set(which.computerId, [])
+      }
+      await Promise.all(
+        [...byComputer].map(async ([computerId, grantIds]) => {
+          const params: DirectRevokeParams =
+            which.by === 'computer' ? { by: 'all' } : { by: 'grant', grantIds }
+          await deps.gateway
+            .request(computerId, HubToComputerMethods.directRevoke, params)
+            .catch(() => undefined)
+          securityEvent({
+            event: 'computer.direct_revoke',
+            outcome: 'success',
+            targetKind: 'computer',
+            targetId: computerId,
+            detail: { reason, grants: grantIds.length }
+          })
+        })
+      )
     },
 
-    forget(predicate) {
-      const dropped: IssuedGrant[] = []
-      for (const [id, g] of grants) {
-        if (predicate(g)) {
-          grants.delete(id)
-          dropped.push(g)
-        }
-      }
-      return dropped
+    async computerConnected(computerId) {
+      prune()
+      const keep = [...grants.values()]
+        .filter((g) => g.computerId === computerId)
+        .map((g) => g.grantId)
+      await deps.gateway
+        .request(computerId, HubToComputerMethods.directReset, { keep })
+        .catch(() => undefined)
     }
   }
 }

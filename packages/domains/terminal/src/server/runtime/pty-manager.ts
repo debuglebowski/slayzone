@@ -3505,12 +3505,16 @@ function outputOwner(session: PtySession): PtyHandle | null {
  */
 export function getPtyDirectTarget(
   sessionId: string
-): { computerId: string; direct: boolean } | null {
+): { computerId: string; direct: boolean; taskId: string } | null {
   const session = sessions.get(sessionId)
   if (!session) return null
   const handle = session.pty as unknown as PtyHandle
   if (!handle.computerId) return null
-  return { computerId: handle.computerId, direct: outputOwner(session) !== null }
+  return {
+    computerId: handle.computerId,
+    direct: outputOwner(session) !== null,
+    taskId: session.taskId
+  }
 }
 
 export { PtyOutputUnavailableError }
