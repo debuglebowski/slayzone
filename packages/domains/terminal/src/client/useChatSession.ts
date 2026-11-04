@@ -374,6 +374,14 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     opts.tabId ? { kind: 'chat', tabId: opts.tabId } : null
   )
   const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
+  // Fixed identities for the hydrate effect: they read the CURRENT path when called,
+  // so a lease that comes or goes does not re-run the load.
+  const openTimelineRead = useStableCallback((input: Parameters<typeof chatIo.openTimeline>[0]) =>
+    chatIo.openTimeline(input)
+  )
+  const getReplayRead = useStableCallback((input: Parameters<typeof chatIo.getReplay>[0]) =>
+    chatIo.getReplay(input)
+  )
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
     initialState({ agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns })
@@ -816,7 +824,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
     void hydrateAndReplay({
       trpcClient,
-      reads: chatIo,
+      reads: { openTimeline: openTimelineRead, getReplay: getReplayRead },
       target: {
         tabId: opts.tabId,
         taskId: opts.taskId,
@@ -862,7 +870,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     openFull,
     restoreLocal,
     trpcClient,
-    reopenToken
+    reopenToken,
+    openTimelineRead,
+    getReplayRead
   ])
 
   const createOpts = (): {

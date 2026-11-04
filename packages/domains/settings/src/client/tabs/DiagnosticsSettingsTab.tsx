@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { directLinkStatus, directUseCounts } from '@slayzone/transport/direct-client'
 import { describeDirectLink } from './direct-link-status'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -15,7 +15,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
+  useVisibleInterval
 } from '@slayzone/ui'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import { SettingsTabIntro } from './SettingsTabIntro'
@@ -278,10 +279,7 @@ export function DiagnosticsSettingsTab() {
 function DirectLinkCard() {
   const read = () => describeDirectLink(directLinkStatus(), directUseCounts())
   const [view, setView] = useState(read)
-  useEffect(() => {
-    const timer = setInterval(() => setView(read()), 2_000)
-    return () => clearInterval(timer)
-  }, [])
+  useVisibleInterval(() => setView(read()), 2_000, { runOnVisible: true })
   return (
     <Card>
       <CardHeader>
