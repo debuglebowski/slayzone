@@ -16,7 +16,7 @@ import type { MergeContext } from '@slayzone/task-contracts'
 interface ConflictFileViewProps {
   repoPath: string
   filePath: string
-  terminalMode: string
+  agentId: string
   onResolved: () => void
   branchContext: MergeContext
 }
@@ -49,7 +49,7 @@ function resolveLabels(ctx: MergeContext): {
 export function ConflictFileView({
   repoPath,
   filePath,
-  terminalMode,
+  agentId,
   onResolved,
   branchContext
 }: ConflictFileViewProps) {
@@ -188,7 +188,7 @@ export function ConflictFileView({
     setError(null)
     try {
       const result = await analyzeConflict({
-        mode: terminalMode,
+        mode: agentId,
         filePath,
         base: content.base,
         ours: content.ours,
@@ -200,7 +200,7 @@ export function ConflictFileView({
     } finally {
       setAnalyzing(false)
     }
-  }, [content, terminalMode, filePath, analyzeConflict])
+  }, [content, agentId, filePath, analyzeConflict])
 
   if (!content) {
     return (

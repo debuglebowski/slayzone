@@ -22,7 +22,7 @@ export function getAllowedStatusesText(columns: ColumnConfig[] | null): string {
 export async function buildDefaultProviderConfig(db: SlayzoneDb): Promise<ProviderConfig> {
   const providerConfig: ProviderConfig = {}
   const allModes = (await db
-    .prepare('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1')
+    .prepare('SELECT id, default_flags FROM agents WHERE enabled = 1')
     .all()) as Array<{ id: string; default_flags: string | null }>
   for (const row of allModes) {
     providerConfig[row.id] = { flags: row.default_flags ?? '' }

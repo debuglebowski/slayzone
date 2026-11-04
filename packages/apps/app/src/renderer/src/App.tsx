@@ -516,7 +516,7 @@ function App(): React.JSX.Element {
   const agentMode = globalAgentPanelState.mode ?? 'claude-code'
   useEffect(() => {
     if (globalAgentPanelState.mode) return
-    trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then((m) => {
+    trpcClient.settings.get.query({ key: 'default_agent_id' }).then((m) => {
       if (m) setGlobalAgentPanelState({ mode: m })
     })
   }, [globalAgentPanelState.mode, setGlobalAgentPanelState, trpcClient])

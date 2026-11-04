@@ -67,7 +67,7 @@ test.describe('Terminal fit — init measures the settled panel width', () => {
     // Plain shell mode auto-spawns (no idle gate) so the terminal mounts
     // immediately on open.
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     // Pin the terminal panel narrow BEFORE opening so the mount-time layout is

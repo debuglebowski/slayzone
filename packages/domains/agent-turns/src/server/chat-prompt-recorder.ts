@@ -11,7 +11,7 @@ import { agentPromptsEvents } from './events'
 /** Who a chat event belongs to — resolved by the chat runtime from its live session. */
 export interface ChatPromptContext {
   taskId: string
-  /** Chat terminal mode (`claude-chat`, …) — stored as the prompt's `agent_id`. */
+  /** Chat agent (`claude-chat`, …) — stored as the prompt's `agent_id`. */
   mode: string
   /** CLI conversation id of the session — stored as `cli_session_id`. */
   conversationId: string | null

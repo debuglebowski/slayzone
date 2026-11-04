@@ -35,8 +35,8 @@ Available in `run_command` actions:
 | `{{task.priority}}`             | Task priority (number)                       |
 | `{{task.worktree_path}}`        | Worktree path (if any)                       |
 | `{{task.branch}}`               | Branch name (if any)                         |
-| `{{task.terminal_mode}}`        | Task main terminal mode                      |
-| `{{task.terminal_mode_flags}}`  | Task main terminal current flags             |
+| `{{task.agent_id}}`             | Task agent                                   |
+| `{{task.agent_flags}}`          | Task agent current flags                     |
 | `{{project.id}}`                | Project ID                                   |
 | `{{project.name}}`              | Project name                                 |
 | `{{project.path}}`              | Project directory path                       |

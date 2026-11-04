@@ -50,7 +50,7 @@ async function seededHarness(): Promise<TestHarness> {
   const set = h.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
   set.run('viewState', '{"tabs":[{"type":"task","taskId":"t1","title":"T"}]}')
   set.run('panel_config', '{"webPanels":[]}')
-  set.run('default_terminal_mode', 'claude-code')
+  set.run('default_agent_id', 'claude-code')
   set.run('integration:credential:ref-1', 'plain:secret')
   return h
 }
@@ -146,7 +146,7 @@ test('login on: unowned projects + pre-login user settings → first admin, once
     settingKeys(h).filter((k) => ['viewState', 'panel_config'].includes(k)),
     'per-user keys left the global table'
   ).toEqual([])
-  expect(settingKeys(h), 'hub key stays global').toContain('default_terminal_mode')
+  expect(settingKeys(h), 'hub key stays global').toContain('default_agent_id')
   expect(settingKeys(h), 'credential stays global').toContain('integration:credential:ref-1')
   expect(userSettings(h), 'the admin adopted them, byte for byte').toEqual([
     { user_id: admin.id, key: 'panel_config', value: '{"webPanels":[]}' },

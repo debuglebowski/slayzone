@@ -63,17 +63,14 @@ export async function createTaskOp(
       : template?.default_status && isKnownStatus(template.default_status, projectColumns)
         ? template.default_status
         : getDefaultStatus(projectColumns)
-  const terminalMode =
-    data.terminalMode ??
-    template?.terminal_mode ??
-    (
-      await db.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'default_terminal_mode'"
-      )
-    )?.value ??
+  const agentId =
+    data.agentId ??
+    template?.agent_id ??
+    (await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'default_agent_id'"))
+      ?.value ??
     'claude-code'
 
-  // Build provider_config from terminal_modes defaults + template + overrides
+  // Build provider_config from agents defaults + template + overrides
   const providerConfig: ProviderConfig = {}
   const legacyOverrides: Record<string, string | undefined> = {
     'claude-code': data.claudeFlags,
@@ -111,7 +108,7 @@ export async function createTaskOp(
   const id =
     (await reserveWarmAgent(db, data, deps, {
       selectedRepo: project.selected_repo,
-      terminalMode,
+      agentId,
       providerConfig
     })) ?? crypto.randomUUID()
 
@@ -126,7 +123,7 @@ export async function createTaskOp(
     status: initialStatus,
     priority,
     dueDate: data.dueDate ?? null,
-    terminalMode,
+    agentId,
     providerConfig,
     isTemporary: Boolean(data.isTemporary),
     repoName: data.repoName ?? null,
@@ -200,7 +197,7 @@ async function reserveWarmAgent(
   db: SlayzoneDb,
   data: CreateTaskInput,
   deps: OpDeps,
-  task: { selectedRepo: string | null; terminalMode: string; providerConfig: ProviderConfig }
+  task: { selectedRepo: string | null; agentId: string; providerConfig: ProviderConfig }
 ): Promise<string | null> {
   if (!deps.reserveWarmTaskId || !data.openAfterCreate) return null
   if (data.parentId || data.repoName || task.selectedRepo) return null
@@ -222,7 +219,7 @@ async function reserveWarmAgent(
   if (await isAutoCreateWorktreeEnabled(db, data.projectId)) return null
   return deps.reserveWarmTaskId({
     projectId: data.projectId,
-    mode: task.terminalMode,
-    flags: task.providerConfig[task.terminalMode]?.flags ?? null
+    mode: task.agentId,
+    flags: task.providerConfig[task.agentId]?.flags ?? null
   })
 }

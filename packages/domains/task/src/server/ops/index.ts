@@ -22,7 +22,7 @@ export type {
   TaskRuntimeAdapters,
   DiagnosticEventPayload,
   DiagnosticLevel,
-  TerminalModeFlagsRow
+  AgentFlagsRow
 } from './shared.js'
 
 export { getAllTasksOp } from './get-all.js'

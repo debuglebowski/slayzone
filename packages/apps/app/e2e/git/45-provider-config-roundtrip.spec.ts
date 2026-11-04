@@ -156,9 +156,9 @@ test.describe('Provider config roundtrip', () => {
   })
 
   test('default flags setting is used for new tasks', async ({ mainWindow }) => {
-    // Set a custom default via terminal_modes table
+    // Set a custom default via agents table
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().pty.modesUpdate.mutate({
+      window.getTrpcVanillaClient().pty.agentsUpdate.mutate({
         id: 'claude-code',
         updates: { defaultFlags: '--test-default-flag' }
       })
@@ -175,7 +175,7 @@ test.describe('Provider config roundtrip', () => {
 
     // Restore default
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().pty.modesUpdate.mutate({
+      window.getTrpcVanillaClient().pty.agentsUpdate.mutate({
         id: 'claude-code',
         updates: { defaultFlags: '--allow-dangerously-skip-permissions' }
       })

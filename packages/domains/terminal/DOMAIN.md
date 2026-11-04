@@ -1,6 +1,6 @@
 # Terminal Domain
 
-Manages PTY sessions for task execution. Supports multiple terminal modes (Claude Code, Codex, plain shell).
+Manages PTY sessions for task execution. Supports multiple agents (Claude Code, Codex, plain shell).
 
 ## Architecture
 
@@ -107,7 +107,7 @@ PTY Process (node-pty)
 ## Contracts (shared/)
 
 ```typescript
-type TerminalMode = 'claude-code' | 'codex' | 'terminal'
+type AgentId = 'claude-code' | 'codex' | 'terminal'
 type TerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead'
 type CodeMode = 'normal' | 'plan' | 'accept-edits' | 'bypass'
 

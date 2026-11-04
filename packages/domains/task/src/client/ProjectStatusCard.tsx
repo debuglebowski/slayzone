@@ -28,7 +28,7 @@ export function ProjectStatusCard({
     trackTask(task.id, 'task_status_changed', { from: task.status, to: status })
     if (isTerminalStatus(status, columnsConfig)) {
       trackTask(task.id, 'task_completed', {
-        provider: task.terminal_mode ?? 'terminal',
+        provider: task.agent_id ?? 'terminal',
         had_worktree: Boolean(task.worktree_path)
       })
     }

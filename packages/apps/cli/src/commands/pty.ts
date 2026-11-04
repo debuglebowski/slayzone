@@ -356,7 +356,7 @@ export function ptyCommand(): Command {
   cmd
     .command('create <task-id>')
     .description('Create a new terminal tab (new group) for a task. Auto-opens task in app')
-    .option('--mode <mode>', 'Terminal mode (terminal, claude-code, codex, ...)', 'terminal')
+    .option('--mode <mode>', 'Agent (terminal, claude-code, codex, ...)', 'terminal')
     .option('--label <label>', 'Tab label')
     .option('--no-wait', 'Return immediately without waiting for the PTY to spawn')
     .option('--timeout <ms>', 'Wait timeout in milliseconds', '5000')

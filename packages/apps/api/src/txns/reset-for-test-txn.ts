@@ -1,7 +1,7 @@
 import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import { ensureIntegrationSchemaSync } from '@slayzone/integrations/db'
-import { syncTerminalModes } from '@slayzone/terminal/db'
+import { syncAgents } from '@slayzone/terminal/db'
 import { runMigrations } from '@slayzone/db-migrations'
 import { normalizeProjectStatusData } from '@slayzone/projects/db'
 
@@ -51,7 +51,7 @@ export const resetForTestTxns = {
     runMigrations(db)
     ensureIntegrationSchemaSync(db)
     normalizeProjectStatusData(db)
-    syncTerminalModes(db)
+    syncAgents(db)
 
     for (const row of computers) {
       const cols = Object.keys(row)

@@ -147,7 +147,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks create <title> [--project <name|id>] [--description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--template <name|id>] [--external-id <id>] [--external-provider <provider>]\` — create a task.
   - \`--project\` defaults to \`$SLAYZONE_PROJECT_ID\`
-  - If \`--template\` is omitted, the project's default template auto-applies (if one exists). Templates set terminal mode, initial status, priority, and provider config
+  - If \`--template\` is omitted, the project's default template auto-applies (if one exists). Templates set agent, initial status, priority, and provider config
   - \`--external-id\` enables idempotent creation: if a task with the same \`(project, provider, external_id)\` exists, prints "Exists" and exits cleanly — useful for sync scripts
   - Reference artifacts in descriptions via \`[title](artifact:<artifact-id>)\`
 
@@ -184,7 +184,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks subtask-add <title> [--parent <id>] [--description <text>] [--status <status>] [--priority <1-5>] [--external-id <id>] [--external-provider <provider>]\` — add a subtask.
   - \`--parent\` defaults to \`$SLAYZONE_TASK_ID\`
-  - Subtask inherits the parent's terminal mode
+  - Subtask inherits the parent's agent
   - \`--external-id\` deduplication works the same as task creation
 
 ## Blocking
@@ -226,7 +226,7 @@ Tags are project-scoped — a tag name must exist in the project before it can b
 
 ## Templates
 
-Templates define defaults for new tasks: terminal mode, status, priority, provider config, panel visibility, and browser tabs.
+Templates define defaults for new tasks: agent, status, priority, provider config, panel visibility, and browser tabs.
 
 - \`slay templates list [--project <name|id>] [--json]\` — list templates.
   - \`--project\` defaults to \`$SLAYZONE_PROJECT_ID\`
@@ -610,7 +610,7 @@ All commands support ID prefix matching.
 ## Commands
 
 - \`slay pty list [--json]\` — list active PTY sessions.
-  - Shows session ID, task ID, terminal mode, current state, and age
+  - Shows session ID, task ID, agent, current state, and age
 
 - \`slay pty buffer <id>\` — dump the full terminal buffer content to stdout.
   - Useful for reading what an AI agent has output without streaming
@@ -623,7 +623,7 @@ All commands support ID prefix matching.
   - If no text argument is given, reads from stdin (pipe-friendly)
   - Appends a trailing newline to submit
   - For AI modes like \`claude-code\`, internal newlines are encoded as Kitty shift-enter sequences (\`\\x1b[13;2u\`) so multi-line text is submitted as a single input
-  - **Wait behavior:** by default waits for the session to reach the \`idle\` state (= AI CLI ready for input) before sending. Automatic for AI modes. Use \`--no-wait\` to send immediately (default for plain terminal modes)
+  - **Wait behavior:** by default waits for the session to reach the \`idle\` state (= AI CLI ready for input) before sending. Automatic for AI agents. Use \`--no-wait\` to send immediately (default for the plain \`terminal\` agent)
   - Timeout defaults to 60 seconds
 
 - \`slay pty type <id> <data>\` (alias: \`write\`) — send raw bytes to PTY stdin. **Use only when \`submit\` is wrong** — e.g. appending text mid-prompt without submitting, or sending exact byte sequences. No newline added, no encoding.

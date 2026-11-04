@@ -122,7 +122,7 @@ export async function openChatTaskCore<M extends ChatMode>(
     title: o.title,
     ...(o.description ? { description: o.description } : {}),
     status: 'todo',
-    terminalMode: mode,
+    agentId: mode,
     ...(o.isTemporary ? { isTemporary: true } : {})
   })
   const tabId = await page.evaluate(

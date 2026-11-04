@@ -1546,7 +1546,7 @@ test('chat.switchConversation resumes the picked conversation, with its history;
   setClaudeSessionReader(null)
 })
 
-test('picking a terminal conversation is a hand-off: checked against the terminal mode, recorded as handoff', async () => {
+test('picking a terminal conversation is a hand-off: checked against the terminal agent, recorded as handoff', async () => {
   const { ops, o, store } = await switchSetup()
   await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-code' })
   expect(store.calls.find((c) => c.method === 'isHonoredConversation')?.args).toMatchObject({

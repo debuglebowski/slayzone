@@ -152,7 +152,7 @@ test.describe('Chat sessions picker', () => {
       projectId: project.id,
       title: 'Terminal picks chat',
       status: 'in_progress',
-      terminalMode: 'claude-code'
+      agentId: 'claude-code'
     })
     const rows = [
       { conv: 'TP-CHAT', mode: 'claude-chat', text: 'asked in chat', at: 1000 },

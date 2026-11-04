@@ -9,7 +9,7 @@ import {
   agentHookPrompt,
   isPromptCaptureMode,
   type ResolvedAgentHook,
-  terminalModeForChat,
+  terminalAgentIdForChat,
   type ChatComputerOps,
   type ChatAttachment,
   type UserContentBlock
@@ -28,7 +28,7 @@ import {
   legacyChatTaskContentSql,
   createHubChatRelay,
   createHubProviderConfigStore,
-  terminalStorageMode,
+  terminalStorageAgentId,
   type ChatComputerRequest,
   type HubChatOwnership,
   type ChatBootstrap,
@@ -230,7 +230,7 @@ export function createComputerChatServices(opts: {
       }
     const computerId = owner.destinationComputerId ?? owner.computerId
     if (!computerId) throw new Error('Chat computer is unassigned')
-    const terminalMode = terminalStorageMode(owner.mode)
+    const terminalAgentId = terminalStorageAgentId(owner.mode)
     const projectRoot = task.project_id
       ? await opts.legacyData.getProjectRoot(task.project_id, computerId)
       : null
@@ -256,7 +256,10 @@ export function createComputerChatServices(opts: {
             .map(async (key) => [key, await opts.legacyData.readSetting(key)])
         )
       ),
-      terminalProviderConfig: await opts.legacyData.readProviderConfig(owner.taskId, terminalMode),
+      terminalProviderConfig: await opts.legacyData.readProviderConfig(
+        owner.taskId,
+        terminalAgentId
+      ),
       defaultFlags: await opts.legacyData.getModeDefaultFlags(owner.mode),
       env: await opts.legacyData.buildMcpEnv(owner.taskId, owner.mode, computerId),
       deletedConversations: await opts.db.all<{ mode: string; conversationId: string }>(
@@ -265,14 +268,14 @@ export function createComputerChatServices(opts: {
       ),
       honoredSessions: await opts.db.all<{ mode: string; conversationId: string }>(
         "SELECT DISTINCT mode,conversation_id AS conversationId FROM agent_sessions WHERE task_id=? AND mode IN (?,?) AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn')",
-        [owner.taskId, owner.mode, terminalMode]
+        [owner.taskId, owner.mode, terminalAgentId]
       )
     }
     // Capture values and their authority revision together after asynchronous
     // environment/settings work. An old captured value cannot acquire a newer
     // revision after a concurrent edit has already reached the computer.
     const provider = await providerConfigs.snapshot(owner.taskId, owner.mode)
-    const terminal = await providerConfigs.snapshot(owner.taskId, terminalMode)
+    const terminal = await providerConfigs.snapshot(owner.taskId, terminalAgentId)
     values.providerConfig = provider.value
     values.terminalProviderConfig = terminal.value
     const hash = createHash('sha256').update(JSON.stringify(values)).digest('hex')
@@ -395,7 +398,7 @@ export function createComputerChatServices(opts: {
     bootstrap,
     migrate: migration.ensure,
     quiesceProvider: async (owner) => {
-      for (const mode of [owner.mode, terminalStorageMode(owner.mode)]) {
+      for (const mode of [owner.mode, terminalStorageAgentId(owner.mode)]) {
         const config = await opts.legacyData.readProviderConfig(owner.taskId, mode)
         for (const session of [config.conversationId, config.chatConversationId])
           if (
@@ -417,9 +420,9 @@ export function createComputerChatServices(opts: {
       const first = args[0] as { conversationId?: string } | undefined
       const native = method === 'switchConversation' ? first?.conversationId : undefined
       const config = await opts.legacyData.readProviderConfig(owner.taskId, owner.mode)
-      const terminalMode = terminalModeForChat(owner.mode)
-      const terminal = terminalMode
-        ? await opts.legacyData.readProviderConfig(owner.taskId, terminalMode)
+      const terminalAgentId = terminalAgentIdForChat(owner.mode)
+      const terminal = terminalAgentId
+        ? await opts.legacyData.readProviderConfig(owner.taskId, terminalAgentId)
         : null
       const session =
         native ??
@@ -760,7 +763,7 @@ export function createComputerChatServices(opts: {
         context?.mode &&
         (await opts.db.get(
           'SELECT 1 FROM chat_legacy_session_authority WHERE task_id=? AND mode=? AND provider_session_id=? AND conversation_id IS NULL',
-          [taskId, terminalStorageMode(context.mode), native]
+          [taskId, terminalStorageAgentId(context.mode), native]
         ))
       )
         throw new Error(

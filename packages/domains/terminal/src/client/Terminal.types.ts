@@ -1,9 +1,9 @@
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 
 export interface TerminalProps {
   sessionId: string
   cwd: string
-  mode?: TerminalMode
+  mode?: AgentId
   conversationId?: string | null
   existingConversationId?: string | null
   supportsSessionId?: boolean

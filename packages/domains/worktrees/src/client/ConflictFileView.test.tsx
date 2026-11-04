@@ -53,7 +53,7 @@ async function setup() {
         <ConflictFileView
           repoPath="/repo"
           filePath="a.ts"
-          terminalMode="claude-code"
+          agentId="claude-code"
           onResolved={() => {}}
           branchContext={ctx}
         />

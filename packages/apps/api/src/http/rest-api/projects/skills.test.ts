@@ -78,7 +78,7 @@ describe('POST /api/projects/:id/skills', () => {
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
 
-  test('happy: providers default to the terminal-mode provider when none configured', async () => {
+  test('happy: providers default to the default agent provider when none configured', async () => {
     const res = await post(projectId)
     expect(res.body.data.providers).toEqual(['claude'])
   })

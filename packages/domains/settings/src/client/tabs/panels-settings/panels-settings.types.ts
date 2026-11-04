@@ -1,12 +1,12 @@
 import { Globe } from 'lucide-react'
-import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
+import type { AgentId, AgentDefinition } from '@slayzone/terminal-contracts'
 
 export interface PanelsSettingsTabProps {
   activeTab: string
   navigateTo: (tab: string) => void
-  modes: TerminalModeInfo[]
-  defaultTerminalMode: TerminalMode
-  onDefaultTerminalModeChange: (mode: TerminalMode) => void
+  modes: AgentDefinition[]
+  defaultAgentId: AgentId
+  onDefaultAgentIdChange: (mode: AgentId) => void
 }
 
 export interface PanelRowDescriptor {

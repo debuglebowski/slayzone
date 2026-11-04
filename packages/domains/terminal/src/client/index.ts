@@ -27,7 +27,7 @@ export { isSessionKnownUnspawned, markSessionUnspawned } from './pty-attach'
 export { initQueuedCount, subscribeInitQueued } from './terminal-init-scheduler'
 export { traceSessionOpen } from './open-trace'
 export { startEarlyInputCapture } from './early-input'
-export { useTerminalModes } from './useTerminalModes'
+export { useAgents } from './useAgents'
 export { markSkipCache, serializeTerminalHistory } from './terminal-cache'
 export {
   terminalThemes,

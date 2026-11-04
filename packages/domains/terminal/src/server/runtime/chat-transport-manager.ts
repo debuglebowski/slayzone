@@ -126,7 +126,7 @@ export interface TransportDeps {
   /**
    * Optional routed spawn seam. When set, ALL spawns go through it and it decides
    * per-spec whether the process runs on the hub or on a computer — the same shape
-   * `PtyBackend` has for terminal mode. When unset (tests, and any composition
+   * `PtyBackend` has for terminal (PTY) tabs. When unset (tests, and any composition
    * root that never wires it) the local `spawn` above is used directly, so
    * behavior is byte-identical to before this seam existed.
    */

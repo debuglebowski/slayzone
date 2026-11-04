@@ -33,15 +33,12 @@ export async function createImportedTaskOp(
 ): Promise<Task | null> {
   const id = crypto.randomUUID()
 
-  // Default terminal mode from settings (no template path for imports)
-  const terminalMode =
-    (
-      await db.get<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'default_terminal_mode'"
-      )
-    )?.value ?? 'claude-code'
+  // Default agent from settings (no template path for imports)
+  const agentId =
+    (await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'default_agent_id'"))
+      ?.value ?? 'claude-code'
 
-  // Provider config from terminal_modes defaults
+  // Provider config from agents defaults
   const providerConfig: ProviderConfig = {}
   for (const row of await getEnabledModeDefaults(db)) {
     // Claude chat's pills own its spawn flags — no default flags seeded.
@@ -59,7 +56,7 @@ export async function createImportedTaskOp(
     status: data.status,
     priority: data.priority,
     dueDate: null,
-    terminalMode,
+    agentId,
     providerConfig,
     isTemporary: false,
     repoName: null,

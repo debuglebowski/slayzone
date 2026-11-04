@@ -162,8 +162,8 @@ describe('TEMPLATE_VARIABLES — registry', () => {
         priority: 3,
         worktree_path: '/wt',
         branch: 'b',
-        terminal_mode: 'claude-code',
-        terminal_mode_flags: '--foo'
+        agent_id: 'claude-code',
+        agent_flags: '--foo'
       },
       project: { id: 'p1', name: 'P', path: '/p' },
       trigger: { old_status: 'o', new_status: 'n' }
@@ -172,5 +172,17 @@ describe('TEMPLATE_VARIABLES — registry', () => {
       const out = resolveTemplate(`{{${v.name}}}`, ctx)
       if (out === '') throw new Error(`${v.name} resolved empty — registry/TemplateContext drift`)
     }
+  })
+
+  test('retired task.terminal_mode / task.terminal_mode_flags still resolve, unlisted', () => {
+    const ctx: TemplateContext = {
+      task: { id: 't1', name: 'n', status: 's', priority: 3, agent_id: 'codex', agent_flags: '--x' }
+    }
+    expect(resolveTemplate('{{task.terminal_mode}} {{task.terminal_mode_flags}}', ctx)).toBe(
+      'codex --x'
+    )
+    const names = TEMPLATE_VARIABLES.map((v) => v.name)
+    expect(names).not.toContain('task.terminal_mode')
+    expect(names).not.toContain('task.terminal_mode_flags')
   })
 })

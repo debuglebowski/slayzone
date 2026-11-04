@@ -81,7 +81,7 @@ try {
       projectId: hub.projectId,
       title,
       status: 'todo',
-      terminalMode: 'terminal',
+      agentId: 'terminal',
       ...extra
     } as never) as Promise<{ id: string }>
 

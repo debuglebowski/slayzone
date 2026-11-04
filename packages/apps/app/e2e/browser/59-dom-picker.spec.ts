@@ -1,6 +1,6 @@
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { switchTerminalMode, getMainSessionId, waitForPtySession } from '../fixtures/terminal'
+import { switchAgent, getMainSessionId, waitForPtySession } from '../fixtures/terminal'
 import {
   ensureBrowserPanelVisible,
   getActiveViewId,
@@ -35,13 +35,13 @@ test.describe('DOM picker to terminal', () => {
     await s.refreshData()
 
     await openTaskViaSearch(mainWindow, 'DOM picker task')
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
     await expect(mainWindow.locator('[data-testid="terminal-tabbar"]:visible').first()).toBeVisible(
       { timeout: 5_000 }
     )
-    await switchTerminalMode(mainWindow, 'terminal')
+    await switchAgent(mainWindow, 'terminal')
     await waitForPtySession(mainWindow, sessionId)
 
     await ensureBrowserPanelVisible(mainWindow)

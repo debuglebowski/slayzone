@@ -1,10 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordedProjectRoot } from '@slayzone/computers/server'
-import type {
-  TerminalMode,
-  TerminalModeInfo,
-  UsageProviderConfig
-} from '@slayzone/terminal-contracts'
+import type { AgentId, AgentDefinition, UsageProviderConfig } from '@slayzone/terminal-contracts'
 import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
 import type { TaskSessionStore } from './task-session-store'
 
@@ -19,7 +15,7 @@ import type { TaskSessionStore } from './task-session-store'
  * handle at all (only the ledger; wave 2 swaps in a remote-backed impl via
  * `setPtySessionLedger` without touching call sites). pty-store still holds
  * the raw db — its `PtySpawnLookups` impl is db-backed and built once at
- * composition (`createPtyOps`), and `terminal_modes` CRUD stays on raw db by
+ * composition (`createPtyOps`), and `agents` CRUD stays on raw db by
  * design (hub data, not exec-side runtime state). Wave 2 adds the lookups
  * injection seam when the computer actually loses its local DB.
  */
@@ -54,7 +50,7 @@ export interface PtySessionLedger {
    */
   buildMcpEnv(
     taskId: string | undefined,
-    mode?: TerminalMode,
+    mode?: AgentId,
     remote?: RemoteMcpEnv | null
   ): Promise<Record<string, string>>
 }
@@ -75,11 +71,11 @@ export function createDbPtySessionLedger(
 
 /**
  * Spawn-time reads consumed by pty-store's `ptyCreate`/`ptyValidate`: resolve
- * the terminal mode row (templates, patterns, flags) and the task's project
+ * the agent row (templates, patterns, flags) and the task's project
  * (warm-pool claim key).
  */
 export interface PtySpawnLookups {
-  getTerminalMode(id: string): Promise<TerminalModeInfo | null>
+  getAgent(id: string): Promise<AgentDefinition | null>
   getTaskProjectId(taskId: string): Promise<string | null>
   /**
    * Hub/computer split (wave 2, Model A): the computer a task's PTY should spawn on,
@@ -105,11 +101,11 @@ export interface PtySpawnLookups {
 }
 
 /**
- * A `terminal_modes` row exactly as SQLite hands it back: snake_case columns,
- * booleans still 0/1, and `usage_config` still a JSON string. `mapModeRow` is
+ * A `agents` row exactly as SQLite hands it back: snake_case columns,
+ * booleans still 0/1, and `usage_config` still a JSON string. `mapAgentRow` is
  * the one place that shape is known, so it stays local to this module.
  */
-interface TerminalModeRow {
+interface AgentRow {
   id: string
   label: string
   type: string
@@ -126,14 +122,14 @@ interface TerminalModeRow {
 }
 
 /**
- * Map a raw `terminal_modes` row to the shared TerminalModeInfo shape.
+ * Map a raw `agents` row to the shared AgentDefinition shape.
  *
  * Takes `unknown` because every caller feeds it straight from `db.prepare(...)`,
  * whose result the DB bridge types as `unknown`; the row shape is asserted once
  * here rather than at each of the five call sites.
  */
-export function mapModeRow(row: unknown): TerminalModeInfo {
-  const r = row as TerminalModeRow
+export function mapAgentRow(row: unknown): AgentDefinition {
+  const r = row as AgentRow
   let usageConfig: UsageProviderConfig | null = null
   if (r.usage_config) {
     try {
@@ -162,9 +158,9 @@ export function mapModeRow(row: unknown): TerminalModeInfo {
 /** Default local-DB lookups — same SQL the ptyCreate/ptyValidate sites ran inline. */
 export function createDbPtySpawnLookups(db: SlayzoneDb): PtySpawnLookups {
   return {
-    getTerminalMode: async (id) => {
-      const row = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
-      return row ? mapModeRow(row) : null
+    getAgent: async (id) => {
+      const row = await db.prepare('SELECT * FROM agents WHERE id = ?').get(id)
+      return row ? mapAgentRow(row) : null
     },
     getTaskProjectId: async (taskId) => {
       const row = (await db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId)) as

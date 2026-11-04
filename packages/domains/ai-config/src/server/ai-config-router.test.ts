@@ -408,7 +408,7 @@ describe('listProviders', () => {
 
 describe('toggleProvider', () => {
   // Handler test toggled provider-claude, but the current op refuses to disable
-  // the default terminal-mode provider (claude). Exercise the enable/disable
+  // the default agent's provider (claude). Exercise the enable/disable
   // round-trip on a non-default provider (cursor) instead — same contract — and
   // assert the default-guard separately.
   test('enables provider', async () => {

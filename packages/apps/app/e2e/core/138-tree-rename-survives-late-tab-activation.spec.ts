@@ -53,7 +53,7 @@ test.describe('Tree rename vs a late tab activation', () => {
         projectId: p.id,
         title: 'LA terminal',
         status: 'in_progress',
-        terminalMode: 'terminal'
+        agentId: 'terminal'
       })
     ).id
     renamedTask = (

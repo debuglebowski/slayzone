@@ -139,12 +139,12 @@ test.describe('CLI: slay', () => {
         window.getTrpcVanillaClient().task.getAll.query()
       )) as {
         title: string
-        terminal_mode: string
+        agent_id: string
         provider_config: Record<string, { flags?: string }>
       }[]
       const task = tasks.find((t) => t.title === title)!
       expect(task).toBeTruthy()
-      expect(task.terminal_mode).toBeTruthy()
+      expect(task.agent_id).toBeTruthy()
       expect(task.provider_config).toBeTruthy()
       expect(task.provider_config['claude-code']?.flags).toContain(
         '--allow-dangerously-skip-permissions'

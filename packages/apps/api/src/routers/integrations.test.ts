@@ -97,7 +97,7 @@ h.db
 const taskId = crypto.randomUUID()
 h.db
   .prepare(
-    "INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
+    "INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
   )
   .run(taskId, projectId, 'Int Task', 'todo', 3, 'claude-code')
 
@@ -140,7 +140,7 @@ test('getConnectionUsage: returns mapped projects and linked task counts', async
   const mappedTaskId = crypto.randomUUID()
   h.db
     .prepare(
-      "INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
+      "INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
     )
     .run(mappedTaskId, mappedProjectId, 'Mapped task', 'todo', 3, 'claude-code')
 
@@ -151,7 +151,7 @@ test('getConnectionUsage: returns mapped projects and linked task counts', async
   const linkedOnlyTaskId = crypto.randomUUID()
   h.db
     .prepare(
-      "INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
+      "INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
     )
     .run(linkedOnlyTaskId, linkedOnlyProjectId, 'Linked task', 'todo', 3, 'claude-code')
 
@@ -302,12 +302,12 @@ test('clearProjectProvider: removes mapping + links for only the selected provid
   const taskGithub = crypto.randomUUID()
   h.db
     .prepare(
-      "INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
+      "INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
     )
     .run(taskLinear, clearProjectId, 'Linear task', 'todo', 3, 'claude-code')
   h.db
     .prepare(
-      "INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
+      "INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))"
     )
     .run(taskGithub, clearProjectId, 'GitHub task', 'todo', 3, 'claude-code')
 
@@ -600,7 +600,7 @@ test('(setup) mark status setup complete for apiProject linear mapping', async (
 test('listLinearIssues: annotates linkedTaskId for linked issues', async () => {
   const linkedTaskId = 'task-linked-1'
   h.db
-    .prepare(`INSERT OR IGNORE INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    .prepare(`INSERT OR IGNORE INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
     VALUES (?, ?, 'Linked', 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
     .run(linkedTaskId, apiProjectId)
   h.db
@@ -760,7 +760,7 @@ test('syncNow: pulls remote when remote is newer', async () => {
 
   const syncTaskId = 'task-sync-pull'
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
     VALUES (?, ?, 'Old title', null, 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), '2025-01-01 00:00:00')`)
     .run(syncTaskId, apiProjectId)
   h.db
@@ -797,7 +797,7 @@ test('syncNow: pushes local when local newer + two_way', async () => {
 
   const pushTaskId = 'task-sync-push'
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
     VALUES (?, ?, 'Local newer', '<p>local desc</p>', 'in_progress', 4, 'claude-code', '{}', '', '', datetime('now'), '2099-01-01 00:00:00')`)
     .run(pushTaskId, apiProjectId)
   h.db
@@ -857,7 +857,7 @@ test('syncNow: missing remote archives local task (treats issue as deleted upstr
   // confound the scan.
   const missTaskId = 'task-sync-miss'
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
     VALUES (?, ?, 'Will be archived', null, 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), '2025-01-01 00:00:00')`)
     .run(missTaskId, apiProjectId)
   h.db
@@ -886,7 +886,7 @@ test('syncNow: records error when remote fetch throws (non-auth API error)', asy
   // fires when the batch fetch itself throws a non-auth error. Use a fresh link.
   const errTaskId = 'task-sync-err'
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
     VALUES (?, ?, 'Errors on sync', null, 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), '2025-01-01 00:00:00')`)
     .run(errTaskId, apiProjectId)
   h.db

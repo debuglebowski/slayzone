@@ -266,9 +266,7 @@ async function createChatTask(mainWindow: Page, projectId: string, title: string
   })
   await mainWindow.evaluate(
     (id) =>
-      window
-        .getTrpcVanillaClient()
-        .task.update.mutate({ id, terminalMode: 'claude-chat' } as never),
+      window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'claude-chat' } as never),
     task.id
   )
   return mainWindow.evaluate(async (id) => {

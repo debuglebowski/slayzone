@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { toast } from '@slayzone/ui'
-import type { TerminalModeInfo, CreateTerminalModeInput } from '@slayzone/terminal-contracts'
+import type { AgentDefinition, CreateAgentDefinitionInput } from '@slayzone/terminal-contracts'
 import { slugify } from './utils'
 
 type TestResult = { ok: boolean; error?: string; detail?: string }
 
 interface UseAiProviderFormParams {
-  createMode: (input: CreateTerminalModeInput) => Promise<TerminalModeInfo>
+  createMode: (input: CreateAgentDefinitionInput) => Promise<AgentDefinition>
   testMode: (command: string) => Promise<TestResult>
 }
 
@@ -24,7 +24,7 @@ export function useAiProviderForm({ createMode, testMode }: UseAiProviderFormPar
   const [newPatternWorking, setNewPatternWorking] = useState('')
   const [newPatternError, setNewPatternError] = useState('')
 
-  const duplicateMode = (mode: TerminalModeInfo) => {
+  const duplicateMode = (mode: AgentDefinition) => {
     setNewModeLabel(`${mode.label} (Copy)`)
     setNewInitialCommand(mode.initialCommand || '')
     setNewResumeCommand(mode.resumeCommand || '')

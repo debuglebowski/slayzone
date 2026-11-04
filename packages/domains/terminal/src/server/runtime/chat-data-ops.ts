@@ -23,7 +23,7 @@ import {
 } from '../chat-timeline-store'
 import { buildMcpEnv, resolveRemoteMcpEnv } from '../mcp-env'
 import { getRemoteMcpEnvProvider } from './pty-manager'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { defaultChatModeSettingKey, resolveDefaultChatMode } from '@slayzone/terminal-contracts'
 import {
   bumpAutocompleteUsage,
@@ -82,7 +82,7 @@ export type { RecordConversationInput }
 
 /**
  * Every DB touchpoint of the terminal chat runtime, behind one injectable
- * seam. The chat handlers never touch `tasks` / `terminal_modes` /
+ * seam. The chat handlers never touch `tasks` / `agents` /
  * `chat_events` / `chat_queue` / `autocomplete_usage` directly — they go
  * through this interface. The default implementation
  * (`createDbChatDataOps`) runs the exact SQL the handlers previously ran
@@ -103,7 +103,7 @@ export interface ChatDataOps {
   ): Promise<void>
   writeChatFastMode(taskId: string, mode: string, chatFastMode: boolean): Promise<void>
   clearChatConversationId(taskId: string, mode: string): Promise<void>
-  /** `terminal_modes.default_flags` for a mode (PTY fallback flags). */
+  /** `agents.default_flags` for a mode (PTY fallback flags). */
   getModeDefaultFlags(mode: string): Promise<string | null>
   /**
    * Chat mode for a task with no stored `chatMode`: the user's default
@@ -357,9 +357,9 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     },
 
     getModeDefaultFlags: async (mode) => {
-      const row = (await db
-        .prepare('SELECT default_flags FROM terminal_modes WHERE id = ?')
-        .get(mode)) as { default_flags: string | null } | undefined
+      const row = (await db.prepare('SELECT default_flags FROM agents WHERE id = ?').get(mode)) as
+        | { default_flags: string | null }
+        | undefined
       return row?.default_flags ?? null
     },
 
@@ -454,9 +454,9 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       const remote = await resolveRemoteMcpEnv(getRemoteMcpEnvProvider(), {
         taskId,
         computerId: computerId ?? null,
-        mode: mode as TerminalMode
+        mode: mode as AgentId
       })
-      return buildMcpEnv(db, taskId, mode as TerminalMode, undefined, remote)
+      return buildMcpEnv(db, taskId, mode as AgentId, undefined, remote)
     },
 
     resolveComputerId: async (taskId) => {

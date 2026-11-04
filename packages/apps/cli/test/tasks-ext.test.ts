@@ -44,7 +44,7 @@ function createTask(title: string, extra: Record<string, unknown> = {}) {
   const now = new Date().toISOString()
   h.db
     .prepare(
-      `INSERT INTO tasks (id, project_id, title, status, priority, due_date, terminal_mode, provider_config, "order", created_at, updated_at)
+      `INSERT INTO tasks (id, project_id, title, status, priority, due_date, agent_id, provider_config, "order", created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
@@ -54,7 +54,7 @@ function createTask(title: string, extra: Record<string, unknown> = {}) {
       extra.status ?? 'inbox',
       extra.priority ?? 3,
       extra.due_date ?? null,
-      extra.terminal_mode ?? 'claude-code',
+      extra.agent_id ?? 'claude-code',
       '{}',
       now,
       now
@@ -221,7 +221,7 @@ describe('tasks create --template', () => {
     const tplId = crypto.randomUUID()
     h.db
       .prepare(
-        `INSERT INTO task_templates (id, project_id, name, terminal_mode, default_priority, is_default, sort_order, created_at, updated_at)
+        `INSERT INTO task_templates (id, project_id, name, agent_id, default_priority, is_default, sort_order, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)`
       )
       .run(
@@ -235,12 +235,12 @@ describe('tasks create --template', () => {
       )
 
     // Template resolution by name
-    const tpls = db.query<{ id: string; terminal_mode: string; default_priority: number }>(
+    const tpls = db.query<{ id: string; agent_id: string; default_priority: number }>(
       `SELECT * FROM task_templates WHERE project_id = :pid AND LOWER(name) = LOWER(:name) LIMIT 2`,
       { ':pid': projectId, ':name': 'mytpl' }
     )
     expect(tpls).toHaveLength(1)
-    expect(tpls[0].terminal_mode).toBe('codex')
+    expect(tpls[0].agent_id).toBe('codex')
     expect(tpls[0].default_priority).toBe(1)
   })
 
@@ -370,7 +370,7 @@ describe('tasks list --json public contract', () => {
     // Internal columns must stay out of the public JSON contract.
     for (const internal of [
       'provider_config',
-      'terminal_mode',
+      'agent_id',
       'claude_flags',
       'codex_flags',
       'claude_session_id',

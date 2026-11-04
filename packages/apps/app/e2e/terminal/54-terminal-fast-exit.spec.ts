@@ -23,9 +23,9 @@ test.describe('Terminal fast exit', () => {
     })
     taskId = t.id
 
-    // Terminal mode with /usr/bin/true as shell — exits immediately with code 0
+    // Terminal agent with /usr/bin/true as shell — exits immediately with code 0
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await mainWindow.evaluate(() =>

@@ -412,6 +412,8 @@ run_harness packages/shared/db-migrations/src/v178-chat-cli-models-migration.tes
 run_harness packages/shared/db-migrations/src/v179-chat-paged-history-migration.test.ts
 run_harness packages/shared/db-migrations/src/v182-chat-attachment-messages-migration.test.ts
 run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migration.test.ts
+# v192: terminal_modes → agents, *.terminal_mode → agent_id, default_terminal_mode → default_agent_id.
+run_harness packages/shared/db-migrations/src/v192-agent-id-rename-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -1216,7 +1218,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
-  packages/domains/terminal/src/client/useTerminalModes.test.tsx \
+  packages/domains/terminal/src/client/useAgents.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \

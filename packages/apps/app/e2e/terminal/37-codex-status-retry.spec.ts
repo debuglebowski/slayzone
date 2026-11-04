@@ -1,11 +1,11 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { switchTerminalMode } from '../fixtures/terminal'
+import { switchAgent } from '../fixtures/terminal'
 
 /**
  * Tests that:
  * 1. No /status is auto-fired (banner is user-initiated only)
- * 2. Banner transitions correctly when switching terminal modes
+ * 2. Banner transitions correctly when switching agents
  * 3. Banner reappears after navigating away and back
  * 4. Unavailable dismiss state resets for a different task
  * 5. Detect button handles PTY not existing yet
@@ -112,11 +112,11 @@ test.describe('Session banner behavior', () => {
       ({ noAuto, nav, d1, d2, noPty }) => {
         const c = window.getTrpcVanillaClient()
         return Promise.all([
-          c.task.update.mutate({ id: noAuto, terminalMode: 'codex' }),
-          c.task.update.mutate({ id: nav, terminalMode: 'codex' }),
-          c.task.update.mutate({ id: d1, terminalMode: 'cursor-agent' }),
-          c.task.update.mutate({ id: d2, terminalMode: 'cursor-agent' }),
-          c.task.update.mutate({ id: noPty, terminalMode: 'codex' })
+          c.task.update.mutate({ id: noAuto, agentId: 'codex' }),
+          c.task.update.mutate({ id: nav, agentId: 'codex' }),
+          c.task.update.mutate({ id: d1, agentId: 'cursor-agent' }),
+          c.task.update.mutate({ id: d2, agentId: 'cursor-agent' }),
+          c.task.update.mutate({ id: noPty, agentId: 'codex' })
         ])
       },
       {
@@ -191,19 +191,19 @@ test.describe('Session banner behavior', () => {
     ).not.toBeVisible()
 
     // Switch to Codex → detect banner
-    await switchTerminalMode(mainWindow, 'codex')
+    await switchAgent(mainWindow, 'codex')
     await expect(mainWindow.getByText('Session not saved').last()).toBeVisible()
     await expect(
       mainWindow.getByText(/Session ID detection not available/).first()
     ).not.toBeVisible()
 
     // Switch to Cursor → unavailable banner
-    await switchTerminalMode(mainWindow, 'cursor-agent')
+    await switchAgent(mainWindow, 'cursor-agent')
     await expect(mainWindow.getByText('Session not saved').first()).not.toBeVisible()
     await expect(mainWindow.getByText(/Session ID detection not available/).last()).toBeVisible()
 
     // Switch to Terminal → no banners
-    await switchTerminalMode(mainWindow, 'terminal')
+    await switchAgent(mainWindow, 'terminal')
     await expect(mainWindow.getByText('Session not saved').first()).not.toBeVisible()
     await expect(
       mainWindow.getByText(/Session ID detection not available/).first()
@@ -212,7 +212,7 @@ test.describe('Session banner behavior', () => {
     // (gemini branch removed 2026-06-23 — gemini e2e coverage intentionally dropped)
 
     // Switch back to Claude → no banners
-    await switchTerminalMode(mainWindow, 'claude-code')
+    await switchAgent(mainWindow, 'claude-code')
     await expect(mainWindow.getByText('Session not saved').first()).not.toBeVisible()
     await expect(
       mainWindow.getByText(/Session ID detection not available/).first()

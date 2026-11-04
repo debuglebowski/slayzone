@@ -1,7 +1,7 @@
 import type { RefObject } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { useTRPCClient } from './trpc'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
+import type { AgentId, TerminalState } from '@slayzone/terminal-contracts'
 import {
   ensureFocusDiagnostics,
   captureBlurSync,
@@ -18,7 +18,7 @@ interface FocusLossWatchOptions {
   terminalRef: RefObject<XTerm | null>
   ptyStateRef: RefObject<TerminalState>
   sessionId: string
-  mode: TerminalMode
+  mode: AgentId
   trpcClient: ReturnType<typeof useTRPCClient>
 }
 

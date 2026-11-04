@@ -9,7 +9,7 @@
 // `getMainSessionId(taskId) === `${taskId}:${taskId}`` (the helper Terminal.tsx
 // and Electron tests both rely on).
 
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import type {
   TerminalTab,
   CreateTerminalTabInput,
@@ -46,7 +46,7 @@ function findById(tabId: string): { task: string; tab: TerminalTab } | null {
 }
 
 export const tabsShim = {
-  ensureMain: async (taskId: string, defaultMode: TerminalMode): Promise<TerminalTab> => {
+  ensureMain: async (taskId: string, defaultMode: AgentId): Promise<TerminalTab> => {
     const existing = listFor(taskId)
     const main = existing.find((t) => t.isMain)
     if (main) return main

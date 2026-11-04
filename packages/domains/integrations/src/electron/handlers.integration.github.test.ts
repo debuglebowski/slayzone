@@ -695,7 +695,7 @@ if (createdIssueNumber) {
     const newTaskId = crypto.randomUUID()
     h.db
       .prepare(`INSERT INTO tasks
-      (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+      (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
       VALUES (?, ?, ?, null, 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
       .run(newTaskId, projectId, `[test] push-created ${Date.now()}`)
 
@@ -816,7 +816,7 @@ if (createdIssueNumber) {
       const id = crypto.randomUUID()
       h.db
         .prepare(`INSERT INTO tasks
-        (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+        (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
         VALUES (?, ?, ?, null, 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
         .run(id, projectId, `[test] unlinked ${i} ${Date.now()}`)
       unlinkedIds.push(id)
@@ -859,7 +859,7 @@ if (createdIssueNumber) {
     const tempId = crypto.randomUUID()
     h.db
       .prepare(`INSERT INTO tasks
-      (id, project_id, title, description, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, is_temporary, created_at, updated_at)
+      (id, project_id, title, description, status, priority, agent_id, provider_config, claude_flags, codex_flags, is_temporary, created_at, updated_at)
       VALUES (?, ?, ?, null, 'todo', 3, 'claude-code', '{}', '', '', 1, datetime('now'), datetime('now'))`)
       .run(tempId, projectId, `[test] temporary ${Date.now()}`)
 
@@ -1136,7 +1136,7 @@ console.log('\nGitHub: Clear/disconnect')
   // Create a task + link in this mapping
   const clearTaskId = crypto.randomUUID()
   h.db
-    .prepare(`INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    .prepare(`INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, claude_flags, codex_flags, created_at, updated_at)
     VALUES (?, ?, 'clear test', 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
     .run(clearTaskId, clearTest.projectId)
   h.db

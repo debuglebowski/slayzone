@@ -19,7 +19,7 @@ export interface CreateTemplateTxnParams {
   projectId: string
   name: string
   description: string | null
-  terminalMode: string | null
+  agentId: string | null
   // Pre-serialized JSON (or null) — the IPC layer stringifies before sending.
   providerConfig: string | null
   panelVisibility: string | null
@@ -52,7 +52,7 @@ export const templatesTxns = {
     db.prepare(`
       INSERT INTO task_templates (
         id, project_id, name, description,
-        terminal_mode, provider_config, panel_visibility, browser_tabs, web_panel_urls,
+        agent_id, provider_config, panel_visibility, browser_tabs, web_panel_urls,
         dangerously_skip_permissions, default_status, default_priority,
         is_default, sort_order
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -61,7 +61,7 @@ export const templatesTxns = {
       p.projectId,
       p.name,
       p.description,
-      p.terminalMode,
+      p.agentId,
       p.providerConfig,
       p.panelVisibility,
       p.browserTabs,

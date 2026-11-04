@@ -38,7 +38,7 @@ function seedTask(): string {
   const id = crypto.randomUUID()
   h.db
     .prepare(
-      'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config) VALUES (?, ?, ?, ?, 3, ?, ?)'
+      'INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config) VALUES (?, ?, ?, ?, 3, ?, ?)'
     )
     .run(id, projectId, `attn-${id.slice(0, 6)}`, 'todo', 'claude-code', '{}')
   return id

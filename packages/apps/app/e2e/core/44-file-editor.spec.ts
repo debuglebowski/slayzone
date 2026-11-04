@@ -62,9 +62,9 @@ test.describe('File editor', () => {
     await clickProject(mainWindow, projectAbbrev)
     await expect(mainWindow.getByText('Editor test task').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('Editor test task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
 
     // Toggle editor panel on via Cmd+E
     await mainWindow.keyboard.press('Meta+e')

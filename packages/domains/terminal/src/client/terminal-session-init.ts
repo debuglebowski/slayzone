@@ -6,7 +6,7 @@ import type { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { useTRPCClient } from './trpc'
 import { safeRandomUUID } from '@slayzone/ui'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
+import type { AgentId, TerminalState } from '@slayzone/terminal-contracts'
 import { spawnConversationIds, stripOscReplies } from '@slayzone/terminal-contracts'
 import { createXterm, registerTestTerminalLinks } from './xterm-init'
 import type { WebLinkProvider } from './web-link-provider'
@@ -72,7 +72,7 @@ export interface TerminalInitOptions {
 export interface TerminalInitContext {
   sessionId: string
   cwd: string
-  mode: TerminalMode
+  mode: AgentId
   trpcClient: ReturnType<typeof useTRPCClient>
   resetTaskState: (sessionId: string) => void
   handleTerminalKeyEvent: (e: KeyboardEvent) => boolean
@@ -756,7 +756,7 @@ export async function initTerminalSession(
       // (rest-api/agent-hook.ts persistConversationId), so only confirmed ids
       // are ever stored. See plans/conv-id-robustness-v2.md.
       //
-      // Plain terminal mode doesn't use conversation IDs. The rule is shared with
+      // The plain terminal agent doesn't use conversation IDs. The rule is shared with
       // the hub's `task.startMainAgent` (`spawnConversationIds`).
       const {
         conversationId: effectiveConversationId,

@@ -353,7 +353,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
 
   async function getDefaultProviderKind(): Promise<CliProvider> {
     const mode = (
-      (await db.prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'").get()) as
+      (await db.prepare("SELECT value FROM settings WHERE key = 'default_agent_id'").get()) as
         | { value: string }
         | undefined
     )?.value
@@ -374,7 +374,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         .all('active')) as Array<{ kind: string }>
       providers = filterConfigurableCliProviders(active.map((p) => p.kind))
     }
-    // Always include the default terminal mode's provider
+    // Always include the default agent's provider
     const defaultKind = await getDefaultProviderKind()
     if (!providers.includes(defaultKind)) {
       providers.push(defaultKind)
@@ -2034,7 +2034,7 @@ export function createAiConfigOps(db: SlayzoneDb) {
         | { kind: string }
         | undefined
       if (!row || !isConfigurableCliProvider(row.kind)) return
-      // Prevent disabling the default terminal mode's provider
+      // Prevent disabling the default agent's provider
       if (!enabled && row.kind === (await getDefaultProviderKind())) return
       await db
         .prepare(

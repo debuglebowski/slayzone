@@ -13,7 +13,7 @@ import {
   getMainSessionId,
   openTaskTerminal,
   runCommand,
-  switchTerminalMode,
+  switchAgent,
   waitForBufferContains,
   waitForPtySession
 } from '../fixtures/terminal'
@@ -40,7 +40,7 @@ test.describe('Terminal crash overlay', () => {
     )
     await mainWindow.evaluate(
       (id) =>
-        window.getTrpcVanillaClient().pty.modesCreate.mutate({
+        window.getTrpcVanillaClient().pty.agentsCreate.mutate({
           id,
           label: 'Crash Overlay E2E',
           type: 'claude-code',
@@ -70,7 +70,7 @@ test.describe('Terminal crash overlay', () => {
 
     // Set the task to the custom mode and open its terminal.
     await mainWindow.evaluate(
-      ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
+      ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: m }),
       {
         id: taskId,
         m: crashModeId
@@ -84,7 +84,7 @@ test.describe('Terminal crash overlay', () => {
 
   test.afterAll(async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }),
+      (id) => window.getTrpcVanillaClient().pty.agentsDelete.mutate({ id }),
       crashModeId
     )
     await mainWindow
@@ -223,7 +223,7 @@ test.describe('Doctor from terminal menu', () => {
     await mainWindow.keyboard.press('Escape').catch(() => {})
     await terminalMenuButton(mainWindow).click()
   }
-  const setTerminalMode = async (
+  const setAgent = async (
     mainWindow: import('@playwright/test').Page,
     mode: 'claude-code' | 'terminal'
   ) => {
@@ -232,8 +232,7 @@ test.describe('Doctor from terminal menu', () => {
     // the mode trigger on tasks:changed, which is what these tests probe.
     if (mode === 'claude-code') {
       await mainWindow.evaluate(
-        (id) =>
-          window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }),
+        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'claude-code' }),
         taskId
       )
       await mainWindow.evaluate(() => {
@@ -242,10 +241,10 @@ test.describe('Doctor from terminal menu', () => {
         return refresh?.()
       })
       // Give the renderer a beat to reflect the mode change before the next
-      // step opens a menu that depends on terminal_mode.
+      // step opens a menu that depends on agent_id.
       await mainWindow.waitForTimeout(150)
     } else {
-      await switchTerminalMode(mainWindow, mode)
+      await switchAgent(mainWindow, mode)
     }
   }
 
@@ -283,7 +282,7 @@ test.describe('Doctor from terminal menu', () => {
   })
 
   test('Doctor dialog shows validation results for claude', async ({ mainWindow }) => {
-    await setTerminalMode(mainWindow, 'claude-code')
+    await setAgent(mainWindow, 'claude-code')
     await openTerminalMenu(mainWindow)
     await expect(doctorMenuItem(mainWindow)).toBeVisible({ timeout: 3_000 })
 
@@ -310,9 +309,9 @@ test.describe('Doctor from terminal menu', () => {
     await expect(dialog).not.toBeVisible({ timeout: 2_000 })
   })
 
-  test('Doctor not shown for terminal mode', async ({ mainWindow }) => {
-    // Switch to terminal mode via UI to ensure rendered state is up to date.
-    await setTerminalMode(mainWindow, 'terminal')
+  test('Doctor not shown for terminal agent', async ({ mainWindow }) => {
+    // Switch to the terminal agent via UI to ensure rendered state is up to date.
+    await setAgent(mainWindow, 'terminal')
 
     await openTerminalMenu(mainWindow)
 
@@ -321,6 +320,6 @@ test.describe('Doctor from terminal menu', () => {
     await mainWindow.keyboard.press('Escape')
 
     // Restore to claude-code
-    await setTerminalMode(mainWindow, 'claude-code')
+    await setAgent(mainWindow, 'claude-code')
   })
 })

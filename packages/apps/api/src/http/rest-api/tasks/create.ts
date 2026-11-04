@@ -10,6 +10,7 @@ import {
   resolveTemplateRef,
   type ResolvedProject
 } from '../resolve'
+import { resolveAgentIdAlias } from '../../agent-id-alias'
 
 /**
  * POST /api/tasks — create a task (CLI `slay tasks create`).
@@ -35,6 +36,9 @@ import {
  *   clients showed the task without its external identity until something else
  *   refreshed.
  *
+ * - `agentId` also accepts its deprecated old name `terminalMode`
+ *   (`resolveAgentIdAlias`; both with different values = 400).
+ *
  * The CLI-shaped fields are resolved to concrete ids BEFORE the domain schema
  * parses, so the strict `CreateTaskInputSchema` stays free of them (same shape as
  * the PATCH route's `appendDescription` handling).
@@ -58,6 +62,12 @@ function validPriority(value: unknown, res: Response): number | null | undefined
 export function registerCreateTaskRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/tasks', async (req, res) => {
     const body = { ...((req.body ?? {}) as Record<string, unknown>) }
+
+    const alias = resolveAgentIdAlias(body)
+    if (!alias.ok) {
+      res.status(400).json({ ok: false, error: alias.error })
+      return
+    }
 
     if (body.project !== undefined && body.projectId !== undefined) {
       res.status(400).json({ ok: false, error: 'Provide either project or projectId, not both.' })

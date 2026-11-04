@@ -32,7 +32,7 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
-import { chatStorageMode, terminalStorageMode } from './storage-mode'
+import { chatStorageMode, terminalStorageAgentId } from './storage-mode'
 
 export const sessionRecordKey = (mode: string, conversationId: string | null): string =>
   `session:${JSON.stringify([mode, conversationId])}`
@@ -263,7 +263,7 @@ export function createLocalChatData(
       // a stale sibling's timestamp (including when the sibling is newly created).
       for (const mode of [
         value.identity.mode,
-        ...(value.terminalProviderConfig ? [terminalStorageMode(value.identity.mode)] : [])
+        ...(value.terminalProviderConfig ? [terminalStorageAgentId(value.identity.mode)] : [])
       ]) {
         const present = store.compose((db) =>
           db
@@ -353,7 +353,7 @@ export function createLocalChatData(
         }
       }
       if (value.terminalProviderConfig) {
-        const mode = terminalStorageMode(value.identity.mode)
+        const mode = terminalStorageAgentId(value.identity.mode)
         if (!previous || value.revision > previous.revision)
           set(value.identity.tabId, 'settings', `provider:${mode}`, value.terminalProviderConfig)
       }
@@ -368,7 +368,7 @@ export function createLocalChatData(
           if (value.terminalProviderConfig)
             bootstrapProvider(
               value,
-              terminalStorageMode(value.identity.mode),
+              terminalStorageAgentId(value.identity.mode),
               value.terminalProviderConfig,
               value.terminalProviderConfigRevision
             )

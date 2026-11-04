@@ -32,6 +32,7 @@ interface Template {
   name: string
   default_priority: number | null
   default_status: string | null
+  agent_id: string | null
   is_default: boolean
 }
 type One = { ok: boolean; data: Template; error?: string }
@@ -117,6 +118,36 @@ describe('/api/templates CRUD', () => {
     expect(res.status).toBe(200)
     expect(res.body.data.name).toBe('Renamed')
     expect(res.body.data.default_priority).toBe(5)
+  })
+
+  test('POST + PATCH: agentId, and its deprecated alias terminalMode', async () => {
+    const created = await rest.request<One>('POST', '/api/templates', {
+      project: 'Alpha',
+      name: 'AgentTpl',
+      agentId: 'codex'
+    })
+    expect(created.status).toBe(200)
+    expect(created.body.data.agent_id).toBe('codex')
+    const id = created.body.data.id
+    const legacy = await rest.request<One>('PATCH', `/api/templates/${id}`, {
+      terminalMode: 'gemini'
+    })
+    expect(legacy.status).toBe(200)
+    expect(legacy.body.data.agent_id).toBe('gemini')
+    const legacyPost = await rest.request<One>('POST', '/api/templates', {
+      project: 'Alpha',
+      name: 'LegacyTpl',
+      terminalMode: 'codex'
+    })
+    expect(legacyPost.body.data.agent_id).toBe('codex')
+    const bad = await rest.request<One>('PATCH', `/api/templates/${id}`, {
+      agentId: 'codex',
+      terminalMode: 'gemini'
+    })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error).toMatch(/agentId.*terminalMode/)
+    await rest.request('DELETE', `/api/templates/${id}`)
+    await rest.request('DELETE', `/api/templates/${legacyPost.body.data.id}`)
   })
 
   test('PATCH 400: empty body', async () => {

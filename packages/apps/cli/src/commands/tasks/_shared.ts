@@ -14,7 +14,7 @@ export interface TaskRow extends Record<string, unknown> {
 
 export interface TemplateRow extends Record<string, unknown> {
   id: string
-  terminal_mode: string | null
+  agent_id: string | null
   default_status: string | null
   default_priority: number | null
   provider_config: string | null

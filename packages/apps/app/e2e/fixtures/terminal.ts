@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect } from './electron'
 import { openTaskByTitle } from './electron'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
+import type { AgentId, TerminalState } from '@slayzone/terminal-contracts'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { execSync } from 'child_process'
@@ -55,7 +55,7 @@ export const CLI_PATHS = {
 function activeModeTrigger(page: Page) {
   // Multiple tabs from prior tests can leave hidden triggers in DOM; use the
   // last visible one (most-recently mounted = currently active tab).
-  return page.locator('[data-testid="terminal-mode-trigger"]:visible').last()
+  return page.locator('[data-testid="agent-trigger"]:visible').last()
 }
 
 export function getMainSessionId(taskId: string): string {
@@ -85,7 +85,7 @@ export async function openTaskTerminal(
 export async function startAgentTerminal(page: Page): Promise<void> {
   // AI-mode terminals are idle-gated (TerminalStarter): an autofocused "Open <agent>"
   // button must be clicked to spawn the PTY (saves CPU/API credits). Plain `terminal`
-  // auto-spawns (no gate) — no-op there. Call after openTaskTerminal (+ switchTerminalMode).
+  // auto-spawns (no gate) — no-op there. Call after openTaskTerminal (+ switchAgent).
   // Scope to VISIBLE buttons: inactive task tabs stay mounted (display:none) and can
   // hold hidden starters, so a bare `.last()` could resolve to another tab's button —
   // its isVisible() check then reads false and the loop bails without ever clicking
@@ -151,8 +151,8 @@ export async function closeAllTaskTabs(page: Page): Promise<void> {
   })
 }
 
-export async function switchTerminalMode(page: Page, mode: TerminalMode): Promise<void> {
-  const labels: Record<TerminalMode, string[]> = {
+export async function switchAgent(page: Page, mode: AgentId): Promise<void> {
+  const labels: Record<AgentId, string[]> = {
     'claude-code': ['Claude', 'Claude Code'],
     codex: ['Codex'],
     'cursor-agent': ['Cursor', 'Cursor Agent'],
@@ -184,7 +184,7 @@ export async function switchTerminalMode(page: Page, mode: TerminalMode): Promis
   // — whichever opens the menu wins.
   const tryOpenMenu = async () => {
     // Strategy 1: click the chevron (its onClick dispatches contextmenu on the tab)
-    const dropdownBtn = trigger.locator('[data-testid="terminal-mode-dropdown"], button').first()
+    const dropdownBtn = trigger.locator('[data-testid="agent-dropdown"], button').first()
     if (await dropdownBtn.isVisible({ timeout: 500 }).catch(() => false)) {
       await dropdownBtn.click().catch(() => {})
     }
@@ -246,8 +246,7 @@ export async function switchTerminalMode(page: Page, mode: TerminalMode): Promis
     const tab = state?.tabs[state.activeTabIndex]
     return tab?.type === 'task' ? tab.taskId : null
   })
-  if (!taskId)
-    throw new Error(`switchTerminalMode fallback: no active task tab found (mode=${mode})`)
+  if (!taskId) throw new Error(`switchAgent fallback: no active task tab found (mode=${mode})`)
   await page.evaluate(
     async ({ id, m }) => {
       try {
@@ -261,7 +260,7 @@ export async function switchTerminalMode(page: Page, mode: TerminalMode): Promis
       for (const k of Object.keys(cfg ?? {})) cleared[k] = { conversationId: null }
       await window
         .getTrpcVanillaClient()
-        .task.update.mutate({ id, terminalMode: m, providerConfig: cleared })
+        .task.update.mutate({ id, agentId: m, providerConfig: cleared })
       const refresh = (window as { __slayzone_refreshData?: () => Promise<void> | void })
         .__slayzone_refreshData
       await refresh?.()

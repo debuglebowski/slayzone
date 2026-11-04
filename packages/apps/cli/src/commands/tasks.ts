@@ -78,7 +78,7 @@ export function tasksCommand(): Command {
     )
     .option(
       '--mode <mode>',
-      'Limit to one terminal mode (e.g. claude-code, codex). Default: every mode with a row for this task.'
+      'Limit to one agent (e.g. claude-code, codex). Default: every agent with a row for this task.'
     )
     .action(resetConversationAction)
 

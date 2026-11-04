@@ -32,7 +32,7 @@ test.describe('Project folder per computer', () => {
     )
     await mainWindow.evaluate(
       (id) =>
-        window.getTrpcVanillaClient().pty.modesCreate.mutate({
+        window.getTrpcVanillaClient().pty.agentsCreate.mutate({
           id,
           label: 'Project Folder E2E',
           type: 'claude-code',
@@ -48,7 +48,7 @@ test.describe('Project folder per computer', () => {
 
   test.afterAll(async ({ mainWindow }) => {
     await mainWindow
-      .evaluate((id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }), modeId)
+      .evaluate((id) => window.getTrpcVanillaClient().pty.agentsDelete.mutate({ id }), modeId)
       .catch(() => {})
     await mainWindow
       .evaluate(() =>
@@ -76,7 +76,7 @@ test.describe('Project folder per computer', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
+      ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: m }),
       { id: task.id, m: modeId }
     )
     await s.refreshData()

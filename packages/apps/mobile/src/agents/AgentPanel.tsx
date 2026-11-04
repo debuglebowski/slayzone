@@ -105,13 +105,13 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
       }
     })
   )
-  const modesQ = useQuery(trpc.pty.modesList.queryOptions())
+  const modesQ = useQuery(trpc.pty.agentsList.queryOptions())
 
   // A task with no main tab row yet (never opened on desktop): create it, as
   // desktop's terminal does when it opens the task.
   const ensured = useRef(false)
   const tabRows = tabsQ.data
-  const taskMode = task.terminal_mode
+  const taskMode = task.agent_id
   useEffect(() => {
     if (!tabRows || ensured.current || tabRows.some((t) => t.isMain)) return
     ensured.current = true
@@ -187,7 +187,7 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
 
   const switchTo = (mode: string): void => {
     setPicking(false)
-    if (mode === task.terminal_mode) return
+    if (mode === task.agent_id) return
     confirmThen(
       'Switch',
       `Switch to ${modeLabel(mode)}?`,
@@ -263,7 +263,7 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
             disabled={busy !== null}
             hitSlop={8}
           >
-            <Text style={styles.mode}>{modeLabel(task.terminal_mode)} ▾</Text>
+            <Text style={styles.mode}>{modeLabel(task.agent_id)} ▾</Text>
           </Pressable>
         ) : (
           <Text style={styles.mode}>{modeLabel(selected.mode)}</Text>
@@ -353,12 +353,12 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
             <Pressable
               key={m.id}
               accessibilityRole="button"
-              accessibilityState={{ selected: m.id === task.terminal_mode }}
+              accessibilityState={{ selected: m.id === task.agent_id }}
               onPress={() => switchTo(m.id)}
               style={styles.pickerRow}
             >
               <Text style={styles.pickerText}>{m.label}</Text>
-              {m.id === task.terminal_mode ? <Text style={styles.pickerText}>✓</Text> : null}
+              {m.id === task.agent_id ? <Text style={styles.pickerText}>✓</Text> : null}
             </Pressable>
           ))}
       </BottomSheet>

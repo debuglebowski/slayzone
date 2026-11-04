@@ -80,7 +80,7 @@ export function TemplatesSettingsTab({ projectId }: TemplatesSettingsTabProps) {
 
   const summarize = (t: TaskTemplate): string => {
     const parts: string[] = []
-    if (t.terminal_mode) parts.push(t.terminal_mode)
+    if (t.agent_id) parts.push(t.agent_id)
     if (t.default_priority != null) parts.push(`P${t.default_priority}`)
     if (t.default_status) parts.push(t.default_status)
     if (t.panel_visibility) {
@@ -203,7 +203,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
   const isEdit = !!template
   const [name, setName] = useState(template?.name ?? '')
   const [description, setDescription] = useState(template?.description ?? '')
-  const [terminalMode, setTerminalMode] = useState(template?.terminal_mode ?? NONE)
+  const [agentId, setAgentId] = useState(template?.agent_id ?? NONE)
   const [defaultStatus, setDefaultStatus] = useState(template?.default_status ?? '')
   const [defaultPriority, setDefaultPriority] = useState<string>(
     template?.default_priority != null ? String(template.default_priority) : NONE
@@ -214,7 +214,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
   const [isDefault, setIsDefault] = useState(template?.is_default ?? false)
   const [saving, setSaving] = useState(false)
 
-  const modesQuery = useQuery(trpc.pty.modesList.queryOptions())
+  const modesQuery = useQuery(trpc.pty.agentsList.queryOptions())
   const modes = (modesQuery.data ?? [])
     .filter((mode) => mode.enabled)
     .map((mode) => ({ id: mode.id, label: mode.label }))
@@ -228,7 +228,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           id: template.id,
           name: name.trim(),
           description: description.trim() || null,
-          terminalMode: terminalMode === NONE ? null : terminalMode || null,
+          agentId: agentId === NONE ? null : agentId || null,
           defaultStatus: defaultStatus || null,
           defaultPriority:
             defaultPriority === NONE ? null : defaultPriority ? Number(defaultPriority) : null,
@@ -241,7 +241,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           projectId,
           name: name.trim(),
           description: description.trim() || null,
-          terminalMode: terminalMode === NONE ? null : terminalMode || null,
+          agentId: agentId === NONE ? null : agentId || null,
           defaultStatus: defaultStatus || null,
           defaultPriority:
             defaultPriority === NONE ? null : defaultPriority ? Number(defaultPriority) : null,
@@ -295,9 +295,9 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <SettingLabel tip="Which AI provider to launch when opening the terminal panel.">
-                Terminal mode
+                Agent
               </SettingLabel>
-              <Select value={terminalMode} onValueChange={setTerminalMode}>
+              <Select value={agentId} onValueChange={setAgentId}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="System default" />
                 </SelectTrigger>

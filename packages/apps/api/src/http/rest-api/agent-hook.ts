@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { z } from 'zod'
-import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentLifecycleEvent, TerminalState, AgentId } from '@slayzone/terminal-contracts'
 import {
   resolveAgentHook as resolveHookIdentity,
   sanitizeAgentHook,
@@ -679,7 +679,7 @@ export async function processAgentHook(
         hook.spawnToken
       )
       // Mirror onto the live PTY session for the idle-close gate.
-      const ptySessionId = bridge?.findSession(hook.taskId, hook.mode as TerminalMode)
+      const ptySessionId = bridge?.findSession(hook.taskId, hook.mode as AgentId)
       if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
     }
   }
@@ -689,7 +689,7 @@ export async function processAgentHook(
   // regex). gemini/opencode still rely on adapter detection.
   // Hook-driven is a property of the AGENT; the PTY is found by its MODE.
   if (bridge && isHookDrivenMode(hook.agentId) && hook.taskId) {
-    const sessionId = bridge.findSession(hook.taskId, hook.mode as TerminalMode)
+    const sessionId = bridge.findSession(hook.taskId, hook.mode as AgentId)
     if (sessionId) {
       const newState = hookToTerminalState(hook.agentId, sessionId, hook.hookEvent, hook.raw)
       const subagentId = subagentIdOf(hook.raw)

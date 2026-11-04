@@ -26,7 +26,7 @@ test.describe('Codex resume', () => {
       ({ id, conversationId }) => {
         return window.getTrpcVanillaClient().task.update.mutate({
           id,
-          terminalMode: 'codex',
+          agentId: 'codex',
           codexConversationId: conversationId
         })
       },
@@ -48,7 +48,7 @@ test.describe('Codex resume', () => {
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    expect(task?.terminal_mode).toBe('codex')
+    expect(task?.agent_id).toBe('codex')
     expect(task?.codex_conversation_id).toBe(codexConversationId)
   })
 })

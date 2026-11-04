@@ -1,6 +1,6 @@
 import type { ExecutionContext } from '@slayzone/terminal-contracts'
 
-export type TerminalMode = string
+export type AgentId = string
 export type { ExecutionContext }
 
 // Activity states for CLI tools.
@@ -77,7 +77,7 @@ export interface DoctorBinaryRequirement {
 }
 
 export interface TerminalAdapter {
-  readonly mode: TerminalMode
+  readonly mode: AgentId
 
   /** Silence-timeout in ms before the inactivity checker flips running→idle.
    *  `null` = use default 60s. `Infinity` = no silence timer (hook-driven

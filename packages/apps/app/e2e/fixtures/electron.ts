@@ -1083,7 +1083,7 @@ export function seed(page: Page) {
       page.evaluate((d) => window.getTrpcVanillaClient().projects.create.mutate(d), data),
 
     // Typed off the mutations' own input types rather than a hand-picked subset:
-    // the subset silently dropped fields specs DO pass (terminalMode, repoName,
+    // the subset silently dropped fields specs DO pass (agentId, repoName,
     // isTemporary, title-on-update), and nothing flagged it while e2e was
     // outside every tsconfig.
     createTask: (data: CreateTaskInput) =>
@@ -1326,9 +1326,9 @@ export async function openTaskById(page: Page, taskId: string): Promise<void> {
       fn(id)
     }, taskId)
     // Opening by id is deterministic, so a visible mode-trigger here is THIS task's.
-    await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible(
-      { timeout: 7_000 }
-    )
+    await expect(page.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 7_000
+    })
     // 20s, NOT 40s. A retry budget above the 30s test timeout can never report its
     // own failure — Playwright kills the test first and blames whatever line is
     // executing, which is how a helper's failure gets filed as an unrelated bug.
@@ -1380,7 +1380,7 @@ export async function showProjectBoard(
  * Match is by EXACT title, which already excludes the auto-named "Terminal N" scratch
  * task; the most-recently-created match wins so re-used titles across describes resolve
  * to the freshly-seeded one. NOTE: do NOT filter out `is_temporary` — specs that
- * deliberately seed temporary tasks (e.g. 22-terminal-mode-switching) open them by
+ * deliberately seed temporary tasks (e.g. 22-agent-switching) open them by
  * title too, and the exact-title match is what keeps the stray scratch task out.
  */
 export async function openTaskByTitle(page: Page, title: string): Promise<void> {

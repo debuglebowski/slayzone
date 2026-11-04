@@ -7,10 +7,10 @@ import {
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
 import {
   HOOK_SUPPORTED_AGENT_IDS,
-  isBuiltinTerminalMode,
+  isBuiltinAgentId,
   modeAgentId,
-  type AgentId,
-  type TerminalMode
+  type HookAgentId,
+  type AgentId
 } from '@slayzone/terminal-contracts'
 
 /** Path the agent lifecycle hook (notify.sh) POSTs to — see agent-hook.ts. */
@@ -53,7 +53,7 @@ export interface RemoteMcpEnv {
 export type RemoteMcpEnvProvider = (args: {
   taskId: string | undefined
   computerId: string
-  mode?: TerminalMode
+  mode?: AgentId
 }) => Promise<RemoteMcpEnv | null> | RemoteMcpEnv | null
 
 /**
@@ -65,7 +65,7 @@ export type RemoteMcpEnvProvider = (args: {
  */
 export async function resolveRemoteMcpEnv(
   provider: RemoteMcpEnvProvider | null | undefined,
-  args: { taskId: string | undefined; computerId: string | null; mode?: TerminalMode }
+  args: { taskId: string | undefined; computerId: string | null; mode?: AgentId }
 ): Promise<RemoteMcpEnv | null> {
   if (args.computerId == null || !provider) return null
   try {
@@ -149,7 +149,7 @@ export async function resolveRemoteMcpEnv(
 export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
   taskId: string | undefined,
-  mode?: TerminalMode,
+  mode?: AgentId,
   /** Explicit project id — set when the caller already knows it without a task row
    *  (the warm pool boots an agent under a reserved task id before that task is
    *  created). Takes priority over the task-derived lookup so `SLAYZONE_PROJECT_ID`
@@ -180,13 +180,12 @@ export async function buildMcpEnv(
   // `modeAgentId`); with no db (pre-init) it stays unresolved, i.e. not capable.
   let agentId: string | undefined
   if (mode) {
-    const declaredType = isBuiltinTerminalMode(mode)
+    const declaredType = isBuiltinAgentId(mode)
       ? null
-      : (await db?.get<{ type: string }>('SELECT type FROM terminal_modes WHERE id = ?', [mode]))
-          ?.type
+      : (await db?.get<{ type: string }>('SELECT type FROM agents WHERE id = ?', [mode]))?.type
     agentId = modeAgentId(mode, declaredType)
   }
-  const hookCapable = Boolean(agentId && HOOK_SUPPORTED_AGENT_IDS.has(agentId as AgentId))
+  const hookCapable = Boolean(agentId && HOOK_SUPPORTED_AGENT_IDS.has(agentId as HookAgentId))
 
   // On-disk anchor for EVERY spawn, hook-capable or not — this hub's own root,
   // which the `slay` CLI inside the child uses to find the DB (post-flattening

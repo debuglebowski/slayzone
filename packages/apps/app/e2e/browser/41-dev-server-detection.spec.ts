@@ -59,7 +59,7 @@ test.describe('Dev server URL detection', () => {
     sessionId = getMainSessionId(taskId)
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -145,7 +145,7 @@ test.describe('Dev server detection — toast disabled', () => {
     sessionId = getMainSessionId(t.id)
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       t.id
     )
     await s.refreshData()
@@ -192,7 +192,7 @@ test.describe('Dev server detection — auto-open browser', () => {
     sessionId = getMainSessionId(t.id)
 
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'terminal' }),
       t.id
     )
     await s.refreshData()

@@ -1998,7 +1998,7 @@ export interface RoutingChatBackendOptions {
 
 /**
  * A `ChatBackend` that forwards remote spawns over the gateway, so a chat-mode
- * agent runs on a computer exactly as a terminal-mode agent already does.
+ * agent runs on a computer exactly as a terminal (pty) agent already does.
  *
  * Rides the SAME sequenced duplex `proc.*` channel as
  * {@link createRoutingProcessBackend} — no `chat.*` namespace. A chat agent is

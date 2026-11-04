@@ -25,10 +25,8 @@ export function useUsageAnalytics() {
   const [pickedProvider, setSelectedProvider] = useState<string | null>(null)
 
   // Enabled modes + persisted default provider.
-  const modesQuery = useQuery(trpc.pty.modesList.queryOptions())
-  const defaultModeQuery = useQuery(
-    trpc.settings.get.queryOptions({ key: 'default_terminal_mode' })
-  )
+  const modesQuery = useQuery(trpc.pty.agentsList.queryOptions())
+  const defaultModeQuery = useQuery(trpc.settings.get.queryOptions({ key: 'default_agent_id' }))
   const settingsLoaded = modesQuery.isSuccess && defaultModeQuery.isSuccess
 
   const providerOptions = useMemo<ProviderOption[]>(() => {

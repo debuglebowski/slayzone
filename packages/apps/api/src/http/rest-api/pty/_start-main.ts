@@ -11,7 +11,7 @@ const failureCache = new Map<string, { result: EnsureAliveResult; expiresAt: num
 
 interface TaskRow {
   id: string
-  terminal_mode: string | null
+  agent_id: string | null
 }
 
 /** Main-tab sessionId convention (see TaskDetailPage.getMainSessionId): the
@@ -56,15 +56,15 @@ export async function startMainPty(
 ): Promise<StartMainPtyResult> {
   if (pty.hasLivePty(mainSessionIdFor(taskId))) return 'already-alive'
 
-  const task = (await deps.db
-    .prepare('SELECT id, terminal_mode FROM tasks WHERE id = ?')
-    .get(taskId)) as TaskRow | undefined
+  const task = (await deps.db.prepare('SELECT id, agent_id FROM tasks WHERE id = ?').get(taskId)) as
+    | TaskRow
+    | undefined
   if (!task) return 'no-task'
 
   const cached = failureCache.get(taskId)
   if (cached && cached.expiresAt > Date.now()) return cached.result
 
-  await ensureMainTab(deps.db, taskId, task.terminal_mode ?? 'terminal')
+  await ensureMainTab(deps.db, taskId, task.agent_id ?? 'terminal')
   await setTabAgentState(deps.db, taskId, 'running')
   // Dual-emit: legacy IPC broadcast + tRPC tabsEvents (subscribers in slice 5).
   deps.legacyBroadcast?.('tabs:changed', { taskId })

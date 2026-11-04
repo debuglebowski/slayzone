@@ -177,7 +177,7 @@
   "e2e/terminal/102-hidden-terminals-skip-paint.spec.ts": 6828,
   "e2e/terminal/103-boot-renderer-economy.spec.ts": 4049,
   "e2e/terminal/104-mac-option-as-meta.spec.ts": 2148,
-  "e2e/terminal/22-terminal-mode-switching.spec.ts": 7329,
+  "e2e/terminal/22-agent-switching.spec.ts": 7329,
   "e2e/terminal/27-codex-resume.spec.ts": 1236,
   "e2e/terminal/28-codex-session-detection.spec.ts": 2520,
   "e2e/terminal/29-terminal-session-isolation.spec.ts": 2466,

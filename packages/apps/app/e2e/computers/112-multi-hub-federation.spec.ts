@@ -479,7 +479,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             projectId: project.id,
             title: `Remote recovery ${isTemporary}`,
             status: 'in_progress',
-            terminalMode: 'terminal',
+            agentId: 'terminal',
             isTemporary
           })) as { id: string }
           ids.push(task.id)
@@ -516,7 +516,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             projectId: project.id,
             title: `Local recovery ${isTemporary}`,
             status: 'in_progress',
-            terminalMode: 'terminal',
+            agentId: 'terminal',
             isTemporary
           })
           ids.push(task.id)
@@ -669,7 +669,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             projectId: project.id,
             title: `Terminal ${n}`,
             status: 'in_progress',
-            terminalMode: 'terminal',
+            agentId: 'terminal',
             isTemporary: true
           })) as { id: string }
           ids.push(task.id)
@@ -703,7 +703,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             projectId: project.id,
             title: `Local ${n}`,
             status: 'in_progress',
-            terminalMode: 'terminal'
+            agentId: 'terminal'
           })
           ids.push(task.id)
         }
@@ -1200,14 +1200,14 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           projectId: project.id,
           title: 'remote complete task',
           status: 'todo',
-          terminalMode: 'terminal'
+          agentId: 'terminal'
         })) as { id: string }
         const temporary = (await c.task.create.mutate({
           projectId: project.id,
           title: 'remote temporary task',
           status: 'todo',
           isTemporary: true,
-          terminalMode: 'terminal'
+          agentId: 'terminal'
         })) as { id: string }
         return { regularId: regular.id, temporaryId: temporary.id }
       })

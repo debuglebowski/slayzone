@@ -71,7 +71,7 @@ const task = {
   id: 't1',
   worktree_path: '/wt',
   worktree_parent_branch: 'main',
-  terminal_mode: 'claude-code',
+  agent_id: 'claude-code',
   merge_context: { type: 'merge', sourceBranch: 'feature', targetBranch: 'main' }
 } as unknown as Task
 

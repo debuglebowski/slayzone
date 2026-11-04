@@ -70,7 +70,7 @@ test('template router: create defaults', async () => {
   expect(t.name).toBe('Basic')
   expect(t.project_id).toBe(projectId)
   expect(t.is_default).toBe(false)
-  expect(t.terminal_mode).toBeNull()
+  expect(t.agent_id).toBeNull()
   expect(t.provider_config).toBeNull()
   expect(t.panel_visibility).toBeNull()
   expect(t.browser_tabs).toBeNull()
@@ -83,7 +83,7 @@ test('template router: create defaults', async () => {
 test('template router: create with all fields', async () => {
   const t = await createTemplate('Full', {
     description: 'A full template',
-    terminalMode: 'codex',
+    agentId: 'codex',
     providerConfig: { codex: { flags: '--sandbox workspace-write' } },
     panelVisibility: { ...PANEL, editor: false },
     browserTabs: {
@@ -96,7 +96,7 @@ test('template router: create with all fields', async () => {
     defaultPriority: 1
   })
   expect(t.description).toBe('A full template')
-  expect(t.terminal_mode).toBe('codex')
+  expect(t.agent_id).toBe('codex')
   expect(t.provider_config?.codex?.flags).toBe('--sandbox workspace-write')
   expect(t.panel_visibility?.terminal).toBe(true)
   expect(t.browser_tabs?.tabs).toHaveLength(1)
@@ -127,22 +127,22 @@ test('template router: get + update name + partial preserves + create→get→ge
   expect((await caller.get({ id: t.id }))?.name).toBe('GetMe')
 
   const partial = await createTemplate('Partial', {
-    terminalMode: 'codex',
+    agentId: 'codex',
     defaultPriority: 2
   })
   const updated = (await caller.update({ id: partial.id, defaultPriority: 5 }))!
-  expect(updated.terminal_mode).toBe('codex')
+  expect(updated.agent_id).toBe('codex')
   expect(updated.default_priority).toBe(5)
 })
 
-test('template router: update terminalMode + panelVisibility', async () => {
+test('template router: update agentId + panelVisibility', async () => {
   const t = await createTemplate('UpdateFields')
   const updated = (await caller.update({
     id: t.id,
-    terminalMode: 'codex',
+    agentId: 'codex',
     panelVisibility: PANEL
   }))!
-  expect(updated.terminal_mode).toBe('codex')
+  expect(updated.agent_id).toBe('codex')
   expect(updated.panel_visibility?.browser).toBe(true)
 })
 
@@ -172,7 +172,7 @@ test('template router: missing id → null / false (no throw)', async () => {
 
 test('template application: explicit templateId applies all fields', async () => {
   const tmpl = await createTemplate('ApplyAll', {
-    terminalMode: 'codex',
+    agentId: 'codex',
     providerConfig: { codex: { flags: '--test-flag' } },
     panelVisibility: { ...PANEL, editor: true },
     browserTabs: {
@@ -189,7 +189,7 @@ test('template application: explicit templateId applies all fields', async () =>
     title: 'FromTemplate',
     templateId: tmpl.id
   })
-  expect(task.terminal_mode).toBe('codex')
+  expect(task.agent_id).toBe('codex')
   expect(task.provider_config.codex?.flags).toBe('--test-flag')
   expect(task.panel_visibility?.editor).toBe(true)
   expect(task.browser_tabs?.tabs).toHaveLength(1)
@@ -210,19 +210,19 @@ test('template application: project default auto-applies when no templateId', as
     projectId: pid,
     name: 'ProjectDefault',
     isDefault: true,
-    terminalMode: 'codex',
+    agentId: 'codex',
     defaultStatus: 'backlog',
     defaultPriority: 5
   })
   const task = await tasks.create({ projectId: pid, title: 'Auto' })
-  expect(task.terminal_mode).toBe('codex')
+  expect(task.agent_id).toBe('codex')
   expect(task.status).toBe('backlog')
   expect(task.priority).toBe(5)
 })
 
 test('template application: explicit input overrides template + no-template defaults + temp task', async () => {
   const tmpl = await createTemplate('Overridable', {
-    terminalMode: 'codex',
+    agentId: 'codex',
     defaultStatus: 'todo',
     defaultPriority: 1
   })
@@ -230,23 +230,23 @@ test('template application: explicit input overrides template + no-template defa
     projectId,
     title: 'Override',
     templateId: tmpl.id,
-    terminalMode: 'claude-code',
+    agentId: 'claude-code',
     status: 'in_progress',
     priority: 4
   })
-  expect(overridden.terminal_mode).toBe('claude-code')
+  expect(overridden.agent_id).toBe('claude-code')
   expect(overridden.status).toBe('in_progress')
   expect(overridden.priority).toBe(4)
 
   const plainPid = mkProject()
   const plain = await tasks.create({ projectId: plainPid, title: 'Plain' })
-  expect(plain.terminal_mode).toBe('claude-code')
+  expect(plain.agent_id).toBe('claude-code')
   expect(plain.priority).toBe(3)
   expect(plain.panel_visibility).toBeNull()
   expect(plain.browser_tabs).toBeNull()
 
   const tempTmpl = await createTemplate('TempTemplate', {
-    terminalMode: 'codex',
+    agentId: 'codex',
     defaultPriority: 2,
     panelVisibility: PANEL
   })
@@ -257,14 +257,14 @@ test('template application: explicit input overrides template + no-template defa
     templateId: tempTmpl.id
   })
   expect(temp.is_temporary).toBe(true)
-  expect(temp.terminal_mode).toBe('codex')
+  expect(temp.agent_id).toBe('codex')
   expect(temp.priority).toBe(2)
   expect(temp.panel_visibility?.browser).toBe(true)
 })
 
 // ─── updateTask persists template-like fields ───
 
-test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode round-trip + combined', async () => {
+test('updateTask: panelVisibility / browserTabs / webPanelUrls / agentId round-trip + combined', async () => {
   const t1 = await tasks.create({ projectId, title: 'PanelRT' })
   const visUpdated = await tasks.update({
     id: t1.id,
@@ -289,18 +289,18 @@ test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode ro
   expect(webUpdated.web_panel_urls?.grafana).toBe('http://grafana.local')
 
   const t4 = await tasks.create({ projectId, title: 'ModeChange' })
-  expect((await tasks.update({ id: t4.id, terminalMode: 'codex' })).terminal_mode).toBe('codex')
+  expect((await tasks.update({ id: t4.id, agentId: 'codex' })).agent_id).toBe('codex')
 
   const t5 = await tasks.create({ projectId, title: 'ApplySimulation' })
   const combined = await tasks.update({
     id: t5.id,
-    terminalMode: 'codex',
+    agentId: 'codex',
     providerConfig: { codex: { flags: '--custom' } },
     panelVisibility: PANEL,
     browserTabs: { tabs: [{ id: 'b', url: 'http://app', title: 'App' }], activeTabId: 'b' },
     webPanelUrls: { panel1: 'http://panel.local' }
   })
-  expect(combined.terminal_mode).toBe('codex')
+  expect(combined.agent_id).toBe('codex')
   expect(combined.provider_config.codex?.flags).toBeTruthy()
   expect(combined.panel_visibility?.browser).toBe(true)
   expect(combined.browser_tabs?.tabs[0].url).toBe('http://app')

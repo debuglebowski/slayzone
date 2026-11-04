@@ -2,7 +2,7 @@ import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   openTaskTerminal,
-  switchTerminalMode,
+  switchAgent,
   getMainSessionId,
   waitForPtySession,
   runCommand,
@@ -28,7 +28,7 @@ test.describe('PTY fd limit — RLIMIT_NOFILE soft', () => {
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev: 'FD', taskTitle: 'FD limit task' })
-    await switchTerminalMode(mainWindow, 'terminal')
+    await switchAgent(mainWindow, 'terminal')
   })
 
   test('PTY shell sees soft limit >= 65535 (or unlimited)', async ({ mainWindow }) => {

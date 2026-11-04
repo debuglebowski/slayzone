@@ -29,7 +29,7 @@ import {
   type PtyCreateResult
 } from './pty-manager'
 import { listSessions, getSessionState, listChatSessionEntries } from './session-registry'
-import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty-data-ops'
+import { createDbPtySpawnLookups, mapAgentRow, type PtySpawnLookups } from './pty-data-ops'
 import type { TaskSessionStore } from './task-session-store'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { resolveSpawnTarget } from './spawn-target'
@@ -37,12 +37,12 @@ import { getPtyBackend } from './pty-backend'
 import { runDoctor } from './runtime-doctor'
 import { getAdapter, type ExecutionContext } from '../adapters'
 import type {
-  TerminalMode,
-  TerminalModeInfo,
-  CreateTerminalModeInput,
-  UpdateTerminalModeInput
+  AgentId,
+  AgentDefinition,
+  CreateAgentDefinitionInput,
+  UpdateAgentDefinitionInput
 } from '@slayzone/terminal-contracts'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import { parseShellArgs } from '../adapters/flag-parser'
 import {
   getShellOverride,
@@ -71,7 +71,7 @@ export interface PtyCreateOpts {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
-  mode?: TerminalMode
+  mode?: AgentId
   initialPrompt?: string | null
   providerFlags?: string | null
   executionContext?: ExecutionContext | null
@@ -84,7 +84,7 @@ export interface PtyCreateOpts {
 /**
  * Transport-agnostic PTY operations (IPC → tRPC migration, slice 3 / P17).
  *
- * Single implementation of every `pty:*` / `terminalModes:*` / `session:*` /
+ * Single implementation of every `pty:*` / `agents*` / `session:*` /
  * `chat:list` handler body, so the IPC handlers (`registerPtyHandlers`) and the
  * tRPC `pty` router both delegate here — no duplicated logic while both
  * transports coexist (renderer cutover is slice 5). Mirrors the chat/task
@@ -102,22 +102,22 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   setDatabase(db, taskStore)
   // Spawn-time reads (mode row, task→project, computer assignment) — same queries,
   // behind the seam. Injectable (wave 2) so a computer-aware impl can replace the
-  // db default; unset → the db-backed impl (byte-identical). The terminal_modes
+  // db default; unset → the db-backed impl (byte-identical). The agents
   // CRUD below stays on the raw db: that's hub data.
   const lookups = injectedSpawnLookups ?? createDbPtySpawnLookups(db)
 
-  // Terminal Modes CRUD
-  const terminalModesList = async (): Promise<TerminalModeInfo[]> => {
-    const rows = await db.prepare('SELECT * FROM terminal_modes ORDER BY "order" ASC').all()
-    return rows.map(mapModeRow)
+  // Agent definitions CRUD
+  const agentsList = async (): Promise<AgentDefinition[]> => {
+    const rows = await db.prepare('SELECT * FROM agents ORDER BY "order" ASC').all()
+    return rows.map(mapAgentRow)
   }
 
-  const terminalModesTest = async (
+  const agentsTest = async (
     command: string
   ): Promise<{ ok: boolean; error?: string; detail?: string }> => {
     // `which` on THIS machine: refused on a hub with processes switched off (T-06),
     // outside the try so the refusal is not reported as "command not found".
-    assertHubLocalExecEnabled({ op: 'terminal_modes.test' })
+    assertHubLocalExecEnabled({ op: 'agents.test' })
     try {
       const parts = parseShellArgs(command)
       const bin = parts[0]
@@ -132,17 +132,17 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     }
   }
 
-  const terminalModesGet = async (id: string): Promise<TerminalModeInfo | null> => {
-    const row = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
-    return row ? mapModeRow(row) : null
+  const agentsGet = async (id: string): Promise<AgentDefinition | null> => {
+    const row = await db.prepare('SELECT * FROM agents WHERE id = ?').get(id)
+    return row ? mapAgentRow(row) : null
   }
 
-  const terminalModesCreate = async (input: CreateTerminalModeInput): Promise<TerminalModeInfo> => {
+  const agentsCreate = async (input: CreateAgentDefinitionInput): Promise<AgentDefinition> => {
     const id = input.id
     await db
       .prepare(
         `
-      INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order", pattern_working, pattern_error, usage_config)
+      INSERT INTO agents (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order", pattern_working, pattern_error, usage_config)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
     `
       )
@@ -160,17 +160,17 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
         input.patternError ?? null,
         input.usageConfig ? JSON.stringify(input.usageConfig) : null
       )
-    const row = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
-    return mapModeRow(row)
+    const row = await db.prepare('SELECT * FROM agents WHERE id = ?').get(id)
+    return mapAgentRow(row)
   }
 
-  const terminalModesUpdate = async (
+  const agentsUpdate = async (
     id: string,
-    updates: UpdateTerminalModeInput
-  ): Promise<TerminalModeInfo | null> => {
-    const builtinRow = (await db
-      .prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?')
-      .get(id)) as { is_builtin: number } | undefined
+    updates: UpdateAgentDefinitionInput
+  ): Promise<AgentDefinition | null> => {
+    const builtinRow = (await db.prepare('SELECT is_builtin FROM agents WHERE id = ?').get(id)) as
+      | { is_builtin: number }
+      | undefined
     const isBuiltin = Boolean(builtinRow?.is_builtin)
 
     const sets: string[] = []
@@ -224,30 +224,30 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     if (sets.length > 0) {
       sets.push("updated_at = datetime('now')")
       params.push(id)
-      await db.prepare(`UPDATE terminal_modes SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+      await db.prepare(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`).run(...params)
     }
 
-    const updatedRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
-    return updatedRow ? mapModeRow(updatedRow) : null
+    const updatedRow = await db.prepare('SELECT * FROM agents WHERE id = ?').get(id)
+    return updatedRow ? mapAgentRow(updatedRow) : null
   }
 
-  const terminalModesDelete = async (id: string): Promise<boolean> => {
-    const deleteRow = (await db
-      .prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?')
-      .get(id)) as { is_builtin: number } | undefined
+  const agentsDelete = async (id: string): Promise<boolean> => {
+    const deleteRow = (await db.prepare('SELECT is_builtin FROM agents WHERE id = ?').get(id)) as
+      | { is_builtin: number }
+      | undefined
     if (deleteRow?.is_builtin) {
       return false // Built-in modes cannot be deleted
     }
-    await db.prepare('DELETE FROM terminal_modes WHERE id = ?').run(id)
+    await db.prepare('DELETE FROM agents WHERE id = ?').run(id)
     return true
   }
 
-  const terminalModesRestoreDefaults = async (): Promise<void> => {
+  const agentsRestoreDefaults = async (): Promise<void> => {
     const insertSql = `
-        INSERT OR IGNORE INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
+        INSERT OR IGNORE INTO agents (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
       `
-    const ops = DEFAULT_TERMINAL_MODES.map((mode) => ({
+    const ops = DEFAULT_AGENTS.map((mode) => ({
       type: 'run' as const,
       sql: insertSql,
       params: [
@@ -265,14 +265,14 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     await db.batchTxn(ops)
   }
 
-  const terminalModesResetToDefaultState = async (): Promise<void> => {
+  const agentsResetToDefaultState = async (): Promise<void> => {
     const insertSql = `
-        INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
+        INSERT INTO agents (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
       `
     const ops = [
-      { type: 'run' as const, sql: 'DELETE FROM terminal_modes', params: [] as unknown[] },
-      ...DEFAULT_TERMINAL_MODES.map((mode) => ({
+      { type: 'run' as const, sql: 'DELETE FROM agents', params: [] as unknown[] },
+      ...DEFAULT_AGENTS.map((mode) => ({
         type: 'run' as const,
         sql: insertSql,
         params: [
@@ -315,7 +315,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     // Look up mode info to get type, templates, and default flags
     const modeId = opts.mode || 'claude-code'
 
-    const modeInfo = (await lookups.getTerminalMode(modeId)) ?? undefined
+    const modeInfo = (await lookups.getAgent(modeId)) ?? undefined
 
     // Warm-process pool: if a warm agent was reserved for THIS task at create (it
     // booted with the task's id) and the spawn matches it (default mode,
@@ -366,7 +366,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
       cwd,
       conversationId: opts.conversationId,
       existingConversationId: opts.existingConversationId,
-      mode: modeId as TerminalMode,
+      mode: modeId as AgentId,
       initialPrompt: opts.initialPrompt,
       providerArgs,
       executionContext: opts.executionContext,
@@ -416,8 +416,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
 
   /** Doctor. With `taskId`, the computer that task's agents start on answers for
    *  itself — node-pty, shell, binaries (runtime-doctor.ts). */
-  const ptyValidate = async (mode: TerminalMode, taskId?: string) => {
-    const modeInfo = (await lookups.getTerminalMode(mode)) ?? undefined
+  const ptyValidate = async (mode: AgentId, taskId?: string) => {
+    const modeInfo = (await lookups.getAgent(mode)) ?? undefined
     const adapter = getAdapter({
       mode,
       type: modeInfo?.type,
@@ -449,14 +449,14 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     setProjectTabCounts(windowId, counts)
 
   return {
-    terminalModesList,
-    terminalModesTest,
-    terminalModesGet,
-    terminalModesCreate,
-    terminalModesUpdate,
-    terminalModesDelete,
-    terminalModesRestoreDefaults,
-    terminalModesResetToDefaultState,
+    agentsList,
+    agentsTest,
+    agentsGet,
+    agentsCreate,
+    agentsUpdate,
+    agentsDelete,
+    agentsRestoreDefaults,
+    agentsResetToDefaultState,
     ptyCreate,
     setCreateCapture: setPtyCreateCapture,
     takeCreateOpts: takePtyCreateOpts,

@@ -1,13 +1,13 @@
 export type DateRange = '7d' | '30d' | '90d' | 'all'
 
 export interface ProviderOption {
-  /** Terminal mode id (e.g. 'claude-code', 'codex') */
+  /** Agent id (e.g. 'claude-code', 'codex') */
   id: string
   label: string
   hasUsageData: boolean
 }
 
-/** Maps terminal mode IDs to whether we can parse their local usage data */
+/** Maps agent IDs to whether we can parse their local usage data */
 export const PROVIDER_USAGE_SUPPORT: Record<string, { label: string; supported: boolean }> = {
   'claude-code': { label: 'Claude', supported: true },
   codex: { label: 'Codex', supported: true },

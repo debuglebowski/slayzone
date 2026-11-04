@@ -1,6 +1,6 @@
 import type { UserContentBlock } from './agent-events'
 
-export type TerminalMode = string
+export type AgentId = string
 // `hibernated` is a CLIENT-SYNTHESIZED status (PtyContext): the PTY is actually
 // dead, but the idle-close feature killed it and the UI shows it as sleeping
 // (💤) until the user reopens. Main never emits it via the state machine.
@@ -30,7 +30,7 @@ export function isAliveTerminalState(state: TerminalState): boolean {
   return state !== 'dead' && state !== 'hibernated'
 }
 
-export const BuiltinTerminalMode = {
+export const BuiltinAgentId = {
   ClaudeCode: 'claude-code',
   ClaudeChat: 'claude-chat',
   Codex: 'codex',
@@ -70,7 +70,7 @@ export function isPromptCaptureMode(mode: string): mode is PromptCaptureMode {
   return (PROMPT_CAPTURE_MODES as readonly string[]).includes(mode)
 }
 
-export interface TerminalModeInfo {
+export interface AgentDefinition {
   id: string
   label: string
   type: string
@@ -106,7 +106,7 @@ export function supportsFreshPreMint(initialCommand: string | null | undefined):
   return typeof initialCommand === 'string' && initialCommand.includes('{id}')
 }
 
-export interface CreateTerminalModeInput {
+export interface CreateAgentDefinitionInput {
   id: string
   label: string
   type: string
@@ -121,7 +121,7 @@ export interface CreateTerminalModeInput {
   usageConfig?: UsageProviderConfig | null
 }
 
-export interface UpdateTerminalModeInput {
+export interface UpdateAgentDefinitionInput {
   label?: string
   type?: string
   initialCommand?: string | null
@@ -152,9 +152,9 @@ export const DETECTION_ENGINES: DetectionEngine[] = [
   { type: 'copilot', label: 'Copilot' }
 ]
 
-export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
+export const DEFAULT_AGENTS: AgentDefinition[] = [
   {
-    id: BuiltinTerminalMode.ClaudeCode,
+    id: BuiltinAgentId.ClaudeCode,
     label: 'Claude',
     type: 'claude-code',
     initialCommand: 'claude --session-id {id} {flags}',
@@ -166,7 +166,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 0
   },
   {
-    id: BuiltinTerminalMode.ClaudeChat,
+    id: BuiltinAgentId.ClaudeChat,
     label: 'Claude Chat',
     type: 'claude-code',
     initialCommand: null,
@@ -178,7 +178,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 0.5
   },
   {
-    id: BuiltinTerminalMode.Codex,
+    id: BuiltinAgentId.Codex,
     label: 'Codex',
     type: 'codex',
     initialCommand: 'codex {flags}',
@@ -194,7 +194,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     // JSON-RPC protocol. Coexists with the PTY `codex` mode above.
     // `initialCommand`/`resumeCommand` are null: chat is spawned by the
     // chat-transport-manager, not the PTY manager.
-    id: BuiltinTerminalMode.CodexChat,
+    id: BuiltinAgentId.CodexChat,
     label: 'Codex Chat',
     type: 'codex',
     initialCommand: null,
@@ -206,7 +206,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 1.5
   },
   {
-    id: BuiltinTerminalMode.Gemini,
+    id: BuiltinAgentId.Gemini,
     label: 'Gemini',
     type: 'gemini',
     initialCommand: 'gemini {flags}',
@@ -231,7 +231,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     // captured id exists — pty-manager picks `resumeCommand` solely when
     // `resuming = !!existingConversationId`. No id → `initialCommand` (fresh
     // session).
-    id: BuiltinTerminalMode.Antigravity,
+    id: BuiltinAgentId.Antigravity,
     label: 'Antigravity',
     type: 'antigravity',
     initialCommand: 'agy {flags}',
@@ -243,7 +243,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 2.5
   },
   {
-    id: BuiltinTerminalMode.CursorAgent,
+    id: BuiltinAgentId.CursorAgent,
     label: 'Cursor',
     type: 'cursor-agent',
     initialCommand: 'cursor-agent {flags}',
@@ -255,7 +255,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 3
   },
   {
-    id: BuiltinTerminalMode.OpenCode,
+    id: BuiltinAgentId.OpenCode,
     label: 'OpenCode',
     type: 'opencode',
     initialCommand: 'opencode {flags}',
@@ -267,7 +267,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 4
   },
   {
-    id: BuiltinTerminalMode.QwenCode,
+    id: BuiltinAgentId.QwenCode,
     label: 'Qwen',
     type: 'qwen-code',
     initialCommand: 'qwen --session-id {id} {flags}',
@@ -279,7 +279,7 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     order: 6
   },
   {
-    id: BuiltinTerminalMode.Copilot,
+    id: BuiltinAgentId.Copilot,
     label: 'Copilot',
     type: 'copilot',
     initialCommand: 'copilot --resume={id} {flags}',
@@ -304,14 +304,14 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
   }
 ]
 
-/** Ids of the built-in modes. `syncTerminalModes` keeps the DB's `is_builtin` rows
+/** Ids of the built-in agents. `syncAgents` keeps the DB's `is_builtin` rows
  *  equal to this list (it prunes the rest), so this needs no DB read. */
-const BUILTIN_TERMINAL_MODE_IDS: ReadonlySet<string> = new Set(
-  DEFAULT_TERMINAL_MODES.filter((m) => m.isBuiltin).map((m) => m.id)
+const BUILTIN_AGENT_IDS: ReadonlySet<string> = new Set(
+  DEFAULT_AGENTS.filter((m) => m.isBuiltin).map((m) => m.id)
 )
 
-export function isBuiltinTerminalMode(mode: string): boolean {
-  return BUILTIN_TERMINAL_MODE_IDS.has(mode)
+export function isBuiltinAgentId(agentId: string): boolean {
+  return BUILTIN_AGENT_IDS.has(agentId)
 }
 
 /**
@@ -321,14 +321,14 @@ export function isBuiltinTerminalMode(mode: string): boolean {
  *    names their engine but whose spawn and session semantics are their own
  *    (they are not hook-wired), so `type` is never consulted for a built-in;
  *  - a user-defined provider has its own id and declares the agent it wraps in
- *    `terminal_modes.type`. Without a known type it falls back to its own id,
+ *    `agents.type`. Without a known type it falls back to its own id,
  *    which no agent set contains — i.e. the pre-resolution behavior.
  *
- * `declaredType` is the mode row's `type`; callers read it only for a mode that is
+ * `declaredType` is the `agents` row's `type`; callers read it only for a mode that is
  * not built-in.
  */
 export function modeAgentId(mode: string, declaredType: string | null | undefined): string {
-  if (isBuiltinTerminalMode(mode)) return mode
+  if (isBuiltinAgentId(mode)) return mode
   return declaredType || mode
 }
 
@@ -366,7 +366,7 @@ export interface PtyInfo {
   label: string | null
   lastOutputTime: number
   createdAt: number
-  mode: TerminalMode
+  mode: AgentId
   state: TerminalState
   /** Claude background jobs (Bash run_in_background / Monitor) still running. */
   backgroundJobs: number
@@ -391,7 +391,7 @@ export interface ChatSessionStateEntry {
   /** Broadcast format `${taskId}:${tabId}`. */
   sessionId: string
   taskId: string
-  mode: TerminalMode
+  mode: AgentId
   /** Last event flow timestamp (ms). Same semantics as PtyInfo.lastOutputTime. */
   lastOutputTime: number
   state: TerminalState
@@ -455,7 +455,7 @@ export interface ProviderUsage {
   fetchedAt: number
 }
 
-// Custom usage provider configuration (stored as JSON in terminal_modes.usage_config)
+// Custom usage provider configuration (stored as JSON in agents.usage_config)
 export interface UsageWindowMapping {
   key?: string // dot-path to key field, or omit for auto-index
   label: string // dot-path or literal prefixed with "="
@@ -484,13 +484,13 @@ export interface UsageProviderConfig {
 }
 
 /** Command to discover session ID for providers that don't support --session-id at creation. */
-export const SESSION_ID_COMMANDS: Partial<Record<TerminalMode, string>> = {
+export const SESSION_ID_COMMANDS: Partial<Record<AgentId, string>> = {
   codex: '/status',
   gemini: '/stats'
 }
 
 /** Providers where session ID detection is not possible — no --session-id flag and no detection command. */
-export const SESSION_ID_UNAVAILABLE: readonly TerminalMode[] = ['cursor-agent', 'opencode']
+export const SESSION_ID_UNAVAILABLE: readonly AgentId[] = ['cursor-agent', 'opencode']
 
 export type SkillSource = 'user' | 'project' | 'agents'
 

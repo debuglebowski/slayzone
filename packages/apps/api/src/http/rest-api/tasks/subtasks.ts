@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Express } from 'express'
 import { getDefaultStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import { insertTaskRow } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
@@ -9,8 +9,8 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 /**
  * GET  /api/tasks/:id/subtasks — list direct subtasks (CLI `slay tasks subtasks`).
  * POST /api/tasks/:id/subtasks — create a subtask (CLI `slay tasks subtask-add`):
- * inherits the parent's project + terminal mode (falling back to the
- * `default_terminal_mode` setting, then 'claude-code'), snapshots the current
+ * inherits the parent's project + agent (falling back to the
+ * `default_agent_id` setting, then 'claude-code'), snapshots the current
  * provider flag config, supports external-id dedupe (returns the existing row
  * with `existing: true` instead of erroring).
  */
@@ -18,7 +18,7 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 interface ParentRow {
   id: string
   project_id: string
-  terminal_mode: string | null
+  agent_id: string | null
 }
 
 async function buildProviderConfig(
@@ -26,12 +26,12 @@ async function buildProviderConfig(
 ): Promise<Record<string, { flags: string }>> {
   let rows: { id: string; default_flags: string | null }[] = []
   try {
-    rows = await db.all(`SELECT id, default_flags FROM terminal_modes WHERE enabled = 1`)
+    rows = await db.all(`SELECT id, default_flags FROM agents WHERE enabled = 1`)
   } catch {
     /* table may not exist */
   }
   if (rows.length === 0) {
-    rows = DEFAULT_TERMINAL_MODES.filter((m) => m.enabled).map((m) => ({
+    rows = DEFAULT_AGENTS.filter((m) => m.enabled).map((m) => ({
       id: m.id,
       default_flags: m.defaultFlags ?? ''
     }))
@@ -100,7 +100,7 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
         'tasks',
         req.params.id,
         'Task',
-        'id, project_id, terminal_mode'
+        'id, project_id, agent_id'
       )
       if (isResolveFailure(resolved)) {
         res.status(resolved.status).json({ ok: false, error: resolved.error })
@@ -143,11 +143,11 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
         return
       }
 
-      const terminalMode =
-        parent.terminal_mode ??
+      const agentId =
+        parent.agent_id ??
         (
           await db.get<{ value: string }>(
-            `SELECT value FROM settings WHERE key = 'default_terminal_mode' LIMIT 1`
+            `SELECT value FROM settings WHERE key = 'default_agent_id' LIMIT 1`
           )
         )?.value ??
         'claude-code'
@@ -173,7 +173,7 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
           status: status ?? getDefaultStatus(parentColumns),
           priority,
           dueDate: null,
-          terminalMode,
+          agentId,
           providerConfig,
           isTemporary: false,
           repoName: null,

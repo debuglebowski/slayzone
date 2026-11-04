@@ -8,14 +8,14 @@
  * `agent:lifecycle` IPC channel.
  */
 
-export type AgentId = 'claude-code' | 'codex' | 'gemini' | 'antigravity' | 'opencode'
+import type { HookAgentId } from './agent-hook'
 
 /**
  * Runtime allowlist for agents that currently emit hook lifecycle events.
  * Used at PTY/chat spawn time to gate `SLAYZONE_AGENT_HOOK_URL` injection.
  * Add an agent here once both its hook script + installer have shipped.
  */
-export const HOOK_SUPPORTED_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
+export const HOOK_SUPPORTED_AGENT_IDS: ReadonlySet<HookAgentId> = new Set<HookAgentId>([
   'claude-code',
   'codex',
   'gemini',
@@ -31,7 +31,7 @@ export type AgentLifecycleEventType =
   | 'session-end'
 
 export interface AgentLifecycleEvent {
-  agentId: AgentId
+  agentId: HookAgentId
   type: AgentLifecycleEventType
   taskId?: string
   sessionId?: string
@@ -107,7 +107,7 @@ const ALIAS_TABLE: Record<string, AgentLifecycleEventType> = {
  * (model thinks next), while Codex's `after_tool` means tool finished —
  * quiescent. Same string, opposite meaning.
  */
-const PER_AGENT_OVERRIDES: Partial<Record<AgentId, Record<string, AgentLifecycleEventType>>> = {
+const PER_AGENT_OVERRIDES: Partial<Record<HookAgentId, Record<string, AgentLifecycleEventType>>> = {
   gemini: {
     beforeagent: 'agent-start',
     afteragent: 'agent-stop',
@@ -122,7 +122,10 @@ const PER_AGENT_OVERRIDES: Partial<Record<AgentId, Record<string, AgentLifecycle
  *
  * Pass `agentId` to consult per-agent overrides before the shared table.
  */
-export function mapEventType(hookEvent: string, agentId?: AgentId): AgentLifecycleEventType | null {
+export function mapEventType(
+  hookEvent: string,
+  agentId?: HookAgentId
+): AgentLifecycleEventType | null {
   if (!hookEvent) return null
   const key = hookEvent.trim().toLowerCase()
   const stripped = key.replace(/[_\-\s]/g, '')

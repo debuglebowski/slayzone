@@ -35,7 +35,7 @@ export type SettingScope = 'hub' | 'user' | 'internal'
 /** Read by hub server code (file named for the reader). */
 const HUB_KEYS: ReadonlySet<string> = new Set([
   // task create (task ops, MCP create-subtask, REST subtasks + skills, ai-config)
-  'default_terminal_mode',
+  'default_agent_id',
   // task create (task ops shared.ts)
   'auto_create_worktree_on_task_create',
   'worktree_base_path',
@@ -65,7 +65,7 @@ const HUB_KEYS: ReadonlySet<string> = new Set([
   'hub_label',
   'backup_names',
   // Legacy per-provider default flags: seeded by early migrations and read only by
-  // v61, which moved them to `terminal_modes.default_flags`. Hub-wide by origin.
+  // v61, which moved them to `terminal_modes.default_flags` (now `agents.default_flags`). Hub-wide by origin.
   'default_claude_flags',
   'default_codex_flags',
   'default_cursor_flags',
@@ -77,7 +77,7 @@ const HUB_KEYS: ReadonlySet<string> = new Set([
 const HUB_PREFIXES: readonly string[] = ['ai_providers:', 'ai_instruction_variant:']
 
 /**
- * Per-provider chat defaults (`chat_default_mode:<terminalMode>` …) read by the
+ * Per-provider chat defaults (`chat_default_mode:<agentId>` …) read by the
  * chat spawn (terminal chat-data-ops.ts) for tasks that never picked one. Not
  * project-keyed, so kept out of `HUB_PREFIXES` (`settingProjectId`).
  */

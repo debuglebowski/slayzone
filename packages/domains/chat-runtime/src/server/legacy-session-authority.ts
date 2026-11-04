@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
-import { terminalStorageMode } from './storage-mode'
+import { terminalStorageAgentId } from './storage-mode'
 
 /** Historical session lists are shared metadata, not proof that every copy owns
  * the provider session. Elect once from provider/tab/computer provenance. An
@@ -12,7 +12,7 @@ export async function legacySessionAuthority(
   sessionId: string,
   resolveComputer?: (owner: HubChatOwnership) => Promise<string | null>
 ): Promise<string | null> {
-  const canonical = terminalStorageMode(mode)
+  const canonical = terminalStorageAgentId(mode)
   const existing = await db.get<{ conversation_id: string | null }>(
     'SELECT conversation_id FROM chat_legacy_session_authority WHERE task_id=? AND mode=? AND provider_session_id=?',
     [taskId, canonical, sessionId]
@@ -23,7 +23,7 @@ export async function legacySessionAuthority(
   let selected =
     bound?.taskId === taskId &&
     bound.state === 'active' &&
-    terminalStorageMode(bound.mode) === canonical
+    terminalStorageAgentId(bound.mode) === canonical
       ? bound.id
       : null
   if (!selected) {
@@ -34,7 +34,7 @@ export async function legacySessionAuthority(
       order: string
     }> = []
     for (const owner of await store.forTask(taskId)) {
-      if (owner.state === 'deleted' || terminalStorageMode(owner.mode) !== canonical) continue
+      if (owner.state === 'deleted' || terminalStorageAgentId(owner.mode) !== canonical) continue
       const tab = await db.get<{ created_at: string }>(
         'SELECT created_at FROM terminal_tabs WHERE id=? AND task_id=?',
         [owner.tabId, taskId]

@@ -1,35 +1,35 @@
 import type { Database } from 'better-sqlite3'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 
 /**
- * Synchronize terminal modes in the database with the default modes defined in code.
+ * Synchronize agents in the database with the default agents defined in code.
  * This ensures that new built-in modes are added and existing ones are updated
  * across app versions, while preserving user-added custom modes.
  */
-export function syncTerminalModes(db: Database): void {
+export function syncAgents(db: Database): void {
   db.transaction(() => {
     const insertStmt = db.prepare(`
-      INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
+      INSERT INTO agents (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `)
 
     const updateStmt = db.prepare(`
-      UPDATE terminal_modes
+      UPDATE agents
       SET label = ?, type = ?, initial_command = ?, resume_command = ?, headless_command = ?, is_builtin = 1, updated_at = datetime('now')
       WHERE id = ?
     `)
 
-    const existsStmt = db.prepare('SELECT id FROM terminal_modes WHERE id = ?')
+    const existsStmt = db.prepare('SELECT id FROM agents WHERE id = ?')
 
     // Prune legacy built-ins that are no longer in the code definition
-    const builtinIds = DEFAULT_TERMINAL_MODES.map((m) => m.id)
+    const builtinIds = DEFAULT_AGENTS.map((m) => m.id)
     const placeholders = builtinIds.map(() => '?').join(',')
     db.prepare(`
-      DELETE FROM terminal_modes
+      DELETE FROM agents
       WHERE is_builtin = 1 AND id NOT IN (${placeholders})
     `).run(...builtinIds)
 
-    for (const mode of DEFAULT_TERMINAL_MODES) {
+    for (const mode of DEFAULT_AGENTS) {
       if (!mode.isBuiltin) continue
 
       const existing = existsStmt.get(mode.id)

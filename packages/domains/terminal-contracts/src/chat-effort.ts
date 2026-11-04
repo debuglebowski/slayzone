@@ -3,7 +3,7 @@ import type { ChatModel } from './chat-model'
 /**
  * Reasoning effort level for the chat subprocess. `null` = inherit provider
  * default (no `--effort` flag emitted). Stored in
- * `provider_config.<terminalMode>.chatEffort`.
+ * `provider_config.<agentId>.chatEffort`.
  *
  * Mirrors `claude --effort` accepted values. Pill is gated by
  * `modelSupportsEffort` — haiku has no extended thinking and the flag is hidden.

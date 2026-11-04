@@ -62,7 +62,7 @@ const ALLOWLIST = {
   'packages/domains/terminal/src/server/files-scan.ts':
     '@file autocomplete git ls-files; refuses (T-06)',
   'packages/domains/terminal/src/server/runtime/pty-store.ts':
-    'terminal-mode which probe; refuses (T-06)',
+    'agent command which probe; refuses (T-06)',
   'packages/domains/ai-config/src/server/handlers-store.ts':
     'setupSlay runs slay init; refuses (T-06)',
   'packages/apps/hub/src/shell-native.ts': 'open/xdg-open/explorer; refuse (T-06)',

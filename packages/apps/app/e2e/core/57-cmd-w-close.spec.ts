@@ -108,9 +108,9 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
       await input.fill(title)
       await page.getByRole('dialog').last().getByText(title).first().click()
     }
-    await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible(
-      { timeout: 5_000 }
-    )
+    await expect(page.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
   }
 
   const openEditorFile = async (page: Page, fileName: string) => {
@@ -184,7 +184,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
       projectId: p.id,
       title: 'CmdW task',
       status: 'in_progress',
-      terminalMode: 'terminal'
+      agentId: 'terminal'
     })
     await s.refreshData()
 
@@ -241,10 +241,9 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     await focusTerminal(mainWindow)
     await emitMenu(mainWindow, 'close-current-focus')
 
-    await expect(mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible')).toHaveCount(
-      0,
-      { timeout: 2_000 }
-    )
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible')).toHaveCount(0, {
+      timeout: 2_000
+    })
     await expect(mainWindow.locator('input[value="CmdW task"]:visible')).toHaveCount(0, {
       timeout: 2_000
     })

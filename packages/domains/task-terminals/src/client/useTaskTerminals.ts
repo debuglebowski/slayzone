@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { usePty } from '@slayzone/terminal'
 
 interface UseTaskTerminalsResult {
@@ -11,7 +11,7 @@ interface UseTaskTerminalsResult {
   groups: TerminalGroup[]
   activeGroupId: string
   setActiveGroupId: (id: string) => void
-  createTab: (mode?: TerminalMode) => Promise<TerminalTab>
+  createTab: (mode?: AgentId) => Promise<TerminalTab>
   splitTab: (tabId: string) => Promise<TerminalTab | null>
   closeTab: (tabId: string) => Promise<boolean>
   movePane: (tabId: string, targetGroupId: string | null) => Promise<void>
@@ -50,10 +50,7 @@ function computeGroups(tabs: TerminalTab[]): TerminalGroup[] {
   return groups
 }
 
-export function useTaskTerminals(
-  taskId: string,
-  defaultMode: TerminalMode
-): UseTaskTerminalsResult {
+export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskTerminalsResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const [tabs, setTabs] = useState<TerminalTab[]>([])
@@ -121,7 +118,7 @@ export function useTaskTerminals(
 
   // Create a new group with one terminal
   const createTab = useCallback(
-    async (mode?: TerminalMode): Promise<TerminalTab> => {
+    async (mode?: AgentId): Promise<TerminalTab> => {
       const newTab = await createTerminal({ taskId, mode: mode || 'terminal' })
       setTabs((prev) => [...prev, newTab])
       setActiveGroupId(newTab.groupId)

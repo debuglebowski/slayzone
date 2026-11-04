@@ -4,7 +4,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import {
   assertChatTabStateScope,
   type ChatTabStateScope,
-  chatModeForTerminal,
+  chatAgentIdForTerminal,
   type AgentEvent,
   type ChatSessionStateEntry
 } from '@slayzone/terminal-contracts'
@@ -346,7 +346,7 @@ export function createHubChatRelay(opts: {
     )
     const tab =
       tabs.find((t) => supportsChatMode(t.mode) && (!mode || t.mode === mode)) ??
-      tabs.find((t) => (chatModeForTerminal(t.mode) ?? t.mode) === mode)
+      tabs.find((t) => (chatAgentIdForTerminal(t.mode) ?? t.mode) === mode)
     if (!tab) throw new Error('Task has no chat tab for this provider')
     return ensureTab(tab.id)
   }

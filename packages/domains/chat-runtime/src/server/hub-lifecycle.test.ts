@@ -8,7 +8,10 @@ import { createChatLifecycle } from './hub-lifecycle'
 test('reconnect barrier delivers lifecycle before commands and never acknowledges a failed deletion', async () => {
   const db = new Database(':memory:')
   db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY,deleted_at TEXT,archived_at TEXT)')
-  for (const migration of migrations.filter((m) => m.version >= 187)) migration.up(db)
+  // From the chat-ownership migrations (187) on, minus v192: it renames
+  // `terminal_modes` / `tasks.terminal_mode`, which this skeleton DB does not have.
+  for (const migration of migrations.filter((m) => m.version >= 187 && m.version !== 192))
+    migration.up(db)
   try {
     const adapter = createSlayzoneDbAdapter(db),
       ownership = createChatOwnershipStore(adapter)

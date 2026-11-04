@@ -1,8 +1,8 @@
 import type {
-  TerminalMode,
-  TerminalModeInfo,
-  CreateTerminalModeInput,
-  UpdateTerminalModeInput
+  AgentId,
+  AgentDefinition,
+  CreateAgentDefinitionInput,
+  UpdateAgentDefinitionInput
 } from '@slayzone/terminal-contracts'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { ProviderListView } from './ai-providers/ProviderListView'
@@ -12,15 +12,15 @@ import { useAiProviderForm } from './ai-providers/useAiProviderForm'
 interface AiProvidersSettingsTabProps {
   activeTab: string
   navigateTo: (tab: string) => void
-  modes: TerminalModeInfo[]
-  createMode: (input: CreateTerminalModeInput) => Promise<TerminalModeInfo>
-  updateMode: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
+  modes: AgentDefinition[]
+  createMode: (input: CreateAgentDefinitionInput) => Promise<AgentDefinition>
+  updateMode: (id: string, updates: UpdateAgentDefinitionInput) => Promise<AgentDefinition | null>
   deleteMode: (id: string) => Promise<boolean>
   testMode: (command: string) => Promise<{ ok: boolean; error?: string; detail?: string }>
   restoreDefaults: () => Promise<void>
   resetToDefaultState: () => Promise<void>
-  defaultTerminalMode: TerminalMode
-  onDefaultTerminalModeChange: (mode: TerminalMode) => void
+  defaultAgentId: AgentId
+  onDefaultAgentIdChange: (mode: AgentId) => void
 }
 
 export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
@@ -34,8 +34,8 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
     testMode,
     restoreDefaults,
     resetToDefaultState,
-    defaultTerminalMode,
-    onDefaultTerminalModeChange
+    defaultAgentId,
+    onDefaultAgentIdChange
   } = props
 
   const form = useAiProviderForm({ createMode, testMode })
@@ -44,7 +44,7 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
     <>
       <SettingsTabIntro
         title="Providers"
-        description="Configure AI coding assistants and custom terminal modes. Each provider can have its own root command and default flags."
+        description="Configure AI coding assistants and custom agents. Each provider can have its own root command and default flags."
       />
 
       {activeTab === 'ai-providers' && (
@@ -54,8 +54,8 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
           updateMode={updateMode}
           restoreDefaults={restoreDefaults}
           resetToDefaultState={resetToDefaultState}
-          defaultTerminalMode={defaultTerminalMode}
-          onDefaultTerminalModeChange={onDefaultTerminalModeChange}
+          defaultAgentId={defaultAgentId}
+          onDefaultAgentIdChange={onDefaultAgentIdChange}
           form={form}
         />
       )}

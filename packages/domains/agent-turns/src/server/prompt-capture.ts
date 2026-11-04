@@ -47,7 +47,7 @@ export interface CapturePromptInput {
 
 /**
  * Capture one user prompt from an agent hook ping. No-op unless: the agent is a
- * capture-capable terminal mode, the event is UserPromptSubmit, and the payload
+ * capture-capable agent, the event is UserPromptSubmit, and the payload
  * carries non-empty prompt text. Best-effort — never throws into the hook path.
  */
 export async function capturePrompt(db: SlayzoneDb, input: CapturePromptInput): Promise<void> {

@@ -82,9 +82,9 @@ test.describe('Artifacts panel', () => {
       timeout: 5_000
     })
     await mainWindow.getByText('Artifacts test task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-testid="agent-trigger"]:visible').first()).toBeVisible({
+      timeout: 5_000
+    })
   })
 
   // --- Group 1: Panel basics ---

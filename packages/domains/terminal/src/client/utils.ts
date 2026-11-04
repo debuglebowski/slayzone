@@ -1,20 +1,20 @@
-import type { TerminalModeInfo } from '@slayzone/terminal-contracts'
+import type { AgentDefinition } from '@slayzone/terminal-contracts'
 
 /**
- * Filter and sort terminal modes for display in selectors.
+ * Filter and sort agents for display in selectors.
  */
 export function getVisibleModes(
-  modes: TerminalModeInfo[],
+  modes: AgentDefinition[],
   currentMode?: string | null
-): TerminalModeInfo[] {
+): AgentDefinition[] {
   const filtered = modes.filter((m) => m.enabled || m.id === currentMode)
   return [...filtered].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
 /**
- * Groups terminal modes into Built-in and Custom categories.
+ * Groups agents into Built-in and Custom categories.
  */
-export function groupTerminalModes(modes: TerminalModeInfo[]) {
+export function groupAgents(modes: AgentDefinition[]) {
   const builtin = modes.filter((m) => m.isBuiltin)
   const custom = modes.filter((m) => !m.isBuiltin)
 
@@ -22,8 +22,8 @@ export function groupTerminalModes(modes: TerminalModeInfo[]) {
 }
 
 /**
- * Get the display label for a terminal mode, with special handling for built-in cases.
+ * Get the display label for an agent, with special handling for built-in cases.
  */
-export function getModeLabel(mode: TerminalModeInfo | { id: string; label: string }): string {
+export function getModeLabel(mode: AgentDefinition | { id: string; label: string }): string {
   return mode.label
 }

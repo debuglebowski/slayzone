@@ -1,11 +1,11 @@
-import type { AgentState, TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentState, AgentId } from '@slayzone/terminal-contracts'
 
 export interface TerminalTab {
   id: string // UUID or "main"
   taskId: string
   groupId: string // tabs with same groupId render side-by-side
   label: string | null
-  mode: TerminalMode
+  mode: AgentId
   isMain: boolean
   position: number
   createdAt: string
@@ -27,13 +27,13 @@ export interface TerminalGroup {
 
 export interface CreateTerminalTabInput {
   taskId: string
-  mode?: TerminalMode
+  mode?: AgentId
   label?: string
 }
 
 export interface UpdateTerminalTabInput {
   id: string
   label?: string | null
-  mode?: TerminalMode
+  mode?: AgentId
   position?: number
 }

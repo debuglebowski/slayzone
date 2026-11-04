@@ -71,7 +71,7 @@ describe('settings.set for a web session', () => {
   test('never writes a hub-wide or internal key, even on an admin account', async () => {
     for (const key of [
       'test_profiles',
-      'default_terminal_mode',
+      'default_agent_id',
       'worktree_copy_paths',
       'ai_providers:p1',
       'integration:credential:linear'

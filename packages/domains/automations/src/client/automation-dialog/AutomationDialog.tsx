@@ -44,7 +44,7 @@ export function AutomationDialog({
   // Provider list — only fetched while the dialog is open (mirrors the old
   // open-gated load). `providersLoaded` flips true once the query settles, and
   // on error we fall back to an empty list (same as the old `.catch`).
-  const modesQuery = useQuery(trpc.pty.modesList.queryOptions(undefined, { enabled: open }))
+  const modesQuery = useQuery(trpc.pty.agentsList.queryOptions(undefined, { enabled: open }))
   const providers = useMemo<AiProviderOption[]>(() => {
     if (modesQuery.isError) return []
     return (modesQuery.data ?? [])

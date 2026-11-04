@@ -24,7 +24,7 @@ import {
   parseColumnsConfig,
   WORKFLOW_CATEGORIES
 } from '@slayzone/projects-contracts'
-import { chatOwnsSpawnFlags, DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
+import { chatOwnsSpawnFlags, DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
@@ -508,21 +508,19 @@ export async function getProjectColumns(
   return parseColumnsConfig(row?.columns_config)
 }
 
-export type TerminalModeFlagsRow = { id: string; default_flags: string | null }
+export type AgentFlagsRow = { id: string; default_flags: string | null }
 
-export async function getEnabledModeDefaults(db: SlayzoneDb): Promise<TerminalModeFlagsRow[]> {
-  let rows: TerminalModeFlagsRow[] = []
+export async function getEnabledModeDefaults(db: SlayzoneDb): Promise<AgentFlagsRow[]> {
+  let rows: AgentFlagsRow[] = []
   try {
-    rows = await db.all<TerminalModeFlagsRow>(
-      'SELECT id, default_flags FROM terminal_modes WHERE enabled = 1'
-    )
+    rows = await db.all<AgentFlagsRow>('SELECT id, default_flags FROM agents WHERE enabled = 1')
   } catch {
     rows = []
   }
 
   if (rows.length > 0) return rows
 
-  return DEFAULT_TERMINAL_MODES.filter((mode) => mode.enabled).map((mode) => ({
+  return DEFAULT_AGENTS.filter((mode) => mode.enabled).map((mode) => ({
     id: mode.id,
     default_flags: mode.defaultFlags ?? ''
   }))
@@ -534,15 +532,15 @@ export async function getModeDefaultFlags(
 ): Promise<string | undefined> {
   try {
     const row = await db.get<{ default_flags: string | null }>(
-      'SELECT default_flags FROM terminal_modes WHERE id = ?',
+      'SELECT default_flags FROM agents WHERE id = ?',
       [modeId]
     )
     if (row) return row.default_flags ?? ''
   } catch {
-    // Fall back to built-in defaults when terminal_modes is unavailable or unseeded.
+    // Fall back to built-in defaults when agents is unavailable or unseeded.
   }
 
-  const fallback = DEFAULT_TERMINAL_MODES.find((mode) => mode.id === modeId)
+  const fallback = DEFAULT_AGENTS.find((mode) => mode.id === modeId)
   return fallback ? (fallback.defaultFlags ?? '') : undefined
 }
 
@@ -1087,9 +1085,9 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     fields.push('parent_id = ?')
     values.push(data.parentId)
   }
-  if (data.terminalMode !== undefined) {
-    fields.push('terminal_mode = ?')
-    values.push(data.terminalMode)
+  if (data.agentId !== undefined) {
+    fields.push('agent_id = ?')
+    values.push(data.agentId)
   }
   if (data.terminalShell !== undefined) {
     fields.push('terminal_shell = ?')
@@ -1156,7 +1154,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     if (
       data.providerConfig !== undefined ||
       hasLegacyUpdate ||
-      data.terminalMode !== undefined ||
+      data.agentId !== undefined ||
       shouldResetConversationIds
     ) {
       // Read current provider_config
@@ -1191,12 +1189,12 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
         }
       }
 
-      // Seed default flags when switching terminal mode (not for Claude chat,
+      // Seed default flags when switching agent (not for Claude chat,
       // whose pills own its spawn flags)
-      if (data.terminalMode !== undefined && !chatOwnsSpawnFlags(data.terminalMode)) {
-        const defaultFlags = await getModeDefaultFlags(db, data.terminalMode)
+      if (data.agentId !== undefined && !chatOwnsSpawnFlags(data.agentId)) {
+        const defaultFlags = await getModeDefaultFlags(db, data.agentId)
         if (defaultFlags !== undefined) {
-          merged[data.terminalMode] = { ...merged[data.terminalMode], flags: defaultFlags }
+          merged[data.agentId] = { ...merged[data.agentId], flags: defaultFlags }
         }
       }
 
@@ -1445,7 +1443,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   //   - renderer Detect → parses /status from slay's own PTY (the agent's
   //     real sessionId)
   //   - renderer Reset Terminal → writes null
-  //   - server-internal terminal-mode / worktree paths → don't carry foreign
+  //   - server-internal agent / worktree paths → don't carry foreign
   //     conv-ids
   // If you add an `updateTask` caller that takes a user-controlled or
   // network-supplied conversation id and threads it through `providerConfig`,

@@ -78,7 +78,7 @@ describe('addressing', () => {
     expect((await rest.request('GET', '/api/chat/ffffffff/status')).status).toBe(404)
   })
 
-  test('a terminal-mode task is refused with a pointer to slay agent', async () => {
+  test('a terminal-agent task is refused with a pointer to slay agent', async () => {
     const res = await rest.request<{ error: string }>('GET', `/api/chat/${ptyTask}/status`)
     expect(res.status).toBe(409)
     expect(res.body.error).toMatch(/slay agent/)

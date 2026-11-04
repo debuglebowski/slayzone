@@ -92,7 +92,7 @@ test.describe('hidden task terminals parse output but do not paint it', () => {
         projectId: p.id,
         title: `Hidden paint ${i}`,
         status: 'in_progress',
-        terminalMode: 'terminal'
+        agentId: 'terminal'
       })
       if (i === 0) visibleId = t.id
       else hiddenIds.push(t.id)

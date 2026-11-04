@@ -98,7 +98,7 @@ function useBoostStatus() {
   useEffect(() => {
     if (Date.now() >= PROMO_END.getTime()) return
 
-    trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then((mode) => {
+    trpcClient.settings.get.query({ key: 'default_agent_id' }).then((mode) => {
       if (!mode || !mode.toLowerCase().includes('claude')) return
       setVisible(true)
 

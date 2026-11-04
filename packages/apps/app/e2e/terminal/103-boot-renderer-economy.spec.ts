@@ -109,7 +109,7 @@ test.describe('boot renderer economy', () => {
         projectId: p.id,
         title: `Boot econ ${i}`,
         status: 'in_progress',
-        terminalMode: 'terminal'
+        agentId: 'terminal'
       })
       taskIds.push(t.id)
     }

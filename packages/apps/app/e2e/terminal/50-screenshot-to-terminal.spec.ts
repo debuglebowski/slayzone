@@ -2,7 +2,7 @@ import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   openTaskTerminal,
-  switchTerminalMode,
+  switchAgent,
   getMainSessionId,
   waitForPtySession,
   waitForBufferContains,
@@ -42,7 +42,7 @@ test.describe('Screenshot browser to terminal', () => {
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Screenshot task' })
-    await switchTerminalMode(mainWindow, 'terminal')
+    await switchAgent(mainWindow, 'terminal')
     await waitForPtySession(mainWindow, sessionId)
     await expect(mainWindow.locator('.xterm-screen:visible')).toBeVisible({ timeout: 5_000 })
   })

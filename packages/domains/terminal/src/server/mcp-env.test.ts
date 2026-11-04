@@ -80,13 +80,13 @@ const REMOTE: RemoteMcpEnv = {
 
 const LOOPBACK_HOOK_URL = `http://127.0.0.1:${MCP_PORT}${AGENT_HOOK_PATH}`
 
-// A db that knows `terminal_modes` rows (id → declared `type`) and nothing else —
+// A db that knows `agents` rows (id → declared `type`) and nothing else —
 // enough for buildMcpEnv to resolve the agent a mode runs. Built-in rows are listed
 // too, so a test proves a built-in is NOT re-resolved through its `type`.
 function dbWithModes(types: Record<string, string>): never {
   return {
     get: async (sql: string, params: unknown[] = []) => {
-      if (!sql.includes('FROM terminal_modes')) return undefined
+      if (!sql.includes('FROM agents')) return undefined
       const type = types[params[0] as string]
       return type ? { type } : undefined
     }

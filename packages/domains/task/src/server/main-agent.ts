@@ -129,7 +129,7 @@ export async function resolveMainAgentLaunch(
     await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
   )
   const pty = getPtyDeps().ops
-  const props = mainTerminalProps(task, project, await pty.terminalModesList())
+  const props = mainTerminalProps(task, project, await pty.agentsList())
   // The main tab follows the task's mode, as the desktop's `taskTerminals.ensureMain`.
   const tab = await ensureMainTab(db, taskId, props.mode)
   return {
@@ -235,7 +235,7 @@ async function liveState(kind: 'pty' | 'chat', sessionId: string): Promise<Termi
 
 export interface SwitchMainAgentModeInput {
   taskId: string
-  /** A `terminal_modes` id (`claude-code`, `codex`, `claude-chat`, …). */
+  /** An `agents` id (`claude-code`, `codex`, `claude-chat`, …). */
   mode: string
 }
 
@@ -259,9 +259,9 @@ export async function switchMainAgentMode(
 ): Promise<Task> {
   const task = await io.getTask(taskId)
   if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-  if (task.terminal_mode === mode) return task
+  if (task.agent_id === mode) return task
 
-  const modes = await getPtyDeps().ops.terminalModesList()
+  const modes = await getPtyDeps().ops.agentsList()
   const target = modes.find((m) => m.id === mode)
   if (!target || !target.enabled) {
     const enabled = modes.filter((m) => m.enabled).map((m) => m.id)
@@ -277,7 +277,7 @@ export async function switchMainAgentMode(
 
   const updated = await io.update({
     id: taskId,
-    terminalMode: mode,
+    agentId: mode,
     providerConfig: clearAllConversationIds(task.provider_config)
   })
   if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })

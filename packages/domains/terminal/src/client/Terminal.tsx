@@ -70,7 +70,7 @@ import type { TerminalState } from '@slayzone/terminal-contracts'
 import { startingWatchdogVerdict, STARTING_WATCHDOG_INTERVAL_MS } from './starting-watchdog'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import {
-  chatModeForTerminal,
+  chatAgentIdForTerminal,
   stripUnderlineCodes,
   KITTY_SHIFT_ENTER,
   DETECTION_ENGINES
@@ -1262,7 +1262,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // "Continue here" on a start refused because a chat of the task runs the
   // conversation (chat E): the chat's hand-off (A's `continueInTerminal`) stops
   // it and points this mode at the conversation, then the main tab restarts.
-  const handoffChatMode = chatModeForTerminal(mode)
+  const handoffChatMode = chatAgentIdForTerminal(mode)
   const continueHere = useMemo(
     () =>
       handoffChatMode && onRetry

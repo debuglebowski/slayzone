@@ -116,7 +116,7 @@ test('create: creates with defaults', async () => {
   expect(t.title).toBe('First task')
   expect(t.status).toBe('todo') // project default (first column) — handler used 'inbox' default project
   expect(t.priority).toBe(3)
-  expect(t.terminal_mode).toBe('claude-code')
+  expect(t.agent_id).toBe('claude-code')
   expect(t.project_id).toBe(projectId)
   expect(t.archived_at).toBeNull()
   expect(t.description).toBeNull()
@@ -567,7 +567,7 @@ test('update: updates worktree fields', async () => {
 })
 
 test('update: clears conversation IDs when worktreePath changes', async () => {
-  const t = await createTask('SessionReset', { terminalMode: 'codex' })
+  const t = await createTask('SessionReset', { agentId: 'codex' })
   const withSession = await up({
     id: t.id,
     providerConfig: { codex: { conversationId: 'stale-session-123' } }
@@ -1008,7 +1008,7 @@ function seedReviveTask(status: string): string {
   const id = crypto.randomUUID()
   h.db
     .prepare(
-      'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config) VALUES (?, ?, ?, ?, 3, ?, ?)'
+      'INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config) VALUES (?, ?, ?, ?, 3, ?, ?)'
     )
     .run(id, reviveProjectId, `task-${status}`, status, 'claude-code', '{}')
   return id
@@ -1066,7 +1066,7 @@ function seedAttnTask(): string {
   const id = crypto.randomUUID()
   h.db
     .prepare(
-      'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config) VALUES (?, ?, ?, ?, 3, ?, ?)'
+      'INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config) VALUES (?, ?, ?, ?, 3, ?, ?)'
     )
     .run(id, attnProjectId, `attn-${id.slice(0, 6)}`, 'todo', 'claude-code', '{}')
   return id
@@ -1200,7 +1200,7 @@ function seedTempTask(initialStatus = 'inbox'): string {
   const id = crypto.randomUUID()
   h.db
     .prepare(
-      'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, is_temporary) VALUES (?, ?, ?, ?, 3, ?, ?, 1)'
+      'INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, is_temporary) VALUES (?, ?, ?, ?, 3, ?, ?, 1)'
     )
     .run(id, tempPromoteProjectId, 'temp', initialStatus, 'claude-code', '{}')
   return id
@@ -1235,7 +1235,7 @@ test('temp-promote: renaming a non-temp task leaves is_temporary untouched and d
   const id = crypto.randomUUID()
   h.db
     .prepare(
-      'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, is_temporary) VALUES (?, ?, ?, ?, 3, ?, ?, 0)'
+      'INSERT INTO tasks (id, project_id, title, status, priority, agent_id, provider_config, is_temporary) VALUES (?, ?, ?, ?, 3, ?, ?, 0)'
     )
     .run(id, tempPromoteProjectId, 'real', 'inbox', 'claude-code', '{}')
   await updateTask(h.slayDb, { id, title: 'Renamed' } as unknown as UpdateTaskInput)

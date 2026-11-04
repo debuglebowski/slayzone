@@ -1,5 +1,5 @@
 export { openChatStorage, type ChatStorage } from './storage'
-export { chatStorageMode, terminalStorageMode } from './storage-mode'
+export { chatStorageMode, terminalStorageAgentId } from './storage-mode'
 export { createComputerChatRuntime } from './computer-runtime'
 export type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 export {

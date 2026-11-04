@@ -65,7 +65,7 @@ export {
   whichBinary,
   getEnrichedPath
 } from '../server/shell-env'
-export { syncTerminalModes } from '../server/startup-sync'
+export { syncAgents } from '../server/startup-sync'
 export { isHookDrivenMode, HOOK_DRIVEN_MODES } from '../server/adapters'
 export {
   registerChatHandlers,

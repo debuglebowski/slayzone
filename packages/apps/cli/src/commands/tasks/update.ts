@@ -66,8 +66,8 @@ export async function updateAction(idPrefix: string | undefined, opts: UpdateOpt
   if (opts.parent === false) body.parentId = null
   else if (typeof opts.parent === 'string') body.parentId = opts.parent
   if (opts.permanent) body.isTemporary = false
-  // A mode switch on the hub: stops the live agent, clears conversations (task.switchMode).
-  if (opts.agent !== undefined) body.terminalMode = opts.agent
+  // An agent switch on the hub: stops the live agent, clears conversations (task.switchMode).
+  if (opts.agent !== undefined) body.agentId = opts.agent
 
   if (opts.worktreePath !== undefined) {
     // Worktree linking stays CLIENT-side: the git checks and the branch read are

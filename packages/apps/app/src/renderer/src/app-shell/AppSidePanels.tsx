@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import type { Project } from '@slayzone/projects-contracts'
 import { defaultProjectRoot } from '@slayzone/projects-contracts'
-import type { TerminalMode } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import {
   GLOBAL_AGENT_PANEL_MIN_WIDTH,
@@ -108,7 +108,7 @@ export function AppSidePanels({
               width={globalAgentPanelState.panelWidth}
               sessionId={agentSessionId}
               cwd={defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ?? ''}
-              mode={agentMode as TerminalMode}
+              mode={agentMode as AgentId}
               isActive={globalAgentPanelState.isOpen}
               isResizing={isSidePanelResizing}
               onNewSession={handleAgentNewSession}
