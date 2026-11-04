@@ -744,6 +744,7 @@ run_harness packages/domains/terminal/src/server/chat-tab-state-store.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-resume-guard.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-watchdog.test.ts
+run_harness packages/domains/terminal/src/server/runtime/host-suspend-clock.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-outbox.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts

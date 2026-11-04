@@ -80,6 +80,7 @@ import { ChatEventSplitter, isStreamFragment } from './chat-event-splitter'
 import { ChatOutbox, type OutboxState } from './chat-outbox'
 import { classifyResumeEvent } from './chat-resume-guard'
 import { runningDeadline, toolBoundMs } from './chat-watchdog'
+import { processSuspendClock, type SuspendClock } from './host-suspend-clock'
 import { isCliVersionBelow } from './cli-version'
 
 export { markSessionUserInput }
@@ -208,6 +209,11 @@ export interface TransportDeps {
     killGraceMs: number
     spawnReplyBoundMs?: number
   }
+  /**
+   * When this process last came back from a host sleep / suspend — the watchdog
+   * does not judge silence it did not witness. Default: the process-wide ticker.
+   */
+  suspendClock?: SuspendClock
   /** Test override: how a link-down message write is retried (default 30 s window, 1 s base). */
   outboxRetry?: { windowMs: number; baseMs: number }
 }
@@ -328,6 +334,13 @@ interface ChatTab {
   watchdogKillStage: 'none' | 'sigterm' | 'sigkill'
   /** Timestamp (ms) of the last forward-progress signal while `running`. */
   watchdogLastProgress: number
+  /** When the watchdog timer was last armed: a freeze after it voids the window. */
+  watchdogArmedAt: number
+  /**
+   * Watchdog kills restarted in a row with no completed turn between (a `result`
+   * resets it): bounds an agent that hangs every time it starts or runs.
+   */
+  watchdogRestarts: number
   /**
    * The prompts (`permission-request` ids: permission cards, AskUserQuestion,
    * plan approval) the CLI is parked on. Non-empty drives the idle flip, so tab
@@ -676,6 +689,12 @@ export function createChatTransport(
   const WATCHDOG_KILL_GRACE_MS = 2_000
   /** A start waits for its process this long: the computer's admission queue + the link. */
   const WATCHDOG_SPAWN_REPLY_BOUND_MS = 120_000
+  /** Watchdog kills restarted in a row (no completed turn between) before one stays stopped. */
+  const WATCHDOG_MAX_RESTARTS = 2
+
+  function suspendClock(): SuspendClock {
+    return deps.suspendClock ?? processSuspendClock()
+  }
 
   function watchdogTimings(): {
     startingBoundMs: number
@@ -734,13 +753,21 @@ export function createChatTransport(
     tab.watchdogKillStage = 'none'
   }
 
-  /** When the running turn counts as stuck: silence window, or the open tools' own bounds. */
+  /**
+   * When the running turn counts as stuck: silence window, or the open tools' own
+   * bounds — and never sooner than a full silence window after the host last woke
+   * (the agent's in-flight call died with the sleep; it needs time to retry).
+   */
   function runningDeadlineOf(tab: ChatTab): number {
-    return runningDeadline({
-      lastProgressAt: tab.watchdogLastProgress,
-      stallMs: watchdogTimings().runningStallMs,
-      openTools: tab.proc?.openTools.values() ?? []
-    })
+    const stallMs = watchdogTimings().runningStallMs
+    return Math.max(
+      runningDeadline({
+        lastProgressAt: tab.watchdogLastProgress,
+        stallMs,
+        openTools: tab.proc?.openTools.values() ?? []
+      }),
+      suspendClock().lastResumeAt() + stallMs
+    )
   }
 
   /** Arm (or re-arm) the watchdog for the session's current non-terminal state. */
@@ -756,6 +783,7 @@ export function createChatTransport(
       tab.watchdogTimer = null
       return
     }
+    tab.watchdogArmedAt = Date.now()
     tab.watchdogTimer = setTimeout(() => fireWatchdog(tab), delay)
     tab.watchdogTimer.unref?.()
   }
@@ -804,14 +832,30 @@ export function createChatTransport(
       return
     }
     const timings = watchdogTimings()
+    // Freeze guard: the host slept (or the process was otherwise frozen) after
+    // this timer was armed, so the silence about to be judged was never observed
+    // — on wake the agent's in-flight request is retrying, not stuck. Judge again
+    // with a window this process is awake for. Mid-kill escalation is not deferred.
+    if (tab.watchdogKillStage === 'none') {
+      const resumedAt = suspendClock().lastResumeAt()
+      if (resumedAt > tab.watchdogArmedAt) {
+        diagnostic(
+          tab,
+          'info',
+          'chat.watchdog_after_freeze',
+          'host was suspended — re-arming instead of judging',
+          { terminalState: tab.terminalState, armedAt: tab.watchdogArmedAt, resumedAt }
+        )
+        armWatchdog(tab)
+        return
+      }
+    }
     // `running` recheck: progress (or a tool call opening) may have moved the
     // deadline after the timer was set — re-arm for the remainder instead of
     // false-killing.
     if (tab.terminalState === 'running' && tab.watchdogKillStage === 'none') {
-      const remaining = runningDeadlineOf(tab) - Date.now()
-      if (remaining > 0) {
-        tab.watchdogTimer = setTimeout(() => fireWatchdog(tab), remaining)
-        tab.watchdogTimer.unref?.()
+      if (runningDeadlineOf(tab) > Date.now()) {
+        armWatchdog(tab)
         return
       }
     }
@@ -851,6 +895,9 @@ export function createChatTransport(
       // than re-probing forever. Its late output, if any, is dropped at the door.
       recordWatchdogFire(tab, vector, 'unconfirmed-kill', tab.watchdogKillStage)
       clearWatchdog(tab)
+      // It may still run on its computer: a restart could put two processes on one
+      // conversation. It stays stopped.
+      proc.watchdogRestart = false
       proc.reap(null, 'SIGKILL')
       return
     }
@@ -858,6 +905,11 @@ export function createChatTransport(
     recordWatchdogFire(tab, vector, 'alive', tab.watchdogKillStage)
     if (tab.watchdogKillStage === 'none') {
       if (vector !== 'fatal-kill') {
+        // A stuck agent is not left dead: its exit restarts it (resuming the
+        // conversation), unless it already hung that often in a row.
+        const restart = tab.watchdogRestarts < WATCHDOG_MAX_RESTARTS
+        proc.watchdogRestart = restart
+        const name = tab.backend.displayName
         // Every failure is visible: say why the agent is being stopped.
         routeHostEvent(tab, {
           kind: 'notice',
@@ -866,9 +918,13 @@ export function createChatTransport(
           code: 'watchdog-killed',
           text:
             vector === 'stuck-starting'
-              ? `${tab.backend.displayName} did not start in time and was stopped.`
-              : `${tab.backend.displayName} stopped responding and was stopped.`,
-          detail: { vector }
+              ? restart
+                ? `${name} did not start in time, so it was restarted.`
+                : `${name} did not start in time and was stopped.`
+              : restart
+                ? `${name} stopped responding, so it was restarted. Its last turn was cut off; send a message to continue.`
+                : `${name} stopped responding and was stopped.`,
+          detail: { vector, restart }
         })
       }
       proc.kill('SIGTERM')
@@ -1216,6 +1272,8 @@ export function createChatTransport(
       if (event.kind === 'tool-call') {
         transitionState(tab, 'running')
       } else if (event.kind === 'result') {
+        // A completed turn: the agent is responsive, its watchdog restarts start over.
+        tab.watchdogRestarts = 0
         // A turn the user stopped ends with the CLI's aborted result: an end, not
         // a failure (the same for the TUI's plain "No", deny + interrupt).
         const stopped = tab.turnInterrupted || isAbortedResult(event)
@@ -1666,10 +1724,13 @@ export function createChatTransport(
     if (!current || proc.replaced || proc.resumeFailed) return
     clearWatchdog(tab)
     tab.ended = true
+    // The watchdog stopped a stuck agent and decided it restarts (see fireWatchdog).
+    const restart = proc.watchdogRestart && !isShuttingDown && !tab.storageFailed
     // Record `stopped` UNLESS we're in app shutdown — in which case the row stays
-    // `running` so next boot restores. Subprocess crashes / claude-side exits count
-    // as stopped because there's nothing to "restore" anymore.
-    if (!isShuttingDown) {
+    // `running` so next boot restores — or it restarts right away (still running).
+    // Subprocess crashes / claude-side exits count as stopped because there's
+    // nothing to "restore" anymore.
+    if (!isShuttingDown && !restart) {
       try {
         agentStateRecorder?.(tab.tabId, 'stopped')
       } catch (err) {
@@ -1679,6 +1740,18 @@ export function createChatTransport(
     routeHostEvent(tab, { kind: 'process-exit', code, signal })
     deps.broadcastExit(tab.tabId, tab.sessionId, code, signal)
     deps.userInputTracker.clear(stateKey(tab))
+    if (restart) {
+      tab.watchdogRestarts++
+      setImmediate(() => {
+        // Not if the tab went away or something else already started it.
+        if (tab.closed || tab.storageFailed || tabs.get(tab.tabId) !== tab || tab.proc !== proc)
+          return
+        // Resumes the conversation (`startProcess`: a confirmed session is resumed).
+        void ensureSpawned(tab.tabId).catch((err) => {
+          console.error('[chat-transport] restart after a watchdog kill failed:', err)
+        })
+      })
+    }
   }
 
   /**
@@ -1875,6 +1948,8 @@ export function createChatTransport(
       watchdogTimer: null,
       watchdogKillStage: 'none',
       watchdogLastProgress: Date.now(),
+      watchdogArmedAt: Date.now(),
+      watchdogRestarts: 0,
       pendingPrompts: new Set<string>(),
       steers: new Map(),
       turnInterrupted: false,
