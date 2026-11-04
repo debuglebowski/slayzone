@@ -7,7 +7,12 @@ import {
 } from './startup-progress'
 
 const T0 = 1_000_000
-const idle: StartupInputs = { agents: [], panes: { hydrated: 1, queued: 0 }, terminalsQueued: 0 }
+const idle: StartupInputs = {
+  agents: [],
+  panes: { hydrated: 1, queued: 0 },
+  terminalsQueued: 0,
+  chatsLoading: 0
+}
 const q = (sessionId: string) => ({ sessionId, phase: 'queued' as const })
 const b = (sessionId: string) => ({ sessionId, phase: 'booting' as const })
 
@@ -32,7 +37,8 @@ describe('startup watch', () => {
       {
         agents: [b('a'), q('b'), q('c')],
         panes: { hydrated: 1, queued: 3 },
-        terminalsQueued: 0
+        terminalsQueued: 0,
+        chatsLoading: 0
       },
       T0 + 100
     )
@@ -43,7 +49,8 @@ describe('startup watch', () => {
       {
         agents: [b('b'), q('c'), q('d')],
         panes: { hydrated: 3, queued: 1 },
-        terminalsQueued: 0
+        terminalsQueued: 0,
+        chatsLoading: 0
       },
       T0 + STARTUP_SHOW_AFTER_MS
     )
@@ -54,14 +61,16 @@ describe('startup watch', () => {
       agentsTotal: 4,
       agentsBooting: 1,
       agentsQueued: 2,
-      tabsLoaded: 3,
-      tabsTotal: 4
+      pagesLoaded: 3,
+      pagesTotal: 4,
+      terminalsQueued: 0,
+      chatsLoading: 0
     })
 
     // Everything up: shown as settled through the quiet spell, then gone for good.
     const t1 = T0 + 5_000
     const settled = w.update(
-      { agents: [], panes: { hydrated: 4, queued: 0 }, terminalsQueued: 0 },
+      { agents: [], panes: { hydrated: 4, queued: 0 }, terminalsQueued: 0, chatsLoading: 0 },
       t1
     )
     expect(settled.visible).toBe(true)
@@ -80,8 +89,25 @@ describe('startup watch', () => {
     const waiting = w.update({ ...idle, terminalsQueued: 1 }, T0 + 3_000 + STARTUP_QUIET_MS)
     expect(waiting.visible).toBe(true)
     expect(waiting.progress?.settled).toBe(false)
+    // Shown on the card, not only waited on.
+    expect(waiting.progress?.terminalsQueued).toBe(1)
     const agent = w.update({ ...idle, agents: [q('x')] }, T0 + 9_000)
     expect(agent.progress?.agentsTotal).toBe(1)
+    expect(agent.progress?.agentsQueued).toBe(1)
+  })
+
+  it('a chat still loading its history keeps startup open, and is shown', () => {
+    const w = createStartupWatch(T0)
+    w.update({ ...idle, panes: { hydrated: 1, queued: 2 } }, T0 + 2_000)
+    w.update({ ...idle, chatsLoading: 2 }, T0 + 3_000)
+    const loading = w.update({ ...idle, chatsLoading: 2 }, T0 + 3_000 + STARTUP_QUIET_MS)
+    expect(loading.ended).toBe(false)
+    expect(loading.visible).toBe(true)
+    expect(loading.progress?.settled).toBe(false)
+    expect(loading.progress?.chatsLoading).toBe(2)
+    // Its agent asked to start: the hub reports it from here.
+    const agent = w.update({ ...idle, agents: [q('chat')] }, T0 + 7_000)
+    expect(agent.progress?.chatsLoading).toBe(0)
     expect(agent.progress?.agentsQueued).toBe(1)
   })
 
@@ -97,7 +123,7 @@ describe('startup watch', () => {
   it('nothing to report (no tabs, no agents) shows nothing', () => {
     const w = createStartupWatch(T0)
     const r = w.update(
-      { agents: [], panes: { hydrated: 0, queued: 0 }, terminalsQueued: 0 },
+      { agents: [], panes: { hydrated: 0, queued: 0 }, terminalsQueued: 0, chatsLoading: 0 },
       T0 + 5_000
     )
     expect(r.visible).toBe(false)

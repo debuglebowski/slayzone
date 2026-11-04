@@ -1,6 +1,6 @@
 /**
  * The sidebar's startup card: while a restored workspace is still coming up, the
- * sidebar footer says so ("Starting up", tabs loaded N/M, agents starting), and
+ * sidebar footer says so ("Starting up", and what is left: "12 pages · 3 terminals left"), and
  * the card goes away by itself once everything is up — it is for startup only.
  *
  * The boot is made slow on purpose (every idle callback held back), the way a busy
@@ -8,7 +8,7 @@
  * by design, never shows it.
  *
  * Shell tabs only (`seedBootTasks`): a shell is not an agent, so the card counts
- * tabs and shows no agent line. Agent counting is covered by the hub's own tests
+ * pages (and terminals) and never agents. Agent counting is covered by the hub's own tests
  * (`agent-starts`, `pty-backend`, `chat-transport-manager`).
  */
 import { test, expect } from '../fixtures/electron'
@@ -46,16 +46,19 @@ test.describe('startup progress card', () => {
     const card = mainWindow.locator(CARD)
     await expect(card).toBeVisible({ timeout: 30_000 })
     await expect(card).toContainText('Starting up')
-    const tabs = card.locator('[data-testid="startup-progress-tabs"]')
-    await expect(tabs).toHaveText(new RegExp(`^Tabs \\d+/${TABS}$`))
-    // Shells only: no agent line.
-    await expect(card.locator('[data-testid="startup-progress-agents"]')).toHaveCount(0)
+    const left = card.locator('[data-testid="startup-progress-left"]')
+    await expect(left).toHaveText(/^\d+ pages? (· .+ )?left$/)
+    // Shells only: no agents.
+    await expect(left).not.toContainText('agent')
+    // The tooltip keeps the full count.
+    await expect(card).toHaveAttribute('title', new RegExp(`Pages \\d+/${TABS}`))
 
-    // It counts up as tabs load.
-    const loaded = async (): Promise<number> =>
-      Number(/Tabs (\d+)\//.exec((await tabs.textContent()) ?? '')?.[1] ?? -1)
-    const first = await loaded()
-    await expect.poll(loaded, { timeout: 60_000 }).toBeGreaterThan(first)
+    // It counts down as task pages mount (a finished stage drops out: 0 left).
+    const pagesLeft = async (): Promise<number> =>
+      Number(/(\d+) pages? /.exec((await left.textContent()) ?? '')?.[1] ?? 0)
+    const first = await pagesLeft()
+    expect(first).toBeGreaterThan(0)
+    await expect.poll(pagesLeft, { timeout: 60_000 }).toBeLessThan(first)
 
     // Once everything is up the card goes away by itself, and stays away.
     await expect(card).toHaveCount(0, { timeout: 90_000 })

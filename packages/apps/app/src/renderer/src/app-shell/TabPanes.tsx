@@ -461,6 +461,8 @@ function usePaneHydrated(
   useEffect(() => {
     browserOpenRef.current = browserOpen
   }, [browserOpen])
+  // Mounted = its tab is open: counted by the startup card until it closes.
+  useEffect(() => paneHydrator.attach(taskId), [taskId])
   useEffect(() => {
     if (onScreen) {
       paneHydrator.hydrateNow(taskId)

@@ -36,8 +36,10 @@ export type KeyRecorderComponent = (props: KeyRecorderProps) => ReactNode
 
 /**
  * What the sidebar's startup card shows while a restored workspace comes up: agents
- * started so far (and how many are still booting or waiting for a start slot), and
- * tabs loaded. `settled`: nothing left in flight — the card says "Ready" until it goes.
+ * started so far (and how many are still booting or waiting for a start slot), open
+ * tabs whose task page has mounted, hidden terminals still waiting to initialise, and
+ * chats still loading their history. `settled`: nothing left in flight — the card
+ * says "Ready" until it goes.
  */
 export interface StartupProgress {
   settled: boolean
@@ -45,6 +47,9 @@ export interface StartupProgress {
   agentsTotal: number
   agentsBooting: number
   agentsQueued: number
-  tabsLoaded: number
-  tabsTotal: number
+  /** Open tabs whose task page has mounted. */
+  pagesLoaded: number
+  pagesTotal: number
+  terminalsQueued: number
+  chatsLoading: number
 }

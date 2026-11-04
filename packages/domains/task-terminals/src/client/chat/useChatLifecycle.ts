@@ -9,6 +9,7 @@ import {
   type AgentState
 } from '@slayzone/terminal-contracts'
 import { resetChat } from './autocomplete/chat-actions'
+import { trackChatLoading } from './chat-loading'
 import type { ChatActions } from './autocomplete/types'
 
 export interface UseChatLifecycleOpts {
@@ -29,6 +30,8 @@ export interface UseChatLifecycleOpts {
   chatApi: ChatActions
   inFlight: boolean
   hydrating: boolean
+  /** The history failed to load (the chat shows its open failure). */
+  loadFailed?: boolean
   state: ChatTimelineState
   resetTimeline: () => void
   setDraft: (value: string) => void
@@ -143,6 +146,7 @@ export function useChatLifecycle({
   chatApi,
   inFlight,
   hydrating,
+  loadFailed = false,
   state,
   resetTimeline,
   setDraft,
@@ -162,8 +166,9 @@ export function useChatLifecycle({
   // conversation id.
   const [openState] = useState(() => ({ agentState, isMain, isTemporary }))
   const autoStartedRef = useRef(false)
-  // 'now' = start, 'shown' = start once the task is on screen (effect below).
-  const [startDecision, setStartDecision] = useState<'now' | 'shown' | null>(null)
+  // 'now' = start, 'shown' = start once the task is on screen (effect below),
+  // 'none' = leave it for the user.
+  const [startDecision, setStartDecision] = useState<'now' | 'shown' | 'none' | null>(null)
   useEffect(() => {
     if (hydrating || autoStartedRef.current) return
     autoStartedRef.current = true
@@ -173,7 +178,7 @@ export function useChatLifecycle({
       .query({ key: AGENT_STARTUP_SETTING })
       .then((raw) => {
         if (!openState.isMain) {
-          if (openState.agentState === 'running') setStartDecision('now')
+          setStartDecision(openState.agentState === 'running' ? 'now' : 'none')
           return
         }
         const rule = {
@@ -183,14 +188,23 @@ export function useChatLifecycle({
         }
         if (agentStartsOnOpen({ ...rule, shown: false })) setStartDecision('now')
         else if (agentStartsOnOpen({ ...rule, shown: true })) setStartDecision('shown')
+        else setStartDecision('none')
       })
       .catch(() => {
-        /* best-effort — the chat still spawns when the user types */
+        // Best-effort — the chat still spawns when the user types.
+        setStartDecision('none')
       })
   }, [hydrating, openState, trpcClient])
+  // Still coming up (the startup card counts it, see chat-loading.ts): until the
+  // decision lands. A 'now' start is requested in the same commit (effect below),
+  // after which the hub reports the agent itself. A failed load is shown in the
+  // chat, not waited on.
+  const loading = startDecision === null && !loadFailed
+  useEffect(() => (loading ? trackChatLoading() : undefined), [loading])
   const startFiredRef = useRef(false)
   useEffect(() => {
-    if (startDecision === null || (startDecision === 'shown' && !shown)) return
+    if (startDecision === null || startDecision === 'none') return
+    if (startDecision === 'shown' && !shown) return
     if (startFiredRef.current) return
     startFiredRef.current = true
     // 'now' = reopening the workspace (a restore: the computer starts these a few
