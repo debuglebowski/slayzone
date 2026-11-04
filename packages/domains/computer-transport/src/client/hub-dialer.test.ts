@@ -270,6 +270,33 @@ describe('computer protocol v3 (T-27)', () => {
       COMPUTER_PROTOCOL_VERSION
     )
   })
+
+  it('protocol v8: advertises the direct address read at send time on hello, null without one', async () => {
+    const seen: Record<string, unknown>[] = []
+    let address: string | null = null
+    const helloSeen = (n: number) =>
+      new Promise<void>((resolve) => {
+        const tick = () => (seen.length >= n ? resolve() : setTimeout(tick, 5))
+        tick()
+      })
+    const port = await rawHub((hello) => {
+      seen.push(hello.params as Record<string, unknown>)
+      return { result: { computerId: 'c-1', protocolVersion: COMPUTER_PROTOCOL_VERSION } }
+    })
+    makeDialer(`ws://127.0.0.1:${port}`, {
+      credentialStore: createMemoryCredentialStore({ computerId: 'c-1', apiKey: 'k-1' }),
+      identity: { ...IDENTITY, directAddress: () => address }
+    }).start()
+    await helloSeen(1)
+    expect(seen[0].directAddress).toBeNull()
+    address = '127.0.0.1:5000'
+    makeDialer(`ws://127.0.0.1:${port}`, {
+      credentialStore: createMemoryCredentialStore({ computerId: 'c-1', apiKey: 'k-1' }),
+      identity: { ...IDENTITY, directAddress: () => address }
+    }).start()
+    await helloSeen(2)
+    expect(seen[1].directAddress).toBe('127.0.0.1:5000')
+  })
 })
 
 describe('malformed frames from the hub', () => {

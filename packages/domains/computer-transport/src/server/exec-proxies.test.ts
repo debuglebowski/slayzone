@@ -621,6 +621,8 @@ describe('createRoutingPtyBackend', () => {
       computer: {
         computerId: 'computer-1',
         authMode: 'hello',
+        directAddress: null,
+        peerLoopback: false,
         connectedAt: 0,
         lastSeenAt: 0,
         ...(epoch === undefined ? {} : { epoch })
@@ -1711,6 +1713,8 @@ describe('createRoutingProcessBackend', () => {
       computer: {
         computerId: 'computer-1',
         authMode: 'hello',
+        directAddress: null,
+        peerLoopback: false,
         connectedAt: 0,
         lastSeenAt: 0,
         ...(epoch === undefined ? {} : { epoch })
@@ -2514,6 +2518,8 @@ describe('createRemoteFsAdapters — watch', () => {
     version: '0.0.0',
     capabilities: ['fs'],
     authMode: 'hello',
+    directAddress: null,
+    peerLoopback: false,
     connectedAt: 0,
     lastSeenAt: 0
   })

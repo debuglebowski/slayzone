@@ -1,5 +1,6 @@
 export * from './rpc'
 export * from './frames'
+export * from './direct'
 export * from './events'
 export * from './ws-data'
 export * from './http-tunnel'

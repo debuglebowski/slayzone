@@ -37,6 +37,7 @@
  */
 
 import { z } from 'zod'
+import { directAddressSchema } from './direct'
 import { RpcError } from './rpc'
 
 /**
@@ -52,6 +53,11 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
 /**
  * Bump on any breaking change to the frames below.
+ *
+ * v8: direct client ↔ computer link. `enroll` / `hello` carry the computer's
+ * advertised direct-listener authority (`directAddress`), and the hub registers,
+ * revokes and resets client capabilities with `direct.grant` / `direct.revoke` /
+ * `direct.reset` (see ./direct and docs/direct-link.md). Both peers upgrade together.
  *
  * v7: durable provider-tab transitions and verified task-content cleanup proof.
  * Rekeying history requires matching identity/epoch and a persisted restore proof.
@@ -74,7 +80,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 7
+export const COMPUTER_PROTOCOL_VERSION = 8
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {
@@ -194,7 +200,9 @@ export const enrollParamsSchema = z.object({
   capabilities: z.array(z.string()),
   protocolVersion: z.number().int().positive(),
   epoch: epochField,
-  hostId: hostIdField
+  hostId: hostIdField,
+  /** v8: the direct listener's advertised authority; absent/null = none. */
+  directAddress: directAddressSchema.optional()
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -220,7 +228,9 @@ export const helloParamsSchema = z.object({
    * reconnected on any protocol. Absent = a pre-v3 computer; a v3 hub refuses it
    * with `protocolMismatch`.
    */
-  protocolVersion: z.number().int().positive().optional()
+  protocolVersion: z.number().int().positive().optional(),
+  /** v8: the direct listener's advertised authority; absent/null = none. */
+  directAddress: directAddressSchema.optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
@@ -592,7 +602,14 @@ export const HubToComputerMethods = {
    * Where Claude Code session files are on the computer, wherever the session's
    * folder moved to (EnterWorktree), and which folder to resume each one from.
    */
-  claudeSessionLocate: 'claudeSession.locate'
+  claudeSessionLocate: 'claudeSession.locate',
+  // direct client ↔ computer link (v8) — see ./direct
+  /** Register one client capability (its hash only) before the client gets the token. */
+  directGrant: 'direct.grant',
+  /** Drop capabilities now (user disabled, computer revoked, task gone, epoch moved). */
+  directRevoke: 'direct.revoke',
+  /** After every (re)connect: keep only the grants the hub still holds. */
+  directReset: 'direct.reset'
 } as const
 
 /** Reserved method namespaces for future hub → computer exec commands. */
