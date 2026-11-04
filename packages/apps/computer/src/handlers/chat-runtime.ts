@@ -1,4 +1,9 @@
-import type { ResolvedAgentHook, ChatAttachment } from '@slayzone/terminal-contracts'
+import {
+  chatSavedSummary,
+  type AgentEvent,
+  type ResolvedAgentHook,
+  type ChatAttachment
+} from '@slayzone/terminal-contracts'
 import { rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
@@ -40,6 +45,7 @@ import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
 import { createDirectChatFanout, type DirectChatEvent } from '../direct/chat-fanout'
+import { createChatRelayFilter } from '../direct/chat-relay-filter'
 
 /** History reads a direct-link client may make (docs/direct-link.md). */
 export const DIRECT_CHAT_READS = new Set([
@@ -118,6 +124,16 @@ const requestSchema = z.discriminatedUnion('kind', [
     })
   }),
   z.object({ kind: z.literal('test.reset') }),
+  /**
+   * Which tabs' full events this hub wants (docs/direct-link.md): `all`, or only
+   * `tabIds` — those a hub client watches. Saved events are always reported as an
+   * `event-signal`. Until a hub says otherwise: all.
+   */
+  z.object({
+    kind: z.literal('relay.watch'),
+    all: z.boolean(),
+    tabIds: z.array(z.string().min(1).max(200)).max(10_000)
+  }),
   z.object({ kind: z.literal('artifact.invoke'), value: computerArtifactRequestSchema }),
   z.object({ kind: z.literal('inventory') }),
   z.object({ kind: z.literal('metadata.snapshot'), id: z.string() }),
@@ -281,6 +297,8 @@ export function createChatRuntimeHandlers(opts: {
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
   const directFanout = createDirectChatFanout()
+  /** Which tabs' full events this hub wants (`relay.watch`); all until it says. */
+  const relay = createChatRelayFilter()
   function runtime() {
     if (closed || resetting) throw new Error('Chat runtime is shutting down')
     if (instance) return instance
@@ -339,11 +357,25 @@ export function createChatRuntimeHandlers(opts: {
       if (type !== 'metadata' && !owner) return
       // Direct-link clients get the tab's events from here, not through the hub.
       if (type === 'event' && owner) {
-        directFanout.publish(
-          { tabId: owner.identity.tabId, epoch: owner.identity.epoch },
-          data as { event: unknown; seq: number; live?: number; at?: number }
-        )
+        const ev = data as { event: unknown; seq: number; live?: number; at?: number }
+        directFanout.publish({ tabId: owner.identity.tabId, epoch: owner.identity.epoch }, ev)
+        // The hub always learns that an event was saved (history progress, prompts,
+        // `slay chat` waits); the event itself only while a hub client watches.
+        if (ev.live === undefined) {
+          publishToHub(owner, 'event-signal', {
+            tabId: owner.identity.tabId,
+            saved: chatSavedSummary(ev.event as AgentEvent, ev.seq)
+          })
+        }
+        if (!relay.wantsFull(owner.identity.tabId)) return
       }
+      publishToHub(owner ?? null, type, data)
+    }
+    function publishToHub(
+      owner: { identity: { id: string; epoch: number; tabId: string } } | null,
+      type: string,
+      data: Record<string, unknown>
+    ) {
       opts.ctx.dialer.notify(ComputerNotificationMethods.event, {
         name: 'chat-runtime',
         payload: {
@@ -440,6 +472,9 @@ export function createChatRuntimeHandlers(opts: {
     }
     const r = runtime()
     switch (req.kind) {
+      case 'relay.watch':
+        relay.configure(req.all, req.tabIds)
+        return { ok: true }
       case 'conversation.delete':
         await r.deleteConversation(req.identity)
         directFanout.end(req.identity.tabId, 'deleted')

@@ -684,9 +684,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     },
     []
   )
+  // The hub relays this tab — and asks its computer for the full events — only
+  // while the tab is not on the direct link (docs/direct-link.md).
   useSubscription(
-    trpc.chat.onEvent.subscriptionOptions(undefined, {
-      enabled: !!opts.tabId,
+    trpc.chat.onEvent.subscriptionOptions(opts.tabId ? { tabIds: [opts.tabId] } : undefined, {
+      enabled: !!opts.tabId && !directChat,
       onData: handleEvent
     })
   )
@@ -756,6 +758,20 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     setLoadedInputs(null)
     setReopenToken((n) => n + 1)
   }, [])
+  // Back from the direct link to the hub: events saved between the end of the
+  // direct stream and the hub's first relayed one are not on either stream, so load
+  // the tab again (rare: the link dropped). Going direct needs nothing: the direct
+  // stream starts before the hub's stops.
+  const wasDirectRef = useRef(false)
+  useEffect(() => {
+    if (directChat) {
+      wasDirectRef.current = true
+      return
+    }
+    if (!wasDirectRef.current) return
+    wasDirectRef.current = false
+    reload()
+  }, [directChat, reload])
 
   const inputsChanged = (a: typeof loadInputs, b: typeof loadInputs): boolean =>
     a.tabId !== b.tabId ||

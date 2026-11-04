@@ -1,3 +1,4 @@
+import { createChatRelayWatch } from './chat-relay-watch'
 import { createChatDirectWriteHandler } from './chat-direct-write'
 import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import { createDirectLinkIssuer, type DirectLinkIssuer } from './direct-link'
@@ -959,18 +960,33 @@ export function composeServer(opts: {
       request: computerChat.lifecycle.request
     })
   )
+  // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).
+  const chatRelayWatch = createChatRelayWatch({
+    computers: () => computerGatewayRef?.listUsableComputers().map((c) => c.computerId) ?? [],
+    send: (computerId, config) => {
+      const gateway = computerGatewayRef
+      if (!gateway) return Promise.resolve()
+      return gateway.request(computerId, HubToComputerMethods.chatRequest, {
+        kind: 'relay.watch',
+        ...config
+      })
+    }
+  })
   setChatDeps({
     ...computerChat.relay,
     computers: computerChat.computers,
     testing: computerChat.testing,
-    availability: computerChat.availability
+    availability: computerChat.availability,
+    watchEvents: chatRelayWatch.watch
   })
   setChatSessionSource(computerChat.relay.sessions)
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
   setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))
-  computerChat.relay.events.on('event', (tabId, event) => {
-    if (event.kind !== 'user-message' && event.kind !== 'user-message-delivery') return
+  // Every saved event is reported to the hub (`saved`), relayed in full or not
+  // (docs/direct-link.md): the prompt lists follow it even for a tab no hub client watches.
+  computerChat.relay.events.on('saved', (tabId, saved) => {
+    if (saved.kind !== 'user-message' && saved.kind !== 'user-message-delivery') return
     void computerChat.ownership
       .forTab(tabId)
       .then((owner) => {
@@ -1768,6 +1784,7 @@ export function composeServer(opts: {
     // (none after a hub restart), so nothing it granted outlives what the hub knows.
     computerGateway.events.on('computer-connected', ({ computer }) => {
       void directLinkIssuer?.computerConnected(computer.computerId)
+      void chatRelayWatch.computerConnected(computer.computerId)
     })
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its

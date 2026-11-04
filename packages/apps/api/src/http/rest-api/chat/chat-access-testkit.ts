@@ -7,7 +7,13 @@
  * task as claude-chat on its main tab.
  */
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { AgentEvent, ChatTurnStatus, TerminalState } from '@slayzone/terminal-contracts'
+import {
+  chatSavedSummary,
+  type AgentEvent,
+  type ChatSavedSummary,
+  type ChatTurnStatus,
+  type TerminalState
+} from '@slayzone/terminal-contracts'
 import type { ChatAccess } from '../types'
 
 export interface FakeChat {
@@ -30,6 +36,7 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
   const ptyTasks = new Set(opts.ptyTasks ?? [])
   const events = new TypedEmitter<{
     event: [string, AgentEvent, number, number?, number?]
+    saved: [string, ChatSavedSummary]
     exit: [string, string, number | null, string | null]
     'threads-changed': [string]
     'replay-required': [string, string]
@@ -46,8 +53,12 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     status: null,
     buffer: [],
     queue: [],
-    emit: (tabId, event, seq = 1_000) =>
-      events.emit('event', tabId, event, seq, undefined, Date.now()),
+    // As the hub does for a saved event: its summary always (`saved`), the full event
+    // to clients that watch it (docs/direct-link.md).
+    emit: (tabId, event, seq = 1_000) => {
+      events.emit('saved', tabId, chatSavedSummary(event, seq))
+      events.emit('event', tabId, event, seq, undefined, Date.now())
+    },
     state: (sessionId, state) => {
       for (const cb of stateListeners) cb(sessionId, state)
     },

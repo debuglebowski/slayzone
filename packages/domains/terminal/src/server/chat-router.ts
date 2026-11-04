@@ -695,10 +695,14 @@ export const chatRouter = router({
                   : { tabId, event, seq }
             )
           }
-          const ev = getChatDeps().events
+          const deps = getChatDeps()
+          const ev = deps.events
           ev.on('event', handler)
+          // Watching is what makes the tabs' computers send their full events here.
+          const unwatch = deps.watchEvents?.(filter ?? 'all')
           return () => {
             ev.off('event', handler)
+            unwatch?.()
           }
         }
       )

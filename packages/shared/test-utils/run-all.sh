@@ -102,6 +102,7 @@ run_harness packages/apps/hub/src/local-computer-roots.test.ts
 run_harness packages/apps/hub/src/computer-placement.test.ts
 run_harness packages/apps/hub/src/direct-link.test.ts
 run_harness packages/apps/hub/src/chat-direct-write.test.ts
+run_harness packages/apps/hub/src/chat-relay-watch.test.ts
 run_harness packages/apps/hub/src/user-access.test.ts
 # Project folders: the ordered sequence each computer goes through on connect
 # (refresh, legacy paths → pending, widen, deliver, default backfill) and user folder

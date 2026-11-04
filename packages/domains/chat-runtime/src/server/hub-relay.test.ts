@@ -501,3 +501,76 @@ test('closing a newly visible answer thread atomically fences its first owner re
     h.cleanup()
   }
 })
+
+test('direct link: an event-signal reports every saved event to hub consumers, ownership-checked', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb),
+      calls: unknown[] = [],
+      requests: unknown[] = []
+    await ownership.register({
+      id: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      request: async (_pc, value) => {
+        requests.push(value)
+        const request = value as { kind: string }
+        if (['sessions', 'pendingMetadata'].includes(request.kind)) return []
+        return null
+      },
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      bootstrap: async () => ({
+        identity: { id: 'c', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+        projectId: null,
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }),
+      migrate: async () => {
+        throw new Error('Unexpected migration')
+      },
+      recordConversation: async () => {
+        throw new Error('Unexpected ledger write')
+      },
+      onState: async (...args) => {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        calls.push(args)
+      }
+    })
+    const saved: unknown[] = []
+    relay.events.on('saved', (tabId, summary) => saved.push({ tabId, summary }))
+    const relayed: unknown[] = []
+    relay.events.on('event', (...args) => relayed.push(args))
+    const signal = {
+      type: 'event-signal',
+      conversationId: 'c',
+      epoch: 1,
+      tabId: 'tab',
+      saved: { seq: 0, kind: 'user-message', id: 'u1' }
+    }
+    await relay.receive('pc', signal)
+    expect(saved).toEqual([{ tabId: 'tab', summary: { seq: 0, kind: 'user-message', id: 'u1' } }])
+    // Not a client event: nothing is relayed to clients from a signal.
+    expect(relayed).toEqual([])
+    // History progress follows it: the hub knows clients may have seq 0.
+    expect(relay.history.behind('c', 0)).toBe(false)
+    await expect(relay.receive('other-pc', signal)).rejects.toThrow(/ownership/i)
+    await expect(relay.receive('pc', { ...signal, epoch: 2 })).rejects.toThrow(/ownership/i)
+    expect(saved).toHaveLength(1)
+  } finally {
+    h.cleanup()
+  }
+})

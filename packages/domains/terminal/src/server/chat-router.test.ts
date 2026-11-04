@@ -216,6 +216,32 @@ describe('chat router', () => {
     expect(got).toEqual(['tab-x'])
     expect(queueEvents.listenerCount('queue-changed')).toEqual(before)
   })
+
+  test('onEvent registers what it watches (docs/direct-link.md), and releases it on unsubscribe', async () => {
+    const previous = getChatDeps()
+    const watching: Array<readonly string[] | 'all'> = []
+    let released = 0
+    setChatDeps({
+      ...previous,
+      watchEvents: (tabIds) => {
+        watching.push(tabIds)
+        return () => {
+          released++
+        }
+      }
+    })
+    try {
+      const caller = chatRouter.createCaller(ctx)
+      const filtered = (await caller.onEvent({ tabIds: ['tab-a'] })).subscribe({})
+      const all = (await caller.onEvent()).subscribe({})
+      expect(watching).toEqual([['tab-a'], 'all'])
+      filtered.unsubscribe()
+      all.unsubscribe()
+      expect(released).toBe(2)
+    } finally {
+      setChatDeps(previous)
+    }
+  })
 })
 
 describe('chat router — command tasks (plan 3.9)', () => {
