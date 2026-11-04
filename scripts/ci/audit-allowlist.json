@@ -32,13 +32,6 @@
       ]
     },
     {
-      "packages": ["dompurify"],
-      "reason": "NEEDS REVIEW: dompurify 3.4.15 via mermaid and 3.4.16 via @slayzone/editor. These ids were previously covered by the posthog-js entry, whose rationale (posthog's pinned 3.3.1 copy) does not apply to these paths; moved here unchanged when posthog-js 1.434 dropped dompurify.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-c6gr-qvv4-5v3f", "GHSA-cg2g-xh64-v4q7", "GHSA-mrv2-3pqr-j5jr"]
-    },
-    {
       "packages": ["@hono/node-server", "ip-address", "fast-uri"],
       "reason": "Via @modelcontextprotocol/sdk: our server transport uses only @hono/node-server getRequestListener (no serveStatic; the serveStatic fix is only in @hono/node-server 2.x, which the SDK does not accept); the IP code is in the SDK auth router, which we do not mount; no URI-based security decisions. Locked to the newest versions at least 30 days old on 2026-11-04 (fast-uri 3.1.8, ip-address 10.7.3); the remaining fixes (fast-uri 3.1.9, ip-address 10.7.4) clear the age gate later in November.",
       "reviewed": "2026-11-04",

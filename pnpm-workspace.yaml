@@ -29,6 +29,10 @@ minimumReleaseAgeExclude:
   # advisory 44.5.1 is exposed to. Tarball checksums.json verified against the GitHub
   # release SHASUMS256.txt. Drop once 45.0.0 clears the age gate (2026-11-20).
   - electron@45.0.0
+  # Security hand bump (2026-11-04, user-approved): 3.4.17 fixes GHSA-cg2g-xh64-v4q7
+  # (critical) and two more in 3.4.16 (editor, mermaid, posthog-js). Drop once it clears
+  # the age gate (2026-11-11).
+  - dompurify@3.4.17
   # Hand bump (2026-10-27): 5.0.0's ESM shim finds the last import by regex and
   # js-yaml 5's JSDoc `import … from 'js-yaml'` put the __dirname/require shim inside a
   # comment → main crashed at boot. 6.0.0 parses the AST. Drop once 6.0.0 clears the
