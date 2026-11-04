@@ -9,28 +9,19 @@ import type { DeviceEmulation } from '../shared'
 const enableDeviceEmulation = vi.fn((_input: unknown) => Promise.resolve(true))
 const disableDeviceEmulation = vi.fn((_input: unknown) => undefined)
 
-// Stable objects: the compiled component memoizes on them.
-const trpc = {
-  app: {
-    webview: {
-      enableDeviceEmulation: { mutationOptions: () => ({ mutationFn: enableDeviceEmulation }) },
-      disableDeviceEmulation: { mutationOptions: () => ({ mutationFn: disableDeviceEmulation }) }
-    }
-  }
+// This device's browser host, in the shapes the assertions below read. Stable: the
+// compiled component may memoize on it.
+const host = {
+  call: (method: string, ...args: unknown[]): Promise<unknown> => {
+    if (method === 'webview.enableDeviceEmulation')
+      return enableDeviceEmulation({ webviewId: args[0], params: args[1] })
+    if (method === 'webview.disableDeviceEmulation')
+      return Promise.resolve(disableDeviceEmulation({ webviewId: args[0] }))
+    return Promise.resolve(undefined)
+  },
+  on: () => () => {}
 }
-vi.mock('./trpc', () => ({ useTRPC: () => trpc }))
-
-const mutations = new Map<unknown, { mutate: unknown; mutateAsync: unknown }>()
-vi.mock('@tanstack/react-query', () => ({
-  useMutation: (opts: { mutationFn: (input: unknown) => unknown }) => {
-    let m = mutations.get(opts.mutationFn)
-    if (!m) {
-      m = { mutate: opts.mutationFn, mutateAsync: opts.mutationFn }
-      mutations.set(opts.mutationFn, m)
-    }
-    return m
-  }
-}))
+vi.mock('./browser-host', () => ({ getBrowserHost: () => host }))
 
 vi.mock('@slayzone/platform/slz-file-url', () => ({ fileUrlToSlzFileUrl: (u: string) => u }))
 

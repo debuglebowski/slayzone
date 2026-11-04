@@ -1,12 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
 
-// Intentional bootstrap-only preload surface. Do not add domain APIs here.
+// Intentional bootstrap + client-local host surface. Do not add domain APIs here.
 // Renderer/backend traffic uses tRPC over WebSocket after boot.
 
 let lastDropPaths: string[] = []
 let lastPastePaths: string[] = []
 const isPlaywright = process.env.PLAYWRIGHT === '1'
+const browserHostListeners = new Set<(event: string, payload: unknown) => void>()
+let browserHostSubscribed = false
 
 window.addEventListener('dragover', (event) => event.preventDefault(), true)
 window.addEventListener(
@@ -90,6 +92,24 @@ const api: ElectronAPI = {
       process.env.SLAYZONE_DEBUG_BOOT === '1'
         ? (label: string) => ipcRenderer.send('boot:mark', label)
         : () => undefined
+  },
+  // Client-local host capability, not a domain API: the browser panel drives the web
+  // views on THIS device (see browser-host-ipc.ts). Never routed through the hub.
+  browserHost: {
+    invoke: (method, args) => ipcRenderer.invoke('browser-host:invoke', method, args),
+    on: (listener) => {
+      browserHostListeners.add(listener)
+      if (!browserHostSubscribed) {
+        browserHostSubscribed = true
+        ipcRenderer.on('browser-host:event', (_e, event: string, payload: unknown) => {
+          for (const l of browserHostListeners) l(event, payload)
+        })
+        ipcRenderer.send('browser-host:subscribe')
+      }
+      return () => {
+        browserHostListeners.delete(listener)
+      }
+    }
   },
   files: {
     getDropPaths: () => {

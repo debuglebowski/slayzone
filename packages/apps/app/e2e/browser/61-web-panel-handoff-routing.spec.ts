@@ -34,7 +34,7 @@ test.describe('Web panel handoff routing', () => {
   const getWebPanelViewId = async (mainWindow: import('@playwright/test').Page) => {
     return await mainWindow.evaluate(async () => {
       type V = { viewId: string; partition: string; kind: string }
-      const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+      const views = (await window.__testInvoke('browser:list-views')) as V[]
       const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
       return wp?.viewId ?? null
     })
@@ -48,7 +48,7 @@ test.describe('Web panel handoff routing', () => {
   const getWebPanelUrl = async (mainWindow: import('@playwright/test').Page) => {
     return await mainWindow.evaluate(async () => {
       type V = { viewId: string; partition: string; kind: string; url: string }
-      const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+      const views = (await window.__testInvoke('browser:list-views')) as V[]
       const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
       if (!wp) return 'no-webview'
       return wp.url === '' ? 'about:blank' : wp.url
@@ -58,16 +58,14 @@ test.describe('Web panel handoff routing', () => {
   const resetWebPanelToAboutBlank = async (mainWindow: import('@playwright/test').Page) => {
     return await mainWindow.evaluate(async () => {
       type V = { viewId: string; partition: string; kind: string; url: string }
-      const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+      const views = (await window.__testInvoke('browser:list-views')) as V[]
       const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
       if (!wp) return 'no-webview'
       // '' = never loaded — must still navigate so the frame gets a real document.
       if (wp.url === 'about:blank') return 'about:blank'
-      await window
-        .getTrpcVanillaClient()
-        .app.browser.navigate.mutate({ viewId: wp.viewId, url: 'about:blank' })
+      await window.__testInvoke('browser:navigate', wp.viewId, 'about:blank')
       await new Promise((resolve) => setTimeout(resolve, 700))
-      const after = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+      const after = (await window.__testInvoke('browser:list-views')) as V[]
       const url = after.find((v) => v.viewId === wp.viewId)?.url
       if (url === undefined) return 'no-webview'
       return url
@@ -80,17 +78,18 @@ test.describe('Web panel handoff routing', () => {
   ) => {
     return await mainWindow.evaluate(async (targetUrl) => {
       type V = { viewId: string; partition: string; kind: string; url: string }
-      const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+      const views = (await window.__testInvoke('browser:list-views')) as V[]
       const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
       if (!wp) return 'no-webview'
       // Inject a synthetic window.open via executeJs to provoke the popup handler.
       // `void` so executeJavaScript never tries to serialize a WindowProxy result.
-      await window.getTrpcVanillaClient().app.browser.executeJs.mutate({
-        viewId: wp.viewId,
-        code: `void window.open(${JSON.stringify(targetUrl)}, '_blank')`
-      })
+      await window.__testInvoke(
+        'browser:execute-js',
+        wp.viewId,
+        `void window.open(${JSON.stringify(targetUrl)}, '_blank')`
+      )
       await new Promise((resolve) => setTimeout(resolve, 900))
-      const after = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+      const after = (await window.__testInvoke('browser:list-views')) as V[]
       const url = after.find((v) => v.viewId === wp.viewId)?.url
       if (url === undefined) return 'no-webview'
       return url === '' ? 'about:blank' : url

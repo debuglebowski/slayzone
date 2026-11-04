@@ -6,3 +6,10 @@ export { computeScale } from './scale'
 export { MOBILE_UA, IPAD_UA } from './device-presets'
 export { registerBrowserTaskSource } from './BrowserTaskSource'
 export type { BrowserTaskSource } from './BrowserTaskSource'
+// This device's browser host (the web views live on the client, never the hub).
+export {
+  getBrowserHost,
+  callBrowserHost,
+  useBrowserHostEvent,
+  type BrowserHostClient
+} from './browser-host'

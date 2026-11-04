@@ -64,15 +64,13 @@ import {
   unregisterBrowserTab,
   setActiveBrowserTab,
   clearBrowserRegistry,
-  getResolvedBrowserTabId,
-  listBrowserTabs,
-  hasBrowserTab,
-  awaitBrowserRegistration,
   browserExecJs,
   browserLoadUrl,
   browserGetUrl,
-  browserCapturePageToFile
+  browserCapturePng
 } from './browser-registry'
+import { registerBrowserHostIpc } from './browser-host-ipc'
+import type { BrowserViewEvent } from '@slayzone/task-browser/shared'
 import {
   BrowserViewManager,
   browserViewEvents,
@@ -2431,20 +2429,6 @@ app
                 writeFileSync(destPath, await renderToPng(html))
                 return true
               },
-              // Task/tab browser registry, reached from the hub over the capability
-              // injects into the REST browser routes. One implementation, two
-              // bridge. Sole injection point since the REST proxy was deleted.
-              browserTabs: {
-                getResolvedTabId: async (taskId, tabId) => getResolvedBrowserTabId(taskId, tabId),
-                listTabs: async (taskId) => listBrowserTabs(taskId),
-                hasTab: async (taskId, tabId) => hasBrowserTab(taskId, tabId),
-                waitForRegistration: (taskId, opts) => awaitBrowserRegistration(taskId, opts),
-                execJs: (taskId, tabId, code) => browserExecJs(taskId, tabId, code),
-                loadUrl: (taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
-                getUrl: (taskId, tabId) => browserGetUrl(taskId, tabId),
-                capturePageToFile: (taskId, tabId, destPath) =>
-                  browserCapturePageToFile(taskId, tabId, destPath)
-              },
               appGetTrpcPort: () => awaitTrpcPort(),
               appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
               appSetLabFlag: async (key, on) => {
@@ -2541,100 +2525,9 @@ app
                   return c.decryptString(Buffer.from(b64, 'base64'))
                 }
               },
-              // Browser view ops — same BrowserViewManager singleton + shared
-              // browserExtensionOps the `browser:*` IPC handlers use (coexistence
-              // until slice 5). browserExtensionOps is defined below in this
-              // app.whenReady scope; these closures only run after it inits.
-              browser: {
-                createView: (opts) => browserViewManager.createView(opts as never),
-                destroyView: (viewId) => browserViewManager.destroyView(viewId),
-                destroyAllForTask: (taskId) => browserViewManager.destroyAllForTask(taskId),
-                setBounds: (viewId, bounds) =>
-                  browserViewManager.setBounds(viewId, bounds as never),
-                setVisible: (viewId, visible) => browserViewManager.setVisible(viewId, visible),
-                setLocked: (viewId, locked) => browserViewManager.setLocked(viewId, locked),
-                hideAll: () => browserViewManager.hideAll(),
-                showAll: () => browserViewManager.showAll(),
-                setHandoffPolicy: (viewId, policy) =>
-                  browserViewManager.setHandoffPolicy(viewId, policy as never),
-                navigate: (viewId, url) => browserViewManager.navigate(viewId, url),
-                goBack: (viewId) => browserViewManager.goBack(viewId),
-                goForward: (viewId) => browserViewManager.goForward(viewId),
-                reload: (viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
-                stop: (viewId) => browserViewManager.stop(viewId),
-                executeJs: (viewId, code) => browserViewManager.executeJs(viewId, code),
-                insertCss: (viewId, css) => browserViewManager.insertCss(viewId, css),
-                setForcedTheme: (viewId, theme) => browserViewManager.setForcedTheme(viewId, theme),
-                removeCss: (viewId, key) => browserViewManager.removeCss(viewId, key),
-                setZoom: (viewId, factor) => browserViewManager.setZoom(viewId, factor),
-                focus: (viewId) => browserViewManager.focus(viewId),
-                findInPage: (viewId, text, options) =>
-                  browserViewManager.findInPage(viewId, text, options as never),
-                stopFindInPage: (viewId, action) =>
-                  browserViewManager.stopFindInPage(viewId, action),
-                setKeyboardPassthrough: (viewId, enabled) =>
-                  browserViewManager.setKeyboardPassthrough(viewId, enabled),
-                sendInputEvent: (viewId, input) =>
-                  browserViewManager.sendInputEvent(viewId, input as never),
-                openDevTools: (viewId, mode) => browserViewManager.openDevTools(viewId, mode),
-                closeDevTools: (viewId) => browserViewManager.closeDevTools(viewId),
-                isDevToolsOpen: (viewId) => browserViewManager.isDevToolsOpen(viewId),
-                getUrl: (viewId) => browserViewManager.getUrl(viewId),
-                getBounds: (viewId) => browserViewManager.getBounds(viewId),
-                getZoomFactor: (viewId) => browserViewManager.getZoomFactor(viewId),
-                getActualNativeBounds: (viewId) => browserViewManager.getActualNativeBounds(viewId),
-                getViewVisible: (viewId) => browserViewManager.getViewVisible(viewId),
-                getViewsForTask: (taskId) => browserViewManager.getViewsForTask(taskId),
-                getAllViewIds: () => browserViewManager.getAllViewIds(),
-                listViews: () => browserViewManager.listViews(),
-                getNativeChildViewCount: () => browserViewManager.getNativeChildViewCount(),
-                isAllHidden: () => browserViewManager.isAllHidden(),
-                isFocused: (viewId) => browserViewManager.isFocused(viewId),
-                isViewNativelyVisible: (viewId) => browserViewManager.isViewNativelyVisible(viewId),
-                getPartition: (viewId) => browserViewManager.getPartition(viewId),
-                getWebContentsId: (viewId) => browserViewManager.getWebContentsId(viewId),
-                activateExtension: (extensionId) =>
-                  browserExtensionOps.activateExtension(extensionId),
-                getExtensions: () => browserExtensionOps.getExtensions(),
-                loadExtension: () => browserExtensionOps.loadExtension(),
-                removeExtension: (extensionId) => browserExtensionOps.removeExtension(extensionId),
-                discoverBrowserExtensions: () => browserExtensionOps.discoverBrowserExtensions(),
-                importExtension: (extPath) => browserExtensionOps.importExtension(extPath),
-                reparentToCurrentWindow: (viewId) => {
-                  const win = BrowserWindow.getFocusedWindow() ?? mainWindow
-                  if (win) browserViewManager.reparentView(viewId, win)
-                },
-                getAllStateSnapshots: () => browserViewManager.getAllStateSnapshots(),
-                getStateSnapshot: (viewId) => browserViewManager.getStateSnapshot(viewId),
-                events: browserViewEvents
-              },
               floatingAgent: {
                 ...floatingGlobalAgentPanelOps,
                 events: floatingGlobalAgentPanelEvents
-              },
-              webview: {
-                registerBrowserTab,
-                unregisterBrowserTab,
-                setActiveBrowserTab,
-                closeDevTools: (webviewId) => webviewOps.closeDevTools(webviewId),
-                isDevToolsOpened: (webviewId) => webviewOps.isDevToolsOpened(webviewId),
-                disableDeviceEmulation: (webviewId) => webviewOps.disableDeviceEmulation(webviewId),
-                // tRPC has no caller renderer to IPC-send to — only emits via
-                // webviewEvents (the onShortcut sub delivers to subscribers).
-                registerShortcuts: (webviewId) => webviewOps.registerShortcuts(webviewId),
-                setKeyboardPassthrough: (webviewId, enabled) =>
-                  webviewOps.setKeyboardPassthrough(webviewId, enabled),
-                setDesktopHandoffPolicy: (webviewId, policy) =>
-                  webviewOps.setDesktopHandoffPolicy(
-                    webviewId,
-                    policy as DesktopHandoffPolicy | null
-                  ),
-                openDevToolsBottom: (webviewId, options) =>
-                  webviewOps.openDevToolsBottom(webviewId, options),
-                openDevToolsDetached: (webviewId) => webviewOps.openDevToolsDetached(webviewId),
-                enableDeviceEmulation: (webviewId, params) =>
-                  webviewOps.enableDeviceEmulation(webviewId, params),
-                events: webviewEvents
               },
               taskWindows: {
                 ...taskWindowsOps,
@@ -3336,9 +3229,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     }
     void loadSavedExtensions()
 
-    // Shared Chrome-extension ops — single impl behind BOTH the `browser:*` IPC
-    // handlers and the tRPC `app.browser.*` extension procedures (coexistence
-    // until slice 5). Captured by the setAppDeps browser closures above.
+    // Shared Chrome-extension ops — single impl behind the client-local browser host
+    // (`extensions.*`) and the Playwright-only `browser:*` IPC test channels.
     const browserExtensionOps = {
       getExtensions: () =>
         browserSession.getAllExtensions().map((ext) => ({
@@ -3425,6 +3317,86 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     }
     logBoot('extension+session config done')
+
+    // The browser panel's client-local host: this app's renderers drive the web views
+    // here directly (never through the hub), in local AND remote-hub mode. Registered
+    // before any window loads so a renderer's subscribe is never dropped.
+    registerBrowserHostIpc({
+      viewEvents: browserViewEvents,
+      webviewEvents,
+      impl: {
+        'view.create': (_s, opts) => browserViewManager.createView(opts),
+        'view.destroy': (_s, viewId) => browserViewManager.destroyView(viewId),
+        'view.destroyAllForTask': (_s, taskId) => browserViewManager.destroyAllForTask(taskId),
+        'view.reparentToCurrentWindow': (sender, viewId) => {
+          const win = BrowserWindow.fromWebContents(sender)
+          if (!win || win.isDestroyed()) return { ok: false }
+          return { ok: browserViewManager.reparentView(viewId, win) }
+        },
+        'view.setBounds': (_s, viewId, bounds) => browserViewManager.setBounds(viewId, bounds),
+        'view.setVisible': (_s, viewId, visible) => browserViewManager.setVisible(viewId, visible),
+        'view.setLocked': (_s, viewId, locked) => browserViewManager.setLocked(viewId, locked),
+        'view.hideAll': () => browserViewManager.hideAll(),
+        'view.showAll': () => browserViewManager.showAll(),
+        'view.setHandoffPolicy': (_s, viewId, policy) =>
+          browserViewManager.setHandoffPolicy(viewId, policy),
+        'view.navigate': (_s, viewId, url) => browserViewManager.navigate(viewId, url),
+        'view.goBack': (_s, viewId) => browserViewManager.goBack(viewId),
+        'view.goForward': (_s, viewId) => browserViewManager.goForward(viewId),
+        'view.reload': (_s, viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+        'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
+        'view.executeJs': (_s, viewId, code) => browserViewManager.executeJs(viewId, code),
+        'view.insertCss': (_s, viewId, css) => browserViewManager.insertCss(viewId, css),
+        'view.removeCss': (_s, viewId, key) => browserViewManager.removeCss(viewId, key),
+        'view.setForcedTheme': (_s, viewId, theme) =>
+          browserViewManager.setForcedTheme(viewId, theme),
+        'view.setZoom': (_s, viewId, factor) => browserViewManager.setZoom(viewId, factor),
+        'view.focus': (_s, viewId) => browserViewManager.focus(viewId),
+        'view.findInPage': (_s, viewId, text, options) =>
+          browserViewManager.findInPage(viewId, text, options),
+        'view.stopFindInPage': (_s, viewId, action) =>
+          browserViewManager.stopFindInPage(viewId, action),
+        'view.setKeyboardPassthrough': (_s, viewId, enabled) =>
+          browserViewManager.setKeyboardPassthrough(viewId, enabled),
+        'view.sendInputEvent': (_s, viewId, input) =>
+          browserViewManager.sendInputEvent(viewId, input as Electron.KeyboardInputEvent),
+        'view.openDevTools': (_s, viewId, mode) => browserViewManager.openDevTools(viewId, mode),
+        'view.closeDevTools': (_s, viewId) => browserViewManager.closeDevTools(viewId),
+        'view.isDevToolsOpen': (_s, viewId) => browserViewManager.isDevToolsOpen(viewId),
+        'view.getWebContentsId': (_s, viewId) => browserViewManager.getWebContentsId(viewId),
+        'view.list': () => browserViewManager.listViews(),
+        'view.stateSnapshots': () =>
+          browserViewManager.getAllStateSnapshots() as BrowserViewEvent[],
+        'extensions.list': () => browserExtensionOps.getExtensions(),
+        'extensions.load': () => browserExtensionOps.loadExtension(),
+        'extensions.remove': (_s, extensionId) => browserExtensionOps.removeExtension(extensionId),
+        'extensions.discover': () => browserExtensionOps.discoverBrowserExtensions(),
+        'extensions.import': (_s, extPath) => browserExtensionOps.importExtension(extPath),
+        'extensions.activate': (_s, extensionId) =>
+          browserExtensionOps.activateExtension(extensionId),
+        'webview.registerShortcuts': (_s, id) => webviewOps.registerShortcuts(id),
+        'webview.setKeyboardPassthrough': (_s, id, enabled) =>
+          webviewOps.setKeyboardPassthrough(id, enabled),
+        'webview.setDesktopHandoffPolicy': (_s, id, policy) =>
+          webviewOps.setDesktopHandoffPolicy(id, policy),
+        'webview.openDevToolsBottom': (_s, id, options) =>
+          webviewOps.openDevToolsBottom(id, options),
+        'webview.openDevToolsDetached': (_s, id) => webviewOps.openDevToolsDetached(id),
+        'webview.closeDevTools': (_s, id) => webviewOps.closeDevTools(id),
+        'webview.isDevToolsOpened': (_s, id) => webviewOps.isDevToolsOpened(id),
+        'webview.enableDeviceEmulation': (_s, id, params) =>
+          webviewOps.enableDeviceEmulation(id, params),
+        'webview.disableDeviceEmulation': (_s, id) => webviewOps.disableDeviceEmulation(id),
+        'tabs.register': (_s, taskId, tabId, webContentsId) =>
+          registerBrowserTab(taskId, tabId, webContentsId),
+        'tabs.unregister': (_s, taskId, tabId) => unregisterBrowserTab(taskId, tabId),
+        'tabs.setActive': (_s, taskId, tabId) => setActiveBrowserTab(taskId, tabId),
+        'tabs.execJs': (_s, taskId, tabId, code) => browserExecJs(taskId, tabId, code),
+        'tabs.loadUrl': (_s, taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
+        'tabs.getUrl': (_s, taskId, tabId) => browserGetUrl(taskId, tabId),
+        'tabs.capturePng': (_s, taskId, tabId) => browserCapturePng(taskId, tabId)
+      }
+    })
 
     // Set app user model id for windows (dev: the electron binary, so
     // notifications/taskbar group under it rather than a not-installed app id)
@@ -4383,11 +4355,11 @@ const isBlockedScheme = (url: string) => isBlockedExternalProtocolUrl(url)
 const webviewDesktopHandoffPolicy = new Map<number, DesktopHandoffPolicy>()
 const webviewDesktopHandoffPolicyCleanupRegistered = new Set<number>()
 
-// Webview shortcut state lifted to module scope so webviewOps (and the
-// setAppDeps webview closures) can own it across both transports.
+// Webview shortcut state lifted to module scope so webviewOps owns it.
 const registeredWebviews = new Set<number>()
 const keyboardPassthroughWebviews = new Set<number>()
-// tRPC shortcut stream for browser-tab keyboard handling.
+// Shortcut stream for DOM `<webview>` keyboard handling (→ the browser host's
+// `webview-shortcut` event).
 const webviewEvents = new EventEmitter() as EventEmitter & {
   on(
     event: 'shortcut',
@@ -4396,10 +4368,8 @@ const webviewEvents = new EventEmitter() as EventEmitter & {
   off(event: string, listener: (...args: unknown[]) => void): EventEmitter
 }
 
-// Shared webview ops — single impl behind BOTH the `webview:*` IPC handlers and
-// the tRPC `app.webview.*` procedures (coexistence until slice 5). Grows across
-// P19k (devtools) + P19m (shortcuts/emulation); captured by the setAppDeps
-// webview closures above (run only after this module-scope init).
+// Shared webview ops — single impl behind the client-local browser host
+// (`webview.*`) and the `webview:*` IPC handlers.
 const webviewOps = {
   closeDevTools: (webviewId: number) => {
     const wc = webContents.fromId(webviewId)
@@ -4419,7 +4389,7 @@ const webviewOps = {
     wc.setUserAgent(_chromeUa)
     return true
   },
-  // tRPC subscribers receive browser-tab shortcuts via webviewEvents.
+  // Browser-host subscribers receive browser-tab shortcuts via webviewEvents.
   registerShortcuts: (webviewId: number) => {
     if (registeredWebviews.has(webviewId)) return
     const wc = webContents.fromId(webviewId)
@@ -4434,7 +4404,7 @@ const webviewOps = {
         e.preventDefault()
         const key = input.key.toLowerCase()
         const shift = Boolean(input.shift)
-        webviewEvents.emit('shortcut', { webviewId, key, shift }) // tRPC app.webview.onShortcut
+        webviewEvents.emit('shortcut', { webviewId, key, shift })
       }
     })
     wc.on('destroyed', () => {

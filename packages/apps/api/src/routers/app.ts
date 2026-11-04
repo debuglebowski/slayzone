@@ -15,7 +15,7 @@ import { appBackupRouter, appExportImportRouter } from '@slayzone/settings/serve
 import { appLeaderboardRouter } from '@slayzone/usage-analytics/server'
 import { appUsageRouter } from '@slayzone/terminal/hub'
 import { appFeedbackRouter } from '@slayzone/feedback/server'
-import { appBrowserRouter, appWebviewRouter } from '@slayzone/task-browser/server'
+import { appBrowserRelayRouter } from '@slayzone/task-browser/server'
 import { appFloatingAgentRouter } from '@slayzone/agent-panels/server'
 
 // App-level router — main-process capabilities grouped by concern, mounted at `app`.
@@ -42,8 +42,7 @@ export const appLevelRouter = router({
   shortcuts: appShortcutsRouter,
   auth: appAuthRouter,
   dialog: appDialogRouter,
-  browser: appBrowserRouter,
+  browserRelay: appBrowserRelayRouter,
   floatingAgent: appFloatingAgentRouter,
-  webview: appWebviewRouter,
   taskWindows: appTaskWindowsRouter
 })

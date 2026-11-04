@@ -17,7 +17,7 @@ import type {
  * Side-car → Electron-host capability bridge (slice 9 local cutover).
  *
  * When supervised by the Electron host, the renderer talks to THIS side-car
- * for everything, but Electron-only capabilities (browser-WCV, clipboard,
+ * for everything, but Electron-only capabilities (clipboard,
  * dialogs, backup, task-windows, floating-agent, native menus, …) can only run
  * in the host. So the side-car's `AppDeps` become forwarding proxies over the
  * host's `capabilityBridgeRouter`, and host-originated events stream back over
@@ -59,9 +59,7 @@ export function createHostBridge(
   const bridgeUrl = opts.token ? `${url}?token=${encodeURIComponent(opts.token)}` : url
   const wsClient = createWSClient({
     url: bridgeUrl,
-    WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
-    // Every (re)open: browser events were lost while the socket was down.
-    onOpen: () => refreshSnapshots()
+    WebSocket: WebSocket as unknown as typeof globalThis.WebSocket
   })
   const client = createTRPCClient<CapabilityBridgeRouter>({
     links: [wsLink({ client: wsClient, transformer: superjson })]
@@ -72,17 +70,13 @@ export function createHostBridge(
 
   // Local re-emit targets — the side-car appRouter subscriptions wrap these,
   // and the host's events stream feeds them (plus side-car-local menu emits).
-  const browserEmitter = new EventEmitter()
   const floatingEmitter = new EventEmitter()
-  const webviewEmitter = new EventEmitter()
   const taskWindowsEmitter = new EventEmitter()
   const menuEvents = new TypedEmitter<MenuEventMap>()
   const powerResume = new TypedEmitter<PowerResumeEventMap>()
 
   const emitterByChannel: Record<CapabilityEventFrame['channel'], EventEmitter> = {
-    browser: browserEmitter,
     floatingAgent: floatingEmitter,
-    webview: webviewEmitter,
     taskWindows: taskWindowsEmitter,
     menu: menuEvents,
     power: powerResume,
@@ -91,111 +85,19 @@ export function createHostBridge(
     theme: settingsEvents
   }
 
-  // Replay cache — `app.browser.onEvent` replays `getAllStateSnapshots()`
-  // SYNCHRONOUSLY to every new subscriber (the createView→loadURL WS-race fix),
-  // so the proxy must answer without awaiting. Each browser tab subscribes on its
-  // own, so a tab that subscribes right after a relayed dom-ready/did-stop-loading
-  // has missed that event and is healed ONLY by this replay — the cache must
-  // never trail the events already relayed. It used to be re-fetched async after
-  // each event (one desktop round trip behind), so such a tab was replayed
-  // "loading" and stranded its loading overlay for good.
-  //
-  // Now it moves in lockstep with the stream: the desktop stamps every browser
-  // nav event with that view's state as the event fires
-  // (`CapabilityEventFrame.snapshot`), applied below in the same tick, before
-  // the event is re-emitted. A full fetch still primes it on every (re)connect —
-  // events are lost while the socket is down — and its result is re-emitted to
-  // live subscribers so they converge too. A view a relayed event touched while
-  // that fetch was in flight keeps the event's state (at least as new as the
-  // fetch's: both ride one socket, in order).
-  const snapshotCache = new Map<string, unknown>()
-  let touchedDuringFetch: Set<string> | null = null
-  let fetching = false
-  let fetchAgain = false
-  const viewIdOf = (x: unknown): string | null => {
-    const viewId = (x as { viewId?: unknown } | null)?.viewId
-    return typeof viewId === 'string' ? viewId : null
-  }
-  const refreshSnapshots = (): void => {
-    if (fetching) {
-      fetchAgain = true
-      return
-    }
-    fetching = true
-    const touched = new Set<string>()
-    touchedDuringFetch = touched
-    void invoke('browser.getAllStateSnapshots')
-      .then((snaps) => {
-        if (!Array.isArray(snaps)) return
-        const live = new Set<string>()
-        const fresh: unknown[] = []
-        for (const s of snaps) {
-          const viewId = viewIdOf(s)
-          if (!viewId) continue
-          live.add(viewId)
-          if (touched.has(viewId)) continue
-          snapshotCache.set(viewId, s)
-          fresh.push(s)
-        }
-        for (const viewId of [...snapshotCache.keys()]) {
-          if (!live.has(viewId) && !touched.has(viewId)) snapshotCache.delete(viewId)
-        }
-        // Heal live subscribers that missed events while the socket was down.
-        // `state-snapshot` is the authoritative shape they already apply on replay.
-        for (const s of fresh) browserEmitter.emit('event', s)
-      })
-      .catch(() => {
-        /* host unreachable — keep the last good cache */
-      })
-      .finally(() => {
-        if (touchedDuringFetch === touched) touchedDuringFetch = null
-        fetching = false
-        if (fetchAgain) {
-          fetchAgain = false
-          refreshSnapshots()
-        }
-      })
-  }
-  /** Apply a relayed browser nav event's own snapshot — before it is re-emitted. */
-  const applyBrowserFrame = (frame: CapabilityEventFrame): void => {
-    if (frame.channel !== 'browser' || frame.event !== 'event') return
-    // No snapshot: the desktop could not read the view's state — re-read them all.
-    if (!('snapshot' in frame)) return refreshSnapshots()
-    const viewId = viewIdOf(frame.args[0])
-    if (!viewId) return
-    touchedDuringFetch?.add(viewId)
-    if (frame.snapshot == null) snapshotCache.delete(viewId)
-    else snapshotCache.set(viewId, frame.snapshot)
-  }
-
-  const makeNested = (
-    prefix: string,
-    emitter: EventEmitter,
-    extra?: Record<string, (...args: never[]) => unknown>
-  ): unknown =>
+  const makeNested = (prefix: string, emitter: EventEmitter): unknown =>
     new Proxy(
       {},
       {
         get(_t, prop: string | symbol) {
           if (typeof prop !== 'string') return undefined
           if (prop === 'events') return emitter
-          if (extra && prop in extra) return extra[prop]
           return (...args: unknown[]) => invoke(`${prefix}.${prop}`, ...args)
         }
       }
     )
 
-  const browserProxy = makeNested('browser', browserEmitter, {
-    getAllStateSnapshots: () => [...snapshotCache.values()],
-    // A destroyed view emits nothing more, so drop it here rather than replay it
-    // to every later subscriber until the next (re)connect prime.
-    destroyView: (viewId: string) => {
-      snapshotCache.delete(viewId)
-      return invoke('browser.destroyView', viewId)
-    }
-  })
   const floatingProxy = makeNested('floatingAgent', floatingEmitter)
-  const webviewProxy = makeNested('webview', webviewEmitter)
   const taskWindowsProxy = makeNested('taskWindows', taskWindowsEmitter)
   // Eventless nested capability: forward every method as `credentialCipher.<m>`.
   // The side-car has no Electron safeStorage; the host holds the real cipher.
@@ -205,20 +107,6 @@ export function createHostBridge(
       get(_t, prop: string | symbol) {
         if (typeof prop !== 'string') return undefined
         return (...args: unknown[]) => invoke(`credentialCipher.${prop}`, ...args)
-      }
-    }
-  )
-
-  // Eventless nested capability: the task/tab browser registry (distinct from
-  // `browser`, the view-id-keyed manager). Forwards every method as
-  // `browserTabs.<m>` so the REST browser routes can run HERE, against this
-  // process's DB, instead of being reverse-proxied to the host wholesale.
-  const browserTabsProxy = new Proxy(
-    {},
-    {
-      get(_t, prop: string | symbol) {
-        if (typeof prop !== 'string') return undefined
-        return (...args: unknown[]) => invoke(`browserTabs.${prop}`, ...args)
       }
     }
   )
@@ -238,14 +126,8 @@ export function createHostBridge(
           }
         }
         switch (prop) {
-          case 'browser':
-            return browserProxy
-          case 'browserTabs':
-            return browserTabsProxy
           case 'floatingAgent':
             return floatingProxy
-          case 'webview':
-            return webviewProxy
           case 'taskWindows':
             return taskWindowsProxy
           case 'credentialCipher':
@@ -264,16 +146,14 @@ export function createHostBridge(
   let eventsSub: { unsubscribe: () => void } | null = null
 
   const connect = (): void => {
-    refreshSnapshots()
     eventsSub = client.events.subscribe(undefined, {
       onData: (frame: CapabilityEventFrame) => {
         const emitter = emitterByChannel[frame.channel]
         if (!emitter) return
-        applyBrowserFrame(frame)
         emitter.emit(frame.event, ...frame.args)
       },
       onError: () => {
-        /* wsLink auto-reconnects + resubscribes; `onOpen` re-primes the replay cache */
+        /* wsLink auto-reconnects + resubscribes */
       }
     })
   }

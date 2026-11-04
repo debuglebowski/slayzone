@@ -99,8 +99,26 @@ export interface ElectronBootstrapFiles {
   getPastePaths: () => string[]
 }
 
+/**
+ * The client-local browser host — the process on THIS device that owns the browser
+ * panel's web views (Electron main). A client-local host capability, not a domain
+ * API: the panel drives its own device's views and never asks the hub.
+ *
+ * Deliberately generic: `@slayzone/task-browser/shared`'s `BrowserHostMethods` /
+ * `BrowserHostEvents` are the typed contract both ends check against.
+ */
+export interface ElectronBrowserHost {
+  /** One `BrowserHostMethods` call. */
+  invoke: (method: string, args: unknown[]) => Promise<unknown>
+  /** Every host event. The first listener subscribes this renderer; it then gets one
+   *  `event` (`state-snapshot`) per live view before live events. */
+  on: (listener: (event: string, payload: unknown) => void) => () => void
+}
+
 /** The whole `window.api` surface. `@slayzone/types`' `ElectronAPI` extends it. */
 export interface ElectronBootstrapAPI {
   app: ElectronBootstrapApp
   files: ElectronBootstrapFiles
+  /** Absent where this device hosts no web views (web shell, a partial host). */
+  browserHost?: ElectronBrowserHost
 }

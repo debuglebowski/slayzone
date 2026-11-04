@@ -1,7 +1,5 @@
 import { useState } from 'react'
-import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC } from './trpc'
-import { useStableCallback } from '@slayzone/ui'
+import { useBrowserHostEvent } from './browser-host'
 
 export interface LoadError {
   code: number
@@ -37,7 +35,6 @@ const INITIAL_STATE: BrowserViewState = {
 }
 
 export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
-  const trpc = useTRPC()
   const [state, setState] = useState<BrowserViewState>(INITIAL_STATE)
 
   // Reset to initial state when the view clears. Matches the old effect's
@@ -51,8 +48,7 @@ export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
     if (!viewId) setState(INITIAL_STATE)
   }
 
-  const handleEvent = useStableCallback((raw: unknown) => {
-    const event = raw as BrowserViewEvent
+  const handleEvent = (event: BrowserViewEvent): void => {
     if (event.viewId !== viewId) return
 
     switch (event.type) {
@@ -137,14 +133,9 @@ export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
         }))
         break
     }
-  })
+  }
 
-  useSubscription(
-    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
-      enabled: !!viewId,
-      onData: handleEvent
-    })
-  )
+  useBrowserHostEvent('event', handleEvent, !!viewId)
 
   return state
 }

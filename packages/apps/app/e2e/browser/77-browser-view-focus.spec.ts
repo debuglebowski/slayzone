@@ -74,7 +74,7 @@ test.describe('Browser view focus (WebContentsView)', () => {
     await expect(searchInput).not.toBeVisible({ timeout: 2_000 })
 
     // Drive a WebContentsView Cmd+K. The renderer consumes browser-WCV shortcuts
-    // via the tRPC `app.browser.onShortcut` source (not the legacy
+    // via the browser host's `shortcut` event (not the legacy
     // `browser-view:shortcut` IPC, which has no renderer consumer post slice-5).
     // A real synthesized keypress doesn't reliably fire the view's
     // before-input-event in the headless harness (verified flaky), so we emit on

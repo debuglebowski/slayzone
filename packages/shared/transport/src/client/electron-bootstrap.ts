@@ -1,4 +1,7 @@
-import type { ElectronBootstrapAPI } from '@slayzone/platform/electron-bootstrap-contract'
+import type {
+  ElectronBootstrapAPI,
+  ElectronBrowserHost
+} from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 
@@ -92,5 +95,10 @@ export const electronBootstrap = {
   bootMark: (label: string) => api().app.bootMark?.(label),
   isPlaywright: () => api().app.isPlaywright ?? false,
   getDropPaths: () => api().files.getDropPaths?.() ?? [],
-  getPastePaths: () => api().files.getPastePaths?.() ?? []
+  getPastePaths: () => api().files.getPastePaths?.() ?? [],
+  // The client-local browser host (web views on THIS device), or null where there is
+  // none — `window.api` itself is absent in the web shell. `@slayzone/task-browser`'s
+  // typed client is the only intended reader.
+  browserHost: (): ElectronBrowserHost | null =>
+    (typeof window !== 'undefined' ? window.api?.browserHost : undefined) ?? null
 }

@@ -72,12 +72,11 @@ const execInWebPanelView = async (mainWindow: Page, panelId: string, code: strin
   mainWindow.evaluate(
     async ({ pid, js }) => {
       type V = { viewId: string; tabId: string; kind: string }
-      const client = window.getTrpcVanillaClient()
-      const views = (await client.app.browser.listViews.query()) as V[]
+      const views = (await window.__testInvoke('browser:list-views')) as V[]
       const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
       const wp = matches[matches.length - 1]
       if (!wp) return 'no-webview'
-      return client.app.browser.executeJs.mutate({ viewId: wp.viewId, code: js })
+      return window.__testInvoke('browser:execute-js', wp.viewId, js)
     },
     { pid: panelId, js: code }
   )
@@ -92,7 +91,7 @@ const ensureBrowserPanel = ensureBrowserPanelVisible
 // ---------------------------------------------------------------------------
 // Web panels migrated from <webview> to WebContentsView: there is no DOM
 // element to query — target the main-process BrowserViewManager via the
-// app.browser tRPC router instead. Views are matched by tabId (= panel id)
+// Playwright `browser:*` test channels instead. Views are matched by tabId (= panel id)
 // so a stale panel from an earlier describe can never be picked up.
 
 const clearOpenExternalCalls = async (electronApp: ElectronApp) => {
@@ -112,7 +111,7 @@ const getOpenExternalCalls = async (electronApp: ElectronApp) =>
 const getWebPanelViewId = async (mainWindow: Page, panelId: string) =>
   mainWindow.evaluate(async (pid) => {
     type V = { viewId: string; tabId: string; kind: string }
-    const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+    const views = (await window.__testInvoke('browser:list-views')) as V[]
     const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
     return matches.length > 0 ? matches[matches.length - 1].viewId : null
   }, panelId)
@@ -125,7 +124,7 @@ const getWebPanelViewId = async (mainWindow: Page, panelId: string) =>
 const getWebPanelUrl = async (mainWindow: Page, panelId: string) =>
   mainWindow.evaluate(async (pid) => {
     type V = { viewId: string; tabId: string; kind: string; url: string }
-    const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+    const views = (await window.__testInvoke('browser:list-views')) as V[]
     const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
     const wp = matches[matches.length - 1]
     if (!wp) return 'no-webview'
@@ -135,16 +134,15 @@ const getWebPanelUrl = async (mainWindow: Page, panelId: string) =>
 const resetWebPanelToAboutBlank = async (mainWindow: Page, panelId: string) =>
   mainWindow.evaluate(async (pid) => {
     type V = { viewId: string; tabId: string; kind: string; url: string }
-    const client = window.getTrpcVanillaClient()
-    const views = (await client.app.browser.listViews.query()) as V[]
+    const views = (await window.__testInvoke('browser:list-views')) as V[]
     const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
     const wp = matches[matches.length - 1]
     if (!wp) return 'no-webview'
     // '' = never loaded — must still navigate so the frame gets a real document.
     if (wp.url === 'about:blank') return 'about:blank'
-    await client.app.browser.navigate.mutate({ viewId: wp.viewId, url: 'about:blank' })
+    await window.__testInvoke('browser:navigate', wp.viewId, 'about:blank')
     await new Promise((resolve) => setTimeout(resolve, 700))
-    const after = (await client.app.browser.listViews.query()) as V[]
+    const after = (await window.__testInvoke('browser:list-views')) as V[]
     const url = after.find((v) => v.viewId === wp.viewId)?.url
     if (url === undefined) return 'no-webview'
     return url
@@ -162,17 +160,17 @@ const triggerPopupFromWebPanel = async (mainWindow: Page, panelId: string, popup
   mainWindow.evaluate(
     async ({ pid, targetUrl }) => {
       type V = { viewId: string; tabId: string; kind: string; url: string }
-      const client = window.getTrpcVanillaClient()
-      const views = (await client.app.browser.listViews.query()) as V[]
+      const views = (await window.__testInvoke('browser:list-views')) as V[]
       const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
       const wp = matches[matches.length - 1]
       if (!wp) return 'no-webview'
-      await client.app.browser.executeJs.mutate({
-        viewId: wp.viewId,
-        code: `void window.open(${JSON.stringify(targetUrl)}, '_blank')`
-      })
+      await window.__testInvoke(
+        'browser:execute-js',
+        wp.viewId,
+        `void window.open(${JSON.stringify(targetUrl)}, '_blank')`
+      )
       await new Promise((resolve) => setTimeout(resolve, 900))
-      const after = (await client.app.browser.listViews.query()) as V[]
+      const after = (await window.__testInvoke('browser:list-views')) as V[]
       const url = after.find((v) => v.viewId === wp.viewId)?.url
       if (url === undefined) return 'no-webview'
       return url === '' ? 'about:blank' : url
@@ -520,7 +518,7 @@ test.describe
 // ===========================================================================
 
 // MIGRATED 2026-07-03 (webview → WebContentsView):
-// - Helpers target the main-process WCV via app.browser tRPC (DOM <webview> is
+// - Helpers target the main-process WCV via `browser:*` test channels (DOM <webview> is
 //   gone) and force a real about:blank load before any executeJavaScript.
 // - window.open() WITH features is now ALLOWED for web panels regardless of
 //   handoff policy (real BrowserWindow on the panel session so OAuth cookies

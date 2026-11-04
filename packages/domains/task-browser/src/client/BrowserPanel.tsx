@@ -9,17 +9,10 @@ import {
   useInsertionEffect,
   createRef
 } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from './trpc'
+import { callBrowserHost, getBrowserHost, useBrowserHostEvent } from './browser-host'
+import { BrowserRelayHostContext, useBrowserRelayHost } from './useBrowserRelayHost'
 import { useTrack } from '@slayzone/telemetry/client'
-import {
-  cn,
-  isPrimaryModifier,
-  useShortcutAction,
-  useShortcutDisplay,
-  useStableCallback
-} from '@slayzone/ui'
+import { cn, isPrimaryModifier, useShortcutAction, useShortcutDisplay } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/ui'
 import { type BrowserTabPlaceholderHandle, type BrowserTabView } from './BrowserTabPlaceholder'
 import type { BrowserViewState } from './useBrowserView'
@@ -59,11 +52,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   }: BrowserPanelProps,
   ref
 ) {
-  const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
-  const setActiveBrowserTab = useMutation(
-    trpc.app.webview.setActiveBrowserTab.mutationOptions()
-  ).mutate
+  const hasBrowserHost = getBrowserHost() !== null
+  const relayHost = useBrowserRelayHost(taskId)
   const { browserDefaultUrl, browserDefaultZoom, browserDeviceDefaults } = useAppearance()
   const elementPickerShortcut = useShortcutDisplay('browser-element-picker')
   const { track } = useTrack()
@@ -242,24 +232,20 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     projectId
   })
 
-  // Mirror the active tab id to the main-process registry so CLI calls without
-  // an explicit --tab flag default to whichever tab the user is currently viewing.
+  // Mirror the active tab id to this device's tab registry and the hub relay, so CLI
+  // calls without an explicit --tab flag default to whichever tab the user is viewing.
   // Per-tab webContents registration is owned by BrowserTabPlaceholder.
   useEffect(() => {
     if (!taskId) return
-    setActiveBrowserTab({ taskId, tabId: tabs.activeTabId })
-  }, [taskId, tabs.activeTabId, setActiveBrowserTab])
+    callBrowserHost('tabs.setActive', taskId, tabs.activeTabId)
+    relayHost.setActiveTab(tabs.activeTabId)
+  }, [taskId, tabs.activeTabId, relayHost])
 
-  // Sync keyboard passthrough to main process.
-  // NOTE: browser.setKeyboardPassthrough manipulates the active WebContentsView
-  // (electron-native) — stays on the preload bridge per migration design.
+  // Sync keyboard passthrough to this device's browser host.
   useEffect(() => {
     if (!activeViewId) return
-    void trpcClient.app.browser.setKeyboardPassthrough.mutate({
-      viewId: activeViewId,
-      enabled: captureShortcuts
-    })
-  }, [activeViewId, captureShortcuts, trpcClient])
+    callBrowserHost('view.setKeyboardPassthrough', activeViewId, captureShortcuts)
+  }, [activeViewId, captureShortcuts])
 
   // Update URL bar when active tab changes
   useEffect(() => {
@@ -270,18 +256,14 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Note: isActive (parent task tab visibility) is intentionally NOT a gate
   // here — when the parent tab is hidden, the active browser sub-tab keeps
   // painting and useBrowserViewBounds parks it off-screen via offScreen.
-  // browser.setVisible drives WebContentsView painting (electron-native) — bridge.
   useEffect(() => {
     for (const [tabId, ref] of tabRefsRef.current) {
       const handle = ref.current
       if (!handle?.viewId) continue
       const shouldBeVisible = tabId === tabs.activeTabId && !extensionsManagerOpen
-      void trpcClient.app.browser.setVisible.mutate({
-        viewId: handle.viewId,
-        visible: shouldBeVisible
-      })
+      callBrowserHost('view.setVisible', handle.viewId, shouldBeVisible)
     }
-  }, [tabs.activeTabId, extensionsManagerOpen, trpcClient])
+  }, [tabs.activeTabId, extensionsManagerOpen])
 
   // Refs for stable event handler closures (avoids tearing down listeners on every tabs change).
   // Written every commit (no deps), before any effect or handler reads them.
@@ -331,7 +313,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Tab requests from main: new-tab-request (Cmd+Click / middle-click on links, and
   // Chrome extensions' chrome.tabs.create — those carry the tabId main waits on),
   // select-tab-request / close-tab-request (chrome.tabs.update / chrome.tabs.remove).
-  const handleNewTabRequest = useStableCallback((raw: unknown) => {
+  const handleNewTabRequest = (raw: unknown): void => {
     const event = raw as {
       type: string
       taskId?: string
@@ -357,13 +339,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     } else {
       createNewTab(tabUrl, event.tabId)
     }
-  })
-  useSubscription(
-    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
-      enabled: !!taskId,
-      onData: handleNewTabRequest
-    })
-  )
+  }
+  useBrowserHostEvent('event', handleNewTabRequest, !!taskId)
 
   // Apply the browser's own baseline zoom without tying it to app-level UI zoom.
   useEffect(() => {
@@ -373,29 +350,21 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   // Forward Cmd+Arrow to webpage via scope-aware shortcut system.
   // Only fires when browser scope is active (panel or WebContentsView focused).
-  // browser.sendInputEvent injects synthetic input into the WebContentsView
-  // (electron-native) — kept on the preload bridge per migration design.
   useShortcutAction('browser-scroll-top', () => {
     if (!activeViewId) return false // decline — let event propagate
-    void trpcClient.app.browser.sendInputEvent.mutate({
-      viewId: activeViewId,
-      input: {
-        type: 'keyDown',
-        keyCode: 'Up',
-        modifiers: ['meta']
-      }
+    callBrowserHost('view.sendInputEvent', activeViewId, {
+      type: 'keyDown',
+      keyCode: 'Up',
+      modifiers: ['meta']
     })
     return undefined
   })
   useShortcutAction('browser-scroll-bottom', () => {
     if (!activeViewId) return false
-    void trpcClient.app.browser.sendInputEvent.mutate({
-      viewId: activeViewId,
-      input: {
-        type: 'keyDown',
-        keyCode: 'Down',
-        modifiers: ['meta']
-      }
+    callBrowserHost('view.sendInputEvent', activeViewId, {
+      type: 'keyDown',
+      keyCode: 'Down',
+      modifiers: ['meta']
     })
     return undefined
   })
@@ -465,23 +434,23 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
     track('browser_devtools_toggled')
 
-    // DevTools open/close/query operate on the WebContentsView (electron-native)
-    // — kept on the preload bridge per migration design.
+    const host = getBrowserHost()
+    if (!host) return
     void (async () => {
       try {
-        const isOpen = await trpcClient.app.browser.isDevToolsOpen.query({ viewId: activeViewId })
+        const isOpen = await host.call('view.isDevToolsOpen', activeViewId)
         if (isOpen) {
-          await trpcClient.app.browser.closeDevTools.mutate({ viewId: activeViewId })
+          await host.call('view.closeDevTools', activeViewId)
           setDevToolsOpen(false)
         } else {
-          await trpcClient.app.browser.openDevTools.mutate({ viewId: activeViewId, mode: 'bottom' })
+          await host.call('view.openDevTools', activeViewId, 'bottom')
           setDevToolsOpen(true)
         }
       } catch {
         // DevTools toggle failed silently
       }
     })()
-  }, [multiDeviceMode, webviewReady, activeViewId, trpcClient, track])
+  }, [multiDeviceMode, webviewReady, activeViewId, track])
 
   const toggleCaptureShortcuts = useCallback(() => {
     setCaptureShortcuts((prev) => !prev)
@@ -508,145 +477,161 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     [handlePickElement, activeActions, findMode, closeFindMode, activeViewId, createNewTab]
   )
 
+  if (!hasBrowserHost) {
+    return (
+      <div
+        data-browser-panel="true"
+        className={cn(
+          'flex items-center justify-center p-6 text-center text-sm text-muted-foreground',
+          className
+        )}
+      >
+        The browser panel runs in the SlayZone desktop app.
+      </div>
+    )
+  }
+
   return (
-    <div
-      ref={containerRef}
-      data-browser-panel="true"
-      data-picker-active={isPickingElement ? 'true' : 'false'}
-      className={cn(
-        'flex flex-col rounded-md transition-shadow',
-        isPickingElement && 'ring-2 ring-amber-500/70',
-        className
-      )}
-      tabIndex={-1}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-    >
-      <BrowserTabBar
-        tabs={tabs}
-        isPickingElement={isPickingElement}
-        tabSensors={tabSensors}
-        onDragEnd={handleTabDragEnd}
-        onSwitch={switchToTab}
-        onClose={closeTab}
-        onRename={renameTab}
-        onNewTab={() => createNewTab()}
-      />
-
-      <BrowserToolbar
-        activeLocked={activeLocked}
-        findMode={findMode}
-        activeViewUrl={activeViewState.url}
-        activeTab={activeTab}
-        toggleActiveLock={toggleActiveLock}
-        findInputRef={findInputRef}
-        findText={findText}
-        handleFindTextChange={handleFindTextChange}
-        findNext={findNext}
-        closeFindMode={closeFindMode}
-        findResult={findResult}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        isLoading={isLoading}
-        extensionsManagerOpen={extensionsManagerOpen}
-        multiDeviceMode={multiDeviceMode}
-        activeActions={activeActions}
-        setReloadTrigger={setReloadTrigger}
-        setForceReloadTrigger={setForceReloadTrigger}
-        urlInputRef={urlInputRef}
-        inputUrl={inputUrl}
-        setInputUrl={setInputUrl}
-        handleKeyDown={handleKeyDown}
-        taskId={taskId}
-        importDropdownOpen={importDropdownOpen}
-        setImportDropdownOpen={setImportDropdownOpen}
-        otherTaskUrls={otherTaskUrls}
-        updateActiveTab={updateActiveTab}
-        toggleMultiDevice={toggleMultiDevice}
-        canUseDomPicker={canUseDomPicker}
-        webviewReady={webviewReady}
-        isPickingElement={isPickingElement}
-        handlePickElement={handlePickElement}
-        elementPickerShortcut={elementPickerShortcut}
-        onScreenshot={onScreenshot}
-        activeViewId={activeViewId}
-        devToolsOpen={devToolsOpen}
-        toggleDevTools={toggleDevTools}
-        cycleTheme={cycleTheme}
-        captureShortcuts={captureShortcuts}
-        toggleCaptureShortcuts={toggleCaptureShortcuts}
-        handleToggleExtensionsManager={handleToggleExtensionsManager}
-      />
-
-      {pickError && !multiDeviceMode && !extensionsManagerOpen && (
-        <div
-          className="shrink-0 px-2 py-1.5 border-b text-xs text-destructive bg-destructive/5 truncate"
-          title={pickError}
-        >
-          Element picker error: {pickError}
-        </div>
-      )}
-
-      {/* Responsive toolbar */}
-      {multiDeviceMode && !extensionsManagerOpen && (
-        <BrowserMultiDeviceToolbar
-          multiDeviceConfig={multiDeviceConfig}
-          multiDeviceLayout={multiDeviceLayout}
-          onToggleSlot={toggleSlot}
-          onSetLayout={setMultiDeviceLayout}
-        />
-      )}
-
-      {/* Webview / Multi-device */}
-      {EXTENSIONS_MANAGER_ENABLED && extensionsManagerOpen ? (
-        <ExtensionsManagerView
-          extensions={extensions}
-          browserExtensions={browserExtensions}
-          isLoading={extensionsLoading}
-          error={extensionsError}
-          onRefresh={() => {
-            void refreshExtensions()
-          }}
-          onClose={() => setExtensionsManagerOpen(false)}
-          onActivate={handleActivateExtension}
-          onRemove={(extensionId) => {
-            void handleRemoveExtension(extensionId)
-          }}
-          onImport={(path, name) => {
-            void handleImportExtension(path, name)
-          }}
-          onLoadUnpacked={() => {
-            void handleLoadExtension()
-          }}
-        />
-      ) : multiDeviceMode ? (
-        <MultiDeviceGrid
-          config={multiDeviceConfig}
-          layout={multiDeviceLayout}
-          url={activeTab?.url || 'about:blank'}
-          isResizing={isResizing}
-          reloadTrigger={reloadTrigger}
-          forceReloadTrigger={forceReloadTrigger}
-          onPresetChange={setPreset}
-        />
-      ) : (
-        <BrowserViewport
+    <BrowserRelayHostContext.Provider value={relayHost}>
+      <div
+        ref={containerRef}
+        data-browser-panel="true"
+        data-picker-active={isPickingElement ? 'true' : 'false'}
+        className={cn(
+          'flex flex-col rounded-md transition-shadow',
+          isPickingElement && 'ring-2 ring-amber-500/70',
+          className
+        )}
+        tabIndex={-1}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+      >
+        <BrowserTabBar
           tabs={tabs}
-          taskId={taskId}
-          getTabRef={getTabRef}
-          extensionsManagerOpen={extensionsManagerOpen}
-          loadError={loadError}
-          hasLoadedRealPage={activeViewState.hasLoadedRealPage}
-          isActive={isActive}
-          isResizing={isResizing}
           isPickingElement={isPickingElement}
-          hiddenByOverlay={hiddenByOverlay}
-          activeActions={activeActions}
-          setActiveViewState={setActiveViewState}
-          setHiddenByOverlay={setHiddenByOverlay}
-          onTabViewChange={handleTabViewChange}
+          tabSensors={tabSensors}
+          onDragEnd={handleTabDragEnd}
+          onSwitch={switchToTab}
+          onClose={closeTab}
+          onRename={renameTab}
+          onNewTab={() => createNewTab()}
         />
-      )}
-    </div>
+
+        <BrowserToolbar
+          activeLocked={activeLocked}
+          findMode={findMode}
+          activeViewUrl={activeViewState.url}
+          activeTab={activeTab}
+          toggleActiveLock={toggleActiveLock}
+          findInputRef={findInputRef}
+          findText={findText}
+          handleFindTextChange={handleFindTextChange}
+          findNext={findNext}
+          closeFindMode={closeFindMode}
+          findResult={findResult}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          isLoading={isLoading}
+          extensionsManagerOpen={extensionsManagerOpen}
+          multiDeviceMode={multiDeviceMode}
+          activeActions={activeActions}
+          setReloadTrigger={setReloadTrigger}
+          setForceReloadTrigger={setForceReloadTrigger}
+          urlInputRef={urlInputRef}
+          inputUrl={inputUrl}
+          setInputUrl={setInputUrl}
+          handleKeyDown={handleKeyDown}
+          taskId={taskId}
+          importDropdownOpen={importDropdownOpen}
+          setImportDropdownOpen={setImportDropdownOpen}
+          otherTaskUrls={otherTaskUrls}
+          updateActiveTab={updateActiveTab}
+          toggleMultiDevice={toggleMultiDevice}
+          canUseDomPicker={canUseDomPicker}
+          webviewReady={webviewReady}
+          isPickingElement={isPickingElement}
+          handlePickElement={handlePickElement}
+          elementPickerShortcut={elementPickerShortcut}
+          onScreenshot={onScreenshot}
+          activeViewId={activeViewId}
+          devToolsOpen={devToolsOpen}
+          toggleDevTools={toggleDevTools}
+          cycleTheme={cycleTheme}
+          captureShortcuts={captureShortcuts}
+          toggleCaptureShortcuts={toggleCaptureShortcuts}
+          handleToggleExtensionsManager={handleToggleExtensionsManager}
+        />
+
+        {pickError && !multiDeviceMode && !extensionsManagerOpen && (
+          <div
+            className="shrink-0 px-2 py-1.5 border-b text-xs text-destructive bg-destructive/5 truncate"
+            title={pickError}
+          >
+            Element picker error: {pickError}
+          </div>
+        )}
+
+        {/* Responsive toolbar */}
+        {multiDeviceMode && !extensionsManagerOpen && (
+          <BrowserMultiDeviceToolbar
+            multiDeviceConfig={multiDeviceConfig}
+            multiDeviceLayout={multiDeviceLayout}
+            onToggleSlot={toggleSlot}
+            onSetLayout={setMultiDeviceLayout}
+          />
+        )}
+
+        {/* Webview / Multi-device */}
+        {EXTENSIONS_MANAGER_ENABLED && extensionsManagerOpen ? (
+          <ExtensionsManagerView
+            extensions={extensions}
+            browserExtensions={browserExtensions}
+            isLoading={extensionsLoading}
+            error={extensionsError}
+            onRefresh={() => {
+              void refreshExtensions()
+            }}
+            onClose={() => setExtensionsManagerOpen(false)}
+            onActivate={handleActivateExtension}
+            onRemove={(extensionId) => {
+              void handleRemoveExtension(extensionId)
+            }}
+            onImport={(path, name) => {
+              void handleImportExtension(path, name)
+            }}
+            onLoadUnpacked={() => {
+              void handleLoadExtension()
+            }}
+          />
+        ) : multiDeviceMode ? (
+          <MultiDeviceGrid
+            config={multiDeviceConfig}
+            layout={multiDeviceLayout}
+            url={activeTab?.url || 'about:blank'}
+            isResizing={isResizing}
+            reloadTrigger={reloadTrigger}
+            forceReloadTrigger={forceReloadTrigger}
+            onPresetChange={setPreset}
+          />
+        ) : (
+          <BrowserViewport
+            tabs={tabs}
+            taskId={taskId}
+            getTabRef={getTabRef}
+            extensionsManagerOpen={extensionsManagerOpen}
+            loadError={loadError}
+            hasLoadedRealPage={activeViewState.hasLoadedRealPage}
+            isActive={isActive}
+            isResizing={isResizing}
+            isPickingElement={isPickingElement}
+            hiddenByOverlay={hiddenByOverlay}
+            activeActions={activeActions}
+            setActiveViewState={setActiveViewState}
+            setHiddenByOverlay={setHiddenByOverlay}
+            onTabViewChange={handleTabViewChange}
+          />
+        )}
+      </div>
+    </BrowserRelayHostContext.Provider>
   )
 })

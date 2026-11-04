@@ -464,13 +464,6 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'agentSessions.onChanged': (o) =>
     agentSessionsEvents.emit('agent-sessions:changed', { taskId: o.task }),
   'agentTurns.onChanged': (o) => agentTurnsEvents.emit('agent-turns:changed', o.path),
-  'app.browser.onCreateTaskFromLink': (o) =>
-    getAppDeps().browser.events.emit('create-task-from-link', {
-      viewId: 'v',
-      taskId: o.task,
-      url: 'https://example.com',
-      source: 'context-menu'
-    }),
   'app.taskWindows.onListChanged': (o) =>
     getAppDeps().taskWindows.events.emit('list-changed', [o.task]),
   'app.taskWindows.onPrimaryActiveChanged': (o) =>

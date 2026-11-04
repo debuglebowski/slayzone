@@ -2,27 +2,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 
-// tRPC mock — the hook subscribes via useSubscription(trpc.app.browser.onEvent
-// .subscriptionOptions(...)). subscriptionOptions passes its opts through so the
-// useSubscription mock can capture onData and the test can feed events directly.
+// Browser-host mock — the hook listens via useBrowserHostEvent('event', handler,
+// enabled). The mock captures the handler so the test can feed events directly.
 type OnData = (raw: unknown) => void
 let capturedOnData: OnData | null = null
 
-vi.mock('@slayzone/transport/client', () => ({
-  useTRPC: () => ({
-    app: {
-      browser: {
-        onEvent: {
-          subscriptionOptions: (_input: unknown, opts: { enabled: boolean; onData: OnData }) => opts
-        }
-      }
-    }
-  }),
-  useSubscription: (opts: { enabled: boolean; onData: OnData }) => {
-    if (opts.enabled) capturedOnData = opts.onData
+vi.mock('./browser-host', () => ({
+  useBrowserHostEvent: (_event: string, handler: OnData, enabled = true) => {
+    if (enabled) capturedOnData = handler
   }
 }))
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 
 import { useBrowserViewEvents } from './useBrowserViewEvents'
 

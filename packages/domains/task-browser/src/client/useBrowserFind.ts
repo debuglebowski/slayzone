@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from './trpc'
+import { useTRPCClient } from './trpc'
+import { callBrowserHost, getBrowserHost, useBrowserHostEvent } from './browser-host'
 import { useShortcutAction, useStableCallback } from '@slayzone/ui'
 
 type FoundInPageEvent = {
@@ -26,7 +26,6 @@ export function useBrowserFind({
   activeTabId,
   containerRef
 }: UseBrowserFindParams) {
-  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const [findMode, setFindMode] = useState(false)
   const [findText, setFindText] = useState('')
@@ -70,8 +69,8 @@ export function useBrowserFind({
   // ends on it — Esc, a tab switch, or the panel unmounting. The cleanup closes
   // over that view, so a tab switch never clears the newly active tab instead.
   const clearHighlights = useStableCallback((viewId: string) => {
-    void trpcClient.app.browser.stopFindInPage
-      .mutate({ viewId, action: 'clearSelection' })
+    getBrowserHost()
+      ?.call('view.stopFindInPage', viewId, 'clearSelection')
       .catch(() => {
         /* view already gone */
       })
@@ -95,13 +94,9 @@ export function useBrowserFind({
   const findNext = useCallback(
     (forward: boolean) => {
       if (!activeViewId || !findText) return
-      void trpcClient.app.browser.findInPage.mutate({
-        viewId: activeViewId,
-        text: findText,
-        options: { forward, findNext: true }
-      })
+      callBrowserHost('view.findInPage', activeViewId, findText, { forward, findNext: true })
     },
-    [activeViewId, findText, trpcClient]
+    [activeViewId, findText]
   )
 
   const handleFindTextChange = useCallback(
@@ -109,38 +104,30 @@ export function useBrowserFind({
       setFindText(text)
       if (!activeViewId) return
       if (text) {
-        void trpcClient.app.browser.findInPage.mutate({
-          viewId: activeViewId,
-          text,
-          options: { forward: true }
-        })
+        callBrowserHost('view.findInPage', activeViewId, text, { forward: true })
       } else {
-        void trpcClient.app.browser.stopFindInPage.mutate({
-          viewId: activeViewId,
-          action: 'clearSelection'
-        })
+        callBrowserHost('view.stopFindInPage', activeViewId, 'clearSelection')
         setFindResult(null)
       }
     },
-    [activeViewId, trpcClient]
+    [activeViewId]
   )
 
   // Subscribe to found-in-page results
-  useSubscription(
-    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
-      enabled: findMode,
-      onData: (raw) => {
-        const event = raw as FoundInPageEvent
-        if (event.type !== 'found-in-page') return
-        if (event.viewId !== activeViewId) return
-        if (event.finalUpdate) {
-          setFindResult({
-            active: event.activeMatchOrdinal as number,
-            total: event.matches as number
-          })
-        }
+  useBrowserHostEvent(
+    'event',
+    (raw) => {
+      const event = raw as FoundInPageEvent
+      if (event.type !== 'found-in-page') return
+      if (event.viewId !== activeViewId) return
+      if (event.finalUpdate) {
+        setFindResult({
+          active: event.activeMatchOrdinal as number,
+          total: event.matches as number
+        })
       }
-    })
+    },
+    findMode
   )
 
   // Find shortcuts via scope-aware registry. Routes from both DOM focus

@@ -1,5 +1,5 @@
 import { useState, useEffect, useEffectEvent, useRef } from 'react'
-import { useTRPCClient } from './trpc'
+import { callBrowserHost, getBrowserHost } from './browser-host'
 
 interface DesktopHandoffPolicy {
   protocol: string
@@ -15,13 +15,11 @@ interface UseBrowserViewLifecycleOpts {
   desktopHandoffPolicy?: DesktopHandoffPolicy | null
 }
 
-// NOTE: browser.createView / browser.destroyView spawn and tear down the native
-// Electron WebContentsView. These are electron-native view ops and intentionally
-// stay on the preload bridge per the migration design (no tRPC cutover).
+// Spawns and tears down the native web view on THIS device's browser host (never the
+// hub). No host (web shell) → no view.
 export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
   viewId: string | null
 } {
-  const trpcClient = useTRPCClient()
   const { tabId, taskId, url, partition, kind, desktopHandoffPolicy } = opts
   const [viewId, setViewId] = useState<string | null>(null)
   const mountedRef = useRef(true)
@@ -40,11 +38,13 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
 
     const tryCreate = async (): Promise<void> => {
       if (!mountedRef.current || currentTabIdRef.current !== tabId) return
+      const host = getBrowserHost()
+      if (!host) return
 
       // Promise chain, not try/catch: React Compiler can't lower value blocks
       // inside try. `.catch` after `.then` covers the same span the try did.
-      return trpcClient.app.browser.createView
-        .mutate({
+      return host
+        .call('view.create', {
           taskId,
           tabId,
           partition: initial.partition,
@@ -64,12 +64,12 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
           }
 
           if (!mountedRef.current || currentTabIdRef.current !== tabId) {
-            void trpcClient.app.browser.destroyView.mutate({ viewId: id as string })
+            callBrowserHost('view.destroy', id)
             return
           }
 
-          createdViewId = id as string
-          setViewId(id as string)
+          createdViewId = id
+          setViewId(id)
         })
         .catch((err) => {
           console.error('[useBrowserViewLifecycle] createView failed:', err)
@@ -86,11 +86,11 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
       mountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
       if (createdViewId) {
-        void trpcClient.app.browser.destroyView.mutate({ viewId: createdViewId })
+        callBrowserHost('view.destroy', createdViewId)
       }
       setViewId(null)
     }
-  }, [tabId, taskId, trpcClient])
+  }, [tabId, taskId])
 
   return { viewId }
 }

@@ -28,9 +28,9 @@ export type IdleCloseHandle = {
  *    unset);
  *  - the sweep that evaluates it every 10s (`startIdleChecker`), which also runs
  *    the silence-timer running→idle fallback for non-hook agents;
- *  - the browser panel's engagement touch. A WebContentsView's input never
- *    reaches the renderer DOM, so the desktop reports it as a bare-taskId
- *    `engaged` browser event, relayed here over the desktop bridge.
+ *  - the browser panel's engagement touch. A web view's input never reaches the
+ *    renderer DOM, so the client's browser host reports it, and the panel sends it
+ *    here as `app.browserRelay.engaged` — emitted on `browserEvents` as `engaged`.
  *
  * All three were wired only in the Electron host, whose registry holds no
  * sessions. `9023df2fe` moved the getter here but left the sweep in the host, so

@@ -537,6 +537,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-browser':
+        specifier: workspace:*
+        version: link:../../domains/task-browser
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts
@@ -3983,6 +3986,9 @@ importers:
       '@slayzone/mojo-bindings':
         specifier: workspace:*
         version: link:../mojo-bindings
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../../domains/projects-contracts

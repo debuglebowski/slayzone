@@ -19,6 +19,7 @@ import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -40,8 +41,9 @@ import {
   setMenuEvents,
   setTaskTriggerBus,
   setAppDeps,
-  getAppDeps,
   setBackupOps,
+  BrowserRelay,
+  setBrowserRelayRouterDeps,
   setAuthEvents,
   setComputersDeps,
   requestGithubSignInStart,
@@ -1117,20 +1119,6 @@ export function composeServer(opts: {
       appRelaunch: stub('appRelaunch'),
       // Never reached: the only caller is gated on `bridge`, which is null here.
       diagnosticsConfigChanged: stub('diagnosticsConfigChanged'),
-      // Task/tab browser registry — there are no WebContentsViews here, so every
-      // member fails loud rather than pretending an empty registry (which would make
-      // `hasTab` answer "no tab" and turn a missing capability into a 404).
-      browserTabs: {
-        getResolvedTabId: stub('browserTabs.getResolvedTabId'),
-        listTabs: stub('browserTabs.listTabs'),
-        hasTab: stub('browserTabs.hasTab'),
-        waitForRegistration: stub('browserTabs.waitForRegistration'),
-        execJs: stub('browserTabs.execJs'),
-        loadUrl: stub('browserTabs.loadUrl'),
-        getUrl: stub('browserTabs.getUrl'),
-        capturePageToFile: stub('browserTabs.capturePageToFile')
-      },
-
       clipboardWriteFilePaths: stub('clipboardWriteFilePaths'),
       clipboardReadFilePaths: stub('clipboardReadFilePaths'),
       clipboardHasFiles: stub('clipboardHasFiles'),
@@ -1279,62 +1267,6 @@ export function composeServer(opts: {
       // No OS window owns this process — nothing to close.
       windowClose: noop,
 
-      browser: {
-        createView: stub('browser.createView'),
-        destroyView: stub('browser.destroyView'),
-        destroyAllForTask: stub('browser.destroyAllForTask'),
-        setBounds: stub('browser.setBounds'),
-        setVisible: stub('browser.setVisible'),
-        setLocked: stub('browser.setLocked'),
-        hideAll: stub('browser.hideAll'),
-        showAll: stub('browser.showAll'),
-        setHandoffPolicy: stub('browser.setHandoffPolicy'),
-        navigate: stub('browser.navigate'),
-        goBack: stub('browser.goBack'),
-        goForward: stub('browser.goForward'),
-        reload: stub('browser.reload'),
-        stop: stub('browser.stop'),
-        executeJs: stub('browser.executeJs'),
-        insertCss: stub('browser.insertCss'),
-        setForcedTheme: stub('browser.setForcedTheme'),
-        removeCss: stub('browser.removeCss'),
-        setZoom: stub('browser.setZoom'),
-        focus: stub('browser.focus'),
-        findInPage: stub('browser.findInPage'),
-        stopFindInPage: stub('browser.stopFindInPage'),
-        setKeyboardPassthrough: stub('browser.setKeyboardPassthrough'),
-        sendInputEvent: stub('browser.sendInputEvent'),
-        openDevTools: stub('browser.openDevTools'),
-        closeDevTools: stub('browser.closeDevTools'),
-        isDevToolsOpen: stub('browser.isDevToolsOpen'),
-        getUrl: stub('browser.getUrl'),
-        getBounds: stub('browser.getBounds'),
-        getZoomFactor: stub('browser.getZoomFactor'),
-        getActualNativeBounds: stub('browser.getActualNativeBounds'),
-        getViewVisible: stub('browser.getViewVisible'),
-        getViewsForTask: () => [],
-        getAllViewIds: () => [],
-        listViews: () => [],
-        getNativeChildViewCount: () => 0,
-        isAllHidden: () => true,
-        isFocused: () => false,
-        isViewNativelyVisible: () => false,
-        getPartition: stub('browser.getPartition'),
-        getWebContentsId: stub('browser.getWebContentsId'),
-        activateExtension: stub('browser.activateExtension'),
-        getExtensions: () => [],
-        loadExtension: stub('browser.loadExtension'),
-        removeExtension: stub('browser.removeExtension'),
-        discoverBrowserExtensions: () => [],
-        importExtension: stub('browser.importExtension'),
-        reparentToCurrentWindow: stub('browser.reparentToCurrentWindow'),
-        // Event-shaped nav-state replay for late onEvent subscribers — none exist
-        // in a WCV-less host.
-        getAllStateSnapshots: () => [],
-        getStateSnapshot: () => null,
-        events: silentEmitter as AppDeps['browser']['events']
-      },
-
       floatingAgent: {
         setEnabled: stub('floatingAgent.setEnabled'),
         setSessionId: stub('floatingAgent.setSessionId'),
@@ -1352,24 +1284,6 @@ export function composeServer(opts: {
         getSession: () => null,
         getConfig: () => null,
         events: silentEmitter as AppDeps['floatingAgent']['events']
-      },
-
-      webview: {
-        // Browser-tab bookkeeping exists to drive native z-order; there are no
-        // native child views here, so registration has nothing to track.
-        registerBrowserTab: noop,
-        unregisterBrowserTab: noop,
-        setActiveBrowserTab: noop,
-        closeDevTools: stub('webview.closeDevTools'),
-        isDevToolsOpened: () => false,
-        disableDeviceEmulation: stub('webview.disableDeviceEmulation'),
-        registerShortcuts: stub('webview.registerShortcuts'),
-        setKeyboardPassthrough: stub('webview.setKeyboardPassthrough'),
-        setDesktopHandoffPolicy: stub('webview.setDesktopHandoffPolicy'),
-        openDevToolsBottom: stub('webview.openDevToolsBottom'),
-        openDevToolsDetached: stub('webview.openDevToolsDetached'),
-        enableDeviceEmulation: stub('webview.enableDeviceEmulation'),
-        events: silentEmitter as AppDeps['webview']['events']
       },
 
       taskWindows: {
@@ -1393,10 +1307,21 @@ export function composeServer(opts: {
     })
   }
 
+  // --- Browser panel relay -------------------------------------------------------
+  // The web views live on the clients. The hub keeps the tab list (task ops) and
+  // this relay: which client owns each task's live tabs, and the request/reply
+  // channel `slay browser` (the REST browser routes) rides to reach it. Same on a
+  // local and a remote hub — no desktop bridge involved.
+  const browserRelay = new BrowserRelay()
+  const browserEngagement = new EventEmitter()
+  setBrowserRelayRouterDeps({
+    relay: browserRelay,
+    onEngaged: (taskId) => browserEngagement.emit('engaged', { taskId })
+  })
+
   // Idle-close: config getter + sweep + the browser panel's engagement touch, all
-  // in THIS process because the pty sessions are here (./idle-close.ts). After
-  // setAppDeps: the browser `engaged` events arrive on its (bridged) emitter.
-  const idleClose = wireIdleClose(db, getAppDeps().browser.events)
+  // in THIS process because the pty sessions are here (./idle-close.ts).
+  const idleClose = wireIdleClose(db, browserEngagement)
 
   // PTY state-machine bridge — shared by the agent-hook HTTP route (restDeps
   // below) AND the computer-relay `event` consumer (wired in the async gateway
@@ -1580,33 +1505,33 @@ export function composeServer(opts: {
             bridge.appDeps.artifactRenderPngToFile(content, mode, title, destPath)
         }
       : undefined,
-    // Browser routes also run HERE now: they read and write `tasks.browser_tabs`,
-    // which is in THIS process's DB, and reach the host only for operations on the
-    // live WebContents. That pairing is why they used to be proxied wholesale —
-    // the old BrowserAccess handed back a handle, so the handler had to run where
-    // the handle was, which is not where the row is.
-    //
-    // Absent when standalone (no WebContentsViews) → the routes 501, unchanged.
-    browser: bridge
-      ? {
-          // Every member is async — the registry lives on the host, so each one is
-          // a bridge round-trip. `BrowserAccess` was made async wholesale rather
-          // than cached here on purpose: a snapshot of "which tabs exist" goes
-          // stale the moment a user closes one, and these routes exist to drive a
-          // live browser.
-          getResolvedBrowserTabId: (taskId, tabId) =>
-            bridge.appDeps.browserTabs.getResolvedTabId(taskId, tabId),
-          listBrowserTabs: (taskId) => bridge.appDeps.browserTabs.listTabs(taskId),
-          hasBrowserTab: (taskId, tabId) => bridge.appDeps.browserTabs.hasTab(taskId, tabId),
-          waitForBrowserRegistration: (taskId, opts) =>
-            bridge.appDeps.browserTabs.waitForRegistration(taskId, opts),
-          execJs: (taskId, tabId, code) => bridge.appDeps.browserTabs.execJs(taskId, tabId, code),
-          loadUrl: (taskId, tabId, url) => bridge.appDeps.browserTabs.loadUrl(taskId, tabId, url),
-          getUrl: (taskId, tabId) => bridge.appDeps.browserTabs.getUrl(taskId, tabId),
-          capturePageToFile: (taskId, tabId, destPath) =>
-            bridge.appDeps.browserTabs.capturePageToFile(taskId, tabId, destPath)
-        }
-      : undefined,
+    // Browser routes run HERE, where the `tasks.browser_tabs` row they read and write
+    // lives; each operation on a live tab is relayed to the client that owns it.
+    browser: {
+      getResolvedBrowserTabId: async (taskId, tabId) =>
+        browserRelay.getResolvedTabId(taskId, tabId),
+      listBrowserTabs: async (taskId) => browserRelay.listTabs(taskId),
+      hasBrowserTab: async (taskId, tabId) => browserRelay.hasTab(taskId, tabId),
+      waitForBrowserRegistration: (taskId, opts) => browserRelay.waitForRegistration(taskId, opts),
+      execJs: (taskId, tabId, code) => browserRelay.run(taskId, tabId, { op: 'execJs', code }),
+      loadUrl: async (taskId, tabId, url) => {
+        await browserRelay.run(taskId, tabId, { op: 'loadUrl', url })
+      },
+      getUrl: async (taskId, tabId) => {
+        const url = await browserRelay.run(taskId, tabId, { op: 'getUrl' })
+        return typeof url === 'string' ? url : null
+      },
+      // The client sends the PNG as bytes; it lands in this hub's temp dir, as before.
+      capturePageToFile: async (taskId, tabId, destPath) => {
+        const reply = (await browserRelay.run(taskId, tabId, { op: 'capturePng' })) as {
+          pngBase64?: unknown
+        } | null
+        const b64 = typeof reply?.pngBase64 === 'string' ? reply.pngBase64 : ''
+        if (!b64) return false
+        await writeFile(destPath, Buffer.from(b64, 'base64'))
+        return true
+      }
+    },
     pty: {
       listPtys,
       hasPty,

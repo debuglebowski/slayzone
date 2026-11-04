@@ -16,7 +16,6 @@ import { detectChildRepos, setWorktreesRouterDeps } from '@slayzone/worktrees/hu
 import { setMainAgentDeps } from '@slayzone/task/server'
 import { setHostCapabilitiesDeps } from '@slayzone/host-capabilities/server'
 import { setUsageRouterDeps } from '@slayzone/terminal/hub'
-import { setTaskBrowserRouterDeps } from '@slayzone/task-browser/server'
 import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
 import { setUsageAnalyticsRouterDeps } from '@slayzone/usage-analytics/server'
 import { setComputersRouterDeps } from '@slayzone/computers/server'
@@ -86,7 +85,6 @@ setArtifactsRouterDeps({
 // exactly as `getAppDeps()` did inside the router.
 setHostCapabilitiesDeps({ getHost: () => getAppDeps() })
 setUsageRouterDeps({ getHost: () => getAppDeps() })
-setTaskBrowserRouterDeps({ getHost: () => getAppDeps() })
 setAgentPanelsRouterDeps({ getHost: () => getAppDeps() })
 
 // `app.leaderboard` and `usageAnalytics` sum over the caller's projects only (T-17):

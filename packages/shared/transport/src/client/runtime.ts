@@ -39,9 +39,8 @@ export type CreateTrpcClientOpts = {
   /**
    * Extra links PREPENDED before the terminating wsLink. A link may short-circuit
    * an operation (resolve it locally) and pass everything else through via
-   * `next(op)`. The Chromium fork uses this to resolve `app.browser.*` against the
-   * native mojo host instead of the (stubbed) standalone sidecar. Electron callers
-   * omit it → identical wsLink-only behavior.
+   * `next(op)`. The web shell uses this to react to auth invalidation. Electron
+   * callers omit it → identical wsLink-only behavior.
    */
   links?: RuntimeLink[]
   /**

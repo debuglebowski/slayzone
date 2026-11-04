@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
+import { callBrowserHost, getBrowserHost } from './browser-host'
+import { useBrowserRelayHostHandle } from './useBrowserRelayHost'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 import type { BrowserTabTheme } from '../shared'
 
@@ -71,12 +71,7 @@ export const BrowserTabPlaceholder = forwardRef<
   },
   ref
 ) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const registerTab = useMutation(trpc.app.webview.registerBrowserTab.mutationOptions()).mutateAsync
-  const unregisterTab = useMutation(trpc.app.webview.unregisterBrowserTab.mutationOptions()).mutate
-  const setViewLocked = useMutation(trpc.app.browser.setLocked.mutationOptions()).mutate
-  const setViewForcedTheme = useMutation(trpc.app.browser.setForcedTheme.mutationOptions()).mutate
+  const relayHost = useBrowserRelayHostHandle()
 
   const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
     tabId,
@@ -110,29 +105,35 @@ export const BrowserTabPlaceholder = forwardRef<
     if (visible) onOverlayChange?.(hiddenByOverlay)
   }, [visible, hiddenByOverlay, onOverlayChange])
 
-  // Register this tab's webContents with the main-process registry so the CLI
-  // can target it. Each tab registers independently; activeness is tracked
-  // separately by BrowserPanel via setActiveBrowserTab.
+  // Register this tab's webContents with this device's tab registry, then tell the
+  // hub this client has it live — so `slay browser` can target it. Each tab registers
+  // independently; activeness is tracked separately by BrowserPanel.
   useEffect(() => {
-    if (!taskId || !viewId) return
+    const host = getBrowserHost()
+    if (!taskId || !viewId || !host) return
     let cancelled = false
-    void (async () => {
-      const wcId = (await queryClient.fetchQuery(
-        trpc.app.browser.getWebContentsId.queryOptions({ viewId })
-      )) as number | null
-      if (cancelled || wcId == null) return
-      await registerTab({ taskId, tabId, webContentsId: wcId })
-    })()
+    let live = false
+    host
+      .call('view.getWebContentsId', viewId)
+      .then(async (wcId) => {
+        if (cancelled || wcId == null) return
+        await host.call('tabs.register', taskId, tabId, wcId)
+        if (cancelled) return
+        live = true
+        relayHost?.tabLive(tabId)
+      })
+      .catch((err: unknown) => console.warn('[browser] tab registration failed:', err))
     return () => {
       cancelled = true
-      unregisterTab({ taskId, tabId })
+      if (live) relayHost?.tabGone(tabId)
+      callBrowserHost('tabs.unregister', taskId, tabId)
     }
-  }, [taskId, tabId, viewId, queryClient, trpc, registerTab, unregisterTab])
+  }, [taskId, tabId, viewId, relayHost])
 
   useEffect(() => {
     if (!viewId) return
-    setViewLocked({ viewId, locked: !!locked })
-  }, [viewId, locked, setViewLocked])
+    callBrowserHost('view.setLocked', viewId, !!locked)
+  }, [viewId, locked])
 
   // Declare the desired theme; the main process owns applying and re-applying
   // it. `viewId` is a dependency on purpose — a re-created view (remount, LRU
@@ -140,8 +141,12 @@ export const BrowserTabPlaceholder = forwardRef<
   // unthemed.
   useEffect(() => {
     if (!viewId) return
-    setViewForcedTheme({ viewId, theme: !themeMode || themeMode === 'system' ? null : themeMode })
-  }, [viewId, themeMode, setViewForcedTheme])
+    callBrowserHost(
+      'view.setForcedTheme',
+      viewId,
+      !themeMode || themeMode === 'system' ? null : themeMode
+    )
+  }, [viewId, themeMode])
 
   return (
     <div

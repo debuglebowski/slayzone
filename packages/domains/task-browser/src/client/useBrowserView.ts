@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from './trpc'
-import { useStableCallback } from '@slayzone/ui'
+import { callBrowserHost, getBrowserHost, useBrowserHostEvent } from './browser-host'
 import { useBrowserViewLifecycle } from './useBrowserViewLifecycle'
 import { useBrowserViewBounds } from './useBrowserViewBounds'
 import { useBrowserViewEvents, type BrowserViewState, type LoadError } from './useBrowserViewEvents'
@@ -56,9 +54,6 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
     onPopupRoute
   } = opts
 
-  const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
-
   const { viewId } = useBrowserViewLifecycle({
     tabId,
     taskId,
@@ -79,73 +74,69 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   useEffect(() => {
     if (!viewId || desktopHandoffPolicy === prevPolicyRef.current) return
     prevPolicyRef.current = desktopHandoffPolicy
-    void trpcClient.app.browser.setHandoffPolicy.mutate({
-      viewId,
-      policy: desktopHandoffPolicy ?? null
-    })
-  }, [viewId, desktopHandoffPolicy, trpcClient])
+    callBrowserHost('view.setHandoffPolicy', viewId, desktopHandoffPolicy ?? null)
+  }, [viewId, desktopHandoffPolicy])
 
   // Multi-window: ensure WCV is parented to THIS window. Called on mount + on window focus
   // so the view follows whichever window currently renders the BrowserPanel.
   useEffect(() => {
     if (!viewId) return
-    void trpcClient.app.browser.reparentToCurrentWindow.mutate({ viewId })
+    callBrowserHost('view.reparentToCurrentWindow', viewId)
     const onFocus = () => {
-      void trpcClient.app.browser.reparentToCurrentWindow.mutate({ viewId })
+      callBrowserHost('view.reparentToCurrentWindow', viewId)
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [viewId, trpcClient])
+  }, [viewId])
 
   // Handle web-panel:popup-request events
-  const handlePopupEvent = useStableCallback((raw: unknown) => {
-    const event = raw as { viewId: string; type: string; url?: string }
-    if (event.viewId !== viewId || event.type !== 'web-panel:popup-request') return
-    onPopupRoute?.(event.url as string)
-  })
-  useSubscription(
-    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
-      enabled: !!viewId,
-      onData: handlePopupEvent
-    })
+  useBrowserHostEvent(
+    'event',
+    (event) => {
+      if (event.viewId !== viewId || event.type !== 'web-panel:popup-request') return
+      onPopupRoute?.(event.url as string)
+    },
+    !!viewId
   )
 
   const actions: BrowserViewActions = useMemo(
     () => ({
       navigate: (u: string) => {
-        if (viewId) void trpcClient.app.browser.navigate.mutate({ viewId, url: u })
+        if (viewId) callBrowserHost('view.navigate', viewId, u)
       },
       goBack: () => {
-        if (viewId) void trpcClient.app.browser.goBack.mutate({ viewId })
+        if (viewId) callBrowserHost('view.goBack', viewId)
       },
       goForward: () => {
-        if (viewId) void trpcClient.app.browser.goForward.mutate({ viewId })
+        if (viewId) callBrowserHost('view.goForward', viewId)
       },
       reload: (ignoreCache?: boolean) => {
-        if (viewId) void trpcClient.app.browser.reload.mutate({ viewId, ignoreCache })
+        if (viewId) callBrowserHost('view.reload', viewId, ignoreCache)
       },
       stop: () => {
-        if (viewId) void trpcClient.app.browser.stop.mutate({ viewId })
+        if (viewId) callBrowserHost('view.stop', viewId)
       },
-      executeJs: (code: string) =>
-        viewId
-          ? trpcClient.app.browser.executeJs.mutate({ viewId, code })
-          : Promise.resolve(undefined),
-      insertCss: (css: string) =>
-        viewId
-          ? (trpcClient.app.browser.insertCss.mutate({ viewId, css }) as Promise<string>)
-          : Promise.resolve(''),
+      executeJs: (code: string) => {
+        const host = getBrowserHost()
+        return viewId && host
+          ? host.call('view.executeJs', viewId, code)
+          : Promise.resolve(undefined)
+      },
+      insertCss: (css: string) => {
+        const host = getBrowserHost()
+        return viewId && host ? host.call('view.insertCss', viewId, css) : Promise.resolve('')
+      },
       removeCss: (key: string) => {
-        if (viewId) void trpcClient.app.browser.removeCss.mutate({ viewId, key })
+        if (viewId) callBrowserHost('view.removeCss', viewId, key)
       },
       setZoom: (factor: number) => {
-        if (viewId) void trpcClient.app.browser.setZoom.mutate({ viewId, factor })
+        if (viewId) callBrowserHost('view.setZoom', viewId, factor)
       },
       focus: () => {
-        if (viewId) void trpcClient.app.browser.focus.mutate({ viewId })
+        if (viewId) callBrowserHost('view.focus', viewId)
       }
     }),
-    [viewId, trpcClient]
+    [viewId]
   )
 
   return { viewId, state, actions, placeholderRef, hiddenByOverlay }

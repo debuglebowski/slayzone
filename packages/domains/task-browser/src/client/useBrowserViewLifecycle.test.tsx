@@ -7,11 +7,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 
 const createView = vi.fn()
-const destroyView = vi.fn(() => Promise.resolve())
-const client = {
-  app: { browser: { createView: { mutate: createView }, destroyView: { mutate: destroyView } } }
-}
-vi.mock('./trpc', () => ({ useTRPCClient: () => client }))
+const destroyView = vi.fn((_input: unknown) => Promise.resolve())
+// This device's browser host: view.create / view.destroy, in the shapes the
+// assertions below read.
+const call = (method: string, ...args: unknown[]): Promise<unknown> =>
+  method === 'view.create'
+    ? Promise.resolve(createView(args[0]))
+    : method === 'view.destroy'
+      ? destroyView({ viewId: args[0] })
+      : Promise.resolve(undefined)
+const host = { call, on: () => () => {} }
+vi.mock('./browser-host', () => ({
+  getBrowserHost: () => host,
+  callBrowserHost: (method: string, ...args: unknown[]) => void call(method, ...args)
+}))
 
 const { useBrowserViewLifecycle } = await import('./useBrowserViewLifecycle')
 

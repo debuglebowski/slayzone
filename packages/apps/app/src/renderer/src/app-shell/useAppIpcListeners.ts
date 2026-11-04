@@ -4,6 +4,7 @@ import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { scopeTracker, useStableCallback } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
+import { callBrowserHost, useBrowserHostEvent } from '@slayzone/task-browser/client'
 import { useDialogStore } from '@slayzone/dialogs'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task-contracts'
 import type { Task } from '@slayzone/task-contracts'
@@ -143,13 +144,13 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   useSubscription(
     trpc.menu.onReloadBrowser.subscriptionOptions(undefined, {
       onData: () => {
-        // Find visible WebContentsView placeholder and reload via tRPC
+        // Find visible WebContentsView placeholder and reload it on this device's host
         const placeholder = document.querySelector(
           '[data-browser-panel][data-view-id]'
         ) as HTMLElement | null
         const viewId = placeholder?.dataset.viewId
         if (viewId) {
-          void trpcClient.app.browser.reload.mutate({ viewId })
+          callBrowserHost('view.reload', viewId)
           return
         }
         // Fallback: webview (multi-device grid). <webview> is an Electron custom
@@ -201,90 +202,78 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   // Forward keyboard shortcuts from WebContentsView back into the DOM.
   // Forward WebContentsView keyboard shortcuts back into the renderer DOM (the
   // view is a separate web contents, so renderer key handlers never see them).
-  useSubscription(
-    trpc.app.browser.onShortcut.subscriptionOptions(undefined, {
-      onData: (payload) => {
-        // WebContentsView is a separate web contents — focusin never fires in
-        // renderer when it has focus. Set browser scope before dispatching so
-        // the shortcut registry sees the correct active scopes.
-        // Web panels should NOT activate browser scope — browser-scoped shortcuts
-        // (T for new tab, D for split) are wrong for web panels.
-        if (payload.kind !== 'web-panel') {
-          scopeTracker.setComponentScope('browser', payload.viewId)
-        }
-        // Dispatch on document (not window) so react-hotkeys-hook sees it —
-        // it listens on document. Events on document also bubble to window,
-        // so raw window.addEventListener handlers still work.
-        // react-hotkeys-hook tracks pressed keys by e.code via keydown events.
-        // Emit modifier keydowns first so the pressed-key set is correct, then
-        // emit the actual key. Include code on all events.
-        const key = payload.key
-        const code = key.length === 1 ? `Key${key.toUpperCase()}` : key
-        const mods = {
-          shiftKey: payload.shift,
-          metaKey: payload.meta,
-          ctrlKey: payload.control,
-          altKey: payload.alt
-        }
-        if (payload.control)
-          document.dispatchEvent(
-            new KeyboardEvent('keydown', {
-              key: 'Control',
-              code: 'ControlLeft',
-              ...mods,
-              bubbles: true
-            })
-          )
-        if (payload.meta)
-          document.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Meta', code: 'MetaLeft', ...mods, bubbles: true })
-          )
-        if (payload.shift)
-          document.dispatchEvent(
-            new KeyboardEvent('keydown', {
-              key: 'Shift',
-              code: 'ShiftLeft',
-              ...mods,
-              bubbles: true
-            })
-          )
-        if (payload.alt)
-          document.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Alt', code: 'AltLeft', ...mods, bubbles: true })
-          )
-        document.dispatchEvent(new KeyboardEvent('keydown', { key, code, ...mods, bubbles: true }))
-      }
-    })
-  )
+  useBrowserHostEvent('shortcut', (payload) => {
+    // WebContentsView is a separate web contents — focusin never fires in
+    // renderer when it has focus. Set browser scope before dispatching so
+    // the shortcut registry sees the correct active scopes.
+    // Web panels should NOT activate browser scope — browser-scoped shortcuts
+    // (T for new tab, D for split) are wrong for web panels.
+    if (payload.kind !== 'web-panel') {
+      scopeTracker.setComponentScope('browser', payload.viewId)
+    }
+    // Dispatch on document (not window) so react-hotkeys-hook sees it —
+    // it listens on document. Events on document also bubble to window,
+    // so raw window.addEventListener handlers still work.
+    // react-hotkeys-hook tracks pressed keys by e.code via keydown events.
+    // Emit modifier keydowns first so the pressed-key set is correct, then
+    // emit the actual key. Include code on all events.
+    const key = payload.key
+    const code = key.length === 1 ? `Key${key.toUpperCase()}` : key
+    const mods = {
+      shiftKey: payload.shift,
+      metaKey: payload.meta,
+      ctrlKey: payload.control,
+      altKey: payload.alt
+    }
+    if (payload.control)
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Control',
+          code: 'ControlLeft',
+          ...mods,
+          bubbles: true
+        })
+      )
+    if (payload.meta)
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Meta', code: 'MetaLeft', ...mods, bubbles: true })
+      )
+    if (payload.shift)
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Shift',
+          code: 'ShiftLeft',
+          ...mods,
+          bubbles: true
+        })
+      )
+    if (payload.alt)
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Alt', code: 'AltLeft', ...mods, bubbles: true })
+      )
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, code, ...mods, bubbles: true }))
+  })
 
   // When a WebContentsView gains focus, dispatch a synthetic focusin on the
   // owning panel element so TaskDetailPage's glow tracking picks it up.
   // Uses DOM lookup via data-view-id → closest data-panel-id to work for
   // both browser tabs and web panels.
-  useSubscription(
-    trpc.app.browser.onFocused.subscriptionOptions(undefined, {
-      onData: ({ viewId }) => {
-        const el = document.querySelector(`[data-view-id="${viewId}"]`)
-        const panel = el?.closest('[data-panel-id]')
-        if (panel) {
-          panel.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
-        }
-      }
-    })
-  )
+  useBrowserHostEvent('focused', ({ viewId }) => {
+    const el = document.querySelector(`[data-view-id="${viewId}"]`)
+    const panel = el?.closest('[data-panel-id]')
+    if (panel) {
+      panel.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    }
+  })
 
   // Open the create-task dialog seeded from a browser-link intent (context menu
   // / modified-click in a WebContentsView).
-  useSubscription(
-    trpc.app.browser.onCreateTaskFromLink.subscriptionOptions(undefined, {
-      onData: (intent) => {
-        const sourceTask = tasksMap.get(intent.taskId)
-        const fallbackProjectId = sourceTask?.project_id ?? selectedProjectId ?? projects[0]?.id
-        useDialogStore.getState().openCreateTask({
-          ...buildCreateTaskDraftFromBrowserLink(intent.url, intent.linkText),
-          projectId: fallbackProjectId
-        })
-      }
+  useBrowserHostEvent('create-task-from-link', (intent) => {
+    const sourceTask = tasksMap.get(intent.taskId)
+    const fallbackProjectId = sourceTask?.project_id ?? selectedProjectId ?? projects[0]?.id
+    useDialogStore.getState().openCreateTask({
+      ...buildCreateTaskDraftFromBrowserLink(intent.url, intent.linkText),
+      projectId: fallbackProjectId
     })
-  )
+  })
 }

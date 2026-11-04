@@ -7,7 +7,6 @@ import { hibernatedSessionIdsSource } from '@slayzone/task-terminals/hibernated-
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { ConvexAuthBootstrap } from '@slayzone/leaderboard'
-import { browserMojoLink } from './browser-mojo-link'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
 import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
@@ -98,10 +97,10 @@ export async function mountApp({ onboarding = true }: MountAppOptions = {}): Pro
     electronBootstrap.getWindowId()
   ])
   const trpcUrl = withWindowId(server.url, windowId)
-  // Resolve the browser panel's `app.browser.*` ops against the native mojo host
-  // (window.api.browser) instead of the standalone sidecar, which stubs them.
-  // FIRST initTrpcClient call wins the link stack; TrpcProvider reuses the singleton.
-  initTrpcClient(trpcUrl, { links: [browserMojoLink()] })
+  // The browser panel drives the native mojo host directly through
+  // `window.api.browserHost` (window-api-shim) — nothing about it rides tRPC.
+  // FIRST initTrpcClient call wins; TrpcProvider reuses the singleton.
+  initTrpcClient(trpcUrl)
 
   // Provider stack mirrors the Electron renderer (packages/apps/app/src/renderer/
   // src/main.tsx): TrpcProvider OUTERMOST (Pty/Appearance/Telemetry providers call

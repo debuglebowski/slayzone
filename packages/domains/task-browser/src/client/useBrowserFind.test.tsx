@@ -11,27 +11,24 @@ let capturedOnData: OnData | null = null
 const findInPage = vi.fn((_input: unknown) => Promise.resolve())
 const stopFindInPage = vi.fn((_input: unknown) => Promise.resolve())
 
-vi.mock('@slayzone/transport/client', () => ({
-  useTRPC: () => ({
-    app: {
-      browser: {
-        onEvent: {
-          subscriptionOptions: (_input: unknown, opts: { enabled: boolean; onData: OnData }) => opts
-        }
-      }
-    }
-  }),
-  useTRPCClient: () => ({
-    app: {
-      window: { focusRenderer: { mutate: () => Promise.resolve() } },
-      browser: { findInPage: { mutate: findInPage }, stopFindInPage: { mutate: stopFindInPage } }
-    }
-  }),
-  useSubscription: (opts: { enabled: boolean; onData: OnData }) => {
-    capturedOnData = opts.enabled ? opts.onData : null
+const trpcClient = { app: { window: { focusRenderer: { mutate: () => Promise.resolve() } } } }
+vi.mock('./trpc', () => ({ useTRPCClient: () => trpcClient }))
+
+// This device's browser host: find calls in the shapes the assertions below read.
+const call = (method: string, ...args: unknown[]): Promise<unknown> => {
+  if (method === 'view.findInPage')
+    return findInPage({ viewId: args[0], text: args[1], options: args[2] })
+  if (method === 'view.stopFindInPage') return stopFindInPage({ viewId: args[0], action: args[1] })
+  return Promise.resolve(undefined)
+}
+const host = { call, on: () => () => {} }
+vi.mock('./browser-host', () => ({
+  getBrowserHost: () => host,
+  callBrowserHost: (method: string, ...args: unknown[]) => void call(method, ...args),
+  useBrowserHostEvent: (_event: string, handler: OnData, enabled = true) => {
+    capturedOnData = enabled ? handler : null
   }
 }))
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 
 const shortcuts = new Map<string, { handler: () => void; enabled: boolean }>()
 vi.mock('@slayzone/ui', async (importOriginal) => ({

@@ -573,11 +573,8 @@ run_harness packages/apps/api/src/routers/template.test.ts
 run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 # Cross-domain: task+tags+history activity-event recording + cursor pagination.
 run_harness packages/apps/api/src/routers/history.test.ts
-# Browser onEvent snapshot replay (stuck-loading race fix) — no DB
-run_harness packages/domains/task-browser/src/server/router.test.ts
-# Desktop bridge replay cache: a browser tab subscribing right after a relayed
-# dom-ready/did-stop-loading is replayed THAT state (stale "loading" stranded the overlay).
-run_harness packages/apps/hub/src/host-bridge.test.ts
+# Browser relay: which client owns a task's tabs + slay browser request/reply — no DB
+run_harness packages/domains/task-browser/src/server/browser-relay.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
@@ -1125,6 +1122,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/BlockerDialog.test.tsx \
   packages/domains/task/src/client/taskDetailCache.test.ts \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
+  packages/domains/task-browser/src/client/browser-host.test.ts \
   packages/domains/task-browser/src/client/useBrowserFind.test.tsx \
   packages/domains/task-browser/src/client/useBrowserImportUrls.test.tsx \
   packages/domains/task-browser/src/client/DeviceWebview.test.tsx \

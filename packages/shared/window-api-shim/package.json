@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@slayzone/mojo-bindings": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",

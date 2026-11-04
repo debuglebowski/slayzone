@@ -66,7 +66,7 @@ describe('SCOPE_POLICY — specific classifications', () => {
     ['chat.reset', 're-creates a session with an attacker-chosen mode + cwd'],
     ['task.startMainAgent', 'starts a process with flags/cwd a tasks-scoped session can write'],
     ['workspace.setAllowedRoots', 'mutates the filesystem sandbox itself'],
-    ['app.browser.executeJs', 'arbitrary JS eval in a live WebContentsView'],
+    ['app.browserRelay.serve', "receives arbitrary JS to run in this client's live browser tabs"],
     ['app.shell.openExternal', 'opens an arbitrary URL/path on the hub machine'],
     ['computers.mintJoinToken', 'mints a computer enrollment secret'],
     ['computers.setTaskComputer', 'chooses which computer a task runs on'],

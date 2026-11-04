@@ -144,6 +144,17 @@ test.describe('Browser CLI multi-tab targeting', () => {
     expect(r1.stdout).toContain('tab1.html')
   })
 
+  // The client captures the page and sends the PNG bytes to the hub over the relay;
+  // the hub writes the file the CLI reads.
+  test('screenshot --tab writes a PNG of the targeted tab', () => {
+    const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'slay-shot-')), 'tab1.png')
+    const r = runCli('tasks', 'browser', 'screenshot', '--tab', '1', '--output', out)
+    expect(r.status, r.stderr).toBe(0)
+    const bytes = fs.readFileSync(out)
+    expect(bytes.length).toBeGreaterThan(100)
+    expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+  })
+
   test('out-of-range --tab idx errors with available tabs listed', () => {
     const r = runCli('tasks', 'browser', 'url', '--tab', '99')
     expect(r.status).not.toBe(0)

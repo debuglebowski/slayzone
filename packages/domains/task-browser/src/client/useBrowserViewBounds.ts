@@ -1,7 +1,8 @@
 import { useCallback, useRef, useEffect, useInsertionEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from './trpc'
+import { useTRPC } from './trpc'
+import { callBrowserHost } from './browser-host'
 import { useStableCallback } from '@slayzone/ui'
 
 interface UseBrowserViewBoundsOpts {
@@ -24,7 +25,6 @@ export function useBrowserViewBounds(
   opts: UseBrowserViewBoundsOpts
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
   const { visible, hidden, isResizing, offScreen } = opts
   const shouldPaint = visible && !hidden && !isResizing
   const effectivelyVisible = shouldPaint && !offScreen
@@ -76,8 +76,8 @@ export function useBrowserViewBounds(
   // plays) while parked off-screen by the bounds effect below.
   useEffect(() => {
     if (!viewId) return
-    void trpcClient.app.browser.setVisible.mutate({ viewId, visible: shouldPaint })
-  }, [viewId, shouldPaint, trpcClient])
+    callBrowserHost('view.setVisible', viewId, shouldPaint)
+  }, [viewId, shouldPaint])
 
   // Park bounds off-screen when shouldPaint && offScreen. One-shot per transition:
   // the rAF loop is gated on effectivelyVisible (= !offScreen), so it won't fight
@@ -88,17 +88,14 @@ export function useBrowserViewBounds(
     const last = lastBoundsRef.current
     const width = last?.width && last.width > 0 ? last.width : FALLBACK_PARK_WIDTH
     const height = last?.height && last.height > 0 ? last.height : FALLBACK_PARK_HEIGHT
-    void trpcClient.app.browser.setBounds.mutate({
-      viewId,
-      bounds: {
-        x: OFF_SCREEN_X,
-        y: OFF_SCREEN_Y,
-        width,
-        height
-      }
+    callBrowserHost('view.setBounds', viewId, {
+      x: OFF_SCREEN_X,
+      y: OFF_SCREEN_Y,
+      width,
+      height
     })
     lastBoundsRef.current = null
-  }, [viewId, shouldPaint, offScreen, trpcClient])
+  }, [viewId, shouldPaint, offScreen])
 
   // Track whether we've hidden this view due to a dialog overlay
   const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
@@ -141,11 +138,11 @@ export function useBrowserViewBounds(
       if (overlaps && !hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = true
         setHiddenByOverlay(true)
-        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: false })
+        callBrowserHost('view.setVisible', vid, false)
       } else if (!overlaps && hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = false
         setHiddenByOverlay(false)
-        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: true })
+        callBrowserHost('view.setVisible', vid, true)
       }
 
       // Only sync bounds when not hidden by overlay
@@ -169,10 +166,7 @@ export function useBrowserViewBounds(
         ) {
           lastBoundsRef.current = { x, y, width, height }
           if (width > 0 && height > 0) {
-            void trpcClient.app.browser.setBounds.mutate({
-              viewId: vid,
-              bounds: { x, y, width, height }
-            })
+            callBrowserHost('view.setBounds', vid, { x, y, width, height })
           }
         }
       }
@@ -183,7 +177,7 @@ export function useBrowserViewBounds(
     if (!rafRef.current) {
       rafRef.current = requestAnimationFrame(tick)
     }
-  }, [trpcClient])
+  }, [])
 
   const stopLoop = useCallback(() => {
     if (rafRef.current) {
@@ -206,9 +200,9 @@ export function useBrowserViewBounds(
   const handleMouseDown = useCallback(() => {
     const vid = viewIdRef.current
     if (vid) {
-      void trpcClient.app.browser.focus.mutate({ viewId: vid })
+      callBrowserHost('view.focus', vid)
     }
-  }, [trpcClient])
+  }, [])
 
   // Callback ref — handles conditional mounting
   const placeholderRef = useCallback(

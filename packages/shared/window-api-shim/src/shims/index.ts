@@ -8,6 +8,7 @@ import { ptyShim } from './pty'
 import { dialogShim } from './dialog'
 import { browserShim } from './browser'
 import { webviewShim } from './webview'
+import { browserHostShim } from './browser-host'
 import { agentsShim } from './agents'
 import { tabsShim } from './tabs'
 import { makeStubNamespace } from './stub-factory'
@@ -78,6 +79,8 @@ export function buildApi(): ElectronAPI {
   api.dialog = dialogShim
   api.browser = browserShim
   api.webview = webviewShim
+  // The canonical browser panel's client-local host (see ./browser-host.ts).
+  api.browserHost = browserHostShim
   api.agents = agentsShim
   api.tabs = tabsShim
   return api as unknown as ElectronAPI

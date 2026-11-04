@@ -70,6 +70,9 @@ export {
 } from './app-deps'
 // The tags router's trigger bus lives with it; re-exported so the hub wires it here.
 export { setTaskTriggerBus, getTaskTriggerBus, type TaskTriggerBus } from '@slayzone/tags/server'
+// The browser panel's hub side: which client owns a task's live tabs (`slay browser`
+// relays to it). The hub composes one relay and wires it here.
+export { BrowserRelay, setBrowserRelayRouterDeps } from '@slayzone/task-browser/server'
 
 // Capability bridge — host↔side-car seam (slice 9). The Electron host serves
 // `capabilityBridgeRouter`; the side-car forwards its Electron-only `AppDeps`

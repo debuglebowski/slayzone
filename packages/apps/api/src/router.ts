@@ -42,7 +42,7 @@ import {
 } from '@slayzone/usage-analytics/server'
 import type { AppUsageMounts } from '@slayzone/terminal/hub'
 import type { AppFeedbackMounts } from '@slayzone/feedback/server'
-import type { AppBrowserMounts, AppWebviewMounts } from '@slayzone/task-browser/server'
+import type { AppBrowserRelayMounts } from '@slayzone/task-browser/server'
 import type { AppFloatingAgentMounts } from '@slayzone/agent-panels/server'
 import { aiConfigRouter, type AiConfigMounts } from '@slayzone/ai-config/server'
 import {
@@ -140,7 +140,7 @@ export type DomainRouterSlices = [
   // The `app.*` routers, each owned by its package (`./routers/app.ts`).
   AssertAppSlice<IsAppSlice<AppAuthMounts>>,
   AssertAppSlice<IsAppSlice<AppBackupMounts>>,
-  AssertAppSlice<IsAppSlice<AppBrowserMounts>>,
+  AssertAppSlice<IsAppSlice<AppBrowserRelayMounts>>,
   AssertAppSlice<IsAppSlice<AppClipboardMounts>>,
   AssertAppSlice<IsAppSlice<AppDialogMounts>>,
   AssertAppSlice<IsAppSlice<AppExportImportMounts>>,
@@ -154,7 +154,6 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AppShortcutsMounts>>,
   AssertAppSlice<IsAppSlice<AppTaskWindowsMounts>>,
   AssertAppSlice<IsAppSlice<AppUsageMounts>>,
-  AssertAppSlice<IsAppSlice<AppWebviewMounts>>,
   AssertAppSlice<IsAppSlice<AppWindowMounts>>,
   // The domains:
   AssertAppSlice<IsAppSlice<AgentLifecycleMounts>>,

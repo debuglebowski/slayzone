@@ -9,7 +9,6 @@ import type { HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import type { HostCapabilities } from '@slayzone/host-capabilities/server'
 import type { UsageHost } from '@slayzone/terminal/server'
-import type { TaskBrowserHost } from '@slayzone/task-browser/server'
 import type { FloatingAgentHost } from '@slayzone/agent-panels/server'
 
 // Backup ops — the registry lives with the `app.backup` router that reads it.
@@ -73,13 +72,12 @@ export function getPowerResumeEvents(): TypedEmitter<PowerResumeEventMap> {
 // wired throws on the first app procedure call.
 //
 // The members the `app.*` routers wrap are declared by the package that owns each
-// router (`HostCapabilities`, `UsageHost`, `TaskBrowserHost`, `FloatingAgentHost`),
+// router (`HostCapabilities`, `UsageHost`, `FloatingAgentHost`),
 // so router and host share one contract; this type is their union plus the members
 // only api's own code reads. Member names are the capability bridge's wire contract
 // (`capability-bridge.ts` forwards by name): never rename one.
 export type AppDeps = HostCapabilities &
-  UsageHost &
-  TaskBrowserHost & {
+  UsageHost & {
     floatingAgent: FloatingAgentHost
   } & {
     /** Relaunch the desktop app. Used by backup restore, which overwrites the
@@ -159,40 +157,6 @@ export type AppDeps = HostCapabilities &
       title: string,
       destPath: string
     ) => Promise<boolean>
-
-    /**
-     * The task/tab browser REGISTRY — distinct from `browser` below, which is the
-     * view-id-keyed WebContentsView manager.
-     *
-     * Exists so the REST browser routes can run on the hub, where the
-     * `tasks.browser_tabs` row they read and write lives. They used to be
-     * reverse-proxied to the desktop wholesale, purely because the old
-     * `BrowserAccess` handed back a live `WebContents` — which in turn forced the
-     * desktop to keep its own connection to the shared database. A handle can't
-     * cross the bridge; `(taskId, tabId)` can.
-     *
-     * `capturePageToFile` writes the PNG on the host so a full-page image never
-     * travels as a buffer, matching the `artifactRender*ToFile` slots.
-     */
-    browserTabs: {
-      getResolvedTabId: (taskId: string, tabId?: string) => Promise<string | null>
-      listTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
-      hasTab: (taskId: string, tabId?: string) => Promise<boolean>
-      /** Resolves once a tab registers; rejects on timeout. */
-      waitForRegistration: (
-        taskId: string,
-        opts: { tabId?: string; timeoutMs?: number }
-      ) => Promise<void>
-      execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
-      loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
-      getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
-      /** False when the captured image was empty. */
-      capturePageToFile: (
-        taskId: string,
-        tabId: string | null,
-        destPath: string
-      ) => Promise<boolean>
-    }
   }
 
 let appDeps: AppDeps | null = null

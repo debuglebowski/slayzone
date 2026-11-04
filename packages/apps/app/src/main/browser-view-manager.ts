@@ -13,12 +13,9 @@ import { EventEmitter } from 'node:events'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { menuEvents } from './menu-events'
 
-// tRPC event stream — dual-emitted alongside the legacy `browser:*` /
-// `browser-view:*` webContents.send broadcasts below, so the
-// `app.browser.on*` subscriptions work while the renderer still consumes IPC
-// (coexistence until slice 5; the sends drop then). The `app:*` shortcut
-// broadcasts below are also dual-emitted onto `menuEvents` for the `menu.*`
-// subs (P21 menu router slice) — same coexistence.
+// View event stream — forwarded to this app's renderers by the client-local browser
+// host (`browser-host-ipc.ts`). The `app:*` shortcut broadcasts below are also
+// emitted onto `menuEvents` for the `menu.*` subs.
 export const browserViewEvents = new EventEmitter() as EventEmitter & {
   on(event: 'event', listener: (e: unknown) => void): EventEmitter
   on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
@@ -946,7 +943,7 @@ export class BrowserViewManager {
       source: payload.source
     }
 
-    browserViewEvents.emit('create-task-from-link', intent) // tRPC app.browser.onCreateTaskFromLink
+    browserViewEvents.emit('create-task-from-link', intent)
     return true
   }
 
@@ -978,7 +975,7 @@ export class BrowserViewManager {
           background: false,
           taskId: entry.taskId
         }
-        browserViewEvents.emit('event', newTabEvent) // tRPC app.browser.onEvent
+        browserViewEvents.emit('event', newTabEvent)
         return true
       }
       case 'copy-link':
@@ -1138,7 +1135,7 @@ export class BrowserViewManager {
       background: false,
       taskId: sourceEntry.taskId,
       tabId
-    }) // tRPC app.browser.onEvent
+    })
     const entry = await created
     const win = this.windowFor(entry)
     if (!win) throw new Error('The browser panel window is gone')
@@ -1155,7 +1152,7 @@ export class BrowserViewManager {
       type: 'select-tab-request',
       taskId: entry.taskId,
       tabId: entry.tabId
-    }) // tRPC app.browser.onEvent
+    })
   }
 
   /** chrome.tabs.remove: close that panel tab. */
@@ -1168,7 +1165,7 @@ export class BrowserViewManager {
       type: 'close-tab-request',
       taskId: entry.taskId,
       tabId: entry.tabId
-    }) // tRPC app.browser.onEvent
+    })
   }
 
   private getWebContents(viewId: string): Electron.WebContents | null {
@@ -1278,7 +1275,7 @@ export class BrowserViewManager {
     const wc = view.webContents
     const entry = this.views.get(viewId)!
     const send = (event: BrowserViewEvent) => {
-      browserViewEvents.emit('event', event) // tRPC app.browser.onEvent
+      browserViewEvents.emit('event', event)
     }
 
     if (entry.kind === 'web-panel') {
@@ -1377,7 +1374,7 @@ export class BrowserViewManager {
           control: false,
           kind: entry.kind
         }
-        browserViewEvents.emit('shortcut', escapeShortcut) // tRPC app.browser.onShortcut
+        browserViewEvents.emit('shortcut', escapeShortcut)
         return
       }
 
@@ -1413,7 +1410,7 @@ export class BrowserViewManager {
         control: Boolean(input.control),
         kind: entry.kind
       }
-      browserViewEvents.emit('shortcut', cmdShortcut) // tRPC app.browser.onShortcut
+      browserViewEvents.emit('shortcut', cmdShortcut)
     })
 
     // Navigation focus-steal guard — see browser-view-nav-focus-guard.ts.
@@ -1433,7 +1430,7 @@ export class BrowserViewManager {
         // The sessions live in the hub, which touches on this event (relayed over
         // the desktop bridge — apps/hub/src/idle-close.ts).
         browserViewEvents.emit('engaged', { taskId: entry.taskId })
-        browserViewEvents.emit('focused', { viewId }) // tRPC app.browser.onFocused
+        browserViewEvents.emit('focused', { viewId })
       },
       onStolen: (owner) => {
         pendingHandBack = setImmediate(() => {

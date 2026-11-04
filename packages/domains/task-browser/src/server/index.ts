@@ -1,17 +1,9 @@
-// `app.browser` / `app.webview` tRPC routers + the host seam they read. Composed by
-// `@slayzone/api` under `app`, which also wires the seam from its `AppDeps` registry.
+// The hub's side of the browser panel: `app.browserRelay` (which client owns a task's
+// live tabs, and the request/reply channel `slay browser` rides to reach it). The web
+// views themselves are client-local — see `../shared/browser-host.ts`.
+export { BrowserRelay } from './browser-relay'
 export {
-  appBrowserRouter,
-  appWebviewRouter,
-  type AppBrowserRouter,
-  type AppBrowserMounts,
-  type AppWebviewRouter,
-  type AppWebviewMounts
-} from './router'
-export {
-  setTaskBrowserRouterDeps,
-  type TaskBrowserRouterDeps,
-  type TaskBrowserHost,
-  type BrowserViewHost,
-  type WebviewHost
-} from './router-deps'
+  appBrowserRelayRouter,
+  setBrowserRelayRouterDeps,
+  type AppBrowserRelayMounts
+} from './relay-router'

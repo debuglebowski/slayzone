@@ -1,6 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
+import { getBrowserHost } from './browser-host'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { DeviceEmulation } from '../shared'
 
@@ -38,10 +37,6 @@ export function DeviceWebview({
   forceReloadTrigger,
   onLayout
 }: DeviceWebviewProps) {
-  const trpc = useTRPC()
-  const enableEmulation = useMutation(
-    trpc.app.webview.enableDeviceEmulation.mutationOptions()
-  ).mutateAsync
   const webviewRef = useRef<WebviewElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [webviewReady, setWebviewReady] = useState(false)
@@ -124,20 +119,21 @@ export function DeviceWebview({
     const prevUa = prev?.ua
     prevEmulationRef.current = cur
 
+    const host = getBrowserHost()
+    if (!host) return
     const wcId = wv.getWebContentsId()
-    void enableEmulation({
-      webviewId: wcId,
-      params: {
+    void host
+      .call('webview.enableDeviceEmulation', wcId, {
         screenSize: { width: preset.width, height: preset.height },
         viewSize: { width: 0, height: 0 },
         deviceScaleFactor: preset.deviceScaleFactor,
         screenPosition: preset.mobile ? 'mobile' : 'desktop',
         userAgent: preset.userAgent
-      }
-    }).then(() => {
-      if (preset.userAgent !== prevUa) wv.reload()
-    })
-  }, [preset, webviewReady, enableEmulation])
+      })
+      .then(() => {
+        if (preset.userAgent !== prevUa) wv.reload()
+      })
+  }, [preset, webviewReady])
 
   // Navigate only when parent URL actually changes
   useEffect(() => {

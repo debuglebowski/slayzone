@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
+import type { BrowserHostClient } from './browser-host'
+import { getBrowserHost } from './browser-host'
 import { RotateCw, Plus, Puzzle, Trash2, TriangleAlert, Download } from 'lucide-react'
 import {
   Button,
@@ -53,22 +54,34 @@ export interface ExtensionsManagerViewProps {
  * Owns all extension-manager state: installed + discoverable lists, loading/error,
  * and the open/close + activate/import/load/remove handlers.
  */
+// Extensions are per device (they live in this device's browser session), so they are
+// queried from this device's browser host, keyed here rather than by a hub procedure.
+const INSTALLED_KEY = ['browser-host', 'extensions.list'] as const
+const DISCOVERED_KEY = ['browser-host', 'extensions.discover'] as const
+
+function requireHost(): BrowserHostClient {
+  const host = getBrowserHost()
+  if (!host) throw new Error('This client has no browser host')
+  return host
+}
+
 export function useBrowserExtensions() {
-  const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [extensionsManagerOpen, setExtensionsManagerOpen] = useState(false)
   const [extensionsError, setExtensionsError] = useState<string | null>(null)
 
   // Installed + discoverable lists. Both fetch only while the manager is open;
   // the prior code refreshed them imperatively on open and after each mutation.
-  const installedQuery = useQuery(
-    trpc.app.browser.getExtensions.queryOptions(undefined, { enabled: extensionsManagerOpen })
-  ) as { data?: InstalledBrowserExtension[]; isFetching: boolean; error: unknown }
-  const discoveredQuery = useQuery(
-    trpc.app.browser.discoverBrowserExtensions.queryOptions(undefined, {
-      enabled: extensionsManagerOpen
-    })
-  ) as { data?: BrowserExtensionSource[]; isFetching: boolean; error: unknown }
+  const installedQuery = useQuery({
+    queryKey: INSTALLED_KEY,
+    queryFn: () => requireHost().call('extensions.list'),
+    enabled: extensionsManagerOpen
+  }) as { data?: InstalledBrowserExtension[]; isFetching: boolean; error: unknown }
+  const discoveredQuery = useQuery({
+    queryKey: DISCOVERED_KEY,
+    queryFn: () => requireHost().call('extensions.discover'),
+    enabled: extensionsManagerOpen
+  }) as { data?: BrowserExtensionSource[]; isFetching: boolean; error: unknown }
 
   const extensions = useMemo<InstalledBrowserExtension[]>(
     () => installedQuery.data ?? [],
@@ -101,40 +114,38 @@ export function useBrowserExtensions() {
   const refreshExtensions = useCallback(async () => {
     setExtensionsError(null)
     await Promise.all([
-      queryClient.invalidateQueries(trpc.app.browser.getExtensions.queryFilter()),
-      queryClient.invalidateQueries(trpc.app.browser.discoverBrowserExtensions.queryFilter())
+      queryClient.invalidateQueries({ queryKey: INSTALLED_KEY }),
+      queryClient.invalidateQueries({ queryKey: DISCOVERED_KEY })
     ])
-  }, [queryClient, trpc])
+  }, [queryClient])
 
   const handleToggleExtensionsManager = useCallback(() => {
     setExtensionsManagerOpen((prev) => !prev)
   }, [])
 
-  // activateExtension manipulates the active WebContentsView (opens the
-  // extension action in the live view) but is an app.browser router proc; keep
-  // it on tRPC. Fire-and-forget after the rAF, matching the prior behavior.
-  const activateExtension = useMutation(trpc.app.browser.activateExtension.mutationOptions()).mutate
-  const handleActivateExtension = useCallback(
-    (extensionId: string) => {
-      setExtensionsManagerOpen(false)
-      requestAnimationFrame(() => {
-        activateExtension({ extensionId })
-      })
-    },
-    [activateExtension]
-  )
-
-  const importExtensionAsync = useMutation(
-    trpc.app.browser.importExtension.mutationOptions({
-      onSuccess: (result) => {
-        if (result && typeof result === 'object' && 'id' in result) {
-          void refreshExtensions()
-        } else if (result && typeof result === 'object' && 'error' in result) {
-          setExtensionsError((result as { error: string }).error)
-        }
-      }
+  // Opens the extension's action in the live view. Fire-and-forget after the rAF.
+  const handleActivateExtension = useCallback((extensionId: string) => {
+    setExtensionsManagerOpen(false)
+    requestAnimationFrame(() => {
+      getBrowserHost()
+        ?.call('extensions.activate', extensionId)
+        .catch(() => {
+          /* the action could not open — nothing to undo */
+        })
     })
-  ).mutateAsync
+  }, [])
+
+  const importExtensionAsync = useMutation({
+    mutationFn: ({ extPath }: { extPath: string }) =>
+      requireHost().call('extensions.import', extPath),
+    onSuccess: (result) => {
+      if (result && typeof result === 'object' && 'id' in result) {
+        void refreshExtensions()
+      } else if (result && typeof result === 'object' && 'error' in result) {
+        setExtensionsError((result as { error: string }).error)
+      }
+    }
+  }).mutateAsync
   const handleImportExtension = useCallback(
     async (path: string, name: string) => {
       await importExtensionAsync({ extPath: path }).catch((error) => {
@@ -145,17 +156,16 @@ export function useBrowserExtensions() {
     [importExtensionAsync]
   )
 
-  const loadExtensionAsync = useMutation(
-    trpc.app.browser.loadExtension.mutationOptions({
-      onSuccess: (result) => {
-        if (result && typeof result === 'object' && 'id' in result) {
-          void refreshExtensions()
-        } else if (result && typeof result === 'object' && 'error' in result) {
-          setExtensionsError((result as { error: string }).error)
-        }
+  const loadExtensionAsync = useMutation({
+    mutationFn: () => requireHost().call('extensions.load'),
+    onSuccess: (result) => {
+      if (result && typeof result === 'object' && 'id' in result) {
+        void refreshExtensions()
+      } else if (result && typeof result === 'object' && 'error' in result) {
+        setExtensionsError((result as { error: string }).error)
       }
-    })
-  ).mutateAsync
+    }
+  }).mutateAsync
   const handleLoadExtension = useCallback(async () => {
     await loadExtensionAsync().catch((error) => {
       const message = error instanceof Error ? error.message : 'Failed to load unpacked extension'
@@ -163,13 +173,13 @@ export function useBrowserExtensions() {
     })
   }, [loadExtensionAsync])
 
-  const removeExtensionAsync = useMutation(
-    trpc.app.browser.removeExtension.mutationOptions({
-      onSuccess: () => {
-        void refreshExtensions()
-      }
-    })
-  ).mutateAsync
+  const removeExtensionAsync = useMutation({
+    mutationFn: ({ extensionId }: { extensionId: string }) =>
+      requireHost().call('extensions.remove', extensionId),
+    onSuccess: () => {
+      void refreshExtensions()
+    }
+  }).mutateAsync
   const handleRemoveExtension = useCallback(
     async (extensionId: string) => {
       await removeExtensionAsync({ extensionId }).catch((error) => {
