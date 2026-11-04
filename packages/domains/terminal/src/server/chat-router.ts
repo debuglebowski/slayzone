@@ -2,7 +2,13 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { randomUUID } from 'node:crypto'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { CHAT_IMAGE_MEDIA_TYPES, SIDE_QUESTION_MAX_CHARS } from '@slayzone/terminal-contracts'
+import {
+  CHAT_IMAGE_MEDIA_TYPES,
+  chatPermissionArgsSchema,
+  chatScrollAnchorSchema,
+  chatToolResultArgsSchema,
+  SIDE_QUESTION_MAX_CHARS
+} from '@slayzone/terminal-contracts'
 import { getChatDeps } from './chat-router-deps'
 
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
@@ -23,39 +29,8 @@ const chatCreateOpts = z.object({
   cwd: z.string(),
   providerFlagsOverride: z.string().nullish()
 })
-const toolResultArgs = z.object({
-  toolUseId: z.string(),
-  content: z.string(),
-  isError: z.boolean().optional()
-})
-const permissionArgs = z.object({
-  requestId: z.string(),
-  /** Prompt row the user picked (display only; persisted on permission-resolved). */
-  optionId: z.string().optional(),
-  decision: z.discriminatedUnion('behavior', [
-    z.object({
-      behavior: z.literal('allow'),
-      updatedInput: z.record(z.string(), z.unknown()).optional(),
-      updatedPermissions: z.array(z.unknown()).optional(),
-      scope: z.literal('session').optional(),
-      amendment: z
-        .discriminatedUnion('kind', [
-          z.object({ kind: z.literal('execpolicy'), command: z.array(z.string()) }),
-          z.object({
-            kind: z.literal('network'),
-            host: z.string(),
-            action: z.enum(['allow', 'deny'])
-          })
-        ])
-        .optional()
-    }),
-    z.object({
-      behavior: z.literal('deny'),
-      message: z.string(),
-      interrupt: z.boolean().optional()
-    })
-  ])
-})
+const toolResultArgs = chatToolResultArgsSchema
+const permissionArgs = chatPermissionArgsSchema
 
 const watchdogTimings = z.object({
   startingBoundMs: z.number().int().positive(),
@@ -83,17 +58,7 @@ const chatDraft = z.object({
   text: z.string().max(1_000_000),
   attachments: z.array(chatAttachment).max(100)
 })
-const scrollAnchor = z.union([
-  z.object({ atBottom: z.literal(true) }).strict(),
-  z
-    .object({
-      atBottom: z.literal(false),
-      key: z.string().min(1).max(500),
-      offsetPx: z.number(),
-      row: z.number().int().nonnegative().optional()
-    })
-    .strict()
-])
+const scrollAnchor = chatScrollAnchorSchema
 
 /** One block of a user message: text, or an attached file. */
 const userContentBlock = z.discriminatedUnion('type', [

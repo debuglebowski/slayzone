@@ -3113,7 +3113,11 @@ importers:
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303
 
-  packages/domains/terminal-contracts: {}
+  packages/domains/terminal-contracts:
+    dependencies:
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
 
   packages/domains/test-panel:
     dependencies:
@@ -3716,6 +3720,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../../domains/terminal-contracts
       '@slayzone/trpc-server':
         specifier: workspace:*
         version: link:../trpc-server

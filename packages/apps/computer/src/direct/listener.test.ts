@@ -75,6 +75,7 @@ function fakePty() {
 /** A stand-in for one hub's chat. */
 function fakeChat() {
   const reads: unknown[] = []
+  const commands: unknown[] = []
   const watchers = new Map<
     string,
     { onEvent: (e: unknown) => void; onEnd: (r: 'epoch') => void; epoch: number }
@@ -82,6 +83,16 @@ function fakeChat() {
   const service = {
     read: async (tabId: string, epoch: number, method: string, args: unknown[]) => {
       reads.push({ tabId, epoch, method, args })
+      return { ok: method }
+    },
+    command: async (
+      tabId: string,
+      epoch: number,
+      method: string,
+      args: unknown[],
+      operationId: string
+    ) => {
+      commands.push({ tabId, epoch, method, args, operationId })
       return { ok: method }
     },
     watch: (
@@ -94,7 +105,7 @@ function fakeChat() {
       return () => watchers.delete(tabId)
     }
   }
-  return { service, reads, watchers }
+  return { service, reads, commands, watchers }
 }
 
 async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits']) {
@@ -453,5 +464,67 @@ describe('direct listener: chat', () => {
     expect(got).toEqual([{ tabId: 't1', event: { kind: 'x' }, seq: 1, at: 5 }])
     chat.watchers.get('t1')?.onEnd('epoch')
     await waitFor(() => errors.length === 1)
+  })
+})
+
+describe('direct listener: chat commands', () => {
+  it('runs the simple commands under the granted epoch, with an operation id', async () => {
+    const { store, listener, chat } = await setup()
+    const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    await trpc.chat.respondPermission.mutate({
+      tabId: 't1',
+      args: { requestId: 'r', decision: { behavior: 'allow' } },
+      operationId: 'op-1'
+    })
+    await trpc.chat.saveScroll.mutate({ tabId: 't1', anchor: { atBottom: true } })
+    await trpc.chat.saveDraft.mutate({
+      tabId: 't1',
+      draft: { text: 'hi', attachments: [] },
+      expectedMode: 'claude-chat'
+    })
+    expect(chat.commands).toEqual([
+      {
+        tabId: 't1',
+        epoch: 3,
+        method: 'respondPermission',
+        args: ['t1', { requestId: 'r', decision: { behavior: 'allow' } }],
+        operationId: 'op-1'
+      },
+      {
+        tabId: 't1',
+        epoch: 3,
+        method: 'saveTabScroll',
+        args: ['t1', { atBottom: true }],
+        operationId: expect.any(String)
+      },
+      {
+        tabId: 't1',
+        epoch: 3,
+        method: 'saveTabDraft',
+        args: [
+          't1',
+          { text: 'hi', attachments: [] },
+          { expectedMode: 'claude-chat', expectedOwnership: undefined }
+        ],
+        operationId: expect.any(String)
+      }
+    ])
+  })
+
+  it('refuses a draft with attachments (the hub seals files) and an ungranted tab', async () => {
+    const { store, listener, chat } = await setup()
+    const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    await expect(
+      trpc.chat.saveDraft.mutate({
+        tabId: 't1',
+        draft: { text: 'x', attachments: [{ artifactId: 'a' } as never] }
+      })
+    ).rejects.toThrow()
+    await expect(
+      trpc.chat.sendToolResult.mutate({ tabId: 't2', args: { toolUseId: 'u', content: 'c' } })
+    ).rejects.toThrow(/no capability/)
+    expect(chat.commands).toEqual([])
   })
 })

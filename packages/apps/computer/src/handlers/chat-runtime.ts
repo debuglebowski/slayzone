@@ -24,6 +24,8 @@ import {
 } from '@slayzone/computer-transport/server'
 import {
   TypedEventEmitter,
+  CHAT_DIRECT_WRITE_EVENT_NAME,
+  type ChatDirectWritePayload,
   ComputerNotificationMethods,
   HubToComputerMethods,
   procDataParamsSchema,
@@ -48,6 +50,19 @@ export const DIRECT_CHAT_READS = new Set([
 ] as const)
 export type DirectChatRead = typeof DIRECT_CHAT_READS extends Set<infer M> ? M : never
 
+/**
+ * Commands a direct-link client may send: they need only the computer's ownership
+ * check. Everything that needs the hub's coordination (send, queue, rewind, …) and
+ * drafts with attachments (the hub seals their bytes) stay hub calls.
+ */
+export const DIRECT_CHAT_COMMANDS = new Set([
+  'respondPermission',
+  'sendToolResult',
+  'saveTabDraft',
+  'saveTabScroll'
+] as const)
+export type DirectChatCommand = typeof DIRECT_CHAT_COMMANDS extends Set<infer M> ? M : never
+
 /** One hub's chat, as direct-link clients reach it on this computer. */
 export interface DirectChatService {
   /**
@@ -55,6 +70,17 @@ export interface DirectChatService {
    * ownership check refuses a stale epoch, exactly as for a relayed read.
    */
   read(tabId: string, epoch: number, method: DirectChatRead, args: unknown[]): Promise<unknown>
+  /**
+   * A command, deduplicated by `operationId`. Then the hub is told (a journaled
+   * `chat-direct-write`) so it drains metadata as after a relayed command.
+   */
+  command(
+    tabId: string,
+    epoch: number,
+    method: DirectChatCommand,
+    args: unknown[],
+    operationId: string
+  ): Promise<unknown>
   /** The tab's events while its epoch is still the granted one; null when it is not. */
   watch(
     tabId: string,
@@ -701,6 +727,32 @@ export function createChatRuntimeHandlers(opts: {
           args
         })
       )
+    },
+    async command(tabId, epoch, method, args, operationId) {
+      if (!DIRECT_CHAT_COMMANDS.has(method)) throw new Error(`not a direct chat command: ${method}`)
+      const r = runtime()
+      const owner = r.storage.forTab(tabId)
+      if (!owner) throw new Error('No chat conversation for this tab')
+      const result = await r.invoke(
+        parseChatInvocation({
+          route: { id: owner.identity.id, epoch },
+          target: 'ops',
+          method,
+          args,
+          operationId
+        })
+      )
+      const payload: ChatDirectWritePayload = {
+        tabId,
+        conversationId: owner.identity.id,
+        epoch,
+        method
+      }
+      opts.ctx.dialer.notify(ComputerNotificationMethods.event, {
+        name: CHAT_DIRECT_WRITE_EVENT_NAME,
+        payload
+      })
+      return result
     },
     watch(tabId, epoch, onEvent, onEnd) {
       const owner = instance?.storage.forTab(tabId)

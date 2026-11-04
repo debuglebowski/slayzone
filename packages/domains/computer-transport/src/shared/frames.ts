@@ -324,6 +324,21 @@ export const PTY_SIGNAL_EVENT_NAME = 'pty-signal'
  */
 export const PTY_INPUT_EVENT_NAME = 'pty-input'
 
+/**
+ * `ComputerEventParams.name` for a chat command a client sent STRAIGHT to the
+ * computer (v8, docs/direct-link.md). The hub then does what it does after any chat
+ * command it relayed: drain the conversation's metadata, so its records stay current.
+ */
+export const CHAT_DIRECT_WRITE_EVENT_NAME = 'chat-direct-write'
+
+export const chatDirectWritePayloadSchema = z.object({
+  tabId: z.string().min(1),
+  conversationId: z.string().min(1),
+  epoch: z.number().int().nonnegative(),
+  method: z.string().min(1).max(100)
+})
+export type ChatDirectWritePayload = z.infer<typeof chatDirectWritePayloadSchema>
+
 export const ptyInputPayloadSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),

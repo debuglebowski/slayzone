@@ -16,6 +16,13 @@
 import { initTRPC, TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
+import {
+  chatPermissionArgsSchema,
+  chatScrollAnchorSchema,
+  chatTabStateExpectationsSchema,
+  chatTextDraftSchema,
+  chatToolResultArgsSchema
+} from '@slayzone/terminal-contracts'
 import { z } from 'zod'
 
 /** Wire version (mirrors computer-transport `DIRECT_LINK_PROTOCOL`). */
@@ -88,6 +95,13 @@ export interface DirectChatService {
     method: 'getReplay' | 'openTimeline' | 'timelinePages' | 'searchTimeline',
     args: unknown[]
   ): Promise<unknown>
+  command(
+    tabId: string,
+    epoch: number,
+    method: 'respondPermission' | 'sendToolResult' | 'saveTabDraft' | 'saveTabScroll',
+    args: unknown[],
+    operationId: string
+  ): Promise<unknown>
   watch(
     tabId: string,
     epoch: number,
@@ -127,6 +141,19 @@ function noCapability(): TRPCError {
 }
 
 const tabId = z.string().min(1).max(200)
+/** A client's id for one command, so a retry is not a second write. */
+const operationId = z.string().min(1).max(200).optional()
+const newOperationId = (): string => globalThis.crypto.randomUUID()
+
+/** The hub router's arg shape for a tab-state write: the fences only when given. */
+function withExpectations(
+  args: unknown[],
+  input: { expectedMode?: string; expectedOwnership?: { id: string; epoch: number } }
+): unknown[] {
+  return input.expectedMode || input.expectedOwnership
+    ? [...args, { expectedMode: input.expectedMode, expectedOwnership: input.expectedOwnership }]
+    : args
+}
 
 export function createDirectRouter(services: DirectRouterServices) {
   /** The hub's terminals for a session this socket holds a grant on. */
@@ -255,6 +282,67 @@ export function createDirectRouter(services: DirectRouterServices) {
         .query(({ ctx, input }) => {
           const { service, epoch } = chatFor(ctx, input.tabId)
           return service.read(input.tabId, epoch, 'searchTimeline', [input.tabId, input.query])
+        }),
+      /**
+       * Commands that need only the computer's ownership check (the hub's shapes).
+       * The computer tells the hub after each, so its records stay current.
+       */
+      respondPermission: t.procedure
+        .input(z.object({ tabId, args: chatPermissionArgsSchema, operationId }))
+        .mutation(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.command(
+            input.tabId,
+            epoch,
+            'respondPermission',
+            [input.tabId, input.args],
+            input.operationId ?? newOperationId()
+          )
+        }),
+      sendToolResult: t.procedure
+        .input(z.object({ tabId, args: chatToolResultArgsSchema, operationId }))
+        .mutation(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.command(
+            input.tabId,
+            epoch,
+            'sendToolResult',
+            [input.tabId, input.args],
+            input.operationId ?? newOperationId()
+          )
+        }),
+      /** A draft with no attachments (the hub seals attached files). */
+      saveDraft: t.procedure
+        .input(
+          chatTabStateExpectationsSchema.extend({ tabId, draft: chatTextDraftSchema, operationId })
+        )
+        .mutation(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.command(
+            input.tabId,
+            epoch,
+            'saveTabDraft',
+            withExpectations([input.tabId, input.draft], input),
+            input.operationId ?? newOperationId()
+          )
+        }),
+      saveScroll: t.procedure
+        .input(
+          chatTabStateExpectationsSchema.extend({
+            tabId,
+            anchor: chatScrollAnchorSchema,
+            operationId
+          })
+        )
+        .mutation(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.command(
+            input.tabId,
+            epoch,
+            'saveTabScroll',
+            withExpectations([input.tabId, input.anchor], input),
+            input.operationId ?? newOperationId()
+          )
         }),
       /**
        * The tab's events. Errors FORBIDDEN when the grant ends or the conversation

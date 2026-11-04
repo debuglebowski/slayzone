@@ -10,5 +10,8 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.3.5"
   }
 }

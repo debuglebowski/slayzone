@@ -1,3 +1,5 @@
+import { createChatDirectWriteHandler } from './chat-direct-write'
+import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import { createDirectLinkIssuer, type DirectLinkIssuer } from './direct-link'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
@@ -1850,12 +1852,23 @@ export function composeServer(opts: {
       )
     })
     // Only normalized, computer-persisted chat events cross this channel.
+    // A chat command a client sent straight to the computer (docs/direct-link.md):
+    // drain metadata as after a relayed command — in the same per-computer order.
+    const chatDirectWrite = createChatDirectWriteHandler({
+      forTab: (tabId) => computerChat.ownership.forTab(tabId),
+      drainMetadata: (computerId) => computerChat.relay.drainMetadata(computerId)
+    })
     computerGateway.events.on('event', ({ computerId, name, payload }) => {
-      if (name !== 'chat-runtime' || resettingForTest) return
+      if ((name !== 'chat-runtime' && name !== CHAT_DIRECT_WRITE_EVENT_NAME) || resettingForTest)
+        return
       const previous = chatNotificationChains.get(computerId) ?? Promise.resolve()
       const next = previous
         .then(() =>
-          asComputerOwner(computerId, () => computerChat.relay.receive(computerId, payload))
+          asComputerOwner(computerId, () =>
+            name === CHAT_DIRECT_WRITE_EVENT_NAME
+              ? chatDirectWrite(computerId, payload)
+              : computerChat.relay.receive(computerId, payload)
+          )
         )
         .catch(() => {
           console.error('[chat] rejected computer notification')
