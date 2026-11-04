@@ -1,6 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { LegacyMigrationPaths } from './worker-protocol'
+
+/** The pre-rename (`omgslayzone`) userData dir and the current one, resolved on the main thread. */
+export type LegacyMigrationPaths = {
+  oldUserData: string
+  newUserData: string
+}
 
 const LEGACY_DB_NAMES = ['omgslayzone.sqlite', 'omgslayzone.dev.sqlite'] as const
 const DB_SUFFIXES = ['', '-wal', '-shm'] as const

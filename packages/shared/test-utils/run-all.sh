@@ -108,6 +108,10 @@ run_harness packages/apps/hub/src/bootstrap-schema.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_harness packages/apps/hub/src/supervised-bootstrap.test.ts
+# The hub's data + diagnostics DBs run on worker threads: a long query never freezes
+# the hub event loop, and every SlayzoneDb op (errors + codes, Buffers, txns, backup,
+# close) behaves as it did in-process.
+run_harness packages/apps/hub/src/db.test.ts
 # Diagnostics retention ownership: an unsupervised hub prunes its own diagnostics
 # (rows + blobs; only the desktop host used to, so standalone hubs grew forever);
 # a supervised hub leaves the shared file to its host.

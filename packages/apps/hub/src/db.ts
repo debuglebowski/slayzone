@@ -1,24 +1,13 @@
-import Database from 'better-sqlite3'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import {
-  DB_PRAGMAS,
-  adoptRenamedDatabase,
   getDbName,
   getDiagnosticsDbName,
   getLegacyDbName,
   getStorageDir,
-  type SlayzoneDb,
-  type PreparedBridge,
-  type BatchOp,
-  type RunResult,
-  type TxnName,
-  type TxnParams,
-  type TxnResult
+  type SlayzoneDb
 } from '@slayzone/platform'
-import { domainTxnRegistry } from '@slayzone/api/txns'
-import { createPreMigrationBackup, LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
-import { bootstrapSchema } from './bootstrap-schema'
-import { createDiagnosticsSchema, applyDiagnosticsPragmas } from '@slayzone/diagnostics/server'
+import { openSqliteWorker } from '@slayzone/platform/sqlite-worker'
 
 /**
  * Resolves the SQLite path the side-car should open — DERIVED from the storage
@@ -33,75 +22,49 @@ export function getDatabasePathFromEnv(): string {
   return path.join(getStorageDir(), name)
 }
 
+/** What `db-worker.ts` needs to open the data DB. Resolved HERE, from env, at open time. */
+export type HubDataDbWorkerData = {
+  storageDir: string
+  dbPath: string
+  dbName: string
+  legacyDbName: string
+  backupsDir: string
+  backupFilePrefix: string
+}
+
+/** What `diag-worker.ts` needs to open the diagnostics DB. */
+export type HubDiagnosticsDbWorkerData = { dbPath: string }
+
 /**
- * Synchronous in-process implementation of the async `SlayzoneDb` interface.
- *
- * In the Electron app the connection lives in a worker thread so queries don't
- * block the UI thread. The standalone side-car has no UI thread to protect, so
- * it runs better-sqlite3 directly and wraps each call in a resolved promise —
- * satisfying the one `SlayzoneDb` contract every domain/router consumer now
- * expects, without a worker. `namedTxn` dispatches against the shared domain
- * registry (`@slayzone/api/txns`); app-only txns are absent by design.
+ * Where a worker entry lives: beside the running bundle. `build.mjs` emits
+ * `db-worker.cjs` + `diag-worker.cjs` next to `bin.cjs` in `dist/`, and every way
+ * the hub ships keeps them together (packaged: `resources/hub/`; npm: the
+ * package's `dist/`). Run from TS source (tests: `src/db.ts`) nothing is beside
+ * this file, so it falls back to the same `../dist` offset `WEB_ROOT` uses — the
+ * built entry, which the test harness's globalSetup rebuilds before any suite.
+ * `__dirname`, never `import.meta` (empty in the CJS bundle — see server.ts).
  */
-class SyncSlayzoneDb implements SlayzoneDb {
-  constructor(private readonly db: Database.Database) {}
+function workerEntryPath(file: 'db-worker.cjs' | 'diag-worker.cjs'): string {
+  const besideBundle = path.join(__dirname, file)
+  if (existsSync(besideBundle)) return besideBundle
+  const builtFromSource = path.join(__dirname, '..', 'dist', file)
+  if (existsSync(builtFromSource)) return builtFromSource
+  throw new Error(
+    `hub DB worker entry ${file} not found (looked in ${besideBundle} and ${builtFromSource}) — ` +
+      'build the hub (node packages/apps/hub/build.mjs); packaging must ship it beside bin.cjs'
+  )
+}
 
-  async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
-    return this.db.prepare(sql).get(...params) as T | undefined
-  }
-
-  async all<T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> {
-    return this.db.prepare(sql).all(...params) as T[]
-  }
-
-  async run(sql: string, params: unknown[] = []): Promise<RunResult> {
-    const r = this.db.prepare(sql).run(...params)
-    return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }
-  }
-
-  async exec(sql: string): Promise<void> {
-    this.db.exec(sql)
-  }
-
-  async batchTxn(ops: BatchOp[]): Promise<unknown[]> {
-    return this.db.transaction(() =>
-      ops.map((op) => this.db.prepare(op.sql)[op.type](...op.params))
-    )()
-  }
-
-  async namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>> {
-    // Domain txns only — the two app-only sources (export-import, reset-for-test)
-    // have all their call sites inside apps/app and are deliberately absent here.
-    const fn = (
-      domainTxnRegistry as Record<string, (db: Database.Database, p: unknown) => unknown>
-    )[name as string]
-    if (!fn) {
-      throw new Error(
-        `Unknown named transaction "${String(name)}" — not registered in the standalone server (app-only txns live in apps/app)`
-      )
-    }
-    return (await fn(this.db, params)) as Awaited<TxnResult<K>>
-  }
-
-  async backup(destPath: string): Promise<void> {
-    await this.db.backup(destPath)
-  }
-
-  prepare(sql: string): PreparedBridge {
-    const stmt = this.db.prepare(sql)
-    return {
-      get: async <T = unknown>(...params: unknown[]) => stmt.get(...params) as T | undefined,
-      all: async <T = unknown>(...params: unknown[]) => stmt.all(...params) as T[],
-      run: async (...params: unknown[]) => {
-        const r = stmt.run(...params)
-        return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }
-      }
-    }
-  }
-
-  async close(): Promise<void> {
-    this.db.close()
-  }
+/**
+ * A DB worker that dies after startup (out of memory, an uncaught throw) leaves a
+ * hub that answers every request with an error. In-process, the same failure took
+ * the whole process down and the supervisor restarted it — so escalate to exactly
+ * that: rethrow on the hub's thread, where it is an uncaught exception.
+ */
+function crashHub(err: Error): void {
+  process.nextTick(() => {
+    throw err
+  })
 }
 
 /**
@@ -116,34 +79,35 @@ class SyncSlayzoneDb implements SlayzoneDb {
  * on the server. Removing the parameter makes the special-case unrepresentable
  * rather than merely unused.
  *
- * The pre-migration backup lives HERE, immediately before `bootstrapSchema`, on
- * this same connection — `db.backup()` snapshots the live connection, so the two
- * belong in one function where no future caller can interleave them. It self-skips
- * on a fresh (v0) or already-current store.
- *
- * Async only because of that backup; every query path stays synchronous.
+ * The connection lives on a worker thread (`db-worker.ts`). better-sqlite3 is
+ * synchronous: on the hub's only thread a long query — or a long run of short ones,
+ * since every `await db.x()` resolved as a microtask and never yielded — froze all
+ * WS/tRPC traffic (event-loop stalls of 2–10s; task tabs missed their 20s load
+ * deadline). The worker runs the whole bring-up — rename adoption, pragmas, the
+ * pre-migration backup and the schema bootstrap, on the one connection, so no
+ * caller can interleave between backup and migration — and this resolves once it
+ * finished; a startup failure rejects with that error (message + SQLite code).
  */
-export async function openServerDatabase(): Promise<SlayzoneDb> {
-  // The main DB was renamed `slayzone.sqlite` → `slayzone.data.sqlite`. A hub root a
-  // beta wrote (and every standalone hub) still holds the old name; move it BEFORE
-  // opening, or `new Database()` would create a fresh empty file beside the real one.
-  // The desktop app does the same earlier in boot for its own copy migrations; this is
-  // the one that covers a standalone hub, and it is a no-op once done.
+export function openServerDatabase(): Promise<SlayzoneDb> {
   const dev = process.env.SLAYZONE_DEV === '1'
-  adoptRenamedDatabase(getStorageDir(), getLegacyDbName(!dev), getDbName(!dev))
-  const db = new Database(getDatabasePathFromEnv())
-  for (const pragma of DB_PRAGMAS) db.pragma(pragma)
-  // Same derivation as the DB path itself, so the backup can never be named for
-  // a different channel than the file it backs up.
-  const filePrefix = getDbName(process.env.SLAYZONE_DEV !== '1').replace(/\.sqlite$/, '')
-  await createPreMigrationBackup(
-    db,
-    LATEST_MIGRATION_VERSION,
-    path.join(getStorageDir(), 'backups'),
-    filePrefix
-  )
-  bootstrapSchema(db)
-  return new SyncSlayzoneDb(db)
+  const storageDir = getStorageDir()
+  const dbName = getDbName(!dev)
+  const data: HubDataDbWorkerData = {
+    storageDir,
+    dbPath: getDatabasePathFromEnv(),
+    dbName,
+    legacyDbName: getLegacyDbName(!dev),
+    backupsDir: path.join(storageDir, 'backups'),
+    // Same derivation as the DB path itself, so the backup can never be named for
+    // a different channel than the file it backs up.
+    backupFilePrefix: dbName.replace(/\.sqlite$/, '')
+  }
+  return openSqliteWorker({
+    label: 'the hub data DB worker',
+    workerPath: workerEntryPath('db-worker.cjs'),
+    workerData: data,
+    onUnexpectedExit: crashHub
+  })
 }
 
 /**
@@ -163,19 +127,16 @@ export function getServerDiagnosticsDatabasePath(): string {
  * diagnostics were invisible). WAL + busy_timeout (DB_PRAGMAS) make the two-process
  * (host + sidecar) writers safe; the schema is now literally shared rather than
  * "mirrored", which is what let the two drift.
+ *
+ * In its OWN worker (`diag-worker.ts`), not the data DB's: diagnostics writes never
+ * share a connection or a queue with task/settings data.
  */
-export function openServerDiagnosticsDatabase(): SlayzoneDb {
-  const db = new Database(getServerDiagnosticsDatabasePath())
-  // ONE schema definition, shared with the Electron host's diag worker
-  // (diagnostics/server/schema.ts). These used to diverge — four indexes and
-  // auto_vacuum on the host side, two indexes and none here — and since both
-  // processes open this same file, whichever created it first silently decided
-  // the other's schema. auto_vacuum in particular cannot be set afterwards.
-  //
-  // Repair (`selfHealDiagnosticsDb`) is deliberately NOT run here: rotating a file
-  // the host may hold open is the hazard, so the host owns repair and starts first.
-  applyDiagnosticsPragmas(db)
-  for (const pragma of DB_PRAGMAS) db.pragma(pragma)
-  createDiagnosticsSchema(db)
-  return new SyncSlayzoneDb(db)
+export function openServerDiagnosticsDatabase(): Promise<SlayzoneDb> {
+  const data: HubDiagnosticsDbWorkerData = { dbPath: getServerDiagnosticsDatabasePath() }
+  return openSqliteWorker({
+    label: 'the hub diagnostics DB worker',
+    workerPath: workerEntryPath('diag-worker.cjs'),
+    workerData: data,
+    onUnexpectedExit: crashHub
+  })
 }

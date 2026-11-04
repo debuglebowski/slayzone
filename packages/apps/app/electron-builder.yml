@@ -78,6 +78,13 @@ extraResources:
     to: "bin/slay"
   - from: "../hub/dist/bin.cjs"
     to: "hub/bin.cjs"
+  # The hub's SQLite worker threads (data DB + diagnostics DB). db.ts spawns them from
+  # BESIDE bin.cjs, so they must land in the same dir; without them the hub cannot
+  # open its database and never boots.
+  - from: "../hub/dist/db-worker.cjs"
+    to: "hub/db-worker.cjs"
+  - from: "../hub/dist/diag-worker.cjs"
+    to: "hub/diag-worker.cjs"
   # The co-located local computer: index.ts spawns resourcesPath/computer/bin.cjs. Every
   # agent, terminal and git operation runs on a computer, so without this the app boots
   # but can do none of its work. Built by the app's `prebuild`.

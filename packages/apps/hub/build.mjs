@@ -2,7 +2,7 @@ import { build } from 'esbuild'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { basename, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
 import { watchBundleInputs } from '@slayzone/build-guards/watch-inputs'
@@ -40,8 +40,18 @@ function buildOptions(commit, builtAt) {
     // work. An ESM bundle would import externals with the ESM resolver, which
     // ignores NODE_PATH entirely — that broke the packaged side-car. `.cjs`
     // extension because package.json is "type": "module".
-    entryPoints: ['src/bin.ts'],
-    outfile: 'dist/bin.cjs',
+    //
+    // Plus one self-contained bundle per SQLite worker thread (db.ts spawns them from
+    // beside bin.cjs): the data DB and the diagnostics DB each run on their own
+    // worker so a query never blocks the hub's event loop. Every way the hub ships
+    // must keep all three together (electron-builder extraResources, npm `dist/`).
+    entryPoints: {
+      bin: 'src/bin.ts',
+      'db-worker': 'src/db-worker.ts',
+      'diag-worker': 'src/diag-worker.ts'
+    },
+    outdir: 'dist',
+    outExtension: { '.js': '.cjs' },
     bundle: true,
     platform: 'node',
     format: 'cjs',
@@ -63,7 +73,8 @@ function buildOptions(commit, builtAt) {
     // Without it the kernel has no interpreter and /bin/sh runs the JS as a
     // shell script → `use strict: not found`. In-app spawns pass an explicit
     // node/electron argv[0] and are unaffected, which is why the omission only
-    // broke `npx @slayzone/hub`.
+    // broke `npx @slayzone/hub`. (esbuild applies it to the worker bundles too —
+    // inert there: Node skips a leading hashbang.)
     banner: { js: '#!/usr/bin/env node' },
     // Textual substitution consumed by src/build-info.ts. Declared `string |
     // undefined` there so running the un-bundled TS source resolves to sentinels.
@@ -99,11 +110,16 @@ async function buildOnce() {
   // rebuilds (a parallel test, the sidecar supervisor) reads the old file or the
   // new one, never a half-written one.
   const result = await build({ ...buildOptions(commit, builtAt), write: false })
-  const bundle = result.outputFiles.find((f) => f.path.endsWith('bin.cjs'))
-  if (!bundle || result.outputFiles.length !== 1)
+  const output = (name) => result.outputFiles.find((f) => basename(f.path) === name)
+  const bundle = output('bin.cjs')
+  const workers = ['db-worker.cjs', 'diag-worker.cjs'].map(output)
+  if (!bundle || workers.some((w) => !w) || result.outputFiles.length !== 3)
     throw new Error(
-      `[build] expected one bin.cjs output, got ${result.outputFiles.map((f) => f.path)}`
+      `[build] expected bin.cjs + db-worker.cjs + diag-worker.cjs, got ${result.outputFiles.map((f) => f.path)}`
     )
+  // Workers first, bin.cjs last: bin.cjs is what gets spawned, so a process that
+  // starts mid-write finds workers at least as new as the bin it runs.
+  for (const w of workers) writeAtomic(w.path, w.contents)
   // Executable: it is also the published package's `slayzone-hub` bin (shebang).
   writeAtomic(bundle.path, bundle.contents, 0o755)
 

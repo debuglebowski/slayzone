@@ -157,7 +157,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Separate diagnostics events DB so THIS process's recordDiagnosticEvent calls
   // (pty + agent pool run here) persist + are queryable, instead of buffering +
   // dropping. Always owned here (independent of cfg.db).
-  const diagnosticsDb = openServerDiagnosticsDatabase()
+  const diagnosticsDb = await openServerDiagnosticsDatabase()
 
   // A frozen main thread looks dead to everything talking to this hub: computer
   // heartbeats go unanswered, sockets drop, timers fire late all at once. Record
@@ -872,8 +872,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   })
   // Force the batch out now: the boot canary is `info` (not the error level that
   // auto-flushes), and a sidecar that crashes/exits inside the flush window is
-  // exactly the stale/crash-loop case we need it for. The sidecar's diag DB is
-  // synchronous, so this drains immediately.
+  // exactly the stale/crash-loop case we need it for. Awaited: the write lands on
+  // the diagnostics DB worker before boot continues.
   await flushWriteQueue()
 
   let stopped = false

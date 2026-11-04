@@ -5,7 +5,7 @@
 // list closed — a NEW import of a process-spawning module anywhere in the hub bundle
 // fails here until it is either routed to a computer or refused and allowlisted below.
 //
-// It reads esbuild's metafile for the hub entry (same entry and externals as
+// It reads esbuild's metafile for the hub entries (same entries and externals as
 // packages/apps/hub/build.mjs) instead of grepping directories, so it follows the
 // bundle graph: any package the hub pulls in counts, `require` and dynamic `import`
 // count, `import type` does not, and a third-party dependency that shells out shows up
@@ -79,14 +79,16 @@ const ALLOWLIST = {
 
 const result = await build({
   absWorkingDir: HUB,
-  entryPoints: ['src/bin.ts'],
+  // EVERY hub bundle: bin.cjs and the SQLite worker threads it spawns (migrations and
+  // named transactions run in db-worker.cjs, so a spawn there runs on the hub too).
+  entryPoints: ['src/bin.ts', 'src/db-worker.ts', 'src/diag-worker.ts'],
   bundle: true,
   platform: 'node',
   format: 'cjs',
   target: 'node20',
   external: ['better-sqlite3', 'bufferutil', 'utf-8-validate', 'node-pty'],
   write: false,
-  outfile: 'dist/exec-guard.cjs',
+  outdir: 'dist/exec-guard',
   metafile: true,
   logLevel: 'silent'
 })

@@ -629,7 +629,10 @@ async function reapKnownHistory(proc: ManagedProcess): Promise<void> {
     if (entry.pid === proc.pid) continue
     // A leftover that survived even SIGKILL stays in history, reachable next time.
     if (await reapCandidatePid(proc, entry.pid, backend)) {
-      void persistence.removePidHistory(proc.id, entry.pid)
+      // Best-effort: a failed delete only leaves the row for the next sweep. Never
+      // let it float — the hub's worker-backed DB reports every SQL error,
+      // prepare-time ones included, as a rejection.
+      persistence.removePidHistory(proc.id, entry.pid).catch(() => undefined)
     }
   }
 }

@@ -29,6 +29,8 @@
     "./local-computer-status": "./src/local-computer-status.ts",
     "./electron-bootstrap-contract": "./src/electron-bootstrap-contract.ts",
     "./paths": "./src/paths.ts",
+    "./sqlite-worker": "./src/sqlite-worker.ts",
+    "./sqlite-worker-host": "./src/sqlite-worker-host.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
     "./security-log": "./src/security-log.ts",

@@ -11,6 +11,7 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./self-heal": "./src/server/self-heal.ts",
+    "./schema": "./src/server/schema.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
