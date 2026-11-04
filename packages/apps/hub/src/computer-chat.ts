@@ -50,6 +50,27 @@ import {
 class ChatMigrationDeferredError extends Error {}
 
 /**
+ * An agent start named a provider session another task's chat owns. Two tasks must
+ * never drive one transcript, so the start is refused — naming the owner, so the
+ * user can continue there or start fresh here. Rare since one task per provider
+ * session (agent-sessions.ts `NOT_CLAIMED_ELSEWHERE_SQL`) keeps another task's
+ * session out of this task's resume target: an explicit id (a stale resume hint)
+ * is what still reaches it.
+ */
+export class ProviderSessionOwnedElsewhereError extends Error {
+  readonly code = 'provider-session-owned-elsewhere'
+  constructor(
+    readonly ownerTaskId: string,
+    ownerTitle: string | null
+  ) {
+    super(
+      `This session belongs to task "${ownerTitle?.trim() || ownerTaskId}". Continue it there, or start a fresh session here.`
+    )
+    this.name = 'ProviderSessionOwnedElsewhereError'
+  }
+}
+
+/**
  * Owner states whose hub source rows are still the conversation's history: not
  * migrated ('legacy') or copied but not yet activated ('copying', 'verified').
  * An 'active' owner's history is on its computer; hub rows left by a pending
@@ -923,7 +944,14 @@ export function createComputerChatServices(opts: {
         await recoverComputer(owner.computerId!)
         await assertTaskHistory()
         await lifecycle.sync(owner.computerId!)
-        if (owner.taskId !== taskId || owner.state !== 'active' || !owner.computerId)
+        if (owner.taskId !== taskId) {
+          const ownerTask = await opts.db.get<{ title: string | null }>(
+            'SELECT title FROM tasks WHERE id=?',
+            [owner.taskId]
+          )
+          throw new ProviderSessionOwnedElsewhereError(owner.taskId, ownerTask?.title ?? null)
+        }
+        if (owner.state !== 'active' || !owner.computerId)
           throw new Error('Provider session ownership is unavailable')
         await opts.gate?.(owner.computerId, taskId)
         return owner.computerId

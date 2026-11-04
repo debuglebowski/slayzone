@@ -1459,6 +1459,9 @@ test('task router: missing id throws TRPCError NOT_FOUND (not silent null)', asy
 // set. `switchConversation` re-points the resume target by appending a
 // `user-selected` row; `deleteConversation` tombstones a session and refuses the
 // current one (a live agent is running on it).
+//
+// Each test names its own conversation ids: one provider session belongs to ONE
+// task (the earliest claimant), and these tests share one DB.
 // ===========================================================================
 const seedSession = (taskId: string, conv: string, at: number, mode = 'claude-code'): void => {
   h.db
@@ -1477,21 +1480,23 @@ const seedSession = (taskId: string, conv: string, at: number, mode = 'claude-co
 
 test('switchConversation: re-points the task at an earlier session', async () => {
   const t = await createTask('switch me')
-  seedSession(t.id, 'CONV-A', 1000)
-  seedSession(t.id, 'CONV-B', 2000)
-  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe('CONV-B')
+  seedSession(t.id, 'SWITCH-A', 1000)
+  seedSession(t.id, 'SWITCH-B', 2000)
+  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe(
+    'SWITCH-B'
+  )
 
   const after = await caller.switchConversation({
     id: t.id,
     mode: 'claude-code',
-    conversationId: 'CONV-A'
+    conversationId: 'SWITCH-A'
   })
-  expect(after.currentConversationByMode!['claude-code']).toBe('CONV-A')
+  expect(after.currentConversationByMode!['claude-code']).toBe('SWITCH-A')
 })
 
 test('switchConversation: rejects an id the task does not own', async () => {
   const t = await createTask('switch guard')
-  seedSession(t.id, 'CONV-A', 1000)
+  seedSession(t.id, 'GUARD-A', 1000)
   expect(
     await errCode(() =>
       caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'SOMEONE-ELSE' })
@@ -1499,33 +1504,37 @@ test('switchConversation: rejects an id the task does not own', async () => {
   ).toBe('BAD_REQUEST')
   expect(
     await errCode(() =>
-      caller.switchConversation({ id: 'nope', mode: 'claude-code', conversationId: 'CONV-A' })
+      caller.switchConversation({ id: 'nope', mode: 'claude-code', conversationId: 'GUARD-A' })
     )
   ).toBe('NOT_FOUND')
 })
 
 test('deleteConversation: tombstones a non-current session', async () => {
   const t = await createTask('delete me')
-  seedSession(t.id, 'CONV-A', 1000)
-  seedSession(t.id, 'CONV-B', 2000)
-  await caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'CONV-A' })
+  seedSession(t.id, 'DELETE-A', 1000)
+  seedSession(t.id, 'DELETE-B', 2000)
+  await caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'DELETE-A' })
   // Gone from the honored set → no longer switchable, and still not current.
   expect(
     await errCode(() =>
-      caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'CONV-A' })
+      caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'DELETE-A' })
     )
   ).toBe('BAD_REQUEST')
-  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe('CONV-B')
+  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe(
+    'DELETE-B'
+  )
 })
 
 test('deleteConversation: refuses the CURRENT session', async () => {
   const t = await createTask('delete current')
-  seedSession(t.id, 'CONV-A', 1000)
-  seedSession(t.id, 'CONV-B', 2000)
+  seedSession(t.id, 'CURRENT-A', 1000)
+  seedSession(t.id, 'CURRENT-B', 2000)
   expect(
     await errCode(() =>
-      caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'CONV-B' })
+      caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'CURRENT-B' })
     )
   ).toBe('BAD_REQUEST')
-  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe('CONV-B')
+  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe(
+    'CURRENT-B'
+  )
 })

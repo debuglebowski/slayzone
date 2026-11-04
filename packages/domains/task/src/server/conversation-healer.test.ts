@@ -21,6 +21,10 @@ import type { ConversationHealer } from '@slayzone/terminal/server'
 const state = vi.hoisted(() => ({
   healer: null as unknown as ConversationHealer,
   owned: [] as string[],
+  /** Pre-ledger `provider_config.claude-code.conversationHistory`. */
+  legacyHistory: [] as string[],
+  /** Ids another task owns (`claimedByOtherTasks`). */
+  foreign: new Set<string>(),
   firstSeenAtMs: null as number | null,
   recorded: [] as Array<{ conversationId: string }>
 }))
@@ -37,14 +41,20 @@ vi.mock('@slayzone/terminal/server', async (importOriginal) => {
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => undefined }))
 vi.mock('./ops/index.js', () => ({
   // Created after the legacy cutoff → history-only path (no orphan disk scan).
-  getTaskOp: async () => ({ id: 't1', created_at: '2026-10-01 00:00:00', provider_config: {} }),
+  getTaskOp: async () => ({
+    id: 't1',
+    created_at: '2026-10-01 00:00:00',
+    provider_config: { 'claude-code': { conversationHistory: state.legacyHistory } }
+  }),
   collectReferencedConversationIds: async () => new Set<string>(),
   recordConversation: async (_db: unknown, row: { conversationId: string }) => {
     state.recorded.push(row)
   },
   getCurrentConversationId: async () => null,
   getConversationFirstSeenAt: async () => state.firstSeenAtMs,
-  listResumeCandidates: async () => state.owned
+  listResumeCandidates: async () => state.owned,
+  claimedByOtherTasks: async (_db: unknown, _taskId: string, ids: string[]) =>
+    new Set(ids.filter((id) => state.foreign.has(id)))
 }))
 
 const { registerConversationHealer } = await import('./conversation-healer')
@@ -95,6 +105,8 @@ afterAll(() => {
 })
 beforeEach(() => {
   state.owned = []
+  state.legacyHistory = []
+  state.foreign = new Set()
   state.recorded = []
   // First seen 2.6h ago: inside one retention period, so a truly missing
   // transcript reads as "never written" (→ fresh).
@@ -155,5 +167,26 @@ describe('conversation healer: behaviour kept', () => {
     state.owned = [SIBLING, MISSING]
     expect(await heal(MISSING)).toEqual({ id: SIBLING, healed: true })
     expect(state.recorded.map((r) => r.conversationId)).toEqual([SIBLING])
+  })
+})
+
+describe('conversation healer: one task per provider session (#172 follow-up #4)', () => {
+  // Pre-ledger SessionStart hooks appended whatever `/resume` picked in a shared cwd
+  // to conversationHistory — a parent's or sibling's session (task 735ba25d holds
+  // three). A `history` repoint to one would make two tasks drive one transcript.
+  test('a pre-ledger history id that another task owns is never a repoint target', async () => {
+    state.owned = [MISSING]
+    state.legacyHistory = [SIBLING]
+    state.foreign = new Set([SIBLING])
+    const res = await heal(MISSING)
+    expect(res.id).toBe(MISSING)
+    expect(res.healed).toBe(false)
+    expect(state.recorded).toEqual([])
+  })
+
+  test('a pre-ledger history id nobody else owns still repoints', async () => {
+    state.owned = [MISSING]
+    state.legacyHistory = [SIBLING]
+    expect(await heal(MISSING)).toEqual({ id: SIBLING, healed: true })
   })
 })

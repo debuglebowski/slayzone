@@ -58,6 +58,7 @@ run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_harness packages/domains/task/src/server/ops/agent-sessions.test.ts
+run_harness packages/domains/task/src/server/ops/shared-session-claims.test.ts
 # Entity-model B — one-row-per-spawn session lifecycle (spawn→confirm→dead→bind).
 run_harness packages/domains/task/src/server/ops/agent-sessions-lifecycle.test.ts
 # v151 `in-band-clear` origin — CHECK-widening table rebuild. Guards the data copy
@@ -715,6 +716,7 @@ run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
 run_harness packages/apps/hub/src/recovery-second-pass.test.ts
 run_harness packages/apps/hub/src/computer-chat-isolation.test.ts
 run_harness packages/apps/hub/src/shared-session-ownership.test.ts
+run_harness packages/apps/hub/src/shared-session-repair.test.ts
 run_harness packages/apps/hub/src/computer-chat-live-task-fallback.test.ts
 run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
 run_harness packages/apps/hub/src/content-third-pass.test.ts

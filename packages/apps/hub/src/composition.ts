@@ -250,6 +250,7 @@ import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
 import { startFdWatch } from './fd-watch.js'
 import { startSessionRetention } from './session-retention.js'
+import { repairSharedSessionClaims } from './shared-session-repair.js'
 import { startSsoRecheck } from './sso-recheck.js'
 import { createTrpcConnectionRegistry, type TrpcConnectionRegistry } from './trpc-connections.js'
 import { createUserAccessRevoker, type UserAccessRevoker } from './user-access.js'
@@ -707,6 +708,12 @@ export function composeServer(opts: {
     }
   })
   startArtifactWatcher(join(dataRoot, 'artifacts'))
+  // One task per provider session (shared-session-repair.ts): tombstone the losing
+  // claims on a session two tasks hold (pre-ledger data). Idempotent; a no-op on
+  // any store written after the provenance gate.
+  bootBestEffort('shared-session-repair', () =>
+    repairSharedSessionClaims({ db, record: recordDiagnosticEvent })
+  )
 
   // --- PTY + chat runtime --------------------------------------------------
   // Configure the pty-host bridge with a STUB window. node-pty spawns in THIS
