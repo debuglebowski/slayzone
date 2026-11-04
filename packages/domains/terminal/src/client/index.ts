@@ -82,6 +82,10 @@ export {
   selectConversationAttachmentBytes
 } from '../shared/chat-timeline'
 export {
+  selectBackgroundSubAgents,
+  type BackgroundSubAgent
+} from '../shared/background-sub-agents'
+export {
   FILE_TOOL_NAMES,
   SHELL_TOOL_NAMES,
   fileChangeOf,

@@ -198,6 +198,58 @@ describe('Codex sub-agents (recorded: sub-agent-interrupt)', () => {
     expect(threads).toContain(CHILD)
   })
 
+  test('stopping one sub-agent interrupts its own turn only', async () => {
+    const h = await started()
+    await replay(h, 'sub-agent-interrupt')
+    const before = h.sent.length
+    void h.driver.stopSubAgent?.(spawnId('sub-agent-interrupt'))
+    await flush()
+    const sent = h.sent.slice(before).filter((m) => m.method === 'turn/interrupt')
+    expect(sent.map((m) => (m.params as { threadId: string }).threadId)).toEqual([CHILD])
+    expect((sent[0].params as { turnId?: string }).turnId).toBeTruthy()
+  })
+
+  test('a Stop between its turns waits for its next turn, then interrupts it', async () => {
+    const h = await started()
+    await replay(h, 'sub-agent-interrupt')
+    const line = (method: string, params: unknown) =>
+      h.driver.handleLine(JSON.stringify({ jsonrpc: '2.0', method, params }))
+    // Its turn over, the row still open (a status Codex has not told us the meaning of).
+    line('turn/completed', {
+      threadId: CHILD,
+      turn: { id: 'child-turn', status: 'other', items: [] }
+    })
+    await flush()
+    const before = h.sent.length
+    await h.driver.stopSubAgent?.(spawnId('sub-agent-interrupt'))
+    expect(h.sent.slice(before).filter((m) => m.method === 'turn/interrupt')).toEqual([])
+    line('turn/started', { threadId: CHILD, turn: { id: 'child-turn-2' } })
+    await flush()
+    expect(
+      h.sent
+        .slice(before)
+        .filter((m) => m.method === 'turn/interrupt')
+        .map((m) => m.params)
+    ).toEqual([{ threadId: CHILD, turnId: 'child-turn-2' }])
+  })
+
+  test('stopping a sub-agent that is not running refuses', async () => {
+    const h = await started()
+    await replay(h, 'sub-agent-interrupt')
+    await expect(h.driver.stopSubAgent?.('no-such-row')).rejects.toThrow(/not running/)
+    h.driver.handleLine(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { threadId: CHILD, turn: { id: 'child-turn', status: 'completed', items: [] } }
+      })
+    )
+    await flush()
+    await expect(h.driver.stopSubAgent?.(spawnId('sub-agent-interrupt'))).rejects.toThrow(
+      /not running/
+    )
+  })
+
   test("a sub-agent's turn ending interrupted fails its row", async () => {
     const h = await started()
     await replay(h, 'sub-agent-interrupt')

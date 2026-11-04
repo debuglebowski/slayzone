@@ -1183,6 +1183,17 @@ class CodexChatSession implements ChatSessionDriver {
     }
   }
 
+  /**
+   * Stop one sub-agent: interrupt its own running turn (its row ends
+   * `interrupted`); between its turns, the next one as it starts.
+   */
+  async stopSubAgent(toolUseId: string): Promise<void> {
+    const stop = this.disposed || !this.client ? null : this.subAgents.requestStop(toolUseId)
+    if (!this.client || !stop) throw new Error(`sub-agent ${toolUseId} is not running`)
+    if (stop === 'queued') return
+    await this.client.request('turn/interrupt', stop, 5_000)
+  }
+
   private async interruptAndWait(timeoutMs: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const stopped = async () => {
@@ -1535,6 +1546,12 @@ class CodexChatSession implements ChatSessionDriver {
     ) {
       for (const event of this.subAgents.onThreadNotification(thread, method, params))
         this.emit(ctx, event)
+      const queued = method === 'turn/started' ? this.subAgents.takeQueuedStop(thread) : null
+      if (queued && this.client) {
+        this.client
+          .request('turn/interrupt', queued, 5_000)
+          .catch((err: unknown) => console.warn('[codex-chat] sub-agent stop failed:', err))
+      }
       return
     }
     switch (method) {

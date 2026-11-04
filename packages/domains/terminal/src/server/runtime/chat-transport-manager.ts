@@ -2744,6 +2744,16 @@ export function createChatTransport(
     return proc.driver.stopCommandTask(taskId)
   }
 
+  /** Stop one running sub-agent of the tab's live process (by its row's tool_use_id). */
+  function stopSubAgent(tabId: string, toolUseId: string): Promise<void> {
+    const proc = liveProcess(tabId)
+    if (!proc) return Promise.reject(new ChatTransportError('no live session'))
+    if (!proc.driver.stopSubAgent) {
+      return Promise.reject(new ChatTransportError('this agent cannot stop a sub-agent'))
+    }
+    return proc.driver.stopSubAgent(toolUseId)
+  }
+
   /** Move a running foreground command of the tab's live process to the background. */
   function backgroundCommandTask(tabId: string, toolUseId: string): Promise<boolean> {
     const proc = liveProcess(tabId)
@@ -4036,6 +4046,7 @@ export function createChatTransport(
     getCommandTaskOutput,
     stopCommandTask,
     backgroundCommandTask,
+    stopSubAgent,
     updateSessionChatMode,
     updateSessionChatModel,
     updateSessionChatEffort,
@@ -4109,6 +4120,7 @@ export const {
   getCommandTaskOutput,
   stopCommandTask,
   backgroundCommandTask,
+  stopSubAgent,
   updateSessionChatMode,
   updateSessionChatModel,
   updateSessionChatEffort,

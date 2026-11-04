@@ -255,6 +255,11 @@ export type TimelineItem =
       phase: 'in-flight' | 'completed' | 'failed'
       /** Runs in the background: it outlives its turn, not its process. */
       backgrounded?: true
+      /**
+       * The turn that started it (`turnsClosed` while that turn ran); absent
+       * when none ran (a Codex child's own child, spawned between turns).
+       */
+      spawnedInTurn?: number
       description?: string
       status?: string
       summary?: string
@@ -2133,10 +2138,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // No row yet: a notification of a task that already ended (an orphan of a
       // previous process) is a row that ended, never one left running.
       const phase = endedSubAgentPhase(event.status) ?? incomingPhase
+      const spawnedInTurn = openTurn(state)
       const item: TimelineItem = {
         kind: 'sub-agent',
         toolUseId: id,
         phase,
+        ...(spawnedInTurn !== null ? { spawnedInTurn } : {}),
         description: event.description,
         status: event.status,
         summary: event.summary,

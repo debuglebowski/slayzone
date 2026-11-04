@@ -653,6 +653,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getCommandTaskOutput,
     stopCommandTask,
     backgroundCommandTask,
+    stopSubAgent,
     sendToolResult,
     sendControlRequest,
     respondToPermissionRequest,
@@ -929,6 +930,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
     /** Move a running foreground command to the background (`background_tasks`). */
     backgroundCommandTask: (tabId: string, toolUseId: string) =>
       backgroundCommandTask(tabId, toolUseId),
+    /** Stop one running sub-agent, by its row's tool_use_id (`stop_task` / Codex `turn/interrupt`). */
+    stopSubAgent: (tabId: string, toolUseId: string) => stopSubAgent(tabId, toolUseId),
 
     /**
      * Eager spawn entrypoint. Used by the renderer's "Restart" button after a

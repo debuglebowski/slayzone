@@ -96,6 +96,11 @@ export interface ChatCapabilities {
    * does; its handshake's synthetic turn-init must not read as work.
    */
   agentStartedTurns: boolean
+  /**
+   * One background sub-agent can be stopped on its own (the composer's Stop):
+   * Claude `stop_task` with its task id; Codex `turn/interrupt` on its thread.
+   */
+  stopSubAgent: boolean
 }
 
 const NONE: ChatCapabilities = {
@@ -120,7 +125,8 @@ const NONE: ChatCapabilities = {
   sideQuestions: false,
   steerQueued: false,
   withdrawSteered: false,
-  agentStartedTurns: false
+  agentStartedTurns: false,
+  stopSubAgent: false
 }
 
 const CAPABILITIES: Record<string, ChatCapabilities> = {
@@ -146,7 +152,8 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     sideQuestions: true,
     steerQueued: true,
     withdrawSteered: true,
-    agentStartedTurns: true
+    agentStartedTurns: true,
+    stopSubAgent: true
   },
   'codex-chat': {
     ...NONE,
@@ -178,7 +185,9 @@ const CAPABILITIES: Record<string, ChatCapabilities> = {
     // An ephemeral `thread/fork` + one turn on it, answered and dropped (the driver).
     sideQuestions: true,
     // `turn/steer` into the running turn; no way to take it back.
-    steerQueued: true
+    steerQueued: true,
+    // `turn/interrupt` on the sub-agent's own thread.
+    stopSubAgent: true
   }
 }
 

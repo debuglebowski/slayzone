@@ -304,6 +304,11 @@ export interface ChatSessionDriver {
   stopCommandTask?(taskId: string): Promise<void>
   /** Move a running foreground command to the background; false when it is not one. */
   backgroundCommandTask?(toolUseId: string): Promise<boolean>
+  /**
+   * Stop one running sub-agent, named by its row (`toolUseId`). Rejects when it
+   * is not running. Absent: the provider cannot stop a single sub-agent.
+   */
+  stopSubAgent?(toolUseId: string): Promise<void>
   /** Teardown — reject pending promises, clear timers. Called on process exit. */
   dispose(): void
 }

@@ -242,6 +242,7 @@ The fake answers the app's task control requests itself:
 - `get_task_output {task_id}` → `{output (last 8 KiB), total_bytes, truncated}`; empty once a foreground command finished; kept (with `[exited with code N]`) for a background one; an unknown id is an error reply. Each poll is logged (`task-poll`); read the requests with `run.controlRequests()`.
 - `background_tasks {tool_use_id}` on a running foreground command → `background_tasks_changed` + `task_updated {patch:{is_backgrounded:true}}`, ack `{backgrounded:true}`, tool_result "Command was manually backgrounded…"; the command runs on in the background.
 - `stop_task {task_id}` on a running command → `task_updated {status:'killed'}` + `task_notification stopped` + `background_tasks_changed`, ack `{}`, output ends with `[killed]`. Not verified on the real CLI for a FOREGROUND command (played as a killed command with an error tool_result).
+- `stop_task {task_id}` on a running scripted sub-agent (a `task_started` with `task_type: 'local_agent'` the scenario emitted) → `task_updated {status:'killed'}` + `task_notification stopped` (its `tool_use_id`), ack `{}` — as Claude Code 2.1.318 does. Its scripted `task_notification` afterwards is not played.
 
 ## e2e (`packages/apps/app/e2e/fixtures/chat.ts`)
 

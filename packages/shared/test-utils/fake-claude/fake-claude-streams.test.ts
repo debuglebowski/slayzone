@@ -441,6 +441,56 @@ describe('fake-claude — command tasks (2.1.312, spike item 14)', () => {
     expect((await control(p, { subtype: 'stop_task', task_id: 'tst' })).subtype).toBe('error')
   })
 
+  it('stop_task stops a scripted sub-agent: killed + stopped; its scripted end never plays', async () => {
+    fake.setScenario({
+      processes: [
+        {
+          turns: [
+            [
+              step.emit(
+                ev.init(),
+                {
+                  type: 'system',
+                  subtype: 'task_started',
+                  task_id: 'ag1',
+                  tool_use_id: 'toolu_ag',
+                  description: 'Research',
+                  is_backgrounded: true,
+                  task_type: 'local_agent'
+                },
+                ev.result({ text: 'LAUNCHED' })
+              ),
+              step.sleep(300),
+              step.emit({
+                type: 'system',
+                subtype: 'task_notification',
+                task_id: 'ag1',
+                tool_use_id: 'toolu_ag',
+                status: 'completed',
+                summary: 'done'
+              }),
+              step.emit(ev.result({ text: 'AFTER' }))
+            ]
+          ]
+        }
+      ]
+    })
+    const p = start()
+    p.send(user('go'))
+    await p.waitFor(isResult)
+    const ack = await control(p, { subtype: 'stop_task', task_id: 'ag1' })
+    expect(ack).toMatchObject({ subtype: 'success', response: {} })
+    expect(p.lines.find(sys('task_updated'))).toMatchObject({
+      task_id: 'ag1',
+      patch: { status: 'killed' }
+    })
+    await p.waitFor((l) => isResult(l) && l.result === 'AFTER')
+    const ends = p.lines.filter(sys('task_notification'))
+    expect(ends).toHaveLength(1)
+    expect(ends[0]).toMatchObject({ task_id: 'ag1', tool_use_id: 'toolu_ag', status: 'stopped' })
+    expect((await control(p, { subtype: 'stop_task', task_id: 'ag1' })).subtype).toBe('error')
+  })
+
   it('get_task_output keeps the last 8 KiB and reports the total', async () => {
     const big = 'x'.repeat(10_000)
     fake.setScenario({
