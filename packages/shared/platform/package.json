@@ -44,7 +44,8 @@
     "./event-loop-stall": "./src/event-loop-stall.ts",
     "./parent-watch": "./src/parent-watch.ts",
     "./node-pty-install": "./src/node-pty-install.ts",
-    "./computer-launcher": "./src/computer-launcher.ts"
+    "./computer-launcher": "./src/computer-launcher.ts",
+    "./suspend-clock": "./src/suspend-clock.ts"
   },
   "scripts": {
     "test": "vitest run",

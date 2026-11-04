@@ -80,7 +80,7 @@ import { ChatEventSplitter, isStreamFragment } from './chat-event-splitter'
 import { ChatOutbox, type OutboxState } from './chat-outbox'
 import { classifyResumeEvent } from './chat-resume-guard'
 import { runningDeadline, toolBoundMs } from './chat-watchdog'
-import { processSuspendClock, type SuspendClock } from './host-suspend-clock'
+import { processSuspendClock, type SuspendClock } from '@slayzone/platform/suspend-clock'
 import { isCliVersionBelow } from './cli-version'
 
 export { markSessionUserInput }
@@ -213,7 +213,7 @@ export interface TransportDeps {
    * When this process last came back from a host sleep / suspend — the watchdog
    * does not judge silence it did not witness. Default: the process-wide ticker.
    */
-  suspendClock?: SuspendClock
+  suspendClock?: Pick<SuspendClock, 'lastResumeAt'>
   /** Test override: how a link-down message write is retried (default 30 s window, 1 s base). */
   outboxRetry?: { windowMs: number; baseMs: number }
 }
@@ -692,7 +692,7 @@ export function createChatTransport(
   /** Watchdog kills restarted in a row (no completed turn between) before one stays stopped. */
   const WATCHDOG_MAX_RESTARTS = 2
 
-  function suspendClock(): SuspendClock {
+  function suspendClock(): Pick<SuspendClock, 'lastResumeAt'> {
     return deps.suspendClock ?? processSuspendClock()
   }
 
