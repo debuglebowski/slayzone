@@ -942,6 +942,53 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           { timeout: 20_000, intervals: [500, 1_000] }
         )
         .toBe(true)
+
+      // (5) NATIVE MENU → REMOTE TASK TAB — Cmd+W ("Close Tab") is raised by the
+      // Electron host and reaches only the LOCAL hub (the capability bridge). The
+      // remote task's page sits in the remote hub's HubScope, so it must still
+      // hear the host event. Emit it the way the menu does (on the local hub, via
+      // the window's default client) and require the remote task's tab to close.
+      const remoteTabOpen = () =>
+        page.evaluate(
+          (tid) =>
+            (
+              window as unknown as {
+                __slayzone_tabStore: {
+                  getState: () => { tabs: Array<{ type: string; taskId?: string }> }
+                }
+              }
+            ).__slayzone_tabStore
+              .getState()
+              .tabs.some((tab) => tab.type === 'task' && tab.taskId === tid),
+          remoteTaskId
+        )
+      expect(await remoteTabOpen()).toBe(true)
+      await page.evaluate(() =>
+        window.getTrpcVanillaClient().menu.testEmit.mutate({ event: 'close-current-focus' })
+      )
+      await expect.poll(remoteTabOpen, { timeout: 10_000, intervals: [250, 500] }).toBe(false)
+
+      // (6) DESKTOP-ONLY CALLS FROM THE REMOTE HUB'S CLIENT — what a remote task pane
+      // sends for `app.*` host features (shell, windows, screenshot…). The remote hub
+      // can only stub them; its client must forward them to the local hub. Hub data
+      // on the same client must still come from the remote hub.
+      const viaRemote = await page.evaluate(async (tid) => {
+        type C = {
+          task: { loadBoardData: { query: () => Promise<{ tasks: Array<{ id: string }> }> } }
+          app: { meta: { getVersion: { query: () => Promise<string> } } }
+        }
+        const c = (
+          window as unknown as { __slayzone_hubClientForTest: (id: string) => C | null }
+        ).__slayzone_hubClientForTest('remote-b')
+        if (!c) return { error: 'no remote-b client' }
+        const board = await c.task.loadBoardData.query()
+        const version = await c.app.meta.getVersion
+          .query()
+          .catch((e: Error) => `error:${e.message}`)
+        return { hasRemoteTask: board.tasks.some((t) => t.id === tid), version }
+      }, remoteTaskId)
+      expect(viaRemote).toMatchObject({ hasRemoteTask: true })
+      expect((viaRemote as { version: string }).version).toMatch(/^\d+\.\d+\.\d+/)
     } finally {
       if (launched) await launched.close()
       // Computer before hub: it re-dials on disconnect, so killing the hub first

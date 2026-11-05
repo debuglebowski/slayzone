@@ -1268,6 +1268,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies-chat.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
+  packages/apps/api/src/host-paths.test.ts \
   packages/apps/api/src/scopes.test.ts \
   packages/apps/api/src/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \

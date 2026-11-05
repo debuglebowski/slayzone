@@ -14,7 +14,7 @@ import {
   setHubConnectProbe,
   useHubRegistryStore
 } from '@slayzone/transport/client'
-import { getTrpcClient, initTrpcClient } from './trpc'
+import { getHubClient, getTrpcClient, initTrpcClient } from './trpc'
 import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
@@ -233,6 +233,15 @@ if (isFloatingGlobalAgentPanel) {
       ;(
         window as typeof window & { __slayzone_stopViewStatePersistence?: () => Promise<void> }
       ).__slayzone_stopViewStatePersistence = stopViewStatePersistence
+      // A federated hub's OWN client (null until something resolved it), so specs can
+      // drive what a pane scoped to that hub sends — incl. host-path forwarding.
+      ;(
+        window as typeof window & {
+          __slayzone_hubClientForTest?: (
+            hubId: string
+          ) => ReturnType<typeof initTrpcClient>['client'] | null
+        }
+      ).__slayzone_hubClientForTest = (hubId) => getHubClient(hubId)?.client ?? null
     }
     // Multi-hub federation registry. The DEFAULT hub is pinned to `server.url` —
     // the exact url boot's initTrpcClient() used — so its HubScope reuses that
