@@ -63,7 +63,11 @@ export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from 
 // `@slayzone/platform/hub-registry` and `/local-computer-status` subpaths —
 // prefer those from renderer bundles.
 export type { HubKind, HubEntry } from './hub-registry'
-export type { LocalComputerStatus } from './local-computer-status'
+export type {
+  LocalComputerHubs,
+  LocalComputerHubStatus,
+  LocalComputerStatus
+} from './local-computer-status'
 export {
   childProcessEnv,
   ENV_MANIFEST,

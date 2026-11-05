@@ -808,11 +808,13 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
   'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
   'computers.resolveTaskComputer': checked(task('taskId')),
+  'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
   'computers.delete': none(COMPUTER),
   'computers.onStatusChange': none(COMPUTER),
   'computers.revokeComputer': none(COMPUTER),
+  'computers.setDisabled': none(COMPUTER),
 
   // ── diagnostics, feedback ──
   'diagnostics.recordClientError': none(SELF),

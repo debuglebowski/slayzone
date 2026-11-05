@@ -38,7 +38,8 @@ export async function registerComputer(
     auth_key_id: input.authKeyId ?? null,
     last_seen_at: now,
     created_at: now,
-    revoked_at: null
+    revoked_at: null,
+    disabled_at: null
   }
   await db.run(
     `INSERT INTO computers
@@ -292,6 +293,50 @@ export async function revokeComputer(
   at: number = Date.now()
 ): Promise<void> {
   await db.run(`UPDATE computers SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, [at, id])
+}
+
+/**
+ * Disable (`true`) or enable (`false`) a computer. A disabled computer stays enrolled
+ * and connected but gets no new work (`computers.setDisabled`). Disabling an already
+ * disabled computer keeps its first time, like {@link revokeComputer}.
+ */
+export async function setComputerDisabled(
+  db: SlayzoneDb,
+  id: string,
+  disabled: boolean,
+  at: number = Date.now()
+): Promise<void> {
+  if (disabled) {
+    await db.run(`UPDATE computers SET disabled_at = ? WHERE id = ? AND disabled_at IS NULL`, [
+      at,
+      id
+    ])
+  } else {
+    await db.run(`UPDATE computers SET disabled_at = NULL WHERE id = ?`, [id])
+  }
+}
+
+/** Rename a computer. Its enroll name until now; a re-enroll of a remote computer
+ *  makes a new row, so this name stays with this row. */
+export async function renameComputer(db: SlayzoneDb, id: string, name: string): Promise<void> {
+  await db.run(`UPDATE computers SET name = ? WHERE id = ?`, [name, id])
+}
+
+/** Ids of every disabled computer — what placement leaves out of its default picks. */
+export async function listDisabledComputerIds(db: SlayzoneDb): Promise<Set<string>> {
+  const rows = await db.all<{ id: string }>(
+    `SELECT id FROM computers WHERE disabled_at IS NOT NULL`
+  )
+  return new Set(rows.map((r) => r.id))
+}
+
+/** Whether a computer is disabled. False for one that does not exist. */
+export async function isComputerDisabled(db: SlayzoneDb, id: string): Promise<boolean> {
+  const row = await db.get<{ disabled_at: number | null }>(
+    `SELECT disabled_at FROM computers WHERE id = ?`,
+    [id]
+  )
+  return row?.disabled_at != null
 }
 
 // --- task/project computer binding ----------------------------------------------

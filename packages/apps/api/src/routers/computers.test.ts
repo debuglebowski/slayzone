@@ -346,7 +346,8 @@ test('T-15/T-19: an admin manages a private computer of another user but cannot 
       'FORBIDDEN:ADMIN_ONLY'
     )
     expect(await refusal(carol.claim({ computerId: bobs.id }))).toBe('FORBIDDEN:ADMIN_ONLY')
-    expect(await refusal(carol.mintJoinToken({ label: 'x' }))).toBe('FORBIDDEN:ADMIN_ONLY')
+    // Enrolling a computer is not lifecycle of someone else's: a user mints for themselves.
+    expect(await refusal(carol.mintJoinToken({ label: 'x' }))).toBe('ok')
     expect(await refusal(admin.setVisibility({ computerId: bobs.id, visibility: 'private' }))).toBe(
       'ok'
     )
@@ -404,16 +405,19 @@ test('T-15/T-19: an admin manages a private computer of another user but cannot 
 })
 
 /**
- * T-20 (O-5) through the real `appRouter`, on a hub with login: only an admin mints
- * (the role gate, with its audit line), always FOR a named, enabled user who owns the
- * computer, for at most 1 hour. Each refusal is BAD_REQUEST with a stable `appCode`
- * and one `computer.join_token.mint` denied line; nothing is minted.
+ * T-20 (O-5) + self-enroll, through the real `appRouter`, on a hub with login: every
+ * user mints for THEMSELVES (naming nobody, or naming themselves); only an admin mints
+ * for someone else, who must be a named, enabled user. At most 1 hour. Each refusal
+ * carries a stable `appCode` and one `computer.join_token.mint` denied line; nothing is
+ * minted.
  */
-test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a user cannot mint', async () => {
+test('T-20: users mint for themselves; only an admin mints for a named, enabled other user', async () => {
   setAuthGate(() => true)
   const accounts: Record<string, { userId: string; disabled: boolean }> = {
     'bob@example.com': { userId: 'bob', disabled: false },
     bob: { userId: 'bob', disabled: false },
+    'carol@example.com': { userId: 'carol', disabled: false },
+    carol: { userId: 'carol', disabled: false },
     dave: { userId: 'dave', disabled: true }
   }
   setComputersDeps({ ...fakeDeps, findAccount: async (ref) => accounts[ref] ?? null })
@@ -421,10 +425,13 @@ test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a use
   setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
   const tokens = () =>
     (h.db.prepare('SELECT COUNT(*) AS n FROM join_tokens').get() as { n: number }).n
+  const ownerOf = (id: string) =>
+    h.db.prepare('SELECT minted_by_user_id, owner_user_id FROM join_tokens WHERE id = ?').get(id)
   try {
     const as = (userId: string, role: 'admin' | 'user') =>
       appRouter.createCaller({ ...ctx, principal: { userId, role, scopes: ['full'] } }).computers
     const admin = as('alice', 'admin')
+    const carol = as('carol', 'user')
     const refusal = async (p: Promise<unknown>): Promise<string> =>
       p.then(
         () => 'ok',
@@ -433,11 +440,12 @@ test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a use
       )
     const before = tokens()
 
-    expect(await refusal(as('carol', 'user').mintJoinToken({ label: 'x', forUser: 'bob' }))).toBe(
-      'FORBIDDEN:ADMIN_ONLY'
+    // A user may not enroll a computer for anyone else — nor learn who exists.
+    expect(await refusal(carol.mintJoinToken({ label: 'x', forUser: 'bob' }))).toBe(
+      'FORBIDDEN:JOIN_TOKEN_OWNER_FORBIDDEN'
     )
-    expect(await refusal(admin.mintJoinToken({ label: 'x' }))).toBe(
-      'BAD_REQUEST:JOIN_TOKEN_OWNER_REQUIRED'
+    expect(await refusal(carol.mintJoinToken({ label: 'x', forUser: 'nobody@example.com' }))).toBe(
+      'FORBIDDEN:JOIN_TOKEN_OWNER_FORBIDDEN'
     )
     expect(await refusal(admin.mintJoinToken({ label: 'x', forUser: 'nobody@example.com' }))).toBe(
       'BAD_REQUEST:JOIN_TOKEN_OWNER_UNKNOWN'
@@ -450,7 +458,7 @@ test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a use
     ).toBe('BAD_REQUEST:JOIN_TOKEN_TTL_TOO_LONG')
     expect(tokens()).toBe(before)
     // The stable code reaches a client as `data.appCode`, as ADMIN_ONLY does.
-    const err = await admin.mintJoinToken({ label: 'x' }).catch((e: unknown) => e)
+    const err = await carol.mintJoinToken({ label: 'x', forUser: 'bob' }).catch((e: unknown) => e)
     audit.pop()
     const shape = appRouter._def._config.errorFormatter({
       error: err,
@@ -458,36 +466,48 @@ test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a use
       path: 'computers.mintJoinToken',
       input: undefined,
       ctx: undefined,
-      shape: { message: 'x', code: -32600, data: { code: 'BAD_REQUEST' } }
+      shape: { message: 'x', code: -32600, data: { code: 'FORBIDDEN' } }
     } as never) as { data: { appCode?: string } }
-    expect(shape.data.appCode).toBe('JOIN_TOKEN_OWNER_REQUIRED')
+    expect(shape.data.appCode).toBe('JOIN_TOKEN_OWNER_FORBIDDEN')
+
+    // Self-enroll: naming nobody, or naming yourself, mints a computer YOU own.
+    const own = await carol.mintJoinToken({ label: 'carol-laptop' })
+    expect(ownerOf(own.id)).toEqual({ minted_by_user_id: 'carol', owner_user_id: 'carol' })
+    const ownByEmail = await carol.mintJoinToken({ label: 'x', forUser: 'carol@example.com' })
+    expect(ownerOf(ownByEmail.id)).toEqual({ minted_by_user_id: 'carol', owner_user_id: 'carol' })
+    const adminsOwn = await admin.mintJoinToken({ label: 'x' })
+    expect(ownerOf(adminsOwn.id)).toEqual({ minted_by_user_id: 'alice', owner_user_id: 'alice' })
 
     const minted = await admin.mintJoinToken({ label: 'bob-laptop', forUser: 'bob@example.com' })
     expect(minted.expiresAt - minted.createdAt).toBe(15 * 60_000)
-    expect(
-      h.db
-        .prepare('SELECT minted_by_user_id, owner_user_id FROM join_tokens WHERE id = ?')
-        .get(minted.id)
-    ).toEqual({ minted_by_user_id: 'alice', owner_user_id: 'bob' })
+    expect(ownerOf(minted.id)).toEqual({ minted_by_user_id: 'alice', owner_user_id: 'bob' })
 
     expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
-      'authz.denied:denied:carol',
+      'computer.join_token.mint:denied:carol',
+      'computer.join_token.mint:denied:carol',
       'computer.join_token.mint:denied:alice',
       'computer.join_token.mint:denied:alice',
       'computer.join_token.mint:denied:alice',
-      'computer.join_token.mint:denied:alice',
+      'computer.join_token.mint:success:carol',
+      'computer.join_token.mint:success:carol',
+      'computer.join_token.mint:success:alice',
       'computer.join_token.mint:success:alice'
     ])
     expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
-      'not_admin',
-      'JOIN_TOKEN_OWNER_REQUIRED',
+      'JOIN_TOKEN_OWNER_FORBIDDEN',
+      'JOIN_TOKEN_OWNER_FORBIDDEN',
       'JOIN_TOKEN_OWNER_UNKNOWN',
       'JOIN_TOKEN_OWNER_DISABLED',
       'JOIN_TOKEN_TTL_TOO_LONG',
+      undefined,
+      undefined,
+      undefined,
       undefined
     ])
-    expect(audit[5]!.detail).toEqual({ label: 'bob-laptop', ttlMs: 15 * 60_000, owner: 'bob' })
-    expect(audit[5]!.route).toBe('trpc computers.mintJoinToken')
+    // A refused user's typed reference is never echoed back as an account id.
+    expect(audit[0]!.detail).toEqual({ reason: 'JOIN_TOKEN_OWNER_FORBIDDEN', ttlMs: 15 * 60_000 })
+    expect(audit[8]!.detail).toEqual({ label: 'bob-laptop', ttlMs: 15 * 60_000, owner: 'bob' })
+    expect(audit[8]!.route).toBe('trpc computers.mintJoinToken')
     const all = JSON.stringify(audit)
     expect(all.includes(minted.token)).toBe(false)
     expect(all.includes(decodeJoinToken(minted.token)!.secret)).toBe(false)
@@ -506,4 +526,107 @@ test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a use
       code = e.cause?.code
     })
   expect(code).toBe('JOIN_TOKEN_OWNER_UNSUPPORTED')
+})
+
+/**
+ * Disable (`computers.setDisabled`): a disabled computer stays enrolled and listed, but
+ * gets no new work. Refused while it runs terminals or agents, and for the desktop
+ * app's own computer on its own hub, which is also never deletable.
+ */
+test('computers.setDisabled: toggles, refuses while work runs, never the local computer', async () => {
+  const c = await registerComputer(h.slayDb, {
+    name: 'disable-me',
+    platform: 'linux-x64',
+    version: '0.37.0'
+  })
+  const local = await registerComputer(h.slayDb, {
+    name: 'local-computer',
+    platform: 'darwin-arm64',
+    version: '0.37.0'
+  })
+  let running = 0
+  setComputersDeps({
+    ...fakeDeps,
+    localComputerId: local.id,
+    runningWorkOn: async () => running
+  })
+  const code = async (p: Promise<unknown>): Promise<string> =>
+    p.then(
+      () => 'ok',
+      (e: { code?: string; cause?: { code?: string } }) => `${e.code}:${e.cause?.code}`
+    )
+  try {
+    expect((await caller.list()).find((r) => r.id === c.id)?.disabledAt).toBeNull()
+
+    await caller.setDisabled({ computerId: c.id, disabled: true })
+    const row = (await caller.list()).find((r) => r.id === c.id)
+    expect(typeof row?.disabledAt).toBe('number')
+
+    // No new bindings to a disabled computer.
+    expect(await code(caller.setTaskComputer({ taskId, computerId: c.id }))).toBe(
+      'PRECONDITION_FAILED:COMPUTER_DISABLED'
+    )
+    expect(await code(caller.setProjectDefaultComputer({ projectId, computerId: c.id }))).toBe(
+      'PRECONDITION_FAILED:COMPUTER_DISABLED'
+    )
+
+    await caller.setDisabled({ computerId: c.id, disabled: false })
+    expect((await caller.list()).find((r) => r.id === c.id)?.disabledAt).toBeNull()
+
+    // Running terminals or agents: refused, and nothing changes.
+    running = 2
+    expect(await code(caller.setDisabled({ computerId: c.id, disabled: true }))).toBe(
+      'PRECONDITION_FAILED:COMPUTER_HAS_RUNNING_WORK'
+    )
+    expect((await caller.list()).find((r) => r.id === c.id)?.disabledAt).toBeNull()
+    // Enabling never needs the computer idle.
+    running = 0
+
+    // The desktop app's own computer: neither disabled nor deleted.
+    expect(await code(caller.setDisabled({ computerId: local.id, disabled: true }))).toBe(
+      'BAD_REQUEST:COMPUTER_IS_LOCAL'
+    )
+    expect(await code(caller.delete({ computerId: local.id }))).toBe(
+      'BAD_REQUEST:COMPUTER_IS_LOCAL'
+    )
+    expect((await caller.list()).some((r) => r.id === local.id)).toBe(true)
+  } finally {
+    setComputersDeps(fakeDeps)
+    await caller.delete({ computerId: c.id })
+    await h.slayDb.run(`DELETE FROM computers WHERE id = ?`, [local.id])
+  }
+})
+
+/**
+ * Rename (`computers.rename`): the manager names a computer. Never to the name the
+ * desktop hub reserves for its own computer, and never that computer itself.
+ */
+test('computers.rename: renames; refuses the reserved name and the local computer', async () => {
+  const c = await registerComputer(h.slayDb, { name: 'old', platform: 'linux-x64', version: '0' })
+  const local = await registerComputer(h.slayDb, {
+    name: 'local-computer',
+    platform: 'darwin-arm64',
+    version: '0'
+  })
+  setComputersDeps({ ...fakeDeps, localComputerId: local.id })
+  const code = async (p: Promise<unknown>): Promise<string> =>
+    p.then(
+      () => 'ok',
+      (e: { code?: string; cause?: { code?: string } }) => `${e.code}:${e.cause?.code}`
+    )
+  try {
+    await caller.rename({ computerId: c.id, name: '  work-laptop  ' })
+    expect((await caller.list()).find((r) => r.id === c.id)?.name).toBe('work-laptop')
+    expect(await code(caller.rename({ computerId: c.id, name: 'local-computer' }))).toBe(
+      'BAD_REQUEST:COMPUTER_NAME_RESERVED'
+    )
+    expect(await code(caller.rename({ computerId: local.id, name: 'x' }))).toBe(
+      'BAD_REQUEST:COMPUTER_IS_LOCAL'
+    )
+    expect(await code(caller.rename({ computerId: c.id, name: '   ' }))).toMatch(/^BAD_REQUEST/)
+  } finally {
+    setComputersDeps(fakeDeps)
+    await caller.delete({ computerId: c.id })
+    await h.slayDb.run(`DELETE FROM computers WHERE id = ?`, [local.id])
+  }
 })

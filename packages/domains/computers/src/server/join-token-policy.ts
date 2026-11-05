@@ -3,15 +3,18 @@
  * for both mint surfaces, `computers.mintJoinToken` (tRPC) and
  * `POST /api/computers/join-token` (REST), so they cannot drift.
  *
- * WHO MAY MINT is decided before this: on a hub with login only an admin
- * (`admin-policy.ts`, T-15), and never a break-glass session (hub `rest-auth.ts`,
- * `hub-trpc-context.ts`). This decides WHAT the admin may mint:
+ * WHO MAY MINT is decided before this: on a hub with login any signed-in user, never
+ * a break-glass session (hub `rest-auth.ts`, `hub-trpc-context.ts`). This decides
+ * WHO the token is FOR:
  *
- *   - On a hub with login: always FOR a named user, an account that exists and is
- *     enabled. That user owns the computer that redeems the token, whoever redeems
- *     it; the admin minting is only the audit line's actor. Naming nobody is
- *     refused: there is no "the admin's own" default, because a computer runs as
- *     one OS account and the hub cannot know whose — the admin says so.
+ *   - On a hub with login: a computer is personal (`visibility.ts`: its owner uses it,
+ *     nobody else), so enrolling one's OWN computer is every user's to do. Naming
+ *     nobody, or naming yourself, mints a token for the caller. Naming ANYONE ELSE is
+ *     an admin's alone, and must name an account that exists and is enabled; a
+ *     non-admin gets the same refusal for an unknown name as for someone else's, so
+ *     the mint cannot probe which accounts exist. The owner gets the computer that
+ *     redeems the token, whoever redeems it; the minter is only the audit line's
+ *     actor.
  *   - On a hub without login (the desktop app's): unchanged. Anyone on the box
  *     mints, for nobody: the computer is unowned, as before. Naming a user there is
  *     refused rather than ignored — there are no accounts to check it against, and
@@ -35,8 +38,10 @@ import { registerAppCode } from '@slayzone/trpc-server'
 
 export { DEFAULT_JOIN_TOKEN_TTL_MS, JOIN_TOKEN_TTL_TOO_LONG, MAX_JOIN_TOKEN_TTL_MS }
 
-/** A hub with login, and no user named. */
+/** A hub with login, no user named, and no signed-in user to default to. */
 export const JOIN_TOKEN_OWNER_REQUIRED = 'JOIN_TOKEN_OWNER_REQUIRED'
+/** A non-admin named someone other than themselves. */
+export const JOIN_TOKEN_OWNER_FORBIDDEN = 'JOIN_TOKEN_OWNER_FORBIDDEN'
 /** The named user does not exist (or is not a person: the service or break-glass account). */
 export const JOIN_TOKEN_OWNER_UNKNOWN = 'JOIN_TOKEN_OWNER_UNKNOWN'
 /** The named user's account is disabled. */
@@ -47,6 +52,7 @@ export const JOIN_TOKEN_OWNER_UNSUPPORTED = 'JOIN_TOKEN_OWNER_UNSUPPORTED'
 export type JoinTokenRefusalCode =
   | typeof JOIN_TOKEN_TTL_TOO_LONG
   | typeof JOIN_TOKEN_OWNER_REQUIRED
+  | typeof JOIN_TOKEN_OWNER_FORBIDDEN
   | typeof JOIN_TOKEN_OWNER_UNKNOWN
   | typeof JOIN_TOKEN_OWNER_DISABLED
   | typeof JOIN_TOKEN_OWNER_UNSUPPORTED
@@ -94,6 +100,11 @@ export type JoinTokenMintDecision =
 
 const MAX_MINUTES = MAX_JOIN_TOKEN_TTL_MS / 60_000
 
+/** Whether a refusal is the caller's lack of authority (403) rather than a bad request. */
+export function isJoinTokenForbidden(code: JoinTokenRefusalCode): boolean {
+  return code === JOIN_TOKEN_OWNER_FORBIDDEN
+}
+
 /**
  * Decide a mint, auditing a refusal. Call inside the request's security context, so
  * the line carries the minter, client address and route.
@@ -105,6 +116,11 @@ export async function decideJoinTokenMint(input: {
   loginRequired: boolean
   forUser: string | undefined
   ttlMs: number | undefined
+  /**
+   * The signed-in caller: who a token naming nobody is for, and whether they may
+   * name someone else. Null on a hub without login.
+   */
+  caller: { userId: string; isAdmin: boolean } | null
   /** Absent on a hub without login. Required, and called, only on one with login. */
   findAccount: FindJoinTokenAccount | undefined
 }): Promise<JoinTokenMintDecision> {
@@ -141,7 +157,9 @@ export async function decideJoinTokenMint(input: {
     }
     return { ok: true, ownerUserId: null, ttlMs }
   }
+  const caller = input.caller
   if (!forUser) {
+    if (caller) return { ok: true, ownerUserId: caller.userId, ttlMs }
     return refuse(
       JOIN_TOKEN_OWNER_REQUIRED,
       'name the user this computer is for: on a hub with login every computer is ' +
@@ -150,6 +168,13 @@ export async function decideJoinTokenMint(input: {
   }
   if (!input.findAccount) throw new Error('this hub cannot look up accounts yet; try again')
   const account = await input.findAccount(forUser)
+  if (caller && !caller.isAdmin && account?.userId !== caller.userId) {
+    return refuse(
+      JOIN_TOKEN_OWNER_FORBIDDEN,
+      'you can enroll computers only for yourself; ask a hub admin to enroll one for ' +
+        'someone else'
+    )
+  }
   if (!account) return refuse(JOIN_TOKEN_OWNER_UNKNOWN, 'no such user on this hub')
   if (account.disabled) {
     return refuse(JOIN_TOKEN_OWNER_DISABLED, "that user's account is disabled", account.userId)

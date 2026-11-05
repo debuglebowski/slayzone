@@ -5,10 +5,14 @@
  * work, the workspace filesystem, `gh`. The decisions are transport's
  * `computer-access.ts` (T-17's `canAccess`): a computer works only for its owner.
  *
- * WITHOUT LOGIN (the desktop app's hub) nothing changes: a task's binding, else its
- * project's default, else the connected default computer (the sole usable one, else
- * the one named {@link DEFAULT_LOCAL_COMPUTER_NAME}), and no gate. Not one query is
- * added on that path.
+ * WITHOUT LOGIN (the desktop app's hub): a task's binding, else its project's default,
+ * else the connected default computer (the sole usable one, else the one named
+ * {@link DEFAULT_LOCAL_COMPUTER_NAME}), and no gate.
+ *
+ * EVERYWHERE, a DISABLED computer (`computers.setDisabled`) is left out of the default
+ * picks — one query, and only when there is no binding to return. A binding to one is
+ * returned as is: the hub's spawn guard (`computer-new-work.ts`) refuses the work with
+ * a message naming the computer, rather than placement silently running it elsewhere.
  *
  * WITH LOGIN:
  *   - a binding must name a computer owned by the task's (project's) owner, else the
@@ -29,7 +33,12 @@
  *
  * @module hub/computer-placement
  */
-import { DEFAULT_LOCAL_COMPUTER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
+import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
+import {
+  DEFAULT_LOCAL_COMPUTER_NAME,
+  listDisabledComputerIds,
+  resolveTaskComputerId
+} from '@slayzone/computers/server'
 import type { ComputerWork, ComputerWorkGate } from '@slayzone/computer-transport/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { currentSecurityContext, securityEvent } from '@slayzone/platform/security-log'
@@ -40,6 +49,7 @@ import type { WorkspaceComputerTarget } from '@slayzone/file-editor/server'
 export interface UsableComputer {
   readonly computerId: string
   readonly name?: string
+  readonly capabilities?: readonly string[]
 }
 
 /** Raised on a hub with login when work has no computer of its owner's to run on. */
@@ -92,11 +102,22 @@ export interface ComputerPlacement {
   servesProject(computerId: string, projectId: string): Promise<boolean>
 }
 
-/** The connected default among `candidates`: the sole one, else the local-named one. */
+/**
+ * The connected default among `candidates`: the sole one, else the local-named one,
+ * else the sole one that is NOT a desktop's joined computer. A desktop app joins its
+ * computer to every hub it lists ({@link DESKTOP_COMPUTER_CAPABILITY}); that must not
+ * take the default from a computer its user already had on the hub — it becomes the
+ * default only where it is the only one.
+ */
 function pickDefault(candidates: readonly UsableComputer[]): string | null {
   if (candidates.length === 0) return null
   if (candidates.length === 1) return candidates[0].computerId
-  return candidates.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)?.computerId ?? null
+  const local = candidates.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
+  if (local) return local.computerId
+  const dedicated = candidates.filter(
+    (r) => !(r.capabilities ?? []).includes(DESKTOP_COMPUTER_CAPABILITY)
+  )
+  return dedicated.length === 1 ? dedicated[0].computerId : null
 }
 
 const callerPrincipal = (): { userId: string } | null => {
@@ -130,10 +151,18 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
     throw new ComputerNotYoursError()
   }
 
+  /** The usable computers that are not disabled — what a default pick chooses among. */
+  const enabledUsable = async (): Promise<UsableComputer[]> => {
+    const usable = deps.usable()
+    if (usable.length === 0) return []
+    const disabled = await listDisabledComputerIds(db)
+    return usable.filter((c) => !disabled.has(c.computerId))
+  }
+
   /** The connected default among the computers that may do `work`. */
   const pickFor = async (work: OwnedResource | null): Promise<string | null> => {
     const candidates: UsableComputer[] = []
-    for (const c of deps.usable()) if (await serves(c.computerId, work)) candidates.push(c)
+    for (const c of await enabledUsable()) if (await serves(c.computerId, work)) candidates.push(c)
     return pickDefault(candidates)
   }
 
@@ -147,7 +176,7 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
 
   const forTask = async (taskId: string): Promise<string | null> => {
     const bound = await resolveTaskComputerId(db, taskId)
-    if (!requireLogin) return bound ?? pickDefault(deps.usable())
+    if (!requireLogin) return bound ?? pickDefault(await enabledUsable())
     const work = resource('task', taskId)
     if (bound !== null) {
       await admit(bound, work)
@@ -160,14 +189,14 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
 
   const forProject = async (projectId: string): Promise<string | null> => {
     const bound = await projectBinding(projectId)
-    if (!requireLogin) return bound ?? pickDefault(deps.usable())
+    if (!requireLogin) return bound ?? pickDefault(await enabledUsable())
     const work = resource('project', projectId)
     if (bound !== null) return (await serves(bound, work)) ? bound : null
     return pickFor(work)
   }
 
   const forCaller = async (): Promise<string | null> =>
-    requireLogin ? pickFor(null) : pickDefault(deps.usable())
+    requireLogin ? pickFor(null) : pickDefault(await enabledUsable())
 
   return {
     forSpec: (computerId) =>

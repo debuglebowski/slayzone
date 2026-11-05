@@ -24,7 +24,7 @@ describe('REST open routes vs the bearer gate, on a hub that requires login', ()
     }
   })
 
-  test('nothing else is, except admin routes that verify their caller themselves', () => {
+  test('nothing else is, except routes that verify their caller themselves', () => {
     const others = unverified.filter((k) => REST_ADMIN_POLICY[k] !== 'open')
     expect(others.sort()).toEqual([
       'DELETE /api/hub/users',
@@ -33,7 +33,13 @@ describe('REST open routes vs the bearer gate, on a hub that requires login', ()
       'POST /api/computers/join-token',
       'POST /api/hub/users'
     ])
-    for (const k of others) expect(REST_ADMIN_POLICY[k], k).toBe('admin')
+    // Account management is the admin's; a join token is every user's for their own
+    // computer, and the route decides who it may be for (`join-token-policy.ts`).
+    for (const k of others) {
+      expect(REST_ADMIN_POLICY[k], k).toBe(
+        k === 'POST /api/computers/join-token' ? 'user' : 'admin'
+      )
+    }
   })
 
   test('/mcp needs a verified session', () => {

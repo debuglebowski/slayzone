@@ -72,6 +72,8 @@ const webApiTarget: ElectronAPI = {
     hubDeviceLoginWait: async () => ({ ok: false, error: NOT_SUPPORTED }),
     hubDeviceLoginCancel: async () => ({ ok: true }),
     getWindowId: async () => resolveWindowId(),
+    // A browser tab has no app icon to badge.
+    setAppBadge: async () => undefined,
     relaunch: async () => {
       window.location.reload()
     },
@@ -81,6 +83,7 @@ const webApiTarget: ElectronAPI = {
     restartLocalComputer: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // A browser tab supervises no computer.
     getLocalComputerStatus: async () => null,
+    getLocalComputerHubs: async () => ({}),
     // A plain boolean, NOT a function — `electron-bootstrap.ts` wraps it as
     // `() => api().app.isPlaywright`, and a function reference here would make
     // every truthiness check on it (`if (api().app.isPlaywright)`) pass, which

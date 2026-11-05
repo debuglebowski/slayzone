@@ -12,9 +12,12 @@
  *   agent — speak to an ALREADY-RUNNING agent session (type into it, read its
  *           output, adjust its runtime settings). Explicitly NOT "choose what
  *           runs" — see the honest-statement block in `@slayzone/transport/scopes`.
+ *   files — the file editor, for one task, inside that task's own folders. The
+ *           scope gate admits the procedure; `@slayzone/api`'s
+ *           `task-file-confinement.ts` pins every call to the task it names.
  *
  * The per-procedure table (`SCOPE_POLICY`) is composition data — it names every
  * router's paths — so it lives with the composition, not here; the scope gate in
  * `trpc.ts` reaches it through the registered `ProcedurePolicy` (`procedure-policy.ts`).
  */
-export type Scope = 'full' | 'read' | 'tasks' | 'agent'
+export type Scope = 'full' | 'read' | 'tasks' | 'agent' | 'files'

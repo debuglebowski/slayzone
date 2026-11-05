@@ -27,3 +27,11 @@
  * standalone computer renames via the config.json `computerName` key instead.
  */
 export const DEFAULT_LOCAL_COMPUTER_NAME = 'local-computer'
+
+/**
+ * Capability a desktop app's own computer reports on every hub it JOINS besides its
+ * own (the app joins each hub the client lists). The hub reads it when choosing a
+ * default computer: a user who already had a computer on that hub keeps it as the
+ * default, and the desktop becomes the default only where it is their only one.
+ */
+export const DESKTOP_COMPUTER_CAPABILITY = 'desktop'

@@ -136,7 +136,6 @@ describe('exhaustiveness: every live item is classified, nothing stale', () => {
 describe('classification: the admin items the hub needs', () => {
   const admin: string[] = [
     'hub.setLabel',
-    'computers.mintJoinToken',
     'computers.claim',
     'computers.unrevoke',
     'diagnostics.getConfig',
@@ -175,15 +174,18 @@ describe('classification: the admin items the hub needs', () => {
     'app.exportImport.exportProject',
     // O-22 (T-101): every user exports their own content; nobody the whole hub.
     'app.exportImport.exportAll',
-    'app.exportImport.testExportAllToPath'
+    'app.exportImport.testExportAllToPath',
+    // A computer is personal: every user enrolls their own; naming someone else is the
+    // admin's, decided in the handler (`join-token-policy.ts`).
+    'computers.mintJoinToken'
   ]
   for (const path of user) {
     test(`${path} is user`, () => expect(TRPC_ADMIN_POLICY[path]).toBe('user'))
   }
 
-  test('REST: automations, join-token and account management are admin', () => {
+  test('REST: automations and account management are admin; join-token is user', () => {
     const admins = ofClass(REST_ADMIN_POLICY, 'admin')
-    expect(admins).toContain('POST /api/computers/join-token')
+    expect(REST_ADMIN_POLICY['POST /api/computers/join-token']).toBe('user')
     expect(admins).toContain('POST /api/hub/users')
     expect(admins).toContain('POST /api/automations/:id/run')
     for (const k of LIVE_REST.filter((k) => k.includes('/api/automations'))) {
@@ -255,7 +257,7 @@ describe('tRPC, on a hub that requires login', () => {
 
   const ADMIN_PATHS = ofClass(TRPC_ADMIN_POLICY, 'admin')
 
-  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(37))
+  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(36))
 
   for (const path of ADMIN_PATHS) {
     test(`${path}: a user account is FORBIDDEN (ADMIN_ONLY, one audit line); an admin passes`, async () => {
@@ -512,7 +514,7 @@ describe('REST, over HTTP through registerRestApi', () => {
 
   const ADMIN_ROUTES = ofClass(REST_ADMIN_POLICY, 'admin')
 
-  test('there are admin routes to check', () => expect(ADMIN_ROUTES.length).toBe(13))
+  test('there are admin routes to check', () => expect(ADMIN_ROUTES.length).toBe(12))
 
   for (const key of ADMIN_ROUTES) {
     test(`${key}: a user account gets 403 ADMIN_ONLY and one audit line; an admin does not`, async () => {

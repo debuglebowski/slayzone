@@ -30,9 +30,8 @@ import type { Terminal as XTerm, IDisposable } from '@xterm/xterm'
  *
  * Note this suppresses the *answer*, not the query: a program's `ESC[6n` still
  * reaches the terminal and is still answered by the server, which is the whole
- * point. DECRQM (`$p`) is untouched — the renderer legitimately answers it, and
- * stripping it would break capability detection. XTVERSION (`>q`) used to be in
- * that bucket too; see {@link suppressXtVersionReply} for why it no longer is.
+ * point. DECRQM/DECRQSS have their own suppressor,
+ * {@link suppressStateReportReplies}; XTVERSION has {@link suppressXtVersionReply}.
  *
  * @returns disposables for the registered handlers; dispose to restore xterm's
  * built-in behaviour.
@@ -74,4 +73,30 @@ export function suppressDeviceStatusReplies(terminal: Pick<XTerm, 'parser'>): ID
  */
 export function suppressXtVersionReply(terminal: Pick<XTerm, 'parser'>): IDisposable[] {
   return [terminal.parser.registerCsiHandler({ prefix: '>', final: 'q' }, () => true)]
+}
+
+/**
+ * Stop xterm.js from ANSWERING state reports: DECRQM (`CSI [?] Ps $ p`) and
+ * DECRQSS (`DCS $ q Pt ST`).
+ *
+ * The server answers these now, from its own headless copy of the screen
+ * (`TerminalReplyMirror`), and strips them from the output — so a live one never
+ * reaches xterm. A renderer answer was the late one: it rode the async round trip
+ * and could land in the program's stdin after the program stopped waiting.
+ * What xterm can still see is a REPLAYED query from a buffer recorded before
+ * the server took over; answering that injects an unsolicited reply.
+ *
+ * Only the reports: setting modes (`CSI ? Ps h/l`) and SGR are other handlers
+ * and keep working.
+ *
+ * @returns disposables for the registered handlers; dispose to restore xterm's
+ * built-in behaviour.
+ */
+export function suppressStateReportReplies(terminal: Pick<XTerm, 'parser'>): IDisposable[] {
+  const handled = (): boolean => true
+  return [
+    terminal.parser.registerCsiHandler({ intermediates: '$', final: 'p' }, handled),
+    terminal.parser.registerCsiHandler({ prefix: '?', intermediates: '$', final: 'p' }, handled),
+    terminal.parser.registerDcsHandler({ intermediates: '$', final: 'q' }, handled)
+  ]
 }

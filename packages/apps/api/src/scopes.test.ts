@@ -88,6 +88,21 @@ describe('SCOPE_POLICY — specific classifications', () => {
     for (const p of paths) expect(SCOPE_POLICY[p], p).toBe('never')
   })
 
+  test('fileEditor is files (task-confined), except the two that leave every root', () => {
+    const paths = LIVE_PATHS.filter((p) => p.startsWith('fileEditor.'))
+    expect(paths.length).toBeGreaterThan(0)
+    // showInFinder opens the HOST's file manager; copyIn reads an arbitrary host path.
+    const outsideAnyRoot = new Set(['fileEditor.showInFinder', 'fileEditor.copyIn'])
+    for (const p of paths) {
+      expect(SCOPE_POLICY[p], p).toBe(outsideAnyRoot.has(p) ? 'never' : 'files')
+    }
+  })
+
+  test('no path outside fileEditor is files (the confinement only knows editor inputs)', () => {
+    const files = LIVE_PATHS.filter((p) => SCOPE_POLICY[p] === 'files')
+    for (const p of files) expect(p.startsWith('fileEditor.'), p).toBe(true)
+  })
+
   test('every integrations.* procedure is never (credential-store backed)', () => {
     const paths = LIVE_PATHS.filter((p) => p.startsWith('integrations.'))
     expect(paths.length).toBeGreaterThan(0)

@@ -18,6 +18,7 @@ import {
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
 import { useComputerConnectRefetch } from './app-shell/computer-connect-refetch'
+import { useAppBadge } from './hooks/useAppBadge'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
@@ -565,6 +566,7 @@ function App(): React.JSX.Element {
       }),
     [rawIdleTasks, dismissedIdle]
   )
+  useAppBadge({ tasks, idleTasks: allIdleTasks, hubIdByProject, defaultHubId })
   const idleTasks = useMemo(
     () =>
       agentStatusState.filterCurrentProject
@@ -1488,6 +1490,7 @@ function App(): React.JSX.Element {
             columnsByProjectId={columnsByProjectId}
             tags={tags}
             taskTags={taskTags}
+            blockedTaskIds={blockedTaskIds}
             compactFooter={headerHidden ? compactFooterContent : undefined}
             statusSlot={<StartupProgressStatus />}
             updateState={
