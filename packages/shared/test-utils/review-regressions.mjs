@@ -286,7 +286,7 @@ export const REGRESSIONS = [
     round: 6,
     id: 'L1',
     what: 'the built computer bundle starts on plain Node',
-    files: [rrComputer]
+    files: [rrComputer, `${P}domains/terminal/src/server/graphemes-addon-load.test.ts`]
   },
   {
     round: 6,
