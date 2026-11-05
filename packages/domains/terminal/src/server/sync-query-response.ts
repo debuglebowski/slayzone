@@ -13,16 +13,16 @@
 // "unknown error" when queries go unanswered).
 
 export interface TerminalTheme {
-  foreground: string;
-  background: string;
-  cursor: string;
+  foreground: string
+  background: string
+  cursor: string
   /**
    * ANSI palette colors indexed 0-15 (black, red, green, yellow, blue, magenta,
    * cyan, white, then bright variants). Populated by the renderer from xterm.js
    * so OSC 4 palette queries return what is actually displayed. Falls back to
    * xterm defaults when absent.
    */
-  ansi?: readonly string[];
+  ansi?: readonly string[]
 }
 
 /**
@@ -31,7 +31,7 @@ export interface TerminalTheme {
  * bundled into the sidecar and the hub). `sync-query-response.test.ts` resolves
  * `@xterm/xterm/package.json` and fails loudly if the two drift.
  */
-export const XTERM_JS_VERSION = "6.1.0-beta.304";
+export const XTERM_JS_VERSION = '6.1.0-beta.304'
 
 /**
  * XTVERSION reply — byte-identical to what xterm.js's `sendXtVersion` emits.
@@ -56,40 +56,62 @@ export const XTERM_JS_VERSION = "6.1.0-beta.304";
  * did, in the same read-loop iteration it asked, and the query never reaches the
  * buffer to be replayed.
  */
-export const XTVERSION_RESPONSE = `\x1bP>|xterm.js(${XTERM_JS_VERSION})\x1b\\`;
+export const XTVERSION_RESPONSE = `\x1bP>|xterm.js(${XTERM_JS_VERSION})\x1b\\`
 
 // xterm default ANSI palette (indices 0-15) used when the renderer has not
 // supplied an explicit palette yet.
 export const XTERM_ANSI_PALETTE: readonly string[] = [
-  "#000000",
-  "#cd0000",
-  "#00cd00",
-  "#cdcd00",
-  "#0000ee",
-  "#cd00cd",
-  "#00cdcd",
-  "#e5e5e5",
-  "#7f7f7f",
-  "#ff0000",
-  "#00ff00",
-  "#ffff00",
-  "#5c5cff",
-  "#ff00ff",
-  "#00ffff",
-  "#ffffff",
-];
+  '#000000',
+  '#cd0000',
+  '#00cd00',
+  '#cdcd00',
+  '#0000ee',
+  '#cd00cd',
+  '#00cdcd',
+  '#e5e5e5',
+  '#7f7f7f',
+  '#ff0000',
+  '#00ff00',
+  '#ffff00',
+  '#5c5cff',
+  '#ff00ff',
+  '#00ffff',
+  '#ffffff'
+]
 
 export function hexToOscRgb(hex: string): string {
-  const r = hex.slice(1, 3);
-  const g = hex.slice(3, 5);
-  const b = hex.slice(5, 7);
-  return `rgb:${r}${r}/${g}${g}/${b}${b}`;
+  const r = hex.slice(1, 3)
+  const g = hex.slice(3, 5)
+  const b = hex.slice(5, 7)
+  return `rgb:${r}${r}/${g}${g}/${b}${b}`
 }
 
+/**
+ * One piece of a chunk, in stream order.
+ *
+ * - `output` — ordinary program output: forwarded to clients AND fed to the
+ *   session's terminal mirror so its state tracks the screen.
+ * - `reply` — the answer to a STATELESS query (DA, XTVERSION, DSR, OSC colors),
+ *   computed here; the query itself is stripped.
+ * - `mirror-query` — a query whose answer depends on terminal STATE (cursor
+ *   position, mode settings, SGR). Stripped from the forwarded output, so no
+ *   client answers it, and handed to the mirror, which answers it from the
+ *   state it reached at exactly this point in the stream.
+ *
+ * Consumers must process parts in order — that order IS the reply order.
+ */
+export type SyncQueryPart =
+  | { kind: 'output'; data: string }
+  | { kind: 'reply'; data: string }
+  | { kind: 'mirror-query'; data: string }
+
 export interface SyncQueryResult {
-  response: string;
-  forwarded: string;
-  pendingPartial: string;
+  parts: SyncQueryPart[]
+  /** Every `reply` part joined, in order. */
+  response: string
+  /** Every `output` part joined, in order — what clients receive. */
+  forwarded: string
+  pendingPartial: string
 }
 
 /**
@@ -111,10 +133,10 @@ export interface SyncQueryResult {
  * Mirrors `MAX_HELD_TAIL` in `@slayzone/platform`'s device-status stripper, which
  * has always capped its equivalent hold.
  */
-const MAX_HELD_PARTIAL = 32;
+const MAX_HELD_PARTIAL = 32
 
 /**
- * Every query we answer, as ONE alternation so a single left-to-right pass sees
+ * Every query we handle, as ONE alternation so a single left-to-right pass sees
  * them in the order the program sent them. Replies MUST preserve that order, as
  * a real terminal's do: termenv (gh, lipgloss/glamour apps) probes with
  * `OSC 11 ?` followed by `CSI 6n` as a sentinel, and if the CPR reply arrives
@@ -123,67 +145,60 @@ const MAX_HELD_PARTIAL = 32;
  * escape sequence from terminal: ['\x1b' ']']"). One regex pass per query kind
  * emitted replies grouped by kind instead, which is exactly that failure.
  *
- * Groups: 1 = CSI query, 2 = XTVERSION Ps, 3 = OSC number, 4 = OSC body
- * (everything between `N;` and the final `?`).
+ * Groups: 1 = stateless CSI query, 2 = XTVERSION Ps, 3 = OSC number, 4 = OSC
+ * body (everything between `N;` and the final `?`), 5 = stateful query for the
+ * mirror: CPR (`CSI 6n`), DECRQM (`CSI [?] Ps $ p`), DECRQSS (`DCS $ q Pt ST`).
+ *
+ * DECXCPR (`CSI ? 6 n`) is deliberately NOT here: it stays forwarded and
+ * unanswered (see `TerminalReplyMirror`).
  */
 const QUERY_PATTERN =
-  /\x1b\[(0?c|>0?c|>(\d*)q|5n|6n)|\x1b\](\d+);([^\x07\x1b]*)\?(?:\x07|\x1b\\)/g;
+  /\x1b\[(0?c|>0?c|>(\d*)q|5n)|\x1b\](\d+);([^\x07\x1b]*)\?(?:\x07|\x1b\\)|(\x1b\[6n|\x1b\[\??\d*\$p|\x1bP\$q[^\x07\x1b]*(?:\x07|\x1b\\))/g
 
-function answerCsiQuery(
-  query: string,
-  xtversionPs: string | undefined,
-): string | null {
+function answerCsiQuery(query: string, xtversionPs: string | undefined): string | null {
   // DA1 — Primary Device Attributes
-  if (query === "c" || query === "0c") return "\x1b[?62;4;22c";
+  if (query === 'c' || query === '0c') return '\x1b[?62;4;22c'
   // DA2 — Secondary Device Attributes
-  if (query === ">c" || query === ">0c") return "\x1b[>0;10;1c";
+  if (query === '>c' || query === '>0c') return '\x1b[>0;10;1c'
   // DSR — Device Status Report
-  if (query === "5n") return "\x1b[0n";
-  // CPR — Cursor Position. Respond with row=1 col=1. Programs (readline) use CPR mainly
-  // to check if the cursor is at col=1 before drawing a prompt. In practice the terminal
-  // is at col=1 at this point (startup output ends with a newline).
-  if (query === "6n") return "\x1b[1;1R";
+  if (query === '5n') return '\x1b[0n'
   // XTVERSION — CSI > Ps q. xterm.js answers only when Ps is absent or <= 0
   // (`sendXtVersion`); mirror that exactly, or we invent replies to sequences a
   // real terminal stays silent on. Ps > 0 stays forwarded — xterm consumes it
   // without emitting anything, so it is inert in the replay buffer.
   // NOT to be confused with DECSCUSR (`CSI Ps SP q`), which has no `>` prefix.
   if (xtversionPs !== undefined) {
-    if (xtversionPs !== "" && parseInt(xtversionPs, 10) > 0) return null;
-    return XTVERSION_RESPONSE;
+    if (xtversionPs !== '' && parseInt(xtversionPs, 10) > 0) return null
+    return XTVERSION_RESPONSE
   }
-  return null;
+  return null
 }
 
-function answerOscQuery(
-  n: string,
-  body: string,
-  theme: TerminalTheme,
-): string | null {
+function answerOscQuery(n: string, body: string, theme: TerminalTheme): string | null {
   // OSC 0/1/2 set the window/icon title, whose body is free text, so a title
   // merely ending in `?` ("build ok?") matches the query shape. They are never
   // queries: answering would delete the title from the output AND inject a bogus
   // `ESC]0;BEL` into the program's stdin as though the user had typed it.
   // `filterBufferData` already strips them from the replay buffer.
-  if (n === "0" || n === "1" || n === "2") return null;
+  if (n === '0' || n === '1' || n === '2') return null
 
   // OSC 10/11/12 — Foreground / Background / Cursor color queries.
-  if (body === "") {
-    if (n === "10") return `\x1b]10;${hexToOscRgb(theme.foreground)}\x07`;
-    if (n === "11") return `\x1b]11;${hexToOscRgb(theme.background)}\x07`;
-    if (n === "12") return `\x1b]12;${hexToOscRgb(theme.cursor)}\x07`;
+  if (body === '') {
+    if (n === '10') return `\x1b]10;${hexToOscRgb(theme.foreground)}\x07`
+    if (n === '11') return `\x1b]11;${hexToOscRgb(theme.background)}\x07`
+    if (n === '12') return `\x1b]12;${hexToOscRgb(theme.cursor)}\x07`
   }
 
   // OSC 4 — ANSI palette query. Answer from the renderer-supplied palette so
   // programs see what is actually displayed. Falls back to xterm defaults when
   // the renderer has not provided a palette yet. Indices outside 0-15 fall
   // through to the catch-all empty reply below.
-  if (n === "4") {
-    const idxMatch = /^(\d+);$/.exec(body);
+  if (n === '4') {
+    const idxMatch = /^(\d+);$/.exec(body)
     if (idxMatch) {
-      const idx = parseInt(idxMatch[1], 10);
-      const hex = theme.ansi?.[idx] ?? XTERM_ANSI_PALETTE[idx];
-      if (hex) return `\x1b]4;${idx};${hexToOscRgb(hex)}\x07`;
+      const idx = parseInt(idxMatch[1], 10)
+      const hex = theme.ansi?.[idx] ?? XTERM_ANSI_PALETTE[idx]
+      if (hex) return `\x1b]4;${idx};${hexToOscRgb(hex)}\x07`
     }
   }
 
@@ -193,52 +208,65 @@ function answerOscQuery(
   //
   // OSC 52 deliberately stays in scope: `ESC]52;c;?BEL` is a real clipboard READ
   // and an empty reply is the valid "nothing available" answer.
-  return `\x1b]${n};\x07`;
+  return `\x1b]${n};\x07`
 }
 
-export function computeSyncQueryResponse(
-  input: string,
-  theme: TerminalTheme,
-): SyncQueryResult {
-  let response = "";
-  let forwarded = input.replace(
-    QUERY_PATTERN,
-    (
-      match,
-      csi: string | undefined,
-      xtversionPs: string | undefined,
-      oscN: string | undefined,
-      oscBody: string | undefined,
-    ) => {
-      const reply =
-        csi !== undefined
-          ? answerCsiQuery(csi, xtversionPs)
-          : answerOscQuery(oscN as string, oscBody as string, theme);
-      if (reply === null) return match;
-      response += reply;
-      return "";
-    },
-  );
+/**
+ * Trailing incomplete OSC, DCS or CSI sequence that may complete in the next chunk.
+ * OSC/DCS: ESC ] or ESC P <body> — body ends with BEL or ST (ESC \). Trailing ESC
+ * alone could be ST start. CSI: ESC [ <params/intermediates> — ends with a letter
+ * in range @–~.
+ *
+ * The CSI class MUST include `?` (DEC private introducer) alongside `>` and `<`.
+ * Without it, a chunk ending `ESC [ ? 6` is forwarded verbatim and its `n` arrives
+ * orphaned next chunk: the split query is invisible to the answerer here AND to
+ * the per-chunk `filterBufferData` strip, so it reaches the replay buffer, where a
+ * later replay makes xterm.js answer it — the row=1 answer Claude Code reads as
+ * "screen externally wiped" → `/clear`. `$` (DECRQM's intermediate) is in the
+ * class for the same reason.
+ */
+const PARTIAL_TAIL = /\x1b(?:[\]P][^\x07\x1b]*\x1b?|\[[?<>0-9;:$]*)?$/
 
-  // Trailing incomplete OSC or CSI sequence that may complete in the next chunk.
-  // OSC: ESC ] <body> — body ends with BEL or ST (ESC \). Trailing ESC alone could be ST start.
-  // CSI: ESC [ <params> — ends with a letter in range @–~.
-  //
-  // The CSI param class MUST include `?` (DEC private introducer) alongside `>`
-  // and `<`. Without it, a chunk ending `ESC [ ? 6` is forwarded verbatim and its
-  // `n` arrives orphaned next chunk: the split query is invisible to the answerer
-  // here AND to the per-chunk `filterBufferData` strip, so it reaches the replay
-  // buffer, where a later replay makes xterm.js answer it — the row=1 answer Claude
-  // Code reads as "screen externally wiped" → `/clear`. Any private-mode sequence
-  // split on that boundary had the same corruption risk; this covers the class.
-  const partial = forwarded.match(
-    /\x1b(?:\][^\x07\x1b]*\x1b?|\[[?<>0-9;:]*)?$/,
-  );
-  let pendingPartial = "";
-  if (partial?.[0] && partial[0].length <= MAX_HELD_PARTIAL) {
-    pendingPartial = partial[0];
-    forwarded = forwarded.slice(0, -partial[0].length);
+export function computeSyncQueryResponse(input: string, theme: TerminalTheme): SyncQueryResult {
+  const parts: SyncQueryPart[] = []
+  let response = ''
+  let forwarded = ''
+  const pushOutput = (data: string): void => {
+    if (!data) return
+    const last = parts[parts.length - 1]
+    if (last?.kind === 'output') last.data += data
+    else parts.push({ kind: 'output', data })
+    forwarded += data
   }
 
-  return { response, forwarded, pendingPartial };
+  let cursor = 0
+  for (const m of input.matchAll(QUERY_PATTERN)) {
+    const [match, csi, xtversionPs, oscN, oscBody, mirrorQuery] = m
+    const reply =
+      mirrorQuery !== undefined
+        ? null
+        : csi !== undefined
+          ? answerCsiQuery(csi, xtversionPs)
+          : answerOscQuery(oscN as string, oscBody as string, theme)
+    if (mirrorQuery === undefined && reply === null) continue // not ours: stays output
+    pushOutput(input.slice(cursor, m.index))
+    cursor = m.index + match.length
+    if (mirrorQuery !== undefined) {
+      parts.push({ kind: 'mirror-query', data: mirrorQuery })
+    } else {
+      parts.push({ kind: 'reply', data: reply as string })
+      response += reply
+    }
+  }
+
+  let tail = input.slice(cursor)
+  let pendingPartial = ''
+  const partial = tail.match(PARTIAL_TAIL)
+  if (partial?.[0] && partial[0].length <= MAX_HELD_PARTIAL) {
+    pendingPartial = partial[0]
+    tail = tail.slice(0, -partial[0].length)
+  }
+  pushOutput(tail)
+
+  return { parts, response, forwarded, pendingPartial }
 }

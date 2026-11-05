@@ -78,6 +78,7 @@ import {
 } from '../pty-exit-strategy'
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
+import { TerminalReplyMirror } from '../terminal-reply-mirror'
 import { filterBufferData } from '../filter-buffer-data'
 import { isInterruptKey, appendInput } from '../stdin-input'
 import { shouldHonorDetectedError } from '../session-error-gate'
@@ -344,6 +345,9 @@ interface PtySession {
   detectedDevUrls: Set<string>
   // Pending partial escape sequence from previous onData chunk
   syncQueryPending: string
+  // Headless copy of this session's screen: answers state-dependent queries
+  // (CPR, DECRQM, DECRQSS) in stream order. See terminal-reply-mirror.ts.
+  replyMirror: TerminalReplyMirror
   // Last emitted process title (to deduplicate pty:title-change events)
   lastEmittedTitle: string
   // Polls pty.process on interval — decoupled from data flow so idle shells update too
@@ -713,23 +717,29 @@ export function setTerminalTheme(theme: TerminalTheme): void {
 // rather than pty.write() (which is async) so they reach the program in the same
 // read loop iteration — an async response would land after the program had moved
 // on and show up as garbage bytes in stdin.
+//
+// Stateless replies are computed here; state-dependent queries go to the
+// session's reply mirror. Every part passes through the mirror in stream order,
+// so replies reach the program in the order it asked — a real terminal's
+// guarantee, which termenv (gh) depends on.
 function interceptSyncQueries(session: PtySession, data: string): string {
   const input = session.syncQueryPending + data
-  const { response, forwarded, pendingPartial } = computeSyncQueryResponse(
-    input,
-    currentTerminalTheme
-  )
+  const { parts, forwarded, pendingPartial } = computeSyncQueryResponse(input, currentTerminalTheme)
   session.syncQueryPending = pendingPartial
+  session.replyMirror.apply(parts)
+  return forwarded
+}
 
-  if (response) {
+function writeQueryReply(session: PtySession, reply: string): void {
+  try {
+    writeSync((session.pty as unknown as { fd: number }).fd, reply)
+  } catch {
     try {
-      writeSync((session.pty as unknown as { fd: number }).fd, response)
+      session.pty.write(reply)
     } catch {
-      session.pty.write(response)
+      // Process already gone — nobody left to answer.
     }
   }
-
-  return forwarded
 }
 
 function stripAnsiForSessionParse(data: string): string {
@@ -1991,6 +2001,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // Dev server URL dedup
       detectedDevUrls: new Set(),
       syncQueryPending: '',
+      replyMirror: new TerminalReplyMirror(spawnOptions.cols, spawnOptions.rows, (reply) => {
+        const live = sessions.get(sessionId)
+        if (live) writeQueryReply(live, reply)
+      }),
       lastEmittedTitle: ''
     })
     // Adoption: the warm shell was spawned before any tab existed, so it has no
@@ -2160,6 +2174,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // can still be processed and forwarded to the renderer before we drop the session.
       setTimeout(() => {
         dataListeners.delete(sessionId)
+        sessions.get(sessionId)?.replyMirror.dispose()
         sessions.delete(sessionId)
         sessionTaskMap.delete(sessionId)
         sessionTabMap.delete(sessionId)
@@ -3206,6 +3221,7 @@ export function resizePty(sessionId: string, cols: number, rows: number): boolea
   if (session.cols !== safeCols || session.rows !== safeRows) {
     session.cols = safeCols
     session.rows = safeRows
+    session.replyMirror.resize(safeCols, safeRows)
     ptyEvents.emit('resize', sessionId, safeCols, safeRows)
   }
   return true

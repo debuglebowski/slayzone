@@ -25,9 +25,10 @@ test('DSR — device status report', () => {
   expect(r.forwarded).toBe('')
 })
 
-test('CPR — cursor position report', () => {
+test('CPR — cursor position is stateful: handed to the mirror, stripped from output', () => {
   const r = computeSyncQueryResponse('\x1b[6n', theme)
-  expect(r.response).toBe('\x1b[1;1R')
+  expect(r.response).toBe('')
+  expect(r.parts).toEqual([{ kind: 'mirror-query', data: '\x1b[6n' }])
   expect(r.forwarded).toBe('')
 })
 
@@ -378,26 +379,64 @@ test('XTVERSION torn across chunks is held, not forwarded half-answered', () => 
 // a sentinel and treats a CPR-first answer as "no OSC support" — leaving the OSC
 // reply unread in stdin, where the next key reader chokes on it (gh auth login:
 // "unexpected escape sequence from terminal: ['\x1b' ']']").
-test('termenv probe — OSC 11 answered before the CPR sentinel that follows it', () => {
+test('termenv probe — OSC 11 reply ordered before the CPR sentinel that follows it', () => {
   const r = computeSyncQueryResponse('\x1b]11;?\x1b\\\x1b[6n', theme)
-  expect(r.response).toBe('\x1b]11;rgb:1212/3434/5656\x07\x1b[1;1R')
+  expect(r.parts).toEqual([
+    { kind: 'reply', data: '\x1b]11;rgb:1212/3434/5656\x07' },
+    { kind: 'mirror-query', data: '\x1b[6n' }
+  ])
   expect(r.forwarded).toBe('')
 })
 
-test('replies follow query order across every query kind', () => {
+test('parts follow stream order across every query kind', () => {
   const r = computeSyncQueryResponse(
-    'a\x1b]4;1;?\x07b\x1b]10;?\x07\x1b[6nc\x1b]52;c;?\x07\x1b[>q\x1b[5n\x1b[>c\x1b[c',
+    'a\x1b]4;1;?\x07b\x1b]10;?\x07\x1b[6nc\x1b]52;c;?\x07\x1b[>q\x1b[5n\x1b[?2004$p\x1b[>c\x1bP$qm\x1b\\\x1b[c',
     theme
   )
-  expect(r.response).toBe(
-    '\x1b]4;1;rgb:cdcd/0000/0000\x07' +
-      '\x1b]10;rgb:abab/cdcd/efef\x07' +
-      '\x1b[1;1R' +
-      '\x1b]52;\x07' +
-      XTVERSION_RESPONSE +
-      '\x1b[0n' +
-      '\x1b[>0;10;1c' +
-      '\x1b[?62;4;22c'
-  )
+  expect(r.parts).toEqual([
+    { kind: 'output', data: 'a' },
+    { kind: 'reply', data: '\x1b]4;1;rgb:cdcd/0000/0000\x07' },
+    { kind: 'output', data: 'b' },
+    { kind: 'reply', data: '\x1b]10;rgb:abab/cdcd/efef\x07' },
+    { kind: 'mirror-query', data: '\x1b[6n' },
+    { kind: 'output', data: 'c' },
+    { kind: 'reply', data: '\x1b]52;\x07' },
+    { kind: 'reply', data: XTVERSION_RESPONSE },
+    { kind: 'reply', data: '\x1b[0n' },
+    { kind: 'mirror-query', data: '\x1b[?2004$p' },
+    { kind: 'reply', data: '\x1b[>0;10;1c' },
+    { kind: 'mirror-query', data: '\x1bP$qm\x1b\\' },
+    { kind: 'reply', data: '\x1b[?62;4;22c' }
+  ])
   expect(r.forwarded).toBe('abc')
+})
+
+test('DECRQM (ANSI and DEC private) and DECRQSS go to the mirror', () => {
+  for (const q of ['\x1b[4$p', '\x1b[?25$p', '\x1bP$q"p\x1b\\']) {
+    const r = computeSyncQueryResponse(`x${q}y`, theme)
+    expect(r.parts).toEqual([
+      { kind: 'output', data: 'x' },
+      { kind: 'mirror-query', data: q },
+      { kind: 'output', data: 'y' }
+    ])
+  }
+})
+
+test('DECXCPR stays output (deliberately unanswered)', () => {
+  const r = computeSyncQueryResponse('\x1b[?6n', theme)
+  expect(r.parts).toEqual([{ kind: 'output', data: '\x1b[?6n' }])
+})
+
+test('DECRQM and DECRQSS torn across chunks are held, then routed whole', () => {
+  const a = computeSyncQueryResponse('t\x1b[?2004$', theme)
+  expect(a.forwarded).toBe('t')
+  expect(a.pendingPartial).toBe('\x1b[?2004$')
+  expect(computeSyncQueryResponse(`${a.pendingPartial}p`, theme).parts).toEqual([
+    { kind: 'mirror-query', data: '\x1b[?2004$p' }
+  ])
+  const b = computeSyncQueryResponse('t\x1bP$qm\x1b', theme)
+  expect(b.forwarded).toBe('t')
+  expect(computeSyncQueryResponse(`${b.pendingPartial}\\`, theme).parts).toEqual([
+    { kind: 'mirror-query', data: '\x1bP$qm\x1b\\' }
+  ])
 })
