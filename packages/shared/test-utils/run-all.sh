@@ -620,6 +620,9 @@ run_harness packages/domains/terminal/src/server/ring-buffer.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
+# Terminal — state-dependent query replies (CPR, DECRQM, ...) answered from a headless
+# server-side screen mirror, in stream order with the stateless replies. Uses @xterm/headless.
+run_harness packages/domains/terminal/src/server/terminal-reply-mirror.test.ts
 # Diagnostics — payload blob offload. Screenshots were silently truncated to 4096
 # chars by the redactor, making every recorded scramble event unprovable.
 run_harness packages/domains/diagnostics/src/server/payload-blobs.test.ts
@@ -1136,6 +1139,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/useSharedCardHeights.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
+  packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
