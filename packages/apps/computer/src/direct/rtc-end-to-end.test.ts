@@ -104,6 +104,13 @@ it('a client reaches a terminal over WebRTC, brokered by the hub, and types into
   expect(second?.client).toBe(lease?.client)
   expect(answerer.size()).toBe(1)
   expect(manager.status()).toEqual([
-    { computerId: 'c1', path: 'direct', transport: 'webrtc', address: null, leases: 2 }
+    {
+      computerId: 'c1',
+      path: 'direct',
+      transport: 'webrtc',
+      address: null,
+      route: 'local',
+      leases: 2
+    }
   ])
 }, 20_000)

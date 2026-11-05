@@ -21,6 +21,14 @@ const REASONS: Record<'probe' | 'deadline' | 'refused' | 'rtc', string> = {
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
+/** How a direct computer is reached: its listener, or WebRTC and which way. */
+function via(c: Extract<DirectLinkComputerStatus, { path: 'direct' }>): string {
+  if (c.transport !== 'webrtc') return `WebSocket · ${c.address}`
+  if (c.route === 'local') return 'WebRTC · local network'
+  if (c.route === 'stun') return 'WebRTC · through NAT (STUN)'
+  return 'WebRTC'
+}
+
 export function describeDirectLink(
   hubs: Array<{ hubId: string; computers: DirectLinkComputerStatus[] }>,
   counts: { terminals: number; chats: number }
@@ -35,7 +43,7 @@ export function describeDirectLink(
         path: c.path === 'direct' ? 'Direct' : 'Hub relay',
         detail:
           c.path === 'direct'
-            ? `${c.transport === 'webrtc' ? 'WebRTC' : c.address} · ${c.leases} open`
+            ? `${via(c)} · ${c.leases} open`
             : `${REASONS[c.reason]} · retrying in ${Math.ceil(c.retryInMs / 1000)} s`
       })
     }

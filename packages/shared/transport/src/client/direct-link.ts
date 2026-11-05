@@ -88,6 +88,8 @@ function socketAddressOf(issued: Issued): string {
 /** One socket to one computer. */
 export interface DirectConnection {
   client: TRPCClient<DirectRouter>
+  /** WebRTC only: the network path the channel took (Diagnostics). */
+  route?: 'local' | 'stun'
   /** Called once when the socket is gone for good (the manager never reconnects it). */
   onClose(cb: () => void): void
   close(): void
@@ -147,6 +149,8 @@ export type DirectLinkComputerStatus =
       transport: 'ws' | 'webrtc'
       /** The listener's authority; null over WebRTC. */
       address: string | null
+      /** WebRTC: on the local network, or through a NAT (STUN). */
+      route?: 'local' | 'stun'
       leases: number
     }
   | {
@@ -537,6 +541,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
           path: 'direct',
           transport: socket.transport,
           address: socket.transport === 'webrtc' ? null : socket.address,
+          ...(socket.connection.route ? { route: socket.connection.route } : {}),
           leases: socket.leases.size
         })
       }

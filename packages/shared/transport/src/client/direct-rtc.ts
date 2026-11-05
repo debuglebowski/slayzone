@@ -77,6 +77,28 @@ function opened(channel: RtcChannelLike, ms: number): Promise<boolean> {
   })
 }
 
+/**
+ * Which way the channel went (Diagnostics): `local` when the chosen pair's local
+ * candidate is a host address (same network), `stun` when it is an address a NAT
+ * mapped (found through STUN, or learned from the peer). Undefined without stats.
+ */
+async function routeOf(pc: RTCPeerConnection): Promise<'local' | 'stun' | undefined> {
+  const stats = await pc.getStats?.().catch(() => null)
+  if (!stats) return undefined
+  let localId: string | undefined
+  stats.forEach(
+    (s: { type?: string; state?: string; nominated?: boolean; localCandidateId?: string }) => {
+      if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated)
+        localId ??= s.localCandidateId
+    }
+  )
+  if (!localId) return undefined
+  const type = (stats.get(localId) as { candidateType?: string } | undefined)?.candidateType
+  if (type === 'host') return 'local'
+  if (type === 'srflx' || type === 'prflx') return 'stun'
+  return undefined
+}
+
 export async function openDirectRtcConnection(
   opts: DirectRtcConnectOptions
 ): Promise<DirectConnection> {
@@ -97,7 +119,8 @@ export async function openDirectRtcConnection(
     if (!(await opened(channel, opts.connectMs ?? DIRECT_RTC_CONNECT_MS))) {
       throw new Error('direct link did not connect (ICE or DTLS failed)')
     }
-    return channelConnection(pc, channel, opts)
+    const route = await routeOf(pc)
+    return { ...channelConnection(pc, channel, opts), ...(route ? { route } : {}) }
   } catch (err) {
     pc.close()
     throw err

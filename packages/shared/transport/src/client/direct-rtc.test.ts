@@ -39,6 +39,20 @@ class FakePeer extends EventTarget {
   close() {
     this.closed = true
   }
+  /** The selected pair's local candidate type (null: no stats). */
+  route: string | null = null
+  async getStats() {
+    const stats = new Map<string, Record<string, unknown>>()
+    if (this.route === null) return stats
+    stats.set('pair', {
+      type: 'candidate-pair',
+      state: 'succeeded',
+      nominated: true,
+      localCandidateId: 'local'
+    })
+    stats.set('local', { type: 'local-candidate', candidateType: this.route })
+    return stats
+  }
 }
 
 describe('openDirectRtcConnection', () => {
@@ -103,4 +117,29 @@ describe('openDirectRtcConnection', () => {
     expect(Date.now() - started).toBeLessThan(1_000)
     expect(peer.closed).toBe(true)
   })
+})
+
+describe('which route the channel took', () => {
+  for (const [candidateType, route] of [
+    ['host', 'local'],
+    ['srflx', 'stun'],
+    ['prflx', 'stun']
+  ] as const) {
+    it(`reports a ${candidateType} pair as ${route}`, async () => {
+      const peer = new FakePeer({})
+      peer.route = candidateType
+      const conn = await openDirectRtcConnection({
+        createPeer: () => peer as unknown as RTCPeerConnection,
+        stunAddresses: [],
+        grantId: 'g1',
+        token: 't',
+        connect: async () => {
+          setTimeout(() => peer.channel.open(), 5)
+          return { ok: true as const, sdp: 'answer' }
+        }
+      })
+      expect(conn.route).toBe(route)
+      conn.close()
+    })
+  }
 })
