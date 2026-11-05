@@ -472,6 +472,29 @@ describe('assertPathAllowed', () => {
     }
   })
 
+  // A DANGLING link (its target does not exist yet) inside a root, pointing out of
+  // it: realpath fails on it, so it read as a not-yet-created file inside the root —
+  // and a write through it created the file outside.
+  it('a dangling symlink pointing out of a root does not grant a write there', () => {
+    const root = realpathSync(dir)
+    const outside = mkdtempSync(join(tmpdir(), 'computer-outside-'))
+    try {
+      const link = join(root, 'dangling')
+      symlinkSync(join(realpathSync(outside), 'not-yet'), link)
+      expect(() => assertPathAllowed(link, [root])).toThrow(/allowedRoots/)
+      expect(() => assertPathAllowed(join(link, 'deeper'), [root])).toThrow(/allowedRoots/)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('a dangling symlink that stays inside the root is still allowed', () => {
+    const root = realpathSync(dir)
+    const link = join(root, 'inner-dangling')
+    symlinkSync(join(root, 'later'), link)
+    expect(assertPathAllowed(link, [root])).toBe(join(root, 'later'))
+  })
+
   it('throws when no roots are configured', () => {
     expect(() => assertPathAllowed('/anything', [])).toThrow(/no allowedRoots/)
   })

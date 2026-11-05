@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { realpathSync } from 'node:fs'
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
@@ -124,6 +124,15 @@ export const ENV_VARS = {
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
 
+/** The target of `path` when it is a symlink (dangling or not); null otherwise. */
+function readLinkOrNull(path: string): string | null {
+  try {
+    return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Resolve `target` to an absolute canonical path, tolerating a
  * not-yet-existing tail (e.g. a worktree directory about to be created).
@@ -136,12 +145,21 @@ export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
 function realpathBoundary(target: string): string {
   let current = resolve(target)
   const tail: string[] = []
+  let hops = 0
   // Walk up until we hit an existing directory we can canonicalize.
   for (;;) {
     try {
       const real = realpathSync.native(current)
       return tail.length > 0 ? join(real, ...tail.reverse()) : real
     } catch {
+      // A dangling symlink (its target does not exist yet) is not a missing file: a
+      // write through it lands at its target. Follow it, so the jail judges where
+      // the write goes — not the link's own (allowed) place.
+      const link = readLinkOrNull(current)
+      if (link !== null && hops++ < 40) {
+        current = resolve(dirname(current), link)
+        continue
+      }
       const parent = dirname(current)
       if (parent === current) {
         // Reached the filesystem root and nothing exists — fall back to the
