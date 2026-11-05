@@ -235,13 +235,10 @@ export async function createDirectListener(
         state.authenticated = true
         return view(record, performance.now())
       },
-      release(target) {
-        let hit = false
-        for (const [id, held] of state.grants) {
-          if (covers(held.resource, target)) hit = state.grants.delete(id) || hit
-        }
-        if (hit) endUncovered(state)
-        return hit
+      release(grantId) {
+        if (!state.grants.delete(grantId)) return false
+        endUncovered(state)
+        return true
       },
       grantFor(target) {
         for (const record of state.grants.values()) {

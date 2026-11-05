@@ -502,13 +502,25 @@ describe('direct listener: grant replacement and release', () => {
     expect((await trpc.authorize.mutate({ token: other.token })).grantId).toBe(other.grantId)
   })
 
+  // R4: a release names the grant it held; a newer grant on the same target, which
+  // another holder just authorised, survives it.
+  it('releasing a superseded grant leaves the newer one on the target', async () => {
+    const { store, listener } = await setup()
+    const a = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, a.token)
+    const b = grant(store, { sessionId: 's1' })
+    await trpc.authorize.mutate({ token: b.token })
+    expect(await trpc.release.mutate({ grantId: a.grantId })).toEqual({ released: false })
+    expect((await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).exists).toBe(true)
+  })
+
   it('a released grant leaves the socket (the lease is gone)', async () => {
     const { store, listener } = await setup()
     const a = grant(store, { sessionId: 's1' })
     const { trpc } = client(listener, a.token)
     const b = grant(store, { sessionId: 's2' })
     await trpc.authorize.mutate({ token: b.token })
-    expect(await trpc.release.mutate({ kind: 'pty', sessionId: 's2' })).toEqual({ released: true })
+    expect(await trpc.release.mutate({ grantId: b.grantId })).toEqual({ released: true })
     await expect(trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).rejects.toThrow(
       /no capability/
     )

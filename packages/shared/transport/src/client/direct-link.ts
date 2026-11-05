@@ -28,7 +28,7 @@
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
-import type { DirectIssueTarget, DirectRouter, DirectTarget } from '../direct/router'
+import type { DirectIssueTarget, DirectRouter } from '../direct/router'
 import {
   type DirectRtcConnectAnswer,
   type DirectRtcConnectOptions,
@@ -267,6 +267,8 @@ interface Socket {
 
 interface LeaseState {
   target: DirectIssueTarget
+  /** The grant this lease holds now (a renewal replaces it). */
+  grantId: string
   socket: Socket
   renew: ReturnType<typeof setTimeout> | null
   lostListeners: Set<(reason: DirectLeaseLostReason) => void>
@@ -286,6 +288,8 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   >()
   /** The computer each target was last found on: a blocked one is not asked again. */
   const lastComputer = new Map<string, string>()
+  /** Acquires in flight per target: a release must not take the grant they get. */
+  const acquiring = new Map<string, number>()
   const targetKey = (t: DirectIssueTarget): string =>
     t.kind === 'pty' ? `pty:${t.sessionId}` : `chat:${t.tabId}`
   let hubUnsupported = false
@@ -306,9 +310,10 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   }
 
   /**
-   * The lease leaves its socket. When it was the socket's last lease on its target,
-   * the computer is told to drop that target's grants (they would otherwise stay on
-   * the socket until their TTL, and renewals would pile them up to its cap).
+   * The lease leaves its socket. When it was the last holder of its target — no other
+   * lease on the socket and no acquire for it still in flight, whose fresh grant
+   * would otherwise go — the computer is told to drop the grant it held. By id: a
+   * newer grant another holder just authorised is left alone.
    */
   function detach(lease: LeaseState, socketOpen: boolean): void {
     const { socket } = lease
@@ -316,14 +321,12 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     if (!socketOpen) return
     const key = targetKey(lease.target)
     if ([...socket.leases].some((l) => targetKey(l.target) === key)) return
-    const target: DirectTarget =
-      lease.target.kind === 'pty'
-        ? { kind: 'pty', sessionId: lease.target.sessionId }
-        : { kind: 'chat', tabId: lease.target.tabId }
+    if ((acquiring.get(key) ?? 0) > 0) return
+    const grantId = lease.grantId
     // Best-effort: a grant the computer keeps meanwhile is superseded by the next one
     // on the same target, and ends with its TTL.
     void Promise.resolve()
-      .then(() => socket.connection.client.release.mutate(target))
+      .then(() => socket.connection.client.release.mutate({ grantId }))
       .catch(() => undefined)
   }
 
@@ -368,6 +371,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     }
     try {
       await lease.socket.connection.client.authorize.mutate({ token: next.token })
+      lease.grantId = next.grantId
       scheduleRenewal(lease, next.expiresInMs)
     } catch {
       lose(lease, 'renewal-refused')
@@ -469,73 +473,87 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     return socket
   }
 
+  /** One acquire: issue, reach the socket, authorize, lease (see `acquire`). */
+  async function acquireOnce(target: DirectIssueTarget): Promise<DirectLease | null> {
+    const known = lastComputer.get(targetKey(target))
+    if (known && blocked(known)) return null
+    let issued: DirectIssueResult
+    try {
+      issued = await options.issue(target)
+    } catch (err) {
+      if (isUnsupportedHub(err)) hubUnsupported = true
+      return null
+    }
+    if (!issued.available || disposed) return null
+    lastComputer.set(targetKey(target), issued.computerId)
+    if (issued.transport === 'webrtc' && !options.rtc) return null
+    if (
+      blocked(issued.computerId) &&
+      !sockets.has(`${issued.computerId}|${socketAddressOf(issued)}`)
+    ) {
+      return null
+    }
+    const got = await socketFor(issued)
+    if (!got) return null
+    const { socket } = got
+    if (!got.fresh) {
+      const ok = await withDeadline(
+        socket.connection.client.authorize.mutate({ token: issued.token })
+      ).catch(() => 'failed' as const)
+      if (ok === 'timeout' || ok === 'failed') return null
+    }
+    if (socket.linger) {
+      clearTimeout(socket.linger)
+      socket.linger = null
+    }
+    const lease: LeaseState = {
+      target,
+      grantId: issued.grantId,
+      socket,
+      renew: null,
+      lostListeners: new Set(),
+      done: false
+    }
+    socket.leases.add(lease)
+    scheduleRenewal(lease, issued.expiresInMs)
+    return {
+      computerId: socket.computerId,
+      client: socket.connection.client,
+      onLost(cb) {
+        if (lease.done) {
+          cb('closed')
+          return () => undefined
+        }
+        lease.lostListeners.add(cb)
+        return () => lease.lostListeners.delete(cb)
+      },
+      release() {
+        if (lease.done) return
+        lease.done = true
+        if (lease.renew) clearTimeout(lease.renew)
+        detach(lease, true)
+        lease.lostListeners.clear()
+        if (socket.leases.size === 0 && !socket.linger) {
+          socket.linger = setTimeout(() => {
+            socket.linger = null
+            if (socket.leases.size === 0) dropSocket(socket, 'closed')
+          }, cfg.lingerMs)
+        }
+      }
+    }
+  }
+
   return {
     async acquire(target) {
       if (disposed || hubUnsupported) return null
-      const known = lastComputer.get(targetKey(target))
-      if (known && blocked(known)) return null
-      let issued: DirectIssueResult
+      const key = targetKey(target)
+      acquiring.set(key, (acquiring.get(key) ?? 0) + 1)
       try {
-        issued = await options.issue(target)
-      } catch (err) {
-        if (isUnsupportedHub(err)) hubUnsupported = true
-        return null
-      }
-      if (!issued.available || disposed) return null
-      lastComputer.set(targetKey(target), issued.computerId)
-      if (issued.transport === 'webrtc' && !options.rtc) return null
-      if (
-        blocked(issued.computerId) &&
-        !sockets.has(`${issued.computerId}|${socketAddressOf(issued)}`)
-      ) {
-        return null
-      }
-      const got = await socketFor(issued)
-      if (!got) return null
-      const { socket } = got
-      if (!got.fresh) {
-        const ok = await withDeadline(
-          socket.connection.client.authorize.mutate({ token: issued.token })
-        ).catch(() => 'failed' as const)
-        if (ok === 'timeout' || ok === 'failed') return null
-      }
-      if (socket.linger) {
-        clearTimeout(socket.linger)
-        socket.linger = null
-      }
-      const lease: LeaseState = {
-        target,
-        socket,
-        renew: null,
-        lostListeners: new Set(),
-        done: false
-      }
-      socket.leases.add(lease)
-      scheduleRenewal(lease, issued.expiresInMs)
-      return {
-        computerId: socket.computerId,
-        client: socket.connection.client,
-        onLost(cb) {
-          if (lease.done) {
-            cb('closed')
-            return () => undefined
-          }
-          lease.lostListeners.add(cb)
-          return () => lease.lostListeners.delete(cb)
-        },
-        release() {
-          if (lease.done) return
-          lease.done = true
-          if (lease.renew) clearTimeout(lease.renew)
-          detach(lease, true)
-          lease.lostListeners.clear()
-          if (socket.leases.size === 0 && !socket.linger) {
-            socket.linger = setTimeout(() => {
-              socket.linger = null
-              if (socket.leases.size === 0) dropSocket(socket, 'closed')
-            }, cfg.lingerMs)
-          }
-        }
+        return await acquireOnce(target)
+      } finally {
+        const n = (acquiring.get(key) ?? 1) - 1
+        if (n <= 0) acquiring.delete(key)
+        else acquiring.set(key, n)
       }
     },
 

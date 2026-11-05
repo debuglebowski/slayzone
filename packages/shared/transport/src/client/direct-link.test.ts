@@ -172,8 +172,10 @@ describe('acquire', () => {
 
   // M4: grants the client no longer uses must leave the computer's socket, or they
   // pile up to its per-socket cap. Only the LAST lease on a target releases it.
-  it('releases a target on the computer when its last lease on the socket ends', async () => {
-    const { manager, connections } = setup()
+  it('releases its own grant on the computer when its last lease on the target ends', async () => {
+    const { manager, connections, setIssue } = setup()
+    let n = 0
+    setIssue(() => available({ grantId: `g${++n}` }))
     const a = await manager.acquire(pty('s1'))
     const b = await manager.acquire(pty('s1'))
     const c = await manager.acquire(pty('s2'))
@@ -183,10 +185,33 @@ describe('acquire', () => {
     b?.release()
     c?.release()
     await Promise.resolve()
-    expect(connections[0]?.released).toEqual([
-      { kind: 'pty', sessionId: 's1' },
-      { kind: 'pty', sessionId: 's2' }
-    ])
+    expect(connections[0]?.released).toEqual([{ grantId: 'g2' }, { grantId: 'g3' }])
+  })
+
+  // R4: a holder that is still acquiring the same target (its authorize in flight)
+  // must not lose the grant it is about to get to another holder's release.
+  it('never releases a target while another acquire for it is in flight', async () => {
+    const authorizing: Array<() => void> = []
+    const { manager, connections, setIssue } = setup()
+    let n = 0
+    setIssue(() => available({ grantId: `g${++n}` }))
+    const a = await manager.acquire(pty('s1'))
+    const conn = connections[0]!
+    const realAuthorize = (
+      conn.client as { authorize: { mutate: (i: unknown) => Promise<unknown> } }
+    ).authorize.mutate
+    ;(conn.client as { authorize: { mutate: (i: unknown) => Promise<unknown> } }).authorize.mutate =
+      (input) => new Promise((resolve) => authorizing.push(() => resolve(realAuthorize(input))))
+    const pendingB = manager.acquire(pty('s1'))
+    await vi.waitFor(() => expect(authorizing.length).toBe(1))
+    a?.release()
+    await Promise.resolve()
+    expect(conn.released).toEqual([])
+    authorizing[0]!()
+    const b = await pendingB
+    b?.release()
+    await Promise.resolve()
+    expect(conn.released).toEqual([{ grantId: 'g2' }])
   })
 
   it('returns null (use the relay) when the hub offers nothing', async () => {

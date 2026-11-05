@@ -66,10 +66,11 @@ export interface DirectSocket {
    */
   authorize(token: string): DirectGrantView | null
   /**
-   * The client holds no lease on `target` any more: drop every grant this socket
-   * holds on it (streams on it end).
+   * The client holds no lease on that grant's target any more: drop this grant if the
+   * socket still holds it (streams on its target end). A newer grant on the same
+   * target — another holder just authorised it — is left alone.
    */
-  release(target: DirectTarget): boolean
+  release(grantId: string): boolean
   /** A live grant this socket holds on `target`, or null. */
   grantFor(target: DirectTarget): DirectHeldGrant | null
   /** Called once when this socket no longer holds any grant on `target`. */
@@ -255,15 +256,10 @@ export function createDirectRouter(services: DirectRouterServices) {
         return grant
       }),
 
-    /** The client's last lease on this session or tab ended. */
+    /** The client's last lease on this grant's session or tab ended. */
     release: t.procedure
-      .input(
-        z.discriminatedUnion('kind', [
-          z.object({ kind: z.literal('pty'), sessionId }),
-          z.object({ kind: z.literal('chat'), tabId: z.string().min(1).max(200) })
-        ])
-      )
-      .mutation(({ ctx, input }) => ({ released: ctx.socket.release(input) })),
+      .input(z.object({ grantId: z.string().min(1).max(200) }))
+      .mutation(({ ctx, input }) => ({ released: ctx.socket.release(input.grantId) })),
 
     pty: t.router({
       /** Like the hub's `pty.attach` minus `state` (the client reads that from the hub). */
