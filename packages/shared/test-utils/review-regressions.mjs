@@ -391,6 +391,13 @@ export const REGRESSIONS = [
     id: 'N4',
     what: "a path tie between owners is broken by the request's computer, else denied and audited",
     files: [rrOwner]
+  },
+  // ── round 8 ──
+  {
+    round: 8,
+    id: 'P4',
+    what: 'the K2 rename repro protects the file as production does (red before K2)',
+    files: [`${P}apps/computer/src/handlers/jail-escapes.test.ts`]
   }
 ]
 

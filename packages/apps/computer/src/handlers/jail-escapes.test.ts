@@ -268,7 +268,11 @@ describe.skipIf(process.platform === 'linux')(
 
     // Round-7 N2: K2's worst vector — the agent config rename, onto the computer's own
     // config in another case: `rename(2)` replaces it (the hub then owns the computer).
+    // Round-8 P4: protected as production protects it — the FILE (main.ts), not its
+    // folder: with the folder protected, any spelling under it was refused by the
+    // folder match even before K2, and this test guarded nothing.
     it('agentConfig.fs rename onto `.state/COMPUTER.CONFIG.JSON` is refused', async () => {
+      setProtectedPaths([join(r, '.state', 'computer.config.json')])
       writeFileSync(join(r, 'evil.json'), '{"hubUrl":"ws://evil"}')
       expect(
         await attempt(() =>
