@@ -1,5 +1,11 @@
 import { initTRPC, TRPCError } from '@trpc/server'
-import { peerAddress, runWithSecurityContext, securityEvent } from '@slayzone/platform/security-log'
+import { isObservable, observable } from '@trpc/server/observable'
+import {
+  peerAddress,
+  runWithSecurityContext,
+  securityEvent,
+  type SecurityContext
+} from '@slayzone/platform/security-log'
 import {
   assertHubLocalExecEnabled,
   isHubSwitchedOffError
@@ -46,12 +52,59 @@ export const mergeRouters = t.mergeRouters
  * down (`computer.pty.spawn`, …) carry the caller's user id, peer address and
  * procedure path. A no-op for behavior: it only sets the async context.
  */
-const securityContext = t.middleware(({ ctx, next, path }) =>
-  runWithSecurityContext(
-    { actor: ctx.principal?.userId ?? null, ip: peerAddress(ctx.req), route: `trpc ${path}` },
-    () => next()
-  )
-)
+const securityContext = t.middleware(async ({ ctx, next, path, type }) => {
+  const sc: SecurityContext = {
+    actor: ctx.principal?.userId ?? null,
+    ip: peerAddress(ctx.req),
+    route: `trpc ${path}`
+  }
+  const result = await runWithSecurityContext(sc, () => next())
+  // A subscription's body runs LATER — when it is subscribed to, or each time its
+  // generator is pulled — outside the scope above, i.e. with no caller: its requests
+  // to computers then passed the gateway's owner check as the hub's own work (K7).
+  // Carry the caller into it.
+  if (type === 'subscription' && result.ok) {
+    return { ...result, data: withSecurityContext(sc, result.data) }
+  }
+  return result
+})
+
+/**
+ * `data` (a subscription's observable or async iterable) with its body run inside
+ * `sc`: the observable's subscribe function, each `next()` of the iterator. Work the
+ * body starts from there inherits it (AsyncLocalStorage follows promises).
+ */
+function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
+  if (isObservable(data)) {
+    const inner = data
+    return observable<unknown, unknown>((emit) => {
+      const sub = runWithSecurityContext(sc, () =>
+        inner.subscribe({
+          next: (v) => emit.next(v),
+          error: (e) => emit.error(e),
+          complete: () => emit.complete()
+        })
+      )
+      return () => sub.unsubscribe()
+    })
+  }
+  if (data && typeof (data as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function') {
+    const inner = data as AsyncIterable<unknown>
+    return {
+      [Symbol.asyncIterator]() {
+        const it = runWithSecurityContext(sc, () => inner[Symbol.asyncIterator]())
+        const within = <A extends unknown[], R>(fn: ((...a: A) => R) | undefined) =>
+          fn ? (...a: A) => runWithSecurityContext(sc, () => fn.apply(it, a)) : undefined
+        return {
+          next: within(it.next)!,
+          ...(it.return ? { return: within(it.return) } : {}),
+          ...(it.throw ? { throw: within(it.throw) } : {})
+        }
+      }
+    }
+  }
+  return data
+}
 
 /** One `authz.denied` line for a gate refusal; actor/ip/route come from the context. */
 function auditDenied(path: string, detail: Record<string, unknown>): void {
