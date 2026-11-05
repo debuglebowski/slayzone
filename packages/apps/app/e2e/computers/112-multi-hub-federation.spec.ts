@@ -1504,6 +1504,93 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
+  base("Settings hub picker edits the picked hub's hub-wide settings only", async () => {
+    base.setTimeout(180_000)
+
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-settings-hub-'))
+    let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-settings-picker',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify({
+              server_mode: 'local',
+              multi_hub: true,
+              hubs: [{ id: 'remote-b', kind: 'remote', label: 'Hub B', url: remoteHubUrl }],
+              default_hub_id: 'local'
+            })
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
+
+      const remoteSetting = (key: string) =>
+        withHubClient(remoteHubUrl, (c) => c.settings.get.query({ key }) as Promise<string | null>)
+      const localSetting = (key: string) =>
+        page.evaluate(
+          (k) =>
+            window.getTrpcVanillaClient().settings.get.query({ key: k }) as Promise<string | null>,
+          key
+        )
+
+      await clickSettings(page)
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      await expect(dialog).toBeVisible({ timeout: 10_000 })
+
+      // Worktrees: pick Hub B, edit the base path → lands on Hub B only.
+      await dialog.locator('aside button').filter({ hasText: 'Worktrees' }).first().click()
+      await dialog.getByTestId('settings-hub-picker').click()
+      await page.getByRole('option', { name: /Hub B/ }).click()
+      await expect(dialog.getByTestId('hub-wide-note')).toContainText('Hub B')
+      const basePath = dialog.getByPlaceholder('../{project-folder-name}-workspaces')
+      await basePath.fill('../remote-wt')
+      await basePath.blur()
+      await expect
+        .poll(() => remoteSetting('worktree_base_path'), { timeout: 15_000 })
+        .toBe('../remote-wt')
+      expect(await localSetting('worktree_base_path')).not.toBe('../remote-wt')
+
+      // Agent panel: the pick carries across tabs. Startup mode (hub-wide) → Hub B;
+      // scrollback (this client's own UI) → the default hub.
+      await dialog.locator('aside button').filter({ hasText: 'Panels' }).first().click()
+      await dialog.locator('aside button').filter({ hasText: 'Agent' }).first().click()
+      await expect(dialog.getByTestId('hub-wide-note')).toContainText('Hub B')
+      await dialog.getByTestId('agent-startup-mode').click()
+      await page.getByRole('option', { name: 'Manual', exact: true }).click()
+      await expect
+        .poll(() => remoteSetting('terminal_agent_startup'), { timeout: 15_000 })
+        .toBe('manual')
+      expect(await localSetting('terminal_agent_startup')).not.toBe('manual')
+
+      const scrollback = dialog
+        .getByText('Scrollback', { exact: true })
+        .locator('xpath=..')
+        .locator('input')
+      await scrollback.fill('4321')
+      await scrollback.blur()
+      await expect.poll(() => localSetting('terminal_scrollback'), { timeout: 15_000 }).toBe('4321')
+      expect(await remoteSetting('terminal_scrollback')).not.toBe('4321')
+    } finally {
+      if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
   base("create dialog lists the chosen hub's computers and browses their disk", async () => {
     base.setTimeout(240_000)
 

@@ -1,52 +1,51 @@
-import type {
-  AgentId,
-  AgentDefinition,
-  CreateAgentDefinitionInput,
-  UpdateAgentDefinitionInput
-} from '@slayzone/terminal-contracts'
+import { useAgents } from '@slayzone/terminal'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { ProviderListView } from './ai-providers/ProviderListView'
 import { ProviderDetailView } from './ai-providers/ProviderDetailView'
 import { useAiProviderForm } from './ai-providers/useAiProviderForm'
+import { useDefaultAgent } from './use-default-agent'
+import { HubWideSection } from '../settings-hub'
 
 interface AiProvidersSettingsTabProps {
   activeTab: string
   navigateTo: (tab: string) => void
-  modes: AgentDefinition[]
-  createMode: (input: CreateAgentDefinitionInput) => Promise<AgentDefinition>
-  updateMode: (id: string, updates: UpdateAgentDefinitionInput) => Promise<AgentDefinition | null>
-  deleteMode: (id: string) => Promise<boolean>
-  testMode: (command: string) => Promise<{ ok: boolean; error?: string; detail?: string }>
-  restoreDefaults: () => Promise<void>
-  resetToDefaultState: () => Promise<void>
-  defaultAgentId: AgentId
-  onDefaultAgentIdChange: (mode: AgentId) => void
 }
 
 export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
-  const {
-    activeTab,
-    navigateTo,
-    modes,
-    createMode,
-    updateMode,
-    deleteMode,
-    testMode,
-    restoreDefaults,
-    resetToDefaultState,
-    defaultAgentId,
-    onDefaultAgentIdChange
-  } = props
-
-  const form = useAiProviderForm({ createMode, testMode })
-
   return (
     <>
       <SettingsTabIntro
         title="Providers"
         description="Configure AI coding assistants and custom agents. Each provider can have its own root command and default flags."
       />
+      <HubWideSection>
+        <Providers {...props} />
+      </HubWideSection>
+    </>
+  )
+}
 
+/**
+ * Agent definitions, the default agent and per-provider chat defaults all live on a
+ * hub and are read by its task create / spawn, so the whole list follows the
+ * Settings hub picker (`HubWideSection`).
+ */
+function Providers({ activeTab, navigateTo }: AiProvidersSettingsTabProps) {
+  const {
+    modes,
+    createMode,
+    updateMode,
+    deleteMode,
+    testMode,
+    restoreDefaults,
+    resetToDefaultState
+  } = useAgents()
+  const { defaultAgentId, setDefaultAgentId: onDefaultAgentIdChange } = useDefaultAgent()
+
+  const form = useAiProviderForm({ createMode, testMode })
+
+  return (
+    <>
       {activeTab === 'ai-providers' && (
         <ProviderListView
           modes={modes}
