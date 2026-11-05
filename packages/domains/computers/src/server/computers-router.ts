@@ -461,7 +461,7 @@ export const computersRouter = router({
    * every default pick, nothing new may be bound to it, and the hub refuses to start
    * a terminal, agent or process on it (the spawn guard in `apps/hub` composition).
    *
-   * Refused while terminals or agents run on it — the operator stops them first, so a
+   * Refused while terminals, agents or processes run on it — the operator stops them first, so a
    * disable never strands work — and for the desktop app's own computer on its own
    * hub, without which nothing on the machine could run. Enabling has no such check.
    * Who may: the computer's manager (its owner, or an admin), as for revoke.

@@ -1688,7 +1688,7 @@ export function composeServer(opts: {
     // id, see the local-computer dedup below) is never disabled or deleted on its own
     // hub. A standalone hub spawns no computer of its own, so it protects none.
     localComputerId: supervised ? deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME) : null,
-    // What blocks disabling a computer: its terminals and agents, asked of the
+    // What blocks disabling a computer: its terminals, agents and processes, asked of the
     // computer itself. Not connected yet (gateway still starting) = nothing runs.
     runningWorkOn: async (computerId) =>
       computerGatewayRef ? countRunningWork(computerGatewayRef, computerId) : 0,
