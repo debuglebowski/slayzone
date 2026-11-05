@@ -26,7 +26,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@lobehub/icons": "^5.23.1",
+    "@lobehub/icons": "^6.4.0",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/diff-view": "workspace:*",

@@ -9,11 +9,11 @@
       "advisories": ["GHSA-27r3-jxmh-p828"]
     },
     {
-      "packages": ["decode-uri-component", "katex"],
-      "reason": "decode-uri-component: via @lobehub/icons / @lobehub/ui; we deep-import 6 icon components, which do not load it (fix 0.5.1, published 2026-10-23, clears the 14-day minimumReleaseAge on 2026-11-06). katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
-      "reviewed": "2026-11-04",
+      "packages": ["katex"],
+      "reason": "katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
+      "reviewed": "2026-11-05",
       "expires": "2027-01-22",
-      "advisories": ["GHSA-238p-pmpm-9mq7", "GHSA-qr28-fpjm-wq7f"]
+      "advisories": ["GHSA-238p-pmpm-9mq7"]
     },
     {
       "packages": ["minimatch"],
